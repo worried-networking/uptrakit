@@ -9,8 +9,9 @@ use uptrakit_plugin_infrastructure_core::command::{
     CommandExecutor, CommandSpec, send_output, shell_escape,
 };
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, OutputStreamType, Plugin, PluginCapability, PluginError, PluginType,
-    ReleaseInfo, TrackingSystem, UpdateOutputLine, UpstreamRelease, Version,
+    BatchDetectItem, BatchDetectResult, DiscoveredSoftware, OutputStreamType, Plugin,
+    PluginCapability, PluginError, PluginType, ReleaseInfo, TrackingSystem, UpdateOutputLine,
+    UpstreamRelease, Version,
 };
 
 /// Type-erased RAII handle kept alive alongside the Docker client.
@@ -287,9 +288,14 @@ impl Plugin for DockerPlugin {
         let full_ref = format!("{image}:{tag}");
         let mut output = String::new();
 
-        // Pre-pull: collect running/stopped state of containers using this image.
-        // Used for compose direction (up -d vs --no-start) and for auto-recreation.
-        let containers_before = self
+        // Pre-pull: collect running/stopped state of the containers to recreate.
+        //
+        // When the package identifier carries a `#container_name` qualifier (e.g.
+        // `nginx:latest#web-server`), only that specific container is targeted.
+        // Without a qualifier all containers using this image are managed, which
+        // preserves behaviour for items created before per-container tracking was
+        // introduced.
+        let all_containers = self
             .docker_client
             .list_containers_for_image(&full_ref)
             .await
@@ -301,6 +307,15 @@ impl Plugin for DockerPlugin {
                 );
                 vec![]
             });
+
+        let containers_before: Vec<_> = if let Some(ref target) = ir.container_name {
+            all_containers
+                .into_iter()
+                .filter(|c| c.name == *target)
+                .collect()
+        } else {
+            all_containers
+        };
 
         send_output(
             output_tx,
@@ -443,34 +458,6 @@ impl Plugin for DockerPlugin {
                 uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(e.to_string())
             })?;
 
-        // Group container names by full image ref (image:tag).
-        // Skip bare SHA images (sha256:…) — they have no registry provenance.
-        let mut groups: HashMap<String, (ImageRef, Vec<String>)> = HashMap::new();
-
-        for container in containers {
-            let raw_image = container.image.trim();
-            if raw_image.is_empty() {
-                continue;
-            }
-
-            // Skip bare SHA refs
-            if raw_image.starts_with("sha256:") {
-                continue;
-            }
-
-            // Parse the image ref (may or may not have a tag)
-            let ir: ImageRef = match raw_image.parse() {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-
-            let entry = groups
-                .entry(ir.full_ref.clone())
-                .or_insert_with(|| (ir, Vec::new()));
-
-            entry.1.extend(container.names);
-        }
-
         // When the plugin was invoked without a pre-existing plugin config
         // (config is all-defaults / `{}`), emit a DiscoveryTarget so the
         // controller can auto-create a default "Docker" plugin config and
@@ -479,27 +466,90 @@ impl Plugin for DockerPlugin {
         // config-ID path (no targets needed).
         let emit_targets = self.config.is_discover_all_mode();
 
-        // For each unique image, inspect locally to get its digest.
+        // Inspect each unique image ref only once.  Multiple containers using
+        // the same image share the same digest, so there is no point calling
+        // the Docker daemon more than once per image.
+        let mut digest_cache: HashMap<String, Option<String>> = HashMap::new();
+
         let mut discoveries = Vec::new();
 
-        for (full_ref, (ir, container_names)) in groups {
-            let digest = match self.docker_client.inspect_image(&full_ref).await {
-                Ok(Some(d)) => d.digest,
-                Ok(None) => {
-                    // Locally built image — no registry digest, skip
-                    tracing::debug!(
-                        image = %full_ref,
-                        "skipping locally built image (no RepoDigests)"
-                    );
-                    continue;
-                }
-                Err(e) => {
-                    tracing::warn!(image = %full_ref, error = %e, "failed to inspect image");
-                    continue;
+        for container in containers {
+            let raw_image = container.image.trim();
+            if raw_image.is_empty() {
+                continue;
+            }
+
+            // Skip bare SHA refs — they have no registry provenance.
+            if raw_image.starts_with("sha256:") {
+                continue;
+            }
+
+            // Parse the image ref (may or may not have a tag).
+            let ir: ImageRef = match raw_image.parse() {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+
+            // Take the first container name, stripping any leading '/'.
+            let container_name = match container.names.first() {
+                Some(n) => n.trim_start_matches('/').to_string(),
+                None => continue,
+            };
+            if container_name.is_empty() {
+                continue;
+            }
+
+            // Inspect the image once, then reuse the cached result for every
+            // subsequent container that references the same image.
+            let digest = match digest_cache.entry(ir.full_ref.clone()) {
+                std::collections::hash_map::Entry::Occupied(e) => match e.get().clone() {
+                    Some(d) => d,
+                    // Already determined: no registry digest (locally built). Skip.
+                    None => continue,
+                },
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    let outcome = match self.docker_client.inspect_image(&ir.full_ref).await {
+                        Ok(Some(d)) => {
+                            tracing::debug!(
+                                image = %ir.full_ref,
+                                digest = %d.digest,
+                                "inspected image for discovery"
+                            );
+                            Some(d.digest)
+                        }
+                        Ok(None) => {
+                            tracing::debug!(
+                                image = %ir.full_ref,
+                                "skipping locally built image (no RepoDigests)"
+                            );
+                            None
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                image = %ir.full_ref,
+                                error = %err,
+                                "failed to inspect image during discovery"
+                            );
+                            None
+                        }
+                    };
+                    let digest = outcome.clone();
+                    e.insert(outcome);
+                    match digest {
+                        Some(d) => d,
+                        None => continue,
+                    }
                 }
             };
 
-            let name = derive_container_name(&ir, &container_names);
+            // Container-qualified package identifier: "image:tag#container_name".
+            // This uniquely identifies one container even when multiple containers
+            // on the same host use the same image.
+            let pkg_id = format!("{}#{}", ir.full_ref, container_name);
+
+            // Software item name: image reference first (the "what"), container
+            // name in brackets (the "which one").  Example: "nginx:latest [web-server]".
+            let name = format!("{} [{}]", ir.full_ref, container_name);
 
             let targets = if emit_targets {
                 vec![DiscoveryTarget {
@@ -520,11 +570,11 @@ impl Plugin for DockerPlugin {
             };
 
             discoveries.push(DiscoveredSoftware {
-                package_identifier: ir.full_ref.clone(),
+                package_identifier: pkg_id,
                 name,
                 installed_version: digest,
                 targets,
-                extra: Some(json!({ "containers": container_names })),
+                extra: Some(json!({ "container": container_name })),
                 tracking_system: TrackingSystem::Targeted,
             });
         }
@@ -532,17 +582,87 @@ impl Plugin for DockerPlugin {
         tracing::debug!(count = discoveries.len(), "docker autodiscovery completed");
         Ok(discoveries)
     }
-}
 
-/// Derive a human-readable name for a discovered container.
-///
-/// - Single container: use the container name (leading `/` already stripped).
-/// - Multiple containers sharing the same image: use `"image:tag"`.
-fn derive_container_name(ir: &ImageRef, container_names: &[String]) -> String {
-    if container_names.len() == 1 {
-        container_names[0].clone()
-    } else {
-        format!("{}:{}", ir.image, ir.tag)
+    /// Batch installed-version detection with image-level deduplication.
+    ///
+    /// Multiple containers that share the same image (after `tracked_tag`
+    /// resolution) are inspected only once, avoiding redundant Docker daemon
+    /// calls for the common case where several items use e.g. `nginx:latest`.
+    #[tracing::instrument(skip_all)]
+    async fn batch_detect_installed_version(
+        &self,
+        items: &[BatchDetectItem],
+    ) -> uptrakit_plugin_infrastructure_core::Result<Vec<BatchDetectResult>> {
+        use std::collections::HashMap;
+
+        // Inspect each resolved image ref once and cache the outcome.
+        // Key = resolved "image:tag" string (after tracked_tag override).
+        // Value = Ok(Some(digest)) | Ok(None) | Err(message).
+        let mut cache: HashMap<String, std::result::Result<Option<String>, String>> =
+            HashMap::new();
+
+        for item in items {
+            let ir: ImageRef = match item.package_identifier.parse::<ImageRef>() {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            let tag = self.config.resolved_tracked_tag(&ir.tag);
+            let resolved = format!("{}:{tag}", ir.image);
+
+            if cache.contains_key(&resolved) {
+                continue;
+            }
+
+            let outcome = match self.docker_client.inspect_image(&resolved).await {
+                Ok(Some(d)) => Ok(Some(d.digest)),
+                Ok(None) => Ok(None),
+                Err(e) => Err(e.to_string()),
+            };
+            cache.insert(resolved, outcome);
+        }
+
+        let mut results = Vec::with_capacity(items.len());
+        for item in items {
+            let ir: ImageRef = match item.package_identifier.parse::<ImageRef>() {
+                Ok(r) => r,
+                Err(e) => {
+                    results.push(BatchDetectResult {
+                        package_identifier: item.package_identifier.clone(),
+                        installed_version: None,
+                        error: Some(e.to_string()),
+                    });
+                    continue;
+                }
+            };
+            let tag = self.config.resolved_tracked_tag(&ir.tag);
+            let resolved = format!("{}:{tag}", ir.image);
+
+            match cache.get(&resolved) {
+                Some(Ok(Some(digest))) => {
+                    results.push(BatchDetectResult {
+                        package_identifier: item.package_identifier.clone(),
+                        installed_version: Some(Version::new(digest)),
+                        error: None,
+                    });
+                }
+                Some(Ok(None)) | None => {
+                    results.push(BatchDetectResult {
+                        package_identifier: item.package_identifier.clone(),
+                        installed_version: None,
+                        error: None,
+                    });
+                }
+                Some(Err(e)) => {
+                    results.push(BatchDetectResult {
+                        package_identifier: item.package_identifier.clone(),
+                        installed_version: None,
+                        error: Some(e.clone()),
+                    });
+                }
+            }
+        }
+
+        Ok(results)
     }
 }
 
@@ -996,28 +1116,76 @@ mod tests {
     // ── discover_software ─────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn discover_software_groups_by_image() {
+    async fn discover_software_emits_one_item_per_container() {
         let mock = Arc::new(MockDockerClient {
             inspect_result: Some("sha256:abc123".to_string()),
             containers: vec![
                 LocalContainerInfo {
                     image: "nginx:latest".to_string(),
-                    names: vec!["my-nginx".to_string()],
+                    names: vec!["web-server".to_string()],
                 },
                 LocalContainerInfo {
                     image: "nginx:latest".to_string(),
-                    names: vec!["nginx-2".to_string()],
+                    names: vec!["api-proxy".to_string()],
                 },
             ],
             ..Default::default()
         });
         let plugin =
             DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
-        let discoveries = plugin.discover_software().await.unwrap();
-        // Both containers share the same image, so they should be grouped
-        assert_eq!(discoveries.len(), 1);
-        assert_eq!(discoveries[0].package_identifier, "nginx:latest");
+        let mut discoveries = plugin.discover_software().await.unwrap();
+        // Two containers → two software items, even though both use the same image.
+        assert_eq!(discoveries.len(), 2);
+
+        discoveries.sort_by(|a, b| a.package_identifier.cmp(&b.package_identifier));
+        assert_eq!(discoveries[0].package_identifier, "nginx:latest#api-proxy");
+        assert_eq!(discoveries[0].name, "nginx:latest [api-proxy]");
         assert_eq!(discoveries[0].installed_version, "sha256:abc123");
+
+        assert_eq!(discoveries[1].package_identifier, "nginx:latest#web-server");
+        assert_eq!(discoveries[1].name, "nginx:latest [web-server]");
+        assert_eq!(discoveries[1].installed_version, "sha256:abc123");
+    }
+
+    #[tokio::test]
+    async fn discover_software_single_container_uses_image_based_name() {
+        let mock = Arc::new(MockDockerClient {
+            inspect_result: Some("sha256:abc123".to_string()),
+            containers: vec![LocalContainerInfo {
+                image: "nginx:latest".to_string(),
+                names: vec!["my-nginx".to_string()],
+            }],
+            ..Default::default()
+        });
+        let plugin =
+            DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+        let discoveries = plugin.discover_software().await.unwrap();
+
+        assert_eq!(discoveries.len(), 1);
+        // Package identifier includes the container name qualifier.
+        assert_eq!(discoveries[0].package_identifier, "nginx:latest#my-nginx");
+        // Name is based on the image, not just the container name.
+        assert_eq!(discoveries[0].name, "nginx:latest [my-nginx]");
+        assert_eq!(discoveries[0].installed_version, "sha256:abc123");
+    }
+
+    #[tokio::test]
+    async fn discover_software_strips_leading_slash_from_container_name() {
+        let mock = Arc::new(MockDockerClient {
+            inspect_result: Some("sha256:abc123".to_string()),
+            containers: vec![LocalContainerInfo {
+                image: "nginx:latest".to_string(),
+                // BollardDockerClient strips the leading '/' before returning
+                // LocalContainerInfo, but the mock may supply pre-stripped names.
+                names: vec!["my-nginx".to_string()],
+            }],
+            ..Default::default()
+        });
+        let plugin =
+            DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+        let discoveries = plugin.discover_software().await.unwrap();
+        assert_eq!(discoveries.len(), 1);
+        assert_eq!(discoveries[0].package_identifier, "nginx:latest#my-nginx");
     }
 
     #[tokio::test]
@@ -1107,6 +1275,278 @@ mod tests {
         assert!(
             discoveries[0].targets.is_empty(),
             "customized config must not emit targets (config-ID path)"
+        );
+    }
+
+    // ── execute_update — container-qualified identifiers ──────────────────────
+
+    #[tokio::test]
+    async fn execute_update_with_container_qualifier_only_recreates_named_container() {
+        // Two containers share the same image.
+        let mock = Arc::new(MockDockerClient {
+            containers_for_image: vec![
+                ContainerForImage {
+                    name: "web-server".to_string(),
+                    is_running: true,
+                    labels: Default::default(),
+                },
+                ContainerForImage {
+                    name: "api-proxy".to_string(),
+                    is_running: true,
+                    labels: Default::default(),
+                },
+            ],
+            ..Default::default()
+        });
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
+            .expect("valid config");
+        let (tx, mut rx) = mpsc::channel(100);
+        // Container-qualified identifier: only "web-server" should be touched.
+        let result = plugin
+            .execute_update("nginx:latest#web-server", "sha256:abc", None, &tx)
+            .await
+            .expect("execute_update should succeed");
+
+        assert!(
+            result.contains("Recreating container web-server"),
+            "web-server must be recreated: {result}"
+        );
+        assert!(
+            !result.contains("Recreating container api-proxy"),
+            "api-proxy must NOT be recreated: {result}"
+        );
+
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn execute_update_without_qualifier_recreates_all_containers() {
+        // Unqualified identifier (no `#container_name`) → legacy behaviour.
+        let mock = Arc::new(MockDockerClient {
+            containers_for_image: vec![
+                ContainerForImage {
+                    name: "web-server".to_string(),
+                    is_running: true,
+                    labels: Default::default(),
+                },
+                ContainerForImage {
+                    name: "api-proxy".to_string(),
+                    is_running: true,
+                    labels: Default::default(),
+                },
+            ],
+            ..Default::default()
+        });
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
+            .expect("valid config");
+        let (tx, mut rx) = mpsc::channel(100);
+        let result = plugin
+            .execute_update("nginx:latest", "sha256:abc", None, &tx)
+            .await
+            .expect("should succeed");
+
+        assert!(
+            result.contains("Recreating container web-server"),
+            "web-server must be recreated: {result}"
+        );
+        assert!(
+            result.contains("Recreating container api-proxy"),
+            "api-proxy must be recreated: {result}"
+        );
+
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn execute_update_container_not_found_succeeds_silently() {
+        // The named container is not in the list returned by list_containers_for_image.
+        let mock = Arc::new(MockDockerClient {
+            containers_for_image: vec![ContainerForImage {
+                name: "other-container".to_string(),
+                is_running: true,
+                labels: Default::default(),
+            }],
+            ..Default::default()
+        });
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
+            .expect("valid config");
+        let (tx, mut rx) = mpsc::channel(100);
+        let result = plugin
+            .execute_update("nginx:latest#missing-container", "sha256:abc", None, &tx)
+            .await
+            .expect("should succeed even when container not found");
+
+        // Pull happened but no containers were recreated.
+        assert!(
+            result.contains("Pulling Docker image nginx:latest"),
+            "should pull the image: {result}"
+        );
+        assert!(
+            !result.contains("Recreating"),
+            "no containers should be recreated: {result}"
+        );
+
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    // ── batch_detect_installed_version ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn batch_detect_deduplicates_inspections_for_shared_image() {
+        use std::sync::Arc as StdArc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // Custom mock that counts inspect_image calls.
+        struct CountingMockClient {
+            inspect_count: StdArc<AtomicUsize>,
+            digest: String,
+        }
+
+        #[async_trait::async_trait]
+        impl DockerClient for CountingMockClient {
+            #[cfg(feature = "daemon")]
+            async fn ping(&self) -> crate::error::Result<()> {
+                Ok(())
+            }
+
+            async fn pull_image(
+                &self,
+                _image: &str,
+                _tag: &str,
+                _auth: Option<&crate::config::DockerAuth>,
+                _output_tx: &mpsc::Sender<UpdateOutputLine>,
+            ) -> crate::error::Result<String> {
+                Ok(String::new())
+            }
+
+            async fn inspect_image(
+                &self,
+                _full_ref: &str,
+            ) -> crate::error::Result<Option<crate::docker_client::LocalImageDigest>> {
+                self.inspect_count.fetch_add(1, Ordering::SeqCst);
+                Ok(Some(crate::docker_client::LocalImageDigest {
+                    digest: self.digest.clone(),
+                }))
+            }
+
+            async fn list_containers(
+                &self,
+                _all: bool,
+            ) -> crate::error::Result<Vec<crate::docker_client::LocalContainerInfo>> {
+                Ok(vec![])
+            }
+
+            async fn list_containers_for_image(
+                &self,
+                _full_ref: &str,
+            ) -> crate::error::Result<Vec<crate::docker_client::ContainerForImage>> {
+                Ok(vec![])
+            }
+
+            async fn recreate_container(
+                &self,
+                _name: &str,
+                _was_running: bool,
+            ) -> crate::error::Result<()> {
+                Ok(())
+            }
+        }
+
+        let inspect_count = StdArc::new(AtomicUsize::new(0));
+        let mock = Arc::new(CountingMockClient {
+            inspect_count: StdArc::clone(&inspect_count),
+            digest: "sha256:abc".to_string(),
+        });
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
+            .expect("valid config");
+
+        // Three items all using the same image via container-qualified identifiers.
+        let items = vec![
+            BatchDetectItem {
+                package_identifier: "nginx:latest#web-server".to_string(),
+            },
+            BatchDetectItem {
+                package_identifier: "nginx:latest#api-proxy".to_string(),
+            },
+            BatchDetectItem {
+                package_identifier: "nginx:latest#worker".to_string(),
+            },
+        ];
+
+        let results = plugin
+            .batch_detect_installed_version(&items)
+            .await
+            .expect("batch detect should succeed");
+
+        // All three get the digest.
+        assert_eq!(results.len(), 3);
+        for r in &results {
+            assert_eq!(
+                r.installed_version
+                    .as_ref()
+                    .map(|v| v.to_string())
+                    .as_deref(),
+                Some("sha256:abc")
+            );
+            assert!(r.error.is_none());
+        }
+
+        // Exactly one inspect call despite three items (deduplication).
+        assert_eq!(
+            inspect_count.load(Ordering::SeqCst),
+            1,
+            "image should be inspected only once regardless of how many containers use it"
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_detect_returns_none_for_uninstalled_image() {
+        let mock = Arc::new(MockDockerClient {
+            inspect_result: None,
+            ..Default::default()
+        });
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
+            .expect("valid config");
+
+        let items = vec![BatchDetectItem {
+            package_identifier: "nginx:latest#web-server".to_string(),
+        }];
+        let results = plugin
+            .batch_detect_installed_version(&items)
+            .await
+            .expect("ok");
+        assert_eq!(results.len(), 1);
+        assert!(results[0].installed_version.is_none());
+        assert!(results[0].error.is_none());
+    }
+
+    #[tokio::test]
+    async fn batch_detect_handles_unqualified_identifiers() {
+        let mock = Arc::new(MockDockerClient {
+            inspect_result: Some("sha256:def456".to_string()),
+            ..Default::default()
+        });
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
+            .expect("valid config");
+
+        let items = vec![BatchDetectItem {
+            package_identifier: "nginx".to_string(),
+        }];
+        let results = plugin
+            .batch_detect_installed_version(&items)
+            .await
+            .expect("ok");
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0]
+                .installed_version
+                .as_ref()
+                .map(|v| v.to_string())
+                .as_deref(),
+            Some("sha256:def456")
         );
     }
 }

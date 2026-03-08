@@ -2,21 +2,40 @@
 //!
 //! An [`ImageRef`] represents a fully-parsed Docker/OCI image reference,
 //! breaking it into registry, repository, tag, and convenience accessors.
+//!
+//! ## Container-qualified identifiers
+//!
+//! When used as a `package_identifier`, an image reference may carry an
+//! optional **container name suffix** separated by `#`:
+//!
+//! ```text
+//! nginx:latest#web-server
+//! ```
+//!
+//! The `#container_name` suffix identifies a specific named container on the
+//! host. It is used by [`crate::plugin::DockerPlugin`] to target individual
+//! containers during updates while leaving the image-level registry operations
+//! (detect version, fetch releases) unchanged.
+//!
+//! All image-level fields (`registry`, `repository`, `tag`, `image`, `full_ref`)
+//! are derived exclusively from the part before `#`. The container name is
+//! stored separately in [`ImageRef::container_name`].
 
 use std::str::FromStr;
 
 use thiserror::Error;
 
-/// A parsed Docker/OCI image reference.
+/// A parsed Docker/OCI image reference, optionally carrying a container name.
 ///
 /// # Parsing rules
 ///
-/// | Input | Registry | Repository | Tag |
-/// |---|---|---|---|
-/// | `nginx` | `registry-1.docker.io` | `library/nginx` | `latest` |
-/// | `myuser/app:v2` | `registry-1.docker.io` | `myuser/app` | `v2` |
-/// | `ghcr.io/owner/app:main` | `ghcr.io` | `owner/app` | `main` |
-/// | `host:5000/app:latest` | `host:5000` | `app` | `latest` |
+/// | Input | Registry | Repository | Tag | Container |
+/// |---|---|---|---|---|
+/// | `nginx` | `registry-1.docker.io` | `library/nginx` | `latest` | `None` |
+/// | `myuser/app:v2` | `registry-1.docker.io` | `myuser/app` | `v2` | `None` |
+/// | `ghcr.io/owner/app:main` | `ghcr.io` | `owner/app` | `main` | `None` |
+/// | `host:5000/app:latest` | `host:5000` | `app` | `latest` | `None` |
+/// | `nginx:latest#web-server` | `registry-1.docker.io` | `library/nginx` | `latest` | `Some("web-server")` |
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageRef {
     /// Resolved registry hostname (e.g. `"registry-1.docker.io"`, `"ghcr.io"`, `"myhost:5000"`).
@@ -28,7 +47,14 @@ pub struct ImageRef {
     /// Image name without tag (e.g. `"nginx"`, `"ghcr.io/owner/app"`).
     pub image: String,
     /// Full `"image:tag"` string for Bollard / docker pull calls.
+    ///
+    /// Does **not** include the `#container_name` suffix.
     pub full_ref: String,
+    /// Container name parsed from a `#container_name` suffix in the input string.
+    ///
+    /// `None` when the identifier has no container qualifier, in which case
+    /// image-level operations apply to all containers using the image.
+    pub container_name: Option<String>,
 }
 
 /// Error from parsing an image reference.
@@ -49,17 +75,35 @@ impl FromStr for ImageRef {
                 reason: "image reference must not be empty".to_string(),
             });
         }
-        if s.contains("//") {
+
+        // Split on the first `#` to separate the image ref from an optional
+        // container name qualifier.  Docker image refs never contain `#`, so
+        // this split is unambiguous.
+        let (image_part, container_name) = match s.find('#') {
+            Some(pos) => {
+                let name = &s[pos + 1..];
+                validate_container_name(name)?;
+                (&s[..pos], Some(name.to_string()))
+            }
+            None => (s, None),
+        };
+
+        if image_part.is_empty() {
+            return Err(ParseImageRefError::Invalid {
+                reason: "image reference part must not be empty".to_string(),
+            });
+        }
+        if image_part.contains("//") {
             return Err(ParseImageRefError::Invalid {
                 reason: "image reference must not contain '//'".to_string(),
             });
         }
-        if s.split('/').any(|seg| seg == "..") {
+        if image_part.split('/').any(|seg| seg == "..") {
             return Err(ParseImageRefError::Invalid {
                 reason: "image reference segments must not be '..'".to_string(),
             });
         }
-        if s.contains(char::is_whitespace) {
+        if image_part.contains(char::is_whitespace) {
             return Err(ParseImageRefError::Invalid {
                 reason: "image reference must not contain whitespace".to_string(),
             });
@@ -67,7 +111,7 @@ impl FromStr for ImageRef {
 
         // Split off the tag (`:tag`) — but only from the last path segment
         // because registry hostnames may include a port (e.g. `host:5000`).
-        let (image_no_tag, tag) = split_image_tag(s);
+        let (image_no_tag, tag) = split_image_tag(image_part);
 
         let registry = infer_registry(image_no_tag).to_string();
         let repository = resolve_repository(image_no_tag);
@@ -79,11 +123,23 @@ impl FromStr for ImageRef {
             tag,
             image: image_no_tag.to_string(),
             full_ref,
+            container_name,
         })
     }
 }
 
 impl ImageRef {
+    /// Return the full package identifier string, including the `#container_name`
+    /// suffix when present.
+    ///
+    /// This is the canonical form that round-trips through [`FromStr`].
+    pub fn full_pkg_id(&self) -> String {
+        match &self.container_name {
+            Some(name) => format!("{}#{name}", self.full_ref),
+            None => self.full_ref.clone(),
+        }
+    }
+
     /// Best-effort browsable web URL for this image at the given tag or digest.
     pub fn web_url(&self, tag_or_digest: &str) -> String {
         if self.registry == "registry-1.docker.io" {
@@ -117,6 +173,9 @@ impl ImageRef {
 
 /// Validate an image identifier string.
 ///
+/// Accepts both plain image references (`nginx:latest`) and container-qualified
+/// references (`nginx:latest#web-server`).
+///
 /// Returns `Ok(())` when the string is a valid Docker image reference
 /// whose registry hostname does not point to a private/internal network,
 /// or an error message string on failure.
@@ -124,6 +183,9 @@ impl ImageRef {
 /// Used by the plugin registry to validate `package_identifier` values
 /// for the Docker plugin.
 pub fn validate_identifier(id: &str) -> std::result::Result<(), String> {
+    // Split on the first '#' to isolate the image ref part for SSRF checking.
+    // Container name validation is handled by ImageRef::from_str via
+    // validate_container_name.
     let image_ref = id.parse::<ImageRef>().map_err(|e| e.to_string())?;
 
     // Strip port from registry hostname before checking (e.g. "host:5000" → "host").
@@ -144,6 +206,58 @@ pub fn validate_identifier(id: &str) -> std::result::Result<(), String> {
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+/// Validate a Docker container name.
+///
+/// Docker container names must satisfy `[a-zA-Z0-9][a-zA-Z0-9_.-]*`.
+/// We also enforce a reasonable length limit (253 characters).
+fn validate_container_name(name: &str) -> Result<(), ParseImageRefError> {
+    if name.is_empty() {
+        return Err(ParseImageRefError::Invalid {
+            reason: "container name after '#' must not be empty".to_string(),
+        });
+    }
+    if name.len() > 253 {
+        return Err(ParseImageRefError::Invalid {
+            reason: format!(
+                "container name exceeds maximum length of 253 characters (got {})",
+                name.len()
+            ),
+        });
+    }
+    if name.contains(char::is_whitespace) {
+        return Err(ParseImageRefError::Invalid {
+            reason: "container name must not contain whitespace".to_string(),
+        });
+    }
+    if name.contains('/') || name.contains('\\') {
+        return Err(ParseImageRefError::Invalid {
+            reason: "container name must not contain path separators".to_string(),
+        });
+    }
+
+    // Docker container names follow [a-zA-Z0-9][a-zA-Z0-9_.-]*
+    let mut chars = name.chars();
+    // Safe: non-empty already checked above.
+    let first = chars.next().expect("non-empty");
+    if !first.is_ascii_alphanumeric() {
+        return Err(ParseImageRefError::Invalid {
+            reason: format!("container name must start with a letter or digit, got '{first}'"),
+        });
+    }
+    for c in chars {
+        if !c.is_ascii_alphanumeric() && c != '_' && c != '.' && c != '-' {
+            return Err(ParseImageRefError::Invalid {
+                reason: format!(
+                    "container name contains invalid character '{c}': \
+                     only letters, digits, '_', '.', and '-' are allowed"
+                ),
+            });
+        }
+    }
+
+    Ok(())
+}
 
 /// Split `"image:tag"` into `("image", "tag")`.
 ///
@@ -208,7 +322,7 @@ mod tests {
         s.parse().expect("valid image ref")
     }
 
-    // ── Parsing ───────────────────────────────────────────────────────────────
+    // ── Parsing — plain image refs ────────────────────────────────────────────
 
     #[test]
     fn docker_hub_official_image() {
@@ -218,6 +332,7 @@ mod tests {
         assert_eq!(r.tag, "latest");
         assert_eq!(r.image, "nginx");
         assert_eq!(r.full_ref, "nginx:latest");
+        assert!(r.container_name.is_none());
     }
 
     #[test]
@@ -228,6 +343,7 @@ mod tests {
         assert_eq!(r.tag, "v2");
         assert_eq!(r.image, "myuser/app");
         assert_eq!(r.full_ref, "myuser/app:v2");
+        assert!(r.container_name.is_none());
     }
 
     #[test]
@@ -238,6 +354,7 @@ mod tests {
         assert_eq!(r.tag, "main");
         assert_eq!(r.image, "ghcr.io/owner/app");
         assert_eq!(r.full_ref, "ghcr.io/owner/app:main");
+        assert!(r.container_name.is_none());
     }
 
     #[test]
@@ -273,7 +390,98 @@ mod tests {
         assert_eq!(r.tag, "dev");
     }
 
-    // ── Error cases ───────────────────────────────────────────────────────────
+    // ── Parsing — container-qualified identifiers ─────────────────────────────
+
+    #[test]
+    fn container_qualified_nginx() {
+        let r = parse("nginx:latest#web-server");
+        assert_eq!(r.registry, "registry-1.docker.io");
+        assert_eq!(r.repository, "library/nginx");
+        assert_eq!(r.tag, "latest");
+        assert_eq!(r.image, "nginx");
+        assert_eq!(r.full_ref, "nginx:latest");
+        assert_eq!(r.container_name.as_deref(), Some("web-server"));
+    }
+
+    #[test]
+    fn container_qualified_no_tag_defaults_to_latest() {
+        let r = parse("nginx#my-proxy");
+        assert_eq!(r.tag, "latest");
+        assert_eq!(r.full_ref, "nginx:latest");
+        assert_eq!(r.container_name.as_deref(), Some("my-proxy"));
+    }
+
+    #[test]
+    fn container_qualified_ghcr() {
+        let r = parse("ghcr.io/owner/app:main#my-container");
+        assert_eq!(r.registry, "ghcr.io");
+        assert_eq!(r.full_ref, "ghcr.io/owner/app:main");
+        assert_eq!(r.container_name.as_deref(), Some("my-container"));
+    }
+
+    #[test]
+    fn container_qualified_with_underscores_and_dots() {
+        let r = parse("nginx:latest#my_app.v2");
+        assert_eq!(r.container_name.as_deref(), Some("my_app.v2"));
+    }
+
+    #[test]
+    fn full_pkg_id_without_container() {
+        let r = parse("nginx:latest");
+        assert_eq!(r.full_pkg_id(), "nginx:latest");
+    }
+
+    #[test]
+    fn full_pkg_id_with_container() {
+        let r = parse("nginx:latest#web-server");
+        assert_eq!(r.full_pkg_id(), "nginx:latest#web-server");
+    }
+
+    // ── Container name validation errors ─────────────────────────────────────
+
+    #[test]
+    fn empty_container_name_fails() {
+        assert!("nginx:latest#".parse::<ImageRef>().is_err());
+    }
+
+    #[test]
+    fn container_name_with_whitespace_fails() {
+        assert!("nginx:latest#web server".parse::<ImageRef>().is_err());
+    }
+
+    #[test]
+    fn container_name_with_slash_fails() {
+        assert!("nginx:latest#web/server".parse::<ImageRef>().is_err());
+    }
+
+    #[test]
+    fn container_name_starting_with_underscore_fails() {
+        assert!("nginx:latest#_bad".parse::<ImageRef>().is_err());
+    }
+
+    #[test]
+    fn container_name_starting_with_dash_fails() {
+        assert!("nginx:latest#-bad".parse::<ImageRef>().is_err());
+    }
+
+    #[test]
+    fn container_name_with_invalid_char_fails() {
+        assert!("nginx:latest#bad@name".parse::<ImageRef>().is_err());
+    }
+
+    #[test]
+    fn container_name_too_long_fails() {
+        let long = "a".repeat(254);
+        assert!(format!("nginx:latest#{long}").parse::<ImageRef>().is_err());
+    }
+
+    #[test]
+    fn container_name_at_max_length_succeeds() {
+        let long = format!("a{}", "b".repeat(252)); // 253 chars total
+        assert!(format!("nginx:latest#{long}").parse::<ImageRef>().is_ok());
+    }
+
+    // ── Error cases — plain image refs ────────────────────────────────────────
 
     #[test]
     fn empty_string_fails() {
@@ -358,17 +566,32 @@ mod tests {
     // ── validate_identifier ───────────────────────────────────────────────────
 
     #[test]
-    fn validate_identifier_valid() {
+    fn validate_identifier_valid_plain() {
         assert!(validate_identifier("nginx").is_ok());
         assert!(validate_identifier("ghcr.io/owner/app:latest").is_ok());
         assert!(validate_identifier("myuser/app:v2").is_ok());
     }
 
     #[test]
-    fn validate_identifier_invalid() {
+    fn validate_identifier_valid_container_qualified() {
+        assert!(validate_identifier("nginx:latest#web-server").is_ok());
+        assert!(validate_identifier("ghcr.io/owner/app:main#my-app").is_ok());
+        assert!(validate_identifier("nginx#api-proxy").is_ok());
+    }
+
+    #[test]
+    fn validate_identifier_invalid_plain() {
         assert!(validate_identifier("").is_err());
         assert!(validate_identifier("nginx latest").is_err());
         assert!(validate_identifier("ghcr.io//app").is_err());
+    }
+
+    #[test]
+    fn validate_identifier_invalid_container_name() {
+        assert!(validate_identifier("nginx:latest#").is_err());
+        assert!(validate_identifier("nginx:latest#bad name").is_err());
+        assert!(validate_identifier("nginx:latest#bad/name").is_err());
+        assert!(validate_identifier("nginx:latest#_bad").is_err());
     }
 
     // ── SSRF: private registry hostname rejection ────────────────────────
@@ -420,5 +643,12 @@ mod tests {
         // Docker Hub default registry is not private
         assert!(validate_identifier("nginx").is_ok());
         assert!(validate_identifier("myuser/myapp:latest").is_ok());
+    }
+
+    #[test]
+    fn validate_identifier_rejects_container_qualified_private_registry() {
+        // SSRF check still applies when a container name suffix is present
+        let err = validate_identifier("192.168.1.1/myapp:latest#my-container").unwrap_err();
+        assert!(err.contains("private"), "error: {err}");
     }
 }
