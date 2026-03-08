@@ -412,7 +412,7 @@ pub async fn get_mqtt_settings(
             let status = resolve_connection_status(&model, heartbeat_at, now);
             (StatusCode::OK, Json(model_to_response(&model, status))).into_response()
         }
-        Ok(None) => error_response(StatusCode::NOT_FOUND, "Not found"),
+        Ok(None) => error_response(StatusCode::NOT_FOUND, "MQTT client not found"),
         Err(e) => {
             tracing::error!("Failed to load MQTT client: {e:?}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
@@ -459,7 +459,7 @@ pub async fn update_mqtt_settings(
     .await
     {
         Ok(Some(model)) => model,
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Not found"),
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "MQTT client not found"),
         Err(e) => {
             tracing::error!("Failed to load MQTT client: {e:?}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
@@ -626,7 +626,7 @@ pub async fn delete_mqtt_settings(
         .await
     {
         Ok(Some(_)) => {}
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Not found"),
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "MQTT client not found"),
         Err(e) => {
             tracing::error!("Failed to load MQTT client: {e:?}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
@@ -647,7 +647,7 @@ pub async fn delete_mqtt_settings(
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             if let mqtt_client_store::MqttClientError::NotFound = e.current_context() {
-                return error_response(StatusCode::NOT_FOUND, "Not found");
+                return error_response(StatusCode::NOT_FOUND, "MQTT client not found");
             }
             tracing::error!("Failed to delete MQTT client: {e:?}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")

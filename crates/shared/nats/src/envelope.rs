@@ -6,7 +6,7 @@ use uuid::Uuid;
 /// Wire envelope for NATS messages.
 ///
 /// Contains the routing metadata alongside the actual [`ControllerMessage`].
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NatsEventEnvelope {
     pub source_controller_id: Uuid,
     pub target_service_id: Option<Uuid>,
