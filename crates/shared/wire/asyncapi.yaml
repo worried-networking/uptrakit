@@ -3458,8 +3458,30 @@ components:
           type: object
           description: >
             Optional informational metadata (not used for config synthesis).
-            Example: Docker's {"containers": ["web-server"]}.
+            Example: Docker's {"container": "web-server"}.
           nullable: true
+        qualifier:
+          type: string
+          description: >
+            Optional qualifier that distinguishes multiple `host_software_item` rows backed
+            by the same `software_item`. For Docker items this is the container name
+            (e.g. `web-server`). Absent for non-Docker items.
+          nullable: true
+          examples:
+            - web-server
+            - api-proxy
+        plugin_package_identifier:
+          type: string
+          description: >
+            Optional package identifier used for plugin operations (detect_version,
+            fetch_releases, execute_update). When present, this value is stored in
+            `host_software_item_plugin.package_identifier` instead of `package_identifier`.
+            For Docker items this is the container-qualified form (e.g. `nginx:latest#web-server`).
+            Absent for non-Docker items; falls back to `package_identifier`.
+          nullable: true
+          examples:
+            - nginx:latest#web-server
+            - ghcr.io/owner/app:main#my-app
 
     discoveryTarget:
       type: object

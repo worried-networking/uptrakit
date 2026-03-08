@@ -151,32 +151,42 @@ stopped) via `list_containers`. For each container that is not using a bare SHA 
 2. `inspect_image` is called to retrieve the local SHA digest from `RepoDigests` (deduplicated —
    the same image is only inspected once even when multiple containers share it).
 3. Images with no registry provenance (locally built images with no `RepoDigests`) are skipped.
-4. One software item is created **per container**, identified by
-   `image:tag#container_name` (e.g. `nginx:latest#web-server`).
+4. One **software item** is created per *image* (e.g. `nginx:latest`), but multiple containers
+   using the same image each get their own **`host_software_item` row**, distinguished by the
+   container name stored in the `qualifier` field.
 
 ### Per-container tracking
 
-Each container on a host becomes its own software item, even when multiple containers use the
-same image. This allows you to:
+Multiple containers using the same image share one software item entry in the catalog, but each
+container has its own tracking row (`host_software_item`). This allows you to:
 
 - Track and update each container independently.
 - Update `web-server` to a new `nginx` image without touching `api-proxy`, and vice versa.
-- See exactly which container each software item corresponds to.
+- See exactly which containers are running a given image.
 
-**Software item name format:** `image:tag [container_name]` (e.g. `nginx:latest [web-server]`).
-The name is based on the image so you can immediately see what software is being tracked.
+The container name is stored in the `qualifier` field of the host-software-item row. The
+per-container plugin operations (detect version, fetch releases, execute update) use the
+container-qualified identifier `image:tag#container_name` (e.g. `nginx:latest#web-server`),
+which is stored in `host_software_item_plugin.package_identifier`.
+
+**Software item name format:** the image reference (e.g. `nginx:latest`). All containers sharing
+the same image are grouped under this single software item.
 
 ### Auto-created plugin config
 
 In discover-all mode, a single **`"Docker"`** plugin config (empty config `{}`) is created once
-per tenant and shared across all discovered items on all hosts. Individual items carry their
-container qualifier in the `package_identifier`, not in the plugin config.
+per tenant and shared across all discovered items on all hosts. Individual containers carry their
+qualifier in the `host_software_item.qualifier` field, not in the plugin config.
 
 ### Discovered items use digest tracking
 
 `installed_version` is set to the SHA-256 digest of the locally installed image. The same digest
 is reported for all containers that share an image — version differences only appear when one
 container has been updated (and thus holds a different image locally) while another has not.
+
+Version check results and fetch-releases updates apply to **all** `host_software_item` rows for
+a given `(host_id, software_item_id)` pair — i.e. all containers using the same image on the
+same host are updated atomically.
 
 ## Remote Docker via SSH
 
