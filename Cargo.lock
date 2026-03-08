@@ -1173,17 +1173,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cron"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5877d3fbf742507b66bc2a1945106bd30dd8504019d596901ddd012a4dd01740"
-dependencies = [
- "chrono",
- "once_cell",
- "winnow 0.6.26",
-]
-
-[[package]]
 name = "crossbeam-queue"
 version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6087,7 +6076,7 @@ dependencies = [
  "indexmap 2.13.0",
  "toml_datetime",
  "toml_parser",
- "winnow 0.7.14",
+ "winnow",
 ]
 
 [[package]]
@@ -6096,7 +6085,7 @@ version = "1.0.9+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "702d4415e08923e7e1ef96cd5727c0dfed80b4d2fa25db9647fe5eb6f7c5a4c4"
 dependencies = [
- "winnow 0.7.14",
+ "winnow",
 ]
 
 [[package]]
@@ -7067,8 +7056,7 @@ name = "uptrakit-scheduler-engine"
 version = "0.0.1"
 dependencies = [
  "async-trait",
- "chrono",
- "cron",
+ "rand 0.9.2",
  "rootcause",
  "sea-orm",
  "serde_json",
@@ -7196,10 +7184,8 @@ dependencies = [
  "axum",
  "axum-server",
  "base64 0.22.1",
- "chrono",
  "client-ip",
  "const-oid 0.9.6",
- "cron",
  "der 0.7.10",
  "futures-util",
  "hostname",
@@ -7296,8 +7282,7 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
- "chrono",
- "cron",
+ "rand 0.9.2",
  "rootcause",
  "sea-orm",
  "serde",
@@ -8122,15 +8107,6 @@ name = "windows_x86_64_msvc"
 version = "0.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
-
-[[package]]
-name = "winnow"
-version = "0.6.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e90edd2ac1aa278a5c4599b1d89cf03074b610800f866d4026dc199d7929a28"
-dependencies = [
- "memchr",
-]
 
 [[package]]
 name = "winnow"

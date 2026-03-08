@@ -164,7 +164,7 @@ The `AuditLogCleanupExecutor` scheduled task deletes entries older than the conf
 period (default: 90 days). Both `audit_logs` and `system_audit_logs` are cleaned in a single
 database transaction.
 
-The cleanup task is seeded as a scheduled task row (disabled by default, cron `0 3 * * *`).
+The cleanup task is seeded as a scheduled task row (disabled by default, interval: 86 400 seconds / 24 hours).
 Enable it via the scheduler management API or database.
 
 ### Data minimisation

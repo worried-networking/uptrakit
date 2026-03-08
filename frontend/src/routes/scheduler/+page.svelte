@@ -12,12 +12,19 @@
 	let loading: boolean = $state(true);
 	let error: string | null = $state(null);
 	let editingTask: ScheduledTaskResponse | null = $state(null);
-	let editCron: string = $state('');
+	let editInterval: number = $state(300);
+	let editJitter: number = $state(0);
 	let editEnabled: boolean = $state(true);
 	let saving: boolean = $state(false);
 	let triggeringId: string | null = $state(null);
 
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
+
+	function formatInterval(seconds: number): string {
+		if (seconds % 3600 === 0) return `${seconds / 3600}h`;
+		if (seconds % 60 === 0) return `${seconds / 60}m`;
+		return `${seconds}s`;
+	}
 
 	onMount(async () => {
 		if (canManage) await loadTasks();
@@ -37,7 +44,8 @@
 
 	function openEdit(task: ScheduledTaskResponse) {
 		editingTask = task;
-		editCron = task.cron_expression;
+		editInterval = task.interval_seconds;
+		editJitter = task.jitter_seconds;
 		editEnabled = task.enabled;
 	}
 
@@ -50,7 +58,8 @@
 		saving = true;
 		try {
 			const updated = await updateSchedulerTask(editingTask.id, {
-				cron_expression: editCron || undefined,
+				interval_seconds: editInterval,
+				jitter_seconds: editJitter,
 				enabled: editEnabled
 			});
 			tasks = tasks.map((t) => (t.id === editingTask!.id ? updated : t));
@@ -118,7 +127,10 @@
 								<p class="text-xs text-surface-500">{task.task_type}</p>
 							</td>
 							<td>
-								<code class="text-sm">{task.cron_expression}</code>
+								<code class="text-sm">{formatInterval(task.interval_seconds)}</code>
+								{#if task.jitter_seconds > 0}
+									<span class="text-xs text-surface-500">±{formatInterval(task.jitter_seconds)}</span>
+								{/if}
 							</td>
 							<td>
 								{#if task.is_running}
@@ -161,8 +173,13 @@
 {#if editingTask}
 	<Modal title="Edit Task: {editingTask.label}" onclose={closeEdit}>
 		<label class="label">
-			<span>Cron Expression</span>
-			<input class="input font-mono" type="text" bind:value={editCron} />
+			<span>Interval (seconds)</span>
+			<input class="input" type="number" min="1" bind:value={editInterval} />
+		</label>
+
+		<label class="label">
+			<span>Jitter (seconds)</span>
+			<input class="input" type="number" min="0" bind:value={editJitter} />
 		</label>
 
 		<label class="flex items-center gap-3">

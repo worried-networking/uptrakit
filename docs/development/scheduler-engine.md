@@ -10,7 +10,7 @@ The engine provides:
 
 - **Scheduler loop** — polls for due tasks, claims them with optimistic locking, executes, and releases.
 - **Claim mechanism** — `try_claim`, `release_claim`, `recover_stale`, `release_all`, `find_due_tasks`.
-- **Cron utilities** — 5-field → 6-field normalization, `next_run_after()`, `validate_cron()`.
+- **Interval utilities** — `compute_next_run_at(now, interval_seconds, jitter_seconds)` for next-run computation with random jitter.
 - **`TaskExecutor` trait** — implemented by each scheduled task type.
 - **`SchedulerNotifier` trait** — abstracts push notification delivery (local vs NATS).
 - **Shared query helpers** — `load_software_states_for_tenant()`, `should_rotate_ca()`.
@@ -33,7 +33,7 @@ crates/shared/scheduler-engine/src/
     lib.rs              — Re-exports
     scheduler.rs        — Scheduler struct, SchedulerConfig, poll loop
     claim.rs            — try_claim, release_claim, recover_stale, release_all, find_due_tasks
-    cron_utils.rs       — Cron parsing (chrono↔time bridge), next_run_after(), validate_cron()
+    interval.rs         — compute_next_run_at(now, interval_seconds, jitter_seconds)
     error.rs            — SchedulerError, Result<T>
     executor.rs         — TaskExecutor trait
     notifier.rs         — SchedulerNotifier trait (+ NoopSchedulerNotifier for tests)
@@ -174,8 +174,8 @@ Triggers a CRL rebuild on all controller instances by calling `SchedulerNotifier
 - **External mode** (`NatsSchedulerNotifier`): publishes `ControllerMessage::RequestCrlRenewal` to the
   NATS `controller` capability subject; each receiving controller fires its own `revocation_notify`.
 
-Default cron: `0 */4 * * *` (every 4 hours). The interval is configurable at runtime via the scheduler task
-management API (`PUT /api/v1/scheduler/tasks/{id}`) without a restart.
+Default interval: 14 400 seconds (every 4 hours) with 120 seconds jitter. The interval is configurable at
+runtime via the scheduler task management API (`PUT /api/v1/scheduler/tasks/{id}`) without a restart.
 
 The `CrlRenewal` task row is seeded for all tenants by migration `m20260305_000001_crl_cache`.
 

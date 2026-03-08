@@ -198,7 +198,7 @@ CRL rebuilds are triggered by three separate mechanisms:
 | --- | --- |
 | Certificate revoked — same controller | `revocation_notify.notify_one()` fires immediately in `CrlManager::run()`; the CRL is rebuilt and the NATS `RequestCrlRenewal` message is published to notify remote instances |
 | Certificate revoked — remote controllers | `ControllerMessage::RequestCrlRenewal` NATS event received; `event_delivery` calls `revocation_notify.notify_one()` on each receiving controller instance |
-| Periodic refresh | `CrlRenewal` scheduled task (default cron `0 */4 * * *`) executes `CrlRenewalExecutor`, which calls `SchedulerNotifier::signal_crl_renewal()` — fires `revocation_notify` on the embedded scheduler and publishes NATS for all instances |
+| Periodic refresh | `CrlRenewal` scheduled task (default interval: 14 400 seconds / 4 hours, jitter: 120 seconds) executes `CrlRenewalExecutor`, which calls `SchedulerNotifier::signal_crl_renewal()` — fires `revocation_notify` on the embedded scheduler and publishes NATS for all instances |
 
 The default renewal interval (every 4 hours) is configurable via the existing scheduler task management API
 (`PUT /api/v1/scheduler/tasks/{id}`). No separate global setting is needed.

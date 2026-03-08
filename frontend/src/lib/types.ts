@@ -533,7 +533,8 @@ export interface ScheduledTaskResponse {
 	id: string;
 	task_type: string;
 	label: string;
-	cron_expression: string;
+	interval_seconds: number;
+	jitter_seconds: number;
 	enabled: boolean;
 	is_running: boolean;
 	run_count: number;
@@ -545,7 +546,8 @@ export interface ScheduledTaskResponse {
 }
 
 export interface UpdateScheduledTaskRequest {
-	cron_expression?: string;
+	interval_seconds?: number;
+	jitter_seconds?: number;
 	enabled?: boolean;
 }
 

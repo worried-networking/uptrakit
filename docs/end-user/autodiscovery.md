@@ -277,9 +277,9 @@ rediscovery process, even if they are absent from the agent's report.
 
 ### Configuring the schedule
 
-The `discover_host_packages` task uses a standard cron expression (default: `0 */6 * * *`). You
-can adjust the schedule or disable the task from the Web UI (**Settings → Scheduler**) or via the
-API.
+The `discover_host_packages` task runs on a fixed interval (default: 21 600 seconds / 6 hours,
+jitter: 300 seconds). You can adjust the interval or disable the task from the Web UI
+(**Settings -> Scheduler**) or via the API.
 
 ### Auto-updating packages excluded from discovery
 

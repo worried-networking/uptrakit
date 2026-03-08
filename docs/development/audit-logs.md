@@ -282,7 +282,7 @@ The middleware:
 ## Retention cleanup
 
 The `AuditLogCleanupExecutor` (`crates/shared/scheduler-engine/src/executors/audit_log_cleanup.rs`)
-runs as a scheduled task (cron `0 3 * * *`, disabled by default). It deletes entries older than
+runs as a scheduled task (default interval: 86 400 seconds / 24 hours, disabled by default). It deletes entries older than
 the retention period (default: 90 days) from both `audit_logs` and `system_audit_logs` in a
 single database transaction.
 

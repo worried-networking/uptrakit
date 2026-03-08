@@ -720,7 +720,7 @@ operations:
     description: |
       Published by any controller that revokes a certificate (service deactivation,
       service merge, certificate renewal), or by the `CrlRenewal` scheduled task
-      executor on its configured cron schedule. All receiving controllers fire
+      executor on its configured interval schedule. All receiving controllers fire
       `revocation_notify.notify_one()` so that `CrlManager::run()` rebuilds
       and hot-reloads their TLS configuration.
 

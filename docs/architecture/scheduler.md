@@ -13,7 +13,7 @@ Key properties:
 
 - **HA-safe**: only one instance executes a given task at a time (optimistic lock via `locked_by`/`locked_at` columns).
 - **Stale recovery**: tasks locked longer than 10 minutes are automatically released.
-- **Cron-based**: standard 5-field cron expressions control scheduling; 6/7-field extended expressions are also accepted.
+- **Interval+jitter**: each task runs on a fixed interval (seconds) with configurable random jitter to spread load.
 - **REST-manageable**: administrators can view, update schedules, and trigger immediate execution via the REST API.
 
 ## Deployment modes
@@ -80,9 +80,10 @@ and [Scheduler Engine (Development)](../development/scheduler-engine.md) for eng
 | Column | Type | Description |
 | --- | --- | --- |
 | `id` | UUID (PK, v7) | Task identifier |
-| `tenant_id` | UUID FK | References `tenants.id` — scopes the *configuration* (cron schedule, enabled flag, task config) to a specific tenant. Does **not** restrict which scheduler instance processes the task; the external scheduler queries across all tenants. |
+| `tenant_id` | UUID FK | References `tenants.id` — scopes the *configuration* (interval, enabled flag, task config) to a specific tenant. Does **not** restrict which scheduler instance processes the task; the external scheduler queries across all tenants. |
 | `task_type` | TEXT | Enum discriminant (see below) |
-| `cron_expression` | TEXT | Standard 5-field cron expression |
+| `interval_seconds` | INTEGER | How often the task runs (in seconds). Must be > 0. |
+| `jitter_seconds` | INTEGER | Random jitter added to the interval to spread load (in seconds). Must be >= 0. |
 | `enabled` | BOOLEAN | Whether the task is active |
 | `task_config` | JSON (nullable) | Per-task configuration |
 | `last_run_at` | TIMESTAMP (nullable) | Last successful execution |
@@ -104,16 +105,17 @@ and [Scheduler Engine (Development)](../development/scheduler-engine.md) for eng
 
 ### Task types
 
-| Value | Default cron | Description |
-| --- | --- | --- |
-| `auth_cleanup` | `*/5 * * * *` | Clean expired auth flow state from DB |
-| `stale_lease_cleanup` | `*/5 * * * *` | Release stale MQTT client leases |
-| `ca_rotation_check` | `0 3 * * *` | Check if managed CA needs rotation |
-| `fetch_releases` | `0 */6 * * *` | Fetch latest available versions (controller-side API calls + agent-side package index queries). Replaces the old `version_check` task. |
-| `detect_version` | `0 0 * * *` | Detect currently installed versions on all agent hosts. |
-| `service_cert_check` | `0 */12 * * *` | Proactive certificate renewal for services |
-| `crl_renewal` | `0 */4 * * *` | Trigger CRL rebuild on all controller instances |
-| `discover_host_packages` | `0 */6 * * *` | Periodically rediscover installed packages on all active hosts. Packages that disappear from the agent's report are automatically soft-deleted. |
+| Value | Default interval | Default jitter | Description |
+| --- | --- | --- | --- |
+| `auth_cleanup` | 300 s (5 min) | 30 s | Clean expired auth flow state from DB |
+| `stale_lease_cleanup` | 300 s (5 min) | 30 s | Release stale MQTT client leases |
+| `ca_rotation_check` | 86 400 s (24 h) | 300 s | Check if managed CA needs rotation |
+| `fetch_releases` | 21 600 s (6 h) | 300 s | Fetch latest available versions (controller-side API calls + agent-side package index queries). Replaces the old `version_check` task. |
+| `detect_version` | 86 400 s (24 h) | 300 s | Detect currently installed versions on all agent hosts. |
+| `service_cert_check` | 43 200 s (12 h) | 300 s | Proactive certificate renewal for services |
+| `crl_renewal` | 14 400 s (4 h) | 120 s | Trigger CRL rebuild on all controller instances |
+| `audit_log_cleanup` | 86 400 s (24 h) | 300 s | Delete audit log entries older than the retention period (disabled by default) |
+| `discover_host_packages` | 21 600 s (6 h) | 300 s | Periodically rediscover installed packages on all active hosts. Packages that disappear from the agent's report are automatically soft-deleted. |
 
 All rows are seeded during migrations with `next_run_at = now`. The `detect_version` row is
 seeded by migration `m20260307_000001_split_version_check` (one per tenant), which also renames
@@ -127,7 +129,8 @@ The claim pattern mirrors `MqttLeaseCoordinator` (see [Cross-Controller Communic
 1. **Poll**: every 15 seconds, each controller polls for due tasks (`next_run_at <= now`, `enabled = true`, `locked_by IS NULL`).
 1. **Claim**: `UPDATE SET locked_by = $me, locked_at = $now WHERE id = $id AND locked_by IS NULL` -- succeeds only if `rows_affected == 1`.
 1. **Execute**: run the task's executor.
-1. **Release**: clear `locked_by`/`locked_at`, update `last_run_at`, `next_run_at` (computed from cron), `run_count`, and optionally `last_error`.
+1. **Release**: clear `locked_by`/`locked_at`, update `last_run_at`, `run_count`, and optionally `last_error`.
+   Compute `next_run_at = now + interval_seconds + rand(0..=jitter_seconds)`.
 1. **Stale recovery**: on each poll cycle, tasks with `locked_at < now - 10 min` are released (the controller may have crashed).
 1. **Shutdown**: all claims held by the stopping controller are released.
 
@@ -180,7 +183,7 @@ The scheduler engine is a shared library crate:
 crates/shared/scheduler-engine/src/
     lib.rs              -- Re-exports
     scheduler.rs        -- Scheduler struct, SchedulerConfig, poll loop
-    cron_utils.rs       -- Cron parsing (chrono↔time bridge), next_run_after()
+    interval.rs         -- compute_next_run_at(now, interval_seconds, jitter_seconds)
     claim.rs            -- try_claim, release_claim, recover_stale, release_all, find_due_tasks
     executor.rs         -- TaskExecutor trait
     notifier.rs         -- SchedulerNotifier trait
@@ -214,10 +217,12 @@ pub trait TaskExecutor: Send + Sync {
 
 Each executor implements this trait with the task-specific logic.
 
-### Cron handling
+### Interval handling
 
-The `cron` crate requires 6 or 7 fields (with a seconds field). Standard 5-field expressions are normalized by prepending `0` (fire at second 0). The
-chrono-to-time boundary is bridged via unix timestamps in `cron_utils::next_run_after()`.
+The `interval.rs` module provides `compute_next_run_at(now, interval_seconds, jitter_seconds)`. It
+adds `interval_seconds` to `now`, then adds a random value in `[0, jitter_seconds]` to spread task
+executions across instances and avoid thundering-herd effects. No external crate dependencies are
+required (no `cron` or `chrono`).
 
 ## Executor Details
 
@@ -331,7 +336,7 @@ See [HTTP Web API](../api/http-web-api.md#scheduler-endpoints) for endpoint deta
 | --- | --- | --- |
 | GET | `/api/v1/scheduler/tasks` | List all tasks for the tenant |
 | GET | `/api/v1/scheduler/tasks/{id}` | Get task details |
-| PUT | `/api/v1/scheduler/tasks/{id}` | Update cron/enabled/config |
+| PUT | `/api/v1/scheduler/tasks/{id}` | Update interval/jitter/enabled/config |
 | POST | `/api/v1/scheduler/tasks/{id}/trigger` | Trigger immediate execution |
 
 All endpoints require the `ManageSoftware` permission.
@@ -346,7 +351,7 @@ All endpoints require the `ManageSoftware` permission.
 - Each task execution is bounded by a 2-hour per-task timeout (`TASK_EXECUTION_TIMEOUT`). A task that exceeds
   this receives `SchedulerError::TaskTimedOut` and its claim is released immediately.
 - REST API endpoints are protected by JWT authentication and the `ManageSoftware` permission.
-- Cron expressions are validated before persistence.
+- Interval and jitter values are validated before persistence (`interval_seconds > 0`, `jitter_seconds >= 0`).
 
 ## Related Documentation
 

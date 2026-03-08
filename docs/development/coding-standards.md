@@ -866,7 +866,7 @@ if let Err(e) = req.validate() {
 | `RegisterRequest` | email format (contains `@`, max 254 chars), `first_name` non-empty, password 8–1024 chars |
 | `LoginRequest` | email format, password non-empty |
 | `CreateOidcProviderRequest` | name non-empty, slug format (lowercase+digits+hyphens, 1–64), issuer_url scheme, client_id non-empty |
-| `UpdateScheduledTaskRequest` | cron_expression non-empty, 5 whitespace-separated fields |
+| `UpdateScheduledTaskRequest` | interval_seconds > 0, jitter_seconds >= 0 |
 | `UpdateNetworkSettingsRequest` | trusted_proxies items non-empty, real_ip_header non-empty, pki_addr URL format |
 | `CreateSoftwareItemRequest` | name non-empty, exactly one of plugin_config_id/plugin_config |
 | `CreatePluginConfigRequest` | name non-empty |

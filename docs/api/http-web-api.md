@@ -737,7 +737,8 @@ List all scheduled tasks for the tenant.
     "id": "019...",
     "task_type": "auth_cleanup",
     "label": "Auth Cleanup",
-    "cron_expression": "*/5 * * * *",
+    "interval_seconds": 300,
+    "jitter_seconds": 30,
     "enabled": true,
     "task_config": null,
     "last_run_at": "2026-02-15T12:00:00Z",
@@ -765,13 +766,15 @@ Update a scheduled task. All fields are optional.
 
 ```json
 {
-  "cron_expression": "0 */12 * * *",
+  "interval_seconds": 43200,
+  "jitter_seconds": 300,
   "enabled": true,
   "task_config": { "custom_key": "value" }
 }
 ```
 
-- `cron_expression`: validated before persistence. Standard 5-field or extended 6/7-field cron. Updating the expression recomputes `next_run_at`.
+- `interval_seconds`: how often the task runs (in seconds). Must be > 0. Updating the interval recomputes `next_run_at`.
+- `jitter_seconds`: random jitter added to the interval to spread load (in seconds). Must be >= 0.
 - `enabled`: toggle task on/off.
 - `task_config`: JSON value. Send `null` to clear.
 
@@ -796,8 +799,8 @@ Types are defined in `crates/shared/web-api-types/src/scheduler.rs`:
 
 | Type | Fields |
 | --- | --- |
-| `ScheduledTaskResponse` | `id`, `task_type`, `label`, `cron_expression`, `enabled`, `task_config`, `last_run_at`, `next_run_at`, `is_running`, `last_error`, `run_count`, `created_at`, `updated_at` |
-| `UpdateScheduledTaskRequest` | `cron_expression?`, `enabled?`, `task_config?` |
+| `ScheduledTaskResponse` | `id`, `task_type`, `label`, `interval_seconds`, `jitter_seconds`, `enabled`, `task_config`, `last_run_at`, `next_run_at`, `is_running`, `last_error`, `run_count`, `created_at`, `updated_at` |
+| `UpdateScheduledTaskRequest` | `interval_seconds?`, `jitter_seconds?`, `enabled?`, `task_config?` |
 | `TriggerScheduledTaskResponse` | `triggered`, `message` |
 
 ### Key files
