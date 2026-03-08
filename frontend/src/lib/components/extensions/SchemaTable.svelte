@@ -3,6 +3,7 @@
 	import { invokeExtensionAction, getPluginConfigs } from '$lib/api';
 	import { showError } from '$lib/notifications.svelte';
 	import ActionButton from './ActionButton.svelte';
+	import Pagination from '$lib/components/Pagination.svelte';
 
 	/** Check whether a row action should be visible for a given row. */
 	function isRowActionVisible(action: ActionDef, row: Record<string, unknown>): boolean {
@@ -47,6 +48,13 @@
 	let rows: Record<string, unknown>[] = $state([]);
 	let loading: boolean = $state(false);
 
+	// Pagination state
+	const defaultPerPage = $derived(ui.default_per_page ?? 20);
+	let currentPage: number = $state(1);
+	let totalPages: number = $state(1);
+	let total: number = $state(0);
+	let perPage: number = $state(20);
+
 	// Data is ready when either there's no context selector, or a context value is selected.
 	let dataReady = $derived(!cs || (contextLoaded && selectedContext != null));
 
@@ -60,11 +68,35 @@
 					.filter((c) => c.plugin_type === source.plugin_type)
 					.map((c) => ({ value: c.id, label: c.name }));
 			} else if (source.type === 'action') {
-				const result = await invokeExtensionAction(extensionId, source.action_id, {}, serviceId);
-				const arr = Array.isArray(result) ? result : (((result as Record<string, unknown>)?.items as unknown[]) ?? []);
-				contextOptions = arr.map((item) => {
+				// Paginate through all pages to collect complete option list.
+				const allItems: unknown[] = [];
+				let page = 1;
+				let pageTotalPages = 1;
+				do {
+					const result = await invokeExtensionAction(
+						extensionId,
+						source.action_id,
+						{ page, per_page: 1000 },
+						serviceId
+					);
+					const resultObj = result as Record<string, unknown>;
+					if (resultObj?.items && resultObj?.total_pages != null) {
+						allItems.push(...(resultObj.items as unknown[]));
+						pageTotalPages = resultObj.total_pages as number;
+					} else {
+						const arr = Array.isArray(result) ? result : ((resultObj?.items as unknown[]) ?? []);
+						allItems.push(...arr);
+						break;
+					}
+					page++;
+				} while (page <= pageTotalPages);
+
+				contextOptions = allItems.map((item) => {
 					const i = item as Record<string, unknown>;
-					return { value: String(i.value ?? i.id ?? ''), label: String(i.label ?? i.name ?? '') };
+					return {
+						value: String(i.value ?? i.id ?? ''),
+						label: String(i.label ?? i.name ?? '')
+					};
 				});
 			}
 
@@ -88,26 +120,54 @@
 		if (!dataReady) return;
 		loading = true;
 		try {
-			const params: Record<string, unknown> = {};
+			const params: Record<string, unknown> = {
+				page: currentPage,
+				per_page: perPage
+			};
 			if (cs && selectedContext != null) {
 				params[cs.param_key] = selectedContext;
 			}
 			const result = await invokeExtensionAction(extensionId, ui.data_action, params, serviceId);
-			rows = Array.isArray(result)
-				? result
-				: (((result as Record<string, unknown>)?.rows as Record<string, unknown>[]) ?? []);
+			const resultObj = result as Record<string, unknown>;
+
+			if (resultObj?.items && resultObj?.total_pages != null) {
+				rows = resultObj.items as Record<string, unknown>[];
+				total = (resultObj.total as number) ?? 0;
+				currentPage = (resultObj.page as number) ?? 1;
+				perPage = (resultObj.per_page as number) ?? defaultPerPage;
+				totalPages = (resultObj.total_pages as number) ?? 1;
+			} else {
+				// Fallback for actions that don't return paginated responses.
+				rows = Array.isArray(result) ? result : ((resultObj?.rows as Record<string, unknown>[]) ?? []);
+				total = rows.length;
+				totalPages = 1;
+				currentPage = 1;
+			}
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to load data');
 			rows = [];
+			total = 0;
+			totalPages = 1;
 		} finally {
 			loading = false;
 		}
+	}
+
+	function handlePageChange(page: number) {
+		currentPage = page;
+		void loadData();
 	}
 
 	async function handleAddActionComplete(result?: Record<string, unknown>) {
 		const idField = addAction?.api_submit?.response_id_field;
 		const newId = idField && result ? String(result[idField] ?? '') : undefined;
 		await loadContextOptions(newId || undefined);
+	}
+
+	/** Reload data and reset to page 1. */
+	async function reloadData() {
+		currentPage = 1;
+		await loadData();
 	}
 
 	$effect(() => {
@@ -119,8 +179,14 @@
 	});
 
 	// Reload table data when context selection changes or on initial load (no context selector).
+	// Reset to page 1 when context changes.
+	let prevContext: string | undefined = $state(undefined);
 	$effect(() => {
 		if (dataReady) {
+			if (selectedContext !== prevContext) {
+				prevContext = selectedContext;
+				currentPage = 1;
+			}
 			void loadData();
 		}
 	});
@@ -180,7 +246,7 @@
 							{serviceId}
 							{encryptionPublicKey}
 							extraParams={contextParams}
-							onComplete={loadData}
+							onComplete={reloadData}
 						/>
 					{/if}
 				{/each}
@@ -223,7 +289,7 @@
 														{encryptionPublicKey}
 														extraParams={{ ...contextParams, ...row, _row: row }}
 														size="sm"
-														onComplete={loadData}
+														onComplete={reloadData}
 													/>
 												{/if}
 											{/each}
@@ -235,6 +301,13 @@
 					</tbody>
 				</table>
 			</div>
+
+			{#if totalPages > 1}
+				<div class="mt-2 flex items-center justify-between text-sm text-surface-500">
+					<span>{total} total</span>
+					<Pagination {currentPage} {totalPages} onPageChange={handlePageChange} />
+				</div>
+			{/if}
 		{/if}
 	{/if}
 </div>

@@ -917,6 +917,8 @@ export type ExtensionUi =
 			/** Action ID references (resolved via the action library). */
 			primary_actions: string[];
 			context_selector?: ContextSelectorDef;
+			/** Default number of items per page. When absent, defaults to 20. */
+			default_per_page?: number;
 	  }
 	| { type: 'form'; fields: FieldDef[] }
 	| { type: 'key_value'; data_action: string }
