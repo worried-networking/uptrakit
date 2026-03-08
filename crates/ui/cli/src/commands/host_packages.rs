@@ -2,6 +2,7 @@ use crate::client::authenticated_client;
 use crate::error::Result;
 use crate::output::HumanOutput;
 use rootcause::prelude::*;
+use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_openapi_client::types::host_packages::{
     CreateHostPackageIgnoreRequest, HostPackageDetailResponse, HostPackageIgnoreResponse,
     HostPackageResponse, ListHostPackagesParams, PromoteHostPackageRequest,
@@ -377,6 +378,24 @@ pub async fn promote(params: PromoteParams<'_>) -> Result<SoftwareItemDetailResp
         .promote_host_package(params.host_id, params.package_id, &req)
         .await
         .context_to()
+}
+
+/// Perform a batch action on multiple host packages.
+pub async fn batch(
+    host_id: &Uuid,
+    action: &str,
+    ids: &[Uuid],
+    server: Option<&str>,
+    token: Option<&str>,
+    insecure: bool,
+    request_timeout: Option<std::time::Duration>,
+) -> Result<BatchActionResponse> {
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
+    let req = BatchActionRequest {
+        action: action.to_string(),
+        ids: ids.to_vec(),
+    };
+    client.batch_host_packages(host_id, &req).await.context_to()
 }
 
 #[cfg(test)]

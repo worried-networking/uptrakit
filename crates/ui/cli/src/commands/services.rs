@@ -5,6 +5,7 @@ use rootcause::prelude::*;
 use serde::Serialize;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
+use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::services::{
     ListServicesQuery, MergeAgentRequest, MessageResponse, ParseServiceStatusError,
@@ -115,6 +116,28 @@ impl HumanOutput for MergeServiceOutput {
 impl HumanOutput for MessageResponse {
     fn to_human_string(&self) -> String {
         format!("{}\n", self.message)
+    }
+}
+
+impl HumanOutput for BatchActionResponse {
+    fn to_human_string(&self) -> String {
+        let mut out = String::new();
+        if !self.succeeded.is_empty() {
+            out.push_str(&format!("Succeeded ({}):\n", self.succeeded.len()));
+            for s in &self.succeeded {
+                out.push_str(&format!("  {}\n", s.id));
+            }
+        }
+        if !self.failed.is_empty() {
+            out.push_str(&format!("Failed ({}):\n", self.failed.len()));
+            for f in &self.failed {
+                out.push_str(&format!("  {} — {}\n", f.id, f.error));
+            }
+        }
+        if self.succeeded.is_empty() && self.failed.is_empty() {
+            out.push_str("No items processed.\n");
+        }
+        out
     }
 }
 
@@ -242,6 +265,23 @@ pub async fn merge(
         source_id: *source_id,
         inner,
     })
+}
+
+/// Perform a batch action on multiple services.
+pub async fn batch(
+    action: &str,
+    ids: &[Uuid],
+    server: Option<&str>,
+    token: Option<&str>,
+    insecure: bool,
+    request_timeout: Option<std::time::Duration>,
+) -> Result<BatchActionResponse> {
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
+    let req = BatchActionRequest {
+        action: action.to_string(),
+        ids: ids.to_vec(),
+    };
+    client.batch_services(&req).await.context_to()
 }
 
 /// Enable or disable the update freeze on a connected service.

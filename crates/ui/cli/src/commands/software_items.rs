@@ -5,6 +5,7 @@ use crate::output::HumanOutput;
 use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
+use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, HostPluginRoleAssignment,
@@ -436,6 +437,23 @@ pub async fn update_latest(params: UpdateLatestParams<'_>) -> Result<TriggerUpda
         .trigger_update(params.id, params.host_id, &req)
         .await
         .context_to()
+}
+
+/// Perform a batch action on multiple software items.
+pub async fn batch(
+    action: &str,
+    ids: &[Uuid],
+    server: Option<&str>,
+    token: Option<&str>,
+    insecure: bool,
+    request_timeout: Option<std::time::Duration>,
+) -> Result<BatchActionResponse> {
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
+    let req = BatchActionRequest {
+        action: action.to_string(),
+        ids: ids.to_vec(),
+    };
+    client.batch_software_items(&req).await.context_to()
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

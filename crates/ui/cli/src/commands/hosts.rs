@@ -7,6 +7,7 @@ use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::autodiscovery::{
     DiscardDiscoveredResponse, TriggerDiscoveryResponse,
 };
+use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_openapi_client::types::hosts::{HostMessageResponse, HostResponse, UpdateHostRequest};
 use uptrakit_openapi_client::types::pagination::{PaginatedResponse, PaginationParams};
 
@@ -229,6 +230,23 @@ pub async fn discard_discovered(
         .discard_host_discovered(params.id, params.plugin_config_id)
         .await
         .context_to()
+}
+
+/// Perform a batch action on multiple hosts.
+pub async fn batch(
+    action: &str,
+    ids: &[Uuid],
+    server: Option<&str>,
+    token: Option<&str>,
+    insecure: bool,
+    request_timeout: Option<std::time::Duration>,
+) -> Result<BatchActionResponse> {
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
+    let req = BatchActionRequest {
+        action: action.to_string(),
+        ids: ids.to_vec(),
+    };
+    client.batch_hosts(&req).await.context_to()
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

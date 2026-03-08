@@ -9,6 +9,7 @@ use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::autodiscovery::{
     DiscardDiscoveredResponse, TriggerDiscoveryResponse,
 };
+use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_openapi_client::types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_openapi_client::types::plugin_configs::{
     CreatePluginConfigRequest, PluginConfigResponse, UpdatePluginConfigRequest,
@@ -216,6 +217,23 @@ pub async fn discard_discovered(
         .discard_plugin_config_discovered(params.id)
         .await
         .context_to()
+}
+
+/// Perform a batch action on multiple plugin configs.
+pub async fn batch(
+    action: &str,
+    ids: &[Uuid],
+    server: Option<&str>,
+    token: Option<&str>,
+    insecure: bool,
+    request_timeout: Option<std::time::Duration>,
+) -> Result<BatchActionResponse> {
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
+    let req = BatchActionRequest {
+        action: action.to_string(),
+        ids: ids.to_vec(),
+    };
+    client.batch_plugin_configs(&req).await.context_to()
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

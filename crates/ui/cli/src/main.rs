@@ -242,6 +242,13 @@ enum HostsCommands {
         #[command(subcommand)]
         command: HostDiscoveryAllowlistCommands,
     },
+    /// Perform a batch action on multiple hosts
+    Batch {
+        /// Action to perform (e.g. deactivate, delete)
+        action: String,
+        /// Host UUIDs (space-separated)
+        ids: Vec<Uuid>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -317,6 +324,15 @@ enum HostPackagesCommands {
     Ignore {
         #[command(subcommand)]
         command: HostPackageIgnoreCommands,
+    },
+    /// Perform a batch action on multiple host packages
+    Batch {
+        /// Host UUID
+        host_id: Uuid,
+        /// Action to perform (e.g. delete, enable, disable)
+        action: String,
+        /// Package UUIDs (space-separated)
+        ids: Vec<Uuid>,
     },
 }
 
@@ -425,6 +441,13 @@ enum SoftwareItemsCommands {
         /// Host UUID
         #[arg(long)]
         host: Uuid,
+    },
+    /// Perform a batch action on multiple software items
+    Batch {
+        /// Action to perform (e.g. approve, delete, enable, disable)
+        action: String,
+        /// Software item UUIDs (space-separated)
+        ids: Vec<Uuid>,
     },
 }
 
@@ -620,6 +643,13 @@ enum ServicesCommands {
         #[arg(long)]
         reason: Option<String>,
     },
+    /// Perform a batch action on multiple services
+    Batch {
+        /// Action to perform (e.g. approve, reject, deactivate, delete)
+        action: String,
+        /// Service UUIDs (space-separated)
+        ids: Vec<Uuid>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -669,6 +699,13 @@ enum SystemServicesCommands {
         /// Per-service certificate lifetime in hours (0 to clear override)
         #[arg(long)]
         cert_lifetime_hours: Option<u32>,
+    },
+    /// Perform a batch action on multiple system services
+    Batch {
+        /// Action to perform (e.g. approve, reject, deactivate, delete)
+        action: String,
+        /// System service UUIDs (space-separated)
+        ids: Vec<Uuid>,
     },
 }
 
@@ -1270,6 +1307,13 @@ enum PluginConfigsCommands {
         /// Plugin config UUID
         id: Uuid,
     },
+    /// Perform a batch action on multiple plugin configs
+    Batch {
+        /// Action to perform (e.g. delete, enable, disable)
+        action: String,
+        /// Plugin config UUIDs (space-separated)
+        ids: Vec<Uuid>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1347,6 +1391,13 @@ enum IgnoresCommands {
     Delete {
         /// Ignore rule UUID
         id: Uuid,
+    },
+    /// Perform a batch action on multiple autodiscovery ignore rules
+    Batch {
+        /// Action to perform (e.g. delete)
+        action: String,
+        /// Ignore rule UUIDs (space-separated)
+        ids: Vec<Uuid>,
     },
 }
 
@@ -1771,6 +1822,18 @@ async fn run(cli: Cli) -> error::Result<()> {
                 .await?;
                 output::print_output(format, &resp)?;
             }
+            ServicesCommands::Batch { action, ids } => {
+                let resp = commands::services::batch(
+                    &action,
+                    &ids,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
         },
         Commands::Hosts { command } => match command {
             HostsCommands::List { page, per_page } => {
@@ -1886,6 +1949,18 @@ async fn run(cli: Cli) -> error::Result<()> {
                     output::print_output(format, &resp)?;
                 }
             },
+            HostsCommands::Batch { action, ids } => {
+                let resp = commands::hosts::batch(
+                    &action,
+                    &ids,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
         },
         Commands::SoftwareItems { command } => match command {
             SoftwareItemsCommands::List { page, per_page } => {
@@ -2006,6 +2081,18 @@ async fn run(cli: Cli) -> error::Result<()> {
                         insecure,
                         request_timeout,
                     },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            SoftwareItemsCommands::Batch { action, ids } => {
+                let resp = commands::software_items::batch(
+                    &action,
+                    &ids,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
                 )
                 .await?;
                 output::print_output(format, &resp)?;
@@ -2294,6 +2381,23 @@ async fn run(cli: Cli) -> error::Result<()> {
                     output::print_output(format, &resp)?;
                 }
             },
+            HostPackagesCommands::Batch {
+                host_id,
+                action,
+                ids,
+            } => {
+                let resp = commands::host_packages::batch(
+                    &host_id,
+                    &action,
+                    &ids,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
         },
         Commands::UpdateBatches { command } => match command {
             UpdateBatchesCommands::List {
@@ -3056,6 +3160,18 @@ async fn run(cli: Cli) -> error::Result<()> {
                 .await?;
                 output::print_output(format, &resp)?;
             }
+            PluginConfigsCommands::Batch { action, ids } => {
+                let resp = commands::plugin_configs::batch(
+                    &action,
+                    &ids,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
         },
         Commands::EnrollmentTokens { command } => match command {
             EnrollmentTokensCommands::List { page, per_page } => {
@@ -3171,6 +3287,18 @@ async fn run(cli: Cli) -> error::Result<()> {
                             insecure,
                             request_timeout,
                         },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                IgnoresCommands::Batch { action, ids } => {
+                    let resp = commands::autodiscovery::batch(
+                        &action,
+                        &ids,
+                        cli.server.as_deref(),
+                        cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
                     )
                     .await?;
                     output::print_output(format, &resp)?;
@@ -3518,6 +3646,18 @@ async fn run(cli: Cli) -> error::Result<()> {
                     &id,
                     ping_interval,
                     cert_lifetime_hours,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            SystemServicesCommands::Batch { action, ids } => {
+                let resp = commands::system_services::batch(
+                    &action,
+                    &ids,
                     cli.server.as_deref(),
                     cli.token.as_deref(),
                     insecure,

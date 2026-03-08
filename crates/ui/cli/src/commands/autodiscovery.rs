@@ -9,6 +9,7 @@ use uptrakit_openapi_client::autodiscovery::ListIgnoresParams;
 use uptrakit_openapi_client::types::autodiscovery::{
     AutodiscoveryIgnoreResponse, CreateAutodiscoveryIgnoreRequest,
 };
+use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 
 // ── Human output ────────────────────────────────────────────────────────────
@@ -137,6 +138,23 @@ pub async fn ignores_delete(params: IgnoresDeleteParams<'_>) -> Result<DeletedOu
     Ok(DeletedOutput {
         message: format!("Autodiscovery ignore rule {} deleted.", params.id),
     })
+}
+
+/// Perform a batch action on multiple autodiscovery ignore rules.
+pub async fn batch(
+    action: &str,
+    ids: &[Uuid],
+    server: Option<&str>,
+    token: Option<&str>,
+    insecure: bool,
+    request_timeout: Option<std::time::Duration>,
+) -> Result<BatchActionResponse> {
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
+    let req = BatchActionRequest {
+        action: action.to_string(),
+        ids: ids.to_vec(),
+    };
+    client.batch_autodiscovery_ignores(&req).await.context_to()
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
