@@ -38,6 +38,10 @@ pub enum LoopError {
     /// WebSocket connection cleanly closed by the controller.
     #[error("connection closed by controller")]
     ReceiveClosed,
+    /// Transient network error (broken pipe, connection reset, DNS failure, etc.)
+    /// that should trigger reconnection with backoff rather than a fatal exit.
+    #[error("transient network error: {0}")]
+    TransientNetwork(String),
     /// Other error during the event loop.
     #[error("{0}")]
     Other(String),
@@ -51,6 +55,8 @@ impl_report_conversion!(EnrollmentError => LoopError, |e| {
         LoopError::CertExpired
     } else if e.is_receive_closed() {
         LoopError::ReceiveClosed
+    } else if e.is_transient_network() {
+        LoopError::TransientNetwork(e.to_string())
     } else {
         LoopError::Other(e.to_string())
     }
@@ -466,7 +472,7 @@ async fn run_authenticated_with_reconnect(
             ca_pem: current_ca.as_deref(),
         };
 
-        match crate::event_loop::run_event_loop(
+        let outcome = match crate::event_loop::run_event_loop(
             handler,
             host,
             port,
@@ -475,13 +481,40 @@ async fn run_authenticated_with_reconnect(
             &ctx,
         )
         .await
-        .context_transform(|e: LoopError| match e {
-            LoopError::CertExpired => EnrollmentError::Tls(crate::error::TlsError::Rustls(
-                rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired),
-            )),
-            LoopError::ReceiveClosed => EnrollmentError::Protocol(ProtocolError::ReceiveClosed),
-            LoopError::Other(msg) => EnrollmentError::Protocol(ProtocolError::Enrollment(msg)),
-        })? {
+        {
+            Ok(outcome) => outcome,
+            Err(e) => match e.current_context() {
+                // Transient network errors (broken pipe, connection reset, DNS
+                // failure, send timeout, etc.) are recoverable — reconnect with
+                // exponential backoff instead of crashing the service.
+                LoopError::TransientNetwork(_) | LoopError::ReceiveClosed => {
+                    let delay = reconnect_backoff.next_delay();
+                    tracing::warn!(
+                        error = %e,
+                        "connection lost, reconnecting in {delay:?}"
+                    );
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+                // Non-transient errors are fatal — propagate to the caller.
+                LoopError::CertExpired => {
+                    return Err(e.context_transform(|_: LoopError| {
+                        EnrollmentError::Tls(crate::error::TlsError::Rustls(
+                            rustls::Error::AlertReceived(
+                                rustls::AlertDescription::CertificateExpired,
+                            ),
+                        ))
+                    }));
+                }
+                LoopError::Other(_) => {
+                    return Err(e.context_transform(|e: LoopError| {
+                        EnrollmentError::Protocol(ProtocolError::Enrollment(e.to_string()))
+                    }));
+                }
+            },
+        };
+
+        match outcome {
             LoopOutcome::Shutdown => return Ok(()),
             LoopOutcome::Reconnect => {
                 reconnect_backoff.reset();
@@ -543,5 +576,70 @@ mod tests {
         let (reason, outcome) = default_resolve_shutdown(ShutdownCause::ServerRestarting);
         assert_eq!(reason, DisconnectReason::Restart);
         assert_eq!(outcome, LoopOutcome::Disconnected);
+    }
+
+    #[test]
+    fn loop_error_from_websocket_is_transient_network() {
+        let ws_err =
+            EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
+        let report: Report<EnrollmentError> = report!(ws_err);
+        let converted: Report<LoopError> = report.context_transform(|e: EnrollmentError| {
+            if e.is_cert_expired() {
+                LoopError::CertExpired
+            } else if e.is_receive_closed() {
+                LoopError::ReceiveClosed
+            } else if e.is_transient_network() {
+                LoopError::TransientNetwork(e.to_string())
+            } else {
+                LoopError::Other(e.to_string())
+            }
+        });
+        assert!(
+            matches!(converted.current_context(), LoopError::TransientNetwork(_)),
+            "WebSocket error should map to TransientNetwork"
+        );
+    }
+
+    #[test]
+    fn loop_error_from_broken_pipe_is_transient_network() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "broken pipe");
+        let ws_err = EnrollmentError::Io(io_err);
+        let report: Report<EnrollmentError> = report!(ws_err);
+        let converted: Report<LoopError> = report.context_transform(|e: EnrollmentError| {
+            if e.is_cert_expired() {
+                LoopError::CertExpired
+            } else if e.is_receive_closed() {
+                LoopError::ReceiveClosed
+            } else if e.is_transient_network() {
+                LoopError::TransientNetwork(e.to_string())
+            } else {
+                LoopError::Other(e.to_string())
+            }
+        });
+        assert!(
+            matches!(converted.current_context(), LoopError::TransientNetwork(_)),
+            "IO broken pipe should map to TransientNetwork"
+        );
+    }
+
+    #[test]
+    fn loop_error_from_enrollment_rejected_is_other() {
+        let err = EnrollmentError::Protocol(ProtocolError::EnrollmentRejected);
+        let report: Report<EnrollmentError> = report!(err);
+        let converted: Report<LoopError> = report.context_transform(|e: EnrollmentError| {
+            if e.is_cert_expired() {
+                LoopError::CertExpired
+            } else if e.is_receive_closed() {
+                LoopError::ReceiveClosed
+            } else if e.is_transient_network() {
+                LoopError::TransientNetwork(e.to_string())
+            } else {
+                LoopError::Other(e.to_string())
+            }
+        });
+        assert!(
+            matches!(converted.current_context(), LoopError::Other(_)),
+            "EnrollmentRejected should map to Other (fatal)"
+        );
     }
 }

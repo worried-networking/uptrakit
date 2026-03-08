@@ -125,12 +125,13 @@ shutdown) from controller-initiated restarts. `shutdown_timeout_seconds` comes f
 
 ### `LoopError`
 
-`LoopError` is a `thiserror`-backed enum with three variants:
+`LoopError` is a `thiserror`-backed enum with four variants:
 
 | Variant | Meaning | SDK behavior |
 | --- | --- | --- |
 | `CertExpired` | TLS handshake rejected (certificate expired) | Re-enroll |
 | `ReceiveClosed` | WebSocket cleanly closed by controller | Reconnect with backoff |
+| `TransientNetwork(String)` | Transient network error (broken pipe, connection reset, DNS failure, send timeout) | Reconnect with backoff |
 | `Other(String)` | Any other event-loop error | Propagate |
 
 Callbacks return `LoopResult<T>` (alias for `Result<T, Report<LoopError>>`), following the project-wide
@@ -356,14 +357,17 @@ it takes the pending key, persists both the certificate and the key via `identit
 ## Error handling at the trait boundary
 
 The lifecycle works with `Report<EnrollmentError>`. Service callbacks return `LoopResult<T>` (i.e.
-`Result<T, Report<LoopError>>`). `LoopError` is a `thiserror` enum with three variants (`CertExpired`,
-`ReceiveClosed`, `Other`), and a closure-based `impl_report_conversion!` maps `EnrollmentError` to the
-appropriate variant. This enables services to use `.context_to::<LoopError>()?` on SDK connection
-operations (e.g. `conn.send(msg).await.context_to::<LoopError>()?`).
+`Result<T, Report<LoopError>>`). `LoopError` is a `thiserror` enum with four variants (`CertExpired`,
+`ReceiveClosed`, `TransientNetwork`, `Other`), and a closure-based `impl_report_conversion!` maps
+`EnrollmentError` to the appropriate variant. This enables services to use
+`.context_to::<LoopError>()?` on SDK connection operations (e.g.
+`conn.send(msg).await.context_to::<LoopError>()?`).
 
-When the event loop returns to the lifecycle, the lifecycle uses `.context_transform()` to map
-`LoopError` variants back to `EnrollmentError` for semantic decision-making (re-enroll on
-`CertExpired`, reconnect with backoff on `ReceiveClosed`, propagate on `Other`).
+The event loop intercepts transient network errors (broken pipe, connection reset, etc.) from
+`conn.recv()` and breaks with `LoopOutcome::Disconnected` instead of propagating them as fatal
+errors. As defense-in-depth, `run_authenticated_with_reconnect` also catches `TransientNetwork`
+and `ReceiveClosed` errors from handler callbacks and treats them as disconnections (reconnect
+with backoff) rather than fatal exits.
 
 ### `EnrollmentError` sub-enum structure
 

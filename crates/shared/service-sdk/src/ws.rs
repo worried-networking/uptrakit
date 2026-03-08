@@ -363,12 +363,21 @@ pub fn log_close_frame(frame: Option<tokio_tungstenite::tungstenite::protocol::C
 
 /// Returns `true` when the error indicates the peer dropped the TCP
 /// connection without sending a TLS `close_notify`. This is normal
-/// when the controller terminates a connection (e.g. service deactivated).
+/// when the controller terminates a connection (e.g. service deactivated,
+/// network interruption, or controller restart).
 pub fn is_peer_closed(err: &tokio_tungstenite::tungstenite::Error) -> bool {
+    use std::io::ErrorKind;
     use tokio_tungstenite::tungstenite::Error as WsErr;
     use tokio_tungstenite::tungstenite::error::ProtocolError;
     match err {
-        WsErr::Io(io) => io.kind() == std::io::ErrorKind::UnexpectedEof,
+        WsErr::Io(io) => matches!(
+            io.kind(),
+            ErrorKind::UnexpectedEof
+                | ErrorKind::BrokenPipe
+                | ErrorKind::ConnectionReset
+                | ErrorKind::ConnectionAborted
+                | ErrorKind::NotConnected
+        ),
         WsErr::Protocol(
             ProtocolError::ResetWithoutClosingHandshake | ProtocolError::SendAfterClosing,
         ) => true,
@@ -451,7 +460,7 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
     tracing::info!(not_after = %cert.not_after, "received client certificate");
 
     identity.save_certificate(&cert.cert_pem).await?;
-    tracing::info!("service certificate saved to disk");
+    tracing::info!("service certificate saved");
 
     Ok(())
 }
@@ -493,4 +502,75 @@ pub async fn resume_enrollment(
     tracing::info!("service certificate saved to disk");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::ErrorKind;
+    use tokio_tungstenite::tungstenite::Error as WsErr;
+    use tokio_tungstenite::tungstenite::error::ProtocolError;
+
+    #[test]
+    fn is_peer_closed_unexpected_eof() {
+        let err = WsErr::Io(std::io::Error::new(ErrorKind::UnexpectedEof, "eof"));
+        assert!(is_peer_closed(&err));
+    }
+
+    #[test]
+    fn is_peer_closed_broken_pipe() {
+        let err = WsErr::Io(std::io::Error::new(ErrorKind::BrokenPipe, "broken pipe"));
+        assert!(is_peer_closed(&err));
+    }
+
+    #[test]
+    fn is_peer_closed_connection_reset() {
+        let err = WsErr::Io(std::io::Error::new(
+            ErrorKind::ConnectionReset,
+            "connection reset",
+        ));
+        assert!(is_peer_closed(&err));
+    }
+
+    #[test]
+    fn is_peer_closed_connection_aborted() {
+        let err = WsErr::Io(std::io::Error::new(
+            ErrorKind::ConnectionAborted,
+            "connection aborted",
+        ));
+        assert!(is_peer_closed(&err));
+    }
+
+    #[test]
+    fn is_peer_closed_not_connected() {
+        let err = WsErr::Io(std::io::Error::new(
+            ErrorKind::NotConnected,
+            "not connected",
+        ));
+        assert!(is_peer_closed(&err));
+    }
+
+    #[test]
+    fn is_peer_closed_reset_without_closing_handshake() {
+        let err = WsErr::Protocol(ProtocolError::ResetWithoutClosingHandshake);
+        assert!(is_peer_closed(&err));
+    }
+
+    #[test]
+    fn is_peer_closed_send_after_closing() {
+        let err = WsErr::Protocol(ProtocolError::SendAfterClosing);
+        assert!(is_peer_closed(&err));
+    }
+
+    #[test]
+    fn is_peer_closed_other_io_error() {
+        let err = WsErr::Io(std::io::Error::new(ErrorKind::PermissionDenied, "denied"));
+        assert!(!is_peer_closed(&err));
+    }
+
+    #[test]
+    fn is_peer_closed_connection_closed() {
+        let err = WsErr::ConnectionClosed;
+        assert!(!is_peer_closed(&err));
+    }
 }

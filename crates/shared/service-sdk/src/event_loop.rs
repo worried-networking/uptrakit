@@ -128,6 +128,17 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
 
             // 4. Controller messages.
             msg = conn.recv() => {
+                // Check for transient network errors before converting to
+                // LoopError. A broken pipe, connection reset, or similar
+                // transport failure during recv() is a disconnection — not
+                // a fatal protocol error.
+                if let Err(ref e) = msg
+                    && (e.current_context().is_transient_network()
+                        || e.current_context().is_receive_closed())
+                {
+                    tracing::warn!(error = %e, "connection lost, will reconnect");
+                    break LoopOutcome::Disconnected;
+                }
                 match msg.context_to::<LoopError>()? {
                     Some(ControllerMessage::Pong(pong)) => {
                         let rtt = now_millis() - pong.service_ts;
