@@ -544,6 +544,9 @@ uptrakit software-items unassign <ITEM_ID> --host <HOST_ID> --ignore
 
 ## Related Documentation
 
+- [Manual Software Tracking](manual-software-tracking.md) — step-by-step guide for adding
+  tracking for software that cannot be autodiscovered (e.g. standalone binaries from GitHub
+  releases). Covers the three-role model, common patterns, and sudoers requirements.
 - [Autodiscovery](autodiscovery.md) — full discovery workflow, review process, and ignore list
   concepts.
 - [CLI Usage Guide](cli-usage.md) — all `plugin-configs` and `autodiscovery` commands.

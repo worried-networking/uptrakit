@@ -9,6 +9,7 @@ This folder contains user-facing guides for operating Uptrakit, including update
 | [System Overview](system-overview.md) | High-level architecture and operational model for controller, agents, and plugins. |
 | [CLI Usage Guide](cli-usage.md) | Command reference for the `uptrakit` binary (all command groups with examples). |
 | [Plugin Configurations](plugin-configs.md) | Managing plugin configs, supported plugin types, and autodiscovery. |
+| [Manual Software Tracking](manual-software-tracking.md) | Setting up tracking for software that cannot be autodiscovered (e.g. standalone binaries from GitHub releases). |
 | [Autodiscovery](autodiscovery.md) | How autodiscovery works, reviewing pending items, and the ignore list. |
 | [Update Workflow](update-workflow.md) | Manual update process, scheduling behavior, and history/reporting expectations. |
 | [Update History](update-history.md) | Viewing update history, status reference, and triggering updates from the web UI. |
