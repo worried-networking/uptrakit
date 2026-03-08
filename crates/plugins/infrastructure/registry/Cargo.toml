@@ -11,6 +11,10 @@ publish = false
 default = ["daemon"]
 daemon = ["uptrakit-plugin-releases-docker/daemon"]
 ssh = ["daemon", "uptrakit-plugin-releases-docker/ssh"]
+agent-infra = [
+    "uptrakit-plugin-infrastructure-core/agent-infra",
+    "uptrakit-plugin-infrastructure-proxmox/agent-infra",
+]
 
 [dependencies]
 uptrakit-shared-types = { workspace = true }

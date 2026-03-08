@@ -43,6 +43,20 @@ pub use uptrakit_shared_types::PluginType;
 // Re-export executor types for downstream convenience
 pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};
 
+// Re-export agent-infra types when the feature is enabled.
+#[cfg(feature = "agent-infra")]
+pub use uptrakit_plugin_infrastructure_core::agent_infra::AgentInfraRegistry;
+
+/// Create an [`AgentInfraRegistry`] populated with all known infrastructure plugins.
+#[cfg(feature = "agent-infra")]
+pub fn create_agent_infra_registry() -> AgentInfraRegistry {
+    let mut registry = AgentInfraRegistry::new();
+    registry.register(std::sync::Arc::new(
+        uptrakit_plugin_infrastructure_proxmox::agent::ProxmoxAgentPlugin::new(),
+    ));
+    registry
+}
+
 /// Abstraction over the plugin registry operations needed by the web API.
 ///
 /// Defines the three operations used when persisting and returning plugin
