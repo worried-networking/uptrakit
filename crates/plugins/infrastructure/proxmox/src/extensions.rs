@@ -1,6 +1,9 @@
 //! Extension manifests and action handler dispatch for the Proxmox VE plugin.
 
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect,
+};
 use uuid::Uuid;
 
 use uptrakit_extension_framework::*;
@@ -170,6 +173,7 @@ fn hosts_page_manifest() -> ExtensionManifest {
                 "unmatch".to_string(),
             ],
             primary_actions: vec!["discover".to_string(), "test-connection".to_string()],
+            default_per_page: Some(50),
             context_selector: Some(Box::new(
                 ContextSelectorDef::new(
                     "plugin_config_id",
@@ -222,7 +226,9 @@ pub async fn handle_action(
         ("proxmox.hosts", "match") => handle_match(db, params).await,
         ("proxmox.hosts", "approve-match") => handle_approve_match(db, params).await,
         ("proxmox.hosts", "unmatch") => handle_unmatch(db, params).await,
-        ("proxmox.hosts", "list-all-unmatched") => handle_list_all_unmatched(db, tenant_id).await,
+        ("proxmox.hosts", "list-all-unmatched") => {
+            handle_list_all_unmatched(db, tenant_id, params).await
+        }
         ("proxmox.host-info", "get-info") => handle_get_info(db, tenant_id, params).await,
         _ => Err(format!(
             "unknown action '{action_id}' for extension '{extension_id}'"
@@ -237,7 +243,7 @@ pub async fn handle_action(
     result
 }
 
-/// List all discovered Proxmox host mappings with inline match suggestions.
+/// List discovered Proxmox host mappings with pagination and inline match suggestions.
 async fn handle_list(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
@@ -246,29 +252,51 @@ async fn handle_list(
     use uptrakit_shared_db::entity::{host, proxmox_host_mapping};
 
     let plugin_config_id = parse_uuid_param(&params, "plugin_config_id")?;
-    tracing::debug!(%plugin_config_id, "listing Proxmox host mappings");
+    let page = parse_pagination_page(&params);
+    let per_page = parse_pagination_per_page(&params);
 
-    let mut query = proxmox_host_mapping::Entity::find()
+    tracing::debug!(%plugin_config_id, %page, %per_page, "listing Proxmox host mappings");
+
+    let mut base_query = proxmox_host_mapping::Entity::find()
         .filter(proxmox_host_mapping::Column::PluginConfigId.eq(plugin_config_id));
 
     if let Some(tid) = tenant_id {
-        query = query.filter(proxmox_host_mapping::Column::TenantId.eq(tid));
+        base_query = base_query.filter(proxmox_host_mapping::Column::TenantId.eq(tid));
     }
 
-    let mappings = query
+    let base_query = base_query
+        .order_by_asc(proxmox_host_mapping::Column::ProxmoxName)
+        .order_by_asc(proxmox_host_mapping::Column::ProxmoxVmid);
+
+    let total = base_query
+        .clone()
+        .count(db)
+        .await
+        .map_err(|e| format!("database error counting mappings: {e}"))?;
+
+    let offset = (page.saturating_sub(1)) * per_page;
+    let mappings = base_query
+        .offset(Some(offset))
+        .limit(Some(per_page))
         .all(db)
         .await
         .map_err(|e| format!("database error: {e}"))?;
 
-    // Collect IDs of already-matched hosts
+    let total_pages = if per_page == 0 {
+        0
+    } else {
+        total.div_ceil(per_page)
+    };
+
+    // Collect IDs of already-matched hosts on this page for suggestion filtering
     let matched_host_ids: std::collections::HashSet<Uuid> =
         mappings.iter().filter_map(|m| m.host_id).collect();
 
-    // Collect unmatched mappings for suggestion computation
+    // Collect unmatched mappings on this page for suggestion computation
     let unmatched_mappings: Vec<&proxmox_host_mapping::Model> =
         mappings.iter().filter(|m| m.host_id.is_none()).collect();
 
-    // Load active hosts for suggestions (only if there are unmatched mappings)
+    // Load active hosts for suggestions (only if there are unmatched mappings on this page)
     let suggestion_map = if !unmatched_mappings.is_empty() {
         if let Some(tid) = tenant_id {
             let all_hosts: Vec<host::Model> = host::Entity::find()
@@ -297,7 +325,7 @@ async fn handle_list(
         std::collections::HashMap::new()
     };
 
-    let rows: Vec<serde_json::Value> = mappings
+    let items: Vec<serde_json::Value> = mappings
         .into_iter()
         .map(|m| {
             let mapping_id = m.id;
@@ -328,8 +356,14 @@ async fn handle_list(
         })
         .collect();
 
-    tracing::debug!(%plugin_config_id, row_count = rows.len(), "host mappings listed");
-    Ok(serde_json::json!({ "rows": rows }))
+    tracing::debug!(%plugin_config_id, item_count = items.len(), %total, "host mappings listed");
+    Ok(serde_json::json!({
+        "items": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": total_pages,
+    }))
 }
 
 /// Trigger discovery for a Proxmox plugin configuration.
@@ -508,34 +542,47 @@ async fn handle_get_info(
 
 /// List all unmatched discovered guests across ALL Proxmox configs for a tenant.
 ///
-/// Returns results formatted as select options (`value`/`label`) for use in
-/// extension action dropdowns (e.g., SSH agent's "Bootstrap via Discovered Guest").
+/// Returns a paginated list of unmatched guests. Each item includes `value`/`label`
+/// fields for use in extension action dropdowns (e.g., SSH agent's "Bootstrap via
+/// Discovered Guest").
 async fn handle_list_all_unmatched(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
+    params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
     use uptrakit_shared_db::entity::proxmox_host_mapping;
 
     let tenant_id = tenant_id.ok_or_else(|| "tenant context required".to_string())?;
+    let page = parse_pagination_page(&params);
+    let per_page = parse_pagination_per_page(&params);
 
-    let mut mappings = proxmox_host_mapping::Entity::find()
+    let base_query = proxmox_host_mapping::Entity::find()
         .filter(proxmox_host_mapping::Column::TenantId.eq(tenant_id))
         .filter(proxmox_host_mapping::Column::HostId.is_null())
+        .order_by_asc(proxmox_host_mapping::Column::ProxmoxName)
+        .order_by_asc(proxmox_host_mapping::Column::ProxmoxVmid);
+
+    let total = base_query
+        .clone()
+        .count(db)
+        .await
+        .map_err(|e| format!("database error counting unmatched: {e}"))?;
+
+    let offset = (page.saturating_sub(1)) * per_page;
+    let mappings = base_query
+        .offset(Some(offset))
+        .limit(Some(per_page))
         .all(db)
         .await
         .map_err(|e| format!("database error: {e}"))?;
 
-    // Sort by name (case-insensitive), then by VMID as tiebreaker.
-    mappings.sort_by(|a, b| {
-        let name_a = a.proxmox_name.as_deref().unwrap_or("");
-        let name_b = b.proxmox_name.as_deref().unwrap_or("");
-        name_a
-            .to_lowercase()
-            .cmp(&name_b.to_lowercase())
-            .then_with(|| a.proxmox_vmid.cmp(&b.proxmox_vmid))
-    });
+    let total_pages = if per_page == 0 {
+        0
+    } else {
+        total.div_ceil(per_page)
+    };
 
-    let options: Vec<serde_json::Value> = mappings
+    let items: Vec<serde_json::Value> = mappings
         .into_iter()
         .map(|m| {
             let name = m.proxmox_name.as_deref().unwrap_or("unnamed");
@@ -559,11 +606,18 @@ async fn handle_list_all_unmatched(
 
     tracing::debug!(
         %tenant_id,
-        count = options.len(),
+        item_count = items.len(),
+        %total,
         "listed all unmatched Proxmox guests"
     );
 
-    Ok(serde_json::json!({ "options": options }))
+    Ok(serde_json::json!({
+        "items": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": total_pages,
+    }))
 }
 
 /// Load `ProxmoxConfig` from the `plugin_configs` table.
@@ -600,6 +654,24 @@ fn parse_uuid_param(params: &serde_json::Value, key: &str) -> std::result::Resul
         .ok_or_else(|| format!("missing required parameter '{key}'"))?;
 
     Uuid::parse_str(val).map_err(|e| format!("invalid UUID for '{key}': {e}"))
+}
+
+/// Extract the `page` parameter from action params (1-indexed, default 1).
+fn parse_pagination_page(params: &serde_json::Value) -> u64 {
+    params
+        .get("page")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1)
+        .max(1)
+}
+
+/// Extract the `per_page` parameter from action params (default 50, max 1000).
+fn parse_pagination_per_page(params: &serde_json::Value) -> u64 {
+    params
+        .get("per_page")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(50)
+        .clamp(1, 1000)
 }
 
 /// Parse a UUID parameter with a fallback key.

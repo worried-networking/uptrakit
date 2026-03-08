@@ -22,6 +22,7 @@ mod m20260307_000001_split_version_check;
 mod m20260307_000002_manage_commands_permission;
 mod m20260308_000001_system_services_permissions;
 mod m20260308_000002_fix_permission_uuid_storage;
+mod m20260308_000003_proxmox_hm_pagination_indexes;
 mod m20260309_000001_fix_permission_created_at_format;
 mod m20260310_000001_data_encryption_keys;
 mod m20260311_000001_update_history_status_index;
@@ -72,6 +73,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260315_000001_proxmox_hm_machine_id::Migration),
             Box::new(m20260316_000001_host_machine_id_partial_unique::Migration),
             Box::new(m20260317_000001_fix_hosts_count_desync::Migration),
+            Box::new(m20260308_000003_proxmox_hm_pagination_indexes::Migration),
         ]
     }
 }
