@@ -407,7 +407,7 @@ as coverage grows.
 | `src/lib/utils.test.ts` | `isValidLogoUrl`, `formatDate`, `safeRedirect`, `copyToClipboard` |
 | `src/routes/services/services.test.ts` | Services page: load, error, empty state, filter buttons |
 | `src/routes/hosts/hosts.test.ts` | Hosts page: load, error, empty state |
-| `src/lib/components/Pagination.test.ts` | Prev/Next disabled states, click handlers, page display |
+| `src/lib/components/Pagination.test.ts` | Prev/Next disabled states, click handlers, page number buttons, ellipsis rendering, aria-current, total count display |
 | `src/lib/components/ContextMenu.test.ts` | Keyboard navigation (Arrow/Home/End/Enter/Escape) |
 | `src/lib/components/ModalBackdrop.test.ts` | Focus trapping (Tab/Shift+Tab), Escape, backdrop click |
 | `src/lib/components/ConfirmDialog.test.ts` | Confirm/cancel callbacks, disabled state, labels |

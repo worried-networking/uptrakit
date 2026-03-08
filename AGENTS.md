@@ -112,7 +112,7 @@ uptrakit/
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/
 │   │   ├── lib/                        # Shared modules: api client, auth store, types, utils, notifications, sse.ts (SSE: update output + admin events); stores/events.svelte.ts (centralized admin event SSE store)
-│   │   │   └── components/             # Shared UI: ConfirmDialog, ModalBackdrop (focus-trapped), ContextMenu (viewport-aware, keyboard-navigable), Pagination, TerminalOutput (xterm.js wrapper with dark/light theme)
+│   │   │   └── components/             # Shared UI: ConfirmDialog, ModalBackdrop (focus-trapped), ContextMenu (viewport-aware, keyboard-navigable), Pagination (page numbers + ellipsis + total count), TerminalOutput (xterm.js wrapper with dark/light theme)
 │   │   └── routes/                     # SvelteKit file-based routes
 │   │       ├── profile/                #   /profile — account info + API token management (create/revoke)
 │   │       ├── history/                #   /history — update history with filters (host, software item, status) + trigger update button
@@ -1317,6 +1317,20 @@ web UI, REST API, and CLI with custom functionality. Extensions are described by
 
 Extensions require the `UiExtensions` capability. Services without this capability cannot
 register extensions or receive extension requests.
+
+### Frontend consistency
+
+Extension pages must have the same look and feel as built-in pages. Extension components
+(`SchemaTable`, `SchemaForm`, `SchemaKeyValue`, `ActionButton`) use the same Skeleton UI
+classes and shared components (`Pagination`, `Modal`, `ConfirmDialog`) as built-in pages.
+Key conventions:
+
+- **Tables**: `<div class="table-wrap"><table class="table">` — same as built-in pages.
+- **Forms**: Skeleton's `.label` class wrapping each field — same as built-in modal forms.
+- **Empty states**: Two-line pattern inside `<td colspan>` — title + subtitle.
+- **Page headings**: `<h1 class="h1 mb-6">` — same as all built-in pages.
+- **Pagination**: Shared `Pagination` component with page number buttons, ellipsis gaps,
+  and total count.
 
 ### Pagination convention
 

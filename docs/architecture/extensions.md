@@ -269,12 +269,14 @@ The `UiExtensions` capability (wire string: `"ui_extensions"`) gates extension s
 ## Frontend rendering
 
 The frontend uses a schema-driven approach. Extension manifests describe the UI structure
-and the frontend renders appropriate components:
+and the frontend renders appropriate components. All extension components use the same
+Skeleton UI classes and shared components (e.g. `Pagination`, `Modal`, `ConfirmDialog`) as
+built-in pages to ensure a consistent look and feel:
 
 | `ExtensionUi` variant | Frontend component | Description |
 | --- | --- | --- |
-| `data_table` | `SchemaTable.svelte` | Fetches paginated rows via action, renders columns, actions, and pagination controls |
-| `form` | `SchemaForm.svelte` | Typed inputs from `FieldDef`, client-side validation |
+| `data_table` | `SchemaTable.svelte` | Fetches paginated rows via action, renders columns with `table-wrap`/`table` classes, row actions, and shared `Pagination` component |
+| `form` | `SchemaForm.svelte` | Typed inputs from `FieldDef` using Skeleton's `.label`/`.input`/`.select` classes |
 | `key_value` | `SchemaKeyValue.svelte` | Read-only key-value display from action response |
 | `actions` | `ExtensionContextMenuItems.svelte` | Action buttons/menu items |
 
