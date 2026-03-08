@@ -767,51 +767,39 @@ impl Plugin for GitHubPlugin {
     }
 
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        let mut cmds = Vec::new();
-
-        if self.config.install_path.is_some() {
-            cmds.push(SudoCommandEntry {
+        // Declare all commands that any GitHub releases config could need.
+        // Sync runs with empty config (install_path=None, pre/post=None), so
+        // conditional checks would silently omit entries. Declaring them
+        // unconditionally ensures `host sync` always produces a complete
+        // sudoers file regardless of what is in the stored config.
+        //
+        // `install` — copies release assets to the target path.
+        // `systemctl stop/start *` — restricted to two safe subcommands so
+        //   the agent can manage service lifecycle without blanket systemctl.
+        vec![
+            SudoCommandEntry {
                 command: "install".to_string(),
                 explanation: "Install downloaded GitHub release assets to the target path"
                     .to_string(),
                 helper_script: None,
                 args_suffix: None,
                 needs_setenv: false,
-            });
-        }
-
-        // When pre/post install commands reference systemctl (the most common
-        // lifecycle pattern), declare separate sudoers entries restricted to
-        // only `stop` and `start` subcommands — never a blanket systemctl.
-        let has_systemctl = self
-            .config
-            .pre_install_command
-            .as_deref()
-            .is_some_and(|c| c.contains("systemctl"))
-            || self
-                .config
-                .post_install_command
-                .as_deref()
-                .is_some_and(|c| c.contains("systemctl"));
-
-        if has_systemctl {
-            cmds.push(SudoCommandEntry {
+            },
+            SudoCommandEntry {
                 command: "systemctl".to_string(),
                 explanation: "Stop services before GitHub release asset installation".to_string(),
                 helper_script: None,
                 args_suffix: Some("stop *"),
                 needs_setenv: false,
-            });
-            cmds.push(SudoCommandEntry {
+            },
+            SudoCommandEntry {
                 command: "systemctl".to_string(),
                 explanation: "Start services after GitHub release asset installation".to_string(),
                 helper_script: None,
                 args_suffix: Some("start *"),
                 needs_setenv: false,
-            });
-        }
-
-        cmds
+            },
+        ]
     }
 }
 
@@ -1345,28 +1333,24 @@ mod tests {
 
     // ── required_sudo_commands tests ─────────────────────────────────────
 
+    // `required_sudo_commands` returns all three entries unconditionally so
+    // that `host sync` always produces a complete sudoers file regardless of
+    // what config (including empty config) is stored.
+
     #[tokio::test]
-    async fn required_sudo_commands_empty_without_install_path() {
+    async fn required_sudo_commands_always_returns_all_three() {
         let plugin = test_plugin().await;
-        assert!(plugin.required_sudo_commands().is_empty());
-    }
-
-    #[tokio::test]
-    async fn required_sudo_commands_declares_install_with_install_path() {
-        let config = GitHubConfig {
-            install_path: Some("/usr/local/bin/app".to_string()),
-            ..GitHubConfig::default()
-        };
-        let plugin = GitHubPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
         let cmds = plugin.required_sudo_commands();
-        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds.len(), 3);
         assert_eq!(cmds[0].command, "install");
+        assert_eq!(cmds[1].command, "systemctl");
+        assert_eq!(cmds[1].args_suffix, Some("stop *"));
+        assert_eq!(cmds[2].command, "systemctl");
+        assert_eq!(cmds[2].args_suffix, Some("start *"));
     }
 
     #[tokio::test]
-    async fn required_sudo_commands_includes_systemctl_when_used() {
+    async fn required_sudo_commands_unconditional_with_full_config() {
         let config = GitHubConfig {
             install_path: Some("/usr/local/bin/app".to_string()),
             pre_install_command: Some("sudo systemctl stop myapp".to_string()),
@@ -1380,24 +1364,7 @@ mod tests {
         assert_eq!(cmds.len(), 3);
         assert_eq!(cmds[0].command, "install");
         assert_eq!(cmds[1].command, "systemctl");
-        assert_eq!(cmds[1].args_suffix, Some("stop *"));
         assert_eq!(cmds[2].command, "systemctl");
-        assert_eq!(cmds[2].args_suffix, Some("start *"));
-    }
-
-    #[tokio::test]
-    async fn required_sudo_commands_no_systemctl_when_not_referenced() {
-        let config = GitHubConfig {
-            install_path: Some("/usr/local/bin/app".to_string()),
-            pre_install_command: Some("echo stopping".to_string()),
-            ..GitHubConfig::default()
-        };
-        let plugin = GitHubPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
-        let cmds = plugin.required_sudo_commands();
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0].command, "install");
     }
 
     // ── format_size tests ────────────────────────────────────────────────
