@@ -51,6 +51,11 @@ pub struct EventLoopContext<'a> {
 ///
 /// Service-specific behaviour is injected through [`ServiceHandler`]
 /// callbacks.
+///
+/// `signals` is passed in from [`run_authenticated_with_reconnect`] so that
+/// the same watcher instance is shared across reconnect iterations — signals
+/// received during backoff delays are not lost and are handled on the next
+/// loop iteration.
 #[tracing::instrument(skip_all, name = "service.event_loop")]
 pub(crate) async fn run_event_loop<H: ServiceHandler>(
     handler: &mut H,
@@ -59,6 +64,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
     tls_connector: &tokio_rustls::TlsConnector,
     identity: &mut ServiceIdentityState,
     ctx: &EventLoopContext<'_>,
+    signals: &mut SignalWatcher,
 ) -> LoopResult<LoopOutcome> {
     const DEFAULT_SHUTDOWN_TIMEOUT: u32 = 120;
 
@@ -73,13 +79,6 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
 
     // Let the service handle post-connect initialization.
     handler.on_connected(&mut conn, identity).await?;
-
-    // Signal handler.
-    let mut signals = SignalWatcher::new().map_err(|e| {
-        report!(LoopError::Other(format!(
-            "failed to register signal handlers: {e}"
-        )))
-    })?;
 
     // Ping timer — not started until ServiceSettings arrives with ping_interval.
     let mut ping_timer: Option<tokio::time::Interval> = None;

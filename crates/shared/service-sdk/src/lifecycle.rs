@@ -23,7 +23,7 @@ use crate::cli::CommonServiceArgs;
 use crate::connection::ControllerConnection;
 use crate::error::{EnrollmentError, IdentityError, ProtocolError, Result};
 use crate::identity::ServiceIdentityState;
-use crate::signal::Signal;
+use crate::signal::{Signal, SignalWatcher};
 
 /// Error type returned by event loop callbacks in [`ServiceHandler`].
 ///
@@ -305,6 +305,24 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
     )
     .await?;
 
+    // Create the signal watcher once for the entire lifetime of this service
+    // process.  Sharing a single instance across reconnect and enrollment
+    // backoff loops ensures signals received during sleep intervals are not
+    // lost — tokio buffers one notification per signal kind.
+    let mut signals = SignalWatcher::new().map_err(|e| {
+        report!(EnrollmentError::Protocol(ProtocolError::Init(format!(
+            "failed to register signal handlers: {e}"
+        ))))
+    })?;
+
+    let auth_params = AuthLoopParams {
+        host: &host,
+        port,
+        base_url,
+        pki_addr,
+        initial_ca_pem: ca_pem.as_deref(),
+    };
+
     // Check for existing certificate.
     if identity.is_certified() {
         let cert_not_after_ts = identity.cert_not_after_ms();
@@ -318,13 +336,10 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
         } else {
             tracing::info!("loaded existing certificate from disk");
             match run_authenticated_with_reconnect(
-                &host,
-                port,
-                base_url,
-                pki_addr,
-                ca_pem.as_deref(),
+                &auth_params,
                 &mut identity,
                 handler,
+                &mut signals,
             )
             .await
             {
@@ -360,7 +375,15 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
                         error = %e,
                         "transient enrollment error, reconnecting in {delay:?}"
                     );
-                    tokio::time::sleep(delay).await;
+                    // Interruptible sleep: a SIGTERM/SIGINT during enrollment
+                    // backoff exits cleanly instead of waiting up to 60 s.
+                    tokio::select! {
+                        () = tokio::time::sleep(delay) => {}
+                        signal = signals.recv() => {
+                            tracing::info!(%signal, "received signal during enrollment, exiting");
+                            return Ok(());
+                        }
+                    }
                     // Reload identity in case enrollment partially completed.
                     identity.load().await?;
                     continue;
@@ -371,16 +394,7 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
     }
 
     // Enter mTLS loop with reconnect.
-    run_authenticated_with_reconnect(
-        &host,
-        port,
-        base_url,
-        pki_addr,
-        ca_pem.as_deref(),
-        &mut identity,
-        handler,
-    )
-    .await
+    run_authenticated_with_reconnect(&auth_params, &mut identity, handler, &mut signals).await
 }
 
 /// Run enrollment using the shared enrollment module.
@@ -425,15 +439,23 @@ async fn do_enrollment<H: ServiceHandler>(
 /// its new certificate.
 const CERT_RECONNECT_DELAY: Duration = Duration::from_secs(2);
 
+/// Stable connection parameters shared across reconnect iterations.
+struct AuthLoopParams<'a> {
+    host: &'a str,
+    port: u16,
+    base_url: &'a str,
+    pki_addr: Option<&'a str>,
+    /// Initial CA PEM bytes (seeded from bootstrap; updated each iteration
+    /// from the in-memory identity so `CaBundleUpdated` is picked up).
+    initial_ca_pem: Option<&'a [u8]>,
+}
+
 /// Enter the mTLS authenticated loop with automatic reconnection.
 async fn run_authenticated_with_reconnect(
-    host: &str,
-    port: u16,
-    base_url: &str,
-    pki_addr: Option<&str>,
-    ca_pem: Option<&[u8]>,
+    params: &AuthLoopParams<'_>,
     identity: &mut ServiceIdentityState,
     handler: &mut impl ServiceHandler,
+    signals: &mut SignalWatcher,
 ) -> Result<()> {
     let mut reconnect_backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
 
@@ -441,7 +463,7 @@ async fn run_authenticated_with_reconnect(
     // in-memory identity state so that a `CaBundleUpdated` message received
     // during a prior connection (which calls `identity.save_ca_cert()`) is
     // picked up without a restart.
-    let mut current_ca: Option<Vec<u8>> = ca_pem.map(<[u8]>::to_vec);
+    let mut current_ca: Option<Vec<u8>> = params.initial_ca_pem.map(<[u8]>::to_vec);
 
     loop {
         // Refresh the CA from the in-memory identity cache.
@@ -467,18 +489,19 @@ async fn run_authenticated_with_reconnect(
         };
 
         let ctx = crate::event_loop::EventLoopContext {
-            base_url,
-            pki_addr,
+            base_url: params.base_url,
+            pki_addr: params.pki_addr,
             ca_pem: current_ca.as_deref(),
         };
 
         let outcome = match crate::event_loop::run_event_loop(
             handler,
-            host,
-            port,
+            params.host,
+            params.port,
             &mtls_connector,
             identity,
             &ctx,
+            signals,
         )
         .await
         {
@@ -493,7 +516,15 @@ async fn run_authenticated_with_reconnect(
                         error = %e,
                         "connection lost, reconnecting in {delay:?}"
                     );
-                    tokio::time::sleep(delay).await;
+                    // Interruptible sleep: a SIGTERM/SIGINT during the reconnect
+                    // backoff exits cleanly instead of waiting up to 60 s.
+                    tokio::select! {
+                        () = tokio::time::sleep(delay) => {}
+                        signal = signals.recv() => {
+                            tracing::info!(%signal, "received signal during reconnect delay, exiting");
+                            return Ok(());
+                        }
+                    }
                     continue;
                 }
                 // Non-transient errors are fatal — propagate to the caller.
@@ -519,13 +550,27 @@ async fn run_authenticated_with_reconnect(
             LoopOutcome::Reconnect => {
                 reconnect_backoff.reset();
                 tracing::info!("reconnecting with new certificate");
-                tokio::time::sleep(CERT_RECONNECT_DELAY).await;
+                tokio::select! {
+                    () = tokio::time::sleep(CERT_RECONNECT_DELAY) => {}
+                    signal = signals.recv() => {
+                        tracing::info!(%signal, "received signal during cert reconnect delay, exiting");
+                        return Ok(());
+                    }
+                }
                 continue;
             }
             LoopOutcome::Disconnected => {
                 let delay = reconnect_backoff.next_delay();
                 tracing::warn!("disconnected by controller, reconnecting in {delay:?}");
-                tokio::time::sleep(delay).await;
+                // Interruptible sleep: a SIGTERM/SIGINT during the reconnect
+                // backoff exits cleanly instead of waiting up to 60 s.
+                tokio::select! {
+                    () = tokio::time::sleep(delay) => {}
+                    signal = signals.recv() => {
+                        tracing::info!(%signal, "received signal during reconnect delay, exiting");
+                        return Ok(());
+                    }
+                }
                 continue;
             }
             LoopOutcome::Restart => {
