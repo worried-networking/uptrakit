@@ -16,7 +16,7 @@ rootcause = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 rpassword = { workspace = true }
-russh = { workspace = true, features = ["aws-lc-rs"] }
+russh = { workspace = true }
 ssh-key = { workspace = true, features = ["ed25519", "rand_core", "std"] }
 strum = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
