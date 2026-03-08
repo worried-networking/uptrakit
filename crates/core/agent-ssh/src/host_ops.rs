@@ -1,6 +1,7 @@
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
+    QueryOrder, QuerySelect, Set,
 };
 
 use crate::db::entity::ssh_host::{ActiveModel, Column, Entity, Model, SshKeyType};
@@ -16,7 +17,7 @@ use crate::error::{Error, Result};
 /// additions, removals, and updates without loading full host credentials.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostSnapshot {
-    pub id: String,
+    pub id: uuid::Uuid,
     pub updated_at: time::OffsetDateTime,
 }
 
@@ -83,10 +84,9 @@ pub async fn add_host(db: &DatabaseConnection, params: AddHostParams) -> Result<
     }
 
     let now = time::OffsetDateTime::now_utc();
-    let id = params.host_id.to_string();
 
     let model = ActiveModel {
-        id: Set(id),
+        id: Set(params.host_id),
         name: Set(params.name),
         hostname: Set(params.hostname),
         port: Set(params.port),
@@ -112,8 +112,8 @@ pub async fn add_host(db: &DatabaseConnection, params: AddHostParams) -> Result<
 /// Find an SSH host by name or UUID.
 pub async fn find_host(db: &DatabaseConnection, name_or_id: &str) -> Result<Option<Model>> {
     // Try UUID parse first.
-    if uuid::Uuid::try_parse(name_or_id).is_ok() {
-        let by_id = Entity::find_by_id(name_or_id.to_string())
+    if let Ok(uuid) = uuid::Uuid::try_parse(name_or_id) {
+        let by_id = Entity::find_by_id(uuid)
             .one(db)
             .await
             .context_to::<Error>()?;
@@ -133,6 +133,48 @@ pub async fn find_host(db: &DatabaseConnection, name_or_id: &str) -> Result<Opti
 /// List all SSH hosts.
 pub async fn list_hosts(db: &DatabaseConnection) -> Result<Vec<Model>> {
     Entity::find().all(db).await.context_to::<Error>()
+}
+
+/// List SSH hosts with pagination, ordered by name.
+pub async fn list_hosts_paginated(
+    db: &DatabaseConnection,
+    page: u64,
+    per_page: u64,
+) -> Result<PaginatedHosts> {
+    let base_query = Entity::find().order_by_asc(Column::Name);
+
+    let total = base_query.clone().count(db).await.context_to::<Error>()?;
+
+    let offset = (page.saturating_sub(1)) * per_page;
+    let items = base_query
+        .offset(Some(offset))
+        .limit(Some(per_page))
+        .all(db)
+        .await
+        .context_to::<Error>()?;
+
+    let total_pages = if per_page == 0 {
+        0
+    } else {
+        total.div_ceil(per_page)
+    };
+
+    Ok(PaginatedHosts {
+        items,
+        total,
+        page,
+        per_page,
+        total_pages,
+    })
+}
+
+/// Paginated list result for SSH hosts.
+pub struct PaginatedHosts {
+    pub items: Vec<Model>,
+    pub total: u64,
+    pub page: u64,
+    pub per_page: u64,
+    pub total_pages: u64,
 }
 
 /// Remove an SSH host by name or UUID. Returns `true` if a row was deleted.
@@ -211,7 +253,7 @@ pub async fn update_host(
 /// be routed to the correct host via `find_host_by_machine_id()`.
 pub async fn update_host_machine_id(
     db: &DatabaseConnection,
-    host_id: &str,
+    host_id: uuid::Uuid,
     machine_id: &str,
 ) -> Result<()> {
     let host = Entity::find_by_id(host_id)
@@ -233,7 +275,7 @@ pub async fn update_host_machine_id(
 /// value unchanged.
 pub async fn update_host_sudo_state(
     db: &DatabaseConnection,
-    host_id: &str,
+    host_id: uuid::Uuid,
     sudo_available: Option<bool>,
     is_root: Option<bool>,
     sudo_policy: Option<String>,
@@ -364,7 +406,7 @@ mod tests {
         assert_eq!(found.id, host.id);
 
         // Find by ID.
-        let found_by_id = find_host(&db, &host.id)
+        let found_by_id = find_host(&db, &host.id.to_string())
             .await
             .expect("find_host")
             .expect("should exist");
@@ -594,7 +636,7 @@ mod tests {
         assert!(not_found.is_none());
 
         // Set the machine_id.
-        update_host_machine_id(&db, &host.id, "abc123")
+        update_host_machine_id(&db, host.id, "abc123")
             .await
             .expect("update_host_machine_id");
 
@@ -642,7 +684,7 @@ mod tests {
             .expect("snapshot present");
 
         // Set machine_id — this must NOT change updated_at.
-        update_host_machine_id(&db, &host.id, "machine-id-value")
+        update_host_machine_id(&db, host.id, "machine-id-value")
             .await
             .expect("update_host_machine_id");
 
@@ -663,8 +705,7 @@ mod tests {
     #[tokio::test]
     async fn update_host_machine_id_nonexistent_id_fails() {
         let (_dir, db) = setup_db().await;
-        let result =
-            update_host_machine_id(&db, "00000000-0000-0000-0000-000000000000", "mid").await;
+        let result = update_host_machine_id(&db, uuid::Uuid::nil(), "mid").await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err().current_context(),
@@ -791,10 +832,10 @@ mod tests {
         let snapshots = list_host_snapshots(&db).await.expect("list_host_snapshots");
         assert_eq!(snapshots.len(), 2);
 
-        // Ordered by id (lexicographic UUID order).
-        let ids: Vec<&str> = snapshots.iter().map(|s| s.id.as_str()).collect();
-        assert!(ids.contains(&h1.id.as_str()));
-        assert!(ids.contains(&h2.id.as_str()));
+        // Ordered by id.
+        let ids: Vec<uuid::Uuid> = snapshots.iter().map(|s| s.id).collect();
+        assert!(ids.contains(&h1.id));
+        assert!(ids.contains(&h2.id));
 
         for snap in &snapshots {
             assert!(snap.updated_at > time::OffsetDateTime::UNIX_EPOCH);

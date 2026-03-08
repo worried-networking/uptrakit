@@ -64,6 +64,7 @@ pub fn build_manifest(infra_primary_actions: &[String]) -> ExtensionManifest {
             row_actions: vec!["sync-host".to_string(), "remove-host".to_string()],
             primary_actions,
             context_selector: None,
+            default_per_page: Some(50),
         },
     )
     .with_permission(Permission::ManageHosts)
@@ -349,7 +350,7 @@ pub async fn handle_extension_request(
 
     match request.action_id.as_str() {
         "list-hosts" => {
-            let response = handle_list_hosts(&request.request_id, ctx.db).await;
+            let response = handle_list_hosts(&request.request_id, &request.params, ctx.db).await;
             send_response(conn, response).await;
         }
         "remove-host" => {
@@ -371,14 +372,27 @@ pub async fn handle_extension_request(
 
 // ── Action handlers ──────────────────────────────────────────────────
 
-/// List all SSH hosts from the local database.
+/// List SSH hosts from the local database with pagination.
 async fn handle_list_hosts(
     request_id: &str,
+    params: &serde_json::Value,
     db: &sea_orm::DatabaseConnection,
 ) -> ExtensionResponsePayload {
-    match host_ops::list_hosts(db).await {
-        Ok(hosts) => {
-            let rows: Vec<serde_json::Value> = hosts
+    let page = params
+        .get("page")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1)
+        .max(1);
+    let per_page = params
+        .get("per_page")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(50)
+        .clamp(1, 1000);
+
+    match host_ops::list_hosts_paginated(db, page, per_page).await {
+        Ok(result) => {
+            let items: Vec<serde_json::Value> = result
+                .items
                 .into_iter()
                 .map(|h| {
                     json!({
@@ -390,7 +404,16 @@ async fn handle_list_hosts(
                     })
                 })
                 .collect();
-            make_success_response(request_id, json!({ "rows": rows }))
+            make_success_response(
+                request_id,
+                json!({
+                    "items": items,
+                    "total": result.total,
+                    "page": result.page,
+                    "per_page": result.per_page,
+                    "total_pages": result.total_pages,
+                }),
+            )
         }
         Err(e) => {
             tracing::error!(error = %e, "failed to list hosts");
