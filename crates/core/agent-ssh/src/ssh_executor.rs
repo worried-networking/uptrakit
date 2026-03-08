@@ -11,7 +11,6 @@ use rootcause::prelude::*;
 use tokio::sync::mpsc;
 use uptrakit_command::{
     CommandError, CommandExecutor, CommandOutput, CommandSpec, StdioTunnel, UpdateOutputLine,
-    shell_escape,
 };
 
 use crate::ssh_stdio_tunnel::SshStdioTunnel;
@@ -165,32 +164,9 @@ fn log_failed_command_output(exit_code: i32, stderr: &str, stdout: &str) {
 /// Convert a [`CommandSpec`] to a single shell-safe command string
 /// suitable for remote execution over SSH.
 ///
-/// Uses `spec.resolve()` to obtain `(program, args)` for both Exec and
-/// Shell modes, then shell-escapes each component. When `working_dir`
-/// is set, prepends `cd '<dir>' &&`.
-///
-/// Returns [`CommandError::UnsupportedShell`] if the shell variant is
-/// not recognized by this version of the agent.
+/// Delegates to [`uptrakit_command::build_remote_command_string`].
 pub(crate) fn build_remote_command_string(spec: &CommandSpec) -> uptrakit_command::Result<String> {
-    let (program, args) = spec.resolve()?;
-
-    // Prepend env-var assignments before the command so they are visible to the
-    // remote shell without requiring `SendEnv` SSH option support.
-    let mut parts = Vec::with_capacity(spec.envs.len() + 1 + args.len());
-    for (name, value) in &spec.envs {
-        parts.push(format!("{name}={}", shell_escape(value)));
-    }
-    parts.push(shell_escape(&program));
-    for arg in &args {
-        parts.push(shell_escape(arg));
-    }
-
-    let command_str = parts.join(" ");
-
-    Ok(match &spec.working_dir {
-        Some(dir) => format!("cd {} && {}", shell_escape(dir), command_str),
-        None => command_str,
-    })
+    uptrakit_command::build_remote_command_string(spec)
 }
 
 #[cfg(test)]

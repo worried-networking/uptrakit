@@ -12,7 +12,7 @@ pub use command::{
 pub use error::{CommandError, Result};
 pub use executor::{
     CommandExecutor, CommandMode, CommandOutput, CommandSpec, LocalCommandExecutor,
-    NoopCommandExecutor, StdioTunnel,
+    NoopCommandExecutor, StdioTunnel, build_remote_command_string,
 };
 pub use remote_executor::{RemoteCommandResult, RemoteExecutor};
 pub use sudo::{ParseSudoPolicyError, SudoAwareCommandExecutor, SudoContext, SudoPolicy};

@@ -240,6 +240,35 @@ pub trait CommandExecutor: Send + Sync {
     }
 }
 
+/// Convert a [`CommandSpec`] to a single shell-safe command string
+/// suitable for remote execution.
+///
+/// Uses `spec.resolve()` to obtain `(program, args)` for both Exec and
+/// Shell modes, then shell-escapes each component. When `working_dir`
+/// is set, prepends `cd '<dir>' &&`.
+///
+/// Returns [`CommandError::UnsupportedShell`] if the shell variant is
+/// not recognized.
+pub fn build_remote_command_string(spec: &CommandSpec) -> crate::Result<String> {
+    let (program, args) = spec.resolve()?;
+
+    let mut parts = Vec::with_capacity(spec.envs.len() + 1 + args.len());
+    for (name, value) in &spec.envs {
+        parts.push(format!("{name}={}", crate::shell_escape(value)));
+    }
+    parts.push(crate::shell_escape(&program));
+    for arg in &args {
+        parts.push(crate::shell_escape(arg));
+    }
+
+    let command_str = parts.join(" ");
+
+    Ok(match &spec.working_dir {
+        Some(dir) => format!("cd {} && {}", crate::shell_escape(dir), command_str),
+        None => command_str,
+    })
+}
+
 /// Apply an optional timeout to a command execution future.
 ///
 /// If `timeout` is `Some(dur)`, the future is wrapped with
