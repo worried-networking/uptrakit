@@ -473,10 +473,9 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         guest_bootstrap: &noop_bootstrap,
     };
     let mut infra_results: Vec<BootstrapInfraResult> = Vec::new();
-    let host_id_str = params.host_id.to_string();
     for plugin in infra_registry.plugins() {
         match plugin
-            .on_host_bootstrapped(&infra_ctx, &executor, &host_id_str, &params.name)
+            .on_host_bootstrapped(&infra_ctx, &executor, params.host_id, &params.name)
             .await
         {
             Ok(result) => {

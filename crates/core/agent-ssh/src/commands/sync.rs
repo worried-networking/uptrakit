@@ -197,7 +197,7 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
     };
     update_host_sudo_state(
         db,
-        &host.id,
+        host.id,
         persisted_sudo_available,
         Some(agent_is_root),
         None,
@@ -279,8 +279,8 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
         guest_bootstrap: &noop_bootstrap,
     };
     for plugin in infra_registry.plugins() {
-        if plugin.has_infra_state(db, &host.id).await {
-            match plugin.on_host_synced(&infra_ctx, &executor, &host.id).await {
+        if plugin.has_infra_state(db, host.id).await {
+            match plugin.on_host_synced(&infra_ctx, &executor, host.id).await {
                 Ok(sync_result) => {
                     for cmd in sync_result.sudo_commands {
                         resolved.push(ResolvedSudoCommand {
@@ -318,7 +318,7 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
             let preview_text = sudoers::generate_sudoers_content(&host.username, content);
             println!("Writing {sudoers_file}...");
             write_sudoers_file(&executor, &host.username, content, privileged).await?;
-            update_host_sudo_state(db, &host.id, Some(true), Some(agent_is_root), None).await?;
+            update_host_sudo_state(db, host.id, Some(true), Some(agent_is_root), None).await?;
 
             println!();
             println!("Sudoers updated for host '{}'.", host.name);
@@ -489,7 +489,7 @@ pub async fn run_for_extension(
     };
     update_host_sudo_state(
         db,
-        &host.id,
+        host.id,
         persisted_sudo_available,
         Some(agent_is_root),
         None,
@@ -560,8 +560,8 @@ pub async fn run_for_extension(
         guest_bootstrap: &noop_bootstrap,
     };
     for plugin in infra_registry.plugins() {
-        if plugin.has_infra_state(db, &host.id).await {
-            match plugin.on_host_synced(&infra_ctx, &executor, &host.id).await {
+        if plugin.has_infra_state(db, host.id).await {
+            match plugin.on_host_synced(&infra_ctx, &executor, host.id).await {
                 Ok(sync_result) => {
                     for cmd in sync_result.sudo_commands {
                         resolved.push(ResolvedSudoCommand {
@@ -596,7 +596,7 @@ pub async fn run_for_extension(
             .map_err(|e| format!("failed to write sudoers file: {e}"))?;
         // Persist sudo state only for stored-credentials runs.
         if !has_auth_override {
-            update_host_sudo_state(db, &host.id, Some(true), Some(is_root), None)
+            update_host_sudo_state(db, host.id, Some(true), Some(is_root), None)
                 .await
                 .map_err(|e| format!("failed to update sudo state: {e}"))?;
         }

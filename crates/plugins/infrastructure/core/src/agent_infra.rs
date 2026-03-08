@@ -254,7 +254,7 @@ pub trait AgentInfraPlugin: Send + Sync + 'static {
         &self,
         ctx: &InfraPluginContext<'_>,
         executor: &dyn uptrakit_command::RemoteExecutor,
-        host_id: &str,
+        host_id: uuid::Uuid,
         host_name: &str,
     ) -> Result<BootstrapInfraResult>;
 
@@ -266,13 +266,13 @@ pub trait AgentInfraPlugin: Send + Sync + 'static {
         &self,
         ctx: &InfraPluginContext<'_>,
         executor: &dyn uptrakit_command::RemoteExecutor,
-        host_id: &str,
+        host_id: uuid::Uuid,
     ) -> Result<SyncInfraResult>;
 
     /// Check whether this plugin has infrastructure state for the given host.
     ///
     /// Used by the agent to decide whether to call [`on_host_synced`](Self::on_host_synced).
-    async fn has_infra_state(&self, db: &DatabaseConnection, host_id: &str) -> bool;
+    async fn has_infra_state(&self, db: &DatabaseConnection, host_id: uuid::Uuid) -> bool;
 
     /// Handle a plugin-owned extension action.
     ///

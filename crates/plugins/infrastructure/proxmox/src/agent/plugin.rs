@@ -86,7 +86,7 @@ impl AgentInfraPlugin for ProxmoxAgentPlugin {
         &self,
         ctx: &InfraPluginContext<'_>,
         executor: &dyn RemoteExecutor,
-        host_id: &str,
+        host_id: uuid::Uuid,
         _host_name: &str,
     ) -> Result<BootstrapInfraResult> {
         // Detect PVE node.
@@ -124,9 +124,10 @@ impl AgentInfraPlugin for ProxmoxAgentPlugin {
             create_or_reuse_pve_credentials(executor, ctx.db, ctx.tenant_id).await;
 
         // Persist PVE state.
+        let host_id_str = host_id.to_string();
         let config_id = existing_config_id.clone();
         if let Err(e) =
-            db_ops::upsert_host_state(ctx.db, host_id, true, config_id, pve_node_name).await
+            db_ops::upsert_host_state(ctx.db, &host_id_str, true, config_id, pve_node_name).await
         {
             tracing::warn!(error = %e, "failed to persist PVE state for host");
         }
@@ -153,9 +154,10 @@ impl AgentInfraPlugin for ProxmoxAgentPlugin {
         &self,
         ctx: &InfraPluginContext<'_>,
         executor: &dyn RemoteExecutor,
-        host_id: &str,
+        host_id: uuid::Uuid,
     ) -> Result<SyncInfraResult> {
-        let state = db_ops::find_host_state(ctx.db, host_id)
+        let host_id_str = host_id.to_string();
+        let state = db_ops::find_host_state(ctx.db, &host_id_str)
             .await
             .context_to::<PluginError>()?;
         let state = match state {
@@ -188,7 +190,7 @@ impl AgentInfraPlugin for ProxmoxAgentPlugin {
                         if cluster_nodes.is_empty() {
                             None
                         } else {
-                            reconcile_pve_config(ctx.db, host_id, &cluster_nodes).await
+                            reconcile_pve_config(ctx.db, &host_id_str, &cluster_nodes).await
                         }
                     }
                     _ => None,
@@ -218,7 +220,7 @@ impl AgentInfraPlugin for ProxmoxAgentPlugin {
 
         // Persist.
         if node_name.is_some() {
-            db_ops::upsert_host_state(ctx.db, host_id, true, config_id_to_store, node_name)
+            db_ops::upsert_host_state(ctx.db, &host_id_str, true, config_id_to_store, node_name)
                 .await
                 .context_to::<PluginError>()?;
         }
@@ -255,8 +257,8 @@ impl AgentInfraPlugin for ProxmoxAgentPlugin {
         })
     }
 
-    async fn has_infra_state(&self, db: &DatabaseConnection, host_id: &str) -> bool {
-        db_ops::find_host_state(db, host_id)
+    async fn has_infra_state(&self, db: &DatabaseConnection, host_id: uuid::Uuid) -> bool {
+        db_ops::find_host_state(db, &host_id.to_string())
             .await
             .ok()
             .flatten()
