@@ -202,6 +202,7 @@ context selector dropdowns or action-sourced select options.
 | `api_submit` | `ApiSubmitDef` | no | Route form submission to a REST API instead of the extension proxy |
 | `row_visible_when` | `RowVisibleWhen` | no | Conditional visibility for row actions in a `DataTable` |
 | `confirm_entity_field` | string | no | Row data field used as entity name in destructive action confirmation dialog |
+| `batch_action` | bool | no | Enable multi-row batch invocation (default: `false`). See [Batch actions](#batch-actions). |
 
 #### `RowVisibleWhen` — conditional row action visibility
 
@@ -236,6 +237,55 @@ ActionDef::new("remove-host", "Remove Host")
 ```
 
 This produces a dialog: "Are you sure you want to remove host **Server-01**?"
+
+#### Batch actions
+
+The `batch_action` field on `ActionDef` marks an action as supporting multi-row invocation.
+When `true`, the frontend renders a checkbox column in the data table and shows the action
+as a toolbar button when rows are selected. The action receives all selected row IDs in a
+single invocation via the `ids` parameter.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `batch_action` | bool | `false` | Enable batch invocation for this action |
+
+Use the `.batch()` builder method:
+
+```rust
+ActionDef::new("remove-host", "Remove Host")
+    .destructive()
+    .with_confirm_entity_field("name")
+    .batch()
+```
+
+When invoked as a batch action, the params include:
+
+```json
+{
+  "ids": ["019585f4-...", "019585f4-..."]
+}
+```
+
+The action handler must iterate over `ids` and process each entity. Return per-item results
+so the frontend can report partial failures.
+
+#### SSH agent remove-host and sync-host actions
+
+The SSH agent uses `.batch()` on its `remove-host` and `sync-host` row actions so operators
+can remove or sync multiple hosts in a single operation:
+
+```rust
+ActionDef::new("remove-host", "Remove Host")
+    .destructive()
+    .with_confirm_entity_field("name")
+    .with_timeout(30)
+    .batch(),
+sync_host_action(), // also has .batch()
+```
+
+Batch actions are compatible with `destructive`, `row_visible_when`, `confirm_entity_field`,
+and `timeout_seconds`. They are not compatible with `ui` (form/wizard) since no per-item
+form input is collected during batch invocation.
 
 #### `ApiSubmitDef` — calling existing REST APIs from extension forms
 

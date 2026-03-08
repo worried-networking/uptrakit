@@ -45,6 +45,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Host Packages API](api/host-packages.md) | Host package REST API reference (CRUD, updates, ignores). See also: [Host Packages Guide](end-user/host-packages.md), [Host Packages Architecture](architecture/host-packages.md). |
 | [Notifications](api/notifications.md) | Notification channel, rule, and delivery log REST API reference. See also: [Notifications Guide](end-user/notifications.md), [Notifications Security](security/notifications-security.md). |
 | [Audit Logs API](api/audit-logs.md) | Audit log REST API reference: endpoints, filter parameters, response schema, permissions. See also: [Audit Logs Guide](end-user/audit-logs.md), [Audit Logs Security](security/audit-logs.md). |
+| [Batch Actions](api/batch-actions.md) | Batch/group action endpoints for bulk management operations (services, hosts, software items, etc.). See also: [CLI Usage Guide](end-user/cli-usage.md), [Extensions API](api/extensions.md). |
 
 ## Security
 

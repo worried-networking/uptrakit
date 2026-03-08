@@ -136,6 +136,16 @@ does not exist. The two revocation reasons in `system_service_certificates` are
 | Merge | Supported | Not supported |
 | Typical members | Agents, SSH agents | MQTT bridge, external scheduler |
 
+## Batch Actions
+
+The `POST /api/v1/services/batch` endpoint allows performing lifecycle operations (approve,
+reject, deactivate, delete) on multiple services in a single request. System services have
+a corresponding `POST /api/v1/system-services/batch` endpoint.
+
+Batch actions are also available for hosts, host packages, software items, plugin configs,
+and autodiscovery ignores. See [Batch Actions API](batch-actions.md) for the full reference
+including request/response schema and supported actions per resource.
+
 ## Update Hooks
 
 Update hooks (systemd, Docker Compose, custom commands) inject metadata in `update_output`. Document any new hook configuration in

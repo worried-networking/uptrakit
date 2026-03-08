@@ -194,6 +194,10 @@ ______________________________________________________________________
   tenant distribution, HA `update` entity discovery, version sensors, update command handling,
   configurable topics, connection resilience, auth support (encrypted at rest). Unified service
   enrollment and management.
+- **Batch Actions (Group Operations)** — `POST /api/v1/{resource}/batch` endpoints for services,
+  system services, software items, hosts, host packages, autodiscovery ignores, and plugin configs.
+  Partial-success semantics (max 100 IDs). OpenAPI client methods and CLI `batch` subcommands for
+  all resources. Extension framework `batch_action` flag on `ActionDef`.
 
 ### Web API — Pending
 

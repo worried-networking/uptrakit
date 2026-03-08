@@ -189,6 +189,22 @@ curl -X POST \
 
 ---
 
+### Batch actions on extension rows
+
+Extension actions can opt-in to batch invocation by setting `batch_action: true` in their
+`ActionDef`. When enabled, the frontend allows users to select multiple table rows and invoke
+the action on all of them at once. The selected row IDs are passed as an `ids` array in the
+action parameters.
+
+Batch-enabled actions appear as toolbar buttons above the data table when one or more rows
+are selected. The action is invoked once with `{ "ids": ["<id1>", "<id2>", ...] }` in the
+params rather than being called per-row.
+
+See [Extensions Development: `batch_action` field](../development/extensions.md#batch-actions)
+for implementation details.
+
+---
+
 ## Error codes
 
 | HTTP Status | Condition |

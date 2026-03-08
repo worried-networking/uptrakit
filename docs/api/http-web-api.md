@@ -419,6 +419,24 @@ Types are defined in `crates/shared/web-api-types/src/update_batches.rs`:
 | `crates/shared/web-api-types/src/update_batches.rs` | Request/response types |
 | `crates/shared/db/src/entity/update_batch.rs` | SeaORM entity |
 
+## Batch Action Endpoints
+
+Batch actions allow performing the same operation on multiple entities in a single request.
+Unlike batch updates (which create tracked update batches with progress streaming), batch
+actions are simple multi-ID operations that return per-item success/failure results.
+
+| Method | Path | Supported actions | Permission |
+| --- | --- | --- | --- |
+| `POST` | `/api/v1/services/batch` | `approve`, `reject`, `deactivate`, `delete` | `ManageAgents` |
+| `POST` | `/api/v1/system-services/batch` | `approve`, `reject`, `deactivate`, `delete` | `ManageSystemServices` |
+| `POST` | `/api/v1/hosts/batch` | `deactivate`, `delete` | `ManageHosts` |
+| `POST` | `/api/v1/hosts/{host_id}/packages/batch` | `delete`, `enable`, `disable` | `ManageSoftware` |
+| `POST` | `/api/v1/software-items/batch` | `approve`, `delete` | `ManageSoftware` |
+| `POST` | `/api/v1/plugin-configs/batch` | `delete` | `ManageSoftware` |
+| `POST` | `/api/v1/autodiscovery/ignores/batch` | `delete` | `ManageSoftware` |
+
+See [Batch Actions API](batch-actions.md) for full request/response schema and error handling.
+
 ## Host Package Endpoints
 
 Host packages represent per-host system-level packages tracked through the host packages subsystem.

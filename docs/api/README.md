@@ -12,6 +12,7 @@ This folder documents the controller HTTP API, service/controller wire protocol,
 | [Auth Flows](auth-flows.md) | Login/device authorization, token lifecycle, and enrollment-related auth flows. |
 | [Services and Operations](services-operations.md) | Agent and MQTT service lifecycle operations, update execution, and state transitions. |
 | [Notifications](notifications.md) | Notification channels, rules, delivery log, and Telegram callback endpoints. |
+| [Batch Actions](batch-actions.md) | Batch/group action endpoints for bulk management operations across all resources. |
 
 ## Related Documentation
 

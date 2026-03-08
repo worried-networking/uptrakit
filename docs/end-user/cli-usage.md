@@ -869,6 +869,85 @@ REST API directly instead of routing through the extension proxy.
 See also: [Extensions Guide](extensions.md),
 [Extensions Development](../development/extensions.md).
 
+## Batch Actions
+
+Most resource commands support a `batch` subcommand for performing the same operation on
+multiple entities at once. The general syntax is:
+
+```sh
+uptrakit <resource> batch <ACTION> <UUID1> <UUID2> ...
+```
+
+The action name matches the single-entity command (e.g., `approve`, `delete`, `deactivate`).
+Results are reported per-item, showing which succeeded and which failed.
+
+### Services
+
+```sh
+# Approve multiple pending services
+uptrakit services batch approve <UUID1> <UUID2> <UUID3>
+
+# Reject multiple services
+uptrakit services batch reject <UUID1> <UUID2>
+
+# Deactivate multiple services
+uptrakit services batch deactivate <UUID1> <UUID2>
+```
+
+### System services
+
+```sh
+uptrakit system-services batch approve <UUID1> <UUID2>
+uptrakit system-services batch deactivate <UUID1> <UUID2>
+```
+
+### Hosts
+
+```sh
+# Deactivate multiple hosts
+uptrakit hosts batch deactivate <UUID1> <UUID2>
+```
+
+### Host packages
+
+Host package batch commands require the host UUID as the first positional argument:
+
+```sh
+# Delete multiple packages on a host
+uptrakit host-packages batch <HOST_UUID> delete <PKG_UUID1> <PKG_UUID2>
+
+# Enable multiple packages
+uptrakit host-packages batch <HOST_UUID> enable <PKG_UUID1> <PKG_UUID2>
+
+# Disable multiple packages
+uptrakit host-packages batch <HOST_UUID> disable <PKG_UUID1> <PKG_UUID2>
+```
+
+### Software items
+
+```sh
+# Approve multiple discovered software items
+uptrakit software-items batch approve <UUID1> <UUID2>
+
+# Delete multiple software items
+uptrakit software-items batch delete <UUID1> <UUID2>
+```
+
+### Plugin configs
+
+```sh
+uptrakit plugin-configs batch delete <UUID1> <UUID2>
+```
+
+### Autodiscovery ignores
+
+```sh
+uptrakit autodiscovery ignores batch delete <UUID1> <UUID2>
+```
+
+See also: [Batch Actions API](../api/batch-actions.md),
+[HTTP Web API](../api/http-web-api.md#batch-action-endpoints).
+
 ## Raw API Access
 
 For advanced use, the `api` command lets you call any REST endpoint directly.

@@ -260,6 +260,19 @@ A `BatchProgressBroadcaster` (`crates/ui/web-api/src/batch_progress_broadcaster.
 See [Update History Entity](docs/architecture/update-history-entity.md) and
 [Batch Update Endpoints](docs/api/http-web-api.md#batch-update-endpoints).
 
+## Batch actions (group operations)
+
+All management resources support batch actions via `POST /api/v1/{resource}/batch` endpoints. A
+single request carries an action name and up to 100 UUIDs. The server processes each item
+independently and returns partial-success results — items that fail (wrong state, not found) do
+not block successful items. No new database tables are required; batch operations use existing
+columns (status updates, soft-deletes). Side effects (WebSocket notifications, admin events, CRL
+renewal) fire per succeeded item, same as the single-item endpoints.
+
+Covered resources: services, system services, software items, hosts, host packages,
+autodiscovery ignore rules, and plugin configs. Extensions can mark `ActionDef` as batch-capable
+via `batch_action: true`. See [docs/api/batch-actions.md](docs/api/batch-actions.md).
+
 ## Host packages (system-level tracking)
 
 In addition to targeted software items (cross-host tracking), the system supports per-host package tracking for

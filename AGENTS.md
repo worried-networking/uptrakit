@@ -966,6 +966,41 @@ The frontend filters services by capability instead of type and displays `servic
 | `crates/shared/wire/asyncapi.yaml` | Schema for `capabilities` arrays in messages |
 | `docs/api/wire-protocol.md` | Full capability negotiation documentation |
 
+### Batch actions (group operations)
+
+All management endpoints support batch operations via `POST /api/v1/{resource}/batch`. The request body
+contains an `action` string and a `ids` UUID array (max 100). Responses use partial-success semantics:
+each item independently succeeds or fails.
+
+Endpoints: services, system-services, software-items, hosts, hosts/{host_id}/packages,
+autodiscovery/ignores, plugin-configs. Full endpoint table and side-effect documentation in
+[docs/api/batch-actions.md](docs/api/batch-actions.md).
+
+Extensions can mark `ActionDef` as batch-capable via `.batch()` (sets `batch_action: true`). The SSH
+agent marks `sync-host` and `remove-host` as batch-capable.
+
+#### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/shared/web-api-types/src/batch_actions.rs` | `BatchActionRequest`, `BatchActionResponse`, `BatchActionSuccess`, `BatchActionFailure`; `Validate` impl (max 100 IDs) |
+| `crates/ui/web-api-queries/src/queries/services.rs` | `batch_approve_services`, `batch_reject_services`, `batch_deactivate_services` |
+| `crates/ui/web-api-queries/src/queries/system_services.rs` | `batch_approve_system_services`, `batch_reject_system_services`, `batch_deactivate_system_services` |
+| `crates/ui/web-api-queries/src/queries/software_items.rs` | `batch_approve_software_items`, `batch_delete_software_items` |
+| `crates/ui/web-api-queries/src/queries/hosts.rs` | `batch_deactivate_hosts` |
+| `crates/ui/web-api-queries/src/queries/host_packages.rs` | `batch_deactivate_host_packages`, `batch_enable_host_packages`, `batch_disable_host_packages` |
+| `crates/ui/web-api-queries/src/queries/autodiscovery.rs` | `batch_delete_ignore_rules` |
+| `crates/ui/web-api-queries/src/queries/plugin_configs.rs` | `batch_delete_plugin_configs` |
+| `crates/ui/web-api/src/routes/services.rs` | `batch_services` handler |
+| `crates/ui/web-api/src/routes/system_services.rs` | `batch_system_services` handler |
+| `crates/ui/web-api/src/routes/software_items.rs` | `batch_software_items` handler |
+| `crates/ui/web-api/src/routes/hosts.rs` | `batch_hosts` handler |
+| `crates/ui/web-api/src/routes/host_packages.rs` | `batch_host_packages` handler |
+| `crates/ui/web-api/src/routes/autodiscovery.rs` | `batch_autodiscovery_ignores` handler |
+| `crates/ui/web-api/src/routes/plugin_configs.rs` | `batch_plugin_configs` handler |
+| `crates/shared/openapi-client/src/paths.rs` | `BATCH` path constants for all resources |
+| `crates/shared/extension-framework/src/lib.rs` | `ActionDef.batch_action` field |
+
 ### Error handling quick reference
 
 Every boundary (crate or module) must define its own typed error enum. Here is the minimal setup and decision guide.
