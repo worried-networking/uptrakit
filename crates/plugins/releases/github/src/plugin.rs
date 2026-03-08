@@ -582,7 +582,7 @@ impl Plugin for GitHubPlugin {
                 })?;
         }
 
-        // ── 3. Download the asset to a temp file ───────────────────────
+        // ── 3. Download asset into memory ──────────────────────────────
 
         send_output(
             output_tx,
@@ -590,13 +590,6 @@ impl Plugin for GitHubPlugin {
             OutputStreamType::Stdout,
         )
         .await;
-
-        let temp_dir = tempfile::tempdir().map_err(|e| {
-            report!(PluginError::InstallFailed(format!(
-                "failed to create temp directory: {e}"
-            )))
-        })?;
-        let temp_path = temp_dir.path().join(&asset.name);
 
         // Build a download-specific client that follows redirects (GitHub
         // asset URLs redirect to a CDN).
@@ -652,23 +645,6 @@ impl Plugin for GitHubPlugin {
             )))
         })?;
 
-        // Write to temp file.
-        let mut temp_file = tokio::fs::File::create(&temp_path).await.map_err(|e| {
-            report!(PluginError::InstallFailed(format!(
-                "failed to create temp file: {e}"
-            )))
-        })?;
-        temp_file.write_all(&body_bytes).await.map_err(|e| {
-            report!(PluginError::InstallFailed(format!(
-                "failed to write temp file: {e}"
-            )))
-        })?;
-        temp_file.flush().await.map_err(|e| {
-            report!(PluginError::InstallFailed(format!(
-                "failed to flush temp file: {e}"
-            )))
-        })?;
-
         send_output(
             output_tx,
             &format!("Downloaded {} bytes", body_bytes.len()),
@@ -678,14 +654,17 @@ impl Plugin for GitHubPlugin {
 
         // ── 4. Verify SHA-256 checksum ─────────────────────────────────
 
-        if let Some(ref expected_hex) = asset.sha256_digest {
-            let mut hasher = Sha256::new();
-            hasher.update(&body_bytes);
-            let actual_hex = format!("{:x}", hasher.finalize());
+        // Always compute SHA-256: used for checksum verification and to derive
+        // a unique remote temp-file name.
+        let mut hasher = Sha256::new();
+        hasher.update(&body_bytes);
+        let digest = hasher.finalize();
+        let digest_hex = format!("{digest:x}");
 
-            if actual_hex != *expected_hex {
+        if let Some(ref expected_hex) = asset.sha256_digest {
+            if digest_hex != *expected_hex {
                 bail!(PluginError::InstallFailed(format!(
-                    "SHA-256 checksum mismatch: expected {expected_hex}, got {actual_hex}"
+                    "SHA-256 checksum mismatch: expected {expected_hex}, got {digest_hex}"
                 )));
             }
             send_output(
@@ -703,15 +682,52 @@ impl Plugin for GitHubPlugin {
             .await;
         }
 
-        // ── 5. Install the file at the target path ─────────────────────
+        // ── 5. Upload asset to remote temp file ────────────────────────
+
+        // Use the first 8 bytes of the SHA-256 as a unique suffix so that
+        // concurrent uploads of different assets never collide.
+        let remote_temp = format!("/tmp/.uptrakit-{}", &digest_hex[..16]);
+
+        send_output(
+            output_tx,
+            &format!("Uploading to remote temp file {remote_temp} ..."),
+            OutputStreamType::Stdout,
+        )
+        .await;
+
+        // Stream the asset bytes directly into the remote `cat` process via
+        // the SSH stdio tunnel.  This works for any executor that supports
+        // `open_stdio_tunnel` — in practice all SSH-backed executors.
+        {
+            let tunnel_cmd = format!("cat > {remote_temp}");
+            let mut tunnel = self
+                .executor
+                .open_stdio_tunnel(&tunnel_cmd)
+                .await
+                .map_err(|e| {
+                    report!(PluginError::InstallFailed(format!(
+                        "failed to open upload channel: {e}"
+                    )))
+                })?;
+            tunnel.write_all(&body_bytes).await.map_err(|e| {
+                report!(PluginError::InstallFailed(format!(
+                    "failed to upload asset: {e}"
+                )))
+            })?;
+            tunnel.shutdown().await.map_err(|e| {
+                report!(PluginError::InstallFailed(format!(
+                    "failed to finalise upload: {e}"
+                )))
+            })?;
+        }
+
+        // ── 6. Install the file at the target path ─────────────────────
 
         let mode = if self.config.make_executable {
             "755"
         } else {
             "644"
         };
-
-        let temp_path_str = temp_path.to_string_lossy().to_string();
 
         send_output(
             output_tx,
@@ -725,20 +741,25 @@ impl Plugin for GitHubPlugin {
             [
                 "-m".to_string(),
                 mode.to_string(),
-                temp_path_str,
+                remote_temp.clone(),
                 install_path.to_string(),
             ],
         )
         .privileged();
 
-        self.executor
-            .execute(&install_spec, output_tx)
-            .await
-            .map_err(|e| {
-                report!(PluginError::InstallFailed(format!(
-                    "install command failed: {e}"
-                )))
-            })?;
+        let install_result = self.executor.execute(&install_spec, output_tx).await;
+
+        // Best-effort cleanup of the remote temp file regardless of install outcome.
+        let rm_spec = CommandSpec::exec("rm", ["-f".to_string(), remote_temp]);
+        if let Err(e) = self.executor.execute_quiet(&rm_spec).await {
+            tracing::warn!(error = %e, "failed to remove remote temp file (best-effort)");
+        }
+
+        install_result.map_err(|e| {
+            report!(PluginError::InstallFailed(format!(
+                "install command failed: {e}"
+            )))
+        })?;
 
         // ── 6. Run post-install command ────────────────────────────────
 
