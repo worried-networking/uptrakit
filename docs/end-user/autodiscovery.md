@@ -71,7 +71,7 @@ Discovery-capable plugins currently supported:
 | Plugin | What it discovers |
 | --- | --- |
 | APT | Debian/Ubuntu packages installed via APT |
-| Docker | Running and stopped containers on the host, grouped by image reference |
+| Docker | Running and stopped containers on the host — one software item per container |
 | Homebrew (Formulae) | Homebrew formula packages installed on the host |
 | Homebrew (Casks) | Homebrew cask packages installed on the host |
 | Mac App Store | Apps installed from the Mac App Store via `mas list` |

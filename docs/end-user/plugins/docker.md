@@ -7,21 +7,34 @@ discover running and stopped containers on the agent host and auto-populate your
 
 ## Package Identifier Format
 
-A Docker plugin's `package_identifier` is an **image reference** in standard Docker format:
+A Docker plugin's `package_identifier` is an **image reference** in standard Docker format,
+optionally followed by a **container name qualifier**:
 
 ```text
-[registry/][repository/]image[:tag]
+[registry/][repository/]image[:tag][#container_name]
 ```
 
-| Example | Registry | Repository | Tag |
-| --- | --- | --- | --- |
-| `nginx` | Docker Hub | `library/nginx` | `latest` (implied) |
-| `myuser/myapp:v2` | Docker Hub | `myuser/myapp` | `v2` |
-| `ghcr.io/owner/app:main` | `ghcr.io` | `owner/app` | `main` |
-| `myhost:5000/app:latest` | `myhost:5000` | `app` | `latest` |
+| Example | Registry | Repository | Tag | Container |
+| --- | --- | --- | --- | --- |
+| `nginx` | Docker Hub | `library/nginx` | `latest` (implied) | (all containers) |
+| `myuser/myapp:v2` | Docker Hub | `myuser/myapp` | `v2` | (all containers) |
+| `ghcr.io/owner/app:main` | `ghcr.io` | `owner/app` | `main` | (all containers) |
+| `myhost:5000/app:latest` | `myhost:5000` | `app` | `latest` | (all containers) |
+| `nginx:latest#web-server` | Docker Hub | `library/nginx` | `latest` | `web-server` only |
+| `ghcr.io/owner/app:main#my-app` | `ghcr.io` | `owner/app` | `main` | `my-app` only |
 
 The tag embedded in `package_identifier` is used as the default tag to track. It can be
 overridden with the `tracked_tag` config field.
+
+### Container name qualifier
+
+When a `#container_name` suffix is present, image-pull operations remain image-level (the
+same image is pulled regardless), but container recreation after the pull targets **only the
+named container** instead of all containers using that image. This is set automatically by
+autodiscovery for per-container tracking (see [Autodiscovery](#autodiscovery)).
+
+Container names must follow Docker's naming rules: start with a letter or digit, and contain
+only letters, digits, `_`, `.`, and `-`. Maximum 253 characters.
 
 ## How Version Tracking Works
 
@@ -132,22 +145,38 @@ reports zero discoveries and no error — it is expected that some hosts will no
 This prevents spurious connection errors on non-Docker hosts.
 
 When discovery runs, the agent queries the local Docker daemon for all containers (running and
-stopped) via `list_containers`. For each container image that is not a bare SHA digest:
+stopped) via `list_containers`. For each container that is not using a bare SHA digest image:
 
 1. The image reference is normalised (missing tag defaults to `latest`).
-2. `inspect_image` is called to retrieve the local SHA digest from `RepoDigests`.
+2. `inspect_image` is called to retrieve the local SHA digest from `RepoDigests` (deduplicated —
+   the same image is only inspected once even when multiple containers share it).
 3. Images with no registry provenance (locally built images with no `RepoDigests`) are skipped.
-4. Container names are stored as extra metadata (`{"containers": ["my-container"]}`).
+4. One software item is created **per container**, identified by
+   `image:tag#container_name` (e.g. `nginx:latest#web-server`).
 
-Name derivation:
+### Per-container tracking
 
-- **Single container** for an image → container name (leading `/` stripped)
-- **Multiple containers** for the same image → `"image:tag"` format
+Each container on a host becomes its own software item, even when multiple containers use the
+same image. This allows you to:
 
-Auto-created plugin config name: **`"Docker"`** (one config per tenant, shared across all hosts).
+- Track and update each container independently.
+- Update `web-server` to a new `nginx` image without touching `api-proxy`, and vice versa.
+- See exactly which container each software item corresponds to.
 
-Discovered items use digest tracking semantics; `package_identifier` is set to the full image
-reference including tag.
+**Software item name format:** `image:tag [container_name]` (e.g. `nginx:latest [web-server]`).
+The name is based on the image so you can immediately see what software is being tracked.
+
+### Auto-created plugin config
+
+In discover-all mode, a single **`"Docker"`** plugin config (empty config `{}`) is created once
+per tenant and shared across all discovered items on all hosts. Individual items carry their
+container qualifier in the `package_identifier`, not in the plugin config.
+
+### Discovered items use digest tracking
+
+`installed_version` is set to the SHA-256 digest of the locally installed image. The same digest
+is reported for all containers that share an image — version differences only appear when one
+container has been updated (and thus holds a different image locally) while another has not.
 
 ## Remote Docker via SSH
 
