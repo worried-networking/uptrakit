@@ -14,8 +14,8 @@ use crate::error::SchedulerError;
 use crate::executor::TaskExecutor;
 use crate::{claim, cron_utils};
 
-/// Default poll interval for the scheduler loop.
-const DEFAULT_POLL_INTERVAL_SECS: u64 = 15;
+/// Default poll interval for the scheduler loop (15 seconds).
+const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(15);
 
 /// Maximum wall-clock time allowed for a single scheduled task execution.
 ///
@@ -39,7 +39,7 @@ pub struct SchedulerConfig {
 impl SchedulerConfig {
     pub fn new(controller_id: Uuid) -> Self {
         Self {
-            poll_interval: Duration::from_secs(DEFAULT_POLL_INTERVAL_SECS),
+            poll_interval: DEFAULT_POLL_INTERVAL,
             controller_id,
             task_execution_timeout: TASK_EXECUTION_TIMEOUT,
         }
