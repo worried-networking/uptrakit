@@ -71,7 +71,7 @@ Each assignment carries an `execution_site` column (`auto` | `agent` | `controll
 
 | Plugin type | Crate | fetch_releases site | Autodiscovery | Notes |
 | --- | --- | --- | --- | --- |
-| `releases_github` | `uptrakit-plugin-releases-github` | Controller (GitHub API) | No | Tracks GitHub release tags; `ControllerSideFetchReleases` capability |
+| `releases_github` | `uptrakit-plugin-releases-github` | Controller (GitHub API) | No | Tracks GitHub release tags; `ControllerSideFetchReleases` capability; agent-side `execute_update` downloads release assets to a configured `install_path` with SHA-256 verification and optional pre/post install commands |
 | `releases_docker` | `uptrakit-plugin-releases-docker` | Controller (Registry API) | Yes | Tracks OCI image tags; discovers containers; `ControllerSideFetchReleases` capability; `daemon` feature (default) gates bollard for local Docker ops; Docker-over-SSH via StdioTunnel proxy (no second SSH connection); controller builds exclude it |
 | `package_manager_homebrew` | `uptrakit-plugin-package-manager-homebrew` | Agent (`brew info`) | Yes | macOS/Linux formulae and casks; detects host compatibility |
 | `discovery_proxmox_helper_scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers (discovery-only; emits `DiscoveryTarget` for downstream plugins; classifies GitHub, npm, and APT-managed containers) |

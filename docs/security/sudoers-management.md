@@ -64,6 +64,9 @@ During bootstrap or `sync`:
      with mode `0755`, and its path is used directly as the sudoers command.
    - **Without `helper_script`**: `command -v <name>` is run on the remote host to resolve
      the absolute path. Commands not found are skipped with a warning (non-fatal).
+   - **With `args_suffix`**: the resolved absolute path is appended with the suffix
+     (e.g. `systemctl` → `/usr/bin/systemctl stop *`). This restricts which subcommands
+     the managed account can run without needing a helper script.
 3. Resolved entries become `<username> ALL=(root) NOPASSWD: <absolute-path>` lines, with `SETENV:` inserted
    only when `SudoCommandEntry::needs_setenv` is `true` for that entry.
 4. The file is written with permissions `440` and validated with `visudo -cf`.
@@ -144,6 +147,8 @@ fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
             install_path: "/usr/local/bin/my-helper",
             content: include_str!("my_helper.sh"),
         }),
+        args_suffix: None,
+        needs_setenv: false,
     }]
 }
 ```
@@ -153,6 +158,30 @@ The helper script **must**:
 - Validate every argument that influences a file path or command before use.
 - Exit non-zero with a clear error message on invalid input.
 - Be self-contained (no external dependencies beyond POSIX shell and `cat`/`printf`).
+
+### Restricting subcommands with `args_suffix`
+
+When a command only needs certain subcommands (e.g. `systemctl stop` and `systemctl start`
+but not `systemctl mask` or `systemctl disable`), use `args_suffix` instead of a helper script:
+
+```rust
+SudoCommandEntry {
+    command: "systemctl".to_string(),
+    explanation: "Stop services before asset installation".to_string(),
+    helper_script: None,
+    args_suffix: Some("stop *"),
+    needs_setenv: false,
+}
+```
+
+This resolves to a sudoers entry like:
+
+```text
+uptrakit ALL=(root) NOPASSWD: /usr/bin/systemctl stop *
+```
+
+The `*` wildcard allows any service name but the subcommand is fixed. This is safe because
+sudoers argument matching is positional — `stop *` does not match `disable myservice`.
 
 ## The `--allow-all` fallback
 

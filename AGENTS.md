@@ -525,13 +525,21 @@ for user review. Key invariants:
 
 7. **Plugins declare required sudo commands via `required_sudo_commands()`.** Any plugin that needs root-level
    command execution must override `required_sudo_commands() -> Vec<SudoCommandEntry>` on its `Plugin` impl.
-   Each `SudoCommandEntry` carries a bare command name (or display identifier for helper scripts) and a human-readable
-   explanation. For most commands, **never hardcode absolute paths** — they are resolved on the target host via
-   `command -v` at bootstrap time. When a simple sudoers command would be too broad (e.g. granting `cat` would allow
-   reading any file), use `SudoCommandEntry::helper_script: Some(SudoHelperScript { install_path, content })` instead.
+   Each `SudoCommandEntry` carries a bare command name (or display identifier for helper scripts), a human-readable
+   explanation, and an optional `args_suffix`. For most commands, **never hardcode absolute paths** — they are
+   resolved on the target host via `command -v` at bootstrap time.
+
+   **Restricting subcommands:** When a command needs only specific subcommands (e.g. `systemctl stop` and
+   `systemctl start` but not `systemctl disable`), set `args_suffix: Some("stop *")`. The resolved path
+   becomes `/usr/bin/systemctl stop *` in the sudoers file — positional matching prevents other subcommands.
+
+   **Helper scripts:** When a simple sudoers command would be too broad (e.g. granting `cat` would allow
+   reading any file), use `SudoCommandEntry::helper_script: Some(SudoHelperScript { install_path, content })`.
    Bootstrap installs the script at `install_path` with mode `0755` and uses that path as the sudoers command; the
    script itself validates arguments to enforce the least-privilege contract that sudoers wildcards cannot safely
-   express (`*` matches `/` in sudoers). **Never hardcode `sudo` in `CommandSpec`** — instead call `.privileged()`
+   express (`*` matches `/` in sudoers).
+
+   **Never hardcode `sudo` in `CommandSpec`** — instead call `.privileged()`
    on the spec. Shell-mode commands (`CommandSpec::shell`) must embed `sudo` in the command string directly because
    `.privileged()` has no effect on shell mode. `PluginRegistry::all_required_sudo_commands()` aggregates all
    declarations for use by the SSH agent's sudoers generation logic. See

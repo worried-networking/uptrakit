@@ -288,6 +288,9 @@ fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
     vec![SudoCommandEntry {
         command: "apt-get".into(),
         explanation: "Package installation and index refresh require root privileges".into(),
+        helper_script: None,
+        args_suffix: None,
+        needs_setenv: false,
     }]
 }
 ```
@@ -297,6 +300,9 @@ fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
 - `command` is the **bare command name** (e.g. `"apt-get"`, `"systemctl"`), not an absolute path.
   The bootstrap and `sync` commands resolve the absolute path on the target host via
   `command -v <name>`.
+- `args_suffix` optionally restricts the sudoers entry to specific subcommands (e.g.
+  `Some("stop *")` → `/usr/bin/systemctl stop *`). Use this instead of a helper script
+  when positional argument matching is sufficient.
 - `explanation` is shown as a comment in the generated sudoers file and in CLI output. Keep it
   concise and factual.
 - Return an empty `vec![]` (the default) when your plugin never needs elevated privileges.

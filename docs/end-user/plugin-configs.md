@@ -28,9 +28,10 @@ Uptrakit ships with ten built-in plugin types:
 
 ### `releases_github` configuration fields
 
-The GitHub Releases plugin is **controller-side only**. It fetches upstream release metadata via
-the GitHub REST API. The `owner` and `repo` are **not** configuration fields — they are expressed
-as the `package_identifier` of the software item (format: `"owner/repo"`). A single
+The GitHub Releases plugin fetches upstream release metadata via the GitHub REST API
+(controller-side) and can download release assets directly to managed hosts (agent-side).
+The `owner` and `repo` are **not** configuration fields — they are expressed as the
+`package_identifier` of the software item (format: `"owner/repo"`). A single
 `releases_github` config can therefore serve any number of tracked GitHub repositories.
 
 | Field | Required | Description |
@@ -39,13 +40,29 @@ as the `package_identifier` of the software item (format: `"owner/repo"`). A sin
 | `api_base_url` | No | Custom API base URL for GitHub Enterprise (must use HTTPS). Defaults to `https://api.github.com`. |
 | `include_prereleases` | No | Include pre-release tags when resolving latest (default: `false`). |
 | `tag_strip_prefix` | No | Prefix to strip from tag names when extracting version strings (default: `"v"`). |
-| `asset_patterns` | No | List of regex patterns to filter release assets. Only assets whose names match at least one pattern are included. An empty list includes all assets. |
+| `asset_patterns` | No | List of regex patterns to filter release assets. Only assets whose names match at least one pattern are included. An empty list includes all assets. Used by both `fetch_releases` (controller) and `execute_update` (agent). |
+| `install_path` | No | Absolute destination path for the downloaded asset (e.g. `/usr/local/bin/pocket-id`). Required for `execute_update`. Must not contain `..` or null bytes. Max 4096 characters. |
+| `make_executable` | No | Set the executable bit on the installed file (default: `true`). When `false`, the file is installed with mode `0644`. |
+| `pre_install_command` | No | Shell command to run before installing the asset (e.g. `sudo systemctl stop myapp`). Supports `{version}` and `{tag}` placeholders. |
+| `post_install_command` | No | Shell command to run after installing the asset (e.g. `sudo systemctl start myapp`). Supports `{version}` and `{tag}` placeholders. |
 | `verify_attestation` | No | Download the release checksums file and query the [GitHub Attestations API](https://docs.github.com/en/rest/repos/repos#list-attestations) for each release (default: `true`). Attestation status is stored in `latest_release_metadata` and shown in the UI. Set to `false` to disable entirely (not recommended for production use of public repositories). |
 | `require_attestation` | No | Abort the update on the agent if no GitHub Actions attestation is found for the release (default: `false`). When `true`, the agent independently re-verifies the attestation before install and blocks any release with `attestation_status = NotFound`. See [GitHub Actions Attestation Verification](../security/github-attestation.md) for details. |
 
 **Package identifier:** The software item's `package_identifier` for a GitHub-tracked package
 must be set to `"owner/repo"` (e.g. `"octocat/hello-world"`). This value is validated when
 a software item is saved.
+
+**Asset download workflow:** When `install_path` is set, `execute_update` performs:
+pre-install command (if set) → download asset to temp file → verify SHA-256 checksum →
+install to target path via `sudo install` → post-install command (if set). The `asset_patterns`
+field selects which asset to download — exactly one must match per host (use per-host
+`config_override` on the `execute_update` role assignment to narrow patterns for each
+OS/architecture).
+
+**Sudoers entries:** When `install_path` is configured, the plugin declares `install` as a
+required sudo command. When `pre_install_command` or `post_install_command` reference
+`systemctl`, the plugin additionally declares `systemctl stop *` and `systemctl start *` as
+restricted sudo entries (other systemctl subcommands are not permitted).
 
 ### `releases_gitlab` configuration fields
 
