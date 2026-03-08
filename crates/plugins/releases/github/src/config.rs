@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
 use uptrakit_plugin_infrastructure_core::{SecretMasking, SecretString};
@@ -9,14 +11,29 @@ use crate::error::{GitHubError, Result};
 /// Sentinel value used to indicate a masked secret in API responses.
 const SECRET_MASK: &str = "***";
 
+/// Maximum length for `install_path` to prevent abuse.
+const MAX_INSTALL_PATH_LENGTH: usize = 4096;
+
 /// Configuration for the GitHub Releases plugin.
 ///
-/// Holds only auth credentials and behaviour toggles — no `owner` or `repo`.
-/// Those identify *what* is tracked and are expressed as the `package_identifier`
-/// of the software item (format: `"owner/repo"`), not as plugin config.
+/// Holds auth credentials, behaviour toggles, and optional asset install
+/// settings — no `owner` or `repo`. Those identify *what* is tracked and are
+/// expressed as the `package_identifier` of the software item (format:
+/// `"owner/repo"`), not as plugin config.
 ///
 /// A single `GitHubConfig` instance can therefore serve any number of tracked
 /// GitHub repositories.
+///
+/// ## Asset installation
+///
+/// When `install_path` is set the plugin gains `execute_update` capability:
+/// it downloads the matching release asset and places it at the configured
+/// path. Use `asset_patterns` to narrow the selection to a single OS/arch
+/// asset, and `pre_install_command` / `post_install_command` for lifecycle
+/// hooks around the install step (e.g. stop/start a systemd service).
+///
+/// Per-host overrides via `config_override` on the `execute_update` role
+/// assignment allow different `asset_patterns` and `install_path` per host.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GitHubConfig {
     /// Optional personal access token for authentication (increases rate limits).
@@ -33,8 +50,17 @@ pub struct GitHubConfig {
     #[serde(default = "default_tag_strip_prefix")]
     pub tag_strip_prefix: String,
     /// Regex patterns to filter release assets.
+    ///
     /// Only assets whose names match at least one pattern are included.
     /// An empty list means all assets are included.
+    ///
+    /// During `fetch_releases` (controller-side): filters which assets appear
+    /// in release metadata.
+    ///
+    /// During `execute_update` (agent-side): selects which asset to download.
+    /// Exactly one asset must match after filtering; zero or multiple matches
+    /// are an error. Use per-host `config_override` to narrow patterns to the
+    /// host's specific OS/architecture.
     #[serde(default)]
     pub asset_patterns: Vec<String>,
     /// Check GitHub Actions attestations for the latest release.
@@ -51,6 +77,41 @@ pub struct GitHubConfig {
     /// `attestation_status = NotFound`. Default: `false` (warn only).
     #[serde(default)]
     pub require_attestation: bool,
+
+    // ── Asset installation fields ──────────────────────────────────────
+    /// Absolute path where the downloaded asset is installed on the target host.
+    ///
+    /// When set, the plugin supports `execute_update`: it downloads the
+    /// matching release asset, verifies its SHA-256 checksum (if available),
+    /// and places it at this path using `install(1)` via sudo.
+    ///
+    /// Example: `"/usr/local/bin/pocket-id"`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_path: Option<String>,
+    /// Whether to make the installed file executable (mode 0755).
+    ///
+    /// Default: `true` when `install_path` is set. Set to `false` for
+    /// non-executable assets (e.g. data files, configuration templates).
+    #[serde(default = "default_make_executable")]
+    pub make_executable: bool,
+    /// Shell command to run **before** the asset download and installation.
+    ///
+    /// Typical use: stop a running service before replacing its binary.
+    /// Example: `"systemctl stop pocket-id"`
+    ///
+    /// Runs via `CommandSpec::shell()` (bash with `set -euo pipefail`).
+    /// A non-zero exit code aborts the update.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_install_command: Option<String>,
+    /// Shell command to run **after** the asset has been installed.
+    ///
+    /// Typical use: restart a service after replacing its binary.
+    /// Example: `"systemctl start pocket-id"`
+    ///
+    /// Runs via `CommandSpec::shell()` (bash with `set -euo pipefail`).
+    /// A non-zero exit code marks the update as failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_install_command: Option<String>,
 }
 
 fn default_tag_strip_prefix() -> String {
@@ -58,6 +119,10 @@ fn default_tag_strip_prefix() -> String {
 }
 
 fn default_verify_attestation() -> bool {
+    true
+}
+
+fn default_make_executable() -> bool {
     true
 }
 
@@ -71,6 +136,10 @@ impl Default for GitHubConfig {
             asset_patterns: vec![],
             verify_attestation: default_verify_attestation(),
             require_attestation: false,
+            install_path: None,
+            make_executable: default_make_executable(),
+            pre_install_command: None,
+            post_install_command: None,
         }
     }
 }
@@ -119,6 +188,56 @@ impl GitHubConfig {
                 )))
             })?;
         }
+
+        // Validate install_path if set.
+        if let Some(ref path) = self.install_path {
+            if path.is_empty() {
+                bail!(GitHubError::Configuration(
+                    "install_path must not be empty".to_string()
+                ));
+            }
+            if path.len() > MAX_INSTALL_PATH_LENGTH {
+                bail!(GitHubError::Configuration(format!(
+                    "install_path exceeds maximum length of {MAX_INSTALL_PATH_LENGTH}"
+                )));
+            }
+            let p = Path::new(path);
+            if !p.is_absolute() {
+                bail!(GitHubError::Configuration(
+                    "install_path must be an absolute path".to_string()
+                ));
+            }
+            // Reject path traversal components.
+            for component in p.components() {
+                if matches!(component, std::path::Component::ParentDir) {
+                    bail!(GitHubError::Configuration(
+                        "install_path must not contain '..' components".to_string()
+                    ));
+                }
+            }
+            if path.contains('\0') {
+                bail!(GitHubError::Configuration(
+                    "install_path must not contain null bytes".to_string()
+                ));
+            }
+        }
+
+        // Validate command lengths for pre/post install commands.
+        if let Some(ref cmd) = self.pre_install_command {
+            uptrakit_shared_types::command_validation::validate_command_length(
+                cmd,
+                "pre_install_command",
+            )
+            .map_err(|e| report!(GitHubError::Configuration(e)))?;
+        }
+        if let Some(ref cmd) = self.post_install_command {
+            uptrakit_shared_types::command_validation::validate_command_length(
+                cmd,
+                "post_install_command",
+            )
+            .map_err(|e| report!(GitHubError::Configuration(e)))?;
+        }
+
         Ok(())
     }
 
@@ -160,6 +279,22 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for GitHubConfig {
             FieldDef::new("require_attestation", "Require Attestation")
                 .with_type(FieldType::Toggle)
                 .with_help_text("Abort update if no attestation is found"),
+            FieldDef::new("install_path", "Install Path").with_help_text(
+                "Absolute path for the downloaded asset (e.g. /usr/local/bin/pocket-id). \
+                     Enables execute_update capability.",
+            ),
+            FieldDef::new("make_executable", "Make Executable")
+                .with_type(FieldType::Toggle)
+                .with_default_value(serde_json::json!(true))
+                .with_help_text("Set executable permission (mode 0755) on the installed file"),
+            FieldDef::new("pre_install_command", "Pre-Install Command")
+                .with_type(FieldType::Textarea)
+                .with_help_text(
+                    "Shell command to run before download/install (e.g. systemctl stop myapp)",
+                ),
+            FieldDef::new("post_install_command", "Post-Install Command")
+                .with_type(FieldType::Textarea)
+                .with_help_text("Shell command to run after install (e.g. systemctl start myapp)"),
         ]
     }
 }
@@ -205,6 +340,13 @@ mod tests {
             !config.require_attestation,
             "require_attestation should default to false"
         );
+        assert!(config.install_path.is_none());
+        assert!(
+            config.make_executable,
+            "make_executable should default to true"
+        );
+        assert!(config.pre_install_command.is_none());
+        assert!(config.post_install_command.is_none());
     }
 
     #[test]
@@ -268,6 +410,10 @@ mod tests {
             asset_patterns: vec![r".*\.deb$".to_string()],
             verify_attestation: false,
             require_attestation: true,
+            install_path: Some("/usr/local/bin/myapp".to_string()),
+            make_executable: false,
+            pre_install_command: Some("systemctl stop myapp".to_string()),
+            post_install_command: Some("systemctl start myapp".to_string()),
         };
         let json = serde_json::to_string(&config).expect("serialize");
         let deserialized: GitHubConfig = serde_json::from_str(&json).expect("deserialize");
@@ -278,6 +424,13 @@ mod tests {
         assert_eq!(deserialized.asset_patterns, config.asset_patterns);
         assert_eq!(deserialized.verify_attestation, config.verify_attestation);
         assert_eq!(deserialized.require_attestation, config.require_attestation);
+        assert_eq!(deserialized.install_path, config.install_path);
+        assert_eq!(deserialized.make_executable, config.make_executable);
+        assert_eq!(deserialized.pre_install_command, config.pre_install_command);
+        assert_eq!(
+            deserialized.post_install_command,
+            config.post_install_command
+        );
     }
 
     #[test]
@@ -345,5 +498,97 @@ mod tests {
         let config = GitHubConfig::default();
         let json = serde_json::to_string(&config).expect("serialize");
         assert!(!json.contains("auth_token"));
+    }
+
+    // ── install_path validation tests ────────────────────────────────
+
+    #[test]
+    fn validation_passes_with_install_path() {
+        let config = GitHubConfig {
+            install_path: Some("/usr/local/bin/myapp".to_string()),
+            ..GitHubConfig::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validation_rejects_empty_install_path() {
+        let config = GitHubConfig {
+            install_path: Some(String::new()),
+            ..GitHubConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn validation_rejects_relative_install_path() {
+        let config = GitHubConfig {
+            install_path: Some("relative/path/binary".to_string()),
+            ..GitHubConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("absolute path"));
+    }
+
+    #[test]
+    fn validation_rejects_traversal_in_install_path() {
+        let config = GitHubConfig {
+            install_path: Some("/usr/local/../etc/shadow".to_string()),
+            ..GitHubConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains(".."));
+    }
+
+    #[test]
+    fn validation_rejects_too_long_install_path() {
+        let config = GitHubConfig {
+            install_path: Some(format!("/{}", "a".repeat(MAX_INSTALL_PATH_LENGTH))),
+            ..GitHubConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("exceeds maximum length"));
+    }
+
+    #[test]
+    fn validation_passes_pre_install_command() {
+        let config = GitHubConfig {
+            install_path: Some("/usr/local/bin/myapp".to_string()),
+            pre_install_command: Some("systemctl stop myapp".to_string()),
+            ..GitHubConfig::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validation_rejects_too_long_pre_install_command() {
+        let cmd = "x".repeat(uptrakit_shared_types::command_validation::MAX_COMMAND_LENGTH + 1);
+        let config = GitHubConfig {
+            pre_install_command: Some(cmd),
+            ..GitHubConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("pre_install_command"));
+    }
+
+    #[test]
+    fn validation_rejects_too_long_post_install_command() {
+        let cmd = "x".repeat(uptrakit_shared_types::command_validation::MAX_COMMAND_LENGTH + 1);
+        let config = GitHubConfig {
+            post_install_command: Some(cmd),
+            ..GitHubConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("post_install_command"));
+    }
+
+    #[test]
+    fn install_fields_omitted_when_none() {
+        let config = GitHubConfig::default();
+        let json = serde_json::to_string(&config).expect("serialize");
+        assert!(!json.contains("install_path"));
+        assert!(!json.contains("pre_install_command"));
+        assert!(!json.contains("post_install_command"));
     }
 }

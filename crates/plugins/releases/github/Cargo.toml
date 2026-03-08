@@ -21,6 +21,9 @@ regex = { workspace = true }
 async-trait = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 url = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

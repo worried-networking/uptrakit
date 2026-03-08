@@ -1,14 +1,19 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use regex::Regex;
 use rootcause::prelude::*;
+use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use tokio::io::AsyncWriteExt;
 
+use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
+use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    AttestationStatus, Plugin, PluginCapability, PluginError, PluginType, ReleaseAsset,
-    UpstreamRelease, Version,
+    AttestationStatus, OutputStreamType, Plugin, PluginCapability, PluginError, PluginType,
+    ReleaseAsset, ReleaseInfo, SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
 };
 
 use crate::api_types::{AttestationsApiResponse, GitHubApiError, GitHubAsset, GitHubRelease};
@@ -59,7 +64,10 @@ pub fn parse_owner_repo(package_identifier: &str) -> Result<(&str, &str)> {
 /// GitHub Releases plugin implementation.
 ///
 /// Fetches release metadata from the GitHub API and converts it into
-/// `UpstreamRelease` values for the controller.
+/// `UpstreamRelease` values for the controller. When `install_path` is
+/// configured, also supports `execute_update` on the agent side: downloads
+/// the matching release asset, verifies its SHA-256 checksum, and installs
+/// it at the target path.
 ///
 /// The `owner` and `repo` are parsed from the `package_identifier` argument
 /// at call time (format: `"owner/repo"`), not stored in the plugin config.
@@ -68,6 +76,7 @@ pub struct GitHubPlugin {
     client: reqwest::Client,
     config: GitHubConfig,
     asset_filters: Vec<Regex>,
+    executor: Arc<dyn CommandExecutor>,
 }
 
 impl GitHubPlugin {
@@ -78,12 +87,9 @@ impl GitHubPlugin {
     /// Create a new `GitHubPlugin` from the given configuration.
     ///
     /// Validates the configuration and pre-compiles asset filter regexes.
-    /// The `_executor` parameter is accepted for registry compatibility but unused
-    /// (this plugin is controller-side only).
-    pub async fn new(
-        config: GitHubConfig,
-        _executor: std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::CommandExecutor>,
-    ) -> Result<Self> {
+    /// The executor is used for running `install(1)` and pre/post install
+    /// commands during `execute_update`.
+    pub async fn new(config: GitHubConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
         config
             .validate()
             .map_err(|e| report!(GitHubError::Configuration(e.to_string())))?;
@@ -140,6 +146,7 @@ impl GitHubPlugin {
             client,
             config,
             asset_filters,
+            executor,
         })
     }
 
@@ -494,6 +501,327 @@ impl Plugin for GitHubPlugin {
         }
 
         Ok(upstream_releases)
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn execute_update(
+        &self,
+        _package_identifier: &str,
+        _to_version: &str,
+        release_info: Option<&ReleaseInfo>,
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> uptrakit_plugin_infrastructure_core::Result<String> {
+        let install_path = self.config.install_path.as_deref().ok_or_else(|| {
+            report!(PluginError::Configuration(
+                "execute_update requires install_path to be configured".to_string()
+            ))
+        })?;
+
+        let release = release_info.ok_or_else(|| report!(PluginError::MissingReleaseInfo))?;
+
+        // ── 1. Select the matching asset ───────────────────────────────
+
+        let matching_assets: Vec<&ReleaseAsset> = if self.asset_filters.is_empty() {
+            release.assets.iter().collect()
+        } else {
+            release
+                .assets
+                .iter()
+                .filter(|a| self.asset_filters.iter().any(|re| re.is_match(&a.name)))
+                .collect()
+        };
+
+        if matching_assets.is_empty() {
+            let available: Vec<&str> = release.assets.iter().map(|a| a.name.as_str()).collect();
+            bail!(PluginError::InstallFailed(format!(
+                "no asset matched the configured asset_patterns; available assets: [{}]",
+                available.join(", ")
+            )));
+        }
+
+        if matching_assets.len() > 1 {
+            let names: Vec<&str> = matching_assets.iter().map(|a| a.name.as_str()).collect();
+            bail!(PluginError::InstallFailed(format!(
+                "asset_patterns matched {} assets (expected exactly 1): [{}]. \
+                 Narrow the patterns or use a per-host config_override.",
+                matching_assets.len(),
+                names.join(", ")
+            )));
+        }
+
+        let asset = matching_assets[0];
+
+        send_output(
+            output_tx,
+            &format!(
+                "Selected asset: {} ({})",
+                asset.name,
+                format_size(asset.size)
+            ),
+            OutputStreamType::Stdout,
+        )
+        .await;
+
+        // ── 2. Run pre-install command ─────────────────────────────────
+
+        if let Some(ref cmd) = self.config.pre_install_command {
+            send_output(
+                output_tx,
+                &format!("Running pre-install command: {cmd}"),
+                OutputStreamType::Stdout,
+            )
+            .await;
+
+            self.executor
+                .execute(&CommandSpec::shell(cmd), output_tx)
+                .await
+                .map_err(|e| {
+                    report!(PluginError::InstallFailed(format!(
+                        "pre_install_command failed: {e}"
+                    )))
+                })?;
+        }
+
+        // ── 3. Download the asset to a temp file ───────────────────────
+
+        send_output(
+            output_tx,
+            &format!("Downloading {} ...", asset.download_url),
+            OutputStreamType::Stdout,
+        )
+        .await;
+
+        let temp_dir = tempfile::tempdir().map_err(|e| {
+            report!(PluginError::InstallFailed(format!(
+                "failed to create temp directory: {e}"
+            )))
+        })?;
+        let temp_path = temp_dir.path().join(&asset.name);
+
+        // Build a download-specific client that follows redirects (GitHub
+        // asset URLs redirect to a CDN).
+        let download_resp = {
+            let mut download_headers = reqwest::header::HeaderMap::new();
+            download_headers.insert(
+                reqwest::header::ACCEPT,
+                reqwest::header::HeaderValue::from_static("application/octet-stream"),
+            );
+            if let Some(ref token) = self.config.auth_token {
+                let value = format!("Bearer {}", token.expose_secret());
+                if let Ok(hv) = reqwest::header::HeaderValue::from_str(&value) {
+                    download_headers.insert(reqwest::header::AUTHORIZATION, hv);
+                }
+            }
+
+            let download_client = reqwest::Client::builder()
+                .user_agent(concat!(
+                    "uptrakit-plugin-releases-github/",
+                    env!("CARGO_PKG_VERSION")
+                ))
+                .default_headers(download_headers)
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .timeout(std::time::Duration::from_secs(600))
+                .build()
+                .map_err(|e| {
+                    report!(PluginError::InstallFailed(format!(
+                        "failed to build download HTTP client: {e}"
+                    )))
+                })?;
+
+            download_client
+                .get(&asset.download_url)
+                .send()
+                .await
+                .map_err(|e| {
+                    report!(PluginError::InstallFailed(format!(
+                        "asset download request failed: {e}"
+                    )))
+                })?
+        };
+
+        if !download_resp.status().is_success() {
+            bail!(PluginError::InstallFailed(format!(
+                "asset download returned HTTP {}",
+                download_resp.status()
+            )));
+        }
+
+        let body_bytes = download_resp.bytes().await.map_err(|e| {
+            report!(PluginError::InstallFailed(format!(
+                "failed to read asset body: {e}"
+            )))
+        })?;
+
+        // Write to temp file.
+        let mut temp_file = tokio::fs::File::create(&temp_path).await.map_err(|e| {
+            report!(PluginError::InstallFailed(format!(
+                "failed to create temp file: {e}"
+            )))
+        })?;
+        temp_file.write_all(&body_bytes).await.map_err(|e| {
+            report!(PluginError::InstallFailed(format!(
+                "failed to write temp file: {e}"
+            )))
+        })?;
+        temp_file.flush().await.map_err(|e| {
+            report!(PluginError::InstallFailed(format!(
+                "failed to flush temp file: {e}"
+            )))
+        })?;
+
+        send_output(
+            output_tx,
+            &format!("Downloaded {} bytes", body_bytes.len()),
+            OutputStreamType::Stdout,
+        )
+        .await;
+
+        // ── 4. Verify SHA-256 checksum ─────────────────────────────────
+
+        if let Some(ref expected_hex) = asset.sha256_digest {
+            let mut hasher = Sha256::new();
+            hasher.update(&body_bytes);
+            let actual_hex = format!("{:x}", hasher.finalize());
+
+            if actual_hex != *expected_hex {
+                bail!(PluginError::InstallFailed(format!(
+                    "SHA-256 checksum mismatch: expected {expected_hex}, got {actual_hex}"
+                )));
+            }
+            send_output(
+                output_tx,
+                &format!("SHA-256 verified: {expected_hex}"),
+                OutputStreamType::Stdout,
+            )
+            .await;
+        } else {
+            send_output(
+                output_tx,
+                "No SHA-256 checksum available; skipping verification",
+                OutputStreamType::Stdout,
+            )
+            .await;
+        }
+
+        // ── 5. Install the file at the target path ─────────────────────
+
+        let mode = if self.config.make_executable {
+            "755"
+        } else {
+            "644"
+        };
+
+        let temp_path_str = temp_path.to_string_lossy().to_string();
+
+        send_output(
+            output_tx,
+            &format!("Installing to {install_path} (mode {mode})"),
+            OutputStreamType::Stdout,
+        )
+        .await;
+
+        let install_spec = CommandSpec::exec(
+            "install",
+            [
+                "-m".to_string(),
+                mode.to_string(),
+                temp_path_str,
+                install_path.to_string(),
+            ],
+        )
+        .privileged();
+
+        self.executor
+            .execute(&install_spec, output_tx)
+            .await
+            .map_err(|e| {
+                report!(PluginError::InstallFailed(format!(
+                    "install command failed: {e}"
+                )))
+            })?;
+
+        // ── 6. Run post-install command ────────────────────────────────
+
+        if let Some(ref cmd) = self.config.post_install_command {
+            send_output(
+                output_tx,
+                &format!("Running post-install command: {cmd}"),
+                OutputStreamType::Stdout,
+            )
+            .await;
+
+            self.executor
+                .execute(&CommandSpec::shell(cmd), output_tx)
+                .await
+                .map_err(|e| {
+                    report!(PluginError::InstallFailed(format!(
+                        "post_install_command failed: {e}"
+                    )))
+                })?;
+        }
+
+        let summary = format!("Installed {} to {install_path}", asset.name);
+        send_output(output_tx, &summary, OutputStreamType::Stdout).await;
+
+        Ok(summary)
+    }
+
+    fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
+        let mut cmds = Vec::new();
+
+        if self.config.install_path.is_some() {
+            cmds.push(SudoCommandEntry {
+                command: "install".to_string(),
+                explanation: "Install downloaded GitHub release assets to the target path"
+                    .to_string(),
+                helper_script: None,
+                args_suffix: None,
+                needs_setenv: false,
+            });
+        }
+
+        // When pre/post install commands reference systemctl (the most common
+        // lifecycle pattern), declare separate sudoers entries restricted to
+        // only `stop` and `start` subcommands — never a blanket systemctl.
+        let has_systemctl = self
+            .config
+            .pre_install_command
+            .as_deref()
+            .is_some_and(|c| c.contains("systemctl"))
+            || self
+                .config
+                .post_install_command
+                .as_deref()
+                .is_some_and(|c| c.contains("systemctl"));
+
+        if has_systemctl {
+            cmds.push(SudoCommandEntry {
+                command: "systemctl".to_string(),
+                explanation: "Stop services before GitHub release asset installation".to_string(),
+                helper_script: None,
+                args_suffix: Some("stop *"),
+                needs_setenv: false,
+            });
+            cmds.push(SudoCommandEntry {
+                command: "systemctl".to_string(),
+                explanation: "Start services after GitHub release asset installation".to_string(),
+                helper_script: None,
+                args_suffix: Some("start *"),
+                needs_setenv: false,
+            });
+        }
+
+        cmds
+    }
+}
+
+/// Format an optional byte size for display.
+fn format_size(size: Option<u64>) -> String {
+    match size {
+        Some(s) if s >= 1_048_576 => format!("{:.1} MB", s as f64 / 1_048_576.0),
+        Some(s) if s >= 1024 => format!("{:.1} KB", s as f64 / 1024.0),
+        Some(s) => format!("{s} bytes"),
+        None => "unknown size".to_string(),
     }
 }
 
@@ -914,5 +1242,183 @@ mod tests {
             url,
             "https://ghe.corp.com/api/v3/repos/org/project/attestations/sha256:deadbeef"
         );
+    }
+
+    // ── execute_update tests ─────────────────────────────────────────────
+
+    fn make_release_info(assets: Vec<ReleaseAsset>) -> ReleaseInfo {
+        ReleaseInfo {
+            tag: "v1.0.0".to_string(),
+            release_url: "https://github.com/owner/repo/releases/tag/v1.0.0".to_string(),
+            assets,
+            attestation_status: None,
+            require_attestation: false,
+        }
+    }
+
+    fn make_release_asset(name: &str, url: &str) -> ReleaseAsset {
+        ReleaseAsset {
+            name: name.to_string(),
+            download_url: url.to_string(),
+            size: Some(1024),
+            content_type: None,
+            sha256_digest: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_update_fails_without_install_path() {
+        let plugin = test_plugin().await;
+        let (tx, _rx) = mpsc::channel(100);
+        let release = make_release_info(vec![make_release_asset("app", "https://example.com/app")]);
+        let result = plugin
+            .execute_update("owner/repo", "1.0.0", Some(&release), &tx)
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("install_path"));
+    }
+
+    #[tokio::test]
+    async fn execute_update_fails_without_release_info() {
+        let config = GitHubConfig {
+            install_path: Some("/usr/local/bin/app".to_string()),
+            ..GitHubConfig::default()
+        };
+        let plugin = GitHubPlugin::new(config, test_executor())
+            .await
+            .expect("valid config");
+        let (tx, _rx) = mpsc::channel(100);
+        let result = plugin
+            .execute_update("owner/repo", "1.0.0", None, &tx)
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("release info"));
+    }
+
+    #[tokio::test]
+    async fn execute_update_fails_no_matching_asset() {
+        let config = GitHubConfig {
+            install_path: Some("/usr/local/bin/app".to_string()),
+            asset_patterns: vec![r".*windows.*".to_string()],
+            ..GitHubConfig::default()
+        };
+        let plugin = GitHubPlugin::new(config, test_executor())
+            .await
+            .expect("valid config");
+        let (tx, _rx) = mpsc::channel(100);
+        let release = make_release_info(vec![
+            make_release_asset("app-linux-amd64", "https://example.com/linux"),
+            make_release_asset("app-linux-arm64", "https://example.com/arm"),
+        ]);
+        let result = plugin
+            .execute_update("owner/repo", "1.0.0", Some(&release), &tx)
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("no asset matched"), "error: {err}");
+    }
+
+    #[tokio::test]
+    async fn execute_update_fails_ambiguous_assets() {
+        let config = GitHubConfig {
+            install_path: Some("/usr/local/bin/app".to_string()),
+            asset_patterns: vec![r".*linux.*".to_string()],
+            ..GitHubConfig::default()
+        };
+        let plugin = GitHubPlugin::new(config, test_executor())
+            .await
+            .expect("valid config");
+        let (tx, _rx) = mpsc::channel(100);
+        let release = make_release_info(vec![
+            make_release_asset("app-linux-amd64", "https://example.com/amd64"),
+            make_release_asset("app-linux-arm64", "https://example.com/arm64"),
+        ]);
+        let result = plugin
+            .execute_update("owner/repo", "1.0.0", Some(&release), &tx)
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("matched 2 assets"), "error: {err}");
+    }
+
+    // ── required_sudo_commands tests ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn required_sudo_commands_empty_without_install_path() {
+        let plugin = test_plugin().await;
+        assert!(plugin.required_sudo_commands().is_empty());
+    }
+
+    #[tokio::test]
+    async fn required_sudo_commands_declares_install_with_install_path() {
+        let config = GitHubConfig {
+            install_path: Some("/usr/local/bin/app".to_string()),
+            ..GitHubConfig::default()
+        };
+        let plugin = GitHubPlugin::new(config, test_executor())
+            .await
+            .expect("valid config");
+        let cmds = plugin.required_sudo_commands();
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0].command, "install");
+    }
+
+    #[tokio::test]
+    async fn required_sudo_commands_includes_systemctl_when_used() {
+        let config = GitHubConfig {
+            install_path: Some("/usr/local/bin/app".to_string()),
+            pre_install_command: Some("sudo systemctl stop myapp".to_string()),
+            post_install_command: Some("sudo systemctl start myapp".to_string()),
+            ..GitHubConfig::default()
+        };
+        let plugin = GitHubPlugin::new(config, test_executor())
+            .await
+            .expect("valid config");
+        let cmds = plugin.required_sudo_commands();
+        assert_eq!(cmds.len(), 3);
+        assert_eq!(cmds[0].command, "install");
+        assert_eq!(cmds[1].command, "systemctl");
+        assert_eq!(cmds[1].args_suffix, Some("stop *"));
+        assert_eq!(cmds[2].command, "systemctl");
+        assert_eq!(cmds[2].args_suffix, Some("start *"));
+    }
+
+    #[tokio::test]
+    async fn required_sudo_commands_no_systemctl_when_not_referenced() {
+        let config = GitHubConfig {
+            install_path: Some("/usr/local/bin/app".to_string()),
+            pre_install_command: Some("echo stopping".to_string()),
+            ..GitHubConfig::default()
+        };
+        let plugin = GitHubPlugin::new(config, test_executor())
+            .await
+            .expect("valid config");
+        let cmds = plugin.required_sudo_commands();
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0].command, "install");
+    }
+
+    // ── format_size tests ────────────────────────────────────────────────
+
+    #[test]
+    fn format_size_bytes() {
+        assert_eq!(format_size(Some(500)), "500 bytes");
+    }
+
+    #[test]
+    fn format_size_kilobytes() {
+        assert_eq!(format_size(Some(2048)), "2.0 KB");
+    }
+
+    #[test]
+    fn format_size_megabytes() {
+        assert_eq!(format_size(Some(5_242_880)), "5.0 MB");
+    }
+
+    #[test]
+    fn format_size_none() {
+        assert_eq!(format_size(None), "unknown size");
     }
 }

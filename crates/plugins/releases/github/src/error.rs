@@ -29,6 +29,21 @@ pub enum GitHubError {
 
     #[error("invalid asset pattern: {0}")]
     InvalidPattern(String),
+
+    #[error("asset download failed: {0}")]
+    DownloadFailed(String),
+
+    #[error("SHA-256 checksum mismatch: expected {expected}, got {actual}")]
+    ChecksumMismatch { expected: String, actual: String },
+
+    #[error("no matching asset found: {0}")]
+    NoMatchingAsset(String),
+
+    #[error("multiple assets matched ({count}): {names}")]
+    AmbiguousAsset { count: usize, names: String },
+
+    #[error("file operation failed: {0}")]
+    FileOperation(String),
 }
 
 /// Result type alias for GitHub plugin operations.
@@ -37,6 +52,7 @@ pub type Result<T> = std::result::Result<T, Report<GitHubError>>;
 impl_report_conversion!(reqwest::Error => GitHubError, |e| GitHubError::Request(e.to_string()));
 impl_report_conversion!(PluginError => GitHubError, |e| GitHubError::Configuration(e.to_string()));
 impl_report_conversion!(GitHubError => PluginError, |e| PluginError::PluginInternal(e.to_string()));
+impl_report_conversion!(std::io::Error => GitHubError, |e| GitHubError::FileOperation(e.to_string()));
 
 #[cfg(test)]
 mod tests {
