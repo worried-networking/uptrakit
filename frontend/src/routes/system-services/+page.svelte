@@ -36,6 +36,7 @@
 	let submitting: boolean = $state(false);
 	let currentPage: number = $state(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
+	let totalItems: number = $state(0);
 	let statusFilter: StatusFilter = $state(parseUrlParam(page.url, 'status', STATUS_FILTER_VALUES, 'all'));
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSystemServices) ?? false);
@@ -88,6 +89,7 @@
 			services = result.items;
 			currentPage = result.page;
 			totalPages = result.total_pages;
+			totalItems = result.total;
 			if (background) error = null;
 		} catch (e) {
 			if (!background) {
@@ -329,7 +331,7 @@
 		</table>
 	</div>
 
-	<Pagination {currentPage} {totalPages} onPageChange={loadServices} />
+	<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadServices} />
 
 	{#if openMenuId}
 		{@const service = services.find((s) => s.id === openMenuId)}

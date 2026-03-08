@@ -340,7 +340,7 @@
 			</table>
 		</div>
 
-		<Pagination {currentPage} {totalPages} onPageChange={handlePageChange} />
+		<Pagination {currentPage} {totalPages} {total} onPageChange={handlePageChange} />
 	{/if}
 {/if}
 

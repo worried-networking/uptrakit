@@ -29,6 +29,7 @@
 	let error: string | null = $state(null);
 	let currentPage: number = $state(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
+	let totalItems: number = $state(0);
 	let statusFilter: StatusFilter = $state(parseUrlParam(page.url, 'status', STATUS_FILTER_VALUES, 'all'));
 	let expandedId: string | null = $state(null);
 
@@ -80,6 +81,7 @@
 			items = res.items;
 			currentPage = res.page;
 			totalPages = res.total_pages;
+			totalItems = res.total;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load update history';
 		} finally {
@@ -341,7 +343,7 @@
 			</table>
 		</div>
 
-		<Pagination {currentPage} {totalPages} onPageChange={loadHistory} />
+		<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadHistory} />
 	{/if}
 {/if}
 

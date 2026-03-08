@@ -60,6 +60,7 @@
 	let ignoresLoading: boolean = $state(true);
 	let ignoresPage: number = $state(page.url.searchParams.get('tab') === 'ignores' ? parseUrlPage(page.url) : 1);
 	let ignoresTotalPages: number = $state(1);
+	let ignoresTotalItems: number = $state(0);
 	let showIgnoreModal: boolean = $state(false);
 	let ignoreForm = $state({ plugin_config_id: '', package_identifier: '' });
 	let ignoreDeleteConfirm: { id: string; pkg: string } | null = $state(null);
@@ -175,6 +176,7 @@
 			ignores = res.items;
 			ignoresPage = res.page;
 			ignoresTotalPages = res.total_pages;
+			ignoresTotalItems = res.total;
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to load ignore rules');
 		} finally {
@@ -598,7 +600,12 @@
 						</tbody>
 					</table>
 				</div>
-				<Pagination currentPage={ignoresPage} totalPages={ignoresTotalPages} onPageChange={loadIgnores} />
+				<Pagination
+					currentPage={ignoresPage}
+					totalPages={ignoresTotalPages}
+					total={ignoresTotalItems}
+					onPageChange={loadIgnores}
+				/>
 			{/if}
 		{:else}
 			<!-- Discovery allowlist tab -->

@@ -23,6 +23,7 @@
 	let submitting: boolean = $state(false);
 	let currentPage: number = $state(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
+	let totalItems: number = $state(0);
 
 	let discoveringHostIds: Set<string> = $state(new Set());
 
@@ -63,6 +64,7 @@
 			hosts = result.items;
 			currentPage = result.page;
 			totalPages = result.total_pages;
+			totalItems = result.total;
 			if (background) error = null;
 		} catch (e) {
 			if (!background) {
@@ -256,7 +258,7 @@
 		</table>
 	</div>
 
-	<Pagination {currentPage} {totalPages} onPageChange={loadHosts} />
+	<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadHosts} />
 
 	{#if openMenuId}
 		{@const host = hosts.find((h) => h.id === openMenuId)}

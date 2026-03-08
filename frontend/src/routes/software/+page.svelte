@@ -443,7 +443,7 @@
 			</table>
 		</div>
 
-		<Pagination {currentPage} {totalPages} onPageChange={loadAll} />
+		<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadAll} />
 
 		{#if openMenuId}
 			{@const item = items.find((i) => i.id === openMenuId)}

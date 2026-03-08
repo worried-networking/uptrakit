@@ -38,6 +38,7 @@
 
 	let items: AuditLogEntry[] = $state([]);
 	let totalPages: number = $state(1);
+	let totalItems: number = $state(0);
 	let loading: boolean = $state(false);
 	let error: string | null = $state(null);
 
@@ -85,6 +86,7 @@
 			items = res.items;
 			currentPage = res.page;
 			totalPages = res.total_pages;
+			totalItems = res.total;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load audit logs';
 		} finally {
@@ -260,6 +262,6 @@
 			</table>
 		</div>
 
-		<Pagination {currentPage} {totalPages} onPageChange={load} />
+		<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={load} />
 	{/if}
 {/if}
