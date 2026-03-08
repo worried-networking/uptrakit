@@ -11,6 +11,7 @@ pub mod api_tokens;
 pub mod audit_logs;
 pub mod auth;
 pub mod autodiscovery;
+pub mod batch_actions;
 pub mod command_validation;
 pub mod device_auth;
 pub mod discovery_allowlist;
