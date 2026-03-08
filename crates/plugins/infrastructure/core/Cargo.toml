@@ -7,6 +7,10 @@ repository.workspace = true
 version.workspace = true
 publish = false
 
+[features]
+default = []
+agent-infra = ["dep:sea-orm", "dep:sea-orm-migration", "dep:uuid"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -21,6 +25,9 @@ uptrakit-command = { workspace = true }
 uptrakit-extension-framework = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
+sea-orm = { workspace = true, optional = true }
+sea-orm-migration = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

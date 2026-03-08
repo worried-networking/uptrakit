@@ -1,3 +1,5 @@
+#[cfg(feature = "agent-infra")]
+pub mod agent_infra;
 pub mod batch_detect;
 pub mod batch_fetch;
 pub mod batch_update;
