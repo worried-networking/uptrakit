@@ -6,6 +6,7 @@ use uptrakit_web_api_types::autodiscovery::{
     AutodiscoveryIgnoreResponse, CreateAutodiscoveryIgnoreRequest, DiscardDiscoveredResponse,
     TriggerDiscoveryResponse,
 };
+use uptrakit_web_api_types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::software_items::SoftwareItemResponse;
 use uuid::Uuid;
@@ -94,6 +95,17 @@ impl UptrakitClient {
     /// Delete an autodiscovery ignore rule by ID.
     pub async fn delete_autodiscovery_ignore(&self, id: &Uuid) -> Result<()> {
         self.delete(&crate::paths::autodiscovery::ignore_by_id(id))
+            .await
+    }
+
+    /// Perform a batch action on multiple autodiscovery ignore rules.
+    ///
+    /// Supported actions: `delete`.
+    pub async fn batch_autodiscovery_ignores(
+        &self,
+        req: &BatchActionRequest,
+    ) -> Result<BatchActionResponse> {
+        self.post_json(crate::paths::autodiscovery::BATCH, req)
             .await
     }
 }

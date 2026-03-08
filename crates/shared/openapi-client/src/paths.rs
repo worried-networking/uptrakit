@@ -52,6 +52,8 @@ pub(crate) mod autodiscovery {
     use uuid::Uuid;
     /// `GET /api/v1/autodiscovery/ignores` · `POST …`
     pub(crate) const IGNORES: &str = "/api/v1/autodiscovery/ignores";
+    /// `POST /api/v1/autodiscovery/ignores/batch`
+    pub(crate) const BATCH: &str = "/api/v1/autodiscovery/ignores/batch";
     /// `DELETE /api/v1/autodiscovery/ignores/{id}`
     pub(crate) fn ignore_by_id(id: &Uuid) -> String {
         format!("/api/v1/autodiscovery/ignores/{id}")
@@ -80,6 +82,8 @@ pub(crate) mod hosts {
     use uuid::Uuid;
     /// `GET /api/v1/hosts`
     pub(crate) const BASE: &str = "/api/v1/hosts";
+    /// `POST /api/v1/hosts/batch`
+    pub(crate) const BATCH: &str = "/api/v1/hosts/batch";
     /// `GET /api/v1/hosts/{id}` · `PUT /api/v1/hosts/{id}` · `DELETE /api/v1/hosts/{id}`
     pub(crate) fn by_id(id: &Uuid) -> String {
         format!("/api/v1/hosts/{id}")
@@ -139,6 +143,8 @@ pub(crate) mod plugin_configs {
     pub(crate) const PLUGIN_TYPES: &str = "/api/v1/plugin-types";
     /// `GET /api/v1/plugin-configs` · `POST /api/v1/plugin-configs`
     pub(crate) const BASE: &str = "/api/v1/plugin-configs";
+    /// `POST /api/v1/plugin-configs/batch`
+    pub(crate) const BATCH: &str = "/api/v1/plugin-configs/batch";
     /// `GET /api/v1/plugin-configs/{id}` · `PUT …` · `DELETE …`
     pub(crate) fn by_id(id: &Uuid) -> String {
         format!("/api/v1/plugin-configs/{id}")
@@ -203,6 +209,8 @@ pub(crate) mod services {
     use uuid::Uuid;
     /// `GET /api/v1/services` · `POST /api/v1/services`
     pub(crate) const BASE: &str = "/api/v1/services";
+    /// `POST /api/v1/services/batch`
+    pub(crate) const BATCH: &str = "/api/v1/services/batch";
     /// `GET /api/v1/services/{id}` · `PUT …` · `DELETE …`
     pub(crate) fn by_id(id: &Uuid) -> String {
         format!("/api/v1/services/{id}")
@@ -229,6 +237,8 @@ pub(crate) mod system_services {
     use uuid::Uuid;
     /// `GET /api/v1/system-services`
     pub(crate) const BASE: &str = "/api/v1/system-services";
+    /// `POST /api/v1/system-services/batch`
+    pub(crate) const BATCH: &str = "/api/v1/system-services/batch";
     /// `GET /api/v1/system-services/{id}` · `PUT …` · `DELETE …`
     pub(crate) fn by_id(id: &Uuid) -> String {
         format!("/api/v1/system-services/{id}")
@@ -301,6 +311,8 @@ pub(crate) mod software_items {
     use uuid::Uuid;
     /// `GET /api/v1/software-items` · `POST …`
     pub(crate) const BASE: &str = "/api/v1/software-items";
+    /// `POST /api/v1/software-items/batch`
+    pub(crate) const BATCH: &str = "/api/v1/software-items/batch";
     /// `GET /api/v1/software-items/{id}` · `PUT …` · `DELETE …`
     pub(crate) fn by_id(id: &Uuid) -> String {
         format!("/api/v1/software-items/{id}")
@@ -363,6 +375,10 @@ pub(crate) mod host_packages {
     /// `GET /api/v1/hosts/{host_id}/packages`
     pub(crate) fn base(host_id: &Uuid) -> String {
         format!("/api/v1/hosts/{host_id}/packages")
+    }
+    /// `POST /api/v1/hosts/{host_id}/packages/batch`
+    pub(crate) fn batch(host_id: &Uuid) -> String {
+        format!("/api/v1/hosts/{host_id}/packages/batch")
     }
     /// `GET /api/v1/hosts/{host_id}/packages/{id}` · `PUT …` · `DELETE …`
     pub(crate) fn by_id(host_id: &Uuid, id: &Uuid) -> String {

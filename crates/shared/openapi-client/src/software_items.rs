@@ -1,5 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
+use uptrakit_web_api_types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, ListSoftwareItemsParams,
@@ -140,6 +141,17 @@ impl UptrakitClient {
             req,
         )
         .await
+    }
+
+    /// Perform a batch action on multiple software items.
+    ///
+    /// Supported actions: `approve`, `delete`.
+    pub async fn batch_software_items(
+        &self,
+        req: &BatchActionRequest,
+    ) -> Result<BatchActionResponse> {
+        self.post_json(crate::paths::software_items::BATCH, req)
+            .await
     }
 }
 

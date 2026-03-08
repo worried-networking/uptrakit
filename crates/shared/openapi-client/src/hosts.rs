@@ -1,5 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
+use uptrakit_web_api_types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_web_api_types::hosts::{HostResponse, UpdateHostRequest};
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uuid::Uuid;
@@ -42,6 +43,13 @@ impl UptrakitClient {
     /// Deactivate (remove) a host.
     pub async fn deactivate_host(&self, id: &Uuid) -> Result<()> {
         self.delete(&crate::paths::hosts::by_id(id)).await
+    }
+
+    /// Perform a batch action on multiple hosts.
+    ///
+    /// Supported actions: `deactivate`.
+    pub async fn batch_hosts(&self, req: &BatchActionRequest) -> Result<BatchActionResponse> {
+        self.post_json(crate::paths::hosts::BATCH, req).await
     }
 }
 

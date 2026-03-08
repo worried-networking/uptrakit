@@ -1,5 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
+use uptrakit_web_api_types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::plugin_configs::{
     CreatePluginConfigRequest, PluginConfigResponse, PluginTypeInfo, UpdatePluginConfigRequest,
@@ -67,6 +68,17 @@ impl UptrakitClient {
     /// Delete a plugin configuration.
     pub async fn delete_plugin_config(&self, id: &Uuid) -> Result<()> {
         self.delete(&crate::paths::plugin_configs::by_id(id)).await
+    }
+
+    /// Perform a batch action on multiple plugin configurations.
+    ///
+    /// Supported actions: `delete`.
+    pub async fn batch_plugin_configs(
+        &self,
+        req: &BatchActionRequest,
+    ) -> Result<BatchActionResponse> {
+        self.post_json(crate::paths::plugin_configs::BATCH, req)
+            .await
     }
 }
 

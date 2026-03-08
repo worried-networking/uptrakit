@@ -1,5 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
+use uptrakit_web_api_types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::system_services::{
     ListSystemServicesQuery, SystemServiceResponse, UpdateSystemServiceRequest,
@@ -62,6 +63,17 @@ impl UptrakitClient {
     /// Deactivate (remove) a system service.
     pub async fn remove_system_service(&self, id: &Uuid) -> Result<()> {
         self.delete(&crate::paths::system_services::by_id(id)).await
+    }
+
+    /// Perform a batch action on multiple system services.
+    ///
+    /// Supported actions: `approve`, `reject`, `deactivate`.
+    pub async fn batch_system_services(
+        &self,
+        req: &BatchActionRequest,
+    ) -> Result<BatchActionResponse> {
+        self.post_json(crate::paths::system_services::BATCH, req)
+            .await
     }
 }
 

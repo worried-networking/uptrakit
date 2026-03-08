@@ -1,5 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
+use uptrakit_web_api_types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_web_api_types::host_packages::{
     CreateHostPackageIgnoreRequest, HostPackageDetailResponse, HostPackageIgnoreResponse,
     HostPackageResponse, ListHostPackagesParams, PromoteHostPackageRequest,
@@ -110,6 +111,18 @@ impl UptrakitClient {
             req,
         )
         .await
+    }
+
+    /// Perform a batch action on multiple host packages.
+    ///
+    /// Supported actions: `delete`, `enable`, `disable`.
+    pub async fn batch_host_packages(
+        &self,
+        host_id: &Uuid,
+        req: &BatchActionRequest,
+    ) -> Result<BatchActionResponse> {
+        self.post_json(&crate::paths::host_packages::batch(host_id), req)
+            .await
     }
 }
 
