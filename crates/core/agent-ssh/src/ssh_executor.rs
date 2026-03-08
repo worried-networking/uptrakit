@@ -171,7 +171,7 @@ fn log_failed_command_output(exit_code: i32, stderr: &str, stdout: &str) {
 ///
 /// Returns [`CommandError::UnsupportedShell`] if the shell variant is
 /// not recognized by this version of the agent.
-fn build_remote_command_string(spec: &CommandSpec) -> uptrakit_command::Result<String> {
+pub(crate) fn build_remote_command_string(spec: &CommandSpec) -> uptrakit_command::Result<String> {
     let (program, args) = spec.resolve()?;
 
     // Prepend env-var assignments before the command so they are visible to the

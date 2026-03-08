@@ -17,8 +17,7 @@ use crate::commands::sudoers::{
 use crate::db::entity::ssh_host::SshKeyType;
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams};
-use crate::remote_exec::{PveGuestExecutor, SshRemoteExecutor};
-use crate::ssh_executor::SshCommandExecutor;
+use crate::remote_exec::{PveGuestCommandExecutor, PveGuestExecutor, SshRemoteExecutor};
 use crate::ssh_key;
 use crate::ssh_transport::{self, AuthMethod, SshConnectionConfig, SshSession};
 
@@ -299,9 +298,18 @@ pub async fn run_proxmox_bootstrap(
     }
 
     // Configure sudoers.
-    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
-        as Arc<dyn uptrakit_command::CommandExecutor>;
-    let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
+    // Use a PveGuestCommandExecutor so compatibility probes (e.g. `which apt`,
+    // `which brew`) run against the *guest* rather than the PVE host.  The PVE
+    // host will not have `/usr/bin/update`, so using the SSH session directly
+    // would cause the PHS plugin to report Incompatible and skip helper-script
+    // installation on the guest.
+    let guest_cmd_executor = Arc::new(PveGuestCommandExecutor(PveGuestExecutor::new(
+        Arc::clone(&session),
+        params.vmid,
+        params.guest_type,
+    ))) as Arc<dyn uptrakit_command::CommandExecutor>;
+    let plugin_sudo_cmds =
+        PluginRegistry::compatible_sudo_commands_for_host(guest_cmd_executor).await;
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
     for (_plugin_type, entries) in &plugin_sudo_cmds {
