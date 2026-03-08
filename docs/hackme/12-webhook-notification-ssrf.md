@@ -68,14 +68,15 @@
 - ~~No URL validation beyond scheme.~~ **Fixed.** `validate_config()` now validates
   the URL host against `is_private_host()` (unless `--allow-private-notification-urls`
   is set). Encoded IP addresses (e.g. `http://0x7f000001`) are not yet covered.
-- ~~No redirect validation.~~ **Fixed.** The webhook HTTP client now uses
-  `redirect(Policy::none())`. Redirect responses (3xx) are explicitly rejected with
-  a descriptive error message including the `Location` target.
+- ~~No redirect validation.~~ **Fixed.** The webhook HTTP client uses
+  `redirect(Policy::none())` to disable redirect following, and `SsrfSafeResolver`
+  provides defence-in-depth by blocking private-IP resolution at connection time.
 - ~~Arbitrary custom headers.~~ **Fixed.** A header name blocklist rejects
   `Authorization`, `Cookie`, `Host`, `Proxy-Authorization`, `X-Forwarded-For`,
   `X-Forwarded-Host`, and `X-Real-Ip` in custom headers.
-- **DNS rebinding.** A URL like `http://evil.com` could resolve to an internal IP at
-  request time, bypassing any hostname-based validation.
+- ~~DNS rebinding.~~ **Fixed.** The webhook HTTP client uses `SsrfSafeResolver`,
+  which filters resolved IP addresses through `is_private_ip()` at connection time.
+  When `--allow-private-notification-urls` is set, the resolver uses permissive mode.
 - **Notification payload leakage.** The webhook body contains operational data
   (software names, versions, hosts) sent to any configured URL without encryption.
 
@@ -86,8 +87,8 @@
 - ~~Add a header name blocklist~~ — **Done.** Always enforced regardless of URL flag.
 - ~~Disable HTTP redirect following in the webhook client~~ — **Done.** The webhook
   client uses `redirect(Policy::none())` and explicitly rejects 3xx responses.
-- Implement DNS resolution validation at connection time to prevent DNS rebinding
-  attacks.
+- ~~Implement DNS resolution validation at connection time~~ — **Done.** The webhook
+  channel uses `SsrfSafeResolver` (`uptrakit_shared_types::ssrf`).
 - Add a "test delivery" dry-run that shows the resolved IP address and response
   status before committing a webhook configuration, giving admins visibility into
   where requests will go.
@@ -97,9 +98,11 @@
 ## References
 
 - [Notification Subsystem Security](../security/notifications-security.md)
+- [Secure Development — SSRF Protection](../security/secure-development.md#ssrf-protection)
 - [ATK-07: SSRF via Plugin Configuration](07-ssrf-plugin-configuration.md)
-- `crates/shared/types/src/network.rs` — shared `is_private_host()` (IPv4/IPv6/hostname)
+- `crates/shared/types/src/network.rs` — shared `is_private_host()` / `is_private_ip()`
+- `crates/shared/types/src/ssrf.rs` — `SsrfSafeResolver` (DNS rebinding protection)
 - `crates/shared/notification-channels/src/webhook.rs` — `WebhookChannel`,
-  `validate_config()`, header blocklist
+  `validate_config()`, header blocklist, SSRF-safe DNS resolver
 - `crates/ui/web-api/src/routes/notifications.rs` — notification channel handlers
 - `crates/ui/web-api/src/notifications/dispatcher.rs` — notification dispatcher

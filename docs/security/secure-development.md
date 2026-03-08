@@ -165,6 +165,66 @@ When disabled via `--allow-dangerous-commands`, detected patterns are still logg
 `security_audit:` warnings. See
 [ATK-16](../hackme/16-rce-plugin-config-manipulation.md) for the threat model.
 
+## SSRF Protection
+
+All `reqwest::Client` instances that send requests to user-controlled URLs must use the
+`SsrfSafeResolver` custom DNS resolver to prevent DNS rebinding attacks.
+
+### The problem
+
+`is_private_host()` validates hostnames at config-save time, but a DNS rebinding
+attack can cause a hostname to resolve to a private IP at HTTP-request time.
+For example, `evil.com` resolves to `1.2.3.4` during validation, then to
+`169.254.169.254` when the actual request is made.
+
+### The solution
+
+`SsrfSafeResolver` (in `uptrakit_shared_types::ssrf`, feature `http-ssrf`) implements
+`reqwest::dns::Resolve` and filters every resolved IP address through `is_private_ip()`.
+If all resolved addresses are private, the request fails. If there is a mix of public
+and private addresses, only public addresses are returned.
+
+### Usage
+
+```rust
+use std::sync::Arc;
+use uptrakit_shared_types::ssrf::SsrfSafeResolver;
+
+// Standard mode: blocks private IPs
+let client = reqwest::Client::builder()
+    .dns_resolver(Arc::new(SsrfSafeResolver::new()))
+    .connect_timeout(std::time::Duration::from_secs(10))
+    .timeout(std::time::Duration::from_secs(60))
+    .build()?;
+
+// Permissive mode: allows all (for --allow-private-notification-urls)
+let client = reqwest::Client::builder()
+    .dns_resolver(Arc::new(SsrfSafeResolver::permissive()))
+    .build()?;
+```
+
+### Where it is applied
+
+All plugin HTTP clients and the webhook notification channel use `SsrfSafeResolver`:
+
+- Release plugins: GitHub, GitLab, Forgejo, Docker registry
+- Package manager plugins: npm
+- Discovery plugins: Proxmox Helper Scripts
+- Notification channels: Webhook (permissive when `--allow-private-notification-urls`)
+
+The Docker plugin additionally validates the registry hostname in `validate_identifier()`
+via `is_private_host()`, providing defence-in-depth at config-save time.
+
+### When to add it
+
+Any new `reqwest::Client` that sends requests to URLs derived from user configuration
+must use `SsrfSafeResolver::new()`. Add `uptrakit-shared-types = { workspace = true,
+features = ["http-ssrf"] }` to the crate's `Cargo.toml`.
+
+Internal-only clients (e.g. the openapi-client connecting to a known controller URL, or
+the CA certificate fetch in service-sdk) do not need SSRF protection because their
+target URLs are not user-controlled.
+
 ## NATS Plugin Config Protection
 
 Plugin configs published to NATS JetStream are encrypted with AES-256-GCM

@@ -94,7 +94,7 @@ uptrakit/
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── extension-framework/        # uptrakit-extension-framework            (lib)  — UI extension framework types: ExtensionManifest, ActionDef, FieldDef, FormDef, RowVisibleWhen, RowCondition, wire payloads; ActionDef supports `confirm_entity_field` for destructive action confirmation dialogs; standalone crate so plugins don't depend on uptrakit-internal-wire
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared macros (impl_report_conversion!)
-│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (PluginRole, PluginType, TrackingSystem, etc.); network::is_private_host() for SSRF validation; feature-gated: sea-orm, openapi
+│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (PluginRole, PluginType, TrackingSystem, etc.); network::is_private_host()/is_private_ip() for SSRF validation; ssrf::SsrfSafeResolver (feature `http-ssrf`) for DNS rebinding protection; feature-gated: sea-orm, openapi, http-ssrf
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API + SSE streaming coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing; sse.rs provides lightweight SSE parser; update_output_stream.rs provides typed stream_update_output() method; device_auth_stream.rs provides SSE-first device auth; events_stream.rs provides typed admin event SSE client
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
@@ -368,6 +368,12 @@ These are non-negotiable design constraints. Do not violate them.
    `reqwest::StatusCode` variants (`StatusCode::NOT_FOUND`, `StatusCode::FORBIDDEN`) and helper methods
    (`.is_client_error()`, `.is_success()`). Store status codes as `StatusCode`, not `u16`, in error enums and structs.
    See [Coding Standards](docs/development/coding-standards.md).
+1. **Use `SsrfSafeResolver` for all outbound HTTP clients.** Any `reqwest::Client` that sends requests to
+   user-controlled URLs (plugin API base URLs, webhook URLs, registry endpoints) must use
+   `.dns_resolver(Arc::new(SsrfSafeResolver::new()))` to prevent DNS rebinding attacks. For self-hosted deployments
+   that intentionally allow private URLs, use `SsrfSafeResolver::permissive()` instead. The resolver is in
+   `uptrakit_shared_types::ssrf` behind the `http-ssrf` feature. See
+   [Secure Development — SSRF Protection](docs/security/secure-development.md#ssrf-protection).
 1. **Use typed permission extractors for route authorization.** Never call `user.has_permission(...)` directly in
    handler bodies. Instead, declare the required permission via an Axum extractor in the handler signature (e.g.
    `CanViewHosts(_user): CanViewHosts`). The extractors are defined in

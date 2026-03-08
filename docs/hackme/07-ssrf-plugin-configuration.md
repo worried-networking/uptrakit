@@ -57,9 +57,9 @@ requests to cloud metadata endpoints.
 
 ## Residual risk
 
-- **DNS rebinding.** `is_private_host()` checks the hostname string at validation
-  time, not at connection time. A hostname like `evil.com` could resolve to `127.0.0.1`
-  when the HTTP request is actually made, bypassing the static hostname check.
+- ~~DNS rebinding.~~ **Fixed.** All plugin HTTP clients now use `SsrfSafeResolver`,
+  a custom `reqwest::dns::Resolve` implementation that filters resolved addresses
+  through `is_private_ip()` at connection time, preventing DNS rebinding attacks.
 - ~~IPv6 private ranges not fully blocked.~~ **Fixed.** `is_private_host()` now blocks
   IPv6 ULA (`fc00::/7`) and link-local (`fe80::/10`) addresses.
 - ~~CGNAT range not blocked.~~ **Fixed.** `is_private_host()` now blocks the
@@ -67,21 +67,24 @@ requests to cloud metadata endpoints.
 - ~~Docker registry has no private-host check.~~ **Fixed.** `validate_identifier()`
   now strips the port from the registry hostname and validates it against
   `is_private_host()`, rejecting private registries like `localhost`, `10.0.0.1`,
-  `192.168.1.1:5000`, and `169.254.169.254`.
+  `192.168.1.1:5000`, and `169.254.169.254`. `SsrfSafeResolver` provides
+  defence-in-depth at request time.
 - **Error message information leakage.** Connection errors from SSRF attempts may
   include internal IP addresses, port numbers, or service banners in error messages
   returned to the API caller or logged in version check results.
 - ~~Redirect following.~~ **Fixed.** All plugin HTTP clients now use
-  `redirect(Policy::none())`, disabling automatic redirect following. API endpoints
-  should not redirect; any 3xx response is treated as an error.
+  `redirect(Policy::none())`, disabling automatic redirect following.
+  `SsrfSafeResolver` provides additional defence-in-depth by blocking private-IP
+  resolution on redirect targets.
 
 ## Recommended improvements
 
-- Implement DNS resolution validation at connection time (not just at config
-  validation time) by using a custom `reqwest` DNS resolver that rejects private IP
-  addresses. This prevents DNS rebinding attacks.
-- ~~Add `is_private_host()` validation to the Docker plugin's registry hostname.~~
-  **Done.** `validate_identifier()` now checks the registry hostname.
+- ~~Implement DNS resolution validation at connection time~~ — **Done.** All plugin
+  HTTP clients use `SsrfSafeResolver` (`uptrakit_shared_types::ssrf`) which rejects
+  private IPs at the DNS resolver level.
+- ~~Add `is_private_host()` validation to the Docker plugin's registry hostname~~ —
+  **Done.** `validate_identifier()` in `image_ref.rs` now checks the registry
+  hostname.
 - ~~Block IPv6 ULA, link-local, and CGNAT ranges~~ — **Done.** Consolidated shared
   `is_private_host()` in `uptrakit_shared_types::network` covers all ranges.
 - ~~Disable HTTP redirect following in plugin HTTP clients~~ — **Done.** All plugin
@@ -94,9 +97,12 @@ requests to cloud metadata endpoints.
 ## References
 
 - [Secure Development — Plugin Input Validation](../security/secure-development.md#plugin-input-validation)
+- [Secure Development — SSRF Protection](../security/secure-development.md#ssrf-protection)
 - [Plugin Guidelines](../development/plugin-guidelines.md)
-- `crates/shared/types/src/network.rs` — shared `is_private_host()` (IPv4/IPv6/hostname)
+- `crates/shared/types/src/network.rs` — shared `is_private_host()` / `is_private_ip()`
+- `crates/shared/types/src/ssrf.rs` — `SsrfSafeResolver` (DNS rebinding protection)
 - `crates/plugins/releases/github/src/config.rs` — `GitHubConfig::validate()`
 - `crates/plugins/releases/gitlab/src/config.rs` — `GitLabConfig::validate()`
 - `crates/plugins/releases/forgejo/src/config.rs` — `ForgejoConfig::validate()`
-- `crates/plugins/releases/docker/src/registry.rs` — `get_manifest_digest()`
+- `crates/plugins/releases/docker/src/image_ref.rs` — `validate_identifier()` (private host check)
+- `crates/plugins/releases/docker/src/registry.rs` — `RegistryClient` (SSRF-safe DNS)
