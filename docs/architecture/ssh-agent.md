@@ -114,7 +114,7 @@ relevant capabilities are:
 
 Integration points:
 
-- `Capability` enum (`crates/shared/wire/src/lib.rs`) -- `SshRemote` variant
+- `Capability` enum (`crates/shared/wire/src/capabilities.rs`) -- `SshRemote` variant
 - `ServiceProfile::from_capabilities()` -- derives `Agent` profile; `SshRemote` presence distinguishes SSH agents for labeling
 - `SettingKey::EnrollmentTokenHash` -- single shared enrollment token (`service_enrollment.token_hash`)
 - Controller dispatch (`crates/ui/web-api/src/routes/service_ws/`) -- routes based on capabilities
@@ -528,7 +528,7 @@ is empty, `poll_updates()` parks indefinitely so the reload-ticker arm is not st
 ### Graceful Shutdown
 
 On shutdown, the SSH agent drains all in-flight updates using the aggregate channel with a shared
-deadline. All updates share the same `shutdown_timeout_seconds` deadline (not per-update):
+deadline. All updates share the same `shutdown_timeout` deadline (a `Duration`, not per-update):
 
 1. The handler loops over `aggregate_rx.recv()` until `in_flight_updates` is empty or the deadline
    is exceeded.

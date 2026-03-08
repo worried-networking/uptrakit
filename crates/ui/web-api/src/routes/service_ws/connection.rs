@@ -350,7 +350,8 @@ pub(super) async fn handle_authenticated(
         renewal_window_hours,
         ca_bundle_hash,
         capabilities: controller_capabilities(),
-        shutdown_timeout_seconds: shutdown_timeout,
+        shutdown_timeout: shutdown_timeout
+            .map(|secs| std::time::Duration::from_secs(u64::from(secs))),
         ping_interval,
         tenant_id: service_tenant_id,
     });

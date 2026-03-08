@@ -171,7 +171,7 @@ impl ServiceHandler for MqttHandler {
         &mut self,
         conn: &mut ControllerConnection,
         cause: ShutdownCause,
-        _shutdown_timeout_seconds: u32,
+        _shutdown_timeout: std::time::Duration,
     ) -> LoopOutcome {
         let (reason, outcome) = default_resolve_shutdown(cause);
 

@@ -5,9 +5,14 @@
 //! handling, and close-reason dispatch. Service-specific behaviour is
 //! injected through the [`ServiceHandler`](crate::lifecycle::ServiceHandler)
 //! trait callbacks.
+//!
+//! The service event arm (`poll_service_event`) uses a budget of
+//! [`MAX_CONSECUTIVE_SERVICE_EVENTS`] to prevent starvation of the ping,
+//! renewal, and controller-message arms during event bursts.
 
 use std::path::Path;
 use std::pin::Pin;
+use std::time::Duration;
 
 use std::collections::BTreeSet;
 
@@ -36,6 +41,17 @@ pub struct EventLoopContext<'a> {
     /// Raw CA PEM bytes, if a pinned CA is in use.
     pub ca_pem: Option<&'a [u8]>,
 }
+
+/// Maximum number of consecutive service events to process before yielding
+/// to other `select!` arms (ping, renewal, controller messages, signals).
+///
+/// Without this limit, a burst of service events (e.g. rapid MQTT client
+/// status changes) can starve the ping timer, causing the controller to
+/// consider the service dead and trigger unnecessary failover.
+const MAX_CONSECUTIVE_SERVICE_EVENTS: u32 = 16;
+
+/// Default shutdown timeout when `ServiceSettings` does not provide one.
+const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Run the unified event loop for an authenticated service connection.
 ///
@@ -66,8 +82,6 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
     ctx: &EventLoopContext<'_>,
     signals: &mut SignalWatcher,
 ) -> LoopResult<LoopOutcome> {
-    const DEFAULT_SHUTDOWN_TIMEOUT: u32 = 120;
-
     let cert_not_after_ts = identity.cert_not_after_ms();
     // Clone config_dir to avoid borrow conflicts with `&mut identity`.
     let config_dir = identity.config_dir().to_path_buf();
@@ -87,14 +101,24 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
     let mut renewal_sleep = create_renewal_sleep();
     let mut cert_handler = CertificateRenewalHandler::new();
 
-    let mut shutdown_timeout_seconds: u32 = DEFAULT_SHUTDOWN_TIMEOUT;
+    let mut shutdown_timeout: Duration = DEFAULT_SHUTDOWN_TIMEOUT;
+
+    // Tracks consecutive service events to prevent starvation of ping/renewal
+    // arms when a service produces rapid bursts of events (e.g. MQTT bridge).
+    let mut consecutive_service_events: u32 = 0;
 
     let outcome = loop {
+        // When the service event budget is exhausted, skip the service event
+        // arm for one iteration so that ping, renewal, and controller message
+        // arms get a chance to fire. The budget resets when any other arm runs.
+        let poll_service = consecutive_service_events < MAX_CONSECUTIVE_SERVICE_EVENTS;
+
         tokio::select! {
             biased;
 
-            // 1. Service-specific events (highest priority).
-            event = handler.poll_service_event() => {
+            // 1. Service-specific events (highest priority, budget-limited).
+            event = handler.poll_service_event(), if poll_service => {
+                consecutive_service_events += 1;
                 match handler.on_service_event(event, &mut conn).await? {
                     Some(outcome) => break outcome,
                     None => continue,
@@ -108,6 +132,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
             // The trailing `;` discards the `Instant` return so both branches
             // of the `if let` return `()`, which tokio's select! requires.
             _ = async { if let Some(t) = ping_timer.as_mut() { t.tick().await; } }, if ping_timer.is_some() => {
+                consecutive_service_events = 0;
                 let service_ts = now_millis();
                 tracing::trace!(service_ts, "sending ping");
                 if let Err(e) = conn.send(ServiceMessage::Ping(PingPayload::new(service_ts))).await {
@@ -118,6 +143,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
 
             // 3. Certificate renewal timer.
             _ = &mut renewal_sleep => {
+                consecutive_service_events = 0;
                 if let Some(o) = cert_handler.handle_renewal_timer(
                     identity, &mut conn, &mut renewal_sleep,
                 ).await {
@@ -127,6 +153,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
 
             // 4. Controller messages.
             msg = conn.recv() => {
+                consecutive_service_events = 0;
                 // Check for transient network errors before converting to
                 // LoopError. A broken pipe, connection reset, or similar
                 // transport failure during recv() is a disconnection — not
@@ -168,7 +195,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                         tracing::debug!(capabilities = ?agreed, "negotiated protocol capabilities");
 
                         let mut loop_state = LoopState {
-                            shutdown_timeout_seconds: &mut shutdown_timeout_seconds,
+                            shutdown_timeout: &mut shutdown_timeout,
                             renewal_sleep: &mut renewal_sleep,
                             ping_timer: &mut ping_timer,
                             cert_not_after_ts,
@@ -216,7 +243,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                             .on_shutdown(
                                 &mut conn,
                                 ShutdownCause::ServerRestarting,
-                                shutdown_timeout_seconds,
+                                shutdown_timeout,
                             )
                             .await;
                     }
@@ -251,7 +278,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                     .on_shutdown(
                         &mut conn,
                         ShutdownCause::Signal(signal),
-                        shutdown_timeout_seconds,
+                        shutdown_timeout,
                     )
                     .await;
             }
@@ -281,7 +308,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
 /// Mutable state shared across the event loop that `handle_service_settings`
 /// needs to update.
 struct LoopState<'a> {
-    shutdown_timeout_seconds: &'a mut u32,
+    shutdown_timeout: &'a mut Duration,
     renewal_sleep: &'a mut Pin<Box<tokio::time::Sleep>>,
     ping_timer: &'a mut Option<tokio::time::Interval>,
     cert_not_after_ts: Option<i64>,
@@ -298,11 +325,13 @@ async fn handle_service_settings(
 ) {
     tracing::trace!(
         renewal_window_hours = settings.renewal_window_hours,
-        shutdown_timeout = ?settings.shutdown_timeout_seconds,
+        shutdown_timeout = ?settings.shutdown_timeout,
         "received service settings"
     );
 
-    *state.shutdown_timeout_seconds = settings.shutdown_timeout_seconds.unwrap_or(120);
+    *state.shutdown_timeout = settings
+        .shutdown_timeout
+        .unwrap_or(DEFAULT_SHUTDOWN_TIMEOUT);
     update_renewal_schedule(
         state.renewal_sleep,
         state.cert_not_after_ts,

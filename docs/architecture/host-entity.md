@@ -47,7 +47,8 @@ Other crates (`web-api-types`, `db`) keep their own parallel enums; conversion h
 - `RenewCertificate(RenewCertificatePayload)` variant in `ServiceMessage` — service requests certificate renewal with a
   fresh CSR (early or on-demand)
 - `ServiceSettings(ServiceSettingsPayload)` variant in `ControllerMessage` — pushed after authentication with
-  `renewal_window_hours`, `ca_bundle_hash`, and `shutdown_timeout_seconds` (`Option<u32>`)
+  `renewal_window_hours`, `ca_bundle_hash`, and `shutdown_timeout` (`Option<Duration>`, serialized as
+  `shutdown_timeout_seconds` on the wire for backward compatibility)
 - `CaBundleUpdated(CaBundleUpdatedPayload)` variant in `ControllerMessage` — pushed after CA rotation with the new
   bundle PEM
 - `RequestCertRenewal(RequestCertRenewalPayload)` variant in `ControllerMessage` — pushed after CA rotation or PKI
@@ -98,7 +99,7 @@ Rules:
 - Services reconnect for each major phase (enrollment, certificate request, authenticated operation), so each new
   WebSocket connection gets fresh counters
 
-Key types (defined in `crates/shared/wire/src/lib.rs`):
+Key types (defined in `crates/shared/wire/src/envelope.rs`, re-exported via `crates/shared/wire/src/lib.rs`):
 
 - `ServiceEnvelope { protocol_version: u32, seq: u64, message: ServiceMessage }` — outgoing from service
 - `ControllerEnvelope { protocol_version: u32, seq: u64, message: ControllerMessage }` — outgoing from controller
@@ -141,7 +142,7 @@ controlled by signal handlers and a configurable timeout.
 1. Signal received → set `shutting_down` flag
 1. If update in progress:
    - Continue streaming output to controller
-   - Wait for update completion (with `shutdown_timeout_seconds` timeout)
+   - Wait for update completion (with `shutdown_timeout` timeout)
    - Send `UpdateResult` on completion or timeout
 1. Send `Disconnecting { reason: shutdown|restart }` to controller
 1. Close WebSocket gracefully
@@ -149,7 +150,7 @@ controlled by signal handlers and a configurable timeout.
 
 **Configuration:**
 
-- `shutdown_timeout_seconds` in `ServiceSettingsPayload` (default: 120 seconds, `Option<u32>`)
+- `shutdown_timeout` in `ServiceSettingsPayload` (default: 120 seconds, `Option<Duration>`, serialized as `shutdown_timeout_seconds` on the wire)
 - Controller pushes this value after authentication
 - Agent waits up to this duration for in-flight updates to complete
 

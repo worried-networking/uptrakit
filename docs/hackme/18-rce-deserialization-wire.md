@@ -134,8 +134,8 @@ and data integrity.
 
 - [Wire Protocol](../api/wire-protocol.md)
 - [Wire Protocol — Connection Limits](../api/wire-protocol.md#connection-limits)
-- `crates/shared/wire/src/lib.rs` — `ServiceMessage`, `ControllerMessage`,
-  `EnvelopeHeader`
+- `crates/shared/wire/src/messages.rs` — `ServiceMessage`, `ControllerMessage`
+- `crates/shared/wire/src/envelope.rs` — `EnvelopeHeader`
 - `crates/shared/wire/src/limits.rs` — `WireValidate` trait, limit constants,
   `WireValidationError`
 - `crates/shared/wire/src/wire_validate_impls.rs` — per-struct validation

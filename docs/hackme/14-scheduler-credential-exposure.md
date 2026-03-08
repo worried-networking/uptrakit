@@ -120,6 +120,6 @@ Alternatively, the attacker targets the credential delivery path:
 - [External Scheduler Deployment](../end-user/deployment/external-scheduler.md)
 - [NATS Integration](../development/nats-integration.md)
 - [ATK-03: Master Key Compromise](03-master-key-compromise.md)
-- `crates/shared/wire/src/lib.rs` — `ServiceCredentialsPayload`,
-  `is_nats_publishable()`
+- `crates/shared/wire/src/payloads.rs` — `ServiceCredentialsPayload`
+- `crates/shared/wire/src/messages.rs` — `is_nats_publishable()`
 - `crates/ui/web-api/src/routes/service_ws/` — credential delivery logic

@@ -215,7 +215,7 @@ and is not sent to the agent.
 | `pre_update_hooks` | `Vec<HookCommand>` | Pre-update hook commands |
 | `post_update_hooks` | `Vec<HookCommand>` | Post-update hook commands |
 | `release_info` | `ReleaseInfo?` | Release metadata from the upstream source. Only present for GitHub Releases items. See [`ReleaseInfo` fields](#releaseinfo-fields). |
-| `timeout_seconds` | `u32` | Maximum execution time for the entire update (including hooks). Defaults to 7200 (2 hours) when omitted. |
+| `timeout_seconds` | `Duration` | Maximum execution time for the entire update (including hooks). Rust field is `timeout`, serialized as seconds on the wire (`timeout_seconds`). Defaults to 7200 (2 hours) when omitted. |
 
 #### `ReleaseInfo` fields
 
@@ -575,7 +575,7 @@ authenticated connection is established. It carries runtime configuration for th
 | `renewal_window_hours` | `u16` | required | Hours before certificate expiry to initiate renewal |
 | `ca_bundle_hash` | `String` | `#[serde(default)]` | Hash of the current CA bundle for staleness detection |
 | `capabilities` | `BTreeSet<Capability>` | `#[serde(default, skip_serializing_if = "BTreeSet::is_empty")]` | Set of capabilities advertised by the controller; used for capability negotiation |
-| `shutdown_timeout_seconds` | `Option<u32>` | `#[serde(default, skip_serializing_if)]` | Max seconds to wait during shutdown; present for agents, absent for MQTT |
+| `shutdown_timeout_seconds` | `Option<Duration>` | `#[serde(default, skip_serializing_if, with = "option_duration_seconds", rename = "shutdown_timeout_seconds")]` | Max time to wait during shutdown; Rust field is `shutdown_timeout`, serialized as seconds on the wire. Present for agents, absent for MQTT |
 | `tenant_id` | `Option<Uuid>` | `#[serde(default, skip_serializing_if = "Option::is_none")]` | Tenant UUID that this service belongs to; present for tenant-scoped services (agents, SSH agents), absent for system services (MQTT, scheduler) |
 | `ping_interval` | `Duration` | `#[serde(with = "duration_seconds")]` | Controller-managed ping interval; derived from per-service DB override or service-profile default (300s agent/SSH agent, 15s MQTT) |
 

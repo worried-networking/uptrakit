@@ -236,13 +236,13 @@ impl ServiceHandler for AgentHandler {
         &mut self,
         conn: &mut ControllerConnection,
         cause: ShutdownCause,
-        shutdown_timeout_seconds: u32,
+        shutdown_timeout: std::time::Duration,
     ) -> LoopOutcome {
         let (disconnect_reason, outcome) = default_resolve_shutdown(cause);
         client::handle_graceful_shutdown(
             conn,
             self.in_flight_update.take(),
-            shutdown_timeout_seconds,
+            shutdown_timeout,
             disconnect_reason,
             outcome,
         )
