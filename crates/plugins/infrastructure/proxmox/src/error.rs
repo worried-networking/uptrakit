@@ -35,6 +35,7 @@ impl_report_conversion!(reqwest::Error => ProxmoxError, |e| ProxmoxError::Reques
 impl_report_conversion!(PluginError => ProxmoxError, |e| ProxmoxError::Configuration(e.to_string()));
 impl_report_conversion!(ProxmoxError => PluginError, |e| PluginError::PluginInternal(e.to_string()));
 impl_report_conversion!(uptrakit_command::CommandError => ProxmoxError, |e| ProxmoxError::Plugin(e.to_string()));
+impl_report_conversion!(sea_orm::DbErr => ProxmoxError, |e| ProxmoxError::Database(e.to_string()));
 
 #[cfg(test)]
 mod tests {
