@@ -528,16 +528,17 @@ pub struct DeleteHostAssignmentParams {
 
 /// Unassign a software item from a host.
 ///
-/// The optional `ignore=true` query parameter also creates an autodiscovery
-/// ignore rule based on the host assignment's plugin config and package
-/// identifier, so this combination is not re-discovered in future runs.
+/// The optional `ignore=true` query parameter also creates a tenant-wide
+/// autodiscovery ignore rule by the software item's display name, preventing
+/// all future re-discovery of items with that name regardless of which plugin
+/// config or target produced them.
 #[utoipa::path(
     delete,
     path = "/api/v1/software-items/{id}/hosts/{host_id}",
     params(
         ("id" = Uuid, Path, description = "Software item UUID"),
         ("host_id" = Uuid, Path, description = "Host UUID"),
-        ("ignore" = Option<bool>, Query, description = "If true, permanently suppress this package/plugin combination from future autodiscovery runs")
+        ("ignore" = Option<bool>, Query, description = "If true, permanently suppress items with this name from future autodiscovery runs")
     ),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
@@ -554,42 +555,20 @@ pub async fn unassign_host(
     Path((item_id, host_id)): Path<(Uuid, Uuid)>,
     Query(params): Query<DeleteHostAssignmentParams>,
 ) -> Response {
-    // If ignore=true, load the detect_version role plugin assignment before
-    // deleting so we can capture plugin_config_id + package_identifier for the
-    // autodiscovery ignore rule.
-    let ignore_info: Option<(uuid::Uuid, String)> = if params.ignore.unwrap_or(false) {
-        // Load the detect_version role plugin assignment for ignore rule creation.
-        match HostSoftwareItemPlugin::find()
-            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
-            .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
-            .filter(host_software_item_plugin::Column::Role.eq("detect_version"))
+    // If ignore=true, load the software item name before deleting so we can
+    // create a name-based ignore rule.
+    let ignore_name: Option<String> = if params.ignore.unwrap_or(false) {
+        match SoftwareItem::find_by_id(item_id)
+            .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
             .one(tenant_db.db())
             .await
         {
-            Ok(Some(plugin)) => Some((plugin.plugin_config_id, plugin.package_identifier)),
+            Ok(Some(item)) => Some(item.name),
             Ok(None) => {
-                // No detect_version plugin -- try any role to get plugin info
-                match HostSoftwareItemPlugin::find()
-                    .filter(host_software_item_plugin::Column::HostId.eq(host_id))
-                    .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
-                    .one(tenant_db.db())
-                    .await
-                {
-                    Ok(Some(plugin)) => Some((plugin.plugin_config_id, plugin.package_identifier)),
-                    Ok(None) => {
-                        return error_response(StatusCode::NOT_FOUND, "Host assignment not found");
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to look up host assignment for ignore: {e}");
-                        return error_response(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Internal server error",
-                        );
-                    }
-                }
+                return error_response(StatusCode::NOT_FOUND, "Software item not found");
             }
             Err(e) => {
-                tracing::error!("Failed to look up host assignment for ignore: {e}");
+                tracing::error!("Failed to look up software item for ignore: {e}");
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         }
@@ -599,12 +578,11 @@ pub async fn unassign_host(
 
     match item_queries::unassign_host(&tenant_db, item_id, host_id).await {
         Ok(true) => {
-            if let Some((plugin_config_id, package_identifier)) = ignore_info
+            if let Some(name) = ignore_name
                 && let Err(e) = autodiscovery_queries::create_or_ignore_ignore_rule(
                     tenant_db.db(),
                     tenant_db.tenant_id,
-                    plugin_config_id,
-                    &package_identifier,
+                    &name,
                 )
                 .await
             {

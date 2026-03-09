@@ -27,15 +27,12 @@ pub use uptrakit_web_api_types::batch_actions::{
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 
 /// List autodiscovery ignore rules.
-///
-/// Optionally filter by `plugin_config_id`.
 #[utoipa::path(
     get,
     path = "/api/v1/autodiscovery/ignores",
     params(
         ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
         ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)"),
-        ("plugin_config_id" = Option<Uuid>, Query, description = "Filter by plugin config UUID")
     ),
     extensions(("x-required-permission" = json!("view_software"))),
     responses(
@@ -55,13 +52,8 @@ pub async fn list_autodiscovery_ignores(
         per_page: params.per_page,
     };
 
-    match autodiscovery_queries::list_ignore_rules(
-        tenant_db.db(),
-        tenant_db.tenant_id,
-        params.plugin_config_id,
-        &pagination,
-    )
-    .await
+    match autodiscovery_queries::list_ignore_rules(tenant_db.db(), tenant_db.tenant_id, &pagination)
+        .await
     {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
@@ -83,7 +75,6 @@ pub async fn list_autodiscovery_ignores(
         (status = 201, description = "Ignore rule created", body = AutodiscoveryIgnoreResponse),
         (status = 200, description = "Ignore rule already exists", body = AutodiscoveryIgnoreResponse),
         (status = 400, description = "Invalid input"),
-        (status = 404, description = "Plugin config not found")
     ),
     tag = "Autodiscovery",
     security(("bearer_token" = []))
@@ -95,35 +86,19 @@ pub async fn create_autodiscovery_ignore(
     Json(req): Json<CreateAutodiscoveryIgnoreRequest>,
 ) -> Response {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    use uptrakit_shared_db::entity::{plugin_config, prelude::*};
+    use uptrakit_shared_db::entity::{autodiscovery_ignore, prelude::*};
 
     if let Err(e) = req.validate() {
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    // Verify plugin config belongs to this tenant.
-    let cfg = match PluginConfig::find_by_id(req.plugin_config_id)
-        .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))
-        .filter(plugin_config::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
-        .await
-    {
-        Ok(Some(c)) => c,
-        Ok(None) => {
-            return error_response(StatusCode::NOT_FOUND, "Plugin config not found");
-        }
-        Err(e) => {
-            tracing::error!("DB error: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
+    let name = req.name.trim().to_string();
 
     // Create the rule (idempotent). Returns true if newly inserted, false if already existed.
     let was_created = match autodiscovery_queries::create_or_ignore_ignore_rule(
         tenant_db.db(),
         tenant_db.tenant_id,
-        req.plugin_config_id,
-        &req.package_identifier,
+        &name,
     )
     .await
     {
@@ -135,25 +110,19 @@ pub async fn create_autodiscovery_ignore(
     };
 
     // Fetch the current rule to get the correct ID and created_at.
-    use uptrakit_shared_db::entity::autodiscovery_ignore;
     let rule = match AutodiscoveryIgnore::find()
         .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_db.tenant_id))
-        .filter(autodiscovery_ignore::Column::PluginConfigId.eq(req.plugin_config_id))
-        .filter(autodiscovery_ignore::Column::PackageIdentifier.eq(req.package_identifier.clone()))
+        .filter(autodiscovery_ignore::Column::Name.eq(&name))
         .one(tenant_db.db())
         .await
     {
         Ok(Some(r)) => r,
         Ok(None) | Err(_) => {
-            // Row not found after insert — return 201 Created with a stub response.
             return (
                 StatusCode::CREATED,
                 Json(AutodiscoveryIgnoreResponse {
                     id: uuid::Uuid::nil(),
-                    plugin_config_id: cfg.id,
-                    plugin_config_name: cfg.name,
-                    plugin_type: cfg.plugin_type,
-                    package_identifier: req.package_identifier,
+                    name,
                     created_at: time::OffsetDateTime::now_utc(),
                 }),
             )
@@ -161,7 +130,6 @@ pub async fn create_autodiscovery_ignore(
         }
     };
 
-    // 201 Created for new rules; 200 OK for pre-existing (idempotent get-or-create semantics).
     let status = if was_created {
         StatusCode::CREATED
     } else {
@@ -172,10 +140,7 @@ pub async fn create_autodiscovery_ignore(
         status,
         Json(AutodiscoveryIgnoreResponse {
             id: rule.id,
-            plugin_config_id: cfg.id,
-            plugin_config_name: cfg.name,
-            plugin_type: cfg.plugin_type,
-            package_identifier: rule.package_identifier,
+            name: rule.name,
             created_at: rule.created_at,
         }),
     )
@@ -286,5 +251,4 @@ pub async fn batch_autodiscovery_ignores(
 pub struct ListIgnoresParams {
     pub page: Option<u64>,
     pub per_page: Option<u64>,
-    pub plugin_config_id: Option<uuid::Uuid>,
 }

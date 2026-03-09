@@ -45,7 +45,7 @@ impl_report_conversion!(sea_orm::DbErr => AutodiscoveryError::Db);
 
 // ── Ignore rules ─────────────────────────────────────────────────────────────
 
-/// Insert an autodiscovery ignore rule, silently ignoring duplicates (idempotent).
+/// Insert an autodiscovery ignore rule by software item name (idempotent).
 ///
 /// Returns `true` if a new rule was inserted, `false` if the rule already
 /// existed (including the case where a concurrent request inserted the same
@@ -54,14 +54,12 @@ impl_report_conversion!(sea_orm::DbErr => AutodiscoveryError::Db);
 pub async fn create_or_ignore_ignore_rule(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
-    plugin_config_id: Uuid,
-    package_identifier: &str,
+    name: &str,
 ) -> Result<bool> {
     let record = autodiscovery_ignore::ActiveModel {
         id: Set(Uuid::now_v7()),
         tenant_id: Set(tenant_id),
-        plugin_config_id: Set(plugin_config_id),
-        package_identifier: Set(package_identifier.to_string()),
+        name: Set(name.to_string()),
         created_at: Set(OffsetDateTime::now_utc()),
     };
 
@@ -72,12 +70,11 @@ pub async fn create_or_ignore_ignore_rule(
     }
 }
 
-/// List autodiscovery ignore rules for a tenant, with optional plugin-config filter.
+/// List autodiscovery ignore rules for a tenant.
 #[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn list_ignore_rules(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
-    plugin_config_id_filter: Option<Uuid>,
     params: &PaginationParams,
 ) -> Result<PaginatedResponse<AutodiscoveryIgnoreResponse>> {
     use sea_orm::PaginatorTrait;
@@ -85,49 +82,20 @@ pub async fn list_ignore_rules(
     let page = params.page.unwrap_or(1).max(1);
     let per_page = params.per_page.unwrap_or(20).clamp(1, 1000);
 
-    let mut query =
-        AutodiscoveryIgnore::find().filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id));
-
-    if let Some(pc_id) = plugin_config_id_filter {
-        query = query.filter(autodiscovery_ignore::Column::PluginConfigId.eq(pc_id));
-    }
-
-    let paginator = query
+    let paginator = AutodiscoveryIgnore::find()
+        .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
         .order_by_desc(autodiscovery_ignore::Column::CreatedAt)
         .paginate(db, per_page);
 
     let total = paginator.num_items().await.context_to()?;
     let items_raw = paginator.fetch_page(page - 1).await.context_to()?;
 
-    // Collect all plugin_config IDs we need to join.
-    let pc_ids: Vec<Uuid> = items_raw
-        .iter()
-        .map(|r| r.plugin_config_id)
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-
-    let configs = PluginConfig::find()
-        .filter(plugin_config::Column::Id.is_in(pc_ids))
-        .all(db)
-        .await
-        .context_to()?;
-
-    let config_map: std::collections::HashMap<Uuid, plugin_config::Model> =
-        configs.into_iter().map(|c| (c.id, c)).collect();
-
     let items = items_raw
         .into_iter()
-        .filter_map(|r| {
-            let cfg = config_map.get(&r.plugin_config_id)?;
-            Some(AutodiscoveryIgnoreResponse {
-                id: r.id,
-                plugin_config_id: r.plugin_config_id,
-                plugin_config_name: cfg.name.clone(),
-                plugin_type: cfg.plugin_type.clone(),
-                package_identifier: r.package_identifier,
-                created_at: r.created_at,
-            })
+        .map(|r| AutodiscoveryIgnoreResponse {
+            id: r.id,
+            name: r.name,
+            created_at: r.created_at,
         })
         .collect::<Vec<_>>();
 
@@ -431,7 +399,6 @@ pub async fn find_or_create_default_plugin_config(
 ///    find-or-create and role-assignment creation.
 /// 2. **Config-ID-based**: Items with empty `targets` use the pre-existing
 ///    `plugin_config_id` from the result for all three standard roles.
-#[tracing::instrument(skip_all)]
 #[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
 pub async fn process_discovery_results(
     db: &sea_orm::DatabaseConnection,
@@ -441,6 +408,9 @@ pub async fn process_discovery_results(
     payload: DiscoveryResultsPayload,
 ) -> Result<()> {
     let now = OffsetDateTime::now_utc();
+
+    // Load the tenant-wide ignore set once for the entire discovery run.
+    let ignore_set = load_ignore_set(db, tenant_id).await?;
 
     for result in payload.results {
         if let Some(ref err) = result.error {
@@ -462,7 +432,7 @@ pub async fn process_discovery_results(
             continue;
         }
 
-        process_plugin_result(db, tenant_id, host_id, now, &result).await?;
+        process_plugin_result(db, tenant_id, host_id, now, &result, &ignore_set).await?;
     }
 
     Ok(())
@@ -480,6 +450,7 @@ async fn process_plugin_result(
     host_id: Uuid,
     now: OffsetDateTime,
     result: &DiscoveryPluginResult,
+    ignore_set: &HashSet<String>,
 ) -> Result<()> {
     // Tenant-scoped DB handle used for host-package operations below.
     let tenant_db = crate::tenant_db::TenantDb::new(db.clone(), tenant_id);
@@ -490,6 +461,16 @@ async fn process_plugin_result(
     let mut discovered_identifiers: HashSet<String> = HashSet::new();
 
     for item in &result.discoveries {
+        // Check the tenant-wide name-based ignore list before any processing.
+        if ignore_set.contains(&item.name) {
+            tracing::debug!(
+                name = %item.name,
+                package_identifier = %item.package_identifier,
+                "skipping ignored autodiscovery item (name-based ignore)"
+            );
+            continue;
+        }
+
         match item.tracking_system {
             TrackingSystem::HostManaged => {
                 // Route to host_packages table.
@@ -582,17 +563,8 @@ async fn process_plugin_result(
                     )
                     .await?;
                 } else if let Some(existing_pc_id) = result.plugin_config_id {
-                    let ignore_set = load_ignore_set(db, tenant_id, existing_pc_id).await?;
-                    process_one_discovery(
-                        db,
-                        tenant_id,
-                        host_id,
-                        existing_pc_id,
-                        item_info,
-                        &ignore_set,
-                        now,
-                    )
-                    .await?;
+                    process_one_discovery(db, tenant_id, host_id, existing_pc_id, item_info, now)
+                        .await?;
                 } else {
                     tracing::warn!(
                         plugin_type = %result.plugin_type,
@@ -707,18 +679,6 @@ async fn process_targets_discovery(
         )
         .await?;
 
-        let ignore_set = load_ignore_set(db, tenant_id, pc_id).await?;
-
-        // Check ignore list.
-        if ignore_set.contains(pkg_id) {
-            tracing::debug!(
-                %pc_id,
-                package_identifier = %pkg_id,
-                "skipping ignored autodiscovery item"
-            );
-            continue;
-        }
-
         // Build target-specific item info (may override package_identifier).
         let target_item = DiscoveredItemInfo {
             package_identifier: pkg_id,
@@ -762,22 +722,20 @@ async fn process_targets_discovery(
     Ok(())
 }
 
-/// Pre-load the ignore set for a specific `(tenant_id, plugin_config_id)` pair.
+/// Pre-load the tenant-wide autodiscovery ignore set.
 ///
-/// Returns a `HashSet` of `package_identifier` strings that should be skipped.
-/// Scoped per config to keep the set bounded.
+/// Returns a `HashSet` of software item display names that should be skipped.
+/// Bounded by the number of names explicitly ignored by the user (typically small).
 async fn load_ignore_set(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
-    plugin_config_id: Uuid,
 ) -> Result<HashSet<String>> {
     let rules = AutodiscoveryIgnore::find()
         .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
-        .filter(autodiscovery_ignore::Column::PluginConfigId.eq(plugin_config_id))
         .all(db)
         .await
         .context_to()?;
-    Ok(rules.into_iter().map(|r| r.package_identifier).collect())
+    Ok(rules.into_iter().map(|r| r.name).collect())
 }
 
 /// Find-or-create a software item + host link.
@@ -1007,19 +965,8 @@ async fn process_one_discovery(
     host_id: Uuid,
     plugin_config_id: Uuid,
     args: DiscoveredItemInfo<'_>,
-    ignore_set: &HashSet<String>,
     now: OffsetDateTime,
 ) -> Result<()> {
-    // Check ignore list (O(1) lookup into pre-loaded set).
-    if ignore_set.contains(args.package_identifier) {
-        tracing::debug!(
-            %plugin_config_id,
-            package_identifier = %args.package_identifier,
-            "skipping ignored autodiscovery item"
-        );
-        return Ok(());
-    }
-
     let Some((software_item_id, hsi_id)) =
         find_or_create_software_item(db, tenant_id, host_id, plugin_config_id, &args, now).await?
     else {
@@ -1436,9 +1383,8 @@ mod tests {
             qualifier: None,
             plugin_package_identifier: None,
         };
-        let ignore_set = HashSet::new();
 
-        process_one_discovery(&db, tenant_id, host_id, pc_id, args, &ignore_set, now)
+        process_one_discovery(&db, tenant_id, host_id, pc_id, args, now)
             .await
             .expect("process_one_discovery");
 
@@ -1502,9 +1448,8 @@ mod tests {
             qualifier: None,
             plugin_package_identifier: None,
         };
-        let ignore_set = HashSet::new();
 
-        process_one_discovery(&db, tenant_id, host_id, pc_id, args, &ignore_set, now)
+        process_one_discovery(&db, tenant_id, host_id, pc_id, args, now)
             .await
             .expect("process_one_discovery");
 
@@ -1547,7 +1492,7 @@ mod tests {
         let result =
             phs_result_with_github_target("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
 
-        process_plugin_result(&db, tenant_id, host_id, now, &result)
+        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
             .await
             .expect("process_plugin_result");
 
@@ -1598,7 +1543,7 @@ mod tests {
 
         let result = phs_result_with_apt_target("grafana", "Grafana", "10.2.3");
 
-        process_plugin_result(&db, tenant_id, host_id, now, &result)
+        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
             .await
             .expect("process_plugin_result");
 
@@ -1644,7 +1589,7 @@ mod tests {
         insert_tenant(&db, tenant_id).await;
         insert_host(&db, host_id, tenant_id).await;
 
-        process_plugin_result(&db, tenant_id, host_id, now, &result)
+        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
             .await
             .expect("process_plugin_result");
 
@@ -1684,10 +1629,10 @@ mod tests {
         let result2 =
             phs_result_with_github_target("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
 
-        process_plugin_result(&db, tenant_id, host1, now, &result1)
+        process_plugin_result(&db, tenant_id, host1, now, &result1, &HashSet::new())
             .await
             .expect("host1");
-        process_plugin_result(&db, tenant_id, host2, now, &result2)
+        process_plugin_result(&db, tenant_id, host2, now, &result2, &HashSet::new())
             .await
             .expect("host2");
 
@@ -1746,7 +1691,7 @@ mod tests {
             }],
         };
 
-        process_plugin_result(&db, tenant_id, host_id, now, &result)
+        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
             .await
             .expect("process_plugin_result");
 
@@ -1768,7 +1713,7 @@ mod tests {
     }
 
     /// Target-based ignore rules work correctly: items on the ignore list
-    /// for a target's plugin config are skipped.
+    /// for a target's software item name are skipped.
     #[tokio::test]
     async fn target_based_ignore_rules_work() {
         let db = setup_db().await;
@@ -1781,27 +1726,24 @@ mod tests {
 
         // First, create the apt config by processing a normal item.
         let result1 = phs_result_with_apt_target("curl", "cURL", "8.0.0");
-        process_plugin_result(&db, tenant_id, host_id, now, &result1)
+        let ignore_set = HashSet::new();
+        process_plugin_result(&db, tenant_id, host_id, now, &result1, &ignore_set)
             .await
             .expect("first process");
 
-        // Find the auto-created apt config.
-        let apt_config = PluginConfig::find()
-            .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq("package_manager_apt"))
-            .one(&db)
-            .await
-            .expect("query")
-            .expect("apt config must exist");
-
-        // Add "wget" to the ignore list for that config.
-        create_or_ignore_ignore_rule(&db, tenant_id, apt_config.id, "wget")
+        // Add "Wget" to the tenant-wide name-based ignore list.
+        create_or_ignore_ignore_rule(&db, tenant_id, "Wget")
             .await
             .expect("create ignore rule");
 
-        // Now try to discover "wget" via the same apt target path.
+        // Reload the ignore set.
+        let ignore_set = load_ignore_set(&db, tenant_id)
+            .await
+            .expect("load ignore set");
+
+        // Now try to discover "wget" (name: "Wget") via the same apt target path.
         let result2 = phs_result_with_apt_target("wget", "Wget", "1.21.4");
-        process_plugin_result(&db, tenant_id, host_id, now, &result2)
+        process_plugin_result(&db, tenant_id, host_id, now, &result2, &ignore_set)
             .await
             .expect("second process");
 
@@ -1836,7 +1778,7 @@ mod tests {
         let result =
             phs_result_with_two_targets("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
 
-        process_plugin_result(&db, tenant_id, host_id, now, &result)
+        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
             .await
             .expect("process_plugin_result must not fail on name collision");
 
@@ -2048,11 +1990,9 @@ mod tests {
     async fn insert_new_rule_returns_true() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
-        let plugin_config_id = Uuid::now_v7();
         insert_tenant(&db, tenant_id).await;
-        insert_plugin_config(&db, plugin_config_id, tenant_id).await;
 
-        let inserted = create_or_ignore_ignore_rule(&db, tenant_id, plugin_config_id, "my-package")
+        let inserted = create_or_ignore_ignore_rule(&db, tenant_id, "FreshRSS")
             .await
             .expect("should succeed");
 
@@ -2060,7 +2000,7 @@ mod tests {
 
         let count = AutodiscoveryIgnore::find()
             .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
-            .filter(autodiscovery_ignore::Column::PackageIdentifier.eq("my-package"))
+            .filter(autodiscovery_ignore::Column::Name.eq("FreshRSS"))
             .count(&db)
             .await
             .expect("count");
@@ -2071,16 +2011,14 @@ mod tests {
     async fn insert_duplicate_rule_returns_false() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
-        let plugin_config_id = Uuid::now_v7();
         insert_tenant(&db, tenant_id).await;
-        insert_plugin_config(&db, plugin_config_id, tenant_id).await;
 
-        let first = create_or_ignore_ignore_rule(&db, tenant_id, plugin_config_id, "dup-package")
+        let first = create_or_ignore_ignore_rule(&db, tenant_id, "FreshRSS")
             .await
             .expect("first call");
         assert!(first, "first call must return true (new row)");
 
-        let second = create_or_ignore_ignore_rule(&db, tenant_id, plugin_config_id, "dup-package")
+        let second = create_or_ignore_ignore_rule(&db, tenant_id, "FreshRSS")
             .await
             .expect("second call");
         assert!(
@@ -2091,7 +2029,7 @@ mod tests {
         // Exactly one row must exist after both calls.
         let count = AutodiscoveryIgnore::find()
             .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
-            .filter(autodiscovery_ignore::Column::PackageIdentifier.eq("dup-package"))
+            .filter(autodiscovery_ignore::Column::Name.eq("FreshRSS"))
             .count(&db)
             .await
             .expect("count");
