@@ -1,8 +1,11 @@
 <script lang="ts">
+	import { SvelteSet } from 'svelte/reactivity';
 	import type { ActionDef, ExtensionUi } from '$lib/types';
 	import { invokeExtensionAction, getPluginConfigs } from '$lib/api';
-	import { showError } from '$lib/notifications.svelte';
+	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import ActionButton from './ActionButton.svelte';
+	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 
 	/** Check whether a row action should be visible for a given row. */
@@ -60,7 +63,19 @@
 
 	// Count visible row actions for colspan calculation.
 	let hasRowActions = $derived(ui.row_actions.length > 0);
-	let columnCount = $derived(ui.columns.length + (hasRowActions ? 1 : 0));
+
+	// Batch-capable actions
+	const batchCapableActions = $derived(actions.filter((a) => a.batch_action));
+	const hasBatchActions = $derived(batchCapableActions.length > 0);
+	let selectedIds = new SvelteSet<string>();
+	let batchConfirmAction: ActionDef | null = $state(null);
+	let batchSubmitting: boolean = $state(false);
+
+	const batchBarActions = $derived(
+		batchCapableActions.map((a) => ({ id: a.action_id, label: a.label, destructive: a.destructive }))
+	);
+
+	let columnCount = $derived(ui.columns.length + (hasRowActions ? 1 : 0) + (hasBatchActions ? 1 : 0));
 
 	async function loadContextOptions(autoSelectId?: string) {
 		if (!cs) return;
@@ -174,6 +189,54 @@
 		await loadData();
 	}
 
+	function toggleSelectAll() {
+		if (selectedIds.size === rows.length) {
+			selectedIds.clear();
+		} else {
+			selectedIds.clear();
+			for (const row of rows) {
+				const id = String(row.id ?? '');
+				if (id) selectedIds.add(id);
+			}
+		}
+	}
+
+	function toggleSelect(id: string) {
+		if (selectedIds.has(id)) {
+			selectedIds.delete(id);
+		} else {
+			selectedIds.add(id);
+		}
+	}
+
+	function requestBatchAction(actionId: string) {
+		const action = batchCapableActions.find((a) => a.action_id === actionId);
+		if (action) {
+			if (action.destructive) {
+				batchConfirmAction = action;
+			} else {
+				void executeBatchAction(action);
+			}
+		}
+	}
+
+	async function executeBatchAction(action: ActionDef) {
+		if (batchSubmitting) return;
+		batchConfirmAction = null;
+		batchSubmitting = true;
+		try {
+			const ids = [...selectedIds];
+			await invokeExtensionAction(extensionId, action.action_id, { ...contextParams, ids }, serviceId);
+			showSuccess(`Batch ${action.label} completed for ${ids.length} item(s).`);
+			selectedIds.clear();
+			await reloadData();
+		} catch (e) {
+			showError(e instanceof Error ? e.message : `Batch ${action.label} failed`);
+		} finally {
+			batchSubmitting = false;
+		}
+	}
+
 	$effect(() => {
 		if (cs) {
 			void loadContextOptions();
@@ -260,6 +323,18 @@
 		<table class="table">
 			<thead>
 				<tr>
+					{#if hasBatchActions}
+						<th class="w-10">
+							<input
+								type="checkbox"
+								class="checkbox"
+								checked={rows.length > 0 && selectedIds.size === rows.length}
+								indeterminate={selectedIds.size > 0 && selectedIds.size < rows.length}
+								onchange={toggleSelectAll}
+								aria-label="Select all"
+							/>
+						</th>
+					{/if}
 					{#each ui.columns as col (col.key)}
 						<th>{col.label}</th>
 					{/each}
@@ -277,7 +352,19 @@
 					</tr>
 				{:else}
 					{#each rows as row, i (i)}
+						{@const rowId = String(row.id ?? '')}
 						<tr>
+							{#if hasBatchActions}
+								<td>
+									<input
+										type="checkbox"
+										class="checkbox"
+										checked={selectedIds.has(rowId)}
+										onchange={() => toggleSelect(rowId)}
+										aria-label="Select row {i + 1}"
+									/>
+								</td>
+							{/if}
 							{#each ui.columns as col (col.key)}
 								<td>{String(row[col.key] ?? '')}</td>
 							{/each}
@@ -316,4 +403,28 @@
 	</div>
 
 	<Pagination {currentPage} {totalPages} {total} onPageChange={handlePageChange} />
+
+	{#if hasBatchActions && selectedIds.size > 0}
+		<BatchActionBar
+			selectedCount={selectedIds.size}
+			actions={batchBarActions}
+			onaction={requestBatchAction}
+			oncancel={() => selectedIds.clear()}
+		/>
+	{/if}
+
+	{#if batchConfirmAction}
+		<ConfirmDialog
+			title="Batch {batchConfirmAction.label}"
+			messagePrefix="Are you sure you want to {batchConfirmAction.label.toLowerCase()}"
+			entityName="{selectedIds.size} item(s)"
+			confirmLabel={batchSubmitting ? 'Processing...' : batchConfirmAction.label}
+			confirmClass="preset-filled-error-500"
+			confirmDisabled={batchSubmitting}
+			onconfirm={() => {
+				if (batchConfirmAction) void executeBatchAction(batchConfirmAction);
+			}}
+			oncancel={() => (batchConfirmAction = null)}
+		/>
+	{/if}
 {/if}
