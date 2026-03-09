@@ -1199,6 +1199,12 @@ pub fn build_host_connectivity_attributes_payload(
 /// (`uptrakit_host_{tenant}_{host}`), so the sensor appears under the same
 /// HA device as the package and software item update entities.
 ///
+/// When `os_type`, `os_version`, or `architecture` are provided, the
+/// corresponding `model`, `sw_version`, and `hw_version` fields are included
+/// in the HA device block. Home Assistant merges device info from all entities
+/// sharing the same device identifier, so enriching this one config is
+/// sufficient to populate the device card.
+///
 /// The returned JSON should be published (retained) on
 /// [`host_connectivity_discovery_config_topic`].
 ///
@@ -1212,6 +1218,9 @@ pub fn build_host_connectivity_attributes_payload(
 ///     Uuid::nil(),
 ///     Uuid::nil(),
 ///     "myserver",
+///     None,
+///     None,
+///     None,
 /// );
 /// assert_eq!(v["platform"], "mqtt");
 /// assert_eq!(v["device_class"], "connectivity");
@@ -1224,11 +1233,29 @@ pub fn build_host_connectivity_discovery_config(
     tenant_id: Uuid,
     host_id: Uuid,
     friendly_name: &str,
+    os_type: Option<&str>,
+    os_version: Option<&str>,
+    architecture: Option<&str>,
 ) -> serde_json::Value {
     let uid = host_connectivity_unique_id(tenant_id, host_id);
     let host_simple = host_id.simple().to_string();
     let tenant_simple = tenant_id.simple().to_string();
     let default_entity_id = format!("uptrakit_{}_agent", slugify(friendly_name));
+
+    let mut device = serde_json::json!({
+        "identifiers": [format!("uptrakit_host_{tenant_simple}_{host_simple}")],
+        "name": friendly_name,
+        "manufacturer": "Uptrakit"
+    });
+    if let Some(v) = os_type {
+        device["model"] = serde_json::json!(v);
+    }
+    if let Some(v) = os_version {
+        device["sw_version"] = serde_json::json!(v);
+    }
+    if let Some(v) = architecture {
+        device["hw_version"] = serde_json::json!(v);
+    }
 
     serde_json::json!({
         "platform": "mqtt",
@@ -1244,11 +1271,7 @@ pub fn build_host_connectivity_discovery_config(
         "availability_topic": format!("{topic_prefix}/status"),
         "payload_available": "online",
         "payload_not_available": "offline",
-        "device": {
-            "identifiers": [format!("uptrakit_host_{tenant_simple}_{host_simple}")],
-            "name": friendly_name,
-            "manufacturer": "Uptrakit"
-        }
+        "device": device
     })
 }
 
@@ -2755,46 +2778,158 @@ mod tests {
 
     #[test]
     fn build_host_connectivity_discovery_config_platform_mqtt() {
-        let v = build_host_connectivity_discovery_config("uptrakit", tenant(), host(), "myserver");
+        let v = build_host_connectivity_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "myserver",
+            None,
+            None,
+            None,
+        );
         assert_eq!(v["platform"], "mqtt");
     }
 
     #[test]
     fn build_host_connectivity_discovery_config_device_class_connectivity() {
-        let v = build_host_connectivity_discovery_config("uptrakit", tenant(), host(), "myserver");
+        let v = build_host_connectivity_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "myserver",
+            None,
+            None,
+            None,
+        );
         assert_eq!(v["device_class"], "connectivity");
     }
 
     #[test]
     fn build_host_connectivity_discovery_config_enabled_by_default() {
-        let v = build_host_connectivity_discovery_config("uptrakit", tenant(), host(), "myserver");
+        let v = build_host_connectivity_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "myserver",
+            None,
+            None,
+            None,
+        );
         assert_eq!(v["enabled_by_default"], true);
     }
 
     #[test]
     fn build_host_connectivity_discovery_config_payloads() {
-        let v = build_host_connectivity_discovery_config("uptrakit", tenant(), host(), "myserver");
+        let v = build_host_connectivity_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "myserver",
+            None,
+            None,
+            None,
+        );
         assert_eq!(v["payload_on"], "online");
         assert_eq!(v["payload_off"], "offline");
     }
 
     #[test]
     fn build_host_connectivity_discovery_config_name_includes_agent() {
-        let v = build_host_connectivity_discovery_config("uptrakit", tenant(), host(), "myserver");
+        let v = build_host_connectivity_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "myserver",
+            None,
+            None,
+            None,
+        );
         assert_eq!(v["name"], "myserver agent");
     }
 
     #[test]
     fn build_host_connectivity_discovery_config_default_entity_id() {
-        let v = build_host_connectivity_discovery_config("uptrakit", tenant(), host(), "My Server");
+        let v = build_host_connectivity_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "My Server",
+            None,
+            None,
+            None,
+        );
         assert_eq!(v["default_entity_id"], "uptrakit_my_server_agent");
     }
 
     #[test]
     fn build_host_connectivity_discovery_config_device_same_as_packages() {
-        let conn = build_host_connectivity_discovery_config("uptrakit", tenant(), host(), "h");
+        let conn = build_host_connectivity_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "h",
+            None,
+            None,
+            None,
+        );
         let pkg = build_host_packages_discovery_config("uptrakit", tenant(), host(), "h");
         assert_eq!(conn["device"]["identifiers"], pkg["device"]["identifiers"]);
+    }
+
+    #[test]
+    fn build_host_connectivity_discovery_config_device_model_from_os_type() {
+        let v = build_host_connectivity_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "myserver",
+            Some("Linux"),
+            None,
+            None,
+        );
+        assert_eq!(v["device"]["model"], "Linux");
+    }
+
+    #[test]
+    fn build_host_connectivity_discovery_config_device_sw_version_from_os_version() {
+        let v = build_host_connectivity_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "myserver",
+            None,
+            Some("Ubuntu 24.04"),
+            None,
+        );
+        assert_eq!(v["device"]["sw_version"], "Ubuntu 24.04");
+    }
+
+    #[test]
+    fn build_host_connectivity_discovery_config_device_hw_version_from_architecture() {
+        let v = build_host_connectivity_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "myserver",
+            None,
+            None,
+            Some("x86_64"),
+        );
+        assert_eq!(v["device"]["hw_version"], "x86_64");
+    }
+
+    #[test]
+    fn build_host_connectivity_discovery_config_device_model_absent_when_none() {
+        let v = build_host_connectivity_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "myserver",
+            None,
+            None,
+            None,
+        );
+        assert!(v["device"]["model"].is_null());
     }
 
     // -------------------------------------------------------------------------

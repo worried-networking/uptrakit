@@ -612,7 +612,7 @@ impl TenantManager {
                     item.software_item_id,
                     host.host_id,
                     &item.name,
-                    &host.friendly_name,
+                    display_name(&host.friendly_name, &host.hostname),
                     crate::ha_discovery::ReleaseInfo {
                         url: host.release_url.as_deref(),
                         notes: host.release_notes.as_deref(),
@@ -738,7 +738,7 @@ impl TenantManager {
                     topic_prefix,
                     tenant_id,
                     hs.host_id,
-                    &hs.friendly_name,
+                    display_name(&hs.friendly_name, &hs.hostname),
                 );
                 let config_bytes = config_json.to_string().into_bytes();
                 if let Err(e) = state
@@ -832,7 +832,7 @@ impl TenantManager {
                     topic_prefix,
                     tenant_id,
                     hs.host_id,
-                    &hs.friendly_name,
+                    display_name(&hs.friendly_name, &hs.hostname),
                 );
                 let sec_config_bytes = sec_config_json.to_string().into_bytes();
                 if let Err(e) = state
@@ -884,7 +884,7 @@ impl TenantManager {
                 topic_prefix,
                 tenant_id,
                 hs.host_id,
-                &hs.hostname,
+                display_name(&hs.friendly_name, &hs.hostname),
             );
             let config_bytes = config_json.to_string().into_bytes();
             if let Err(e) = state
@@ -908,7 +908,7 @@ impl TenantManager {
                 topic_prefix,
                 tenant_id,
                 hs.host_id,
-                &hs.hostname,
+                display_name(&hs.friendly_name, &hs.hostname),
             );
             let sec_config_bytes = sec_config_json.to_string().into_bytes();
             if let Err(e) = state
@@ -1016,7 +1016,10 @@ impl TenantManager {
                     topic_prefix,
                     tenant_id,
                     host.host_id,
-                    &host.friendly_name,
+                    display_name(&host.friendly_name, &host.hostname),
+                    host.os_type.as_deref(),
+                    host.os_version.as_deref(),
+                    host.architecture.as_deref(),
                 );
                 let config_bytes = config_json.to_string().into_bytes();
                 if let Err(e) = state
@@ -1114,14 +1117,18 @@ impl TenantManager {
         let topic_prefix = &state.topic_prefix;
         let ha_prefix = &state.ha_discovery_prefix;
 
-        // Resolve friendly name from host metadata cache.
+        // Resolve friendly name and OS info from host metadata cache.
         let host_id_str = host_id.to_string();
-        let friendly_name = self
+        let metadata_entry = self
             .host_metadata
             .get(&tenant_id)
-            .and_then(|hosts| hosts.iter().find(|h| h.host_id == host_id))
-            .map(|h| h.friendly_name.as_str())
+            .and_then(|hosts| hosts.iter().find(|h| h.host_id == host_id));
+        let friendly_name: &str = metadata_entry
+            .map(|h| display_name(h.friendly_name.as_str(), h.hostname.as_str()))
             .unwrap_or(host_id_str.as_str());
+        let os_type = metadata_entry.and_then(|h| h.os_type.as_deref());
+        let os_version = metadata_entry.and_then(|h| h.os_version.as_deref());
+        let architecture = metadata_entry.and_then(|h| h.architecture.as_deref());
 
         let config_topic = crate::ha_discovery::host_connectivity_discovery_config_topic(
             ha_prefix, tenant_id, host_id,
@@ -1131,6 +1138,9 @@ impl TenantManager {
             tenant_id,
             host_id,
             friendly_name,
+            os_type,
+            os_version,
+            architecture,
         );
         let config_bytes = config_json.to_string().into_bytes();
         if let Err(e) = state
@@ -1187,6 +1197,19 @@ fn build_config_from_wire(config: &MqttTenantConfig) -> MqttConfig {
         password: config.password.clone(),
         ca_pem: config.ca_pem.clone(),
         topic_prefix: config.topic_prefix.clone(),
+    }
+}
+
+/// Return the display name for a host, falling back to hostname when friendly_name is empty.
+///
+/// Home Assistant shows the `name` field of the device block. When `friendly_name` has
+/// not been set by the user it is an empty string (the `serde` default). In that case
+/// we fall back to `hostname` so HA shows something meaningful instead of a blank name.
+fn display_name<'a>(friendly_name: &'a str, hostname: &'a str) -> &'a str {
+    if friendly_name.is_empty() {
+        hostname
+    } else {
+        friendly_name
     }
 }
 
