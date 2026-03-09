@@ -197,7 +197,14 @@ impl<'de> Deserialize<'de> for PluginType {
 ///
 /// Used by the controller to record results of `actions/attest`-based Sigstore
 /// provenance checks and by the agent to enforce the `require_attestation` policy.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// # Wire forward-compatibility
+///
+/// `Other(String)` is a catch-all variant for status strings received from a
+/// newer peer that this binary does not yet know about. Serde deserialization
+/// is infallible: an unknown string becomes `Other(s)` rather than a parse error,
+/// allowing older agents and web-API clients to survive rolling upgrades.
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[non_exhaustive]
 pub enum AttestationStatus {
@@ -207,6 +214,37 @@ pub enum AttestationStatus {
     NotFound,
     /// Attestation check was not performed (no checksums file found or check disabled).
     Unverified,
+    /// An unknown attestation status received from a newer peer.
+    Other(String),
+}
+
+impl From<String> for AttestationStatus {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "Verified" => Self::Verified,
+            "NotFound" => Self::NotFound,
+            "Unverified" => Self::Unverified,
+            _ => Self::Other(s),
+        }
+    }
+}
+
+impl Serialize for AttestationStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let s = match self {
+            Self::Verified => "Verified",
+            Self::NotFound => "NotFound",
+            Self::Unverified => "Unverified",
+            Self::Other(s) => s.as_str(),
+        };
+        serializer.serialize_str(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for AttestationStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(AttestationStatus::from)
+    }
 }
 
 /// A downloadable asset attached to a release.
@@ -639,6 +677,23 @@ mod tests {
             let deserialized: AttestationStatus = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(deserialized, status);
         }
+    }
+
+    #[test]
+    fn attestation_status_unknown_deserializes_to_other() {
+        let deserialized: AttestationStatus =
+            serde_json::from_str(r#""Pending""#).expect("deserialize unknown");
+        assert_eq!(
+            deserialized,
+            AttestationStatus::Other("Pending".to_string())
+        );
+    }
+
+    #[test]
+    fn attestation_status_other_serializes_to_inner_string() {
+        let status = AttestationStatus::Other("Pending".to_string());
+        let json = serde_json::to_string(&status).expect("serialize");
+        assert_eq!(json, r#""Pending""#);
     }
 
     #[test]
