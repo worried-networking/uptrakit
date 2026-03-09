@@ -13,13 +13,11 @@ use uuid::Uuid;
 
 /// Query parameters for listing autodiscovery ignore rules.
 #[derive(serde::Serialize)]
-pub struct ListIgnoresParams<'a> {
+pub struct ListIgnoresParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub per_page: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub plugin_config_id: Option<&'a Uuid>,
 }
 
 /// Query parameters for `DELETE /api/v1/hosts/{id}/discovered`.
@@ -77,7 +75,7 @@ impl UptrakitClient {
     /// List autodiscovery ignore rules for this tenant.
     pub async fn list_autodiscovery_ignores(
         &self,
-        params: &ListIgnoresParams<'_>,
+        params: &ListIgnoresParams,
     ) -> Result<PaginatedResponse<AutodiscoveryIgnoreResponse>> {
         self.get_with_query(crate::paths::autodiscovery::IGNORES, params)
             .await

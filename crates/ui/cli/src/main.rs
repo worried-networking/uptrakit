@@ -1368,9 +1368,6 @@ enum AutodiscoveryCommands {
 enum IgnoresCommands {
     /// List autodiscovery ignore rules
     List {
-        /// Filter by plugin config UUID
-        #[arg(long)]
-        plugin_config: Option<Uuid>,
         /// Page number
         #[arg(long)]
         page: Option<u64>,
@@ -1380,12 +1377,9 @@ enum IgnoresCommands {
     },
     /// Create an autodiscovery ignore rule
     Create {
-        /// Plugin config UUID
+        /// Software item name to suppress from future discoveries
         #[arg(long)]
-        plugin_config: Uuid,
-        /// Package identifier to suppress
-        #[arg(long)]
-        package: String,
+        name: String,
     },
     /// Delete an autodiscovery ignore rule
     Delete {
@@ -3242,14 +3236,9 @@ async fn run(cli: Cli) -> error::Result<()> {
         },
         Commands::Autodiscovery { command } => match command {
             AutodiscoveryCommands::Ignores { command } => match command {
-                IgnoresCommands::List {
-                    plugin_config,
-                    page,
-                    per_page,
-                } => {
+                IgnoresCommands::List { page, per_page } => {
                     let resp = commands::autodiscovery::ignores_list(
                         commands::autodiscovery::IgnoresListParams {
-                            plugin_config_id: plugin_config.as_ref(),
                             server: cli.server.as_deref(),
                             token: cli.token.as_deref(),
                             insecure,
@@ -3261,14 +3250,10 @@ async fn run(cli: Cli) -> error::Result<()> {
                     .await?;
                     output::print_output(format, &resp)?;
                 }
-                IgnoresCommands::Create {
-                    plugin_config,
-                    package,
-                } => {
+                IgnoresCommands::Create { name } => {
                     let resp = commands::autodiscovery::ignores_create(
                         commands::autodiscovery::IgnoresCreateParams {
-                            plugin_config_id: &plugin_config,
-                            package_identifier: package,
+                            name,
                             server: cli.server.as_deref(),
                             token: cli.token.as_deref(),
                             insecure,
@@ -5985,25 +5970,18 @@ mod tests {
             "autodiscovery",
             "ignores",
             "create",
-            "--plugin-config",
-            PC_UUID,
-            "--package",
-            "org/app",
+            "--name",
+            "FreshRSS",
         ])
         .expect("should parse");
         match args.command {
             Some(Commands::Autodiscovery {
                 command:
                     AutodiscoveryCommands::Ignores {
-                        command:
-                            IgnoresCommands::Create {
-                                plugin_config,
-                                package,
-                            },
+                        command: IgnoresCommands::Create { name },
                     },
             }) => {
-                assert_eq!(plugin_config, uuid(PC_UUID));
-                assert_eq!(package, "org/app");
+                assert_eq!(name, "FreshRSS");
             }
             _ => panic!("expected Autodiscovery Ignores Create"),
         }
