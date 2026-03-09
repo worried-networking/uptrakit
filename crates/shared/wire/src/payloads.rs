@@ -360,6 +360,12 @@ pub struct ExecuteUpdatePayload {
         default = "super::messages::default_update_timeout"
     )]
     pub timeout: std::time::Duration,
+    /// When `true`, the agent allocates a PTY and keeps stdin open for forwarding.
+    ///
+    /// Requires the agent to advertise the `InteractiveUpdates` capability.
+    /// Defaults to `false` for backward compatibility with older agents.
+    #[serde(default)]
+    pub interactive: bool,
 }
 
 /// Agent -> Controller: Update is starting.
@@ -426,6 +432,12 @@ pub struct ExecuteBatchUpdatePayload {
         default = "super::messages::default_update_timeout"
     )]
     pub timeout: std::time::Duration,
+    /// When `true`, the agent allocates a PTY and keeps stdin open for forwarding.
+    ///
+    /// Requires the agent to advertise the `InteractiveUpdates` capability.
+    /// Defaults to `false` for backward compatibility with older agents.
+    #[serde(default)]
+    pub interactive: bool,
 }
 
 /// A single software item within a batch update request.
@@ -1105,4 +1117,41 @@ pub struct ReportPluginConfigResponsePayload {
     /// Error message (set on failure).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+// =============================================================================
+// Interactive Update Payloads
+// =============================================================================
+
+/// Controller → Agent: forward stdin data or a signal to a running interactive update.
+///
+/// The `data` field contains raw bytes encoded as base64 to support binary
+/// control sequences (e.g., `\x03` for Ctrl+C). When `signal` is set, the
+/// agent delivers the signal to the process group instead of writing stdin.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateStdinDataPayload {
+    /// The update history record this stdin data belongs to.
+    pub update_history_id: Uuid,
+    /// Raw bytes encoded as base64 (supports binary: Ctrl+C = \x03, etc.).
+    pub data: String,
+    /// When set, send this signal to the process group instead of writing stdin.
+    /// Values: 2 = SIGINT, 15 = SIGTERM.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal: Option<i32>,
+}
+
+/// Agent → Controller: the update process appears to be waiting for stdin input.
+///
+/// Sent when the agent detects sustained silence from the process (no output for
+/// ~10 seconds while still running). The controller broadcasts this to interactive
+/// session subscribers and may trigger notifications.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StdinAttentionPayload {
+    /// The update history record that needs attention.
+    pub update_history_id: Uuid,
+    /// Optional hint about what the process might be waiting for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }

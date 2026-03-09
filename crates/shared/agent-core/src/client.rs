@@ -707,6 +707,7 @@ mod tests {
             pre_update_hooks: vec![],
             post_update_hooks: vec![],
             timeout,
+            interactive: false,
         }
     }
 

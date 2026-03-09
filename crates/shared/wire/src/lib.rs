@@ -811,6 +811,7 @@ mod tests {
                 require_attestation: false,
             }),
             timeout: std::time::Duration::from_secs(600),
+            interactive: false,
         }));
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"execute_update"#));
@@ -838,6 +839,7 @@ mod tests {
             post_update_hooks: vec![],
             release_info: None,
             timeout: DEFAULT_UPDATE_TIMEOUT,
+            interactive: false,
         }));
         let json = serde_json::to_string(&msg).unwrap();
         // Empty vectors should be omitted
@@ -896,6 +898,7 @@ mod tests {
             post_update_hooks: vec![],
             release_info: None,
             timeout: DEFAULT_UPDATE_TIMEOUT,
+            interactive: false,
         }));
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""shell"#));
@@ -2155,6 +2158,7 @@ mod tests {
                 post_update_hooks: vec![],
                 release_info: None,
                 timeout: DEFAULT_UPDATE_TIMEOUT,
+                interactive: false,
             },
         )));
         spec.validate("executeUpdatePayload", &json);
@@ -2392,6 +2396,7 @@ mod tests {
             pre_update_hooks: vec![],
             post_update_hooks: vec![],
             timeout: std::time::Duration::from_secs(7200),
+            interactive: false,
         }));
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"execute_batch_update"#));
@@ -2464,6 +2469,7 @@ mod tests {
                 pre_update_hooks: vec![],
                 post_update_hooks: vec![],
                 timeout: std::time::Duration::from_secs(7200),
+                interactive: false,
             },
         )));
         spec.validate("executeBatchUpdatePayload", &json);

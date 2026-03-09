@@ -251,6 +251,7 @@ mod tests {
             post_update_hooks: vec![],
             release_info: None,
             timeout: std::time::Duration::from_secs(300),
+            interactive: false,
         }));
 
         let encrypted = encrypt_message_configs(msg);
@@ -287,6 +288,7 @@ mod tests {
             pre_update_hooks: vec![],
             post_update_hooks: vec![],
             timeout: std::time::Duration::from_secs(300),
+            interactive: false,
         }));
 
         let encrypted = encrypt_message_configs(msg);

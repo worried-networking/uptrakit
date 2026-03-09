@@ -449,6 +449,7 @@ pub async fn dispatch_update_to_agent(
         post_update_hooks: resolved_hooks.post_update_hooks,
         release_info: enriched_release_info,
         timeout: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT,
+        interactive: false,
     };
 
     let msg = ControllerMessage::ExecuteUpdate(Box::new(execute_payload));

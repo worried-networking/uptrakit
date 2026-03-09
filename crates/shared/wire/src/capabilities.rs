@@ -95,6 +95,16 @@ pub enum Capability {
     ///
     /// Wire string: `ui_extensions`.
     UiExtensions,
+    /// Service supports interactive update sessions: PTY allocation, stdin
+    /// forwarding, and signal delivery during update execution.
+    ///
+    /// When present, the controller may set `interactive: true` on
+    /// `ExecuteUpdatePayload` and send `UpdateStdinData` messages to this
+    /// service. The service allocates a PTY for the update process and keeps
+    /// stdin open for forwarding.
+    ///
+    /// Wire string: `interactive_updates`.
+    InteractiveUpdates,
     /// Unknown capability from a newer peer; never participates in intersection.
     ///
     /// Provides forward compatibility: a newer peer may advertise capabilities
@@ -119,6 +129,7 @@ impl Capability {
             Self::CaManagement => "ca_management",
             Self::SystemService => "system_service",
             Self::UiExtensions => "ui_extensions",
+            Self::InteractiveUpdates => "interactive_updates",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -155,6 +166,7 @@ impl FromStr for Capability {
             "ca_management" => Self::CaManagement,
             "system_service" => Self::SystemService,
             "ui_extensions" => Self::UiExtensions,
+            "interactive_updates" => Self::InteractiveUpdates,
             other => {
                 tracing::debug!(capability = other, "received unknown capability from peer");
                 Self::Other(other.to_string())

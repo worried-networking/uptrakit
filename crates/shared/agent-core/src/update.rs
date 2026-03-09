@@ -877,6 +877,7 @@ mod tests {
             post_update_hooks: vec![],
             release_info: None,
             timeout: std::time::Duration::from_secs(60),
+            interactive: false,
         }
     }
 
