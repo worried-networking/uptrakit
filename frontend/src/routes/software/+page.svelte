@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
@@ -12,7 +13,8 @@
 		listPluginTypes,
 		getSoftwareItem,
 		triggerSoftwareUpdate,
-		unassignHostFromSoftwareItemWithIgnore
+		unassignHostFromSoftwareItemWithIgnore,
+		batchSoftwareItems
 	} from '$lib/api';
 	import { formatDate, formatVersion, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -23,7 +25,9 @@
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
-	import type { SoftwareItemResponse, SoftwareItemDetailResponse } from '$lib/types';
+	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
+	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
+	import type { SoftwareItemResponse, SoftwareItemDetailResponse, BatchActionResponse } from '$lib/types';
 	import { Permission } from '$lib/types';
 
 	type FilterTab = 'all' | 'pending' | 'active';
@@ -55,9 +59,22 @@
 	let triggeringUpdate: boolean = $state(false);
 	let confirmIgnore: { id: string; name: string } | null = $state(null);
 	let ignoreSubmitting: boolean = $state(false);
+	let batchSelectedIds = new SvelteSet<string>();
+	let batchConfirmAction: string | null = $state(null);
+	let batchResult: BatchActionResponse | null = $state(null);
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
+
+	const batchActions = $derived.by(() => {
+		const acts: { id: string; label: string; destructive?: boolean }[] = [];
+		if (activeTab === 'pending') {
+			acts.push({ id: 'approve', label: 'Approve' });
+			acts.push({ id: 'ignore', label: 'Ignore', destructive: true });
+		}
+		acts.push({ id: 'delete', label: 'Delete', destructive: true });
+		return acts;
+	});
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 	let unsubscribers: (() => void)[] = [];
@@ -293,6 +310,70 @@
 		loadAll(currentPage);
 	}
 
+	function toggleBatchSelectAll() {
+		if (batchSelectedIds.size === items.length) {
+			batchSelectedIds.clear();
+		} else {
+			batchSelectedIds.clear();
+			for (const item of items) batchSelectedIds.add(item.id);
+		}
+	}
+
+	function toggleBatchSelect(id: string) {
+		if (batchSelectedIds.has(id)) {
+			batchSelectedIds.delete(id);
+		} else {
+			batchSelectedIds.add(id);
+		}
+	}
+
+	function requestBatchAction(actionId: string) {
+		batchConfirmAction = actionId;
+	}
+
+	async function executeBatchAction() {
+		if (!batchConfirmAction || submitting) return;
+		const action = batchConfirmAction;
+		const ids = [...batchSelectedIds];
+		batchConfirmAction = null;
+		submitting = true;
+		try {
+			if (action === 'ignore') {
+				// Client-side orchestration: fetch details, unassign hosts with ignore, then delete
+				const succeeded: { id: string }[] = [];
+				const failed: { id: string; error: string }[] = [];
+				for (const itemId of ids) {
+					try {
+						const detail = await getSoftwareItem(itemId);
+						await Promise.all(detail.hosts.map((h) => unassignHostFromSoftwareItemWithIgnore(itemId, h.host_id)));
+						await deleteSoftwareItem(itemId);
+						succeeded.push({ id: itemId });
+					} catch (e) {
+						failed.push({ id: itemId, error: e instanceof Error ? e.message : 'Unknown error' });
+					}
+				}
+				if (failed.length > 0) {
+					batchResult = { succeeded, failed };
+				} else {
+					showSuccess(`${succeeded.length} item(s) will be ignored in future autodiscovery runs.`);
+				}
+			} else {
+				const response = await batchSoftwareItems(action, ids);
+				if (response.failed.length > 0) {
+					batchResult = response;
+				} else {
+					showSuccess(`${response.succeeded.length} item(s) ${action}d successfully.`);
+				}
+			}
+			batchSelectedIds.clear();
+			await loadAll(currentPage);
+		} catch (e) {
+			showError(e instanceof Error ? e.message : `Failed to ${action} software items`);
+		} finally {
+			submitting = false;
+		}
+	}
+
 	function handleWindowClick(event: MouseEvent) {
 		if (openMenuId && !(event.target as HTMLElement).closest('.actions-menu')) {
 			closeMenu();
@@ -348,6 +429,18 @@
 			<table class="table">
 				<thead>
 					<tr>
+						{#if canManage}
+							<th class="w-10">
+								<input
+									type="checkbox"
+									class="checkbox"
+									checked={items.length > 0 && batchSelectedIds.size === items.length}
+									indeterminate={batchSelectedIds.size > 0 && batchSelectedIds.size < items.length}
+									onchange={toggleBatchSelectAll}
+									aria-label="Select all"
+								/>
+							</th>
+						{/if}
 						<th>Name</th>
 						<th>Plugins</th>
 						<th>Status</th>
@@ -361,11 +454,22 @@
 				<tbody>
 					{#if loading}
 						<tr>
-							<td colspan={canManage ? 6 : 5} class="py-6 text-center">Loading...</td>
+							<td colspan={canManage ? 8 : 5} class="py-6 text-center">Loading...</td>
 						</tr>
 					{:else}
 						{#each items as item (item.id)}
 							<tr>
+								{#if canManage}
+									<td>
+										<input
+											type="checkbox"
+											class="checkbox"
+											checked={batchSelectedIds.has(item.id)}
+											onchange={() => toggleBatchSelect(item.id)}
+											aria-label="Select {item.name}"
+										/>
+									</td>
+								{/if}
 								<td>
 									<a href="/software/{item.id}" class="hover:underline font-medium">{item.name}</a>
 								</td>
@@ -424,7 +528,7 @@
 							</tr>
 						{:else}
 							<tr>
-								<td colspan={canManage ? 6 : 5} class="py-8 text-center">
+								<td colspan={canManage ? 8 : 5} class="py-8 text-center">
 									{#if activeTab === 'pending'}
 										<p class="text-lg font-medium">No pending items</p>
 										<p class="mt-1 text-sm text-surface-500">No discovered software awaiting review.</p>
@@ -444,6 +548,42 @@
 		</div>
 
 		<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadAll} />
+
+		{#if canManage && batchSelectedIds.size > 0}
+			<BatchActionBar
+				selectedCount={batchSelectedIds.size}
+				actions={batchActions}
+				onaction={requestBatchAction}
+				oncancel={() => batchSelectedIds.clear()}
+			/>
+		{/if}
+
+		{#if batchConfirmAction}
+			<ConfirmDialog
+				title="Batch {batchConfirmAction}"
+				messagePrefix="Are you sure you want to {batchConfirmAction}"
+				entityName="{batchSelectedIds.size} software item(s)"
+				confirmLabel={submitting
+					? 'Processing...'
+					: batchConfirmAction === 'approve'
+						? 'Approve'
+						: batchConfirmAction === 'ignore'
+							? 'Ignore'
+							: 'Delete'}
+				confirmClass={batchConfirmAction === 'approve'
+					? 'preset-filled-success-500'
+					: batchConfirmAction === 'ignore'
+						? 'preset-filled-warning-500'
+						: 'preset-filled-error-500'}
+				confirmDisabled={submitting}
+				onconfirm={executeBatchAction}
+				oncancel={() => (batchConfirmAction = null)}
+			/>
+		{/if}
+
+		{#if batchResult}
+			<BatchResultDialog title="Batch Action Results" response={batchResult} onclose={() => (batchResult = null)} />
+		{/if}
 
 		{#if openMenuId}
 			{@const item = items.find((i) => i.id === openMenuId)}
