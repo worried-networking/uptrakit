@@ -983,6 +983,13 @@ autodiscovery/ignores, plugin-configs. Full endpoint table and side-effect docum
 Extensions can mark `ActionDef` as batch-capable via `.batch()` (sets `batch_action: true`). The SSH
 agent marks `sync-host` and `remove-host` as batch-capable.
 
+The frontend adds multi-select checkboxes to all list pages (services, system-services, software,
+hosts, host-packages, plugin-configs, autodiscovery ignores) and extension DataTables. Selection
+uses `SvelteSet<string>` (required by `svelte/prefer-svelte-reactivity` ESLint rule). A shared
+`BatchActionBar` appears when items are selected; `BatchResultDialog` shows partial-success
+results. See [docs/development/frontend-components.md](docs/development/frontend-components.md)
+for component details.
+
 #### Key files
 
 | File | Purpose |
@@ -1004,6 +1011,11 @@ agent marks `sync-host` and `remove-host` as batch-capable.
 | `crates/ui/web-api/src/routes/plugin_configs.rs` | `batch_plugin_configs` handler |
 | `crates/shared/openapi-client/src/paths.rs` | `BATCH` path constants for all resources |
 | `crates/shared/extension-framework/src/lib.rs` | `ActionDef.batch_action` field |
+| `frontend/src/lib/types.ts` | `BatchActionRequest`, `BatchActionResponse` TypeScript types |
+| `frontend/src/lib/api.ts` | `batchServices`, `batchHosts`, etc. API client functions |
+| `frontend/src/lib/components/BatchActionBar.svelte` | Shared batch action toolbar (fixed-position, selected count + action buttons) |
+| `frontend/src/lib/components/BatchResultDialog.svelte` | Shared partial-success results dialog |
+| `frontend/src/lib/components/extensions/SchemaTable.svelte` | Extension DataTable with batch support for `batch_action: true` actions |
 
 ### Error handling quick reference
 

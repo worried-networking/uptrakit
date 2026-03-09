@@ -273,6 +273,10 @@ Covered resources: services, system services, software items, hosts, host packag
 autodiscovery ignore rules, and plugin configs. Extensions can mark `ActionDef` as batch-capable
 via `batch_action: true`. See [docs/api/batch-actions.md](docs/api/batch-actions.md).
 
+The frontend provides multi-select checkboxes on all list pages with a shared `BatchActionBar`
+toolbar and `BatchResultDialog` for partial-success feedback. See
+[docs/development/frontend-components.md](docs/development/frontend-components.md#batch-action-components).
+
 ## Host packages (system-level tracking)
 
 In addition to targeted software items (cross-host tracking), the system supports per-host package tracking for
