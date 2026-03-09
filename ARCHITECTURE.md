@@ -269,13 +269,24 @@ not block successful items. No new database tables are required; batch operation
 columns (status updates, soft-deletes). Side effects (WebSocket notifications, admin events, CRL
 renewal) fire per succeeded item, same as the single-item endpoints.
 
-Covered resources: services, system services, software items, hosts, host packages,
+Covered resources: services, system services, software items, hosts, host packages, host tags,
 autodiscovery ignore rules, and plugin configs. Extensions can mark `ActionDef` as batch-capable
 via `batch_action: true`. See [docs/api/batch-actions.md](docs/api/batch-actions.md).
 
 The frontend provides multi-select checkboxes on all list pages with a shared `BatchActionBar`
 toolbar and `BatchResultDialog` for partial-success feedback. See
 [docs/development/frontend-components.md](docs/development/frontend-components.md#batch-action-components).
+
+## Host tags
+
+Hosts support user-defined tags for organization and classification. Tags are tenant-scoped metadata
+with a name, hex color, and optional description. A many-to-many relationship via the
+`host_tag_assignments` join table links tags to hosts. Tags use soft-delete (`deactivated_at`) with a
+partial unique index ensuring unique active names per tenant. Auto-generated colors are picked from a
+12-color palette when no color is specified. The `HostResponse` includes a `tags` field with slim tag
+summaries, batch-loaded to avoid N+1 queries.
+
+See [Host Tags Architecture](docs/architecture/host-tags.md) for the full entity design.
 
 ## Host packages (system-level tracking)
 

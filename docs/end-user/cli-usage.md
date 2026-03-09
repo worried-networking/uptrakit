@@ -230,6 +230,59 @@ allowlist (or the system default of all plugins if the tenant list is also empty
 See also: [Host Entity](../architecture/host-entity.md), [Autodiscovery](autodiscovery.md),
 [Discovery Allowlist API](../api/discovery-allowlist.md).
 
+## Host Tags
+
+Manage host tags -- user-defined labels for organizing and classifying hosts.
+
+### Tag management
+
+```sh
+# List all host tags (paginated)
+uptrakit host-tags list
+uptrakit host-tags list --page 2 --per-page 10
+
+# Search by name
+uptrakit host-tags list --search prod
+
+# Show tag details
+uptrakit host-tags show <TAG_ID>
+
+# Create a new tag (color is auto-assigned from palette if omitted)
+uptrakit host-tags create --name "production"
+uptrakit host-tags create --name "staging" --color "#10B981" --description "Staging environment"
+
+# Update a tag
+uptrakit host-tags update <TAG_ID> --name "prod"
+uptrakit host-tags update <TAG_ID> --color "#EF4444"
+uptrakit host-tags update <TAG_ID> --description "Updated description"
+
+# Clear the description
+uptrakit host-tags update <TAG_ID> --clear-description
+
+# Delete a tag (soft-delete; removes all host assignments)
+uptrakit host-tags delete <TAG_ID>
+```
+
+### Assigning tags to hosts
+
+```sh
+# Set tags on a host (replaces all existing tag assignments)
+uptrakit host-tags set <HOST_ID> --tags <TAG_ID_1>,<TAG_ID_2>
+
+# Remove all tags from a host
+uptrakit host-tags set <HOST_ID> --tags ""
+```
+
+### Batch actions
+
+```sh
+# Delete multiple tags at once
+uptrakit host-tags batch delete <TAG_ID_1> <TAG_ID_2>
+```
+
+See also: [Host Tags API](../api/host-tags.md),
+[Host Tags Architecture](../architecture/host-tags.md).
+
 ## Host Packages
 
 Manage system-level packages tracked per-host by package manager plugins.
@@ -933,6 +986,12 @@ uptrakit software-items batch delete <UUID1> <UUID2>
 
 ```sh
 uptrakit plugin-configs batch delete <UUID1> <UUID2>
+```
+
+### Host tags
+
+```sh
+uptrakit host-tags batch delete <UUID1> <UUID2>
 ```
 
 ### Autodiscovery ignores

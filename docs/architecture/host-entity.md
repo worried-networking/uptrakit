@@ -235,6 +235,15 @@ host record is created with a fresh UUID. The `(tenant_id, machine_id)` uniquene
 index that only covers active hosts (`WHERE deactivated_at IS NULL`), allowing multiple deactivated records to coexist
 with one active record for the same `machine_id`. Autodiscovery is triggered for the newly created host.
 
+## Host tags
+
+Hosts support user-defined tags via the `host_tag_assignments` join table (composite PK
+`(host_tag_id, host_id)`). Tags are tenant-scoped labels with a name, hex color, and optional
+description. The `HostResponse` includes a `tags: Vec<HostTagSummary>` field. Tags are batch-loaded
+via `load_host_tags_batch()` when listing hosts.
+
+See [host tags architecture](host-tags.md) for the full entity design.
+
 ## Host packages
 
 Hosts have a one-to-many relationship with `host_packages` — system-level packages tracked per-host by package
@@ -253,6 +262,8 @@ See [host packages architecture](host-packages.md) for the full entity design.
 | GET | `/api/v1/hosts/{id}` | ViewHosts | Get single host with linked agents |
 | PUT | `/api/v1/hosts/{id}` | ManageHosts | Update friendly_name |
 | DELETE | `/api/v1/hosts/{id}` | ManageHosts | Soft-delete (set deactivated_at) |
+| PUT | `/api/v1/hosts/{id}/tags` | ManageHosts | Set (replace-all) tags on a host |
 
 See also [host packages API](../api/host-packages.md) for package management endpoints scoped under
-`/api/v1/hosts/{host_id}/packages`.
+`/api/v1/hosts/{host_id}/packages`, and [host tags API](../api/host-tags.md) for tag management
+endpoints.

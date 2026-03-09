@@ -437,8 +437,32 @@ actions are simple multi-ID operations that return per-item success/failure resu
 | `POST` | `/api/v1/software-items/batch` | `approve`, `delete` | `ManageSoftware` |
 | `POST` | `/api/v1/plugin-configs/batch` | `delete` | `ManageSoftware` |
 | `POST` | `/api/v1/autodiscovery/ignores/batch` | `delete` | `ManageSoftware` |
+| `POST` | `/api/v1/host-tags/batch` | `delete` | `ManageHosts` |
 
 See [Batch Actions API](batch-actions.md) for full request/response schema and error handling.
+
+## Host Tag Endpoints
+
+Host tags provide user-defined labels for organizing hosts within a tenant. See
+[Host Tags API](host-tags.md) for the full endpoint reference with request/response examples.
+
+- `GET /api/v1/host-tags` -- list tags with pagination and search (`?search=`). Requires
+  `ViewHosts`.
+- `POST /api/v1/host-tags` -- create a tag. Requires `ManageHosts`.
+- `GET /api/v1/host-tags/{id}` -- get a single tag. Requires `ViewHosts`.
+- `PUT /api/v1/host-tags/{id}` -- update a tag. Requires `ManageHosts`.
+- `DELETE /api/v1/host-tags/{id}` -- soft-delete a tag. Requires `ManageHosts`.
+- `POST /api/v1/host-tags/batch` -- batch delete tags. Requires `ManageHosts`.
+- `PUT /api/v1/hosts/{id}/tags` -- set (replace-all) tags on a host. Requires `ManageHosts`.
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/ui/web-api/src/routes/host_tags.rs` | Route handlers |
+| `crates/ui/web-api-queries/src/queries/host_tags.rs` | Query functions |
+| `crates/shared/web-api-types/src/host_tags.rs` | Request/response types |
+| `crates/shared/openapi-client/src/host_tags.rs` | Typed API client |
 
 ## Host Package Endpoints
 

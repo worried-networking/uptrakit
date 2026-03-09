@@ -43,6 +43,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Services and Operations](api/services-operations.md) | Agent/MQTT flows, update history, and tenant-scoped tables. See also: [Update Workflow](end-user/update-workflow.md). |
 | [Enrollment Tokens](api/enrollment-tokens.md) | Enrollment token CRUD, capability scoping, usage limits, TTL, and enrollment flow. See also: [Auth and Authorization](security/auth-and-authorization.md). |
 | [Host Packages API](api/host-packages.md) | Host package REST API reference (CRUD, updates, ignores). See also: [Host Packages Guide](end-user/host-packages.md), [Host Packages Architecture](architecture/host-packages.md). |
+| [Host Tags API](api/host-tags.md) | Host tag CRUD, batch delete, and host tag assignment endpoints. See also: [Host Tags Architecture](architecture/host-tags.md), [CLI Usage Guide](end-user/cli-usage.md). |
 | [Notifications](api/notifications.md) | Notification channel, rule, and delivery log REST API reference. See also: [Notifications Guide](end-user/notifications.md), [Notifications Security](security/notifications-security.md). |
 | [Audit Logs API](api/audit-logs.md) | Audit log REST API reference: endpoints, filter parameters, response schema, permissions. See also: [Audit Logs Guide](end-user/audit-logs.md), [Audit Logs Security](security/audit-logs.md). |
 | [Batch Actions](api/batch-actions.md) | Batch/group action endpoints for bulk management operations (services, hosts, software items, etc.). See also: [CLI Usage Guide](end-user/cli-usage.md), [Extensions API](api/extensions.md). |
@@ -74,6 +75,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Update History Entity](architecture/update-history-entity.md) | Immutable update history records. See also: [Update Workflow](end-user/update-workflow.md). |
 | [Scheduler](architecture/scheduler.md) | Centralised DB-backed task scheduler with HA-safe optimistic locking (embedded or external). See also: [Scheduler Engine](development/scheduler-engine.md), [External Scheduler Deployment](end-user/deployment/external-scheduler.md), [HTTP Web API](api/http-web-api.md), [Cross-Controller Communication](development/cross-controller-comm.md). |
 | [Host Packages](architecture/host-packages.md) | Host packages entity design, tracking system routing, batch updates, and relationship to targeted items. See also: [Host Packages Guide](end-user/host-packages.md), [Host Packages API](api/host-packages.md). |
+| [Host Tags](architecture/host-tags.md) | User-defined host labels, color palette, tag assignments, and tenant isolation. See also: [Host Tags API](api/host-tags.md), [Host Entity](architecture/host-entity.md). |
 | [SSH Agent](architecture/ssh-agent.md) | SSH-backed agent architecture, local DB schema, and self-managed encryption. See also: [SSH Agent Secrets](security/ssh-agent-secrets.md), [Service Lifecycle](development/service-lifecycle.md). |
 
 ## Development

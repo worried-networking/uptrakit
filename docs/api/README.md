@@ -13,6 +13,7 @@ This folder documents the controller HTTP API, service/controller wire protocol,
 | [Services and Operations](services-operations.md) | Agent and MQTT service lifecycle operations, update execution, and state transitions. |
 | [Notifications](notifications.md) | Notification channels, rules, delivery log, and Telegram callback endpoints. |
 | [Batch Actions](batch-actions.md) | Batch/group action endpoints for bulk management operations across all resources. |
+| [Host Tags](host-tags.md) | Host tag CRUD, batch delete, and host tag assignment endpoints. |
 
 ## Related Documentation
 
