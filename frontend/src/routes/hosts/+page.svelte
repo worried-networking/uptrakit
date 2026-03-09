@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
-	import { getHosts, updateHost, deactivateHost, triggerHostDiscovery } from '$lib/api';
-	import type { HostResponse } from '$lib/types';
+	import { getHosts, updateHost, deactivateHost, triggerHostDiscovery, batchHosts } from '$lib/api';
+	import type { HostResponse, BatchActionResponse } from '$lib/types';
 	import { Permission } from '$lib/types';
 	import { formatDate, parseUrlPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -13,6 +14,8 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
+	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
+	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 
 	let hosts: HostResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -26,6 +29,13 @@
 	let totalItems: number = $state(0);
 
 	let discoveringHostIds: Set<string> = $state(new Set());
+	let selectedIds = new SvelteSet<string>();
+	let batchConfirmAction: string | null = $state(null);
+	let batchResult: BatchActionResponse | null = $state(null);
+
+	const batchActions: { id: string; label: string; destructive?: boolean }[] = [
+		{ id: 'deactivate', label: 'Deactivate', destructive: true }
+	];
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 	let unsubscribers: (() => void)[] = [];
@@ -137,6 +147,48 @@
 		}
 	}
 
+	function toggleSelectAll() {
+		if (selectedIds.size === hosts.length) {
+			selectedIds.clear();
+		} else {
+			selectedIds.clear();
+			for (const h of hosts) selectedIds.add(h.id);
+		}
+	}
+
+	function toggleSelect(id: string) {
+		if (selectedIds.has(id)) {
+			selectedIds.delete(id);
+		} else {
+			selectedIds.add(id);
+		}
+	}
+
+	function requestBatchAction(actionId: string) {
+		batchConfirmAction = actionId;
+	}
+
+	async function executeBatchAction() {
+		if (!batchConfirmAction || submitting) return;
+		const action = batchConfirmAction;
+		batchConfirmAction = null;
+		submitting = true;
+		try {
+			const response = await batchHosts(action, [...selectedIds]);
+			if (response.failed.length > 0) {
+				batchResult = response;
+			} else {
+				showSuccess(`${response.succeeded.length} host(s) deactivated successfully.`);
+			}
+			selectedIds.clear();
+			await loadHosts(currentPage);
+		} catch (e) {
+			showError(e instanceof Error ? e.message : `Failed to ${action} hosts`);
+		} finally {
+			submitting = false;
+		}
+	}
+
 	function handleWindowClick(event: MouseEvent) {
 		if (openMenuId && !(event.target as HTMLElement).closest('.actions-menu')) {
 			closeMenu();
@@ -180,6 +232,18 @@
 		<table class="table">
 			<thead>
 				<tr>
+					{#if canManage}
+						<th class="w-10">
+							<input
+								type="checkbox"
+								class="checkbox"
+								checked={hosts.length > 0 && selectedIds.size === hosts.length}
+								indeterminate={selectedIds.size > 0 && selectedIds.size < hosts.length}
+								onchange={toggleSelectAll}
+								aria-label="Select all"
+							/>
+						</th>
+					{/if}
 					<th>Name</th>
 					<th>Hostname</th>
 					<th>OS</th>
@@ -197,6 +261,17 @@
 			<tbody>
 				{#each hosts as host (host.id)}
 					<tr>
+						{#if canManage}
+							<td>
+								<input
+									type="checkbox"
+									class="checkbox"
+									checked={selectedIds.has(host.id)}
+									onchange={() => toggleSelect(host.id)}
+									aria-label="Select {host.friendly_name}"
+								/>
+							</td>
+						{/if}
 						<td>
 							<a href="/hosts/{host.id}" class="hover:underline font-medium">{host.friendly_name}</a>
 						</td>
@@ -246,7 +321,7 @@
 					</tr>
 				{:else}
 					<tr>
-						<td colspan={canManage ? 10 : 9} class="text-center py-8">
+						<td colspan={canManage ? 12 : 9} class="text-center py-8">
 							<p class="text-lg font-medium">No hosts discovered yet</p>
 							<p class="mt-1 text-sm text-surface-500">
 								Hosts appear here automatically when an approved agent reports from a new machine.
@@ -259,6 +334,32 @@
 	</div>
 
 	<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadHosts} />
+
+	{#if canManage && selectedIds.size > 0}
+		<BatchActionBar
+			selectedCount={selectedIds.size}
+			actions={batchActions}
+			onaction={requestBatchAction}
+			oncancel={() => selectedIds.clear()}
+		/>
+	{/if}
+
+	{#if batchConfirmAction}
+		<ConfirmDialog
+			title="Batch Deactivate"
+			messagePrefix="Are you sure you want to deactivate"
+			entityName="{selectedIds.size} host(s)"
+			confirmLabel={submitting ? 'Processing...' : 'Deactivate'}
+			confirmClass="preset-filled-error-500"
+			confirmDisabled={submitting}
+			onconfirm={executeBatchAction}
+			oncancel={() => (batchConfirmAction = null)}
+		/>
+	{/if}
+
+	{#if batchResult}
+		<BatchResultDialog title="Batch Action Results" response={batchResult} onclose={() => (batchResult = null)} />
+	{/if}
 
 	{#if openMenuId}
 		{@const host = hosts.find((h) => h.id === openMenuId)}

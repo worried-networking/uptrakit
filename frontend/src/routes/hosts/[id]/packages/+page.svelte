@@ -1,17 +1,27 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
-	import { getHost, listHostPackages, updateHostPackage, deleteHostPackage, promoteHostPackage } from '$lib/api';
+	import {
+		getHost,
+		listHostPackages,
+		updateHostPackage,
+		deleteHostPackage,
+		promoteHostPackage,
+		batchHostPackages
+	} from '$lib/api';
 	import { formatDate, formatVersion, parseUrlPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import { Permission } from '$lib/types';
-	import type { HostResponse, HostPackageResponse } from '$lib/types';
+	import type { HostResponse, HostPackageResponse, BatchActionResponse } from '$lib/types';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
+	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
+	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 
 	const id = $derived(page.params.id as string);
 
@@ -39,8 +49,18 @@
 	let promoteExistingId: string = $state('');
 	let promoteShowAdvanced: boolean = $state(false);
 	let promoting: boolean = $state(false);
+	let selectedIds = new SvelteSet<string>();
+	let batchConfirmAction: string | null = $state(null);
+	let batchResult: BatchActionResponse | null = $state(null);
+	let batchSubmitting: boolean = $state(false);
 
 	const canManageSoftware = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
+
+	const batchActions: { id: string; label: string; destructive?: boolean }[] = [
+		{ id: 'enable', label: 'Enable' },
+		{ id: 'disable', label: 'Disable' },
+		{ id: 'delete', label: 'Delete', destructive: true }
+	];
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 	let unsubscribers: (() => void)[] = [];
@@ -162,6 +182,48 @@
 		}
 	}
 
+	function toggleSelectAll() {
+		if (selectedIds.size === packages.length) {
+			selectedIds.clear();
+		} else {
+			selectedIds.clear();
+			for (const pkg of packages) selectedIds.add(pkg.id);
+		}
+	}
+
+	function toggleSelect(pkgId: string) {
+		if (selectedIds.has(pkgId)) {
+			selectedIds.delete(pkgId);
+		} else {
+			selectedIds.add(pkgId);
+		}
+	}
+
+	function requestBatchAction(actionId: string) {
+		batchConfirmAction = actionId;
+	}
+
+	async function executeBatchAction() {
+		if (!batchConfirmAction || batchSubmitting) return;
+		const action = batchConfirmAction;
+		batchConfirmAction = null;
+		batchSubmitting = true;
+		try {
+			const response = await batchHostPackages(id, action, [...selectedIds]);
+			if (response.failed.length > 0) {
+				batchResult = response;
+			} else {
+				showSuccess(`${response.succeeded.length} package(s) ${action}d successfully.`);
+			}
+			selectedIds.clear();
+			await loadPackages(currentPage);
+		} catch (e) {
+			showError(e instanceof Error ? e.message : `Failed to ${action} packages`);
+		} finally {
+			batchSubmitting = false;
+		}
+	}
+
 	const hasActiveFilters = $derived(filterHasUpdate != null || filterCategory != null || filterSearch !== '');
 
 	function openPromoteModal(pkg: HostPackageResponse) {
@@ -250,6 +312,18 @@
 			<table class="table">
 				<thead>
 					<tr>
+						{#if canManageSoftware}
+							<th class="w-10">
+								<input
+									type="checkbox"
+									class="checkbox"
+									checked={packages.length > 0 && selectedIds.size === packages.length}
+									indeterminate={selectedIds.size > 0 && selectedIds.size < packages.length}
+									onchange={toggleSelectAll}
+									aria-label="Select all"
+								/>
+							</th>
+						{/if}
 						<th>Name</th>
 						<th>Installed</th>
 						<th>Latest</th>
@@ -263,6 +337,17 @@
 				<tbody>
 					{#each packages as pkg (pkg.id)}
 						<tr>
+							{#if canManageSoftware}
+								<td>
+									<input
+										type="checkbox"
+										class="checkbox"
+										checked={selectedIds.has(pkg.id)}
+										onchange={() => toggleSelect(pkg.id)}
+										aria-label="Select {pkg.name}"
+									/>
+								</td>
+							{/if}
 							<td class="font-medium">{pkg.name}</td>
 							<td title={pkg.installed_version ?? undefined}>{formatVersion(pkg.installed_version)}</td>
 							<td title={pkg.latest_version ?? undefined}>{formatVersion(pkg.latest_version)}</td>
@@ -318,7 +403,7 @@
 						</tr>
 					{:else}
 						<tr>
-							<td colspan={canManageSoftware ? 8 : 7} class="text-center py-8">
+							<td colspan={canManageSoftware ? 10 : 7} class="text-center py-8">
 								<p class="text-lg font-medium">
 									{#if hasActiveFilters}
 										No packages match the current filters
@@ -341,6 +426,38 @@
 		</div>
 
 		<Pagination {currentPage} {totalPages} {total} onPageChange={handlePageChange} />
+
+		{#if canManageSoftware && selectedIds.size > 0}
+			<BatchActionBar
+				selectedCount={selectedIds.size}
+				actions={batchActions}
+				onaction={requestBatchAction}
+				oncancel={() => selectedIds.clear()}
+			/>
+		{/if}
+
+		{#if batchConfirmAction}
+			<ConfirmDialog
+				title="Batch {batchConfirmAction}"
+				messagePrefix="Are you sure you want to {batchConfirmAction}"
+				entityName="{selectedIds.size} package(s)"
+				confirmLabel={batchSubmitting
+					? 'Processing...'
+					: batchConfirmAction === 'enable'
+						? 'Enable'
+						: batchConfirmAction === 'disable'
+							? 'Disable'
+							: 'Delete'}
+				confirmClass={batchConfirmAction === 'delete' ? 'preset-filled-error-500' : 'preset-filled-primary-500'}
+				confirmDisabled={batchSubmitting}
+				onconfirm={executeBatchAction}
+				oncancel={() => (batchConfirmAction = null)}
+			/>
+		{/if}
+
+		{#if batchResult}
+			<BatchResultDialog title="Batch Action Results" response={batchResult} onclose={() => (batchResult = null)} />
+		{/if}
 	{/if}
 {/if}
 
