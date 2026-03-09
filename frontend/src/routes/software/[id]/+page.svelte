@@ -243,9 +243,26 @@
 		}
 	}
 
+	function openConfigurePlugins() {
+		const host = resolveMenuHost();
+		closeMenu();
+		if (host) configureModal = host;
+	}
+
+	function openUnassignConfirm() {
+		const host = resolveMenuHost();
+		closeMenu();
+		if (host) confirmUnassign = host;
+	}
+
+	function menuCheckHostVersions() {
+		const host = resolveMenuHost();
+		closeMenu();
+		if (host) checkHostVersions(host.host_id);
+	}
+
 	async function checkHostVersions(hostId: string) {
 		if (!item || checkingHostId) return;
-		closeMenu();
 		checkingHostId = hostId;
 		try {
 			const result = await checkSoftwareItemVersionsHost(item.id, hostId);
@@ -262,10 +279,16 @@
 		}
 	}
 
-	function openUpdateModal(host: SoftwareItemHostSummary) {
+	function resolveMenuHost(): SoftwareItemHostSummary | null {
+		return openMenuHostId && item ? (item.hosts.find((h) => h.id === openMenuHostId) ?? null) : null;
+	}
+
+	function openUpdateModal(host?: SoftwareItemHostSummary) {
+		const resolved = host ?? resolveMenuHost();
 		closeMenu();
-		const toVersion = host.latest_version ?? item?.latest_version ?? '';
-		updateModal = { host, toVersion };
+		if (!resolved) return;
+		const toVersion = resolved.latest_version ?? item?.latest_version ?? '';
+		updateModal = { host: resolved, toVersion };
 	}
 
 	async function executeUpdate() {
@@ -625,7 +648,7 @@
 						class="w-full rounded-md px-3 py-2 text-left text-sm text-warning-600 dark:text-warning-400 hover:bg-surface-200 dark:hover:bg-surface-800"
 						role="menuitem"
 						tabindex="-1"
-						onclick={() => openUpdateModal(host)}
+						onclick={() => openUpdateModal()}
 					>
 						Update to {formatVersion(updateToVer)}
 					</button>
@@ -637,7 +660,7 @@
 					role="menuitem"
 					tabindex="-1"
 					disabled={checkingHostId === host.host_id}
-					onclick={() => checkHostVersions(host.host_id)}
+					onclick={menuCheckHostVersions}
 				>
 					{checkingHostId === host.host_id ? 'Checking…' : 'Check Versions'}
 				</button>
@@ -647,10 +670,7 @@
 					class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
 					role="menuitem"
 					tabindex="-1"
-					onclick={() => {
-						closeMenu();
-						configureModal = host;
-					}}
+					onclick={openConfigurePlugins}
 				>
 					Configure Plugins
 				</button>
@@ -660,10 +680,7 @@
 					class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 					role="menuitem"
 					tabindex="-1"
-					onclick={() => {
-						closeMenu();
-						confirmUnassign = host;
-					}}
+					onclick={openUnassignConfirm}
 				>
 					Unassign
 				</button>
