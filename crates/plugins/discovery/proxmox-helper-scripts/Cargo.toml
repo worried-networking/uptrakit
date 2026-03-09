@@ -9,7 +9,9 @@ publish = false
 
 [dependencies]
 uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
 rootcause = { workspace = true }
+thiserror = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

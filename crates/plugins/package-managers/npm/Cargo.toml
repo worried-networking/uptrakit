@@ -9,7 +9,10 @@ publish = false
 
 [dependencies]
 uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
+uptrakit-backoff = { workspace = true }
 rootcause = { workspace = true }
+thiserror = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
@@ -17,6 +20,7 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 time = { workspace = true }
 uptrakit-shared-types = { workspace = true, features = ["http-ssrf"] }
+tokio = { workspace = true, features = ["time"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
