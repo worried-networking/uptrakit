@@ -6749,6 +6749,77 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-notification-plugin-core"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "uptrakit-notification-plugin-email"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "lettre",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uptrakit-notification-plugin-core",
+]
+
+[[package]]
+name = "uptrakit-notification-plugin-registry"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "rootcause",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uptrakit-notification-plugin-core",
+ "uptrakit-notification-plugin-email",
+ "uptrakit-notification-plugin-telegram",
+ "uptrakit-notification-plugin-webhook",
+]
+
+[[package]]
+name = "uptrakit-notification-plugin-telegram"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "reqwest",
+ "rootcause",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uptrakit-notification-plugin-core",
+]
+
+[[package]]
+name = "uptrakit-notification-plugin-webhook"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "hmac",
+ "reqwest",
+ "rootcause",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tracing",
+ "uptrakit-notification-plugin-core",
+ "uptrakit-shared-types",
+ "url",
+]
+
+[[package]]
 name = "uptrakit-openapi-client"
 version = "0.0.1"
 dependencies = [
