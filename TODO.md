@@ -198,6 +198,10 @@ ______________________________________________________________________
   system services, software items, hosts, host packages, autodiscovery ignores, and plugin configs.
   Partial-success semantics (max 100 IDs). OpenAPI client methods and CLI `batch` subcommands for
   all resources. Extension framework `batch_action` flag on `ActionDef`.
+- **Host Tags** — Tenant-scoped tags for grouping and categorizing hosts. Full CRUD at
+  `/api/v1/host-tags`, replace-all assignment via `PUT /api/v1/hosts/{id}/tags`, batch delete,
+  auto-generated colors from curated palette, real-time SSE events, OpenAPI client, CLI
+  `host-tags` subcommands, and frontend tag management page with inline tag badges on host lists.
 
 ### Web API — Pending
 
