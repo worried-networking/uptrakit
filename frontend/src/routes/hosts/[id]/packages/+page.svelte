@@ -59,12 +59,19 @@
 
 	const canManageSoftware = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
 
-	const batchActions: { id: string; label: string; destructive?: boolean }[] = [
-		{ id: 'enable', label: 'Enable' },
-		{ id: 'disable', label: 'Disable' },
-		{ id: 'delete', label: 'Delete', destructive: true },
-		{ id: 'ignore', label: 'Ignore', destructive: true }
-	];
+	const batchActions = $derived.by(() => {
+		const selected = packages.filter((p) => selectedIds.has(p.id));
+		const acts: { id: string; label: string; destructive?: boolean }[] = [];
+		if (selected.some((p) => !p.enabled)) {
+			acts.push({ id: 'enable', label: 'Enable' });
+		}
+		if (selected.some((p) => p.enabled)) {
+			acts.push({ id: 'disable', label: 'Disable' });
+		}
+		acts.push({ id: 'delete', label: 'Delete', destructive: true });
+		acts.push({ id: 'ignore', label: 'Ignore', destructive: true });
+		return acts;
+	});
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 	let unsubscribers: (() => void)[] = [];

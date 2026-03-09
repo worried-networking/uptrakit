@@ -70,11 +70,13 @@
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
 
 	const batchActions = $derived.by(() => {
+		const selected = items.filter((i) => batchSelectedIds.has(i.id));
 		const acts: { id: string; label: string; destructive?: boolean }[] = [];
-		if (activeTab === 'pending') {
+		if (selected.some((i) => i.discovery_state === 'pending')) {
 			acts.push({ id: 'approve', label: 'Approve' });
 			acts.push({ id: 'ignore', label: 'Ignore', destructive: true });
-		} else {
+		}
+		if (selected.some((i) => i.update_available)) {
 			acts.push({ id: 'update-all', label: 'Update All' });
 		}
 		acts.push({ id: 'delete', label: 'Delete', destructive: true });
