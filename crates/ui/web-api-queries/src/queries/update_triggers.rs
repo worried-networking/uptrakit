@@ -106,6 +106,8 @@ pub struct TriggerUpdateParams<'a> {
     /// Optional release metadata supplied by the REST caller.
     /// `None` when triggered from MQTT or a scheduler.
     pub release_info: Option<ReleaseInfo>,
+    /// When true, the agent allocates a PTY and keeps stdin open for forwarding.
+    pub interactive: bool,
 }
 
 /// All data loaded and validated during [`validate_update_preconditions`].
@@ -158,6 +160,8 @@ pub struct DispatchUpdateParams {
     pub update_history_id: Uuid,
     pub to_version: String,
     pub release_info: Option<ReleaseInfo>,
+    /// When true, the agent allocates a PTY and keeps stdin open.
+    pub interactive: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -449,7 +453,7 @@ pub async fn dispatch_update_to_agent(
         post_update_hooks: resolved_hooks.post_update_hooks,
         release_info: enriched_release_info,
         timeout: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT,
-        interactive: false,
+        interactive: params.interactive,
     };
 
     let msg = ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
@@ -526,6 +530,7 @@ pub async fn trigger_update_for_host(
             update_history_id,
             to_version: params.to_version,
             release_info: params.release_info,
+            interactive: params.interactive,
         },
     )
     .await?;

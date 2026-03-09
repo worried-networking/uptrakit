@@ -428,6 +428,7 @@ pub async fn update_latest(params: UpdateLatestParams<'_>) -> Result<TriggerUpda
     let req = TriggerUpdateRequest {
         to_version: version,
         release_info: None,
+        interactive: false,
     };
 
     client

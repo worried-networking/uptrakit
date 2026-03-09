@@ -57,6 +57,7 @@ pub async fn trigger(params: TriggerParams<'_>) -> Result<TriggerUpdateResponse>
     let req = TriggerUpdateRequest {
         to_version: params.to_version.to_string(),
         release_info,
+        interactive: false,
     };
 
     client

@@ -245,6 +245,9 @@ pub struct TriggerUpdateRequest {
     pub to_version: String,
     /// Optional release information (for plugins that need it).
     pub release_info: Option<ReleaseInfoRequest>,
+    /// When true, the agent allocates a PTY and keeps stdin open for forwarding.
+    #[serde(default)]
+    pub interactive: bool,
 }
 
 /// Response when triggering a software update.
@@ -558,6 +561,7 @@ mod tests {
         let req = TriggerUpdateRequest {
             to_version: "2.0.0".to_string(),
             release_info: None,
+            interactive: false,
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
         let deserialized: TriggerUpdateRequest =
@@ -579,6 +583,7 @@ mod tests {
                     size: Some(1024),
                 }],
             }),
+            interactive: false,
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
         let deserialized: TriggerUpdateRequest =
