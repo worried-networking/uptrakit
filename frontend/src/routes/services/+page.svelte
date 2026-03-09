@@ -1,17 +1,29 @@
 <script lang="ts">
 	import { onMount, onDestroy, untrack } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
-	import { getServices, approveService, rejectService, deleteService, mergeService, updateService } from '$lib/api';
-	import type { ServiceResponse } from '$lib/types';
+	import {
+		getServices,
+		approveService,
+		rejectService,
+		deleteService,
+		mergeService,
+		updateService,
+		batchServices
+	} from '$lib/api';
+	import type { ServiceResponse, BatchActionResponse } from '$lib/types';
 	import { Permission } from '$lib/types';
 	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
+	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
+	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
+	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 
 	const CAPABILITY_FILTER_VALUES = ['all', 'software_discovery', 'ssh_remote'] as const;
 	type CapabilityFilter = (typeof CAPABILITY_FILTER_VALUES)[number];
@@ -37,7 +49,24 @@
 		parseUrlParam(page.url, 'capability', CAPABILITY_FILTER_VALUES, 'all')
 	);
 
+	let selectedIds = new SvelteSet<string>();
+	let batchConfirmAction: string | null = $state(null);
+	let batchResult: BatchActionResponse | null = $state(null);
+
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageAgents) ?? false);
+
+	const batchActions = $derived.by(() => {
+		const acts: { id: string; label: string; destructive?: boolean }[] = [];
+		const selected = services.filter((s) => selectedIds.has(s.id));
+		if (selected.some((s) => s.status === 'pending')) {
+			acts.push({ id: 'approve', label: 'Approve' });
+			acts.push({ id: 'reject', label: 'Reject', destructive: true });
+		}
+		if (selected.some((s) => s.status !== 'deactivated')) {
+			acts.push({ id: 'deactivate', label: 'Deactivate', destructive: true });
+		}
+		return acts;
+	});
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 	let unsubscribers: (() => void)[] = [];
@@ -235,6 +264,48 @@
 		}
 	}
 
+	function toggleSelectAll() {
+		if (selectedIds.size === services.length) {
+			selectedIds.clear();
+		} else {
+			selectedIds.clear();
+			for (const s of services) selectedIds.add(s.id);
+		}
+	}
+
+	function toggleSelect(id: string) {
+		if (selectedIds.has(id)) {
+			selectedIds.delete(id);
+		} else {
+			selectedIds.add(id);
+		}
+	}
+
+	function requestBatchAction(actionId: string) {
+		batchConfirmAction = actionId;
+	}
+
+	async function executeBatchAction() {
+		if (!batchConfirmAction || submitting) return;
+		const action = batchConfirmAction;
+		batchConfirmAction = null;
+		submitting = true;
+		try {
+			const response = await batchServices(action, [...selectedIds]);
+			if (response.failed.length > 0) {
+				batchResult = response;
+			} else {
+				showSuccess(`${response.succeeded.length} service(s) ${action}d successfully.`);
+			}
+			selectedIds.clear();
+			await loadServices(currentPage);
+		} catch (e) {
+			showError(e instanceof Error ? e.message : `Failed to ${action} services`);
+		} finally {
+			submitting = false;
+		}
+	}
+
 	function handleWindowClick(event: MouseEvent) {
 		if (openMenuId && !(event.target as HTMLElement).closest('.actions-menu')) {
 			closeMenu();
@@ -285,6 +356,18 @@
 		<table class="table">
 			<thead>
 				<tr>
+					{#if canManage}
+						<th class="w-10">
+							<input
+								type="checkbox"
+								class="checkbox"
+								checked={services.length > 0 && selectedIds.size === services.length}
+								indeterminate={selectedIds.size > 0 && selectedIds.size < services.length}
+								onchange={toggleSelectAll}
+								aria-label="Select all"
+							/>
+						</th>
+					{/if}
 					<th>Name</th>
 					<th>Label</th>
 					<th>Hostname</th>
@@ -299,6 +382,17 @@
 			<tbody>
 				{#each services as service (service.id)}
 					<tr>
+						{#if canManage}
+							<td>
+								<input
+									type="checkbox"
+									class="checkbox"
+									checked={selectedIds.has(service.id)}
+									onchange={() => toggleSelect(service.id)}
+									aria-label="Select {service.friendly_name}"
+								/>
+							</td>
+						{/if}
 						<td>{service.friendly_name}</td>
 						<td>
 							<span class="badge preset-tonal">{service.service_label}</span>
@@ -336,7 +430,7 @@
 					</tr>
 				{:else}
 					<tr>
-						<td colspan={canManage ? 7 : 6} class="text-center py-8">
+						<td colspan={canManage ? 9 : 6} class="text-center py-8">
 							<p class="text-lg font-medium">No services registered yet</p>
 							<p class="mt-1 text-sm text-surface-500">
 								Agents, MQTT services, SSH agents, and schedulers appear here when they enroll with the controller.
@@ -349,6 +443,38 @@
 	</div>
 
 	<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadServices} />
+
+	{#if canManage && selectedIds.size > 0}
+		<BatchActionBar
+			selectedCount={selectedIds.size}
+			actions={batchActions}
+			onaction={requestBatchAction}
+			oncancel={() => selectedIds.clear()}
+		/>
+	{/if}
+
+	{#if batchConfirmAction}
+		<ConfirmDialog
+			title="Batch {batchConfirmAction}"
+			messagePrefix="Are you sure you want to {batchConfirmAction}"
+			entityName="{selectedIds.size} service(s)"
+			confirmLabel={submitting
+				? 'Processing...'
+				: batchConfirmAction === 'approve'
+					? 'Approve'
+					: batchConfirmAction === 'reject'
+						? 'Reject'
+						: 'Deactivate'}
+			confirmClass={batchConfirmAction === 'approve' ? 'preset-filled-success-500' : 'preset-filled-error-500'}
+			confirmDisabled={submitting}
+			onconfirm={executeBatchAction}
+			oncancel={() => (batchConfirmAction = null)}
+		/>
+	{/if}
+
+	{#if batchResult}
+		<BatchResultDialog title="Batch Action Results" response={batchResult} onclose={() => (batchResult = null)} />
+	{/if}
 
 	{#if openMenuId}
 		{@const service = services.find((s) => s.id === openMenuId)}
