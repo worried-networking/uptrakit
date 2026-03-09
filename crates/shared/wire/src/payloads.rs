@@ -756,6 +756,8 @@ pub struct MqttSoftwareStateHostEntry {
     pub host_id: Uuid,
     /// Human-readable hostname.
     pub hostname: String,
+    /// User-defined display name for the host.
+    pub friendly_name: String,
     /// Currently installed version, if known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
@@ -807,6 +809,8 @@ pub struct MqttHostPackageHostState {
     pub host_id: Uuid,
     /// Human-readable hostname.
     pub hostname: String,
+    /// User-defined display name for the host.
+    pub friendly_name: String,
     /// Count of packages where `installed_version != latest_version` (both known).
     pub pending_count: u32,
     /// Count of packages where `update_category = "security"` AND versions differ.

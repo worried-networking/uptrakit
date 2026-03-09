@@ -1043,6 +1043,7 @@ impl WireValidate for MqttSoftwareStateItem {
 impl WireValidate for MqttSoftwareStateHostEntry {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.hostname, MAX_SHORT_STRING_LEN, "hostname")?;
+        check_string_len(&self.friendly_name, MAX_SHORT_STRING_LEN, "friendly_name")?;
         check_opt_string_len(
             &self.installed_version,
             MAX_SHORT_STRING_LEN,
@@ -1058,6 +1059,7 @@ impl WireValidate for MqttSoftwareStateHostEntry {
 impl WireValidate for MqttHostPackageHostState {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.hostname, MAX_SHORT_STRING_LEN, "hostname")?;
+        check_string_len(&self.friendly_name, MAX_SHORT_STRING_LEN, "friendly_name")?;
         Ok(())
     }
 }

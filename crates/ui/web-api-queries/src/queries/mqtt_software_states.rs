@@ -161,6 +161,7 @@ pub async fn load_software_states_for_tenant(
                         Some(MqttSoftwareStateHostEntry {
                             host_id: host.id,
                             hostname: host.hostname.clone(),
+                            friendly_name: host.friendly_name.clone(),
                             installed_version: link.installed_version.clone(),
                             latest_version: link.latest_version.clone(),
                             update_available,
@@ -317,6 +318,7 @@ pub async fn load_host_package_host_states_for_tenant(
         results.push(MqttHostPackageHostState {
             host_id,
             hostname: host.hostname.clone(),
+            friendly_name: host.friendly_name.clone(),
             pending_count,
             security_pending_count,
             total_count,

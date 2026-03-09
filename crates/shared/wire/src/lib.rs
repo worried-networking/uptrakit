@@ -2476,6 +2476,7 @@ mod tests {
         let state = MqttHostPackageHostState {
             host_id: TEST_UUID_1,
             hostname: "myserver.local".to_string(),
+            friendly_name: "My Server".to_string(),
             pending_count: 3,
             security_pending_count: 1,
             total_count: 42,
@@ -2502,6 +2503,7 @@ mod tests {
             host_package_hosts: vec![MqttHostPackageHostState {
                 host_id: TEST_UUID_2,
                 hostname: "host1".to_string(),
+                friendly_name: "Host 1".to_string(),
                 pending_count: 5,
                 security_pending_count: 2,
                 total_count: 100,

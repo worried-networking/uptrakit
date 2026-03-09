@@ -125,6 +125,7 @@ pub async fn load_software_states_for_tenant(
                         Some(MqttSoftwareStateHostEntry {
                             host_id: host.id,
                             hostname: host.hostname.clone(),
+                            friendly_name: host.friendly_name.clone(),
                             installed_version: link.installed_version.clone(),
                             latest_version: link.latest_version.clone(),
                             update_available,
