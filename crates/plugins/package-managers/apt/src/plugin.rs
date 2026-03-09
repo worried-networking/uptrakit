@@ -33,10 +33,9 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
         return Err("package_identifier must not exceed 64 characters".to_string());
     }
 
-    // Must start with [a-z0-9].
-    let Some(first) = value.chars().next() else {
-        return Err("package_identifier must not be empty".to_string());
-    };
+    // Must start with [a-z0-9]. The empty check above guarantees chars().next()
+    // returns Some, so the unwrap_or path is unreachable in practice.
+    let first = value.chars().next().unwrap_or('\0');
     if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
         return Err(format!(
             "package_identifier must start with a lowercase letter or digit, found '{first}'"
