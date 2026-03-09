@@ -118,14 +118,14 @@ cd frontend && npm run build                                 # Production build
 
 ## Documentation
 
-All Markdown files (`.md`) are linted with `markdownlint`. Ensure that `markdownlint` passes without errors.
-**Critically**, you must address all warnings and errors; do not silence them by adding exceptions to
-`.markdownlintignore` or `.markdownlint.json` unless explicitly approved.
+Run markdownlint whenever any `.md` files are added or modified:
 
 ```sh
 markdownlint --config .markdownlint.json '**/*.md'
 ```
 
+All warnings and errors must be resolved; do not silence them by adding exceptions to
+`.markdownlintignore` or `.markdownlint.json` unless explicitly approved.
 The `.markdownlintignore` file excludes `node_modules/`, `target/`, `.claude/`, and `CODEREVIEW.md`.
 
-CI runs these same checks. A PR that fails any of them will not merge.
+CI runs markdownlint on every PR. A PR that fails any quality gate will not merge.

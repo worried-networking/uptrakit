@@ -216,13 +216,14 @@ build environments.
 #### AI execution guidance
 
 - Always run quality gates relevant to modified areas before finalizing.
-- **Always lint Markdown** with `markdownlint --config .markdownlint.json '**/*.md'` for all changes (not just docs).
+- **Lint Markdown when `.md` files are changed** with `markdownlint --config .markdownlint.json '**/*.md'`.
   The `.markdownlintignore` file excludes `node_modules/`, `target/`, `.claude/`, and `CODEREVIEW.md`.
   Do not add exceptions to `.markdownlintignore` or `.markdownlint.json` without explicit approval.
 - Scope-based execution is allowed for local iteration:
-  - frontend-only changes: run frontend checks (`npm run lint`, `npm run format:check`, `npm run check`, `npm run build`) and markdownlint.
-  - Rust/backend-only changes: run Rust checks/tests/linters and markdownlint.
-  - mixed changes: run both Rust and frontend gates plus markdownlint.
+  - frontend-only changes: run frontend checks (`npm run lint`, `npm run format:check`, `npm run check`, `npm run build`).
+  - Rust/backend-only changes: run Rust checks/tests/linters.
+  - markdown changes: run `markdownlint --config .markdownlint.json '**/*.md'`.
+  - mixed changes: run all relevant gates for every area touched.
 - If anything related to reverse proxy behavior changes, run ignored reverse proxy integration tests:
   - `cargo test -p uptrakit-integration-tests --test reverse_proxy -- --ignored`
 - Treat the reverse proxy trigger list broadly, including (non-exhaustive):
