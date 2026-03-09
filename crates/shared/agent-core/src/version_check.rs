@@ -414,6 +414,56 @@ pub async fn batch_check_versions(
         .collect()
 }
 
+/// Run `op` with exponential backoff retry on transient plugin errors.
+///
+/// Retries up to `max_retries` times when `PluginError::is_retryable()` returns
+/// `true`. On each transient failure, sleeps an exponentially increasing delay
+/// and logs a debug message. Returns the first successful result or an error
+/// string if all attempts fail.
+async fn run_with_retry<'a, T>(
+    label: &'static str,
+    max_retries: u32,
+    mut op: impl FnMut() -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = uptrakit_plugin_infrastructure_core::Result<T>>
+                + Send
+                + 'a,
+        >,
+    >,
+) -> Result<T, String> {
+    let mut backoff = Backoff::new(RETRY_BASE_DELAY, RETRY_MAX_DELAY);
+    let mut last_error = None;
+
+    for attempt in 0..=max_retries {
+        match op().await {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                let retryable = e.current_context().is_retryable() && attempt < max_retries;
+                if retryable {
+                    let delay = backoff.next_delay();
+                    tracing::debug!(
+                        attempt = attempt + 1,
+                        max_retries,
+                        delay_ms = delay.as_millis() as u64,
+                        error = %e,
+                        label,
+                        "transient error, retrying",
+                    );
+                    tokio::time::sleep(delay).await;
+                    last_error = Some(e);
+                    continue;
+                }
+                return Err(format!("{label} failed: {e}"));
+            }
+        }
+    }
+
+    Err(format!(
+        "{label} failed: {}",
+        last_error.expect("last_error is set when loop exhausts retries")
+    ))
+}
+
 /// Detect the installed version using a specific plugin assignment.
 ///
 /// Retries up to [`MAX_RETRIES`] times when the error is transient
@@ -438,45 +488,21 @@ async fn detect_installed(
             .await
             .map_err(|e| e.to_string())?;
 
-    let mut backoff = Backoff::new(RETRY_BASE_DELAY, RETRY_MAX_DELAY);
-    let mut last_error = None;
-
-    for attempt in 0..=MAX_RETRIES {
-        match plugin
-            .detect_installed_version(&assignment.package_identifier)
-            .await
-        {
-            Ok(Some(version)) => {
-                tracing::debug!(version = %version, "installed version detected");
-                return Ok(Some(version.to_string()));
-            }
-            Ok(None) => {
-                tracing::debug!("no installed version detected");
-                return Ok(None);
-            }
-            Err(e) => {
-                let retryable = e.current_context().is_retryable() && attempt < MAX_RETRIES;
-                if retryable {
-                    let delay = backoff.next_delay();
-                    tracing::debug!(
-                        attempt = attempt + 1,
-                        max_retries = MAX_RETRIES,
-                        delay_ms = delay.as_millis() as u64,
-                        error = %e,
-                        "transient detect error, retrying"
-                    );
-                    tokio::time::sleep(delay).await;
-                    last_error = Some(e);
-                    continue;
-                }
-                return Err(format!("detection failed: {e}"));
-            }
+    let pkg = &assignment.package_identifier;
+    match run_with_retry("detect_installed_version", MAX_RETRIES, || {
+        Box::pin(plugin.detect_installed_version(pkg))
+    })
+    .await
+    {
+        Ok(Some(version)) => {
+            tracing::debug!(version = %version, "installed version detected");
+            Ok(Some(version.to_string()))
         }
-    }
-
-    match last_error {
-        Some(e) => Err(format!("detection failed: {e}")),
-        None => Err("detection failed: unknown error".to_string()),
+        Ok(None) => {
+            tracing::debug!("no installed version detected");
+            Ok(None)
+        }
+        Err(e) => Err(e),
     }
 }
 
@@ -505,43 +531,24 @@ async fn fetch_latest(
             .await
             .map_err(|e| e.to_string())?;
 
-    let mut backoff = Backoff::new(RETRY_BASE_DELAY, RETRY_MAX_DELAY);
-    let mut last_error = None;
-
-    for attempt in 0..=MAX_RETRIES {
-        match plugin.fetch_releases(&assignment.package_identifier).await {
-            Ok(releases) => {
-                tracing::debug!(count = releases.len(), "releases fetched");
-                return Ok(releases.first().map(|r| {
-                    let category = r.category.clone().unwrap_or_default();
-                    (r.version.to_string(), category)
-                }));
-            }
-            Err(e) => {
-                let retryable = e.current_context().is_retryable() && attempt < MAX_RETRIES;
-                if retryable {
-                    let delay = backoff.next_delay();
-                    tracing::debug!(
-                        attempt = attempt + 1,
-                        max_retries = MAX_RETRIES,
-                        delay_ms = delay.as_millis() as u64,
-                        error = %e,
-                        "transient fetch error, retrying"
-                    );
-                    tokio::time::sleep(delay).await;
-                    last_error = Some(e);
-                    continue;
-                }
-                tracing::debug!(error = %e, "failed to fetch latest version from plugin");
-                return Err(format!("fetch_releases failed: {e}"));
-            }
+    let pkg = &assignment.package_identifier;
+    let releases = match run_with_retry("fetch_releases", MAX_RETRIES, || {
+        Box::pin(plugin.fetch_releases(pkg))
+    })
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::debug!(error = %e, "failed to fetch latest version from plugin");
+            return Err(e);
         }
-    }
+    };
 
-    match last_error {
-        Some(e) => Err(format!("fetch_releases failed: {e}")),
-        None => Err("fetch_releases failed: unknown error".to_string()),
-    }
+    tracing::debug!(count = releases.len(), "releases fetched");
+    Ok(releases.first().map(|r| {
+        let category = r.category.clone().unwrap_or_default();
+        (r.version.to_string(), category)
+    }))
 }
 
 #[cfg(test)]
