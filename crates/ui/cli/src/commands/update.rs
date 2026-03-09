@@ -31,6 +31,7 @@ pub struct TriggerParams<'a> {
     pub token: Option<&'a str>,
     pub insecure: bool,
     pub request_timeout: Option<std::time::Duration>,
+    pub interactive: bool,
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────
@@ -57,7 +58,7 @@ pub async fn trigger(params: TriggerParams<'_>) -> Result<TriggerUpdateResponse>
     let req = TriggerUpdateRequest {
         to_version: params.to_version.to_string(),
         release_info,
-        interactive: false,
+        interactive: params.interactive,
     };
 
     client
