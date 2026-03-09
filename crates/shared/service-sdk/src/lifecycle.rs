@@ -505,7 +505,14 @@ async fn run_authenticated_with_reconnect(
         )
         .await
         {
-            Ok(outcome) => outcome,
+            Ok(outcome) => {
+                // The event loop connected and ran successfully for some
+                // period.  Reset backoff so the next reconnect starts from
+                // the base delay instead of continuing to grow from a
+                // previous failure streak.
+                reconnect_backoff.reset();
+                outcome
+            }
             Err(e) => match e.current_context() {
                 // Transient network errors (broken pipe, connection reset, DNS
                 // failure, send timeout, etc.) are recoverable — reconnect with
@@ -548,7 +555,7 @@ async fn run_authenticated_with_reconnect(
         match outcome {
             LoopOutcome::Shutdown => return Ok(()),
             LoopOutcome::Reconnect => {
-                reconnect_backoff.reset();
+                // backoff already reset above after Ok(outcome)
                 tracing::info!("reconnecting with new certificate");
                 tokio::select! {
                     () = tokio::time::sleep(CERT_RECONNECT_DELAY) => {}
