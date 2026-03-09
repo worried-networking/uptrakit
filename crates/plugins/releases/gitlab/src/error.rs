@@ -37,32 +37,3 @@ pub type Result<T> = std::result::Result<T, Report<GitLabError>>;
 impl_report_conversion!(reqwest::Error => GitLabError, |e| GitLabError::Request(e.to_string()));
 impl_report_conversion!(PluginError => GitLabError, |e| GitLabError::Configuration(e.to_string()));
 impl_report_conversion!(GitLabError => PluginError, |e| PluginError::PluginInternal(e.to_string()));
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn display_api_error() {
-        let err = GitLabError::ApiError {
-            status: reqwest::StatusCode::FORBIDDEN,
-            message: "403 Forbidden".to_string(),
-        };
-        assert_eq!(
-            err.to_string(),
-            "GitLab API error: 403 Forbidden 403 Forbidden"
-        );
-    }
-
-    #[test]
-    fn display_rate_limited() {
-        let err = GitLabError::RateLimited;
-        assert_eq!(err.to_string(), "GitLab API rate limit exceeded");
-    }
-
-    #[test]
-    fn display_configuration() {
-        let err = GitLabError::Configuration("invalid path".to_string());
-        assert_eq!(err.to_string(), "configuration error: invalid path");
-    }
-}

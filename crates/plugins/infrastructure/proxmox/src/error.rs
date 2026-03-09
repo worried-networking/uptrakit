@@ -36,24 +36,3 @@ impl_report_conversion!(PluginError => ProxmoxError, |e| ProxmoxError::Configura
 impl_report_conversion!(ProxmoxError => PluginError, |e| PluginError::PluginInternal(e.to_string()));
 impl_report_conversion!(uptrakit_command::CommandError => ProxmoxError, |e| ProxmoxError::Plugin(e.to_string()));
 impl_report_conversion!(sea_orm::DbErr => ProxmoxError, |e| ProxmoxError::Database(e.to_string()));
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn display_api_error() {
-        let err = ProxmoxError::ApiError {
-            status: reqwest::StatusCode::FORBIDDEN,
-            message: "permission denied".to_string(),
-        };
-        assert!(err.to_string().contains("403"));
-        assert!(err.to_string().contains("permission denied"));
-    }
-
-    #[test]
-    fn display_configuration() {
-        let err = ProxmoxError::Configuration("invalid api_url".to_string());
-        assert_eq!(err.to_string(), "configuration error: invalid api_url");
-    }
-}

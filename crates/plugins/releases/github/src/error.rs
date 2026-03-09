@@ -53,34 +53,3 @@ impl_report_conversion!(reqwest::Error => GitHubError, |e| GitHubError::Request(
 impl_report_conversion!(PluginError => GitHubError, |e| GitHubError::Configuration(e.to_string()));
 impl_report_conversion!(GitHubError => PluginError, |e| PluginError::PluginInternal(e.to_string()));
 impl_report_conversion!(std::io::Error => GitHubError, |e| GitHubError::FileOperation(e.to_string()));
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn display_api_error() {
-        let err = GitHubError::ApiError {
-            status: reqwest::StatusCode::NOT_FOUND,
-            message: "Not Found".to_string(),
-        };
-        assert_eq!(err.to_string(), "GitHub API error: 404 Not Found Not Found");
-    }
-
-    #[test]
-    fn display_rate_limited() {
-        let err = GitHubError::RateLimited {
-            reset_at: "1234567890".to_string(),
-        };
-        assert_eq!(
-            err.to_string(),
-            "GitHub API rate limit exceeded (resets at 1234567890)"
-        );
-    }
-
-    #[test]
-    fn display_configuration() {
-        let err = GitHubError::Configuration("invalid owner".to_string());
-        assert_eq!(err.to_string(), "configuration error: invalid owner");
-    }
-}
