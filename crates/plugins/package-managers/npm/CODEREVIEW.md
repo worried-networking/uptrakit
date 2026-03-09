@@ -44,10 +44,6 @@ registry URL, which limits private registry support.
 
 ### Issues
 
-**[MEDIUM]** `plugin.rs:134-142` -- The registry URL is hardcoded to
-`https://registry.npmjs.org`. This prevents use with private npm registries (Verdaccio,
-GitHub Packages, Artifactory). The URL should be configurable via `NpmConfig`.
-
 **[LOW]** `plugin.rs:156-160` -- The `reqwest::Client` is constructed per-plugin instance
 rather than being injected. This prevents connection pool sharing across multiple npm
 plugin instances and makes the HTTP layer harder to mock in integration tests.
@@ -123,11 +119,6 @@ pattern.
 
 ### Issues
 
-**[MEDIUM]** `plugin.rs:411-421` -- No retry logic exists for transient HTTP failures
-(network timeouts, 429 rate limits, 5xx errors). A single failed request to the npm
-registry causes the entire release fetch to fail. Implementing retry with exponential
-backoff for retriable status codes would improve reliability.
-
 **[LOW]** `plugin.rs:359-367` -- Host compatibility detection uses `which npm` which
 may not be available on all systems (e.g., minimal containers). Using `command -v npm`
 would be more portable and POSIX-compliant.
@@ -168,10 +159,6 @@ would aid future maintainers.
   compatibility when new configuration options are added.
 
 ### Issues
-
-**[MEDIUM]** `plugin.rs:134-142` -- The hardcoded `https://registry.npmjs.org` base URL
-cannot be overridden. Adding a `registry_url: Option<String>` to `NpmConfig` with a
-default fallback would enable private registry support without breaking existing configs.
 
 **[LOW]** `plugin.rs:24` -- The `PRERELEASE_DIST_TAGS` list is a compile-time constant.
 Moving it to `NpmConfig` as an optional override would allow users to track custom
@@ -220,15 +207,7 @@ streamed would mirror the pattern used by the APT plugin's `execute_update` test
 
 ### Issues
 
-**[MEDIUM]** The npm plugin does not define a dedicated `NpmError` enum. It uses
-`PluginError` from infrastructure-core directly, unlike the six other plugins (GitHub,
-Docker, GitLab, Forgejo, Homebrew, APT) that each define a `<PluginName>Error`. This means
-npm errors cannot carry plugin-specific context variants and cannot be individually matched
-by consumers. The preferred pattern is to introduce an `NpmError` enum consistent with all
-other plugins, even if it initially mirrors `PluginError`. This also makes
-`impl_report_conversion!` usage uniform. See `infrastructure/registry/CODEREVIEW.md`
-Consistency section for the full cross-plugin finding. (Confirmed by Consistency parallel
-review.)
+No consistency issues found.
 
 ## Maintainability
 

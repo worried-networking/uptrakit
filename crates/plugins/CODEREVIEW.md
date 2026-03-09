@@ -84,17 +84,7 @@ No high availability issues found.
 
 ### Issues
 
-**[MEDIUM]** `crates/plugins/package-managers/mas/src/plugin.rs:143` -- `#[allow(dead_code)]`
-on the `config` field of `MasPlugin`. The comment says "never read after construction." Per the
-project coding standard, no `#[allow(clippy::...)]` or `#[allow(dead_code)]` suppressions are
-approved. The field should be removed, prefixed with `_config`, or given a trivial accessor
-method to eliminate the suppression. (Confirmed by Coding Standards parallel review, finding #6.)
-
-**[LOW]** `crates/plugins/infrastructure/proxmox/src/client.rs:73` -- `.as_u16()` used in a
-`tracing::trace!` structured field (`status = status.as_u16()`). The coding standard approves
-`.as_u16()` only inside serde serialization helpers. Tracing structured fields should use
-`status = %status` or `status = ?status` instead. (Confirmed by Coding Standards parallel
-review, finding #9.)
+No coding standards issues found.
 
 ## Extensibility
 
@@ -124,43 +114,13 @@ relies on `CommandExecutor` dependency injection, making it straightforward to t
 configured command string is passed correctly to the executor would prevent regressions if
 command-building logic changes.
 
-**[MEDIUM]** 22+ `thiserror` Display format tests across plugin error modules violate the
-project testing philosophy documented in `docs/development/testing.md`. These tests construct
-an error variant with known input and assert the `to_string()` output matches the
-`#[error("...")]` format string. They test `thiserror`'s formatting behavior, not application
-logic. Affected files:
-
-- `crates/plugins/releases/docker/src/error.rs` (lines 60-138) -- 10 tests
-- `crates/plugins/releases/github/src/error.rs` (lines 46-68) -- 3 tests
-- `crates/plugins/releases/gitlab/src/error.rs` (lines 46-64) -- 3 tests
-- `crates/plugins/releases/forgejo/src/error.rs` (lines 46-64) -- 3 tests
-- `crates/plugins/infrastructure/proxmox/src/error.rs` (lines 44-54) -- 2 tests
-
-Per the testing philosophy, these tests should be removed because they test upstream crate
-behavior (`thiserror` formatting), not application logic. Tests for custom `Display`
-implementations (where `Display` delegates to hand-written `as_str()` matches) are internal
-logic tests and correctly remain. (Confirmed by Tests parallel review, finding 2.1.)
+No test issues found.
 
 ---
 
 ## Cross-Cutting HTTP Reliability
 
 ### Issues
-
-**[MEDIUM]** `crates/plugins/package-managers/npm/src/plugin.rs:411-421` -- The npm plugin
-has no retry logic for transient HTTP failures (network timeout, 429 rate limit, 5xx server
-error). A single failed request to the npm registry causes the entire release fetch to fail.
-The same gap exists at [LOW] severity in the release plugins: `releases/github`, `releases/forgejo`,
-and `releases/gitlab` all make HTTP calls with no retry on `is_connect()` or `is_timeout()`
-errors. The workspace `uptrakit-backoff` crate provides the `Backoff` primitive needed for
-a consistent retry implementation. Per-crate details are in the respective `CODEREVIEW.md`
-files (`npm`: [MEDIUM], `github`/`forgejo`/`gitlab`: [LOW]).
-
-**[MEDIUM]** `crates/plugins/package-managers/npm/src/plugin.rs:134-142` -- The npm plugin
-hardcodes the registry URL to `https://registry.npmjs.org`, preventing use with private
-registries (Verdaccio, GitHub Packages, Artifactory). The URL should be an optional
-`NpmConfig` field defaulting to the public registry. Per-crate detail in
-`crates/plugins/package-managers/npm/CODEREVIEW.md`.
 
 ---
 

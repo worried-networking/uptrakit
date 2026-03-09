@@ -30,14 +30,6 @@ dispatch table coverage.
 
 ### Issues
 
-**[MEDIUM]** `src/registry.rs` (approximately line 510) -- `handle_extension_action()` uses
-hardcoded string prefix routing (`extension_id.starts_with("proxmox.")`) to dispatch extension
-actions to specific plugins. This is a hidden coupling point that does not participate in the
-`register_plugins!` macro. Adding a new plugin with extension support requires manually adding
-an `if` branch here, which is easy to forget and contradicts the macro-driven design. The
-routing should be declarative (e.g., an extension prefix field in the `register_plugins!`
-invocation) or derived from plugin metadata. (Confirmed by Extensibility parallel review.)
-
 **[LOW]** All 11 plugin crates compile into the single `plugin-infrastructure-registry` crate
 unconditionally. There is no way to build a controller with only a subset of plugins. For
 deployments that only use GitHub + APT, the Docker, npm, Homebrew, Forgejo, GitLab, MAS, and
@@ -142,21 +134,7 @@ adapted for the `Other(String)` pattern could reduce this to a single declaratio
 
 ### Issues
 
-**[MEDIUM]** `crates/plugins/package-managers/npm/src/plugin.rs` and
-`crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs`
-(vs `crates/plugins/releases/github/src/error.rs:8`,
-`crates/plugins/releases/docker/src/error.rs:8`,
-`crates/plugins/releases/gitlab/src/error.rs:8`,
-`crates/plugins/releases/forgejo/src/error.rs:8`,
-`crates/plugins/package-managers/homebrew/src/error.rs:7`,
-`crates/plugins/package-managers/apt/src/error.rs:7`) -- Six plugins define a dedicated
-`<PluginName>Error` enum (e.g., `GitHubError`, `DockerError`, `AptError`, `HomebrewError`).
-The NPM and Proxmox-helper-scripts plugins do not; they use `PluginError` from the
-infrastructure core directly. This means NPM and Proxmox errors cannot carry plugin-specific
-context variants and cannot be individually matched by consumers. Preferred pattern: introduce
-`NpmError` and `ProxmoxHelperScriptsError` enums consistent with all other plugins, even if
-they initially mirror `PluginError`. The dedicated types also make `impl_report_conversion!`
-usage uniform across all plugins.
+No consistency issues found.
 
 ## Tests
 

@@ -177,13 +177,7 @@ construction and output parsing without requiring a Proxmox host.
 
 ### Issues
 
-**[MEDIUM]** The Proxmox Helper Scripts plugin does not define a dedicated
-`ProxmoxHelperScriptsError` enum. Like the npm plugin, it uses `PluginError` from
-infrastructure-core directly, unlike the six other plugins that each define a
-`<PluginName>Error`. The preferred pattern is to introduce a dedicated error enum consistent
-with all other plugins, even if it initially mirrors `PluginError`. See
-`infrastructure/registry/CODEREVIEW.md` Consistency section for the full cross-plugin finding.
-(Confirmed by Consistency parallel review.)
+No consistency issues found.
 
 ## Maintainability
 
