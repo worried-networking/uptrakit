@@ -74,6 +74,8 @@
 		if (activeTab === 'pending') {
 			acts.push({ id: 'approve', label: 'Approve' });
 			acts.push({ id: 'ignore', label: 'Ignore', destructive: true });
+		} else {
+			acts.push({ id: 'update-all', label: 'Update All' });
 		}
 		acts.push({ id: 'delete', label: 'Delete', destructive: true });
 		return acts;
@@ -362,6 +364,32 @@
 				} else {
 					showSuccess(`${succeeded.length} item(s) will be ignored in future autodiscovery runs.`);
 				}
+			} else if (action === 'update-all') {
+				const itemsWithUpdates = items.filter((i) => batchSelectedIds.has(i.id) && i.update_available);
+				if (itemsWithUpdates.length === 0) {
+					showSuccess('None of the selected items have updates available.');
+					batchSelectedIds.clear();
+					submitting = false;
+					return;
+				}
+				let totalTriggered = 0;
+				let totalFailed = 0;
+				for (const softwareItem of itemsWithUpdates) {
+					try {
+						const detail = await getSoftwareItem(softwareItem.id);
+						const targets = detail.hosts.filter((h) => h.update_available && h.latest_version);
+						const results = await Promise.allSettled(
+							targets.map((h) => triggerSoftwareUpdate(softwareItem.id, h.host_id, { to_version: h.latest_version! }))
+						);
+						totalTriggered += results.filter((r) => r.status === 'fulfilled').length;
+						totalFailed += results.filter((r) => r.status === 'rejected').length;
+					} catch {
+						totalFailed++;
+					}
+				}
+				if (totalTriggered > 0)
+					showSuccess(`Update triggered for ${totalTriggered} host(s) across ${itemsWithUpdates.length} item(s).`);
+				if (totalFailed > 0) showError(`Failed to trigger update for ${totalFailed} host(s).`);
 			} else {
 				const response = await batchSoftwareItems(action, ids);
 				if (response.failed.length > 0) {
@@ -579,8 +607,10 @@
 
 			{#if batchConfirmAction}
 				<ConfirmDialog
-					title="Batch {batchConfirmAction}"
-					messagePrefix="Are you sure you want to {batchConfirmAction}"
+					title={batchConfirmAction === 'update-all' ? 'Update All' : `Batch ${batchConfirmAction}`}
+					messagePrefix={batchConfirmAction === 'update-all'
+						? 'Trigger updates for all available updates across'
+						: `Are you sure you want to ${batchConfirmAction}`}
 					entityName="{batchSelectedIds.size} software item(s)"
 					confirmLabel={submitting
 						? 'Processing...'
@@ -588,10 +618,12 @@
 							? 'Approve'
 							: batchConfirmAction === 'ignore'
 								? 'Ignore'
-								: 'Delete'}
+								: batchConfirmAction === 'update-all'
+									? 'Update All'
+									: 'Delete'}
 					confirmClass={batchConfirmAction === 'approve'
 						? 'preset-filled-success-500'
-						: batchConfirmAction === 'ignore'
+						: batchConfirmAction === 'ignore' || batchConfirmAction === 'update-all'
 							? 'preset-filled-warning-500'
 							: 'preset-filled-error-500'}
 					confirmDisabled={submitting}
@@ -682,6 +714,18 @@
 									Assign to Host
 								</button>
 							</li>
+							{#if item.update_available}
+								<li>
+									<button
+										class="w-full rounded-md px-3 py-2 text-left text-sm text-warning-600 dark:text-warning-400 hover:bg-surface-200 dark:hover:bg-surface-800"
+										role="menuitem"
+										tabindex="-1"
+										onclick={() => openUpdateModal(item)}
+									>
+										Trigger Update
+									</button>
+								</li>
+							{/if}
 							<li>
 								<button
 									class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"

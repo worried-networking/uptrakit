@@ -22,6 +22,7 @@
 	import Pagination from '$lib/components/Pagination.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
+	import ContextMenu from '$lib/components/ContextMenu.svelte';
 
 	const id = $derived(page.params.id as string);
 
@@ -53,13 +54,16 @@
 	let batchConfirmAction: string | null = $state(null);
 	let batchResult: BatchActionResponse | null = $state(null);
 	let batchSubmitting: boolean = $state(false);
+	let openMenuId: string | null = $state(null);
+	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
 
 	const canManageSoftware = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
 
 	const batchActions: { id: string; label: string; destructive?: boolean }[] = [
 		{ id: 'enable', label: 'Enable' },
 		{ id: 'disable', label: 'Disable' },
-		{ id: 'delete', label: 'Delete', destructive: true }
+		{ id: 'delete', label: 'Delete', destructive: true },
+		{ id: 'ignore', label: 'Ignore', destructive: true }
 	];
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
@@ -182,6 +186,26 @@
 		}
 	}
 
+	function toggleMenu(pkgId: string, button: HTMLElement) {
+		if (openMenuId === pkgId) {
+			openMenuId = null;
+			return;
+		}
+		const rect = button.getBoundingClientRect();
+		menuPos = { top: rect.bottom + 4, left: rect.right - 160 };
+		openMenuId = pkgId;
+	}
+
+	function closeMenu() {
+		openMenuId = null;
+	}
+
+	function handleWindowClick(event: MouseEvent) {
+		if (openMenuId && !(event.target as HTMLElement).closest('.actions-menu')) {
+			closeMenu();
+		}
+	}
+
 	function toggleSelectAll() {
 		if (selectedIds.size === packages.length) {
 			selectedIds.clear();
@@ -209,6 +233,28 @@
 		batchConfirmAction = null;
 		batchSubmitting = true;
 		try {
+			if (action === 'ignore') {
+				// Client-side orchestration: delete each package with ignore=true
+				const succeeded: { id: string }[] = [];
+				const failed: { id: string; error: string }[] = [];
+				for (const pkgId of [...selectedIds]) {
+					try {
+						await deleteHostPackage(id, pkgId, true);
+						succeeded.push({ id: pkgId });
+					} catch (e) {
+						failed.push({ id: pkgId, error: e instanceof Error ? e.message : 'Unknown error' });
+					}
+				}
+				if (failed.length > 0) {
+					batchResult = { succeeded, failed };
+				} else {
+					showSuccess(`${succeeded.length} package(s) deleted and ignore rules created.`);
+				}
+				selectedIds.clear();
+				await loadPackages(currentPage);
+				batchSubmitting = false;
+				return;
+			}
 			const response = await batchHostPackages(id, action, [...selectedIds]);
 			if (response.failed.length > 0) {
 				batchResult = response;
@@ -250,6 +296,8 @@
 		}
 	}
 </script>
+
+<svelte:window onclick={handleWindowClick} />
 
 {#if getUser()}
 	<div class="mb-4">
@@ -331,7 +379,7 @@
 						<th>Status</th>
 						<th>Enabled</th>
 						<th>Last Checked</th>
-						{#if canManageSoftware}<th class="w-32">Actions</th>{/if}
+						{#if canManageSoftware}<th class="w-20"></th>{/if}
 					</tr>
 				</thead>
 				<tbody>
@@ -379,23 +427,16 @@
 							<td>{formatDate(pkg.last_checked_at)}</td>
 							{#if canManageSoftware}
 								<td>
-									<div class="flex gap-1">
-										<button
-											class="btn btn-sm preset-tonal-primary"
-											title="Promote to software item"
-											onclick={() => openPromoteModal(pkg)}
-										>
-											Promote
-										</button>
-										<button class="btn btn-sm preset-tonal-error" onclick={() => requestDelete(pkg, false)}>
-											Delete
-										</button>
+									<div class="actions-menu">
 										<button
 											class="btn btn-sm preset-tonal"
-											title="Delete and ignore"
-											onclick={() => requestDelete(pkg, true)}
+											aria-label="Actions for {pkg.name}"
+											onclick={(e) => {
+												e.stopPropagation();
+												toggleMenu(pkg.id, e.currentTarget);
+											}}
 										>
-											Ignore
+											&#8943;
 										</button>
 									</div>
 								</td>
@@ -447,8 +488,12 @@
 						? 'Enable'
 						: batchConfirmAction === 'disable'
 							? 'Disable'
-							: 'Delete'}
-				confirmClass={batchConfirmAction === 'delete' ? 'preset-filled-error-500' : 'preset-filled-primary-500'}
+							: batchConfirmAction === 'ignore'
+								? 'Delete & Ignore'
+								: 'Delete'}
+				confirmClass={batchConfirmAction === 'delete' || batchConfirmAction === 'ignore'
+					? 'preset-filled-error-500'
+					: 'preset-filled-primary-500'}
 				confirmDisabled={batchSubmitting}
 				onconfirm={executeBatchAction}
 				oncancel={() => (batchConfirmAction = null)}
@@ -458,6 +503,53 @@
 		{#if batchResult}
 			<BatchResultDialog title="Batch Action Results" response={batchResult} onclose={() => (batchResult = null)} />
 		{/if}
+	{/if}
+{/if}
+
+{#if openMenuId}
+	{@const pkg = packages.find((p) => p.id === openMenuId)}
+	{#if pkg}
+		<ContextMenu top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
+			<li>
+				<button
+					class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+					role="menuitem"
+					tabindex="-1"
+					onclick={() => {
+						closeMenu();
+						openPromoteModal(pkg);
+					}}
+				>
+					Promote to Software Item
+				</button>
+			</li>
+			<li>
+				<button
+					class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+					role="menuitem"
+					tabindex="-1"
+					onclick={() => {
+						closeMenu();
+						requestDelete(pkg, false);
+					}}
+				>
+					Delete
+				</button>
+			</li>
+			<li>
+				<button
+					class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+					role="menuitem"
+					tabindex="-1"
+					onclick={() => {
+						closeMenu();
+						requestDelete(pkg, true);
+					}}
+				>
+					Delete &amp; Ignore
+				</button>
+			</li>
+		</ContextMenu>
 	{/if}
 {/if}
 

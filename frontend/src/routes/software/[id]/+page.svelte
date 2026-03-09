@@ -1,17 +1,23 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import {
 		getSoftwareItem,
 		checkSoftwareItemVersions,
 		checkSoftwareItemVersionsHost,
-		triggerSoftwareUpdate
+		triggerSoftwareUpdate,
+		updateSoftwareItem,
+		deleteSoftwareItem,
+		unassignHostFromSoftwareItem
 	} from '$lib/api';
 	import { formatDate, formatVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
 	import EditHostAssignmentModal from '$lib/components/EditHostAssignmentModal.svelte';
 	import { connectOutputStream } from '$lib/sse';
@@ -26,6 +32,23 @@
 	let error: string | null = $state(null);
 	let checkingAll: boolean = $state(false);
 	let checkingHostId: string | null = $state(null);
+
+	// Context menu state (per host row)
+	let openMenuHostId: string | null = $state(null);
+	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
+
+	// Edit software item state
+	let editItem: boolean = $state(false);
+	let editForm = $state({ name: '', enabled: true });
+	let editSubmitting: boolean = $state(false);
+
+	// Delete software item state
+	let confirmDelete: boolean = $state(false);
+	let deleteSubmitting: boolean = $state(false);
+
+	// Unassign host state
+	let confirmUnassign: SoftwareItemHostSummary | null = $state(null);
+	let unassignSubmitting: boolean = $state(false);
 
 	// Update confirm modal state
 	let updateModal: { host: SoftwareItemHostSummary; toVersion: string } | null = $state(null);
@@ -108,6 +131,81 @@
 		}
 	}
 
+	function toggleMenu(hostId: string, button: HTMLElement) {
+		if (openMenuHostId === hostId) {
+			openMenuHostId = null;
+			return;
+		}
+		const rect = button.getBoundingClientRect();
+		menuPos = { top: rect.bottom + 4, left: rect.right - 180 };
+		openMenuHostId = hostId;
+	}
+
+	function closeMenu() {
+		openMenuHostId = null;
+	}
+
+	function handleWindowClick(event: MouseEvent) {
+		if (openMenuHostId && !(event.target as HTMLElement).closest('.actions-menu')) {
+			closeMenu();
+		}
+	}
+
+	function openEditModal() {
+		if (!item) return;
+		editForm = { name: item.name, enabled: item.enabled };
+		editItem = true;
+	}
+
+	async function executeEdit() {
+		if (!item || editSubmitting) return;
+		editSubmitting = true;
+		try {
+			await updateSoftwareItem(item.id, {
+				name: editForm.name || undefined,
+				enabled: editForm.enabled
+			});
+			showSuccess('Software item updated.');
+			editItem = false;
+			await loadItem(true);
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to update software item.');
+		} finally {
+			editSubmitting = false;
+		}
+	}
+
+	async function executeDelete() {
+		if (!item || deleteSubmitting) return;
+		const name = item.name;
+		deleteSubmitting = true;
+		confirmDelete = false;
+		try {
+			await deleteSoftwareItem(item.id);
+			showSuccess(`"${name}" deleted.`);
+			goto('/software');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to delete software item.');
+			deleteSubmitting = false;
+		}
+	}
+
+	async function executeUnassign() {
+		if (!item || !confirmUnassign || unassignSubmitting) return;
+		const host = confirmUnassign;
+		confirmUnassign = null;
+		unassignSubmitting = true;
+		try {
+			await unassignHostFromSoftwareItem(item.id, host.host_id);
+			showSuccess(`"${host.hostname}" unassigned from "${item.name}".`);
+			await loadItem(true);
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to unassign host.');
+		} finally {
+			unassignSubmitting = false;
+		}
+	}
+
 	async function checkAllVersions() {
 		if (!item || checkingAll) return;
 		checkingAll = true;
@@ -127,6 +225,7 @@
 
 	async function checkHostVersions(hostId: string) {
 		if (!item || checkingHostId) return;
+		closeMenu();
 		checkingHostId = hostId;
 		try {
 			const result = await checkSoftwareItemVersionsHost(item.id, hostId);
@@ -144,6 +243,7 @@
 	}
 
 	function openUpdateModal(host: SoftwareItemHostSummary) {
+		closeMenu();
 		const toVersion = host.latest_version ?? item?.latest_version ?? '';
 		updateModal = { host, toVersion };
 	}
@@ -236,6 +336,8 @@
 	}
 </script>
 
+<svelte:window onclick={handleWindowClick} />
+
 {#if getUser()}
 	<div class="mb-4">
 		<a href="/software" class="text-sm text-surface-500 hover:underline">← Back to Software</a>
@@ -284,9 +386,19 @@
 				</div>
 			</div>
 			{#if canManage}
-				<button class="btn preset-tonal-surface" onclick={checkAllVersions} disabled={checkingAll}>
-					{checkingAll ? 'Checking…' : 'Check All Versions'}
-				</button>
+				<div class="flex flex-wrap items-center gap-2">
+					<button class="btn preset-tonal-surface" onclick={checkAllVersions} disabled={checkingAll}>
+						{checkingAll ? 'Checking…' : 'Check All Versions'}
+					</button>
+					<button class="btn preset-tonal-surface" onclick={openEditModal}>Edit</button>
+					<button
+						class="btn preset-filled-error-500"
+						onclick={() => (confirmDelete = true)}
+						disabled={deleteSubmitting}
+					>
+						Delete
+					</button>
+				</div>
 			{/if}
 		</div>
 
@@ -301,7 +413,7 @@
 						<th>Status</th>
 						<th>Detected At</th>
 						{#if canManage}
-							<th>Actions</th>
+							<th class="w-20"></th>
 						{/if}
 					</tr>
 				</thead>
@@ -371,31 +483,19 @@
 								</td>
 								<td>{formatDate(host.installed_version_detected_at)}</td>
 								{#if canManage}
-									<td class="space-x-2 whitespace-nowrap">
-										{#if host.update_available || item.latest_version}
-											{@const updateToVer = host.latest_version ?? item?.latest_version ?? null}
+									<td>
+										<div class="actions-menu">
 											<button
-												class="btn btn-sm preset-filled-warning-500"
-												title={updateToVer ?? undefined}
-												onclick={() => openUpdateModal(host)}
+												class="btn btn-sm preset-tonal"
+												aria-label="Actions for {host.hostname}"
+												onclick={(e) => {
+													e.stopPropagation();
+													toggleMenu(host.id, e.currentTarget);
+												}}
 											>
-												Update to {formatVersion(updateToVer)}
+												&#8943;
 											</button>
-										{/if}
-										<button
-											class="btn btn-sm preset-tonal"
-											onclick={() => checkHostVersions(host.host_id)}
-											disabled={checkingHostId === host.host_id}
-										>
-											{checkingHostId === host.host_id ? 'Checking…' : 'Check Versions'}
-										</button>
-										<button
-											class="btn btn-sm preset-tonal-surface"
-											onclick={() => (configureModal = host)}
-											title="Configure plugin assignments for this host"
-										>
-											Configure
-										</button>
+										</div>
 									</td>
 								{/if}
 							</tr>
@@ -404,6 +504,64 @@
 				</tbody>
 			</table>
 		</div>
+	{/if}
+{/if}
+
+{#if openMenuHostId && item}
+	{@const host = item.hosts.find((h) => h.id === openMenuHostId)}
+	{#if host}
+		<ContextMenu top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
+			{#if host.update_available || item.latest_version}
+				{@const updateToVer = host.latest_version ?? item.latest_version ?? null}
+				<li>
+					<button
+						class="w-full rounded-md px-3 py-2 text-left text-sm text-warning-600 dark:text-warning-400 hover:bg-surface-200 dark:hover:bg-surface-800"
+						role="menuitem"
+						tabindex="-1"
+						onclick={() => openUpdateModal(host)}
+					>
+						Update to {formatVersion(updateToVer)}
+					</button>
+				</li>
+			{/if}
+			<li>
+				<button
+					class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
+					role="menuitem"
+					tabindex="-1"
+					disabled={checkingHostId === host.host_id}
+					onclick={() => checkHostVersions(host.host_id)}
+				>
+					{checkingHostId === host.host_id ? 'Checking…' : 'Check Versions'}
+				</button>
+			</li>
+			<li>
+				<button
+					class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+					role="menuitem"
+					tabindex="-1"
+					onclick={() => {
+						closeMenu();
+						configureModal = host;
+					}}
+				>
+					Configure Plugins
+				</button>
+			</li>
+			<li>
+				<button
+					class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+					role="menuitem"
+					tabindex="-1"
+					onclick={() => {
+						closeMenu();
+						confirmUnassign = host;
+					}}
+				>
+					Unassign
+				</button>
+			</li>
+		</ContextMenu>
 	{/if}
 {/if}
 
@@ -535,5 +693,50 @@
 			item = result;
 			configureModal = null;
 		}}
+	/>
+{/if}
+
+{#if editItem && item}
+	<Modal title="Edit Software Item" onclose={() => (editItem = false)}>
+		<label class="label">
+			<span>Name</span>
+			<input class="input" type="text" bind:value={editForm.name} />
+		</label>
+		<label class="flex items-center gap-3">
+			<input class="checkbox" type="checkbox" bind:checked={editForm.enabled} />
+			<span>Enabled</span>
+		</label>
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={() => (editItem = false)}>Cancel</button>
+			<button class="btn preset-filled-primary-500" onclick={executeEdit} disabled={editSubmitting}>
+				{editSubmitting ? 'Saving…' : 'Save'}
+			</button>
+		{/snippet}
+	</Modal>
+{/if}
+
+{#if confirmDelete && item}
+	<ConfirmDialog
+		title="Delete Software Item"
+		messagePrefix="Are you sure you want to delete"
+		entityName={item.name}
+		confirmLabel={deleteSubmitting ? 'Deleting…' : 'Delete'}
+		confirmClass="preset-filled-error-500"
+		confirmDisabled={deleteSubmitting}
+		onconfirm={executeDelete}
+		oncancel={() => (confirmDelete = false)}
+	/>
+{/if}
+
+{#if confirmUnassign}
+	<ConfirmDialog
+		title="Unassign Host"
+		messagePrefix="Remove assignment of"
+		entityName="{confirmUnassign.hostname} from this software item"
+		confirmLabel={unassignSubmitting ? 'Removing…' : 'Unassign'}
+		confirmClass="preset-filled-error-500"
+		confirmDisabled={unassignSubmitting}
+		onconfirm={executeUnassign}
+		oncancel={() => (confirmUnassign = null)}
 	/>
 {/if}
