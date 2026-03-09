@@ -21,7 +21,7 @@ pub async fn connect(config: &DbConfig) -> Result<DatabaseConnection> {
         .min_connections(1)
         .connect_timeout(Duration::from_secs(8))
         .acquire_timeout(Duration::from_secs(8))
-        .idle_timeout(Duration::from_secs(8))
+        .idle_timeout(Duration::from_secs(300))
         .sqlx_logging(false); // Use tracing instead
 
     Database::connect(opt)
