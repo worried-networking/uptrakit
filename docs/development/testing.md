@@ -45,6 +45,32 @@ needs to change, the change is intentional and the tests would all need to be up
 making them maintenance work rather than safety nets. Tests for custom hand-written `Display`
 implementations (not derived from `#[error]`) remain internal logic tests and are kept.
 
+More examples:
+
+```rust
+// PROHIBITED — tests upstream thiserror formatting, not our logic
+#[test]
+fn display_api_error() {
+    let err = MyError::ApiError {
+        status: reqwest::StatusCode::NOT_FOUND,
+        message: "not found".to_string(),
+    };
+    assert_eq!(err.to_string(), "API error: 404 Not Found not found");
+}
+```
+
+If you need to verify that a specific error variant is produced (not its Display
+string), test the variant itself:
+
+```rust
+// OK — tests that the correct error variant is returned
+#[test]
+fn parse_returns_config_error_on_empty_owner() {
+    let result = parse_owner_repo("/repo");
+    assert!(matches!(result, Err(ref e) if matches!(e.current_context(), MyError::Configuration(_))));
+}
+```
+
 ### Wire protocol tests: asyncapi.yaml is the source of truth
 
 Spec-conformance tests validate that Rust serialization matches the
