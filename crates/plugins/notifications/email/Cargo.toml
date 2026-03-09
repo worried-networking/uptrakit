@@ -10,9 +10,8 @@ description = "Email (SMTP) notification plugin for Uptrakit"
 
 [dependencies]
 async-trait = { workspace = true }
-lettre = { workspace = true, features = [
-    "smtp-transport", "tokio1", "tokio1-rustls-tls", "builder", "hostname"
-] }
+mail-builder = { workspace = true }
+mail-send = { workspace = true, features = ["builder", "aws_lc_rs"] }
 rootcause = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
