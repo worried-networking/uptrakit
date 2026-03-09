@@ -234,7 +234,7 @@ ______________________________________________________________________
     password reset.
 - [ ] Notification configuration UI
   - **Category**: UI | **Impact**: Medium-High | **Effort**: Medium
-  - Frontend page for managing notification channels and rules. The backend REST API is already
+  - Frontend page for managing notification plugins and rules. The backend REST API is already
     complete; this is purely frontend work.
 - [ ] Batch update UI
   - **Category**: UI | **Impact**: Medium | **Effort**: Medium
@@ -430,33 +430,34 @@ progress tracking (SSE), batch notification events, host packages tracking syste
 
 ### Notification System
 
-Completed: channel-agnostic dispatcher, webhook + Telegram + email channels, scope-based rule
+Completed: channel-agnostic dispatcher, webhook + Telegram + email plugins, scope-based rule
 matching, notification history, actionable notifications, REST API, CLI, OpenAPI client.
+Plugin architecture under `crates/plugins/notifications/` with `NotificationPlugin` trait.
 
-- [ ] Slack notification channel
+- [ ] Slack notification plugin
   - **Category**: Notifications | **Impact**: Medium-High | **Effort**: Medium
-  - Slack integration via `slack-morphism` or Incoming Webhooks. Follow the existing channel trait
-    pattern.
-- [ ] Discord notification channel
+  - Slack integration via `slack-morphism` or Incoming Webhooks. Create a new crate under
+    `crates/plugins/notifications/slack/` implementing the `NotificationPlugin` trait.
+- [ ] Discord notification plugin
   - **Category**: Notifications | **Impact**: Medium | **Effort**: Medium
   - Discord bot or webhook integration via `twilight-http` or simple HTTP POST.
-- [ ] Pushover notification channel
+- [ ] Pushover notification plugin
   - **Category**: Notifications | **Impact**: Low-Medium | **Effort**: Low
   - Simple HTTP POST to Pushover API. Minimal implementation effort.
-- [ ] Gotify notification channel
+- [ ] Gotify notification plugin
   - **Category**: Notifications | **Impact**: Low-Medium | **Effort**: Low
   - Simple HTTP POST to self-hosted Gotify server. Popular in the self-hosted community.
-- [ ] ntfy notification channel
+- [ ] ntfy notification plugin
   - **Category**: Notifications | **Impact**: Medium | **Effort**: Low
   - Simple HTTP POST to ntfy.sh or self-hosted ntfy. Very popular self-hosted choice, minimal
     code needed.
-- [ ] Matrix notification channel
+- [ ] Matrix notification plugin
   - **Category**: Notifications | **Impact**: Low-Medium | **Effort**: Medium
   - Matrix room notifications via the Matrix client-server API.
-- [ ] Microsoft Teams notification channel
+- [ ] Microsoft Teams notification plugin
   - **Category**: Notifications | **Impact**: Medium | **Effort**: Medium
   - Teams Incoming Webhook or Workflow integration.
-- [ ] PagerDuty notification channel
+- [ ] PagerDuty notification plugin
   - **Category**: Notifications | **Impact**: Low-Medium | **Effort**: Medium
   - PagerDuty Events API v2 integration for incident-based alerting on update failures.
 - [ ] Telegram callback rate limiting

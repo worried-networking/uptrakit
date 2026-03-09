@@ -14,7 +14,7 @@
    `http://169.254.169.254/latest/meta-data/iam/security-credentials/`
 2. The attacker creates a notification rule that triggers on a common event (e.g.,
    `UpdateAvailable`).
-3. When the event fires, the notification dispatcher calls `WebhookChannel::deliver()`,
+3. When the event fires, the notification dispatcher calls `WebhookPlugin::deliver()`,
    which sends an HTTP POST request to the attacker-specified URL.
 4. The response is processed by the controller. While the response body is not returned
    to the attacker directly, error messages, connection timing, and HTTP status codes
@@ -102,7 +102,7 @@
 - [ATK-07: SSRF via Plugin Configuration](07-ssrf-plugin-configuration.md)
 - `crates/shared/types/src/network.rs` — shared `is_private_host()` / `is_private_ip()`
 - `crates/shared/types/src/ssrf.rs` — `SsrfSafeResolver` (DNS rebinding protection)
-- `crates/shared/notification-channels/src/webhook.rs` — `WebhookChannel`,
+- `crates/plugins/notifications/webhook/src/lib.rs` — `WebhookPlugin`,
   `validate_config()`, header blocklist, SSRF-safe DNS resolver
 - `crates/ui/web-api/src/routes/notifications.rs` — notification channel handlers
 - `crates/ui/web-api/src/notifications/dispatcher.rs` — notification dispatcher

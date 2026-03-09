@@ -72,7 +72,7 @@ agent identity via forwarded certificate headers.
 
 User-controlled values (software names, version strings) are interpolated into HTML
 notification bodies via `format!()`. All user-controlled values are now HTML-escaped
-before interpolation using the shared `uptrakit_notification_channels::escape_html()`
+before interpolation using the shared `uptrakit_notification_plugin_core::escape_html()`
 function, which escapes `&`, `<`, `>`, `"`, and `'`.
 
 **Verdict: Mitigated.** HTML escaping prevents XSS injection in email/Telegram HTML
@@ -131,7 +131,7 @@ The most impactful indirect attacks are:
   execution, and raw SQL in the controller. Future changes that introduce any of
   these patterns must be reviewed carefully.
 - ~~Notification HTML injection.~~ **Mitigated.** All user-controlled values in
-  `body_html` are HTML-escaped via `uptrakit_notification_channels::escape_html()`.
+  `body_html` are HTML-escaped via `uptrakit_notification_plugin_core::escape_html()`.
 - **Plugin execution on controller.** Controller-side `fetch_releases` plugins
   (GitHub, Docker, GitLab, Forgejo) make outbound HTTP requests with user-configured
   URLs and credentials. While these do not execute processes, they do create SSRF

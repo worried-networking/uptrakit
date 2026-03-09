@@ -199,14 +199,32 @@ AsyncAPI definition lives at `crates/shared/wire/asyncapi.yaml` and is described
 ## Notification subsystem
 
 The controller includes a channel-agnostic notification subsystem that delivers event-driven alerts through
-pluggable channels. Event producers emit `NotificationEvent` values (internal, channel-agnostic); a
+pluggable notification plugins. Event producers emit `NotificationEvent` values (internal, channel-agnostic); a
 fire-and-forget `NotificationDispatcher` matches them against tenant-scoped rules, builds a
-`DeliveryMessage`, and hands it to the appropriate channel implementation for delivery.
+`DeliveryMessage`, and hands it to the appropriate plugin implementation for delivery.
 
-The `uptrakit-notification-channels` crate (`crates/shared/notification-channels/`) houses the
-`NotificationChannel` trait, the `DeliveryMessage` struct, a `ChannelRegistry`, and all concrete channel
-implementations. Each channel is behind its own Cargo feature flag (`webhook` — default on, `telegram`).
-Future channels (Email, Slack, Discord, Pushover, etc.) are added as feature-gated modules in the same crate.
+Notification plugins live under `crates/plugins/notifications/` with one crate per concern:
+
+| Crate | Package | Purpose |
+| --- | --- | --- |
+| `core/` | `uptrakit-notification-plugin-core` | `NotificationPlugin` trait, `DeliveryMessage`, `NotificationPluginError`, `escape_html()` |
+| `webhook/` | `uptrakit-notification-plugin-webhook` | Webhook plugin (SSRF-safe DNS, HMAC-SHA256 signatures) |
+| `telegram/` | `uptrakit-notification-plugin-telegram` | Telegram plugin (inline keyboard for actionable notifications) |
+| `email/` | `uptrakit-notification-plugin-email` | Email plugin (SMTP via lettre) |
+| `registry/` | `uptrakit-notification-plugin-registry` | `NotificationPluginRegistry`, `NotificationOps` trait, `NotificationRegistryConfig` |
+
+Each plugin is behind its own Cargo feature flag in the registry crate (`webhook` — default on, `telegram`,
+`email`). The `NotificationPluginRegistry` is constructed at startup with all feature-enabled plugins and
+exposed in `AppState` as `notification_ops: Arc<dyn NotificationOps>`.
+
+### Adding a new notification plugin
+
+1. Create a new crate under `crates/plugins/notifications/<name>/`.
+2. Implement the `NotificationPlugin` trait from `uptrakit-notification-plugin-core`.
+3. Register the plugin in `NotificationPluginRegistry::new()` behind `#[cfg(feature = "...")]`.
+4. Add the feature in `crates/plugins/notifications/registry/Cargo.toml`.
+5. Add the variant to the `NotificationChannelType` enum.
+6. Propagate the feature: `web-api/Cargo.toml` → `controller/Cargo.toml`.
 
 Supported event types: `update_available`, `update_completed`, `update_failed`, `new_software_discovered`,
 `new_service_enrolled`, `ca_rotated`, `batch_update_completed`, `batch_update_partially_completed`.

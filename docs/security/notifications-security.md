@@ -18,8 +18,8 @@ master key lifecycle and `EncryptedString` semantics.
 
 ### Secret masking in API responses
 
-Config secrets are masked in API responses via the `mask_config_secrets()` method on the `NotificationChannel`
-trait (`crates/shared/notification-channels/src/channel.rs`). The method carries `#[must_use]`, following the
+Config secrets are masked in API responses via the `mask_config_secrets()` method on the `NotificationPlugin`
+trait (`crates/plugins/notifications/core/src/traits.rs`). The method carries `#[must_use]`, following the
 same pattern as `PluginRegistry::mask_config_secrets` -- callers must use the masked output.
 
 Masked fields per channel type:
@@ -88,7 +88,7 @@ See [Auth and Authorization](auth-and-authorization.md) for the full permission 
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/notification-channels/src/email.rs` | `EmailChannel` — SMTP delivery, config validation |
+| `crates/plugins/notifications/email/src/lib.rs` | `EmailPlugin` — SMTP delivery, config validation |
 | `crates/ui/web-api/src/routes/settings_smtp.rs` | SMTP settings GET/PUT handlers with password encryption |
 | `crates/ui/web-api/src/settings.rs` | `SmtpSettingsSnapshot` with masked `Debug` impl |
 | `crates/ui/web-api/src/notifications/dispatcher.rs` | `merge_smtp_into_config` — in-memory merge before delivery |
@@ -136,7 +136,7 @@ webhook requests.
 | File | Purpose |
 | --- | --- |
 | `crates/shared/types/src/network.rs` | Shared `is_private_host()` function |
-| `crates/shared/notification-channels/src/webhook.rs` | `validate_config()` with URL and header validation |
+| `crates/plugins/notifications/webhook/src/lib.rs` | `validate_config()` with URL and header validation |
 | `crates/core/controller/src/cli.rs` | `--allow-private-notification-urls` CLI flag |
 
 The threat model: a user with `manage_notifications` permission can configure a webhook URL
@@ -150,7 +150,7 @@ When a webhook channel has a `secret` field configured, outbound HTTP requests i
 `X-Uptrakit-Signature` header containing an HMAC-SHA256 signature of the request body in the format
 `sha256=<hex>`.
 
-Implementation: `crates/shared/notification-channels/src/webhook.rs`.
+Implementation: `crates/plugins/notifications/webhook/src/lib.rs`.
 
 Recipients should verify this signature to authenticate webhook payloads:
 
@@ -260,13 +260,13 @@ provide defense-in-depth against abuse.
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/notification-channels/src/channel.rs` | `NotificationChannel` trait with `#[must_use]` on `mask_config_secrets` |
-| `crates/shared/notification-channels/src/webhook.rs` | Webhook channel: HMAC-SHA256 signing, secret masking |
-| `crates/shared/notification-channels/src/telegram.rs` | Telegram channel: bot token masking, webhook secret masking |
-| `crates/shared/notification-channels/src/email.rs` | Email channel: SMTP delivery, no per-channel secrets |
+| `crates/plugins/notifications/core/src/traits.rs` | `NotificationPlugin` trait with `#[must_use]` on `mask_config_secrets` |
+| `crates/plugins/notifications/webhook/src/lib.rs` | Webhook plugin: HMAC-SHA256 signing, secret masking |
+| `crates/plugins/notifications/telegram/src/lib.rs` | Telegram plugin: bot token masking, webhook secret masking |
+| `crates/plugins/notifications/email/src/lib.rs` | Email plugin: SMTP delivery, no per-channel secrets |
 | `crates/ui/web-api/src/routes/settings_smtp.rs` | Global SMTP settings API: password encrypted at rest, `has_password` masking |
 | `crates/ui/web-api/src/settings.rs` | `SmtpSettingsSnapshot`: masked `Debug`, decrypted password in memory only |
-| `crates/shared/notification-channels/src/registry.rs` | `ChannelRegistry` for channel type dispatch |
+| `crates/plugins/notifications/registry/src/lib.rs` | `NotificationPluginRegistry` for channel type dispatch |
 | `crates/ui/web-api/src/routes/notifications.rs` | API route handlers including `telegram_callback` |
 | `crates/ui/web-api/src/notifications/dispatcher.rs` | Background dispatcher: rule matching, action token generation, delivery |
 | `crates/shared/db/src/entity/notification_channel.rs` | `notification_channels` entity with `EncryptedString` config |

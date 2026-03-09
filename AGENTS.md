@@ -84,6 +84,12 @@ uptrakit/
 │   │   │   ├── apt/                    # uptrakit-plugin-package-manager-apt                    (lib)  — APT (Debian/Ubuntu) plugin (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install); implements DetectHostCompatibility (checks `which apt-get`) and PostUpdateHook (checks /var/run/reboot-required); native batch_detect_installed_version (dpkg-query with all packages) + batch_fetch_releases (apt-cache madison with all packages)
 │   │   │   ├── npm/                    # uptrakit-plugin-package-manager-npm                    (lib)  — npm global-package plugin; ControllerSideFetchReleases (queries registry.npmjs.org); discovery via `npm list -g --json`; updates via `sudo npm install -g <pkg>@<version>`; implements DetectHostCompatibility (checks `which npm`); validate_identifier exported for registry; native batch_detect_installed_version (single `npm list -g --depth=0 --json` call, filtered in memory)
 │   │   │   └── mas/                    # uptrakit-plugin-package-manager-mas                    (lib)  — Mac App Store plugin via `mas` CLI; agent-side only (no ControllerSideFetchReleases); discovery via `mas list`; version detection + release fetch via `mas list` + `mas outdated`; updates via `mas upgrade <id>`; implements DetectHostCompatibility (checks `which mas`); package_identifier = numeric App Store ID (digits only, max 15 chars); no sudo needed; native batch_detect_installed_version + batch_fetch_releases (single `mas list` + `mas outdated` calls, mapped in memory)
+│   │   ├── notifications/
+│   │   │   ├── core/                   # uptrakit-notification-plugin-core       (lib)  — NotificationPlugin trait, DeliveryMessage, MessageAction, NotificationPluginError, escape_html()
+│   │   │   ├── webhook/               # uptrakit-notification-plugin-webhook    (lib)  — Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing)
+│   │   │   ├── telegram/              # uptrakit-notification-plugin-telegram   (lib)  — Telegram plugin with inline keyboard (feature-gated)
+│   │   │   ├── email/                 # uptrakit-notification-plugin-email      (lib)  — Email plugin (SMTP via lettre, SmtpSettingsSnapshot, merge_smtp_into_config()) (feature-gated)
+│   │   │   └── registry/             # uptrakit-notification-plugin-registry   (lib)  — NotificationPluginRegistry, NotificationOps trait, NotificationRegistryConfig; re-exports core types
 │   │   └── discovery/
 │   │       └── proxmox-helper-scripts/ # uptrakit-plugin-discovery-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/Codeberg/npm/APT upstream; emits ReleasesGithub+GenericShell targets for GitHub-managed items, ReleasesForgejo+GenericShell targets for Codeberg-managed items (api_base_url="https://codeberg.org"; uses Forgejo plugin since Codeberg runs Forgejo), PackageManagerNpm target for npm-managed items, PackageManagerApt target for APT-managed items)
 │   ├── shared/
@@ -101,7 +107,6 @@ uptrakit/
 │   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, interval+jitter scheduling (interval.rs: compute_next_run_at), TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); tasks categorised as internal (CrlRenewal, CaRotationCheck, ServiceCertCheck — embedded scheduler only) vs external (AuthCleanup, StaleLeaseCleanup, FetchReleases, DetectVersion — deferrable to external scheduler); `external_scheduler_connected: Arc<AtomicBool>` flag skips external tasks when set; FetchReleasesExecutor Phase B sends fetch assignments for both host_software_items and host_packages so that latest_version is populated in both tables
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity (ServiceIdentityState: service_id + enrollment_secret + tenant_id in service.json), TLS, CA bootstrap, main helpers; default_resolve_shutdown(), init_tracing(); `decrypt_sensitive_params<T>()` generic ECIES sealed-box decryption for extension sensitive params
 │   │   ├── audit-log/                  # uptrakit-audit-log                      (lib)  — AuditLogBackend trait, AuditEntry, AuditFilter, AuditLogDispatcher; backends: NoopBackend, DatabaseBackend (cfg db), JournaldBackend (cfg journald), MultiplexBackend; fire-and-forget dispatcher pattern
-│   │   ├── notification-channels/      # uptrakit-notification-channels          (lib)  — NotificationChannel trait, DeliveryMessage, ChannelRegistry(ChannelRegistryConfig); shared escape_html(); webhook (default, SSRF validation + header blocklist) + telegram + email (feature-gated) channel impls
 │   │   ├── update-hooks/               # uptrakit-update-hooks                  (lib)  — update hook resolution and config merge logic (extracted from web-api)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields; report pagination (`paginate.rs` Paginatable trait + `report_tracker.rs` ReportTracker); re-exports `uptrakit-extension-framework` as `extension` module
 │   └── ui/
@@ -1220,7 +1225,11 @@ tenant-scoped rules, builds a `DeliveryMessage`, and hands it to the appropriate
 
 | Crate/module | Purpose |
 | --- | --- |
-| `crates/shared/notification-channels/` | `NotificationChannel` trait, `DeliveryMessage`, `ChannelRegistry`, webhook + telegram + email impls |
+| `crates/plugins/notifications/core/` | `NotificationPlugin` trait, `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()` |
+| `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing) |
+| `crates/plugins/notifications/telegram/` | Telegram plugin with inline keyboard |
+| `crates/plugins/notifications/email/` | Email plugin (SMTP via lettre, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`) |
+| `crates/plugins/notifications/registry/` | `NotificationPluginRegistry`, `NotificationOps` trait, `NotificationRegistryConfig`; re-exports core types |
 | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, `NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus` enums |
 | `crates/ui/web-api/src/notifications/` | Internal `NotificationEvent`, `NotificationDispatcher`, `message_builder` |
 | `crates/ui/web-api/src/routes/notifications.rs` | REST API route handlers (channels, rules, log, telegram callback) |
@@ -1232,11 +1241,11 @@ tenant-scoped rules, builds a `DeliveryMessage`, and hands it to the appropriate
 
 | Feature | Crate | Default | Notes |
 | --- | --- | --- | --- |
-| `webhook` | notification-channels | yes | Always compiled |
-| `telegram` | notification-channels | no | Requires `teloxide-core` |
-| `email` | notification-channels | no | SMTP via lettre 0.11 (tokio1-rustls-tls) |
-| `notifications-telegram` | web-api, controller | no | Propagated to notification-channels |
-| `notifications-email` | web-api, controller | no | Propagated to notification-channels; requires global SMTP settings configured via `PUT /api/v1/settings/smtp` |
+| `webhook` | notification-plugin-registry | yes | Always compiled |
+| `telegram` | notification-plugin-registry | no | Requires `teloxide-core` |
+| `email` | notification-plugin-registry | no | SMTP via lettre 0.11 (tokio1-rustls-tls) |
+| `notifications-telegram` | web-api, controller | no | Propagated to notification-plugin-registry |
+| `notifications-email` | web-api, controller | no | Propagated to notification-plugin-registry; requires global SMTP settings configured via `PUT /api/v1/settings/smtp` |
 
 ### Event types
 
@@ -1250,15 +1259,13 @@ and `settings_ca.rs`.
 
 ### Adding a new channel
 
-1. Add feature in `crates/shared/notification-channels/Cargo.toml`
-2. Implement `NotificationChannel` trait in a new module
-3. Register in `ChannelRegistry::new(config)` behind `#[cfg(feature = "...")]` (`config` is
-   `ChannelRegistryConfig` carrying deployment flags like `allow_private_urls`)
-4. Add variant to `NotificationChannelType` enum
-5. Propagate feature: `web-api/Cargo.toml` → `controller/Cargo.toml`
-6. If the channel requires global shared settings (like email + SMTP), add a merge step in
-   `NotificationDispatcher::dispatch_loop` and in the `test_channel` route handler before calling `deliver()`
-7. HTML-escape all user-controlled values in `body_html` via `uptrakit_notification_channels::escape_html()`
+1. Create a new crate under `crates/plugins/notifications/<name>/`
+2. Implement `NotificationPlugin` trait
+3. Register in `NotificationPluginRegistry::new()` behind `#[cfg(feature = "...")]`
+4. Add feature in `crates/plugins/notifications/registry/Cargo.toml`
+5. Add variant to `NotificationChannelType` enum in web-api-types
+6. Propagate feature: `web-api/Cargo.toml` → `controller/Cargo.toml`
+7. HTML-escape all user-controlled values in `body_html` via `uptrakit_notification_plugin_core::escape_html()`
 
 See [Notifications Development](docs/development/notifications.md) for full details.
 

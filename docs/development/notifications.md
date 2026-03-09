@@ -1,29 +1,33 @@
 # Notification subsystem
 
-Development guide for the channel-agnostic notification subsystem. This document covers the architecture, crate layout,
-dispatcher flow, and how to extend the system with new channels.
+Development guide for the plugin-based notification subsystem. This document covers the architecture, crate layout,
+dispatcher flow, and how to extend the system with new notification plugins.
 
 ## Architecture overview
 
-The notification subsystem follows a strict channel-agnostic pipeline:
+The notification subsystem follows a strict plugin-agnostic pipeline:
 
 ```text
-Event producers --> NotificationEvent --> Dispatcher --> match rules --> DeliveryMessage --> Channel::deliver()
+Event producers --> NotificationEvent --> Dispatcher --> match rules --> DeliveryMessage --> NotificationPlugin::deliver()
 ```
 
-**Event producers** know nothing about channels. They emit a `NotificationEvent` containing contextual data
+**Event producers** know nothing about notification plugins. They emit a `NotificationEvent` containing contextual data
 (tenant, host, software item) and a typed `NotificationEventDetails` variant. The **dispatcher** is the single
-translation point: it matches rules, builds a `DeliveryMessage` via `message_builder`, and hands it to the channel
-implementation. **Channels** receive only `DeliveryMessage` and render it into their native format (JSON POST for
+translation point: it matches rules, builds a `DeliveryMessage` via `message_builder`, and hands it to the plugin
+implementation. **Plugins** receive only `DeliveryMessage` and render it into their native format (JSON POST for
 webhooks, HTML message with inline keyboard for Telegram, etc.).
 
-This separation means adding a new channel never requires changes to event-producing code.
+This separation means adding a new notification plugin never requires changes to event-producing code.
 
 ## Crate structure
 
 | Crate | Path | Purpose |
 | --- | --- | --- |
-| `uptrakit-notification-channels` | `crates/shared/notification-channels/` | `NotificationChannel` trait, `DeliveryMessage`, webhook + telegram impls, `ChannelRegistry` |
+| `uptrakit-notification-plugin-core` | `crates/plugins/notifications/core/` | `NotificationPlugin` trait, `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()` |
+| `uptrakit-notification-plugin-webhook` | `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation, header blocklist, HMAC-SHA256 signing) |
+| `uptrakit-notification-plugin-telegram` | `crates/plugins/notifications/telegram/` | Telegram plugin (inline keyboard support) |
+| `uptrakit-notification-plugin-email` | `crates/plugins/notifications/email/` | Email plugin (SMTP via lettre, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`) |
+| `uptrakit-notification-plugin-registry` | `crates/plugins/notifications/registry/` | `NotificationPluginRegistry`, `NotificationOps` trait, re-exports core types |
 | `uptrakit-web-api-types` | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, public enums (`NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus`) |
 | `uptrakit-web-api` | `crates/ui/web-api/src/notifications/` | Dispatcher, internal event types, `message_builder` |
 | `uptrakit-web-api` | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers (CRUD for channels, rules, log) |
@@ -33,49 +37,43 @@ This separation means adding a new channel never requires changes to event-produ
 
 | Feature | Crate | Default | Description |
 | --- | --- | --- | --- |
-| `webhook` | `notification-channels` | yes | Webhook channel (always available) |
-| `telegram` | `notification-channels` | no | Telegram channel with inline keyboard |
-| `email` | `notification-channels` | no | Email channel (SMTP via lettre, async TLS) |
+| `webhook` | `notification-plugin-registry` | yes | Webhook plugin (always available) |
+| `telegram` | `notification-plugin-registry` | no | Telegram plugin with inline keyboard |
+| `email` | `notification-plugin-registry` | no | Email plugin (SMTP via lettre, async TLS) |
 | `notifications-telegram` | `web-api`, `controller` | no | Propagated feature flag enabling Telegram |
 | `notifications-email` | `web-api`, `controller` | no | Propagated feature flag enabling email |
-| `notifications-all` | `web-api`, `controller` | no | Enables all optional notification channels |
+| `notifications-all` | `web-api`, `controller` | no | Enables all optional notification plugins |
 
 Feature flags are additive and chain through the dependency graph:
 
 ```text
-controller/Cargo.toml           web-api/Cargo.toml                 notification-channels/Cargo.toml
+controller/Cargo.toml           web-api/Cargo.toml                 notification-plugin-registry/Cargo.toml
   notifications-telegram  --->    notifications-telegram  --->       telegram
   notifications-email     --->    notifications-email     --->       email
 ```
 
-The `web-api` always depends on `notification-channels` with `default-features = false, features = ["webhook"]`,
+The `web-api` always depends on `notification-plugin-registry` with `default-features = false, features = ["webhook"]`,
 ensuring webhooks are always compiled in.
 
-## `NotificationChannel` trait
+## `NotificationPlugin` trait
 
-Defined in `crates/shared/notification-channels/src/channel.rs`:
+Defined in `crates/plugins/notifications/core/src/traits.rs`:
 
 ```rust
 #[async_trait]
-pub trait NotificationChannel: Send + Sync {
-    /// Deliver a pre-built message using the given channel-specific config.
-    async fn deliver(
-        &self,
-        config: &serde_json::Value,
-        message: &DeliveryMessage,
-    ) -> error::Result<()>;
-
-    /// Validate channel-specific config JSON at create/update time.
-    fn validate_config(&self, config: &serde_json::Value) -> error::Result<()>;
-
-    /// Return a copy of the config with secrets replaced by `"***"`.
+pub trait NotificationPlugin: Send + Sync {
+    fn channel_type(&self) -> &'static str;
+    async fn deliver(&self, config: &serde_json::Value, message: &DeliveryMessage) -> Result<()>;
+    fn validate_config(&self, config: &serde_json::Value) -> Result<()>;
     #[must_use]
     fn mask_config_secrets(&self, config: &serde_json::Value) -> serde_json::Value;
 }
 ```
 
-There is no `supports_actions()` method. Each channel decides independently whether to render `DeliveryMessage.actions`.
-Channels that do not support interactive elements silently ignore the `actions` field.
+The `channel_type()` method returns the string identifier for the plugin (e.g. `"webhook"`, `"telegram"`, `"email"`).
+
+There is no `supports_actions()` method. Each plugin decides independently whether to render `DeliveryMessage.actions`.
+Plugins that do not support interactive elements silently ignore the `actions` field.
 
 ### `DeliveryMessage`
 
@@ -99,73 +97,81 @@ pub struct MessageAction {
 }
 ```
 
-### `ChannelError`
+### `NotificationPluginError`
 
-All channel operations return `error::Result<T>` which is `Result<T, Report<ChannelError>>`. The error variants are:
+All plugin operations return `Result<T>` which is `Result<T, Report<NotificationPluginError>>`. The error variants are:
 
-- `InvalidConfig` -- channel-specific config is invalid
+- `InvalidConfig` -- plugin-specific config is invalid
 - `DeliveryFailed` -- delivery to the external service failed
 - `HttpRequest` -- underlying HTTP request failed
 - `HttpClientBuild` -- `reqwest::Client` could not be constructed
 - `Serialization` -- payload serialization failed
 - `HmacKey` -- HMAC key construction failed
 
-## Adding a new channel
+## Adding a new notification plugin
 
-Follow these steps to add a channel (for example, `slack`):
+Follow these steps to add a plugin (for example, `slack`):
 
-### 1. Add feature flag
+### 1. Create the plugin crate
 
-In `crates/shared/notification-channels/Cargo.toml`:
+Create a new crate at `crates/plugins/notifications/slack/` with a `Cargo.toml` depending on
+`uptrakit-notification-plugin-core`:
 
 ```toml
-[features]
-default = ["webhook"]
-webhook = []
-telegram = []
-email = []
-slack = []                                          # <-- new
-all = ["webhook", "telegram", "email", "slack"]     # <-- update
+[package]
+name = "uptrakit-notification-plugin-slack"
+
+[dependencies]
+uptrakit-notification-plugin-core = { path = "../core" }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+rootcause = { workspace = true }
+serde_json = { workspace = true }
 ```
 
-### 2. Create the channel implementation
+### 2. Implement `NotificationPlugin`
 
-Create `crates/shared/notification-channels/src/slack.rs` implementing `NotificationChannel`:
+Create `crates/plugins/notifications/slack/src/lib.rs` implementing `NotificationPlugin`:
 
 ```rust
 use async_trait::async_trait;
 use rootcause::prelude::*;
 
-use crate::channel::{DeliveryMessage, NotificationChannel};
-use crate::error::{self, ChannelError};
+use uptrakit_notification_plugin_core::{
+    DeliveryMessage, NotificationPlugin, NotificationPluginError, Result,
+};
 
-pub struct SlackChannel {
+pub struct SlackPlugin {
     http: reqwest::Client,
 }
 
-impl SlackChannel {
-    pub fn new() -> error::Result<Self> {
+impl SlackPlugin {
+    pub fn new() -> Result<Self> {
         let http = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(60))
             .build()
-            .map_err(|e| report!(ChannelError::HttpClientBuild(e.to_string())))?;
+            .map_err(|e| report!(NotificationPluginError::HttpClientBuild(e.to_string())))?;
         Ok(Self { http })
     }
 }
 
 #[async_trait]
-impl NotificationChannel for SlackChannel {
+impl NotificationPlugin for SlackPlugin {
+    fn channel_type(&self) -> &'static str {
+        "slack"
+    }
+
     async fn deliver(
         &self,
         config: &serde_json::Value,
         message: &DeliveryMessage,
-    ) -> error::Result<()> {
+    ) -> Result<()> {
         // Build Slack Block Kit payload from message.title, message.body, etc.
         todo!()
     }
 
-    fn validate_config(&self, config: &serde_json::Value) -> error::Result<()> {
+    fn validate_config(&self, config: &serde_json::Value) -> Result<()> {
         // Require "webhook_url" field
         todo!()
     }
@@ -184,45 +190,44 @@ Key requirements:
 - Use `report!()` / `bail!()` macros for error creation, never `Report::new()` directly.
 - No `unwrap()` in production code.
 
-### 3. Register in the `ChannelRegistry`
+### 3. Register in the `NotificationPluginRegistry`
 
-`ChannelRegistry::new()` accepts a `ChannelRegistryConfig` parameter that carries deployment-level
-settings (e.g. `allow_private_urls`). In `crates/shared/notification-channels/src/registry.rs`, add
-inside `ChannelRegistry::new()`:
+Add a feature flag in `crates/plugins/notifications/registry/Cargo.toml` and register the plugin
+in `NotificationPluginRegistry::new()`:
+
+```toml
+[features]
+default = ["webhook"]
+webhook = ["uptrakit-notification-plugin-webhook"]
+telegram = ["uptrakit-notification-plugin-telegram"]
+email = ["uptrakit-notification-plugin-email"]
+slack = ["uptrakit-notification-plugin-slack"]       # <-- new
+all = ["webhook", "telegram", "email", "slack"]      # <-- update
+```
+
+In `crates/plugins/notifications/registry/src/lib.rs`, add inside `NotificationPluginRegistry::new()`:
 
 ```rust
 #[cfg(feature = "slack")]
 {
-    channels.insert(
+    plugins.insert(
         "slack".to_string(),
-        Arc::new(crate::slack::SlackChannel::new()?),
+        Arc::new(uptrakit_notification_plugin_slack::SlackPlugin::new()?),
     );
 }
 ```
 
-### 4. Export the module
-
-In `crates/shared/notification-channels/src/lib.rs`:
-
-```rust
-#[cfg(feature = "slack")]
-mod slack;
-
-#[cfg(feature = "slack")]
-pub use slack::SlackChannel;
-```
-
-### 5. Add the `NotificationChannelType` variant
+### 4. Add the `NotificationChannelType` variant
 
 In `crates/shared/web-api-types/src/notifications.rs`, add `Slack` to the `NotificationChannelType` enum and update
 `as_str()`, `FromStr`, and `Display` implementations accordingly.
 
-### 6. Propagate the feature flag
+### 5. Propagate the feature flag
 
 In `crates/ui/web-api/Cargo.toml`:
 
 ```toml
-notifications-slack = ["uptrakit-notification-channels/slack"]
+notifications-slack = ["uptrakit-notification-plugin-registry/slack"]
 ```
 
 In `crates/core/controller/Cargo.toml`:
@@ -230,6 +235,11 @@ In `crates/core/controller/Cargo.toml`:
 ```toml
 notifications-slack = ["uptrakit-web-api/notifications-slack"]
 ```
+
+### 6. Global shared settings (if applicable)
+
+If the new plugin uses global shared settings (like email uses global SMTP settings), add a merge
+step in the dispatcher and `test_channel` handler following the email channel pattern.
 
 ### 7. Add tests
 
@@ -286,35 +296,35 @@ The dispatcher (`crates/ui/web-api/src/notifications/dispatcher.rs`) runs a fire
 3. Filter by scope: if a rule specifies `host_id`, `software_item_id`, or `plugin_type`, the event must match.
 4. For each matched rule:
    - Load the channel from DB and verify it is enabled.
-   - Look up the channel implementation from `ChannelRegistry`.
+   - Look up the plugin implementation from `NotificationPluginRegistry`.
    - Parse and decrypt the channel config (`EncryptedString`).
    - Generate `action_token` (UUIDv7) if the event is actionable.
    - Build `DeliveryMessage` via `message_builder::build_delivery_message()`.
    - Insert a `notification_log` row with `status = "pending"`.
    - Spawn a `tokio::spawn` delivery task.
-5. The delivery task calls `channel.deliver()` and updates the log to `"delivered"` or `"failed"`.
+5. The delivery task calls `plugin.deliver()` and updates the log to `"delivered"` or `"failed"`.
 
 Delivery failures are logged at `warn` level but never propagate back to event producers.
 
 ### `message_builder`
 
 `crates/ui/web-api/src/notifications/message_builder.rs` is the single translation point between `NotificationEvent`
-and `DeliveryMessage`. Channel implementations never see `NotificationEvent`.
+and `DeliveryMessage`. Plugin implementations never see `NotificationEvent`.
 
 The builder generates:
 
 - `title` -- one-line summary (e.g. "Update Available: nginx")
 - `body` -- multi-line plain text
 - `body_html` -- HTML-formatted version for rich-text channels (user-controlled values are
-  HTML-escaped via `uptrakit_notification_channels::escape_html()`)
+  HTML-escaped via `uptrakit_notification_plugin_core::escape_html()`)
 - `event_payload` -- serialized `NotificationEventDetails` as JSON
 - `actions` -- "Install {version}" button for `UpdateAvailable` events only
 
 **HTML escaping requirement**: all user-controlled values (software names, host names, version
 strings, error messages, etc.) **must** be escaped with `escape_html()` before interpolation into
 `body_html`. The `body` (plain text) and `title` do not need escaping. The shared `escape_html()`
-function (`crates/shared/notification-channels/src/lib.rs`) escapes `& < > " '` and is also used by
-the Telegram and email channel implementations for consistency.
+function (`crates/plugins/notifications/core/src/lib.rs`) escapes `& < > " '` and is also used by
+the Telegram and email plugin implementations for consistency.
 
 ## Emitting events
 
@@ -398,9 +408,9 @@ return masked configs (secrets replaced with `"***"`) via `channel.mask_config_s
 The Telegram callback endpoint is not authenticated via JWT. It verifies the `X-Telegram-Bot-Api-Secret-Token`
 header against the channel's `webhook_secret` config field.
 
-## Webhook channel details
+## Webhook plugin details
 
-`crates/shared/notification-channels/src/webhook.rs`
+`crates/plugins/notifications/webhook/src/lib.rs`
 
 - POSTs a JSON payload to the configured `url`.
 - Config fields: `url` (required), `secret` (optional), `headers` (optional object).
@@ -413,16 +423,16 @@ header against the channel's `webhook_secret` config field.
   if present.
 - `mask_config_secrets` replaces the `secret` field with `"***"`.
 
-## Email channel details
+## Email plugin details
 
-`crates/shared/notification-channels/src/email.rs`
+`crates/plugins/notifications/email/src/lib.rs`
 
-The email channel sends notifications via SMTP using the [lettre](https://lettre.rs/) 0.11 library with
+The email plugin sends notifications via SMTP using the [lettre](https://lettre.rs/) 0.11 library with
 async Tokio support. It is gated on the `email` feature flag.
 
 ### Config split
 
-The email channel uses a **two-layer config** model:
+The email plugin uses a **two-layer config** model:
 
 - **Per-channel config** (stored encrypted in `notification_channels.config`): contains only `to_addresses`.
 - **Global SMTP settings** (stored in the `settings` key-value table, per-tenant): SMTP server host, port,
@@ -467,7 +477,7 @@ Configured via `PUT /api/v1/settings/smtp` (see [Settings Runtime Architecture](
 
 ### Message format
 
-The channel sends **multipart/alternative** emails:
+The plugin sends **multipart/alternative** emails:
 
 - **text/plain** part: `message.body`
 - **text/html** part: `message.body_html` when provided, otherwise the plain body wrapped in a minimal
@@ -484,7 +494,7 @@ The dispatcher (`crates/ui/web-api/src/notifications/dispatcher.rs`) performs th
 3. If `smtp.is_configured()` returns false (host or from_address missing), the notification is skipped
    with a `tracing::warn!` log and the log entry is marked `"failed"`.
 4. Otherwise, call `merge_smtp_into_config()` to add SMTP fields to the config object, then call
-   `email_channel.deliver(&merged_config, &message)`.
+   `email_plugin.deliver(&merged_config, &message)`.
 
 The same merge logic is applied in the `test_channel` route handler
 (`crates/ui/web-api/src/routes/notifications.rs`) and returns HTTP 400 when SMTP is not configured.
@@ -495,23 +505,23 @@ The same merge logic is applied in the `test_channel` route handler
   formats (must contain `@`).
 - `mask_config_secrets`: no-op; per-channel config contains no secrets.
 
-## Telegram channel details
+## Telegram plugin details
 
-`crates/shared/notification-channels/src/telegram.rs`
+`crates/plugins/notifications/telegram/src/lib.rs`
 
 - Sends messages via the Telegram Bot API `sendMessage` endpoint.
 - Config fields: `bot_token` (required), `chat_id` (required), `webhook_secret` (optional, for callback verification).
 - Uses HTML parse mode. The title is wrapped in `<b>` tags. HTML special characters in the title are escaped.
-- When `DeliveryMessage.actions` is non-empty, buttons are rendered as Telegram inline keyboard buttons with
-  `callback_data` set to the action token.
+- When `DeliveryMessage.actions` is non-empty, buttons are rendered as Telegram inline keyboard buttons
+  with `callback_data` set to the action token.
 - `validate_config` requires non-empty `bot_token` and `chat_id`.
 - `mask_config_secrets` replaces `bot_token` and `webhook_secret` with `"***"`.
 
 ## Testing
 
-- **Unit tests** exist in every module: `events.rs`, `message_builder.rs`, `webhook.rs`, `telegram.rs`,
-  `email.rs`, `registry.rs`, `notifications.rs` (web-api-types).
-- **Channel tests** use standard `#[test]` for sync methods (`validate_config`, `mask_config_secrets`).
+- **Unit tests** exist in every module: `events.rs`, `message_builder.rs`, and each plugin crate
+  (`webhook`, `telegram`, `email`), `registry`, `notifications.rs` (web-api-types).
+- **Plugin tests** use standard `#[test]` for sync methods (`validate_config`, `mask_config_secrets`).
   Use `httpmock` for delivery assertions in async tests. Email delivery tests verify error conversion
   against non-routable SMTP hosts (the test waits up to 60 s for connection timeout).
 - **Serde round-trip tests** cover all enum variants and request/response types.
@@ -524,12 +534,12 @@ The same merge logic is applied in the `test_channel` route handler
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/notification-channels/src/channel.rs` | `NotificationChannel` trait, `DeliveryMessage`, `MessageAction` |
-| `crates/shared/notification-channels/src/error.rs` | `ChannelError` enum, `Result` type alias |
-| `crates/shared/notification-channels/src/registry.rs` | `ChannelRegistry` -- compiled-in channel lookup |
-| `crates/shared/notification-channels/src/webhook.rs` | Webhook channel (HMAC-SHA256 signing) |
-| `crates/shared/notification-channels/src/telegram.rs` | Telegram channel (inline keyboard) |
-| `crates/shared/notification-channels/src/email.rs` | Email channel (SMTP via lettre, multipart/alternative) |
+| `crates/plugins/notifications/core/src/traits.rs` | `NotificationPlugin` trait, `DeliveryMessage`, `MessageAction` |
+| `crates/plugins/notifications/core/src/error.rs` | `NotificationPluginError` enum, `Result` type alias |
+| `crates/plugins/notifications/registry/src/lib.rs` | `NotificationPluginRegistry` -- compiled-in plugin lookup, `NotificationOps` trait |
+| `crates/plugins/notifications/webhook/src/lib.rs` | Webhook plugin (HMAC-SHA256 signing) |
+| `crates/plugins/notifications/telegram/src/lib.rs` | Telegram plugin (inline keyboard) |
+| `crates/plugins/notifications/email/src/lib.rs` | Email plugin (SMTP via lettre, multipart/alternative) |
 | `crates/shared/web-api-types/src/notifications.rs` | Shared enums, request/response types, `Validate` impls |
 | `crates/ui/web-api/src/notifications/dispatcher.rs` | Fire-and-forget background dispatcher loop |
 | `crates/ui/web-api/src/notifications/events.rs` | `NotificationEvent`, `NotificationEventDetails`, `ActionParams` |
