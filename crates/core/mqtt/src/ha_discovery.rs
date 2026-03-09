@@ -28,9 +28,28 @@ pub fn discovery_config_topic(ha_prefix: &str, unique_id: &str) -> String {
     format!("{ha_prefix}/update/uptrakit/{object_id}/config")
 }
 
+/// Returns the per-host topic prefix.
+///
+/// Format: `{topic_prefix}/hosts/{host_id}`
+///
+/// All host-scoped topics (software items, packages, security, hostname,
+/// friendly_name) are nested under this prefix.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_topic_prefix;
+/// let prefix = host_topic_prefix("uptrakit", Uuid::nil());
+/// assert!(prefix.starts_with("uptrakit/hosts/"));
+/// ```
+pub fn host_topic_prefix(topic_prefix: &str, host_id: Uuid) -> String {
+    format!("{topic_prefix}/hosts/{host_id}")
+}
+
 /// Returns the topic carrying the installed version of a `(software_item, host)` pair.
 ///
-/// Format: `{topic_prefix}/update/{item_id}/{host_id}/state`
+/// Format: `{topic_prefix}/hosts/{host_id}/items/{item_id}/state`
 ///
 /// # Examples
 ///
@@ -43,12 +62,13 @@ pub fn discovery_config_topic(ha_prefix: &str, unique_id: &str) -> String {
 /// assert!(topic.ends_with("/state"));
 /// ```
 pub fn state_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String {
-    format!("{topic_prefix}/update/{item_id}/{host_id}/state")
+    let hp = host_topic_prefix(topic_prefix, host_id);
+    format!("{hp}/items/{item_id}/state")
 }
 
 /// Returns the topic carrying the latest available version.
 ///
-/// Format: `{topic_prefix}/update/{item_id}/{host_id}/latest_version`
+/// Format: `{topic_prefix}/hosts/{host_id}/items/{item_id}/latest_version`
 ///
 /// # Examples
 ///
@@ -61,12 +81,13 @@ pub fn state_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String {
 /// assert!(topic.ends_with("/latest_version"));
 /// ```
 pub fn latest_version_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String {
-    format!("{topic_prefix}/update/{item_id}/{host_id}/latest_version")
+    let hp = host_topic_prefix(topic_prefix, host_id);
+    format!("{hp}/items/{item_id}/latest_version")
 }
 
 /// Returns the MQTT command topic that HA publishes `"install"` to.
 ///
-/// Format: `{topic_prefix}/update/{item_id}/{host_id}/set`
+/// Format: `{topic_prefix}/hosts/{host_id}/items/{item_id}/set`
 ///
 /// # Examples
 ///
@@ -79,7 +100,8 @@ pub fn latest_version_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) ->
 /// assert!(topic.ends_with("/set"));
 /// ```
 pub fn command_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String {
-    format!("{topic_prefix}/update/{item_id}/{host_id}/set")
+    let hp = host_topic_prefix(topic_prefix, host_id);
+    format!("{hp}/items/{item_id}/set")
 }
 
 /// Returns the MQTT topic for HA JSON attributes of a `(software_item, host)` pair.
@@ -88,7 +110,7 @@ pub fn command_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String
 /// `"in_progress"` (bool): `true` while an update is pending or running,
 /// `false` when idle.
 ///
-/// Format: `{topic_prefix}/update/{item_id}/{host_id}/attributes`
+/// Format: `{topic_prefix}/hosts/{host_id}/items/{item_id}/attributes`
 ///
 /// # Examples
 ///
@@ -101,7 +123,46 @@ pub fn command_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String
 /// assert!(topic.ends_with("/attributes"));
 /// ```
 pub fn json_attributes_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String {
-    format!("{topic_prefix}/update/{item_id}/{host_id}/attributes")
+    let hp = host_topic_prefix(topic_prefix, host_id);
+    format!("{hp}/items/{item_id}/attributes")
+}
+
+/// Returns the MQTT topic carrying the hostname string for a host.
+///
+/// Format: `{topic_prefix}/hosts/{host_id}/hostname`
+///
+/// Published as a retained plain-text payload for MQTT explorer visibility.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::hostname_topic;
+/// let topic = hostname_topic("uptrakit", Uuid::nil());
+/// assert!(topic.ends_with("/hostname"));
+/// ```
+pub fn hostname_topic(topic_prefix: &str, host_id: Uuid) -> String {
+    let hp = host_topic_prefix(topic_prefix, host_id);
+    format!("{hp}/hostname")
+}
+
+/// Returns the MQTT topic carrying the friendly name string for a host.
+///
+/// Format: `{topic_prefix}/hosts/{host_id}/friendly_name`
+///
+/// Published as a retained plain-text payload for MQTT explorer visibility.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::friendly_name_topic;
+/// let topic = friendly_name_topic("uptrakit", Uuid::nil());
+/// assert!(topic.ends_with("/friendly_name"));
+/// ```
+pub fn friendly_name_topic(topic_prefix: &str, host_id: Uuid) -> String {
+    let hp = host_topic_prefix(topic_prefix, host_id);
+    format!("{hp}/friendly_name")
 }
 
 /// Build the JSON attributes payload for a `(software_item, host)` entity.
@@ -131,7 +192,10 @@ pub fn build_attributes_payload(in_progress: bool) -> serde_json::Value {
 
 /// Returns a unique ID string for this `(tenant, software_item, host)` triple.
 ///
-/// Format: `uptrakit_{tenant_id_no_dashes}_{item_id_no_dashes}_{host_id_no_dashes}`
+/// Format: `uptrakit_{tenant_id_no_dashes}_{host_id_no_dashes}_{item_id_no_dashes}`
+///
+/// The host comes before the item so that all entities for a single host share
+/// the same UUID prefix, aligning with the host-centric device model.
 ///
 /// # Examples
 ///
@@ -147,9 +211,9 @@ pub fn build_attributes_payload(in_progress: bool) -> serde_json::Value {
 /// ```
 pub fn unique_id(tenant_id: Uuid, item_id: Uuid, host_id: Uuid) -> String {
     let t = tenant_id.simple();
-    let i = item_id.simple();
     let h = host_id.simple();
-    format!("uptrakit_{t}_{i}_{h}")
+    let i = item_id.simple();
+    format!("uptrakit_{t}_{h}_{i}")
 }
 
 /// Optional upstream release metadata included in a discovery config.
@@ -169,12 +233,12 @@ pub struct ReleaseInfo<'a> {
 
 /// Build the HA MQTT discovery JSON for an `update` entity.
 ///
-/// Each software item is represented as a distinct HA device (identified by
-/// `uptrakit_{tenant_id}_{item_id}`), named after the software item. Entities
-/// within that device are named after the hostname. An explicit
-/// `default_entity_id` in the form `{item_slug}_on_{host_slug}` is included
-/// so that HA uses a stable, human-readable entity ID on first registration,
-/// independent of the entity name.
+/// All entities for a given host are grouped under a single HA device
+/// (identified by `uptrakit_host_{tenant_id}_{host_id}`), named after the
+/// host's `friendly_name`. The entity itself is named after the software item.
+/// An explicit `default_entity_id` in the form
+/// `uptrakit_{friendly_name_slug}_{item_slug}` is included so that HA uses a
+/// stable, human-readable entity ID on first registration.
 ///
 /// Returns a [`serde_json::Value`] that should be serialized with `to_string()`
 /// and published (retained) on `discovery_config_topic(...)`.
@@ -210,18 +274,18 @@ pub fn build_discovery_config(
     item_id: Uuid,
     host_id: Uuid,
     item_name: &str,
-    hostname: &str,
+    friendly_name: &str,
     release: ReleaseInfo<'_>,
 ) -> serde_json::Value {
     let uid = unique_id(tenant_id, item_id, host_id);
     let tenant_simple = tenant_id.simple().to_string();
-    let item_simple = item_id.simple().to_string();
-    let default_entity_id = format!("uptrakit_{}_on_{}", slugify(item_name), slugify(hostname));
+    let host_simple = host_id.simple().to_string();
+    let default_entity_id = format!("uptrakit_{}_{}", slugify(friendly_name), slugify(item_name));
 
     let mut config = serde_json::json!({
         "platform": "mqtt",
         "unique_id": uid,
-        "name": hostname,
+        "name": item_name,
         "default_entity_id": default_entity_id,
         "state_topic": state_topic(topic_prefix, item_id, host_id),
         "latest_version_topic": latest_version_topic(topic_prefix, item_id, host_id),
@@ -232,8 +296,8 @@ pub fn build_discovery_config(
         "payload_available": "online",
         "payload_not_available": "offline",
         "device": {
-            "identifiers": [format!("uptrakit_{tenant_simple}_{item_simple}")],
-            "name": item_name,
+            "identifiers": [format!("uptrakit_host_{tenant_simple}_{host_simple}")],
+            "name": friendly_name,
             "manufacturer": "Uptrakit"
         }
     });
@@ -299,7 +363,7 @@ pub fn slugify(s: &str) -> String {
 /// Try to parse a command topic back to `(item_id, host_id)`.
 ///
 /// Returns `None` if the topic doesn't match
-/// `{prefix}/update/{uuid}/{uuid}/set`.
+/// `{prefix}/hosts/{uuid}/items/{uuid}/set`.
 ///
 /// # Examples
 ///
@@ -313,23 +377,27 @@ pub fn slugify(s: &str) -> String {
 /// assert_eq!(parsed, Some((item_id, host_id)));
 ///
 /// // Non-matching topic returns None.
-/// assert!(parse_command_topic("uptrakit", "uptrakit/update/bad/set").is_none());
+/// assert!(parse_command_topic("uptrakit", "uptrakit/hosts/bad/items/set").is_none());
 /// ```
 pub fn parse_command_topic(topic_prefix: &str, topic: &str) -> Option<(Uuid, Uuid)> {
-    // Expected: "{prefix}/update/{uuid}/{uuid}/set"
-    let prefix = format!("{topic_prefix}/update/");
+    // Expected: "{prefix}/hosts/{uuid}/items/{uuid}/set"
+    let prefix = format!("{topic_prefix}/hosts/");
     let rest = topic.strip_prefix(prefix.as_str())?;
     let rest = rest.strip_suffix("/set")?;
 
-    // rest should now be "{uuid}/{uuid}"
-    let (item_str, host_str) = rest.split_once('/')?;
-    // Make sure there are no further slashes (i.e. exactly two UUID segments).
-    if host_str.contains('/') {
+    // rest should now be "{host_uuid}/items/{item_uuid}"
+    let (host_str, rest) = rest.split_once('/')?;
+    let (items_literal, item_str) = rest.split_once('/')?;
+    if items_literal != "items" {
+        return None;
+    }
+    // Make sure there are no further slashes in item_str.
+    if item_str.contains('/') {
         return None;
     }
 
-    let item_id = Uuid::parse_str(item_str).ok()?;
     let host_id = Uuid::parse_str(host_str).ok()?;
+    let item_id = Uuid::parse_str(item_str).ok()?;
     Some((item_id, host_id))
 }
 
@@ -355,7 +423,8 @@ pub fn parse_command_topic(topic_prefix: &str, topic: &str) -> Option<(Uuid, Uui
 /// assert!(topic.ends_with("/state"));
 /// ```
 pub fn host_packages_state_topic(prefix: &str, host_id: Uuid) -> String {
-    format!("{prefix}/hosts/{host_id}/state")
+    let hp = host_topic_prefix(prefix, host_id);
+    format!("{hp}/state")
 }
 
 /// Returns the MQTT topic carrying the latest-version string for a host's
@@ -377,7 +446,8 @@ pub fn host_packages_state_topic(prefix: &str, host_id: Uuid) -> String {
 /// assert!(topic.ends_with("/latest_version"));
 /// ```
 pub fn host_packages_latest_version_topic(prefix: &str, host_id: Uuid) -> String {
-    format!("{prefix}/hosts/{host_id}/latest_version")
+    let hp = host_topic_prefix(prefix, host_id);
+    format!("{hp}/latest_version")
 }
 
 /// Returns the MQTT topic for HA JSON attributes of a host's package entity.
@@ -397,7 +467,8 @@ pub fn host_packages_latest_version_topic(prefix: &str, host_id: Uuid) -> String
 /// assert!(topic.ends_with("/attributes"));
 /// ```
 pub fn host_packages_json_attributes_topic(prefix: &str, host_id: Uuid) -> String {
-    format!("{prefix}/hosts/{host_id}/attributes")
+    let hp = host_topic_prefix(prefix, host_id);
+    format!("{hp}/attributes")
 }
 
 /// Returns the MQTT command topic that HA publishes `"install"` to for a host's
@@ -414,7 +485,8 @@ pub fn host_packages_json_attributes_topic(prefix: &str, host_id: Uuid) -> Strin
 /// assert!(topic.ends_with("/set"));
 /// ```
 pub fn host_packages_command_topic(prefix: &str, host_id: Uuid) -> String {
-    format!("{prefix}/hosts/{host_id}/set")
+    let hp = host_topic_prefix(prefix, host_id);
+    format!("{hp}/set")
 }
 
 /// Returns the HA MQTT discovery config topic for a host's package `update`
@@ -448,7 +520,7 @@ pub fn host_packages_discovery_config_topic(
 
 /// Returns a unique ID string for a host's package entity.
 ///
-/// Format: `uptrakit_pkgs_{tenant_id_no_dashes}_{host_id_no_dashes}`
+/// Format: `uptrakit_{tenant_id_no_dashes}_{host_id_no_dashes}_pkgs`
 ///
 /// # Examples
 ///
@@ -456,13 +528,14 @@ pub fn host_packages_discovery_config_topic(
 /// # use uuid::Uuid;
 /// # use uptrakit_mqtt::ha_discovery::host_packages_unique_id;
 /// let uid = host_packages_unique_id(Uuid::nil(), Uuid::nil());
-/// assert!(uid.starts_with("uptrakit_pkgs_"));
+/// assert!(uid.starts_with("uptrakit_"));
+/// assert!(uid.ends_with("_pkgs"));
 /// assert!(!uid.contains('-'));
 /// ```
 pub fn host_packages_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
     let t = tenant_id.simple();
     let h = host_id.simple();
-    format!("uptrakit_pkgs_{t}_{h}")
+    format!("uptrakit_{t}_{h}_pkgs")
 }
 
 /// Build the JSON attributes payload for a host's package entity.
@@ -606,17 +679,17 @@ pub fn build_host_packages_discovery_config(
     topic_prefix: &str,
     tenant_id: Uuid,
     host_id: Uuid,
-    hostname: &str,
+    friendly_name: &str,
 ) -> serde_json::Value {
     let uid = host_packages_unique_id(tenant_id, host_id);
     let host_simple = host_id.simple().to_string();
     let tenant_simple = tenant_id.simple().to_string();
-    let default_entity_id = format!("{}_packages", slugify(hostname));
+    let default_entity_id = format!("uptrakit_{}_packages", slugify(friendly_name));
 
     serde_json::json!({
         "platform": "mqtt",
         "unique_id": uid,
-        "name": format!("{hostname} packages"),
+        "name": format!("{friendly_name} packages"),
         "default_entity_id": default_entity_id,
         "enabled_by_default": false,
         "state_topic": host_packages_state_topic(topic_prefix, host_id),
@@ -629,7 +702,7 @@ pub fn build_host_packages_discovery_config(
         "payload_not_available": "offline",
         "device": {
             "identifiers": [format!("uptrakit_host_{tenant_simple}_{host_simple}")],
-            "name": hostname,
+            "name": friendly_name,
             "manufacturer": "Uptrakit"
         }
     })
@@ -688,7 +761,8 @@ pub fn parse_host_packages_command_topic(topic_prefix: &str, topic: &str) -> Opt
 /// assert!(topic.ends_with("/security/state"));
 /// ```
 pub fn host_security_state_topic(prefix: &str, host_id: Uuid) -> String {
-    format!("{prefix}/hosts/{host_id}/security/state")
+    let hp = host_topic_prefix(prefix, host_id);
+    format!("{hp}/security/state")
 }
 
 /// Returns the MQTT topic carrying the latest-version string for a host's
@@ -709,7 +783,8 @@ pub fn host_security_state_topic(prefix: &str, host_id: Uuid) -> String {
 /// assert!(topic.ends_with("/security/latest_version"));
 /// ```
 pub fn host_security_latest_version_topic(prefix: &str, host_id: Uuid) -> String {
-    format!("{prefix}/hosts/{host_id}/security/latest_version")
+    let hp = host_topic_prefix(prefix, host_id);
+    format!("{hp}/security/latest_version")
 }
 
 /// Returns the MQTT topic for HA JSON attributes of a host's security updates
@@ -730,7 +805,8 @@ pub fn host_security_latest_version_topic(prefix: &str, host_id: Uuid) -> String
 /// assert!(topic.ends_with("/security/attributes"));
 /// ```
 pub fn host_security_json_attributes_topic(prefix: &str, host_id: Uuid) -> String {
-    format!("{prefix}/hosts/{host_id}/security/attributes")
+    let hp = host_topic_prefix(prefix, host_id);
+    format!("{hp}/security/attributes")
 }
 
 /// Returns the MQTT command topic that HA publishes `"install"` to for a host's
@@ -747,12 +823,13 @@ pub fn host_security_json_attributes_topic(prefix: &str, host_id: Uuid) -> Strin
 /// assert!(topic.ends_with("/security/set"));
 /// ```
 pub fn host_security_command_topic(prefix: &str, host_id: Uuid) -> String {
-    format!("{prefix}/hosts/{host_id}/security/set")
+    let hp = host_topic_prefix(prefix, host_id);
+    format!("{hp}/security/set")
 }
 
 /// Returns a unique ID string for a host's security updates entity.
 ///
-/// Format: `uptrakit_sec_{tenant_id_no_dashes}_{host_id_no_dashes}`
+/// Format: `uptrakit_{tenant_id_no_dashes}_{host_id_no_dashes}_sec`
 ///
 /// # Examples
 ///
@@ -760,13 +837,14 @@ pub fn host_security_command_topic(prefix: &str, host_id: Uuid) -> String {
 /// # use uuid::Uuid;
 /// # use uptrakit_mqtt::ha_discovery::host_security_unique_id;
 /// let uid = host_security_unique_id(Uuid::nil(), Uuid::nil());
-/// assert!(uid.starts_with("uptrakit_sec_"));
+/// assert!(uid.starts_with("uptrakit_"));
+/// assert!(uid.ends_with("_sec"));
 /// assert!(!uid.contains('-'));
 /// ```
 pub fn host_security_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
     let t = tenant_id.simple();
     let h = host_id.simple();
-    format!("uptrakit_sec_{t}_{h}")
+    format!("uptrakit_{t}_{h}_sec")
 }
 
 /// Returns the HA MQTT discovery config topic for a host's security updates
@@ -829,17 +907,17 @@ pub fn build_host_security_discovery_config(
     topic_prefix: &str,
     tenant_id: Uuid,
     host_id: Uuid,
-    hostname: &str,
+    friendly_name: &str,
 ) -> serde_json::Value {
     let uid = host_security_unique_id(tenant_id, host_id);
     let host_simple = host_id.simple().to_string();
     let tenant_simple = tenant_id.simple().to_string();
-    let default_entity_id = format!("{}_security_updates", slugify(hostname));
+    let default_entity_id = format!("uptrakit_{}_security_updates", slugify(friendly_name));
 
     serde_json::json!({
         "platform": "mqtt",
         "unique_id": uid,
-        "name": format!("{hostname} security updates"),
+        "name": format!("{friendly_name} security updates"),
         "default_entity_id": default_entity_id,
         "enabled_by_default": false,
         "state_topic": host_security_state_topic(topic_prefix, host_id),
@@ -852,7 +930,7 @@ pub fn build_host_security_discovery_config(
         "payload_not_available": "offline",
         "device": {
             "identifiers": [format!("uptrakit_host_{tenant_simple}_{host_simple}")],
-            "name": hostname,
+            "name": friendly_name,
             "manufacturer": "Uptrakit"
         }
     })
@@ -943,6 +1021,16 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
+    // host_topic_prefix
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_topic_prefix_format() {
+        let p = host_topic_prefix("uptrakit", host());
+        assert_eq!(p, "uptrakit/hosts/33333333-3333-3333-3333-333333333333");
+    }
+
+    // -------------------------------------------------------------------------
     // state_topic
     // -------------------------------------------------------------------------
 
@@ -951,7 +1039,7 @@ mod tests {
         let t = state_topic("uptrakit", item(), host());
         assert_eq!(
             t,
-            "uptrakit/update/22222222-2222-2222-2222-222222222222/33333333-3333-3333-3333-333333333333/state"
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/items/22222222-2222-2222-2222-222222222222/state"
         );
     }
 
@@ -969,7 +1057,7 @@ mod tests {
         let t = latest_version_topic("uptrakit", item(), host());
         assert_eq!(
             t,
-            "uptrakit/update/22222222-2222-2222-2222-222222222222/33333333-3333-3333-3333-333333333333/latest_version"
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/items/22222222-2222-2222-2222-222222222222/latest_version"
         );
     }
 
@@ -987,7 +1075,7 @@ mod tests {
         let t = command_topic("uptrakit", item(), host());
         assert_eq!(
             t,
-            "uptrakit/update/22222222-2222-2222-2222-222222222222/33333333-3333-3333-3333-333333333333/set"
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/items/22222222-2222-2222-2222-222222222222/set"
         );
     }
 
@@ -1005,7 +1093,7 @@ mod tests {
         let t = json_attributes_topic("uptrakit", item(), host());
         assert_eq!(
             t,
-            "uptrakit/update/22222222-2222-2222-2222-222222222222/33333333-3333-3333-3333-333333333333/attributes"
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/items/22222222-2222-2222-2222-222222222222/attributes"
         );
     }
 
@@ -1017,8 +1105,30 @@ mod tests {
     #[test]
     fn json_attributes_topic_custom_prefix() {
         let t = json_attributes_topic("home/uptrakit", item(), host());
-        assert!(t.starts_with("home/uptrakit/update/"));
+        assert!(t.starts_with("home/uptrakit/hosts/"));
         assert!(t.ends_with("/attributes"));
+    }
+
+    // -------------------------------------------------------------------------
+    // hostname_topic / friendly_name_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn hostname_topic_format() {
+        let t = hostname_topic("uptrakit", host());
+        assert_eq!(
+            t,
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/hostname"
+        );
+    }
+
+    #[test]
+    fn friendly_name_topic_format() {
+        let t = friendly_name_topic("uptrakit", host());
+        assert_eq!(
+            t,
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/friendly_name"
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -1079,12 +1189,25 @@ mod tests {
     #[test]
     fn unique_id_format_exact() {
         // All-zero UUIDs produce all-zero simple strings.
+        // Format: uptrakit_{tenant}_{host}_{item}
         let zero = Uuid::nil();
         let uid = unique_id(zero, zero, zero);
         assert_eq!(
             uid,
             "uptrakit_00000000000000000000000000000000_00000000000000000000000000000000_00000000000000000000000000000000"
         );
+    }
+
+    #[test]
+    fn unique_id_host_before_item() {
+        // Verify host comes before item in the unique_id.
+        let uid = unique_id(tenant(), item(), host());
+        let host_simple = host().simple().to_string();
+        let item_simple = item().simple().to_string();
+        // host should appear before item in the string
+        let host_pos = uid.find(&host_simple).unwrap();
+        let item_pos = uid.find(&item_simple).unwrap();
+        assert!(host_pos < item_pos);
     }
 
     // -------------------------------------------------------------------------
@@ -1121,7 +1244,7 @@ mod tests {
     }
 
     #[test]
-    fn build_discovery_config_name_is_hostname() {
+    fn build_discovery_config_name_is_item_name() {
         let v = build_discovery_config(
             "uptrakit",
             tenant(),
@@ -1131,7 +1254,7 @@ mod tests {
             "server1",
             ReleaseInfo::default(),
         );
-        assert_eq!(v["name"], "server1");
+        assert_eq!(v["name"], "MyApp");
     }
 
     #[test]
@@ -1249,23 +1372,23 @@ mod tests {
             ReleaseInfo::default(),
         );
         let tenant_simple = tenant().simple().to_string();
-        let item_simple = item().simple().to_string();
-        let expected_id = format!("uptrakit_{tenant_simple}_{item_simple}");
+        let host_simple = host().simple().to_string();
+        let expected_id = format!("uptrakit_host_{tenant_simple}_{host_simple}");
         assert_eq!(v["device"]["identifiers"][0], expected_id.as_str());
     }
 
     #[test]
-    fn build_discovery_config_device_name_is_item_name() {
+    fn build_discovery_config_device_name_is_friendly_name() {
         let v = build_discovery_config(
             "uptrakit",
             tenant(),
             item(),
             host(),
             "My App",
-            "h",
+            "My Friendly Host",
             ReleaseInfo::default(),
         );
-        assert_eq!(v["device"]["name"], "My App");
+        assert_eq!(v["device"]["name"], "My Friendly Host");
         assert_eq!(v["device"]["manufacturer"], "Uptrakit");
     }
 
@@ -1282,7 +1405,7 @@ mod tests {
         );
         assert_eq!(
             v["default_entity_id"],
-            "uptrakit_uptrakit_pangolin_on_pangolin_uk_home_yantsen_su"
+            "uptrakit_pangolin_uk_home_yantsen_su_uptrakit_pangolin"
         );
     }
 
@@ -1297,7 +1420,7 @@ mod tests {
             "server1",
             ReleaseInfo::default(),
         );
-        assert_eq!(v["default_entity_id"], "uptrakit_myapp_on_server1");
+        assert_eq!(v["default_entity_id"], "uptrakit_server1_myapp");
     }
 
     #[test]
@@ -1419,19 +1542,27 @@ mod tests {
 
     #[test]
     fn parse_command_topic_invalid_uuid() {
-        let topic = "uptrakit/update/not-a-uuid/not-a-uuid/set";
+        let topic = "uptrakit/hosts/not-a-uuid/items/not-a-uuid/set";
         assert!(parse_command_topic("uptrakit", topic).is_none());
     }
 
     #[test]
     fn parse_command_topic_too_many_segments() {
-        let topic = format!("uptrakit/update/{}/{}/extra/set", item(), host());
+        let topic = format!("uptrakit/hosts/{}/items/{}/extra/set", host(), item());
         assert!(parse_command_topic("uptrakit", &topic).is_none());
     }
 
     #[test]
-    fn parse_command_topic_missing_host_segment() {
-        let topic = format!("uptrakit/update/{}/set", item());
+    fn parse_command_topic_missing_items_segment() {
+        let topic = format!("uptrakit/hosts/{}/set", host());
+        // This is a host packages command topic, not a software item one.
+        assert!(parse_command_topic("uptrakit", &topic).is_none());
+    }
+
+    #[test]
+    fn parse_command_topic_wrong_literal() {
+        // "things" instead of "items"
+        let topic = format!("uptrakit/hosts/{}/things/{}/set", host(), item());
         assert!(parse_command_topic("uptrakit", &topic).is_none());
     }
 
@@ -1588,8 +1719,10 @@ mod tests {
     // -------------------------------------------------------------------------
 
     #[test]
-    fn host_packages_unique_id_starts_with_uptrakit_pkgs() {
-        assert!(host_packages_unique_id(tenant(), host()).starts_with("uptrakit_pkgs_"));
+    fn host_packages_unique_id_starts_with_uptrakit_ends_with_pkgs() {
+        let uid = host_packages_unique_id(tenant(), host());
+        assert!(uid.starts_with("uptrakit_"));
+        assert!(uid.ends_with("_pkgs"));
     }
 
     #[test]
@@ -1725,7 +1858,7 @@ mod tests {
     #[test]
     fn build_host_packages_discovery_config_default_entity_id() {
         let v = build_host_packages_discovery_config("uptrakit", tenant(), host(), "My Server");
-        assert_eq!(v["default_entity_id"], "my_server_packages");
+        assert_eq!(v["default_entity_id"], "uptrakit_my_server_packages");
     }
 
     #[test]
@@ -1745,7 +1878,7 @@ mod tests {
     }
 
     #[test]
-    fn build_host_packages_discovery_config_device_name_is_hostname() {
+    fn build_host_packages_discovery_config_device_name_is_friendly_name() {
         let v = build_host_packages_discovery_config("uptrakit", tenant(), host(), "pangolin");
         assert_eq!(v["device"]["name"], "pangolin");
     }
@@ -1814,10 +1947,8 @@ mod tests {
     fn host_packages_discovery_config_topic_format() {
         let topic = host_packages_discovery_config_topic("homeassistant", tenant(), host());
         // The "uptrakit_" prefix is stripped; the node_id already carries the namespace.
-        assert!(topic.starts_with("homeassistant/update/uptrakit/pkgs_"));
-        assert!(topic.ends_with("/config"));
-        // The redundant "uptrakit_" prefix must not appear in the object_id segment.
-        assert!(!topic.contains("/uptrakit_pkgs_"));
+        assert!(topic.starts_with("homeassistant/update/uptrakit/"));
+        assert!(topic.ends_with("_pkgs/config"));
     }
 
     // -------------------------------------------------------------------------
@@ -1892,8 +2023,10 @@ mod tests {
     // -------------------------------------------------------------------------
 
     #[test]
-    fn host_security_unique_id_starts_with_uptrakit_sec() {
-        assert!(host_security_unique_id(tenant(), host()).starts_with("uptrakit_sec_"));
+    fn host_security_unique_id_starts_with_uptrakit_ends_with_sec() {
+        let uid = host_security_unique_id(tenant(), host());
+        assert!(uid.starts_with("uptrakit_"));
+        assert!(uid.ends_with("_sec"));
     }
 
     #[test]
@@ -1918,10 +2051,8 @@ mod tests {
     fn host_security_discovery_config_topic_format() {
         let topic = host_security_discovery_config_topic("homeassistant", tenant(), host());
         // The "uptrakit_" prefix is stripped; the node_id already carries the namespace.
-        assert!(topic.starts_with("homeassistant/update/uptrakit/sec_"));
-        assert!(topic.ends_with("/config"));
-        // The redundant "uptrakit_" prefix must not appear in the object_id segment.
-        assert!(!topic.contains("/uptrakit_sec_"));
+        assert!(topic.starts_with("homeassistant/update/uptrakit/"));
+        assert!(topic.ends_with("_sec/config"));
     }
 
     // -------------------------------------------------------------------------
@@ -1955,7 +2086,10 @@ mod tests {
     #[test]
     fn build_host_security_discovery_config_default_entity_id() {
         let v = build_host_security_discovery_config("uptrakit", tenant(), host(), "My Server");
-        assert_eq!(v["default_entity_id"], "my_server_security_updates");
+        assert_eq!(
+            v["default_entity_id"],
+            "uptrakit_my_server_security_updates"
+        );
     }
 
     #[test]
@@ -1971,6 +2105,22 @@ mod tests {
         let pkg = build_host_packages_discovery_config("uptrakit", tenant(), host(), "h");
         // Both entities must belong to the same HA device.
         assert_eq!(sec["device"]["identifiers"], pkg["device"]["identifiers"]);
+    }
+
+    #[test]
+    fn build_discovery_config_device_same_as_host_packages() {
+        // Software item entities should also share the same host-centric device.
+        let sw = build_discovery_config(
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+            ReleaseInfo::default(),
+        );
+        let pkg = build_host_packages_discovery_config("uptrakit", tenant(), host(), "h");
+        assert_eq!(sw["device"]["identifiers"], pkg["device"]["identifiers"]);
     }
 
     // -------------------------------------------------------------------------

@@ -306,6 +306,9 @@ impl TenantManager {
     /// `(item, host)` pairs, then publish HA discovery config topics for clients
     /// that have `ha_discovery` enabled.
     ///
+    /// Also publishes per-host `hostname` and `friendly_name` topics (retained)
+    /// for MQTT explorer visibility.
+    ///
     /// Called on every `SoftwareStates` push and on broker reconnect.
     #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
     async fn publish_software_states(
@@ -321,8 +324,22 @@ impl TenantManager {
         let topic_prefix = &state.topic_prefix;
         let ha_prefix = &state.ha_discovery_prefix;
 
+        // Track which hosts we've already published hostname/friendly_name for.
+        let mut published_hosts = std::collections::HashSet::new();
+
         for item in items {
             for host in &item.hosts {
+                // Per-host topics (deduplicated across items).
+                if published_hosts.insert(host.host_id) {
+                    self.publish_host_identity(
+                        state,
+                        host.host_id,
+                        &host.hostname,
+                        &host.friendly_name,
+                    )
+                    .await;
+                }
+
                 // Always: publish installed version (empty string if unknown).
                 let st = crate::ha_discovery::state_topic(
                     topic_prefix,
@@ -409,7 +426,7 @@ impl TenantManager {
                         item.software_item_id,
                         host.host_id,
                         &item.name,
-                        &host.hostname,
+                        &host.friendly_name,
                         crate::ha_discovery::ReleaseInfo {
                             url: host.release_url.as_deref(),
                             notes: host.release_notes.as_deref(),
@@ -429,6 +446,46 @@ impl TenantManager {
                     }
                 }
             }
+        }
+    }
+
+    /// Publish retained `hostname` and `friendly_name` topics for a host.
+    ///
+    /// These topics are for MQTT explorer visibility and are published under
+    /// `{prefix}/hosts/{host_id}/hostname` and `{prefix}/hosts/{host_id}/friendly_name`.
+    async fn publish_host_identity(
+        &self,
+        client_state: &ClientState,
+        host_id: uuid::Uuid,
+        hostname: &str,
+        friendly_name: &str,
+    ) {
+        let topic_prefix = &client_state.topic_prefix;
+
+        let hn_topic = crate::ha_discovery::hostname_topic(topic_prefix, host_id);
+        if let Err(e) = client_state
+            .handle
+            .publish_retained(&hn_topic, hostname.as_bytes().to_vec())
+            .await
+        {
+            tracing::warn!(
+                error = ?e,
+                host_id = %host_id,
+                "failed to publish hostname topic"
+            );
+        }
+
+        let fn_topic = crate::ha_discovery::friendly_name_topic(topic_prefix, host_id);
+        if let Err(e) = client_state
+            .handle
+            .publish_retained(&fn_topic, friendly_name.as_bytes().to_vec())
+            .await
+        {
+            tracing::warn!(
+                error = ?e,
+                host_id = %host_id,
+                "failed to publish friendly_name topic"
+            );
         }
     }
 
@@ -467,7 +524,7 @@ impl TenantManager {
                     item.software_item_id,
                     host.host_id,
                     &item.name,
-                    &host.hostname,
+                    &host.friendly_name,
                     crate::ha_discovery::ReleaseInfo {
                         url: host.release_url.as_deref(),
                         notes: host.release_notes.as_deref(),
@@ -512,6 +569,10 @@ impl TenantManager {
         let ha_prefix = &state.ha_discovery_prefix;
 
         for hs in host_states {
+            // Publish per-host identity topics (hostname, friendly_name).
+            self.publish_host_identity(state, hs.host_id, &hs.hostname, &hs.friendly_name)
+                .await;
+
             // Compute state string: "unknown" or "up-to-date".
             let installed_str = crate::ha_discovery::host_packages_state_string(hs.pending_count);
 
@@ -586,7 +647,7 @@ impl TenantManager {
                     topic_prefix,
                     tenant_id,
                     hs.host_id,
-                    &hs.hostname,
+                    &hs.friendly_name,
                 );
                 let config_bytes = config_json.to_string().into_bytes();
                 if let Err(e) = state
@@ -680,7 +741,7 @@ impl TenantManager {
                     topic_prefix,
                     tenant_id,
                     hs.host_id,
-                    &hs.hostname,
+                    &hs.friendly_name,
                 );
                 let sec_config_bytes = sec_config_json.to_string().into_bytes();
                 if let Err(e) = state
