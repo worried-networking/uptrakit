@@ -6750,9 +6750,11 @@ dependencies = [
  "rootcause",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-macros",
  "uptrakit-shared-types",
 ]
 
@@ -6908,11 +6910,14 @@ dependencies = [
  "rootcause",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "time",
  "tokio",
  "tracing",
+ "uptrakit-backoff",
  "uptrakit-command",
  "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-macros",
  "uptrakit-shared-types",
 ]
 
