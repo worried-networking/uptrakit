@@ -424,47 +424,6 @@
 			{/if}
 		</section>
 
-		<!-- Package Updates Summary -->
-		{#if canViewSoftware}
-			<section class="mb-6">
-				<div class="mb-3 flex items-center justify-between">
-					<h2 class="h3">Package Updates</h2>
-					<a href="/hosts/{host.id}/packages" class="text-sm text-primary-500 hover:underline">View all packages →</a>
-				</div>
-				<div class="card bg-surface-50 dark:bg-surface-900 p-4">
-					<div class="flex flex-wrap gap-6 text-sm">
-						<div>
-							<p class="text-surface-500">Available Updates</p>
-							<p class="text-2xl font-semibold">
-								{#if host.update_summary.available_updates_count > 0}
-									<a href="/hosts/{host.id}/packages?has_update=true" class="text-warning-500 hover:underline">
-										{host.update_summary.available_updates_count}
-									</a>
-								{:else}
-									<span class="text-surface-400">0</span>
-								{/if}
-							</p>
-						</div>
-						<div>
-							<p class="text-surface-500">Security Updates</p>
-							<p class="text-2xl font-semibold">
-								{#if host.update_summary.security_updates_count > 0}
-									<a
-										href="/hosts/{host.id}/packages?category=security&has_update=true"
-										class="text-error-500 hover:underline"
-									>
-										{host.update_summary.security_updates_count}
-									</a>
-								{:else}
-									<span class="text-surface-400">0</span>
-								{/if}
-							</p>
-						</div>
-					</div>
-				</div>
-			</section>
-		{/if}
-
 		<!-- Discovery Allowlist -->
 		{#if canViewSoftware}
 			<section class="mb-6">

@@ -10,9 +10,7 @@
 		triggerSoftwareUpdate,
 		updateSoftwareItem,
 		deleteSoftwareItem,
-		unassignHostFromSoftwareItem,
-		approveSoftwareItem,
-		unassignHostFromSoftwareItemWithIgnore
+		unassignHostFromSoftwareItem
 	} from '$lib/api';
 	import { formatDate, formatVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -42,7 +40,7 @@
 
 	// Edit software item state
 	let editItem: boolean = $state(false);
-	let editForm = $state({ name: '', enabled: true });
+	let editForm = $state({ name: '', featured: true });
 	let editSubmitting: boolean = $state(false);
 
 	// Delete software item state
@@ -56,13 +54,6 @@
 	// Update confirm modal state
 	let updateModal: { host: SoftwareItemHostSummary; toVersion: string } | null = $state(null);
 	let updateTriggering: boolean = $state(false);
-
-	// Approve state
-	let approvingItem: boolean = $state(false);
-
-	// Ignore state
-	let confirmIgnore: boolean = $state(false);
-	let ignoreSubmitting: boolean = $state(false);
 
 	// Update All (multi-host) modal state
 	let updateAllModal: boolean = $state(false);
@@ -173,7 +164,7 @@
 
 	function openEditModal() {
 		if (!item) return;
-		editForm = { name: item.name, enabled: item.enabled };
+		editForm = { name: item.name, featured: item.featured };
 		editItem = true;
 	}
 
@@ -183,7 +174,7 @@
 		try {
 			await updateSoftwareItem(item.id, {
 				name: editForm.name || undefined,
-				enabled: editForm.enabled
+				featured: editForm.featured
 			});
 			showSuccess('Software item updated.');
 			editItem = false;
@@ -341,37 +332,6 @@
 		liveStreamState = 'disconnected';
 	}
 
-	async function executeApprove() {
-		if (!item || approvingItem) return;
-		approvingItem = true;
-		try {
-			await approveSoftwareItem(item.id);
-			showSuccess(`"${item.name}" approved for version tracking`);
-			await loadItem(true);
-		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to approve software item.');
-		} finally {
-			approvingItem = false;
-		}
-	}
-
-	async function executeIgnore() {
-		if (!item || ignoreSubmitting) return;
-		const name = item.name;
-		confirmIgnore = false;
-		ignoreSubmitting = true;
-		try {
-			const detail = await getSoftwareItem(item.id);
-			await Promise.all(detail.hosts.map((h) => unassignHostFromSoftwareItemWithIgnore(item!.id, h.host_id)));
-			await deleteSoftwareItem(item.id);
-			showSuccess(`"${name}" will be ignored in future autodiscovery runs.`);
-			goto('/software');
-		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to ignore software item.');
-			ignoreSubmitting = false;
-		}
-	}
-
 	async function openUpdateAllModal() {
 		if (!item) return;
 		updateAllModal = true;
@@ -470,13 +430,10 @@
 			<div>
 				<h1 class="h1">{item.name}</h1>
 				<div class="mt-2 flex flex-wrap items-center gap-2">
-					{#if item.discovery_state === 'pending'}
-						<span class="badge preset-filled-warning-500">Pending</span>
-					{/if}
-					{#if item.enabled}
-						<span class="badge preset-filled-success-500">Enabled</span>
+					{#if item.featured}
+						<span class="badge preset-filled-success-500">Featured</span>
 					{:else}
-						<span class="badge preset-tonal">Disabled</span>
+						<span class="badge preset-tonal">Unfeatured</span>
 					{/if}
 					{#if item.update_available}
 						<span class="badge preset-filled-warning-500">Update Available</span>
@@ -500,25 +457,12 @@
 			</div>
 			{#if canManage}
 				<div class="flex flex-wrap items-center gap-2">
-					{#if item.discovery_state === 'pending'}
-						<button class="btn preset-filled-success-500" onclick={executeApprove} disabled={approvingItem}>
-							{approvingItem ? 'Approving…' : 'Approve'}
-						</button>
-						<button
-							class="btn preset-filled-warning-500"
-							onclick={() => (confirmIgnore = true)}
-							disabled={ignoreSubmitting}
-						>
-							Ignore
-						</button>
-					{:else}
-						{#if item.update_available}
-							<button class="btn preset-filled-warning-500" onclick={openUpdateAllModal}> Update All </button>
-						{/if}
-						<button class="btn preset-tonal-surface" onclick={() => (showAssignModal = true)}> Assign to Host </button>
+					{#if item.update_available}
+						<button class="btn preset-filled-warning-500" onclick={openUpdateAllModal}> Update All </button>
 					{/if}
+					<button class="btn preset-tonal-surface" onclick={() => (showAssignModal = true)}> Assign to Host </button>
 					<button class="btn preset-tonal-surface" onclick={checkAllVersions} disabled={checkingAll}>
-						{checkingAll ? 'Checking…' : 'Check All Versions'}
+						{checkingAll ? 'Checking...' : 'Check All Versions'}
 					</button>
 					<button class="btn preset-tonal-surface" onclick={openEditModal}>Edit</button>
 					<button
@@ -662,7 +606,7 @@
 					disabled={checkingHostId === host.host_id}
 					onclick={menuCheckHostVersions}
 				>
-					{checkingHostId === host.host_id ? 'Checking…' : 'Check Versions'}
+					{checkingHostId === host.host_id ? 'Checking...' : 'Check Versions'}
 				</button>
 			</li>
 			<li>
@@ -735,7 +679,7 @@
 		{#snippet footer()}
 			<button class="btn preset-tonal-surface" onclick={() => (updateModal = null)}>Cancel</button>
 			<button class="btn preset-filled-warning-500" onclick={executeUpdate} disabled={updateTriggering}>
-				{updateTriggering ? 'Triggering…' : 'Trigger Update'}
+				{updateTriggering ? 'Triggering...' : 'Trigger Update'}
 			</button>
 		{/snippet}
 	</Modal>
@@ -785,7 +729,7 @@
 				{#if liveStreamState === 'streaming'}
 					<span class="badge preset-filled-success-500 text-xs animate-pulse">Live</span>
 				{:else if liveStreamState === 'connecting'}
-					<span class="badge preset-tonal text-xs">Connecting…</span>
+					<span class="badge preset-tonal text-xs">Connecting...</span>
 				{:else if liveStreamState === 'completed'}
 					<span class="badge preset-filled-success-500 text-xs">Completed</span>
 				{:else if liveStreamState === 'error'}
@@ -827,13 +771,13 @@
 			<input class="input" type="text" bind:value={editForm.name} />
 		</label>
 		<label class="flex items-center gap-3">
-			<input class="checkbox" type="checkbox" bind:checked={editForm.enabled} />
-			<span>Enabled</span>
+			<input class="checkbox" type="checkbox" bind:checked={editForm.featured} />
+			<span>Featured</span>
 		</label>
 		{#snippet footer()}
 			<button class="btn preset-tonal-surface" onclick={() => (editItem = false)}>Cancel</button>
 			<button class="btn preset-filled-primary-500" onclick={executeEdit} disabled={editSubmitting}>
-				{editSubmitting ? 'Saving…' : 'Save'}
+				{editSubmitting ? 'Saving...' : 'Save'}
 			</button>
 		{/snippet}
 	</Modal>
@@ -844,7 +788,7 @@
 		title="Delete Software Item"
 		messagePrefix="Are you sure you want to delete"
 		entityName={item.name}
-		confirmLabel={deleteSubmitting ? 'Deleting…' : 'Delete'}
+		confirmLabel={deleteSubmitting ? 'Deleting...' : 'Delete'}
 		confirmClass="preset-filled-error-500"
 		confirmDisabled={deleteSubmitting}
 		onconfirm={executeDelete}
@@ -857,7 +801,7 @@
 		title="Unassign Host"
 		messagePrefix="Remove assignment of"
 		entityName="{confirmUnassign.hostname} from this software item"
-		confirmLabel={unassignSubmitting ? 'Removing…' : 'Unassign'}
+		confirmLabel={unassignSubmitting ? 'Removing...' : 'Unassign'}
 		confirmClass="preset-filled-error-500"
 		confirmDisabled={unassignSubmitting}
 		onconfirm={executeUnassign}
@@ -865,30 +809,10 @@
 	/>
 {/if}
 
-{#if confirmIgnore && item}
-	<Modal title="Ignore Software Item" onclose={() => (confirmIgnore = false)}>
-		<p class="text-sm">
-			Permanently ignore <strong>{item.name}</strong> from future autodiscovery runs?
-		</p>
-		<p class="mt-2 text-sm text-surface-500">
-			An ignore rule will be created so this package is not re-discovered. You can manage ignore rules under <a
-				href="/software?tab=ignores"
-				class="underline">Software → Ignore Rules</a
-			>.
-		</p>
-		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={() => (confirmIgnore = false)}>Cancel</button>
-			<button class="btn preset-filled-warning-500" disabled={ignoreSubmitting} onclick={executeIgnore}>
-				{ignoreSubmitting ? 'Ignoring…' : 'Ignore'}
-			</button>
-		{/snippet}
-	</Modal>
-{/if}
-
 {#if updateAllModal && item}
 	<Modal title="Trigger Update — {item.name}" onclose={() => (updateAllModal = false)} maxWidth="max-w-lg">
 		{#if updateAllLoading}
-			<p class="text-sm text-surface-500">Loading hosts…</p>
+			<p class="text-sm text-surface-500">Loading hosts...</p>
 		{:else if updateAllDetail}
 			<p class="text-sm text-surface-500 mb-2">
 				Select the hosts to update. Hosts that are already up to date cannot be selected.
@@ -935,7 +859,7 @@
 				disabled={updateAllSelectedHostIds.size === 0 || updateAllTriggering}
 				onclick={executeUpdateAll}
 			>
-				{updateAllTriggering ? 'Triggering…' : `Update ${updateAllSelectedHostIds.size} host(s)`}
+				{updateAllTriggering ? 'Triggering...' : `Update ${updateAllSelectedHostIds.size} host(s)`}
 			</button>
 		{/snippet}
 	</Modal>

@@ -252,8 +252,6 @@
 					<th>Architecture</th>
 					<th>IP</th>
 					<th>Agents</th>
-					<th>Updates</th>
-					<th>Security</th>
 					<th>Last Seen</th>
 					{#if canManage}
 						<th class="w-20 sticky right-0 bg-surface-50 dark:bg-surface-900"></th>
@@ -293,27 +291,6 @@
 						<td>{host.architecture ?? '\u2014'}</td>
 						<td>{host.ip_address ?? '\u2014'}</td>
 						<td>{host.agents.length}</td>
-						<td>
-							{#if host.update_summary.available_updates_count > 0}
-								<a href="/hosts/{host.id}/packages?has_update=true" class="badge preset-filled-warning-500">
-									{host.update_summary.available_updates_count}
-								</a>
-							{:else}
-								<span class="text-surface-400">0</span>
-							{/if}
-						</td>
-						<td>
-							{#if host.update_summary.security_updates_count > 0}
-								<a
-									href="/hosts/{host.id}/packages?category=security&has_update=true"
-									class="badge preset-filled-error-500"
-								>
-									{host.update_summary.security_updates_count}
-								</a>
-							{:else}
-								<span class="text-surface-400">0</span>
-							{/if}
-						</td>
 						<td>{formatDate(host.last_seen_at)}</td>
 						{#if canManage}
 							<td class="sticky right-0 bg-surface-50 dark:bg-surface-900">
@@ -334,7 +311,7 @@
 					</tr>
 				{:else}
 					<tr>
-						<td colspan={canManage ? 13 : 10} class="text-center py-8">
+						<td colspan={canManage ? 11 : 8} class="text-center py-8">
 							<p class="text-lg font-medium">No hosts discovered yet</p>
 							<p class="mt-1 text-sm text-surface-500">
 								Hosts appear here automatically when an approved agent reports from a new machine.
@@ -397,7 +374,7 @@
 							disabled={discoveringHostIds.has(host.id)}
 							onclick={() => triggerDiscovery(host)}
 						>
-							{discoveringHostIds.has(host.id) ? 'Triggering…' : 'Trigger Discovery'}
+							{discoveringHostIds.has(host.id) ? 'Triggering...' : 'Trigger Discovery'}
 						</button>
 					</li>
 				{/if}

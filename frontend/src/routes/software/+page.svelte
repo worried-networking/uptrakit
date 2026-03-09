@@ -7,13 +7,11 @@
 	import {
 		getSoftwareItems,
 		deleteSoftwareItem,
-		approveSoftwareItem,
 		checkSoftwareItemVersions,
 		updateSoftwareItem,
 		listPluginTypes,
 		getSoftwareItem,
 		triggerSoftwareUpdate,
-		unassignHostFromSoftwareItemWithIgnore,
 		batchSoftwareItems
 	} from '$lib/api';
 	import { formatDate, formatVersion, parseUrlPage } from '$lib/utils';
@@ -46,13 +44,12 @@
 	let assignItem: { id: string; name: string } | null = $state(null);
 	let submitting: boolean = $state(false);
 	let checkingVersionsId: string | null = $state(null);
-	let approvingId: string | null = $state(null);
 	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'all');
 
 	const tabExtensions = $derived(getTabExtensions('software'));
-	const isItemsTab = $derived(activeTab === 'all' || activeTab === 'pending' || activeTab === 'active');
-	let editItem: { id: string; name: string; enabled: boolean } | null = $state(null);
-	let editForm = $state({ name: '', enabled: true });
+	const isItemsTab = $derived(activeTab === 'all' || activeTab === 'featured' || activeTab === 'unfeatured');
+	let editItem: { id: string; name: string; featured: boolean } | null = $state(null);
+	let editForm = $state({ name: '', featured: true });
 	let editSubmitting: boolean = $state(false);
 	let pluginTypeNames: Map<string, string> = $state(new Map());
 	let updateModalItem: SoftwareItemResponse | null = $state(null);
@@ -60,8 +57,6 @@
 	let updateModalLoading: boolean = $state(false);
 	let selectedHostIds: Set<string> = $state(new Set());
 	let triggeringUpdate: boolean = $state(false);
-	let confirmIgnore: { id: string; name: string } | null = $state(null);
-	let ignoreSubmitting: boolean = $state(false);
 	let batchSelectedIds = new SvelteSet<string>();
 	let batchConfirmAction: string | null = $state(null);
 	let batchResult: BatchActionResponse | null = $state(null);
@@ -72,9 +67,11 @@
 	const batchActions = $derived.by(() => {
 		const selected = items.filter((i) => batchSelectedIds.has(i.id));
 		const acts: { id: string; label: string; destructive?: boolean }[] = [];
-		if (selected.some((i) => i.discovery_state === 'pending')) {
-			acts.push({ id: 'approve', label: 'Approve' });
-			acts.push({ id: 'ignore', label: 'Ignore', destructive: true });
+		if (selected.some((i) => !i.featured)) {
+			acts.push({ id: 'feature', label: 'Feature' });
+		}
+		if (selected.some((i) => i.featured)) {
+			acts.push({ id: 'unfeature', label: 'Unfeature' });
 		}
 		if (selected.some((i) => i.update_available)) {
 			acts.push({ id: 'update-all', label: 'Update All' });
@@ -124,9 +121,9 @@
 		if (refreshInterval) clearInterval(refreshInterval);
 	});
 
-	function discoveryStateFilter(): 'pending' | 'approved' | undefined {
-		if (activeTab === 'pending') return 'pending';
-		if (activeTab === 'active') return 'approved';
+	function featuredFilter(): boolean | undefined {
+		if (activeTab === 'featured') return true;
+		if (activeTab === 'unfeatured') return false;
 		return undefined;
 	}
 
@@ -136,7 +133,7 @@
 			error = null;
 		}
 		try {
-			const result = await getSoftwareItems(page, undefined, discoveryStateFilter());
+			const result = await getSoftwareItems(page, undefined, featuredFilter());
 			items = result.items;
 			currentPage = result.page;
 			totalPages = result.total_pages;
@@ -155,7 +152,7 @@
 		if (activeTab === tab) return;
 		currentPage = 1;
 		activeTab = tab;
-		if (tab === 'all' || tab === 'pending' || tab === 'active') {
+		if (tab === 'all' || tab === 'featured' || tab === 'unfeatured') {
 			loadAll(1);
 		}
 	}
@@ -186,8 +183,8 @@
 
 	function openEditModal(item: SoftwareItemResponse) {
 		closeMenu();
-		editItem = { id: item.id, name: item.name, enabled: item.enabled };
-		editForm = { name: item.name, enabled: item.enabled };
+		editItem = { id: item.id, name: item.name, featured: item.featured };
+		editForm = { name: item.name, featured: item.featured };
 	}
 
 	async function executeEdit() {
@@ -196,7 +193,7 @@
 		try {
 			const updated = await updateSoftwareItem(editItem.id, {
 				name: editForm.name || undefined,
-				enabled: editForm.enabled
+				featured: editForm.featured
 			});
 			items = items.map((i) => (i.id === editItem!.id ? updated : i));
 			showSuccess(`"${updated.name}" updated.`);
@@ -224,30 +221,6 @@
 		}
 	}
 
-	function requestIgnore(item: SoftwareItemResponse) {
-		closeMenu();
-		confirmIgnore = { id: item.id, name: item.name };
-	}
-
-	async function executeIgnore() {
-		if (!confirmIgnore || ignoreSubmitting) return;
-		const { id, name } = confirmIgnore;
-		confirmIgnore = null;
-		ignoreSubmitting = true;
-		try {
-			const detail = await getSoftwareItem(id);
-			await Promise.all(detail.hosts.map((h) => unassignHostFromSoftwareItemWithIgnore(id, h.host_id)));
-			await deleteSoftwareItem(id);
-			items = items.filter((i) => i.id !== id);
-			showSuccess(`"${name}" will be ignored in future autodiscovery runs.`);
-		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to ignore software item.');
-			loadAll(currentPage);
-		} finally {
-			ignoreSubmitting = false;
-		}
-	}
-
 	async function triggerVersionCheck(item: SoftwareItemResponse) {
 		closeMenu();
 		checkingVersionsId = item.id;
@@ -262,24 +235,6 @@
 			showError(e instanceof Error ? e.message : 'Failed to trigger version check.');
 		} finally {
 			checkingVersionsId = null;
-		}
-	}
-
-	async function approveItem(item: SoftwareItemResponse) {
-		closeMenu();
-		approvingId = item.id;
-		try {
-			const updated = await approveSoftwareItem(item.id);
-			showSuccess(`"${item.name}" approved for version tracking`);
-			if (activeTab === 'pending') {
-				items = items.filter((i) => i.id !== item.id);
-			} else {
-				items = items.map((i) => (i.id === item.id ? updated : i));
-			}
-		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to approve software item.');
-		} finally {
-			approvingId = null;
 		}
 	}
 
@@ -347,26 +302,7 @@
 		batchConfirmAction = null;
 		submitting = true;
 		try {
-			if (action === 'ignore') {
-				// Client-side orchestration: fetch details, unassign hosts with ignore, then delete
-				const succeeded: { id: string }[] = [];
-				const failed: { id: string; error: string }[] = [];
-				for (const itemId of ids) {
-					try {
-						const detail = await getSoftwareItem(itemId);
-						await Promise.all(detail.hosts.map((h) => unassignHostFromSoftwareItemWithIgnore(itemId, h.host_id)));
-						await deleteSoftwareItem(itemId);
-						succeeded.push({ id: itemId });
-					} catch (e) {
-						failed.push({ id: itemId, error: e instanceof Error ? e.message : 'Unknown error' });
-					}
-				}
-				if (failed.length > 0) {
-					batchResult = { succeeded, failed };
-				} else {
-					showSuccess(`${succeeded.length} item(s) will be ignored in future autodiscovery runs.`);
-				}
-			} else if (action === 'update-all') {
+			if (action === 'update-all') {
 				const itemsWithUpdates = items.filter((i) => batchSelectedIds.has(i.id) && i.update_available);
 				if (itemsWithUpdates.length === 0) {
 					showSuccess('None of the selected items have updates available.');
@@ -435,16 +371,16 @@
 					All
 				</button>
 				<button
-					class="btn btn-sm {activeTab === 'pending' ? 'preset-filled-warning-500' : 'preset-tonal'}"
-					onclick={() => switchTab('pending')}
+					class="btn btn-sm {activeTab === 'featured' ? 'preset-filled-success-500' : 'preset-tonal'}"
+					onclick={() => switchTab('featured')}
 				>
-					Pending{activeTab === 'pending' && totalItems > 0 ? ` (${totalItems})` : ''}
+					Featured
 				</button>
 				<button
-					class="btn btn-sm {activeTab === 'active' ? 'preset-filled-success-500' : 'preset-tonal'}"
-					onclick={() => switchTab('active')}
+					class="btn btn-sm {activeTab === 'unfeatured' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+					onclick={() => switchTab('unfeatured')}
 				>
-					Active
+					Unfeatured
 				</button>
 				<button
 					class="btn btn-sm {activeTab === 'ignores' ? 'preset-filled-primary-500' : 'preset-tonal'}"
@@ -526,26 +462,21 @@
 										{item.plugins.map((p) => pluginTypeNames.get(p) ?? p).join(', ') || '\u2014'}
 									</td>
 									<td>
-										{#if item.discovery_state === 'pending'}
-											<span class="badge preset-filled-warning-500">Pending</span>
+										{#if item.featured}
+											<span class="badge preset-filled-success-500">Featured</span>
 										{:else}
-											{#if item.update_available}
-												{#if canManage}
-													<button
-														class="badge preset-filled-warning-500 cursor-pointer hover:opacity-80"
-														onclick={() => openUpdateModal(item)}
-													>
-														Update Available
-													</button>
-												{:else}
-													<span class="badge preset-filled-warning-500">Update Available</span>
-												{/if}
-											{/if}
-											{#if !item.enabled}
-												<span class="badge preset-tonal">Disabled</span>
-											{/if}
-											{#if !item.update_available && item.enabled}
-												<span class="text-surface-400">—</span>
+											<span class="badge preset-tonal">Unfeatured</span>
+										{/if}
+										{#if item.update_available}
+											{#if canManage}
+												<button
+													class="badge preset-filled-warning-500 cursor-pointer hover:opacity-80"
+													onclick={() => openUpdateModal(item)}
+												>
+													Update Available
+												</button>
+											{:else}
+												<span class="badge preset-filled-warning-500">Update Available</span>
 											{/if}
 										{/if}
 									</td>
@@ -578,12 +509,14 @@
 							{:else}
 								<tr>
 									<td colspan={canManage ? 8 : 5} class="py-8 text-center">
-										{#if activeTab === 'pending'}
-											<p class="text-lg font-medium">No pending items</p>
-											<p class="mt-1 text-sm text-surface-500">No discovered software awaiting review.</p>
-										{:else if activeTab === 'active'}
-											<p class="text-lg font-medium">No active software</p>
-											<p class="mt-1 text-sm text-surface-500">Register or approve software to start tracking.</p>
+										{#if activeTab === 'featured'}
+											<p class="text-lg font-medium">No featured software</p>
+											<p class="mt-1 text-sm text-surface-500">
+												Feature software items to highlight them on the dashboard.
+											</p>
+										{:else if activeTab === 'unfeatured'}
+											<p class="text-lg font-medium">No unfeatured software</p>
+											<p class="mt-1 text-sm text-surface-500">All software items are currently featured.</p>
 										{:else}
 											<p class="text-lg font-medium">No software registered yet</p>
 											<p class="mt-1 text-sm text-surface-500">Register a package to start tracking.</p>
@@ -616,18 +549,18 @@
 					entityName="{batchSelectedIds.size} software item(s)"
 					confirmLabel={submitting
 						? 'Processing...'
-						: batchConfirmAction === 'approve'
-							? 'Approve'
-							: batchConfirmAction === 'ignore'
-								? 'Ignore'
-								: batchConfirmAction === 'update-all'
-									? 'Update All'
+						: batchConfirmAction === 'update-all'
+							? 'Update All'
+							: batchConfirmAction === 'feature'
+								? 'Feature'
+								: batchConfirmAction === 'unfeature'
+									? 'Unfeature'
 									: 'Delete'}
-					confirmClass={batchConfirmAction === 'approve'
-						? 'preset-filled-success-500'
-						: batchConfirmAction === 'ignore' || batchConfirmAction === 'update-all'
-							? 'preset-filled-warning-500'
-							: 'preset-filled-error-500'}
+					confirmClass={batchConfirmAction === 'update-all' ||
+					batchConfirmAction === 'feature' ||
+					batchConfirmAction === 'unfeature'
+						? 'preset-filled-warning-500'
+						: 'preset-filled-error-500'}
 					confirmDisabled={submitting}
 					onconfirm={executeBatchAction}
 					oncancel={() => (batchConfirmAction = null)}
@@ -642,103 +575,59 @@
 				{@const item = items.find((i) => i.id === openMenuId)}
 				{#if item}
 					<ContextMenu top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
-						{#if item.discovery_state === 'pending'}
-							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-									role="menuitem"
-									tabindex="-1"
-									onclick={() => openEditModal(item)}
-								>
-									Edit
-								</button>
-							</li>
-							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
-									role="menuitem"
-									tabindex="-1"
-									disabled={approvingId === item.id}
-									onclick={() => approveItem(item)}
-								>
-									{approvingId === item.id ? 'Approving…' : 'Approve'}
-								</button>
-							</li>
+						<li>
+							<button
+								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+								role="menuitem"
+								tabindex="-1"
+								onclick={() => openEditModal(item)}
+							>
+								Edit
+							</button>
+						</li>
+						<li>
+							<button
+								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
+								role="menuitem"
+								tabindex="-1"
+								disabled={checkingVersionsId === item.id}
+								onclick={() => triggerVersionCheck(item)}
+							>
+								{checkingVersionsId === item.id ? 'Checking...' : 'Check Versions'}
+							</button>
+						</li>
+						<li>
+							<button
+								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+								role="menuitem"
+								tabindex="-1"
+								onclick={() => openAssignModal(item)}
+							>
+								Assign to Host
+							</button>
+						</li>
+						{#if item.update_available}
 							<li>
 								<button
 									class="w-full rounded-md px-3 py-2 text-left text-sm text-warning-600 dark:text-warning-400 hover:bg-surface-200 dark:hover:bg-surface-800"
 									role="menuitem"
 									tabindex="-1"
-									onclick={() => requestIgnore(item)}
+									onclick={() => openUpdateModal(item)}
 								>
-									Ignore
-								</button>
-							</li>
-							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-									role="menuitem"
-									tabindex="-1"
-									onclick={() => requestDelete(item)}
-								>
-									Delete
-								</button>
-							</li>
-						{:else}
-							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-									role="menuitem"
-									tabindex="-1"
-									onclick={() => openEditModal(item)}
-								>
-									Edit
-								</button>
-							</li>
-							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
-									role="menuitem"
-									tabindex="-1"
-									disabled={checkingVersionsId === item.id}
-									onclick={() => triggerVersionCheck(item)}
-								>
-									{checkingVersionsId === item.id ? 'Checking…' : 'Check Versions'}
-								</button>
-							</li>
-							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-									role="menuitem"
-									tabindex="-1"
-									onclick={() => openAssignModal(item)}
-								>
-									Assign to Host
-								</button>
-							</li>
-							{#if item.update_available}
-								<li>
-									<button
-										class="w-full rounded-md px-3 py-2 text-left text-sm text-warning-600 dark:text-warning-400 hover:bg-surface-200 dark:hover:bg-surface-800"
-										role="menuitem"
-										tabindex="-1"
-										onclick={() => openUpdateModal(item)}
-									>
-										Trigger Update
-									</button>
-								</li>
-							{/if}
-							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-									role="menuitem"
-									tabindex="-1"
-									onclick={() => requestDelete(item)}
-								>
-									Delete
+									Trigger Update
 								</button>
 							</li>
 						{/if}
+						<li>
+							<button
+								class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+								role="menuitem"
+								tabindex="-1"
+								onclick={() => requestDelete(item)}
+							>
+								Delete
+							</button>
+						</li>
 					</ContextMenu>
 				{/if}
 			{/if}
@@ -754,26 +643,6 @@
 					onconfirm={executeDelete}
 					oncancel={() => (confirmDelete = null)}
 				/>
-			{/if}
-
-			{#if confirmIgnore}
-				<Modal title="Ignore Software Item" onclose={() => (confirmIgnore = null)}>
-					<p class="text-sm">
-						Permanently ignore <strong>{confirmIgnore.name}</strong> from future autodiscovery runs?
-					</p>
-					<p class="mt-2 text-sm text-surface-500">
-						An ignore rule will be created so this package is not re-discovered. You can manage ignore rules under <a
-							href="/software?tab=ignores"
-							class="underline">Software → Ignore Rules</a
-						>.
-					</p>
-					{#snippet footer()}
-						<button class="btn preset-tonal-surface" onclick={() => (confirmIgnore = null)}>Cancel</button>
-						<button class="btn preset-filled-warning-500" disabled={ignoreSubmitting} onclick={executeIgnore}>
-							{ignoreSubmitting ? 'Ignoring…' : 'Ignore'}
-						</button>
-					{/snippet}
-				</Modal>
 			{/if}
 
 			{#if assignItem}
@@ -810,9 +679,9 @@
 {/if}
 
 {#if updateModalItem}
-	<Modal title="Trigger Update — {updateModalItem.name}" onclose={() => (updateModalItem = null)} maxWidth="max-w-lg">
+	<Modal title="Trigger Update -- {updateModalItem.name}" onclose={() => (updateModalItem = null)} maxWidth="max-w-lg">
 		{#if updateModalLoading}
-			<p class="text-sm text-surface-500">Loading hosts…</p>
+			<p class="text-sm text-surface-500">Loading hosts...</p>
 		{:else if updateModalDetail}
 			<p class="text-sm text-surface-500 mb-2">
 				Select the hosts to update. Hosts that are already up to date cannot be selected.
@@ -844,7 +713,7 @@
 								<p class="text-xs text-surface-400">Already up to date</p>
 							{:else}
 								<p class="text-xs text-surface-500">
-									{host.installed_version ?? 'unknown'} → {host.latest_version}
+									{host.installed_version ?? 'unknown'} -> {host.latest_version}
 								</p>
 							{/if}
 						</div>
@@ -859,7 +728,7 @@
 				disabled={selectedHostIds.size === 0 || triggeringUpdate}
 				onclick={executeUpdate}
 			>
-				{triggeringUpdate ? 'Triggering…' : `Update ${selectedHostIds.size} host(s)`}
+				{triggeringUpdate ? 'Triggering...' : `Update ${selectedHostIds.size} host(s)`}
 			</button>
 		{/snippet}
 	</Modal>
@@ -873,8 +742,8 @@
 		</label>
 
 		<label class="flex items-center gap-3">
-			<input class="checkbox" type="checkbox" bind:checked={editForm.enabled} />
-			<span>Enabled</span>
+			<input class="checkbox" type="checkbox" bind:checked={editForm.featured} />
+			<span>Featured</span>
 		</label>
 
 		{#snippet footer()}

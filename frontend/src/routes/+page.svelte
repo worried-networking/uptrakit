@@ -5,49 +5,27 @@
 	import { formatDate } from '$lib/utils';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import { Permission } from '$lib/types';
-	import type {
-		HostResponse,
-		ServiceResponse,
-		SoftwareItemResponse,
-		UpdateHistoryResponse,
-		PaginatedResponse
-	} from '$lib/types';
+	import type { ServiceResponse, SoftwareItemResponse, UpdateHistoryResponse, PaginatedResponse } from '$lib/types';
 
 	// --- Dashboard state ---
 	let loading = $state(true);
 	let error: string | null = $state(null);
 
-	let hosts: HostResponse[] = $state([]);
 	let totalHosts = $state(0);
 	let services: ServiceResponse[] = $state([]);
 	let totalServices = $state(0);
 	let softwareItems: SoftwareItemResponse[] = $state([]);
 	let totalSoftwareItems = $state(0);
-	let pendingSoftwareCount = $state(0);
+	let unfeaturedSoftwareCount = $state(0);
 	let recentUpdates: UpdateHistoryResponse[] = $state([]);
 	let totalRecentUpdates = $state(0);
 
 	// --- Derived stats ---
-	const hostsWithUpdates = $derived(hosts.filter((h) => h.update_summary.available_updates_count > 0).length);
-	const hostsWithSecurityUpdates = $derived(hosts.filter((h) => h.update_summary.security_updates_count > 0).length);
 	const pendingServices = $derived(services.filter((s) => s.status === 'pending').length);
 	const failedUpdates = $derived(recentUpdates.filter((u) => u.status === 'failed').length);
 	const itemsWithUpdates = $derived(softwareItems.filter((i) => i.update_available).length);
 
-	const hasAttentionItems = $derived(
-		pendingServices > 0 ||
-			pendingSoftwareCount > 0 ||
-			hostsWithUpdates > 0 ||
-			hostsWithSecurityUpdates > 0 ||
-			failedUpdates > 0
-	);
-
-	// Hosts that need attention (have updates or security updates)
-	const hostsNeedingAttention = $derived(
-		hosts
-			.filter((h) => h.update_summary.available_updates_count > 0 || h.update_summary.security_updates_count > 0)
-			.slice(0, 5)
-	);
+	const hasAttentionItems = $derived(pendingServices > 0 || unfeaturedSoftwareCount > 0 || failedUpdates > 0);
 
 	// --- Permissions ---
 	const canViewHosts = $derived(getUser()?.permissions.includes(Permission.ViewHosts) ?? false);
@@ -67,8 +45,7 @@
 			subscribeToEvent('software_item_updated', () => loadDashboard(true)),
 			subscribeToEvent('software_item_created', () => loadDashboard(true)),
 			subscribeToEvent('version_check_completed', () => loadDashboard(true)),
-			subscribeToEvent('update_completed', () => loadDashboard(true)),
-			subscribeToEvent('host_packages_changed', () => loadDashboard(true))
+			subscribeToEvent('update_completed', () => loadDashboard(true))
 		);
 
 		refreshInterval = setInterval(() => {
@@ -92,9 +69,8 @@
 
 		if (canViewHosts) {
 			promises.push(
-				getHosts(1, 100)
-					.then((result: PaginatedResponse<HostResponse>) => {
-						hosts = result.items;
+				getHosts(1, 1)
+					.then((result) => {
 						totalHosts = result.total;
 					})
 					.catch(() => {
@@ -118,7 +94,7 @@
 
 		if (canViewSoftware) {
 			promises.push(
-				getSoftwareItems(1, 100, 'approved')
+				getSoftwareItems(1, 100, true)
 					.then((result: PaginatedResponse<SoftwareItemResponse>) => {
 						softwareItems = result.items;
 						totalSoftwareItems = result.total;
@@ -129,9 +105,9 @@
 			);
 
 			promises.push(
-				getSoftwareItems(1, 1, 'pending')
+				getSoftwareItems(1, 1, false)
 					.then((result: PaginatedResponse<SoftwareItemResponse>) => {
-						pendingSoftwareCount = result.total;
+						unfeaturedSoftwareCount = result.total;
 					})
 					.catch(() => {
 						/* non-fatal */
@@ -198,18 +174,7 @@
 				<a href="/hosts" class="card p-5 hover:ring-1 hover:ring-primary-500 transition-shadow">
 					<p class="text-sm font-medium text-surface-500">Hosts</p>
 					<p class="mt-1 text-3xl font-bold">{totalHosts}</p>
-					<p class="mt-1 text-sm text-surface-400">
-						{#if hostsWithUpdates > 0}
-							{hostsWithUpdates} with updates available
-						{:else}
-							All up to date
-						{/if}
-					</p>
-					{#if hostsWithSecurityUpdates > 0}
-						<p class="text-sm text-error-500">
-							{hostsWithSecurityUpdates} with security updates
-						</p>
-					{/if}
+					<p class="mt-1 text-sm text-surface-400">registered hosts</p>
 				</a>
 			{/if}
 
@@ -232,8 +197,8 @@
 					<p class="text-sm font-medium text-surface-500">Software Items</p>
 					<p class="mt-1 text-3xl font-bold">{totalSoftwareItems}</p>
 					<p class="mt-1 text-sm text-surface-400">
-						{#if pendingSoftwareCount > 0}
-							<span class="text-warning-500">{pendingSoftwareCount} pending review</span>
+						{#if unfeaturedSoftwareCount > 0}
+							<span class="text-warning-500">{unfeaturedSoftwareCount} unfeatured</span>
 						{:else if itemsWithUpdates > 0}
 							{itemsWithUpdates} with updates available
 						{:else}
@@ -277,50 +242,18 @@
 						</a>
 					{/if}
 
-					{#if pendingSoftwareCount > 0 && canViewSoftware}
+					{#if unfeaturedSoftwareCount > 0 && canViewSoftware}
 						<a
-							href="/software?tab=pending"
+							href="/software?tab=unfeatured"
 							class="card flex items-center gap-3 p-4 hover:ring-1 hover:ring-warning-500 transition-shadow"
 						>
 							<span
 								class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full preset-filled-warning-500 text-sm font-bold"
 							>
-								{pendingSoftwareCount}
+								{unfeaturedSoftwareCount}
 							</span>
 							<span class="text-sm">
-								discovered software {pendingSoftwareCount === 1 ? 'item' : 'items'} pending review
-							</span>
-						</a>
-					{/if}
-
-					{#if hostsWithSecurityUpdates > 0 && canViewHosts}
-						<a
-							href="/hosts"
-							class="card flex items-center gap-3 p-4 hover:ring-1 hover:ring-error-500 transition-shadow"
-						>
-							<span
-								class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full preset-filled-error-500 text-sm font-bold"
-							>
-								{hostsWithSecurityUpdates}
-							</span>
-							<span class="text-sm">
-								{hostsWithSecurityUpdates === 1 ? 'host has' : 'hosts have'} security updates available
-							</span>
-						</a>
-					{/if}
-
-					{#if hostsWithUpdates > 0 && canViewHosts}
-						<a
-							href="/hosts"
-							class="card flex items-center gap-3 p-4 hover:ring-1 hover:ring-warning-500 transition-shadow"
-						>
-							<span
-								class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full preset-filled-warning-500 text-sm font-bold"
-							>
-								{hostsWithUpdates}
-							</span>
-							<span class="text-sm">
-								{hostsWithUpdates === 1 ? 'host has' : 'hosts have'} package updates available
+								unfeatured software {unfeaturedSoftwareCount === 1 ? 'item' : 'items'}
 							</span>
 						</a>
 					{/if}
@@ -344,122 +277,55 @@
 			</section>
 		{/if}
 
-		<!-- Two-column layout for tables -->
-		<div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-			<!-- Recent updates -->
-			{#if canViewSoftware}
-				<section>
-					<div class="mb-3 flex items-center justify-between">
-						<h2 class="h2">Recent Updates</h2>
-						{#if totalRecentUpdates > 5}
-							<a href="/history" class="btn btn-sm preset-tonal">View all</a>
-						{/if}
-					</div>
-					<div class="table-wrap">
-						<table class="table">
-							<thead>
+		<!-- Recent updates -->
+		{#if canViewSoftware}
+			<section>
+				<div class="mb-3 flex items-center justify-between">
+					<h2 class="h2">Recent Updates</h2>
+					{#if totalRecentUpdates > 5}
+						<a href="/history" class="btn btn-sm preset-tonal">View all</a>
+					{/if}
+				</div>
+				<div class="table-wrap">
+					<table class="table">
+						<thead>
+							<tr>
+								<th>Software</th>
+								<th>Host</th>
+								<th>Status</th>
+								<th>Date</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each recentUpdates as entry (entry.id)}
 								<tr>
-									<th>Software</th>
-									<th>Host</th>
-									<th>Status</th>
-									<th>Date</th>
+									<td class="text-sm font-medium">
+										{entry.software_item_name}
+									</td>
+									<td class="text-sm text-surface-500">
+										{entry.host_name}
+									</td>
+									<td>
+										<span class="badge {statusBadgeClass(entry.status)}">
+											{entry.status}
+										</span>
+									</td>
+									<td class="text-sm text-surface-500">
+										{formatDate(entry.created_at)}
+									</td>
 								</tr>
-							</thead>
-							<tbody>
-								{#each recentUpdates as entry (entry.id)}
-									<tr>
-										<td class="text-sm font-medium">
-											{entry.software_item_name}
-										</td>
-										<td class="text-sm text-surface-500">
-											{entry.host_name}
-										</td>
-										<td>
-											<span class="badge {statusBadgeClass(entry.status)}">
-												{entry.status}
-											</span>
-										</td>
-										<td class="text-sm text-surface-500">
-											{formatDate(entry.created_at)}
-										</td>
-									</tr>
-								{:else}
-									<tr>
-										<td colspan="4" class="py-8 text-center">
-											<p class="text-lg font-medium">No updates yet</p>
-											<p class="mt-1 text-sm text-surface-500">Updates will appear here once triggered.</p>
-										</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
-				</section>
-			{/if}
-
-			<!-- Hosts needing attention -->
-			{#if canViewHosts}
-				<section>
-					<div class="mb-3 flex items-center justify-between">
-						<h2 class="h2">Hosts with Updates</h2>
-						{#if hostsNeedingAttention.length > 0}
-							<a href="/hosts" class="btn btn-sm preset-tonal">View all</a>
-						{/if}
-					</div>
-					<div class="table-wrap">
-						<table class="table">
-							<thead>
+							{:else}
 								<tr>
-									<th>Host</th>
-									<th>Updates</th>
-									<th>Security</th>
+									<td colspan="4" class="py-8 text-center">
+										<p class="text-lg font-medium">No updates yet</p>
+										<p class="mt-1 text-sm text-surface-500">Updates will appear here once triggered.</p>
+									</td>
 								</tr>
-							</thead>
-							<tbody>
-								{#each hostsNeedingAttention as host (host.id)}
-									<tr>
-										<td>
-											<p class="text-sm font-medium">
-												{host.friendly_name || host.hostname}
-											</p>
-											{#if host.friendly_name && host.friendly_name !== host.hostname}
-												<p class="text-xs text-surface-500">
-													{host.hostname}
-												</p>
-											{/if}
-										</td>
-										<td>
-											{#if host.update_summary.available_updates_count > 0}
-												<span class="badge preset-filled-warning-500">
-													{host.update_summary.available_updates_count}
-												</span>
-											{:else}
-												<span class="text-surface-400">&mdash;</span>
-											{/if}
-										</td>
-										<td>
-											{#if host.update_summary.security_updates_count > 0}
-												<span class="badge preset-filled-error-500">
-													{host.update_summary.security_updates_count}
-												</span>
-											{:else}
-												<span class="text-surface-400">&mdash;</span>
-											{/if}
-										</td>
-									</tr>
-								{:else}
-									<tr>
-										<td colspan="3" class="py-8 text-center">
-											<p class="text-lg font-medium">All hosts up to date</p>
-											<p class="mt-1 text-sm text-surface-500">No hosts have pending updates.</p>
-										</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
-				</section>
-			{/if}
-		</div>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			</section>
+		{/if}
 	{/if}
 {/if}

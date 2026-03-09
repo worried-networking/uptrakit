@@ -301,11 +301,6 @@ export interface HostAgentSummary {
 	status: ServiceStatus;
 }
 
-export interface HostUpdateSummary {
-	available_updates_count: number;
-	security_updates_count: number;
-}
-
 export interface HostTagResponse {
 	id: string;
 	name: string;
@@ -351,7 +346,6 @@ export interface HostResponse {
 	created_at: string;
 	updated_at: string;
 	agents: HostAgentSummary[];
-	update_summary: HostUpdateSummary;
 	tags: HostTagSummary[];
 }
 
@@ -429,15 +423,14 @@ export interface CreatePluginConfigRequest {
 
 export interface CreateSoftwareItemRequest {
 	name: string;
-	enabled?: boolean;
+	featured?: boolean;
 }
 
 export interface SoftwareItemResponse {
 	id: string;
 	name: string;
 	plugins: string[];
-	enabled: boolean;
-	discovery_state?: 'pending' | 'approved' | null;
+	featured: boolean;
 	last_checked_at: string | null;
 	host_count: number;
 	latest_version?: string | null;
@@ -507,23 +500,21 @@ export interface TriggerDiscoveryResponse {
 	message: string;
 }
 
-export interface DiscardDiscoveredResponse {
-	discarded_count: number;
-}
-
-export interface AutodiscoveryIgnoreResponse {
+export interface SoftwareIgnoreResponse {
 	id: string;
 	name: string;
+	host_id?: string | null;
 	created_at: string;
 }
 
-export interface CreateAutodiscoveryIgnoreRequest {
+export interface CreateSoftwareIgnoreRequest {
 	name: string;
+	host_id?: string | null;
 }
 
 export interface UpdateSoftwareItemRequest {
 	name?: string;
-	enabled?: boolean;
+	featured?: boolean;
 }
 
 export type UpdateHistoryStatus = 'queued' | 'pending' | 'in_progress' | 'completed' | 'failed';
@@ -699,70 +690,6 @@ export interface SystemEnrollmentTokenResponse {
 	created_at: string;
 	revoked_at: string | null;
 	created_by_user_id: string | null;
-}
-
-// Host packages
-
-export interface HostPackageResponse {
-	id: string;
-	host_id: string;
-	plugin_config_id: string;
-	package_identifier: string;
-	name: string;
-	installed_version: string | null;
-	installed_version_detected_at: string | null;
-	latest_version: string | null;
-	latest_version_fetched_at: string | null;
-	update_category: string;
-	enabled: boolean;
-	last_checked_at: string | null;
-	last_updated_at: string | null;
-	created_at: string;
-	has_update: boolean;
-}
-
-export interface HostPackageDetailResponse {
-	package: HostPackageResponse;
-	recent_updates: HostPackageUpdateHistoryEntry[];
-}
-
-export interface HostPackageUpdateHistoryEntry {
-	id: string;
-	from_version: string | null;
-	to_version: string | null;
-	status: string;
-	output: string | null;
-	created_at: string;
-}
-
-export interface UpdateHostPackageRequest {
-	enabled: boolean;
-}
-
-export interface PromoteHostPackageRequest {
-	name?: string;
-	software_item_id?: string;
-}
-
-export interface HostPackageIgnoreResponse {
-	id: string;
-	plugin_config_id: string;
-	package_identifier: string;
-	created_at: string;
-}
-
-export interface CreateHostPackageIgnoreRequest {
-	plugin_config_id: string;
-	package_identifier: string;
-}
-
-export interface ListHostPackagesParams {
-	page?: number;
-	per_page?: number;
-	enabled?: boolean;
-	has_update?: boolean;
-	category?: string;
-	search?: string;
 }
 
 export interface AuditLogEntry {

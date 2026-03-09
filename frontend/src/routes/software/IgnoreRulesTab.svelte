@@ -1,12 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
-	import {
-		getAutodiscoveryIgnores,
-		createAutodiscoveryIgnore,
-		deleteAutodiscoveryIgnore,
-		batchAutodiscoveryIgnores
-	} from '$lib/api';
+	import { getSoftwareIgnores, createSoftwareIgnore, deleteSoftwareIgnore, batchSoftwareIgnores } from '$lib/api';
 	import { formatDate } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -16,11 +11,11 @@
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 	import { getUser } from '$lib/auth.svelte';
 	import { Permission } from '$lib/types';
-	import type { AutodiscoveryIgnoreResponse, BatchActionResponse } from '$lib/types';
+	import type { SoftwareIgnoreResponse, BatchActionResponse } from '$lib/types';
 
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
 
-	let ignores: AutodiscoveryIgnoreResponse[] = $state([]);
+	let ignores: SoftwareIgnoreResponse[] = $state([]);
 	let ignoresLoading: boolean = $state(true);
 	let ignoresPage: number = $state(1);
 	let ignoresTotalPages: number = $state(1);
@@ -45,7 +40,7 @@
 	async function loadIgnores(p: number) {
 		ignoresLoading = true;
 		try {
-			const res = await getAutodiscoveryIgnores(p);
+			const res = await getSoftwareIgnores(p);
 			ignores = res.items;
 			ignoresPage = res.page;
 			ignoresTotalPages = res.total_pages;
@@ -72,7 +67,7 @@
 			return;
 		}
 		try {
-			await createAutodiscoveryIgnore({ name: ignoreForm.name.trim() });
+			await createSoftwareIgnore({ name: ignoreForm.name.trim() });
 			showSuccess('Ignore rule created.');
 			closeIgnoreModal();
 			loadIgnores(1);
@@ -86,7 +81,7 @@
 		const { id } = ignoreDeleteConfirm;
 		ignoreDeleteConfirm = null;
 		try {
-			await deleteAutodiscoveryIgnore(id);
+			await deleteSoftwareIgnore(id);
 			ignores = ignores.filter((i) => i.id !== id);
 			showSuccess('Ignore rule deleted.');
 		} catch (e) {
@@ -116,7 +111,7 @@
 		ignoreBatchConfirmAction = null;
 		ignoreBatchSubmitting = true;
 		try {
-			const response = await batchAutodiscoveryIgnores('delete', [...ignoreSelectedIds]);
+			const response = await batchSoftwareIgnores('delete', [...ignoreSelectedIds]);
 			if (response.failed.length > 0) {
 				ignoreBatchResult = response;
 			} else {

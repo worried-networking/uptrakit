@@ -6,7 +6,7 @@
  * last subscriber leaves.
  *
  * Rapid duplicate events (same type + entity ID within 200ms) are debounced
- * so that a burst of, e.g., `host_packages_changed` for the same host only
+ * so that a burst of, e.g., `software_item_updated` for the same item only
  * triggers one callback.
  */
 

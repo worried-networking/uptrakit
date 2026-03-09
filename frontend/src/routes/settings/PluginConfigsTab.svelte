@@ -7,7 +7,6 @@
 		updatePluginConfig,
 		deletePluginConfig,
 		triggerPluginConfigDiscovery,
-		discardPluginConfigDiscovered,
 		listDiscoveryAllowlist,
 		addDiscoveryAllowlistEntry,
 		deleteDiscoveryAllowlistEntry,
@@ -48,7 +47,6 @@
 	let configForm = $state({ name: '', plugin_type: '', config: '{}', enabled: true });
 	let configDeleteConfirm: { id: string; name: string } | null = $state(null);
 	let discoveringId: string | null = $state(null);
-	let discardingId: string | null = $state(null);
 	let showJsonEditor: boolean = $state(false);
 
 	// Discovery allowlist state
@@ -292,18 +290,6 @@
 		}
 	}
 
-	async function triggerDiscard(config: PluginConfigResponse) {
-		discardingId = config.id;
-		try {
-			const res = await discardPluginConfigDiscovered(config.id);
-			showSuccess(`Discarded ${res.discarded_count} item(s).`);
-		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to discard discovered items');
-		} finally {
-			discardingId = null;
-		}
-	}
-
 	function toggleConfigSelectAll() {
 		if (configSelectedIds.size === configs.length) {
 			configSelectedIds.clear();
@@ -446,13 +432,6 @@
 											onclick={() => triggerDiscover(config)}
 										>
 											{discoveringId === config.id ? '...' : 'Discover'}
-										</button>
-										<button
-											class="btn btn-sm preset-tonal"
-											disabled={discardingId === config.id}
-											onclick={() => triggerDiscard(config)}
-										>
-											{discardingId === config.id ? '...' : 'Discard'}
 										</button>
 									{/if}
 									<button

@@ -13,7 +13,7 @@
 	} = $props();
 
 	let name: string = $state('');
-	let enabled: boolean = $state(true);
+	let featured: boolean = $state(true);
 	let submitting: boolean = $state(false);
 
 	async function submit() {
@@ -25,7 +25,7 @@
 		}
 		submitting = true;
 		try {
-			const created = await createSoftwareItem({ name: trimmedName, enabled });
+			const created = await createSoftwareItem({ name: trimmedName, featured });
 			showSuccess('Software item registered.');
 			onsuccess(created);
 		} catch (e) {
@@ -45,7 +45,7 @@
 	</label>
 
 	<label class="flex items-center gap-3">
-		<input class="checkbox" type="checkbox" bind:checked={enabled} />
+		<input class="checkbox" type="checkbox" bind:checked={featured} />
 		<span>Track updates for this item</span>
 	</label>
 

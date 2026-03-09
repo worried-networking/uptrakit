@@ -7,14 +7,13 @@ import type {
 	AuthenticationSettings,
 	AuthMethodsResponse,
 	AuthResponse,
-	AutodiscoveryIgnoreResponse,
+	SoftwareIgnoreResponse,
 	CombinedSettingsResponse,
 	CreateApiTokenRequest,
 	CreateApiTokenResponse,
-	CreateAutodiscoveryIgnoreRequest,
+	CreateSoftwareIgnoreRequest,
 	CreateEnrollmentTokenRequest,
 	CreateOidcProviderRequest,
-	DiscardDiscoveredResponse,
 	EnrollmentTokenCreatedResponse,
 	EnrollmentTokenResponse,
 	HostResponse,
@@ -71,13 +70,6 @@ import type {
 	SystemEnrollmentTokenCreatedResponse,
 	SystemEnrollmentTokenResponse,
 	PluginTypeInfo,
-	HostPackageResponse,
-	HostPackageDetailResponse,
-	UpdateHostPackageRequest,
-	PromoteHostPackageRequest,
-	HostPackageIgnoreResponse,
-	CreateHostPackageIgnoreRequest,
-	ListHostPackagesParams,
 	AuditLogEntry,
 	AuditLogListParams,
 	ExtensionResponse,
@@ -435,76 +427,6 @@ export function batchHostTags(action: string, ids: string[]): Promise<BatchActio
 	return request('/host-tags/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
 }
 
-// --- Host Package APIs ---
-
-export function listHostPackages(
-	hostId: string,
-	opts?: ListHostPackagesParams
-): Promise<PaginatedResponse<HostPackageResponse>> {
-	const params = new URLSearchParams();
-	if (opts?.page != null) params.set('page', String(opts.page));
-	if (opts?.per_page != null) params.set('per_page', String(opts.per_page));
-	if (opts?.enabled != null) params.set('enabled', String(opts.enabled));
-	if (opts?.has_update != null) params.set('has_update', String(opts.has_update));
-	if (opts?.category) params.set('category', opts.category);
-	if (opts?.search) params.set('search', opts.search);
-	const query = params.toString();
-	return request(`/hosts/${encodeURIComponent(hostId)}/packages${query ? `?${query}` : ''}`);
-}
-
-export function getHostPackage(hostId: string, packageId: string): Promise<HostPackageDetailResponse> {
-	return request(`/hosts/${encodeURIComponent(hostId)}/packages/${encodeURIComponent(packageId)}`);
-}
-
-export function updateHostPackage(
-	hostId: string,
-	packageId: string,
-	data: UpdateHostPackageRequest
-): Promise<HostPackageResponse> {
-	return request(`/hosts/${encodeURIComponent(hostId)}/packages/${encodeURIComponent(packageId)}`, {
-		method: 'PUT',
-		body: JSON.stringify(data)
-	});
-}
-
-export function deleteHostPackage(hostId: string, packageId: string, ignore = false): Promise<void> {
-	const query = ignore ? '?ignore=true' : '';
-	return requestVoid(`/hosts/${encodeURIComponent(hostId)}/packages/${encodeURIComponent(packageId)}${query}`, {
-		method: 'DELETE'
-	});
-}
-
-export function listHostPackageIgnores(hostId: string): Promise<HostPackageIgnoreResponse[]> {
-	return request(`/hosts/${encodeURIComponent(hostId)}/package-ignores`);
-}
-
-export function createHostPackageIgnore(
-	hostId: string,
-	data: CreateHostPackageIgnoreRequest
-): Promise<HostPackageIgnoreResponse> {
-	return request(`/hosts/${encodeURIComponent(hostId)}/package-ignores`, {
-		method: 'POST',
-		body: JSON.stringify(data)
-	});
-}
-
-export function promoteHostPackage(
-	hostId: string,
-	packageId: string,
-	data: PromoteHostPackageRequest
-): Promise<SoftwareItemDetailResponse> {
-	return request(`/hosts/${encodeURIComponent(hostId)}/packages/${encodeURIComponent(packageId)}/promote`, {
-		method: 'POST',
-		body: JSON.stringify(data)
-	});
-}
-
-export function deleteHostPackageIgnore(hostId: string, ignoreId: string): Promise<void> {
-	return requestVoid(`/hosts/${encodeURIComponent(hostId)}/package-ignores/${encodeURIComponent(ignoreId)}`, {
-		method: 'DELETE'
-	});
-}
-
 // --- Settings APIs ---
 
 export function getRegistrationSettings(): Promise<RegistrationSettings> {
@@ -739,12 +661,12 @@ export function getPluginConfigs(page?: number, perPage?: number): Promise<Pagin
 export function getSoftwareItems(
 	page?: number,
 	perPage?: number,
-	discoveryState?: 'pending' | 'approved'
+	featured?: boolean
 ): Promise<PaginatedResponse<SoftwareItemResponse>> {
 	const params = new URLSearchParams();
 	if (page != null) params.set('page', String(page));
 	if (perPage != null) params.set('per_page', String(perPage));
-	if (discoveryState != null) params.set('discovery_state', discoveryState);
+	if (featured != null) params.set('featured', String(featured));
 	const query = params.toString();
 	return request(`/software-items${query ? `?${query}` : ''}`);
 }
@@ -752,7 +674,7 @@ export function getSoftwareItems(
 export function createSoftwareItem(data: CreateSoftwareItemRequest): Promise<SoftwareItemResponse> {
 	return request('/software-items', {
 		method: 'POST',
-		body: JSON.stringify({ name: data.name, enabled: data.enabled })
+		body: JSON.stringify({ name: data.name, featured: data.featured ?? true })
 	});
 }
 
@@ -777,12 +699,6 @@ export function unassignHostFromSoftwareItem(itemId: string, hostId: string): Pr
 	});
 }
 
-export function unassignHostFromSoftwareItemWithIgnore(itemId: string, hostId: string): Promise<void> {
-	return requestVoid(`/software-items/${encodeURIComponent(itemId)}/hosts/${encodeURIComponent(hostId)}?ignore=true`, {
-		method: 'DELETE'
-	});
-}
-
 export function updateHostAssignment(
 	itemId: string,
 	hostId: string,
@@ -798,40 +714,27 @@ export function checkSoftwareItemVersions(itemId: string): Promise<TriggerVersio
 	return request(`/software-items/${encodeURIComponent(itemId)}/check-versions`, { method: 'POST' });
 }
 
-export function approveSoftwareItem(id: string): Promise<SoftwareItemResponse> {
-	return request(`/software-items/${encodeURIComponent(id)}/approve`, { method: 'POST' });
-}
-
 export function triggerHostDiscovery(hostId: string): Promise<TriggerDiscoveryResponse> {
 	return request(`/hosts/${encodeURIComponent(hostId)}/discover`, { method: 'POST' });
 }
 
-export function discardHostDiscovered(hostId: string, pluginConfigId?: string): Promise<DiscardDiscoveredResponse> {
-	const params = new URLSearchParams();
-	if (pluginConfigId != null) params.set('plugin_config_id', pluginConfigId);
-	const query = params.toString();
-	return request(`/hosts/${encodeURIComponent(hostId)}/discovered${query ? `?${query}` : ''}`, {
-		method: 'DELETE'
-	});
-}
-
-export function getAutodiscoveryIgnores(
+export function getSoftwareIgnores(
 	page?: number,
 	perPage?: number
-): Promise<PaginatedResponse<AutodiscoveryIgnoreResponse>> {
+): Promise<PaginatedResponse<SoftwareIgnoreResponse>> {
 	const params = new URLSearchParams();
 	if (page != null) params.set('page', String(page));
 	if (perPage != null) params.set('per_page', String(perPage));
 	const query = params.toString();
-	return request(`/autodiscovery/ignores${query ? `?${query}` : ''}`);
+	return request(`/software-ignores${query ? `?${query}` : ''}`);
 }
 
-export function createAutodiscoveryIgnore(req: CreateAutodiscoveryIgnoreRequest): Promise<AutodiscoveryIgnoreResponse> {
-	return request('/autodiscovery/ignores', { method: 'POST', body: JSON.stringify(req) });
+export function createSoftwareIgnore(req: CreateSoftwareIgnoreRequest): Promise<SoftwareIgnoreResponse> {
+	return request('/software-ignores', { method: 'POST', body: JSON.stringify(req) });
 }
 
-export function deleteAutodiscoveryIgnore(id: string): Promise<void> {
-	return requestVoid(`/autodiscovery/ignores/${encodeURIComponent(id)}`, { method: 'DELETE' });
+export function deleteSoftwareIgnore(id: string): Promise<void> {
+	return requestVoid(`/software-ignores/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 // Software items - update
@@ -922,10 +825,6 @@ export async function deletePluginConfig(id: string): Promise<void> {
 
 export async function triggerPluginConfigDiscovery(id: string): Promise<TriggerDiscoveryResponse> {
 	return request<TriggerDiscoveryResponse>(`/plugin-configs/${id}/discover`, { method: 'POST' });
-}
-
-export async function discardPluginConfigDiscovered(id: string): Promise<DiscardDiscoveredResponse> {
-	return request<DiscardDiscoveredResponse>(`/plugin-configs/${id}/discovered`, { method: 'DELETE' });
 }
 
 // API tokens
@@ -1035,15 +934,8 @@ export function batchHosts(action: string, ids: string[]): Promise<BatchActionRe
 	return request('/hosts/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
 }
 
-export function batchHostPackages(hostId: string, action: string, ids: string[]): Promise<BatchActionResponse> {
-	return request(`/hosts/${encodeURIComponent(hostId)}/packages/batch`, {
-		method: 'POST',
-		body: JSON.stringify({ action, ids })
-	});
-}
-
-export function batchAutodiscoveryIgnores(action: string, ids: string[]): Promise<BatchActionResponse> {
-	return request('/autodiscovery/ignores/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
+export function batchSoftwareIgnores(action: string, ids: string[]): Promise<BatchActionResponse> {
+	return request('/software-ignores/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
 }
 
 export function batchPluginConfigs(action: string, ids: string[]): Promise<BatchActionResponse> {
