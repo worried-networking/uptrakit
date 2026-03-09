@@ -968,7 +968,7 @@ sequential fallback because the npm registry has no batch endpoint.
 
 #### Agent-core `batch_check_versions()`
 
-`handle_check_versions` groups `VersionCheckAssignment` entries by `(PluginType, effective_config_json)`
+`run_check_versions` (via `batch_check_versions`) groups `VersionCheckAssignment` entries by `(PluginType, effective_config_json)`
 before calling plugins. For each group:
 
 1. One plugin instance is created.

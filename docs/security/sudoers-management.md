@@ -235,8 +235,8 @@ check) on the remote host, and persists the results to the database.
 The `host bootstrap` command also sets `is_root` and `sudo_available` in the
 database, but uses the detected auth-user context (not the target user's).
 
-The `SudoAwareCommandExecutor` (used in `handle_check_versions_ssh`,
-`handle_execute_update_ssh`, `handle_discover_software_ssh`) reads these stored
+The `SudoAwareCommandExecutor` (used in `spawn_check_versions_ssh`,
+`handle_execute_update_ssh`, `spawn_discover_software_ssh`) reads these stored
 values at message-dispatch time — it **never** re-detects at runtime, which
 avoids extra SSH round-trips during normal operations.
 

@@ -442,6 +442,77 @@ tenant_id by calling `identity.save_tenant_id(tid)` when they receive it in `on_
 commands (e.g. the SSH agent's `host sync` and `host bootstrap`) load the persisted tenant_id from
 the identity state instead of requiring a live controller connection.
 
+## Background tasks
+
+Long-running operations such as version checks (`CheckVersions`), software discovery
+(`DiscoverSoftware`), and batch package updates (`ExecuteBatchHostPackageUpdate`) must **not** run
+inline inside `on_message`. Doing so blocks the event loop, prevents WebSocket reads, and causes
+the controller's 15-second write timeout to fire and drop the connection.
+
+The `uptrakit-agent-core` crate provides two helpers that implement the background-task pattern
+used by both the local agent and the SSH agent:
+
+| Helper | Purpose |
+| --- | --- |
+| `spawn_background(bg_tx, future)` | Clones the sender, spawns the future on Tokio, and sends the result through the channel. |
+| `send_background_result(conn, msg)` | Forwards a completed `ServiceMessage` to the controller; returns `Some(LoopOutcome::Disconnected)` on failure. |
+
+### Wiring
+
+1. Create a bounded mpsc channel in `main()`:
+
+   ```rust
+   let (bg_tx, bg_rx) = tokio::sync::mpsc::channel::<ServiceMessage>(32);
+   ```
+
+2. In `on_message`, replace synchronous handler calls with `spawn_*` functions that delegate to
+   `spawn_background`:
+
+   ```rust
+   ControllerMessage::CheckVersions(payload) => {
+       spawn_check_versions(payload, executor, &self.bg_tx);
+       Ok(None)
+   }
+   ```
+
+3. In `poll_service_event`, add a `bg_rx.recv()` arm to the `tokio::select!`:
+
+   ```rust
+   Some(msg) = self.bg_rx.recv() => {
+       AgentEvent::BackgroundResult(msg)
+   }
+   ```
+
+4. In `on_service_event`, forward the result:
+
+   ```rust
+   AgentEvent::BackgroundResult(msg) => {
+       if let Some(outcome) = send_background_result(conn, msg).await {
+           return Ok(Some(outcome));
+       }
+       Ok(None)
+   }
+   ```
+
+5. In `on_shutdown`, drain any remaining results before disconnecting:
+
+   ```rust
+   while let Ok(msg) = self.bg_rx.try_recv() {
+       conn.send_best_effort(msg).await;
+   }
+   ```
+
+### When to use
+
+Use `spawn_background` for any operation that:
+
+- Does not need to write to `ControllerConnection` during execution (no streaming output).
+- May take longer than a few hundred milliseconds (network calls, plugin execution).
+- Does not need exclusive access to handler state (no `&mut self`).
+
+Operations that stream output (like `ExecuteUpdate`) continue to use the existing
+`InFlightUpdate` / `UpdateEvent` pattern with a dedicated output channel.
+
 ## Related documentation
 
 - [Services and Operations](../api/services-operations.md) — shared startup flow and API operations

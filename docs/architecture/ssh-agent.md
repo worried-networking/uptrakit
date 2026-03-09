@@ -400,16 +400,17 @@ For usage details, see [Command Executor](../development/command-executor.md).
 ## Version Check and Update Execution
 
 The SSH agent handles `CheckVersions`, `DiscoverSoftware`, `ExecuteBatchHostPackageUpdate`, and `ExecuteUpdate`
-messages from the controller using the shared `uptrakit-agent-core` crate. The core crate provides both
-compute-only `run_*` functions (return `ServiceMessage` without needing a connection) and thin `handle_*`
-wrappers (compute + send) for common version-check, discovery, and update logic.
+messages from the controller using the shared `uptrakit-agent-core` crate. The core crate provides
+compute-only `run_*` functions (return `ServiceMessage` without needing a connection) and the shared
+`spawn_background` / `send_background_result` helpers for running them as background tasks.
 
 ### Background Task Spawning
 
 Long-running operations (`CheckVersions`, `DiscoverSoftware`, `ExecuteBatchHostPackageUpdate`) are executed
 as background tokio tasks rather than inline in the `on_message` handler. This prevents a slow or stuck SSH
 operation from blocking the event loop, which would make the agent unresponsive to pings, signals, and other
-controller messages.
+controller messages. Both the SSH agent and the local agent use the same pattern — see
+[Background tasks](../development/service-lifecycle.md#background-tasks) in the service lifecycle docs.
 
 The pattern uses a dedicated `bg_tx`/`bg_rx` mpsc channel (capacity 64):
 
@@ -418,9 +419,9 @@ on_message(CheckVersions)
     │
     ├── spawn_check_versions_ssh(payload, db, pool, bg_tx)
     │       │
-    │       └── tokio::spawn ──► run_check_versions_ssh()
-    │                                    │
-    │                                    └── bg_tx.send(ServiceMessage)
+    │       └── spawn_background(bg_tx, ...) ──► run_check_versions_ssh()
+    │                                                     │
+    │                                                     └── bg_tx.send(ServiceMessage)
     │
     └── return Ok(None)   ◄── event loop continues immediately
 
@@ -428,13 +429,14 @@ poll_service_event()
     │
     ├── bg_rx.recv() ──► SshAgentEvent::BackgroundResult(msg)
     │
-    └── on_service_event() ──► conn.send(msg)
+    └── on_service_event() ──► send_background_result(conn, msg)
 ```
 
 The `run_*_ssh` functions in `client.rs` perform host lookup, SSH session acquisition, executor creation,
 and delegate to `uptrakit_agent_core::run_*` which returns a `ServiceMessage`. The `spawn_*_ssh` wrappers
-clone the necessary state, spawn a tokio task, and send the result through `bg_tx`. The event loop picks
-up results via `bg_rx` in `poll_service_event` and sends them to the controller.
+clone the necessary state and call `uptrakit_agent_core::spawn_background` to spawn a tokio task and send
+the result through `bg_tx`. The event loop picks up results via `bg_rx` in `poll_service_event` and
+forwards them to the controller via `uptrakit_agent_core::send_background_result`.
 
 `ExecuteUpdate` continues to use the existing forwarder-task pattern (streaming output through the
 aggregate channel) because it requires real-time output forwarding rather than a single result message.
@@ -718,9 +720,8 @@ Version check and update execution logic shared between `uptrakit-agent` and `up
 | `run_check_versions(payload, executor)` | Compute-only: runs version checks, returns `ServiceMessage::VersionCheckResults` |
 | `run_discover_software(payload, executor)` | Compute-only: runs discovery, returns `ServiceMessage::DiscoveryResults` |
 | `run_execute_batch_host_package_update(payload, executor)` | Compute-only: runs batch host package update, returns `ServiceMessage::BatchHostPackageUpdateResult` |
-| `handle_check_versions(payload, executor, conn)` | Thin wrapper: calls `run_check_versions()` then `conn.send()` |
-| `handle_discover_software(payload, executor, conn)` | Thin wrapper: calls `run_discover_software()` then `conn.send()` |
-| `handle_execute_batch_host_package_update(payload, executor, conn)` | Thin wrapper: calls `run_execute_batch_host_package_update()` then `conn.send()` |
+| `spawn_background(bg_tx, future)` | Spawns a background task and sends its `ServiceMessage` result through the channel |
+| `send_background_result(conn, msg)` | Forwards a background result to the controller; returns `Some(Disconnected)` on failure |
 | `start_update(payload, executor, conn, ctx)` | Applies ctx overrides, spawns update task, sends `UpdateStarted`, returns `InFlightUpdate` |
 | `handle_execute_update(payload, executor, in_flight, conn)` | Rejects if update already in flight (global guard for single-host agent); delegates to `start_update()` |
 | `handle_graceful_shutdown(conn, in_flight, timeout, reason, outcome)` | Drains a single in-flight update before disconnecting (used by the regular agent) |
@@ -731,8 +732,8 @@ Version check and update execution logic shared between `uptrakit-agent` and `up
 
 The `run_*` functions are designed for background spawning: they take owned data (no `&mut conn`
 reference), perform all computation, and return a `ServiceMessage` that the caller can send through
-any channel. The `handle_*` functions are thin wrappers for callers that want compute + send in one step
-(used by the regular agent which processes messages inline).
+any channel. Both the local agent and SSH agent use `spawn_background` to run these functions as
+background tasks, keeping the event loop responsive.
 
 ## Connection Resilience
 
