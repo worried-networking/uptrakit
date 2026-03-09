@@ -371,8 +371,8 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
             .filter(|l| !to_remove.contains(l))
             .collect();
 
-        let new_entry =
-            format!("{AUTHORIZED_KEYS_RESTRICTIONS} {stripped_pubkey} {service_comment}");
+        let restrictions = authorized_keys_restrictions();
+        let new_entry = format!("{restrictions} {stripped_pubkey} {service_comment}");
         let new_content = if keep_lines.is_empty() {
             format!("{new_entry}\n")
         } else {
@@ -764,11 +764,19 @@ fn cmd_detect_home(username: &str, use_sudo: bool) -> String {
 
 /// SSH restrictions applied to `authorized_keys` entries.
 ///
-/// These prevent interactive terminal allocation, SSH agent forwarding, and
-/// X11 forwarding through the managed account while allowing non-interactive
-/// command execution that the agent requires.
-pub(crate) const AUTHORIZED_KEYS_RESTRICTIONS: &str =
-    "no-pty,no-agent-forwarding,no-X11-forwarding";
+/// Without the `interactive` feature, `no-pty` is included to prevent
+/// interactive terminal allocation through the managed account. When the
+/// `interactive` feature is enabled, `no-pty` is omitted so the controller
+/// can request a PTY for interactive update sessions.
+///
+/// Both builds always restrict SSH agent and X11 forwarding.
+pub(crate) fn authorized_keys_restrictions() -> &'static str {
+    if cfg!(feature = "interactive") {
+        "no-agent-forwarding,no-X11-forwarding"
+    } else {
+        "no-pty,no-agent-forwarding,no-X11-forwarding"
+    }
+}
 
 /// Build a remote command that reads `authorized_keys`, tolerating a missing
 /// file (returns empty output).
@@ -802,7 +810,8 @@ fn cmd_setup_authorized_keys(
     service_comment: &str,
 ) -> String {
     let escaped_home = uptrakit_command::shell_escape(home);
-    let restricted_key = format!("{AUTHORIZED_KEYS_RESTRICTIONS} {pubkey} {service_comment}");
+    let restrictions = authorized_keys_restrictions();
+    let restricted_key = format!("{restrictions} {pubkey} {service_comment}");
     let escaped_pubkey = uptrakit_command::shell_escape(&restricted_key);
     let escaped_owner = uptrakit_command::shell_escape(owner);
     let ssh_dir = format!("{home}/.ssh");

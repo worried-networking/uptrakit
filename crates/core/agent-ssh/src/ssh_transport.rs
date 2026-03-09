@@ -292,6 +292,205 @@ impl SshSession {
         })
     }
 
+    /// Execute a command interactively with a PTY on the remote host.
+    ///
+    /// Allocates a remote PTY via `request_pty`, executes the command, and
+    /// returns an [`InteractiveHandle`] with channels for stdin forwarding,
+    /// signal delivery, and completion awaiting.
+    ///
+    /// Unlike [`exec_command_streaming`], stdin is kept open so the remote
+    /// process can read user input. Signals are delivered by writing the
+    /// corresponding control character to the PTY (e.g., `\x03` for SIGINT).
+    #[cfg(feature = "interactive")]
+    pub async fn exec_command_interactive(
+        &self,
+        command: &str,
+        output_tx: &mpsc::Sender<uptrakit_command::UpdateOutputLine>,
+    ) -> Result<uptrakit_command::executor::InteractiveHandle> {
+        use uptrakit_command::executor::InteractiveHandle;
+
+        tracing::debug!(
+            hostname = %self.hostname,
+            command = %command,
+            "executing interactive SSH command with PTY"
+        );
+
+        let mut channel = self.handle.channel_open_session().await.map_err(|e| {
+            report!(Error::SshCommand(format!(
+                "failed to open session channel: {e}"
+            )))
+        })?;
+
+        // Request a PTY on the remote side.
+        channel
+            .request_pty(false, "xterm-256color", 80, 24, 0, 0, &[])
+            .await
+            .map_err(|e| report!(Error::SshCommand(format!("failed to request PTY: {e}"))))?;
+
+        channel
+            .exec(true, command)
+            .await
+            .map_err(|e| report!(Error::SshCommand(format!("failed to execute command: {e}"))))?;
+
+        // Do NOT call channel.eof() — keep stdin open for forwarding.
+
+        let (stdin_tx, mut stdin_rx) = mpsc::channel::<Vec<u8>>(64);
+        let (signal_tx, mut signal_rx) = mpsc::channel::<i32>(8);
+        let (attention_tx, attention_rx) = mpsc::channel::<()>(4);
+        let output_tx_clone = output_tx.clone();
+
+        let completion = tokio::spawn(async move {
+            Self::drive_interactive_ssh_session(
+                &mut channel,
+                &mut stdin_rx,
+                &mut signal_rx,
+                &attention_tx,
+                &output_tx_clone,
+            )
+            .await
+        });
+
+        Ok(InteractiveHandle {
+            stdin_tx,
+            signal_tx,
+            completion,
+            attention_rx,
+        })
+    }
+
+    /// Drive the interactive SSH session event loop.
+    ///
+    /// Reads output from the SSH channel, forwards stdin and signals, and
+    /// detects attention timeouts (10s of output silence).
+    #[cfg(feature = "interactive")]
+    async fn drive_interactive_ssh_session(
+        channel: &mut russh::Channel<russh::client::Msg>,
+        stdin_rx: &mut mpsc::Receiver<Vec<u8>>,
+        signal_rx: &mut mpsc::Receiver<i32>,
+        attention_tx: &mpsc::Sender<()>,
+        output_tx: &mpsc::Sender<uptrakit_command::UpdateOutputLine>,
+    ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+        use rootcause::prelude::*;
+        use uptrakit_command::CommandError;
+
+        const ATTENTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+        const MAX_OUTPUT: usize = 10 * 1024 * 1024;
+        const TRUNCATION_MARKER: &str = "\n... [output truncated at 10 MB] ...\n";
+
+        let mut accumulated_output = String::new();
+        let mut truncated = false;
+        let mut exit_code: Option<u32> = None;
+        let mut last_output_time = tokio::time::Instant::now();
+        let mut attention_sent = false;
+
+        loop {
+            let attention_sleep = if attention_sent {
+                tokio::time::sleep(std::time::Duration::from_secs(3600))
+            } else {
+                let elapsed = last_output_time.elapsed();
+                if elapsed >= ATTENTION_TIMEOUT {
+                    tokio::time::sleep(std::time::Duration::ZERO)
+                } else {
+                    tokio::time::sleep(ATTENTION_TIMEOUT - elapsed)
+                }
+            };
+
+            tokio::select! {
+                biased;
+
+                msg = channel.wait() => {
+                    match msg {
+                        Some(ChannelMsg::Data { ref data }) => {
+                            last_output_time = tokio::time::Instant::now();
+                            attention_sent = false;
+                            let text = String::from_utf8_lossy(data).to_string();
+                            if !truncated {
+                                if accumulated_output.len() + text.len() > MAX_OUTPUT {
+                                    accumulated_output.push_str(TRUNCATION_MARKER);
+                                    truncated = true;
+                                } else {
+                                    accumulated_output.push_str(&text);
+                                }
+                            }
+                            uptrakit_command::send_output(
+                                output_tx,
+                                &text,
+                                OutputStreamType::Stdout,
+                            ).await;
+                        }
+                        Some(ChannelMsg::ExtendedData { ref data, ext: 1 }) => {
+                            last_output_time = tokio::time::Instant::now();
+                            attention_sent = false;
+                            let text = String::from_utf8_lossy(data).to_string();
+                            if !truncated {
+                                if accumulated_output.len() + text.len() > MAX_OUTPUT {
+                                    accumulated_output.push_str(TRUNCATION_MARKER);
+                                    truncated = true;
+                                } else {
+                                    accumulated_output.push_str(&text);
+                                }
+                            }
+                            uptrakit_command::send_output(
+                                output_tx,
+                                &text,
+                                OutputStreamType::Stderr,
+                            ).await;
+                        }
+                        Some(ChannelMsg::ExitStatus { exit_status }) => {
+                            exit_code = Some(exit_status);
+                        }
+                        Some(ChannelMsg::Eof | ChannelMsg::Close) => break,
+                        Some(_) => {}
+                        None => break,
+                    }
+                }
+
+                Some(data) = stdin_rx.recv() => {
+                    if channel.data(&data[..]).await.is_err() {
+                        tracing::warn!("failed to write stdin to SSH channel");
+                    }
+                }
+
+                Some(sig) = signal_rx.recv() => {
+                    // Translate signal numbers to control characters for the PTY.
+                    let ctrl_char = match sig {
+                        2 => Some(b'\x03'),   // SIGINT → Ctrl+C
+                        3 => Some(b'\x1c'),   // SIGQUIT → Ctrl+\
+                        28 => Some(b'\x1a'),  // SIGTSTP → Ctrl+Z (signal 20 on Linux, 28 is unused but kept for safety)
+                        _ => {
+                            tracing::warn!(signal = sig, "unsupported signal for SSH PTY");
+                            None
+                        }
+                    };
+                    if let Some(ch) = ctrl_char
+                        && channel.data(&[ch][..]).await.is_err()
+                    {
+                        tracing::warn!("failed to write signal character to SSH channel");
+                    }
+                }
+
+                _ = attention_sleep => {
+                    if !attention_sent {
+                        let _ = attention_tx.try_send(());
+                        attention_sent = true;
+                    }
+                }
+            }
+        }
+
+        let code = exit_code.unwrap_or(u32::MAX);
+        let code_i32 = i32::try_from(code).unwrap_or(-1);
+
+        if code_i32 != 0 {
+            bail!(CommandError::CommandFailed(code_i32));
+        }
+
+        Ok(uptrakit_command::CommandOutput {
+            output: accumulated_output,
+            exit_code: code_i32,
+        })
+    }
+
     /// Disconnect the SSH session.
     pub async fn disconnect(self) {
         let _ = self

@@ -7,6 +7,10 @@ authors.workspace = true
 repository.workspace = true
 version.workspace = true
 
+[features]
+default = []
+interactive = ["uptrakit-command/interactive"]
+
 [dependencies]
 base64 = { workspace = true }
 clap = { workspace = true }
