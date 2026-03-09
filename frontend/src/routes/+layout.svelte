@@ -82,17 +82,25 @@
 	const publicRoutes = new Set(['/login', '/register', '/device']);
 
 	// Built-in nav items with priority values for unified sorting.
-	const builtInNavItems: { href: string; label: string; priority: number; permission?: Permission }[] = [
+	const builtInNavItems: { href: string; label: string; priority: number; permission?: Permission | Permission[] }[] = [
 		{ href: '/', label: 'Home', priority: 100 },
 		{ href: '/services', label: 'Services', priority: 200 },
 		{ href: '/system-services', label: 'System Services', priority: 300, permission: Permission.ViewSystemServices },
 		{ href: '/hosts', label: 'Hosts', priority: 400 },
 		{ href: '/software', label: 'Software', priority: 500, permission: Permission.ViewSoftware },
-		{ href: '/plugin-configs', label: 'Plugin Configs', priority: 600, permission: Permission.ViewSoftware },
-		{ href: '/scheduler', label: 'Scheduler', priority: 700, permission: Permission.ManageSoftware },
 		{ href: '/history', label: 'History', priority: 800, permission: Permission.ViewSoftware },
 		{ href: '/audit-logs', label: 'Audit Logs', priority: 900, permission: Permission.ViewAuditLogs },
-		{ href: '/settings', label: 'Settings', priority: 1000, permission: Permission.ViewSettings },
+		{
+			href: '/settings',
+			label: 'Settings',
+			priority: 1000,
+			permission: [
+				Permission.ViewSettings,
+				Permission.ManageSettings,
+				Permission.ViewSoftware,
+				Permission.ManageSoftware
+			]
+		},
 		{ href: '/settings/global', label: 'Global Settings', priority: 1100, permission: Permission.ManageGlobalSettings }
 	];
 
@@ -100,7 +108,11 @@
 	const navItems = $derived(
 		[
 			...builtInNavItems
-				.filter((item) => !item.permission || getUser()?.permissions.includes(item.permission))
+				.filter((item) => {
+					if (!item.permission) return true;
+					const perms = Array.isArray(item.permission) ? item.permission : [item.permission];
+					return perms.some((p) => getUser()?.permissions.includes(p));
+				})
 				.map((item) => ({ href: item.href, label: item.label, priority: item.priority })),
 			...getPageExtensions().map((ext) => ({
 				href: `/extensions/${ext.id}`,

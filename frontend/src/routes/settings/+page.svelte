@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getUser } from '$lib/auth.svelte';
+	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { onDestroy } from 'svelte';
 	import { getCombinedSettings, getOidcProviders, getMqttClients } from '$lib/api';
@@ -13,6 +14,7 @@
 	} from '$lib/types';
 	import { Permission } from '$lib/types';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
+	import { getTabExtensions } from '$lib/extensions.svelte';
 
 	import RegistrationSettings from './RegistrationSettings.svelte';
 	import AuthenticationSettings from './AuthenticationSettings.svelte';
@@ -20,7 +22,56 @@
 	import OidcProvidersSettings from './OidcProvidersSettings.svelte';
 	import AgentCertificateSettings from './AgentCertificateSettings.svelte';
 	import EnrollmentTokenSettings from './EnrollmentTokenSettings.svelte';
+	import PluginConfigsTab from './PluginConfigsTab.svelte';
+	import SchedulerTab from './SchedulerTab.svelte';
+	import ExtensionTabContent from '$lib/components/extensions/ExtensionTabContent.svelte';
 
+	// ── Permissions ─────────────────────────────────────────────────────
+	const canManageSettings = $derived(getUser()?.permissions.includes(Permission.ManageSettings) ?? false);
+	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
+	const canManageSoftware = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
+	const hasAnyTabPermission = $derived(canManageSettings || canViewSoftware || canManageSoftware);
+
+	// ── Tab state ────────────────────────────────────────────────────────
+	const tabExtensions = $derived(getTabExtensions('settings'));
+
+	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'general');
+
+	// Redirect if no permissions at all
+	$effect(() => {
+		if (getUser() && !hasAnyTabPermission) {
+			goto('/');
+		}
+	});
+
+	// Correct activeTab if it's not accessible
+	$effect(() => {
+		const user = getUser();
+		if (!user) return;
+		const isBuiltinAccessible =
+			(activeTab === 'general' && canManageSettings) ||
+			(activeTab === 'plugin-configs' && canViewSoftware) ||
+			(activeTab === 'scheduler' && canManageSoftware);
+		const isExtAccessible = tabExtensions.some((e) => e.id === activeTab);
+		if (!isBuiltinAccessible && !isExtAccessible) {
+			if (canManageSettings) activeTab = 'general';
+			else if (canViewSoftware) activeTab = 'plugin-configs';
+			else if (canManageSoftware) activeTab = 'scheduler';
+			else if (tabExtensions.length > 0) activeTab = tabExtensions[0].id;
+		}
+	});
+
+	// Sync active tab to URL
+	$effect(() => {
+		const search = activeTab !== 'general' ? `?tab=${activeTab}` : '';
+		goto(search ? `${location.pathname}${search}` : location.pathname, {
+			replaceState: true,
+			keepFocus: true,
+			noScroll: true
+		});
+	});
+
+	// ── General tab state ─────────────────────────────────────────────────
 	let loading: boolean = $state(true);
 
 	let registrationSettings: RegistrationSettingsData | undefined = $state(undefined);
@@ -30,7 +81,6 @@
 	let agentCertSettings: AgentCertSettingsData | undefined = $state(undefined);
 	let enrollmentTokensSummary: EnrollmentTokensSummary | undefined = $state(undefined);
 
-	// Not reactive — only used for setTimeout cleanup.
 	let mqttPollHandle: ReturnType<typeof setTimeout> | null = null;
 
 	let registrationError: string | null = $state(null);
@@ -40,16 +90,8 @@
 	let agentCertificateError: string | null = $state(null);
 	let enrollmentTokenError: string | null = $state(null);
 	let mqttPollAttempt: number = $state(0);
-	const initialMqttPollDelay = 10_000; // 10 seconds
-	const maxMqttPollDelay = 5 * 60 * 1000; // 5 minutes
-
-	const canManageSettings = $derived(getUser()?.permissions.includes(Permission.ManageSettings) ?? false);
-
-	$effect(() => {
-		if (getUser() && !canManageSettings) {
-			goto('/');
-		}
-	});
+	const initialMqttPollDelay = 10_000;
+	const maxMqttPollDelay = 5 * 60 * 1000;
 
 	$effect(() => {
 		if (canManageSettings) {
@@ -63,28 +105,23 @@
 	});
 
 	function startMqttPolling() {
-		if (mqttPollHandle) return; // Polling already active
-
+		if (mqttPollHandle) return;
 		const poll = async () => {
 			try {
 				const clients = await getMqttClients();
 				mqttClients = clients;
-				mqttPollAttempt = 0; // Reset on success
+				mqttPollAttempt = 0;
 				scheduleNextPoll(initialMqttPollDelay);
 			} catch {
-				// Suppress polling errors to avoid notification spam.
 				mqttPollAttempt++;
 				const baseDelay = Math.min(initialMqttPollDelay * Math.pow(2, mqttPollAttempt - 1), maxMqttPollDelay);
-				const delay = baseDelay * (0.5 + Math.random() * 0.5); // Jitter to prevent thundering herd
+				const delay = baseDelay * (0.5 + Math.random() * 0.5);
 				scheduleNextPoll(delay);
 			}
 		};
-
 		const scheduleNextPoll = (delay: number) => {
 			mqttPollHandle = setTimeout(poll, delay);
 		};
-
-		// Start the first poll after initial delay
 		scheduleNextPoll(initialMqttPollDelay);
 	}
 
@@ -92,13 +129,12 @@
 		if (mqttPollHandle) {
 			clearTimeout(mqttPollHandle);
 			mqttPollHandle = null;
-			mqttPollAttempt = 0; // Reset attempt count when stopping
+			mqttPollAttempt = 0;
 		}
 	}
 
 	async function loadAllSettings() {
 		loading = true;
-		// Clear previous errors
 		registrationError = null;
 		authenticationError = null;
 		mqttClientsError = null;
@@ -106,13 +142,8 @@
 		agentCertificateError = null;
 		enrollmentTokenError = null;
 
-		const results = await Promise.allSettled([
-			getCombinedSettings(), // results[0]
-			getOidcProviders(), // results[1]
-			getMqttClients() // results[2]
-		]);
+		const results = await Promise.allSettled([getCombinedSettings(), getOidcProviders(), getMqttClients()]);
 
-		// Combined Settings
 		if (results[0].status === 'fulfilled') {
 			const combined = results[0].value;
 			registrationSettings = combined.registration;
@@ -127,7 +158,6 @@
 			enrollmentTokenError = msg;
 		}
 
-		// OIDC Providers
 		if (results[1].status === 'fulfilled') {
 			oidcProviders = results[1].value;
 		} else {
@@ -135,7 +165,6 @@
 				results[1].reason instanceof Error ? results[1].reason.message : 'Failed to load OIDC providers.';
 		}
 
-		// MQTT Clients
 		if (results[2].status === 'fulfilled') {
 			mqttClients = results[2].value;
 		} else {
@@ -147,57 +176,112 @@
 	}
 </script>
 
-{#if getUser() && canManageSettings}
+{#if getUser() && hasAnyTabPermission}
 	<h1 class="h1 mb-6">Settings</h1>
 
-	{#if loading}
-		<div class="card mb-6 p-8 text-center">
-			<p>Loading settings...</p>
-		</div>
-	{/if}
-
-	<div aria-busy={loading} class:opacity-50={loading}>
-		<RegistrationSettings settings={registrationSettings} onSuccess={showSuccess} onError={showError} />
-		{#if registrationError}
-			<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-				<p>{registrationError}</p>
-				<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
-			</aside>
+	<!-- Top-level tab bar -->
+	<div class="mb-6 flex gap-1 flex-wrap">
+		{#if canManageSettings}
+			<button
+				class="btn btn-sm {activeTab === 'general' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				onclick={() => (activeTab = 'general')}
+			>
+				General
+			</button>
 		{/if}
-		<AuthenticationSettings settings={authSettings} onSuccess={showSuccess} onError={showError} />
-		{#if authenticationError}
-			<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-				<p>{authenticationError}</p>
-				<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
-			</aside>
+		{#if canViewSoftware}
+			<button
+				class="btn btn-sm {activeTab === 'plugin-configs' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				onclick={() => (activeTab = 'plugin-configs')}
+			>
+				Plugin Configs
+			</button>
 		{/if}
-		<MqttClientsSettings clients={mqttClients} onSuccess={showSuccess} onError={showError} />
-		{#if mqttClientsError}
-			<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-				<p>{mqttClientsError}</p>
-				<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
-			</aside>
+		{#if canManageSoftware}
+			<button
+				class="btn btn-sm {activeTab === 'scheduler' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				onclick={() => (activeTab = 'scheduler')}
+			>
+				Scheduler
+			</button>
 		{/if}
-		<OidcProvidersSettings providers={oidcProviders} onSuccess={showSuccess} onError={showError} />
-		{#if oidcProvidersError}
-			<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-				<p>{oidcProvidersError}</p>
-				<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
-			</aside>
-		{/if}
-		<AgentCertificateSettings settings={agentCertSettings} onSuccess={showSuccess} onError={showError} />
-		{#if agentCertificateError}
-			<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-				<p>{agentCertificateError}</p>
-				<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
-			</aside>
-		{/if}
-		<EnrollmentTokenSettings summary={enrollmentTokensSummary} onSuccess={showSuccess} onError={showError} />
-		{#if enrollmentTokenError}
-			<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-				<p>{enrollmentTokenError}</p>
-				<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
-			</aside>
-		{/if}
+		{#each tabExtensions as ext (ext.id)}
+			<button
+				class="btn btn-sm {activeTab === ext.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				onclick={() => (activeTab = ext.id)}
+			>
+				{ext.label}
+			</button>
+		{/each}
 	</div>
+
+	<!-- General tab -->
+	{#if activeTab === 'general'}
+		{#if loading}
+			<div class="card mb-6 p-8 text-center">
+				<p>Loading settings...</p>
+			</div>
+		{/if}
+
+		<div aria-busy={loading} class:opacity-50={loading}>
+			<RegistrationSettings settings={registrationSettings} onSuccess={showSuccess} onError={showError} />
+			{#if registrationError}
+				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
+					<p>{registrationError}</p>
+					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
+				</aside>
+			{/if}
+			<AuthenticationSettings settings={authSettings} onSuccess={showSuccess} onError={showError} />
+			{#if authenticationError}
+				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
+					<p>{authenticationError}</p>
+					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
+				</aside>
+			{/if}
+			<MqttClientsSettings clients={mqttClients} onSuccess={showSuccess} onError={showError} />
+			{#if mqttClientsError}
+				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
+					<p>{mqttClientsError}</p>
+					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
+				</aside>
+			{/if}
+			<OidcProvidersSettings providers={oidcProviders} onSuccess={showSuccess} onError={showError} />
+			{#if oidcProvidersError}
+				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
+					<p>{oidcProvidersError}</p>
+					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
+				</aside>
+			{/if}
+			<AgentCertificateSettings settings={agentCertSettings} onSuccess={showSuccess} onError={showError} />
+			{#if agentCertificateError}
+				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
+					<p>{agentCertificateError}</p>
+					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
+				</aside>
+			{/if}
+			<EnrollmentTokenSettings summary={enrollmentTokensSummary} onSuccess={showSuccess} onError={showError} />
+			{#if enrollmentTokenError}
+				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
+					<p>{enrollmentTokenError}</p>
+					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
+				</aside>
+			{/if}
+		</div>
+
+		<!-- Plugin Configs tab -->
+	{:else if activeTab === 'plugin-configs'}
+		<PluginConfigsTab />
+
+		<!-- Scheduler tab -->
+	{:else if activeTab === 'scheduler'}
+		<SchedulerTab />
+
+		<!-- Extension tabs -->
+	{:else}
+		{#each tabExtensions as ext (ext.id)}
+			{#if activeTab === ext.id}
+				<ExtensionTabContent extension={ext} />
+			{/if}
+		{/each}
+	{/if}
 {/if}
