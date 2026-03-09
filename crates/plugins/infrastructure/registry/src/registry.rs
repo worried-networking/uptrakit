@@ -64,9 +64,18 @@ fn restore_secrets_for<T: SecretMasking>(
 
 /// Generates the `PluginRegistry` dispatch methods from a single
 /// declaration list, eliminating manually-maintained match arms.
+///
+/// Each entry may optionally specify `extension_prefix: "prefix.", extension_handler: path::to::fn`
+/// to participate in [`PluginRegistry::handle_extension_action`] dispatch.
+/// When specified, any `extension_id` that starts with that prefix is
+/// routed to the provided handler function.
 macro_rules! register_plugins {
     ($(
-        $variant:ident => { config: $config:ty, plugin: $plugin:ty }
+        $variant:ident => {
+            config: $config:ty,
+            plugin: $plugin:ty
+            $(, extension_prefix: $ext_prefix:literal, extension_handler: $ext_handler:path)?
+        }
     ),+ $(,)?) => {
         impl PluginRegistry {
             /// Create a plugin instance from plugin type, config, and executor.
@@ -424,6 +433,41 @@ macro_rules! register_plugins {
                     .flatten()
                     .collect()
             }
+
+            /// Dispatch an extension action to the appropriate plugin handler.
+            ///
+            /// Routes based on the extension ID prefix declared via `extension_prefix`
+            /// in the [`register_plugins!`] macro. Returns `Err` if no plugin handles
+            /// the given extension ID.
+            pub fn handle_extension_action<'a>(
+                ctx: &'a crate::ExtensionActionContext<'a>,
+                extension_id: &'a str,
+                action_id: &'a str,
+                params: serde_json::Value,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<Output = std::result::Result<serde_json::Value, String>>
+                        + Send
+                        + 'a,
+                >,
+            > {
+                Box::pin(async move {
+                    $($(
+                        if extension_id.starts_with($ext_prefix) {
+                            return $ext_handler(
+                                ctx.db,
+                                ctx.tenant_id,
+                                extension_id,
+                                action_id,
+                                params,
+                            )
+                            .await;
+                        }
+                    )?)+
+
+                    Err(format!("no plugin handles extension '{extension_id}'"))
+                })
+            }
         }
     };
 }
@@ -445,17 +489,22 @@ macro_rules! register_plugins {
 pub struct PluginRegistry;
 
 register_plugins! {
-    ReleasesGithub                => { config: GitHubConfig,                   plugin: GitHubPlugin },
-    ReleasesGitlab                => { config: GitLabConfig,                   plugin: GitLabPlugin },
-    ReleasesForgejo              => { config: ForgejoConfig,                 plugin: ForgejoPlugin },
-    ReleasesDocker                => { config: DockerConfig,                   plugin: DockerPlugin },
-    DiscoveryProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig,     plugin: ProxmoxHelperScriptsPlugin },
-    PackageManagerHomebrew        => { config: HomebrewConfig,                 plugin: HomebrewPlugin },
-    PackageManagerApt             => { config: AptConfig,                      plugin: AptPlugin },
-    PackageManagerNpm             => { config: NpmConfig,                      plugin: NpmPlugin },
-    PackageManagerMas             => { config: MasConfig,                      plugin: MasPlugin },
-    GenericShell                  => { config: ShellConfig,                    plugin: ShellPlugin },
-    InfrastructureProxmox         => { config: ProxmoxConfig,                  plugin: ProxmoxPlugin },
+    ReleasesGithub                => { config: GitHubConfig,               plugin: GitHubPlugin },
+    ReleasesGitlab                => { config: GitLabConfig,               plugin: GitLabPlugin },
+    ReleasesForgejo               => { config: ForgejoConfig,              plugin: ForgejoPlugin },
+    ReleasesDocker                => { config: DockerConfig,               plugin: DockerPlugin },
+    DiscoveryProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig, plugin: ProxmoxHelperScriptsPlugin },
+    PackageManagerHomebrew        => { config: HomebrewConfig,             plugin: HomebrewPlugin },
+    PackageManagerApt             => { config: AptConfig,                  plugin: AptPlugin },
+    PackageManagerNpm             => { config: NpmConfig,                  plugin: NpmPlugin },
+    PackageManagerMas             => { config: MasConfig,                  plugin: MasPlugin },
+    GenericShell                  => { config: ShellConfig,                plugin: ShellPlugin },
+    InfrastructureProxmox         => {
+        config: ProxmoxConfig,
+        plugin: ProxmoxPlugin,
+        extension_prefix: "proxmox.",
+        extension_handler: uptrakit_plugin_infrastructure_proxmox::extensions::handle_action
+    },
 }
 
 impl PluginRegistry {
@@ -514,39 +563,6 @@ impl PluginRegistry {
             return vec![];
         };
         Self::capabilities_for(pt)
-    }
-
-    /// Dispatch an extension action to the appropriate plugin handler.
-    ///
-    /// Routes based on the extension ID prefix (e.g., `"proxmox."` routes to
-    /// the Proxmox VE plugin). Returns `Err` if no plugin handles the given
-    /// extension ID.
-    pub fn handle_extension_action<'a>(
-        ctx: &'a crate::ExtensionActionContext<'a>,
-        extension_id: &'a str,
-        action_id: &'a str,
-        params: serde_json::Value,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<serde_json::Value, String>>
-                + Send
-                + 'a,
-        >,
-    > {
-        Box::pin(async move {
-            if extension_id.starts_with("proxmox.") {
-                return uptrakit_plugin_infrastructure_proxmox::extensions::handle_action(
-                    ctx.db,
-                    ctx.tenant_id,
-                    extension_id,
-                    action_id,
-                    params,
-                )
-                .await;
-            }
-
-            Err(format!("no plugin handles extension '{extension_id}'"))
-        })
     }
 }
 
