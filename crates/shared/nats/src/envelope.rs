@@ -47,5 +47,12 @@ mod tests {
         assert_eq!(deserialized.target_service_id, envelope.target_service_id);
         assert_eq!(deserialized.target_capability, envelope.target_capability);
         assert_eq!(deserialized.created_at, envelope.created_at);
+        assert!(
+            matches!(
+                deserialized.message,
+                ControllerMessage::CaBundleUpdated(ref p) if p.ca_bundle_pem == "pem-data"
+            ),
+            "deserialized message must be CaBundleUpdated with the original payload"
+        );
     }
 }
