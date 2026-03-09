@@ -131,6 +131,33 @@ pub const MAX_EXTENSION_RESPONSE_LEN: usize = 1_048_576;
 /// Maximum byte length of plugin config JSON in a `ReportPluginConfig` message.
 pub const MAX_PLUGIN_CONFIG_JSON_LEN: usize = 65_536;
 
+// ── Pagination limits ───────────────────────────────────────────────────────
+
+/// Maximum number of pages in a single paginated report.
+pub const MAX_REPORT_PAGES: u32 = 50;
+
+/// Maximum number of concurrent pending (incomplete) paginated reports per
+/// WebSocket connection. Prevents memory exhaustion from abandoned reports.
+pub const MAX_PENDING_REPORTS_PER_CONNECTION: usize = 10;
+
+/// Total timeout for a paginated report from first page to completion (5 min).
+///
+/// If all pages have not arrived within this window, the report is discarded
+/// and a warning is logged. Already-processed pages committed their DB writes
+/// independently; only the finalization step (e.g. notification) is lost.
+pub const REPORT_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Idle timeout after the last page of a paginated report (15 s).
+///
+/// If no new page for the same `report_id` arrives within this window, the
+/// report is considered abandoned. Catches mid-report connection stalls.
+pub const REPORT_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Serialized JSON size threshold (768 KB) above which a payload is split into
+/// pages. Well under the 1 MB WebSocket frame limit to leave headroom for the
+/// envelope overhead (protocol_version, seq, trace_context, pagination, type tag).
+pub const PAGINATION_SIZE_THRESHOLD: usize = 786_432;
+
 // ── Trace context limits ────────────────────────────────────────────────────
 
 /// Maximum length of a trace ID (32 hex chars for 128-bit W3C trace ID).

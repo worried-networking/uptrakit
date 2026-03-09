@@ -6673,6 +6673,7 @@ dependencies = [
  "strum",
  "thiserror 2.0.18",
  "time",
+ "tokio",
  "tracing",
  "uptrakit-extension-framework",
  "uptrakit-shared-types",

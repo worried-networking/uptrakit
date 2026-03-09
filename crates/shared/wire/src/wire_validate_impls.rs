@@ -89,6 +89,29 @@ impl WireValidate for ControllerMessage {
     }
 }
 
+// ── ReportPagination ─────────────────────────────────────────────────────────
+
+impl WireValidate for crate::envelope::ReportPagination {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        if self.total_pages == 0 || self.total_pages > MAX_REPORT_PAGES {
+            return Err(WireValidationError {
+                field: "pagination.total_pages",
+                message: format!(
+                    "total_pages is {}, must be 1..={MAX_REPORT_PAGES}",
+                    self.total_pages
+                ),
+            });
+        }
+        if self.page == 0 || self.page > self.total_pages {
+            return Err(WireValidationError {
+                field: "pagination.page",
+                message: format!("page is {}, must be 1..={}", self.page, self.total_pages),
+            });
+        }
+        Ok(())
+    }
+}
+
 // ── ServiceMessage payload impls ──────────────────────────────────────────────
 
 impl WireValidate for EnrollPayload {

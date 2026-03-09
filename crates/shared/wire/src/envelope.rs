@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::messages::{ControllerMessage, ServiceMessage};
 use super::trace_context::TraceContext;
@@ -12,11 +13,30 @@ use super::trace_context::TraceContext;
 /// with [`CloseReason::ProtocolError`](super::CloseReason).
 pub const CURRENT_PROTOCOL_VERSION: u32 = 1;
 
+/// Pagination metadata for a paginated report.
+///
+/// When a service needs to send a report that exceeds the WebSocket frame
+/// limit, it splits the payload into pages. Each page carries the same
+/// `report_id` and a 1-based `page` number out of `total_pages`.
+///
+/// The controller processes each page immediately (no payload buffering) and
+/// defers only lightweight finalization (e.g. notification emission) until the
+/// final page arrives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportPagination {
+    /// Unique identifier grouping all pages of the same logical report.
+    pub report_id: Uuid,
+    /// 1-based page number within the report.
+    pub page: u32,
+    /// Total number of pages in the report (known upfront by the sender).
+    pub total_pages: u32,
+}
+
 /// Envelope wrapping a [`ServiceMessage`] with a monotonically increasing
 /// sequence number for replay protection and the current protocol version.
 ///
 /// JSON on the wire includes an optional `trace_context` object for distributed
-/// tracing correlation.
+/// tracing correlation, and optional pagination metadata for paginated reports.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceEnvelope {
     pub protocol_version: u32,
@@ -25,6 +45,13 @@ pub struct ServiceEnvelope {
     /// Always populated when sending; tolerates absence when receiving from older peers.
     #[serde(default)]
     pub trace_context: TraceContext,
+    /// Pagination metadata for paginated reports.
+    ///
+    /// `None` for single-message reports (the common case). When present, the
+    /// controller tracks page arrival and defers finalization until all pages
+    /// have been received.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<ReportPagination>,
     #[serde(flatten)]
     pub message: ServiceMessage,
 }
@@ -67,12 +94,24 @@ impl OutgoingSeq {
         message: ServiceMessage,
         trace_context: TraceContext,
     ) -> ServiceEnvelope {
+        self.wrap_service_paginated(message, trace_context, None)
+    }
+
+    /// Wrap a [`ServiceMessage`] in a [`ServiceEnvelope`] with optional
+    /// pagination metadata.
+    pub fn wrap_service_paginated(
+        &mut self,
+        message: ServiceMessage,
+        trace_context: TraceContext,
+        pagination: Option<ReportPagination>,
+    ) -> ServiceEnvelope {
         let seq = self.next;
         self.next += 1;
         ServiceEnvelope {
             protocol_version: CURRENT_PROTOCOL_VERSION,
             seq,
             trace_context,
+            pagination,
             message,
         }
     }

@@ -4,7 +4,9 @@ pub mod envelope;
 pub mod extension;
 pub mod limits;
 pub mod messages;
+pub mod paginate;
 pub mod payloads;
+pub mod report_tracker;
 pub mod serde_helpers;
 pub mod service_profile;
 pub mod trace_context;
@@ -16,7 +18,9 @@ pub use capabilities::*;
 pub use close_reason::CloseReason;
 pub use envelope::*;
 pub use messages::*;
+pub use paginate::Paginatable;
 pub use payloads::*;
+pub use report_tracker::ReportTracker;
 pub use service_profile::{ServiceProfile, parse_capabilities, serialize_capabilities};
 pub use trace_context::{TraceContext, current_trace_context};
 
@@ -1416,6 +1420,7 @@ mod tests {
                 trace_id: "0".repeat(32),
                 span_id: None,
             },
+            pagination: None,
             message: ServiceMessage::Ping(PingPayload {
                 service_ts: 1706400000000,
             }),
@@ -1509,6 +1514,7 @@ mod tests {
             protocol_version: CURRENT_PROTOCOL_VERSION,
             seq: 3,
             trace_context: TraceContext::generate(),
+            pagination: None,
             message: ServiceMessage::Enroll(EnrollPayload {
                 hostname: "test-host".to_string(),
                 friendly_name: "Test".to_string(),
@@ -1806,6 +1812,7 @@ mod tests {
             protocol_version: CURRENT_PROTOCOL_VERSION,
             seq: 1,
             trace_context: TraceContext::generate(),
+            pagination: None,
             message: msg,
         };
         serde_json::to_value(envelope).unwrap()
