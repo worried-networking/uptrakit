@@ -22,8 +22,10 @@
 //! - **Fault-tolerant**: errors on individual rows are logged and skipped —
 //!   the controller still starts successfully.
 
-use sea_orm::{DatabaseConnection, EntityTrait, IntoActiveModel};
+use sea_orm::{DatabaseConnection, EntityTrait, IntoActiveModel, QuerySelect};
 use uptrakit_crypto::{ColumnAadEntry, EncryptedString};
+
+const UPGRADE_CHUNK_SIZE: u64 = 100;
 
 // ── Column AAD constants ───────────────────────────────────────────────
 
@@ -140,36 +142,56 @@ async fn upgrade_ca_certificate_keys(db: &DatabaseConnection) -> u64 {
     use sea_orm::ActiveModelTrait;
     use uptrakit_shared_db::entity::prelude::CaCertificate;
 
-    let rows = match CaCertificate::find().all(db).await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to query ca_certificates for v3 upgrade");
-            return 0;
-        }
-    };
-
     let mut count = 0u64;
-    for row in rows {
-        if !row.key_pem.needs_v3_upgrade() {
-            continue;
+    let mut offset = 0u64;
+
+    loop {
+        let rows = match CaCertificate::find()
+            .offset(offset)
+            .limit(UPGRADE_CHUNK_SIZE)
+            .all(db)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to query ca_certificates for v3 upgrade");
+                break;
+            }
+        };
+
+        if rows.is_empty() {
+            break;
         }
-        let plaintext = row.key_pem.expose_secret().to_string();
-        let fingerprint = row.fingerprint.clone();
-        match EncryptedString::new(plaintext, AAD_CA_KEY_PEM) {
-            Ok(encrypted) => {
-                let mut am = row.into_active_model();
-                am.key_pem = sea_orm::Set(encrypted);
-                if let Err(e) = am.update(db).await {
-                    tracing::warn!(fingerprint = %fingerprint, error = %e, "v3 upgrade failed: ca_certificates.key_pem");
-                } else {
-                    count += 1;
+        let page_len = rows.len() as u64;
+
+        for row in rows {
+            if !row.key_pem.needs_v3_upgrade() {
+                continue;
+            }
+            let plaintext = row.key_pem.expose_secret().to_string();
+            let fingerprint = row.fingerprint.clone();
+            match EncryptedString::new(plaintext, AAD_CA_KEY_PEM) {
+                Ok(encrypted) => {
+                    let mut am = row.into_active_model();
+                    am.key_pem = sea_orm::Set(encrypted);
+                    if let Err(e) = am.update(db).await {
+                        tracing::warn!(fingerprint = %fingerprint, error = %e, "v3 upgrade failed: ca_certificates.key_pem");
+                    } else {
+                        count += 1;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(fingerprint = %fingerprint, error = %e, "v3 encrypt failed: ca_certificates.key_pem");
                 }
             }
-            Err(e) => {
-                tracing::warn!(fingerprint = %fingerprint, error = %e, "v3 encrypt failed: ca_certificates.key_pem");
-            }
         }
+
+        if page_len < UPGRADE_CHUNK_SIZE {
+            break;
+        }
+        offset += UPGRADE_CHUNK_SIZE;
     }
+
     if count > 0 {
         tracing::info!(
             table = "ca_certificates",
@@ -185,36 +207,56 @@ async fn upgrade_oidc_client_secrets(db: &DatabaseConnection) -> u64 {
     use sea_orm::ActiveModelTrait;
     use uptrakit_shared_db::entity::prelude::OidcProvider;
 
-    let rows = match OidcProvider::find().all(db).await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to query oidc_providers for v3 upgrade");
-            return 0;
-        }
-    };
-
     let mut count = 0u64;
-    for row in rows {
-        if !row.client_secret.needs_v3_upgrade() {
-            continue;
+    let mut offset = 0u64;
+
+    loop {
+        let rows = match OidcProvider::find()
+            .offset(offset)
+            .limit(UPGRADE_CHUNK_SIZE)
+            .all(db)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to query oidc_providers for v3 upgrade");
+                break;
+            }
+        };
+
+        if rows.is_empty() {
+            break;
         }
-        let plaintext = row.client_secret.expose_secret().to_string();
-        let id = row.id;
-        match EncryptedString::new(plaintext, AAD_OIDC_CLIENT_SECRET) {
-            Ok(encrypted) => {
-                let mut am = row.into_active_model();
-                am.client_secret = sea_orm::Set(encrypted);
-                if let Err(e) = am.update(db).await {
-                    tracing::warn!(id = %id, error = %e, "v3 upgrade failed: oidc_providers.client_secret");
-                } else {
-                    count += 1;
+        let page_len = rows.len() as u64;
+
+        for row in rows {
+            if !row.client_secret.needs_v3_upgrade() {
+                continue;
+            }
+            let plaintext = row.client_secret.expose_secret().to_string();
+            let id = row.id;
+            match EncryptedString::new(plaintext, AAD_OIDC_CLIENT_SECRET) {
+                Ok(encrypted) => {
+                    let mut am = row.into_active_model();
+                    am.client_secret = sea_orm::Set(encrypted);
+                    if let Err(e) = am.update(db).await {
+                        tracing::warn!(id = %id, error = %e, "v3 upgrade failed: oidc_providers.client_secret");
+                    } else {
+                        count += 1;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(id = %id, error = %e, "v3 encrypt failed: oidc_providers.client_secret");
                 }
             }
-            Err(e) => {
-                tracing::warn!(id = %id, error = %e, "v3 encrypt failed: oidc_providers.client_secret");
-            }
         }
+
+        if page_len < UPGRADE_CHUNK_SIZE {
+            break;
+        }
+        offset += UPGRADE_CHUNK_SIZE;
     }
+
     if count > 0 {
         tracing::info!(
             table = "oidc_providers",
@@ -230,39 +272,59 @@ async fn upgrade_mqtt_passwords(db: &DatabaseConnection) -> u64 {
     use sea_orm::ActiveModelTrait;
     use uptrakit_shared_db::entity::prelude::MqttClient;
 
-    let rows = match MqttClient::find().all(db).await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to query mqtt_clients for v3 upgrade (password)");
-            return 0;
-        }
-    };
-
     let mut count = 0u64;
-    for row in rows {
-        let Some(ref password) = row.password else {
-            continue;
+    let mut offset = 0u64;
+
+    loop {
+        let rows = match MqttClient::find()
+            .offset(offset)
+            .limit(UPGRADE_CHUNK_SIZE)
+            .all(db)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to query mqtt_clients for v3 upgrade (password)");
+                break;
+            }
         };
-        if !password.needs_v3_upgrade() {
-            continue;
+
+        if rows.is_empty() {
+            break;
         }
-        let plaintext = password.expose_secret().to_string();
-        let id = row.id;
-        match EncryptedString::new(plaintext, AAD_MQTT_PASSWORD) {
-            Ok(encrypted) => {
-                let mut am = row.into_active_model();
-                am.password = sea_orm::Set(Some(encrypted));
-                if let Err(e) = am.update(db).await {
-                    tracing::warn!(id = %id, error = %e, "v3 upgrade failed: mqtt_clients.password");
-                } else {
-                    count += 1;
+        let page_len = rows.len() as u64;
+
+        for row in rows {
+            let Some(ref password) = row.password else {
+                continue;
+            };
+            if !password.needs_v3_upgrade() {
+                continue;
+            }
+            let plaintext = password.expose_secret().to_string();
+            let id = row.id;
+            match EncryptedString::new(plaintext, AAD_MQTT_PASSWORD) {
+                Ok(encrypted) => {
+                    let mut am = row.into_active_model();
+                    am.password = sea_orm::Set(Some(encrypted));
+                    if let Err(e) = am.update(db).await {
+                        tracing::warn!(id = %id, error = %e, "v3 upgrade failed: mqtt_clients.password");
+                    } else {
+                        count += 1;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(id = %id, error = %e, "v3 encrypt failed: mqtt_clients.password");
                 }
             }
-            Err(e) => {
-                tracing::warn!(id = %id, error = %e, "v3 encrypt failed: mqtt_clients.password");
-            }
         }
+
+        if page_len < UPGRADE_CHUNK_SIZE {
+            break;
+        }
+        offset += UPGRADE_CHUNK_SIZE;
     }
+
     if count > 0 {
         tracing::info!(
             table = "mqtt_clients",
@@ -278,39 +340,59 @@ async fn upgrade_mqtt_ca_certs(db: &DatabaseConnection) -> u64 {
     use sea_orm::ActiveModelTrait;
     use uptrakit_shared_db::entity::prelude::MqttClient;
 
-    let rows = match MqttClient::find().all(db).await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to query mqtt_clients for v3 upgrade (ca_cert_pem)");
-            return 0;
-        }
-    };
-
     let mut count = 0u64;
-    for row in rows {
-        let Some(ref ca_cert) = row.ca_cert_pem else {
-            continue;
+    let mut offset = 0u64;
+
+    loop {
+        let rows = match MqttClient::find()
+            .offset(offset)
+            .limit(UPGRADE_CHUNK_SIZE)
+            .all(db)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to query mqtt_clients for v3 upgrade (ca_cert_pem)");
+                break;
+            }
         };
-        if !ca_cert.needs_v3_upgrade() {
-            continue;
+
+        if rows.is_empty() {
+            break;
         }
-        let plaintext = ca_cert.expose_secret().to_string();
-        let id = row.id;
-        match EncryptedString::new(plaintext, AAD_MQTT_CA_CERT_PEM) {
-            Ok(encrypted) => {
-                let mut am = row.into_active_model();
-                am.ca_cert_pem = sea_orm::Set(Some(encrypted));
-                if let Err(e) = am.update(db).await {
-                    tracing::warn!(id = %id, error = %e, "v3 upgrade failed: mqtt_clients.ca_cert_pem");
-                } else {
-                    count += 1;
+        let page_len = rows.len() as u64;
+
+        for row in rows {
+            let Some(ref ca_cert) = row.ca_cert_pem else {
+                continue;
+            };
+            if !ca_cert.needs_v3_upgrade() {
+                continue;
+            }
+            let plaintext = ca_cert.expose_secret().to_string();
+            let id = row.id;
+            match EncryptedString::new(plaintext, AAD_MQTT_CA_CERT_PEM) {
+                Ok(encrypted) => {
+                    let mut am = row.into_active_model();
+                    am.ca_cert_pem = sea_orm::Set(Some(encrypted));
+                    if let Err(e) = am.update(db).await {
+                        tracing::warn!(id = %id, error = %e, "v3 upgrade failed: mqtt_clients.ca_cert_pem");
+                    } else {
+                        count += 1;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(id = %id, error = %e, "v3 encrypt failed: mqtt_clients.ca_cert_pem");
                 }
             }
-            Err(e) => {
-                tracing::warn!(id = %id, error = %e, "v3 encrypt failed: mqtt_clients.ca_cert_pem");
-            }
         }
+
+        if page_len < UPGRADE_CHUNK_SIZE {
+            break;
+        }
+        offset += UPGRADE_CHUNK_SIZE;
     }
+
     if count > 0 {
         tracing::info!(
             table = "mqtt_clients",
@@ -326,36 +408,56 @@ async fn upgrade_oidc_flow_pkce_verifiers(db: &DatabaseConnection) -> u64 {
     use sea_orm::ActiveModelTrait;
     use uptrakit_shared_db::entity::prelude::PendingOidcFlow;
 
-    let rows = match PendingOidcFlow::find().all(db).await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to query pending_oidc_flows for v3 upgrade");
-            return 0;
-        }
-    };
-
     let mut count = 0u64;
-    for row in rows {
-        if !row.pkce_verifier.needs_v3_upgrade() {
-            continue;
+    let mut offset = 0u64;
+
+    loop {
+        let rows = match PendingOidcFlow::find()
+            .offset(offset)
+            .limit(UPGRADE_CHUNK_SIZE)
+            .all(db)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to query pending_oidc_flows for v3 upgrade");
+                break;
+            }
+        };
+
+        if rows.is_empty() {
+            break;
         }
-        let plaintext = row.pkce_verifier.expose_secret().to_string();
-        let csrf_state = row.csrf_state.clone();
-        match EncryptedString::new(plaintext, AAD_PKCE_VERIFIER) {
-            Ok(encrypted) => {
-                let mut am = row.into_active_model();
-                am.pkce_verifier = sea_orm::Set(encrypted);
-                if let Err(e) = am.update(db).await {
-                    tracing::warn!(csrf_state = %csrf_state, error = %e, "v3 upgrade failed: pending_oidc_flows.pkce_verifier");
-                } else {
-                    count += 1;
+        let page_len = rows.len() as u64;
+
+        for row in rows {
+            if !row.pkce_verifier.needs_v3_upgrade() {
+                continue;
+            }
+            let plaintext = row.pkce_verifier.expose_secret().to_string();
+            let csrf_state = row.csrf_state.clone();
+            match EncryptedString::new(plaintext, AAD_PKCE_VERIFIER) {
+                Ok(encrypted) => {
+                    let mut am = row.into_active_model();
+                    am.pkce_verifier = sea_orm::Set(encrypted);
+                    if let Err(e) = am.update(db).await {
+                        tracing::warn!(csrf_state = %csrf_state, error = %e, "v3 upgrade failed: pending_oidc_flows.pkce_verifier");
+                    } else {
+                        count += 1;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(csrf_state = %csrf_state, error = %e, "v3 encrypt failed: pending_oidc_flows.pkce_verifier");
                 }
             }
-            Err(e) => {
-                tracing::warn!(csrf_state = %csrf_state, error = %e, "v3 encrypt failed: pending_oidc_flows.pkce_verifier");
-            }
         }
+
+        if page_len < UPGRADE_CHUNK_SIZE {
+            break;
+        }
+        offset += UPGRADE_CHUNK_SIZE;
     }
+
     if count > 0 {
         tracing::info!(
             table = "pending_oidc_flows",
@@ -371,36 +473,56 @@ async fn upgrade_notification_channel_configs(db: &DatabaseConnection) -> u64 {
     use sea_orm::ActiveModelTrait;
     use uptrakit_shared_db::entity::prelude::NotificationChannel;
 
-    let rows = match NotificationChannel::find().all(db).await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to query notification_channels for v3 upgrade");
-            return 0;
-        }
-    };
-
     let mut count = 0u64;
-    for row in rows {
-        if !row.config.needs_v3_upgrade() {
-            continue;
+    let mut offset = 0u64;
+
+    loop {
+        let rows = match NotificationChannel::find()
+            .offset(offset)
+            .limit(UPGRADE_CHUNK_SIZE)
+            .all(db)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to query notification_channels for v3 upgrade");
+                break;
+            }
+        };
+
+        if rows.is_empty() {
+            break;
         }
-        let plaintext = row.config.expose_secret().to_string();
-        let id = row.id;
-        match EncryptedString::new(plaintext, AAD_NOTIFICATION_CONFIG) {
-            Ok(encrypted) => {
-                let mut am = row.into_active_model();
-                am.config = sea_orm::Set(encrypted);
-                if let Err(e) = am.update(db).await {
-                    tracing::warn!(id = %id, error = %e, "v3 upgrade failed: notification_channels.config");
-                } else {
-                    count += 1;
+        let page_len = rows.len() as u64;
+
+        for row in rows {
+            if !row.config.needs_v3_upgrade() {
+                continue;
+            }
+            let plaintext = row.config.expose_secret().to_string();
+            let id = row.id;
+            match EncryptedString::new(plaintext, AAD_NOTIFICATION_CONFIG) {
+                Ok(encrypted) => {
+                    let mut am = row.into_active_model();
+                    am.config = sea_orm::Set(encrypted);
+                    if let Err(e) = am.update(db).await {
+                        tracing::warn!(id = %id, error = %e, "v3 upgrade failed: notification_channels.config");
+                    } else {
+                        count += 1;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(id = %id, error = %e, "v3 encrypt failed: notification_channels.config");
                 }
             }
-            Err(e) => {
-                tracing::warn!(id = %id, error = %e, "v3 encrypt failed: notification_channels.config");
-            }
         }
+
+        if page_len < UPGRADE_CHUNK_SIZE {
+            break;
+        }
+        offset += UPGRADE_CHUNK_SIZE;
     }
+
     if count > 0 {
         tracing::info!(
             table = "notification_channels",
