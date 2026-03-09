@@ -311,6 +311,7 @@ pub fn build_discovery_config(
         "platform": "mqtt",
         "unique_id": uid,
         "name": item_name,
+        "title": "Software Update",
         "default_entity_id": default_entity_id,
         "state_topic": state_topic(topic_prefix, item_id, host_id),
         "latest_version_topic": latest_version_topic(topic_prefix, item_id, host_id),
@@ -734,7 +735,7 @@ pub fn host_security_latest_version_string(security_pending_count: u32) -> Strin
 ///     Uuid::nil(),
 ///     "myserver",
 /// );
-/// assert_eq!(v["name"], "myserver packages");
+/// assert!(v["name"].is_null());
 /// assert_eq!(v["platform"], "mqtt");
 /// assert_eq!(v["payload_install"], "install");
 /// assert_eq!(v["enabled_by_default"], false);
@@ -753,7 +754,8 @@ pub fn build_host_packages_discovery_config(
     serde_json::json!({
         "platform": "mqtt",
         "unique_id": uid,
-        "name": format!("{friendly_name} packages"),
+        "name": null,
+        "title": "Packages Update",
         "default_entity_id": default_entity_id,
         "enabled_by_default": false,
         "state_topic": host_packages_state_topic(topic_prefix, host_id),
@@ -962,7 +964,7 @@ pub fn host_security_discovery_config_topic(
 ///     Uuid::nil(),
 ///     "myserver",
 /// );
-/// assert_eq!(v["name"], "myserver security updates");
+/// assert!(v["name"].is_null());
 /// assert_eq!(v["platform"], "mqtt");
 /// assert_eq!(v["payload_install"], "install");
 /// assert_eq!(v["enabled_by_default"], false);
@@ -981,7 +983,8 @@ pub fn build_host_security_discovery_config(
     serde_json::json!({
         "platform": "mqtt",
         "unique_id": uid,
-        "name": format!("{friendly_name} security updates"),
+        "name": null,
+        "title": "Security Updates",
         "default_entity_id": default_entity_id,
         "enabled_by_default": false,
         "state_topic": host_security_state_topic(topic_prefix, host_id),
@@ -1657,6 +1660,20 @@ mod tests {
     }
 
     #[test]
+    fn build_discovery_config_title_is_software_update() {
+        let v = build_discovery_config(
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "My App",
+            "myhost",
+            ReleaseInfo::default(),
+        );
+        assert_eq!(v["title"], "Software Update");
+    }
+
+    #[test]
     fn build_discovery_config_state_topic_correct() {
         let v = build_discovery_config(
             "uptrakit",
@@ -2273,9 +2290,15 @@ mod tests {
     }
 
     #[test]
-    fn build_host_packages_discovery_config_name_includes_packages() {
+    fn build_host_packages_discovery_config_name_is_null() {
         let v = build_host_packages_discovery_config("uptrakit", tenant(), host(), "myserver");
-        assert_eq!(v["name"], "myserver packages");
+        assert!(v["name"].is_null());
+    }
+
+    #[test]
+    fn build_host_packages_discovery_config_title_is_packages_update() {
+        let v = build_host_packages_discovery_config("uptrakit", tenant(), host(), "myserver");
+        assert_eq!(v["title"], "Packages Update");
     }
 
     #[test]
@@ -2489,9 +2512,15 @@ mod tests {
     }
 
     #[test]
-    fn build_host_security_discovery_config_name_includes_security_updates() {
+    fn build_host_security_discovery_config_name_is_null() {
         let v = build_host_security_discovery_config("uptrakit", tenant(), host(), "myserver");
-        assert_eq!(v["name"], "myserver security updates");
+        assert!(v["name"].is_null());
+    }
+
+    #[test]
+    fn build_host_security_discovery_config_title_is_security_updates() {
+        let v = build_host_security_discovery_config("uptrakit", tenant(), host(), "myserver");
+        assert_eq!(v["title"], "Security Updates");
     }
 
     #[test]
