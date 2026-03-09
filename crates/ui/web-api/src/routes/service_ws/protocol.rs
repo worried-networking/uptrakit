@@ -14,7 +14,8 @@ use rootcause::prelude::*;
 use thiserror::Error;
 use uptrakit_internal_wire::{
     CURRENT_PROTOCOL_VERSION, Capability, CloseReason, ControllerMessage, IncomingSeq, OutgoingSeq,
-    PongPayload, ServiceEnvelope, ServiceMessage, limits::WireValidate, now_millis,
+    PongPayload, ReportPagination, ServiceEnvelope, ServiceMessage, limits::WireValidate,
+    now_millis,
 };
 use uptrakit_shared_db::entity::service as service_entity;
 use uptrakit_shared_macros::impl_report_conversion;
@@ -162,23 +163,27 @@ struct EnvelopeHeader {
     seq: u64,
 }
 
+/// A deserialized service message with optional pagination metadata.
+#[derive(Debug)]
+pub(crate) struct DeserializedMessage {
+    pub message: ServiceMessage,
+    pub pagination: Option<ReportPagination>,
+}
+
 /// Deserialize a [`ServiceMessage`] from a sequenced [`ServiceEnvelope`]
 /// JSON string, validating the protocol version and sequence number.
 ///
 /// Returns:
 /// - `Err(_)` on malformed JSON, protocol version mismatch, or sequence mismatch
 ///   (hard errors — connection should be closed).
-/// - `Ok(Some(ServiceMessage::Unknown))` when the `type` tag is not recognised
-///   (unknown message type from a newer service build — sequence was already
-///   advanced; the caller should log a warning and continue).
+/// - `Ok(Some(DeserializedMessage))` on successful parse (includes pagination).
 /// - `Ok(None)` when the full envelope parse fails for other reasons (soft
 ///   failure — sequence was already advanced).
-/// - `Ok(Some(msg))` on successful parse.
 #[tracing::instrument(skip_all, name = "ws.deserialize")]
 pub(crate) fn deserialize_service_msg(
     in_seq: &mut IncomingSeq,
     text: &str,
-) -> ServiceWsResult<Option<ServiceMessage>> {
+) -> ServiceWsResult<Option<DeserializedMessage>> {
     // Step 1: Extract protocol version and sequence number (hard fail on malformed JSON).
     let header: EnvelopeHeader = serde_json::from_str(text)
         .context_transform(|e| ServiceWsError::Deserialize(format!("invalid message: {e}")))?;
@@ -203,7 +208,16 @@ pub(crate) fn deserialize_service_msg(
             if let Err(e) = envelope.message.wire_validate() {
                 return Err(report!(ServiceWsError::Deserialize(e.to_string())));
             }
-            Ok(Some(envelope.message))
+            // Step 6: Validate pagination metadata if present.
+            if let Some(ref pagination) = envelope.pagination
+                && let Err(e) = pagination.wire_validate()
+            {
+                return Err(report!(ServiceWsError::Deserialize(e.to_string())));
+            }
+            Ok(Some(DeserializedMessage {
+                message: envelope.message,
+                pagination: envelope.pagination,
+            }))
         }
         Err(e) => {
             tracing::debug!("ignoring unrecognized service message: {e}");

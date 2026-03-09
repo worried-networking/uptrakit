@@ -86,7 +86,7 @@ pub(super) async fn handle_mqtt_register_handshake(
         match msg {
             Message::Text(text) => {
                 let service_msg: ServiceMessage = match deserialize_service_msg(in_seq, &text) {
-                    Ok(Some(m)) => m,
+                    Ok(Some(m)) => m.message,
                     Ok(None) => continue,
                     Err(e) => {
                         tracing::debug!(error = %e, "deserialize error");

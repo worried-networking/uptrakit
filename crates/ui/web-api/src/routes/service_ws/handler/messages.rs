@@ -11,9 +11,10 @@ use futures_util::SinkExt;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
+use uptrakit_internal_wire::report_tracker::{PageOutcome, ReportTracker};
 use uptrakit_internal_wire::{
     CertificatePayload, CloseReason, ControllerMessage, DiscoveryResultsPayload, ErrorCode,
-    ErrorPayload, OutgoingSeq, ReportHostsPayload, ReportPluginConfigPayload,
+    ErrorPayload, OutgoingSeq, ReportHostsPayload, ReportPagination, ReportPluginConfigPayload,
     ReportPluginConfigResponsePayload, RequestCrlRenewalPayload, VersionCheckResultsPayload,
 };
 use uptrakit_shared_db::entity::{
@@ -622,13 +623,37 @@ pub(super) async fn handle_discovery_results(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     payload: DiscoveryResultsPayload,
+    pagination: Option<&ReportPagination>,
+    report_tracker: &mut ReportTracker,
 ) -> LoopAction {
     tracing::debug!(
         %service_id,
         host_machine_id = %payload.host_machine_id,
         results = payload.results.len(),
+        page = pagination.map(|p| p.page),
+        total_pages = pagination.map(|p| p.total_pages),
         "received DiscoveryResults"
     );
+
+    // Determine whether this is the final page (or a non-paginated message).
+    let page_outcome = if let Some(p) = pagination {
+        match report_tracker.register_page(p.report_id, p.page, p.total_pages) {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                tracing::warn!(
+                    %service_id,
+                    error = %e,
+                    "invalid pagination for DiscoveryResults"
+                );
+                return LoopAction::Continue;
+            }
+        }
+    } else {
+        // Non-paginated: treat as final (and only) page.
+        PageOutcome::Final {
+            accumulated_discovered_count: 0,
+        }
+    };
 
     let links = service_host::Entity::find()
         .filter(service_host::Column::ServiceId.eq(service_id))
@@ -654,7 +679,7 @@ pub(super) async fn handle_discovery_results(
             .one(state.db())
             .await
         {
-            let discovered_count: u32 = payload
+            let this_page_count: u32 = payload
                 .results
                 .iter()
                 .filter(|r| r.error.is_none())
@@ -675,23 +700,43 @@ pub(super) async fn handle_discovery_results(
                     %service_id,
                     "failed to process discovery results"
                 );
-            } else if discovered_count > 0 {
-                let host_name = host::Entity::find_by_id(host_id)
-                    .one(state.db())
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|h| h.hostname.clone());
+            } else {
+                // Emit the notification only on the final page (or for
+                // non-paginated messages). For intermediate pages, accumulate
+                // the count in the tracker.
+                match page_outcome {
+                    PageOutcome::Final {
+                        accumulated_discovered_count,
+                    } => {
+                        let total_discovered =
+                            accumulated_discovered_count.saturating_add(this_page_count);
+                        if total_discovered > 0 {
+                            let host_name = host::Entity::find_by_id(host_id)
+                                .one(state.db())
+                                .await
+                                .ok()
+                                .flatten()
+                                .map(|h| h.hostname.clone());
 
-                state.notification_dispatcher.dispatch(NotificationEvent {
-                    tenant_id: svc.tenant_id,
-                    host_id: Some(host_id),
-                    host_name,
-                    software_item_id: None,
-                    software_item_name: None,
-                    plugin_type: None,
-                    details: NotificationEventDetails::NewSoftwareDiscovered { discovered_count },
-                });
+                            state.notification_dispatcher.dispatch(NotificationEvent {
+                                tenant_id: svc.tenant_id,
+                                host_id: Some(host_id),
+                                host_name,
+                                software_item_id: None,
+                                software_item_name: None,
+                                plugin_type: None,
+                                details: NotificationEventDetails::NewSoftwareDiscovered {
+                                    discovered_count: total_discovered,
+                                },
+                            });
+                        }
+                    }
+                    PageOutcome::Pending => {
+                        if let Some(p) = pagination {
+                            report_tracker.add_discovered_count(p.report_id, this_page_count);
+                        }
+                    }
+                }
             }
         }
     } else {

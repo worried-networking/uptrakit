@@ -263,13 +263,15 @@ mod tests {
         let mut in_seq = IncomingSeq::new();
         let json = r#"{"protocol_version":1,"seq":1,"type":"future_message","data":{"foo":"bar"}}"#;
         let result = deserialize_service_msg(&mut in_seq, json);
-        assert!(
-            matches!(
-                result,
-                Ok(Some(uptrakit_internal_wire::ServiceMessage::Unknown))
-            ),
-            "unknown type should deserialize to Ok(Some(ServiceMessage::Unknown))"
-        );
+        match result {
+            Ok(Some(d)) => {
+                assert!(
+                    matches!(d.message, uptrakit_internal_wire::ServiceMessage::Unknown),
+                    "unknown type should produce ServiceMessage::Unknown"
+                );
+            }
+            other => panic!("expected Ok(Some(DeserializedMessage {{ Unknown }})), got {other:?}"),
+        }
     }
 
     #[test]

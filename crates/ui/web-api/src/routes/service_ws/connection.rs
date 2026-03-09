@@ -530,7 +530,7 @@ pub(super) async fn handle_anonymous(
         match msg {
             Message::Text(text) => {
                 let service_msg = match deserialize_service_msg(in_seq, &text) {
-                    Ok(Some(m)) => m,
+                    Ok(Some(m)) => m.message,
                     Ok(None) => continue,
                     Err(e) => {
                         tracing::debug!(error = %e, "invalid message from anonymous client");

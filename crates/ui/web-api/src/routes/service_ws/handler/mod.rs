@@ -33,6 +33,7 @@ use rootcause::prelude::*;
 use sea_orm::EntityTrait;
 
 use uptrakit_internal_wire::limits::WireValidate;
+use uptrakit_internal_wire::report_tracker::ReportTracker;
 use uptrakit_internal_wire::{
     ApprovedPayload, Capability, CertificatePayload, CloseReason, ControllerMessage, ErrorCode,
     ErrorPayload, IncomingSeq, MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq,
@@ -383,6 +384,11 @@ pub(crate) async fn handle_authenticated_loop(
     };
 
     // ------------------------------------------------------------------
+    // Report pagination tracker (per-connection, no payload buffering)
+    // ------------------------------------------------------------------
+    let mut report_tracker = ReportTracker::new();
+
+    // ------------------------------------------------------------------
     // Main operational loop
     // ------------------------------------------------------------------
     loop {
@@ -402,7 +408,7 @@ pub(crate) async fn handle_authenticated_loop(
                 }
                 match msg {
                     Message::Text(text) => {
-                        let service_msg: ServiceMessage =
+                        let deserialized =
                             match deserialize_service_msg(in_seq, &text) {
                                 Ok(Some(m)) => m,
                                 Ok(None) => continue,
@@ -411,6 +417,8 @@ pub(crate) async fn handle_authenticated_loop(
                                     break;
                                 }
                             };
+                        let pagination = deserialized.pagination;
+                        let service_msg = deserialized.message;
 
                         match service_msg {
                             // -------------------------------------------------
@@ -493,7 +501,7 @@ pub(crate) async fn handle_authenticated_loop(
                             ServiceMessage::DiscoveryResults(payload)
                                 if has_software_discovery =>
                             {
-                                if messages::handle_discovery_results(state, service_id, payload).await.is_break() {
+                                if messages::handle_discovery_results(state, service_id, payload, pagination.as_ref(), &mut report_tracker).await.is_break() {
                                     break;
                                 }
                             }
@@ -1021,7 +1029,7 @@ pub(crate) async fn handle_enrolled_loop(
                     Message::Text(text) => {
                         let service_msg: ServiceMessage =
                             match deserialize_service_msg(in_seq, &text) {
-                                Ok(Some(m)) => m,
+                                Ok(Some(m)) => m.message,
                                 Ok(None) => continue,
                                 Err(e) => {
                                     tracing::debug!(error = %e, "deserialize error");
