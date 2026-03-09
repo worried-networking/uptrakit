@@ -14,6 +14,13 @@ pub struct NpmConfig {
     /// When `false` (default), only the `latest` dist-tag is returned.
     #[serde(default)]
     pub include_prereleases: bool,
+
+    /// Override the npm registry URL.
+    ///
+    /// When `None` (default), uses `https://registry.npmjs.org`.
+    /// Set this to use a private registry or a self-hosted mirror.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry_url: Option<String>,
 }
 
 impl SecretMasking for NpmConfig {}
@@ -91,6 +98,7 @@ mod tests {
     fn serialization_roundtrip_prereleases_enabled() {
         let config = NpmConfig {
             include_prereleases: true,
+            registry_url: None,
         };
         let json = serde_json::to_value(&config).expect("serialize");
         assert_eq!(json["include_prereleases"], true);
@@ -108,6 +116,7 @@ mod tests {
         use uptrakit_plugin_infrastructure_core::SecretMasking;
         let config = NpmConfig {
             include_prereleases: true,
+            registry_url: None,
         };
         let expected = config.clone();
         let masked = config.with_secrets_masked();

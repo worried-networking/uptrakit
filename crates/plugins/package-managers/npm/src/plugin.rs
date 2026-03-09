@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use uptrakit_backoff::Backoff;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
@@ -16,6 +17,15 @@ use uptrakit_plugin_infrastructure_core::{
 use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
 use crate::config::NpmConfig;
+
+/// Maximum number of retry attempts for transient npm registry request failures.
+const FETCH_MAX_RETRIES: usize = 3;
+
+/// Initial backoff delay for npm registry retries.
+const FETCH_BACKOFF_BASE: Duration = Duration::from_secs(1);
+
+/// Maximum backoff delay between retry attempts.
+const FETCH_BACKOFF_MAX: Duration = Duration::from_secs(10);
 
 /// npm packages that are package-manager infrastructure, not tracked applications.
 ///
@@ -127,16 +137,25 @@ pub fn validate_version(version: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// The default npm registry base URL.
+const DEFAULT_REGISTRY_BASE: &str = "https://registry.npmjs.org";
+
 /// Build the npm registry URL for a package identifier.
 ///
 /// Scoped packages (`@scope/name`) are URL-encoded: the `/` is encoded as `%2F`.
-pub fn npm_registry_url(package_identifier: &str) -> String {
+///
+/// The `registry_base` parameter overrides the default (`https://registry.npmjs.org`).
+/// Pass `None` to use the default.
+pub fn npm_registry_url(package_identifier: &str, registry_base: Option<&str>) -> String {
+    let base = registry_base
+        .unwrap_or(DEFAULT_REGISTRY_BASE)
+        .trim_end_matches('/');
     if let Some(without_at) = package_identifier.strip_prefix('@') {
         // Encode `@scope/name` as `@scope%2Fname`.
         let encoded = without_at.replacen('/', "%2F", 1);
-        format!("https://registry.npmjs.org/@{encoded}")
+        format!("{base}/@{encoded}")
     } else {
-        format!("https://registry.npmjs.org/{package_identifier}")
+        format!("{base}/{package_identifier}")
     }
 }
 
@@ -413,38 +432,78 @@ impl Plugin for NpmPlugin {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "fetching npm releases from registry");
 
-        let url = npm_registry_url(package_identifier);
-        let response = self.client.get(&url).send().await.map_err(|e| {
-            report!(PluginError::PluginInternal(format!(
-                "npm registry request failed: {e}"
-            )))
-        })?;
+        let url = npm_registry_url(package_identifier, self.config.registry_url.as_deref());
+        let mut backoff = Backoff::new(FETCH_BACKOFF_BASE, FETCH_BACKOFF_MAX);
+        let mut last_err: Option<String> = None;
 
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            tracing::debug!(package = %package_identifier, "package not found in npm registry");
-            return Ok(vec![]);
+        for attempt in 1..=FETCH_MAX_RETRIES {
+            let response = match self.client.get(&url).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    let msg = format!("npm registry request failed: {e}");
+                    tracing::warn!(
+                        package = %package_identifier,
+                        attempt,
+                        error = %e,
+                        "transient npm registry request error; will retry"
+                    );
+                    last_err = Some(msg);
+                    if attempt < FETCH_MAX_RETRIES {
+                        tokio::time::sleep(backoff.next_delay()).await;
+                    }
+                    continue;
+                }
+            };
+
+            let status = response.status();
+
+            // 404 is a permanent, non-retryable condition.
+            if status == reqwest::StatusCode::NOT_FOUND {
+                tracing::debug!(package = %package_identifier, "package not found in npm registry");
+                return Ok(vec![]);
+            }
+
+            // 5xx responses are transient; retry after backoff.
+            if status.is_server_error() {
+                let msg = format!("npm registry returned HTTP {status}");
+                tracing::warn!(
+                    package = %package_identifier,
+                    attempt,
+                    %status,
+                    "transient npm registry server error; will retry"
+                );
+                last_err = Some(msg);
+                if attempt < FETCH_MAX_RETRIES {
+                    tokio::time::sleep(backoff.next_delay()).await;
+                }
+                continue;
+            }
+
+            if !status.is_success() {
+                bail!(PluginError::PluginInternal(format!(
+                    "npm registry returned HTTP {status}"
+                )));
+            }
+
+            let json: serde_json::Value = response.json().await.map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "failed to parse npm registry response: {e}"
+                )))
+            })?;
+
+            let releases = self.parse_registry_response(&json, package_identifier);
+            tracing::debug!(
+                package = %package_identifier,
+                count = releases.len(),
+                "npm releases fetched"
+            );
+            return Ok(releases);
         }
 
-        if !response.status().is_success() {
-            bail!(PluginError::PluginInternal(format!(
-                "npm registry returned HTTP {}",
-                response.status()
-            )));
-        }
-
-        let json: serde_json::Value = response.json().await.map_err(|e| {
-            report!(PluginError::PluginInternal(format!(
-                "failed to parse npm registry response: {e}"
-            )))
-        })?;
-
-        let releases = self.parse_registry_response(&json, package_identifier);
-        tracing::debug!(
-            package = %package_identifier,
-            count = releases.len(),
-            "npm releases fetched"
-        );
-        Ok(releases)
+        // All retries exhausted.
+        bail!(PluginError::PluginInternal(last_err.unwrap_or_else(|| {
+            "npm registry request failed after retries".to_string()
+        })));
     }
 
     #[tracing::instrument(skip_all)]
@@ -821,13 +880,16 @@ mod tests {
 
     #[test]
     fn registry_url_plain_package() {
-        assert_eq!(npm_registry_url("n8n"), "https://registry.npmjs.org/n8n");
+        assert_eq!(
+            npm_registry_url("n8n", None),
+            "https://registry.npmjs.org/n8n"
+        );
     }
 
     #[test]
     fn registry_url_scoped_package() {
         assert_eq!(
-            npm_registry_url("@angular/cli"),
+            npm_registry_url("@angular/cli", None),
             "https://registry.npmjs.org/@angular%2Fcli"
         );
     }
@@ -836,8 +898,20 @@ mod tests {
     fn registry_url_scoped_nested_slash_only_encodes_first() {
         // Only the first `/` after the scope is encoded.
         assert_eq!(
-            npm_registry_url("@scope/name"),
+            npm_registry_url("@scope/name", None),
             "https://registry.npmjs.org/@scope%2Fname"
+        );
+    }
+
+    #[test]
+    fn registry_url_custom_base() {
+        assert_eq!(
+            npm_registry_url("lodash", Some("https://my.registry.example.com")),
+            "https://my.registry.example.com/lodash"
+        );
+        assert_eq!(
+            npm_registry_url("@scope/pkg", Some("https://my.registry.example.com/")),
+            "https://my.registry.example.com/@scope%2Fpkg"
         );
     }
 
@@ -935,6 +1009,7 @@ mod tests {
     async fn parse_registry_response_with_prereleases() {
         let config = NpmConfig {
             include_prereleases: true,
+            registry_url: None,
         };
         let plugin = NpmPlugin::new(config, test_executor())
             .await
@@ -966,6 +1041,7 @@ mod tests {
     async fn parse_registry_response_prerelease_same_as_latest_deduped() {
         let config = NpmConfig {
             include_prereleases: true,
+            registry_url: None,
         };
         let plugin = NpmPlugin::new(config, test_executor())
             .await
