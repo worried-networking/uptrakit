@@ -916,7 +916,8 @@ The `hosts` entries use the following fields:
 | Field | Type | Description |
 | --- | --- | --- |
 | `host_id` | UUID | Host UUID |
-| `hostname` | String | Human-readable hostname |
+| `hostname` | String | Machine hostname |
+| `friendly_name` | String | User-defined display name for the host |
 | `installed_version` | `Option<String>` | Currently installed version (omitted if unknown) |
 | `latest_version` | `Option<String>` | Latest available version (omitted if unknown) |
 | `update_available` | bool | `true` when `latest_version` differs from `installed_version` |
@@ -935,7 +936,8 @@ The `host_package_hosts` field (defaults to `[]` when absent — older controlle
 | Field | Type | Description |
 | --- | --- | --- |
 | `host_id` | UUID | Host UUID |
-| `hostname` | String | Human-readable hostname |
+| `hostname` | String | Machine hostname |
+| `friendly_name` | String | User-defined display name for the host |
 | `pending_count` | u32 | Number of packages where both versions are known and differ |
 | `security_pending_count` | u32 | Number of packages with `update_category = "security"` where both versions are known and differ |
 | `total_count` | u32 | Total number of enabled, non-deactivated packages tracked for this host |

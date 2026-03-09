@@ -17,13 +17,19 @@ topics for every `(software item, host)` pair regardless of whether Home Assista
 
 | Topic | Retained | Purpose |
 | --- | :---: | --- |
-| `{prefix}/update/{item_id}/{host_id}/state` | ✓ | Installed version string (empty if unknown) |
-| `{prefix}/update/{item_id}/{host_id}/latest_version` | ✓ | Latest available version string (empty if unknown) |
-| `{prefix}/update/{item_id}/{host_id}/attributes` | ✓ | JSON attributes: `{"in_progress": true/false}` |
-| `{prefix}/update/{item_id}/{host_id}/set` | — | Command topic — publish `"install"` to trigger an update |
+| `{prefix}/hosts/{host_id}/items/{item_id}/state` | ✓ | Installed version string (empty if unknown) |
+| `{prefix}/hosts/{host_id}/items/{item_id}/latest_version` | ✓ | Latest available version string (empty if unknown) |
+| `{prefix}/hosts/{host_id}/items/{item_id}/attributes` | ✓ | JSON attributes: `{"in_progress": true/false}` |
+| `{prefix}/hosts/{host_id}/items/{item_id}/set` | — | Command topic — publish `"install"` to trigger an update |
 
-Additionally, Uptrakit publishes the following retained topics for every **host** that has at least one
-tracked host package:
+Additionally, Uptrakit publishes the following retained identity topics per host:
+
+| Topic | Retained | Purpose |
+| --- | :---: | --- |
+| `{prefix}/hosts/{host_id}/hostname` | ✓ | Raw hostname string (for MQTT explorer visibility) |
+| `{prefix}/hosts/{host_id}/friendly_name` | ✓ | User-defined display name (for MQTT explorer visibility) |
+
+For every **host** that has at least one tracked host package, Uptrakit also publishes:
 
 | Topic | Retained | Purpose |
 | --- | :---: | --- |
@@ -112,16 +118,18 @@ without leaving Home Assistant.
 For plugins that only track version numbers (e.g. apt, Homebrew, Docker Hub) the `release_url` and
 `release_summary` attributes are omitted from the discovery config.
 
-Each software item is represented as a distinct HA device named after that software item (e.g. "nginx").
-All hosts assigned to the same software item appear as separate entities within that device, each named
-after the hostname. The device identifier follows the pattern `uptrakit_<tenant_id>_<software_item_id>`,
-so items on multiple hosts are grouped together under one device.
+All entities for a given host — software items, host packages, and security updates — are grouped under
+a single HA device per host. The device is identified by
+`uptrakit_host_{tenant_id_hex}_{host_id_hex}` and named after the host's **friendly name** (the
+user-defined display name set on each host). This means all software items, packages, and security
+entities for a host appear together under one device in Home Assistant.
 
-Entity IDs are assigned on first registration using a stable `default_entity_id` in the form
-`uptrakit_{item_slug}_on_{host_slug}`, where slugs are lowercase with non-alphanumeric characters replaced
-by underscores. For example, software item "uptrakit pangolin" on host
+Each software item entity is named after the software item (e.g. "nginx"). Entity IDs are assigned on
+first registration using a stable `default_entity_id` in the form
+`uptrakit_{friendly_name_slug}_{item_slug}`, where slugs are lowercase with non-alphanumeric characters
+replaced by underscores. For example, software item "uptrakit pangolin" on a host with friendly name
 "pangolin.uk.home.yantsen.su" gets the entity ID
-`update.uptrakit_uptrakit_pangolin_on_pangolin_uk_home_yantsen_su`.
+`update.uptrakit_pangolin_uk_home_yantsen_su_uptrakit_pangolin`.
 
 ## Triggering Updates from Home Assistant
 
@@ -137,9 +145,10 @@ The update is then dispatched to the appropriate agent exactly as if it had been
 or CLI.
 
 **In-progress state feedback:** Uptrakit immediately publishes `{"in_progress": true}` to the
-`{prefix}/update/{item_id}/{host_id}/attributes` topic after accepting the update command. Home Assistant
-recognises this attribute on the `update` entity and displays a spinner. Once the agent reports the final
-result (completed or failed), Uptrakit publishes updated state topics including `{"in_progress": false}`.
+`{prefix}/hosts/{host_id}/items/{item_id}/attributes` topic after accepting the update command. Home
+Assistant recognises this attribute on the `update` entity and displays a spinner. Once the agent reports
+the final result (completed or failed), Uptrakit publishes updated state topics including
+`{"in_progress": false}`.
 
 > **Note:** Uptrakit never triggers updates automatically. Update execution always requires an explicit
 > user action — from the web UI, CLI, or Home Assistant.
@@ -154,11 +163,11 @@ etc.) grouped at the host level.
 > explicitly enable them in **Settings > Devices & Services > Entities** before they appear in your
 > dashboard. This prevents noise for users who do not need package-level tracking in HA.
 
-### All-packages entity (`{hostname} packages`)
+### All-packages entity (`{friendly_name} packages`)
 
 Tracks all outdated packages on the host regardless of category.
 
-### Security updates entity (`{hostname} security updates`)
+### Security updates entity (`{friendly_name} security updates`)
 
 Tracks only packages where `update_category = "security"`. Pressing **Install** on this entity
 applies only security updates, leaving other pending updates in place.
@@ -217,16 +226,18 @@ topics, returning `in_progress: false` and recalculating `pending_count`.
 
 ### Device and Entity Naming
 
-Both entities are grouped under the same HA device (one device per host):
+All entities (software items, packages, security) are grouped under a single HA device per host:
 
-- **Device**: `identifiers: ["uptrakit_host_{tenant_id_hex}_{host_id_hex}"]`, `name: {hostname}`
+- **Device**: `identifiers: ["uptrakit_host_{tenant_hex}_{host_hex}"]`, `name: {friendly_name}`
 
 | Entity | Unique ID | Name | Default entity ID |
 | --- | --- | --- | --- |
-| All-packages | `uptrakit_pkgs_{tenant_hex}_{host_hex}` | `{hostname} packages` | `update.{host_slug}_packages` |
-| Security | `uptrakit_sec_{tenant_hex}_{host_hex}` | `{hostname} security updates` | `update.{host_slug}_security_updates` |
+| Software item | `uptrakit_{tenant_hex}_{host_hex}_{item_hex}` | `{item_name}` | `update.uptrakit_{fn_slug}_{item_slug}` |
+| All-packages | `uptrakit_{tenant_hex}_{host_hex}_pkgs` | `{friendly_name} packages` | `update.uptrakit_{fn_slug}_packages` |
+| Security | `uptrakit_{tenant_hex}_{host_hex}_sec` | `{friendly_name} security updates` | `update.uptrakit_{fn_slug}_security_updates` |
 
-Where `{tenant_id_hex}` and `{host_id_hex}` are the UUID strings with dashes removed.
+Where `{tenant_hex}` and `{host_hex}` are UUID strings with dashes removed, and `{fn_slug}` is the
+friendly name slugified (lowercased, non-alphanumeric characters replaced by underscores).
 
 ## Reconnect Resilience
 
@@ -282,7 +293,7 @@ the `settings mqtt create` and `settings mqtt update` subcommands.
 - The MQTT command topics that accept Install commands are scoped per entity and are accessible to anyone
   with publish access to the broker. Ensure your broker uses authentication and access control to limit
   who can publish to Uptrakit command topics.
-  - Software item command topics: `{prefix}/update/{item_id}/{host_id}/set`
+  - Software item command topics: `{prefix}/hosts/{host_id}/items/{item_id}/set`
   - Host package command topics: `{prefix}/hosts/{host_id}/set`
   - Host security command topics: `{prefix}/hosts/{host_id}/security/set`
 - Update requests received via MQTT are validated by the controller (same checks as REST API triggers):

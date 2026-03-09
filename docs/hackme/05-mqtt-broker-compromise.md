@@ -13,9 +13,9 @@
    integration, or gains the ability to publish messages to the broker's topic
    namespace.
 2. The attacker publishes to the MQTT command topic
-   `{prefix}/update/{software_item_uuid}/{host_uuid}/set` with an "install" payload.
+   `{prefix}/hosts/{host_uuid}/items/{software_item_uuid}/set` with an "install" payload.
 3. The MQTT service's `resolve_update_trigger()` parses the topic, extracts the
-   software item ID and host ID, and checks them against its in-memory
+   host ID and software item ID, and checks them against its in-memory
    `software_states` cache.
 4. If the IDs match known entries, the MQTT service sends a `mqtt_trigger_update`
    message to the controller over the mTLS WebSocket.
@@ -27,7 +27,7 @@ Alternatively, the attacker can:
 - **Suppress state updates** by intercepting and dropping retained messages on state
   topics, causing Home Assistant to display stale version information.
 - **Inject false state data** by publishing to
-  `{prefix}/update/{item_uuid}/{host_uuid}/state` topics with fabricated version
+  `{prefix}/hosts/{host_uuid}/items/{item_uuid}/state` topics with fabricated version
   strings.
 - **Capture credentials** if the MQTT connection uses `MqttTransport::Tcp` (plaintext)
   or if the broker's TLS is compromised. MQTT username and password are sent during

@@ -720,17 +720,25 @@ Key invariants:
 
 #### MQTT topic scheme
 
-All topics use the MQTT client's `topic_prefix` field.
+All topics use the MQTT client's `topic_prefix` field. All host-scoped topics share the
+`{prefix}/hosts/{host_id}` prefix (implemented via `host_topic_prefix()` in `ha_discovery.rs`).
+
+**Per-host identity topics** (`{h}` = host UUID):
+
+| Topic | Retained | Direction | Purpose |
+| --- | :---: | --- | --- |
+| `{prefix}/hosts/{host_id}/hostname` | ✓ | publish | Raw hostname string (MQTT explorer visibility) |
+| `{prefix}/hosts/{host_id}/friendly_name` | ✓ | publish | User-defined display name (MQTT explorer visibility) |
 
 **Software item topics** (`{t}` = tenant UUID hex, `{i}` = item UUID hex, `{h}` = host UUID hex):
 
 | Topic | Retained | Direction | Purpose |
 | --- | :---: | --- | --- |
-| `{prefix}/update/{item_id}/{host_id}/state` | ✓ | publish | Installed version string |
-| `{prefix}/update/{item_id}/{host_id}/latest_version` | ✓ | publish | Latest available version string |
-| `{prefix}/update/{item_id}/{host_id}/attributes` | ✓ | publish | JSON attributes: `{"in_progress": true/false}` |
-| `{prefix}/update/{item_id}/{host_id}/set` | — | subscribe | Receives `"install"` from HA |
-| `{ha_prefix}/update/uptrakit_{t}_{i}_{h}/config` | ✓ | publish | HA discovery config (JSON) |
+| `{prefix}/hosts/{host_id}/items/{item_id}/state` | ✓ | publish | Installed version string |
+| `{prefix}/hosts/{host_id}/items/{item_id}/latest_version` | ✓ | publish | Latest available version string |
+| `{prefix}/hosts/{host_id}/items/{item_id}/attributes` | ✓ | publish | JSON attributes: `{"in_progress": true/false}` |
+| `{prefix}/hosts/{host_id}/items/{item_id}/set` | — | subscribe | Receives `"install"` from HA |
+| `{ha_prefix}/update/uptrakit/{t}_{h}_{i}/config` | ✓ | publish | HA discovery config (JSON) |
 | `{ha_prefix}/status` | — | subscribe | HA birth/will (`"online"` / `"offline"`) |
 
 **Host package topics** (`{t}` = tenant UUID hex, `{h}` = host UUID hex):
@@ -741,23 +749,25 @@ All topics use the MQTT client's `topic_prefix` field.
 | `{prefix}/hosts/{host_id}/latest_version` | ✓ | publish | `"N available"` when updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/attributes` | ✓ | publish | JSON: `{"in_progress": bool, "pending_count": N}` |
 | `{prefix}/hosts/{host_id}/set` | — | subscribe | Receives `"install"` → triggers batch update (all packages) |
-| `{ha_prefix}/update/uptrakit_pkgs_{t}_{h}/config` | ✓ | publish | HA discovery config for host packages entity (disabled by default) |
+| `{ha_prefix}/update/uptrakit/{t}_{h}_pkgs/config` | ✓ | publish | HA discovery config for host packages entity (disabled by default) |
 | `{prefix}/hosts/{host_id}/security/state` | ✓ | publish | `"unknown"` when security updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/security/latest_version` | ✓ | publish | `"N available"` when security updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/security/attributes` | ✓ | publish | JSON: `{"in_progress": bool, "pending_count": N}` |
 | `{prefix}/hosts/{host_id}/security/set` | — | subscribe | Receives `"install"` → triggers security-only batch update |
-| `{ha_prefix}/update/uptrakit_sec_{t}_{h}/config` | ✓ | publish | HA discovery config for security updates entity (disabled by default) |
+| `{ha_prefix}/update/uptrakit/{t}_{h}_sec/config` | ✓ | publish | HA discovery config for security updates entity (disabled by default) |
 
-Software item entities: device `uptrakit_{t}_{i}`, unique_id `uptrakit_{t}_{i}_{h}`,
-`default_entity_id` = `{item_slug}_on_{host_slug}`.
+All entities for a given host share a single HA device: `uptrakit_host_{t}_{h}` (name = `friendly_name`).
 
-Host package entities: device `uptrakit_host_{t}_{h}` (name = hostname), unique_id `uptrakit_pkgs_{t}_{h}`,
-entity name `"{hostname} packages"`, `default_entity_id` = `{host_slug}_packages`.
+Software item entities: unique_id `uptrakit_{t}_{h}_{i}`, entity name = `{item_name}`,
+`default_entity_id` = `uptrakit_{fn_slug}_{item_slug}`.
+
+Host package entities: unique_id `uptrakit_{t}_{h}_pkgs`,
+entity name `"{friendly_name} packages"`, `default_entity_id` = `uptrakit_{fn_slug}_packages`.
 Both host package entities are **disabled by default** in HA (`"enabled_by_default": false`).
 
-Security update entities: same device as host package entities (`uptrakit_host_{t}_{h}`), unique_id
-`uptrakit_sec_{t}_{h}`, entity name `"{hostname} security updates"`,
-`default_entity_id` = `{host_slug}_security_updates`. Install triggers a `security_only = true` batch.
+Security update entities: unique_id `uptrakit_{t}_{h}_sec`,
+entity name `"{friendly_name} security updates"`,
+`default_entity_id` = `uptrakit_{fn_slug}_security_updates`. Install triggers a `security_only = true` batch.
 
 #### Key files
 

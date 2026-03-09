@@ -1211,9 +1211,9 @@ components:
         The MQTT service publishes the received state to three retained broker
         topics per `(software_item, host)` pair:
 
-        - `{prefix}/update/{item_id}/{host_id}/state` — installed version string
-        - `{prefix}/update/{item_id}/{host_id}/latest_version` — latest version string
-        - `{prefix}/update/{item_id}/{host_id}/attributes` — JSON attributes: `{"in_progress": true/false}`
+        - `{prefix}/hosts/{host_id}/items/{item_id}/state` — installed version string
+        - `{prefix}/hosts/{host_id}/items/{item_id}/latest_version` — latest version string
+        - `{prefix}/hosts/{host_id}/items/{item_id}/attributes` — JSON attributes: `{"in_progress": true/false}`
 
         Additionally, the `host_package_hosts` field (default: empty array) contains
         per-host package summary data. The MQTT service publishes these to:
@@ -3156,6 +3156,7 @@ components:
       required:
         - host_id
         - hostname
+        - friendly_name
         - update_available
       properties:
         host_id:
@@ -3169,6 +3170,11 @@ components:
           description: Human-readable hostname
           examples:
             - web-server-01
+        friendly_name:
+          type: string
+          description: User-defined display name for the host
+          examples:
+            - "Web Server 01"
         installed_version:
           type: string
           description: Currently installed version (absent if unknown)
@@ -3231,6 +3237,7 @@ components:
       required:
         - host_id
         - hostname
+        - friendly_name
         - pending_count
         - security_pending_count
         - total_count
@@ -3251,6 +3258,11 @@ components:
           description: Human-readable hostname
           examples:
             - web-server-01
+        friendly_name:
+          type: string
+          description: User-defined display name for the host
+          examples:
+            - "Web Server 01"
         pending_count:
           type: integer
           format: int32
