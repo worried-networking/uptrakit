@@ -365,8 +365,9 @@ uptrakit software-items unassign <ITEM_ID> --host <HOST_ID>
 
 ### Web UI
 
-Navigate to **Plugin Configs** in the main navigation. The page lists all plugin configs for
-your account with their type, name, and assigned software items count.
+Navigate to **Settings** in the main navigation, then select the **Plugin Configs** tab. The
+tab lists all plugin configs for your account with their type, name, and assigned software items
+count.
 
 **Creating a plugin config:**
 
@@ -463,7 +464,7 @@ configs are what appear as parent configs on your approved PHS software items.
 
 Discovery runs automatically when an agent registers a new host. You can also trigger it on demand.
 
-**Web UI** — Go to **Plugin Configs**, open the context menu on a discovery-capable config, and
+**Web UI** — Go to **Settings → Plugin Configs**, open the context menu on a discovery-capable config, and
 select **Trigger Discovery**. Alternatively, go to **Hosts**, open the host context menu, and
 select **Trigger Discovery** to run all discovery-capable plugins for that host.
 
@@ -482,7 +483,7 @@ uptrakit hosts discover <HOST_ID>
 After discovery, pending items appear in the **Software → Pending** tab for your review. If you
 want to clear all pending items at once without reviewing them individually:
 
-**Web UI** — Go to **Plugin Configs**, open the context menu, and select **Discard Discovered**.
+**Web UI** — Go to **Settings → Plugin Configs**, open the context menu, and select **Discard Discovered**.
 
 **CLI:**
 
@@ -508,8 +509,8 @@ rule covers all plugin configs and discovery targets for that name, across all h
 
 ### Managing ignore rules in the Web UI
 
-Navigate to **Settings** or the **Autodiscovery** section to view ignore rules. From there you
-can:
+Navigate to **Software** in the main navigation, then select the **Ignore Rules** tab. From
+there you can:
 
 - View all ignore rules.
 - Add a new ignore rule by entering a software item name.
