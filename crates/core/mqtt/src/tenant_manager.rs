@@ -492,8 +492,8 @@ impl TenantManager {
     /// Publish per-host package state topics for all hosts in `host_states`.
     ///
     /// For each host:
-    /// - Publishes `{prefix}/hosts/{host_id}/state` (retained)
-    /// - Publishes `{prefix}/hosts/{host_id}/latest_version` (retained, always "up-to-date")
+    /// - Publishes `{prefix}/hosts/{host_id}/state` (retained) — `"unknown"` or `"up-to-date"`
+    /// - Publishes `{prefix}/hosts/{host_id}/latest_version` (retained) — `"{N} available"` or `"up-to-date"`
     /// - Publishes `{prefix}/hosts/{host_id}/attributes` (retained)
     /// - Subscribes to `{prefix}/hosts/{host_id}/set`
     /// - If `ha_discovery`: publishes HA discovery config (retained)
@@ -512,12 +512,8 @@ impl TenantManager {
         let ha_prefix = &state.ha_discovery_prefix;
 
         for hs in host_states {
-            // Compute state string: "N updates pending" or "up-to-date".
-            let installed_str = if hs.pending_count > 0 {
-                format!("{} updates pending", hs.pending_count)
-            } else {
-                "up-to-date".to_string()
-            };
+            // Compute state string: "unknown" or "up-to-date".
+            let installed_str = crate::ha_discovery::host_packages_state_string(hs.pending_count);
 
             // Publish state topic.
             let st = crate::ha_discovery::host_packages_state_topic(topic_prefix, hs.host_id);
@@ -534,12 +530,14 @@ impl TenantManager {
                 );
             }
 
-            // Publish latest_version topic (always "up-to-date").
+            // Publish latest_version topic.
             let lt =
                 crate::ha_discovery::host_packages_latest_version_topic(topic_prefix, hs.host_id);
+            let latest_str =
+                crate::ha_discovery::host_packages_latest_version_string(hs.pending_count);
             if let Err(e) = state
                 .handle
-                .publish_retained(&lt, b"up-to-date".to_vec())
+                .publish_retained(&lt, latest_str.into_bytes())
                 .await
             {
                 tracing::warn!(
@@ -606,11 +604,8 @@ impl TenantManager {
             }
 
             // Always: publish security entity state topic.
-            let sec_state_str = if hs.security_pending_count > 0 {
-                format!("{} security updates pending", hs.security_pending_count)
-            } else {
-                "up-to-date".to_string()
-            };
+            let sec_state_str =
+                crate::ha_discovery::host_security_state_string(hs.security_pending_count);
             let sec_st = crate::ha_discovery::host_security_state_topic(topic_prefix, hs.host_id);
             if let Err(e) = state
                 .handle
@@ -628,9 +623,11 @@ impl TenantManager {
             // Always: publish security entity latest_version topic.
             let sec_lt =
                 crate::ha_discovery::host_security_latest_version_topic(topic_prefix, hs.host_id);
+            let sec_latest_str =
+                crate::ha_discovery::host_security_latest_version_string(hs.security_pending_count);
             if let Err(e) = state
                 .handle
-                .publish_retained(&sec_lt, b"up-to-date".to_vec())
+                .publish_retained(&sec_lt, sec_latest_str.into_bytes())
                 .await
             {
                 tracing::warn!(

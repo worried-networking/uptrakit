@@ -342,8 +342,9 @@ pub fn parse_command_topic(topic_prefix: &str, topic: &str) -> Option<(Uuid, Uui
 ///
 /// Format: `{prefix}/hosts/{host_id}/state`
 ///
-/// The published value is `"{N} updates pending"` when `pending_count > 0`, or
+/// The published value is `"unknown"` when `pending_count > 0`, or
 /// `"up-to-date"` when all packages are current.
+/// See [`host_packages_state_string`].
 ///
 /// # Examples
 ///
@@ -362,8 +363,10 @@ pub fn host_packages_state_topic(prefix: &str, host_id: Uuid) -> String {
 ///
 /// Format: `{prefix}/hosts/{host_id}/latest_version`
 ///
-/// The published value is always `"up-to-date"`. Home Assistant compares this
+/// The published value is `"{N} available"` when `pending_count > 0`, or
+/// `"up-to-date"` when all packages are current. Home Assistant compares this
 /// against the state topic to determine whether an update badge is shown.
+/// See [`host_packages_latest_version_string`].
 ///
 /// # Examples
 ///
@@ -485,6 +488,90 @@ pub fn build_host_packages_attributes_payload(
     })
 }
 
+/// Returns the state string published on the host packages state topic.
+///
+/// When `pending_count > 0`, returns `"unknown"` — there is no single
+/// "installed version" for an aggregate host entity. When `pending_count == 0`,
+/// returns `"up-to-date"`.
+///
+/// # Examples
+///
+/// ```
+/// # use uptrakit_mqtt::ha_discovery::host_packages_state_string;
+/// assert_eq!(host_packages_state_string(0), "up-to-date");
+/// assert_eq!(host_packages_state_string(3), "unknown");
+/// ```
+pub fn host_packages_state_string(pending_count: u32) -> String {
+    if pending_count > 0 {
+        "unknown".to_string()
+    } else {
+        "up-to-date".to_string()
+    }
+}
+
+/// Returns the latest-version string published on the host packages
+/// `latest_version` topic.
+///
+/// When `pending_count > 0`, returns `"{N} available"` so Home Assistant shows
+/// an update badge with the count. When `pending_count == 0`, returns
+/// `"up-to-date"` (matching state, so HA hides the badge).
+///
+/// # Examples
+///
+/// ```
+/// # use uptrakit_mqtt::ha_discovery::host_packages_latest_version_string;
+/// assert_eq!(host_packages_latest_version_string(0), "up-to-date");
+/// assert_eq!(host_packages_latest_version_string(3), "3 available");
+/// ```
+pub fn host_packages_latest_version_string(pending_count: u32) -> String {
+    if pending_count > 0 {
+        format!("{pending_count} available")
+    } else {
+        "up-to-date".to_string()
+    }
+}
+
+/// Returns the state string published on the host security state topic.
+///
+/// When `security_pending_count > 0`, returns `"unknown"`. When 0, returns
+/// `"up-to-date"`.
+///
+/// # Examples
+///
+/// ```
+/// # use uptrakit_mqtt::ha_discovery::host_security_state_string;
+/// assert_eq!(host_security_state_string(0), "up-to-date");
+/// assert_eq!(host_security_state_string(2), "unknown");
+/// ```
+pub fn host_security_state_string(security_pending_count: u32) -> String {
+    if security_pending_count > 0 {
+        "unknown".to_string()
+    } else {
+        "up-to-date".to_string()
+    }
+}
+
+/// Returns the latest-version string published on the host security
+/// `latest_version` topic.
+///
+/// When `security_pending_count > 0`, returns `"{N} available"`. When 0,
+/// returns `"up-to-date"`.
+///
+/// # Examples
+///
+/// ```
+/// # use uptrakit_mqtt::ha_discovery::host_security_latest_version_string;
+/// assert_eq!(host_security_latest_version_string(0), "up-to-date");
+/// assert_eq!(host_security_latest_version_string(2), "2 available");
+/// ```
+pub fn host_security_latest_version_string(security_pending_count: u32) -> String {
+    if security_pending_count > 0 {
+        format!("{security_pending_count} available")
+    } else {
+        "up-to-date".to_string()
+    }
+}
+
 /// Build the HA MQTT discovery JSON for a host's package `update` entity.
 ///
 /// Publishes a single entity per host that represents the overall package update
@@ -588,9 +675,9 @@ pub fn parse_host_packages_command_topic(topic_prefix: &str, topic: &str) -> Opt
 ///
 /// Format: `{prefix}/hosts/{host_id}/security/state`
 ///
-/// The published value is `"{N} security updates pending"` when
-/// `security_pending_count > 0`, or `"up-to-date"` when all security
-/// packages are current.
+/// The published value is `"unknown"` when `security_pending_count > 0`, or
+/// `"up-to-date"` when all security packages are current.
+/// See [`host_security_state_string`].
 ///
 /// # Examples
 ///
@@ -609,7 +696,9 @@ pub fn host_security_state_topic(prefix: &str, host_id: Uuid) -> String {
 ///
 /// Format: `{prefix}/hosts/{host_id}/security/latest_version`
 ///
-/// The published value is always `"up-to-date"`.
+/// The published value is `"{N} available"` when `security_pending_count > 0`,
+/// or `"up-to-date"` when all security packages are current.
+/// See [`host_security_latest_version_string`].
 ///
 /// # Examples
 ///
@@ -1515,6 +1604,82 @@ mod tests {
             host_packages_unique_id(tenant(), host()),
             host_packages_unique_id(tenant(), host())
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // host_packages_state_string
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_packages_state_string_zero_pending() {
+        assert_eq!(host_packages_state_string(0), "up-to-date");
+    }
+
+    #[test]
+    fn host_packages_state_string_one_pending() {
+        assert_eq!(host_packages_state_string(1), "unknown");
+    }
+
+    #[test]
+    fn host_packages_state_string_many_pending() {
+        assert_eq!(host_packages_state_string(3), "unknown");
+    }
+
+    // -------------------------------------------------------------------------
+    // host_packages_latest_version_string
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_packages_latest_version_string_zero_pending() {
+        assert_eq!(host_packages_latest_version_string(0), "up-to-date");
+    }
+
+    #[test]
+    fn host_packages_latest_version_string_one_pending() {
+        assert_eq!(host_packages_latest_version_string(1), "1 available");
+    }
+
+    #[test]
+    fn host_packages_latest_version_string_many_pending() {
+        assert_eq!(host_packages_latest_version_string(3), "3 available");
+    }
+
+    // -------------------------------------------------------------------------
+    // host_security_state_string
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_security_state_string_zero_pending() {
+        assert_eq!(host_security_state_string(0), "up-to-date");
+    }
+
+    #[test]
+    fn host_security_state_string_one_pending() {
+        assert_eq!(host_security_state_string(1), "unknown");
+    }
+
+    #[test]
+    fn host_security_state_string_many_pending() {
+        assert_eq!(host_security_state_string(3), "unknown");
+    }
+
+    // -------------------------------------------------------------------------
+    // host_security_latest_version_string
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_security_latest_version_string_zero_pending() {
+        assert_eq!(host_security_latest_version_string(0), "up-to-date");
+    }
+
+    #[test]
+    fn host_security_latest_version_string_one_pending() {
+        assert_eq!(host_security_latest_version_string(1), "1 available");
+    }
+
+    #[test]
+    fn host_security_latest_version_string_many_pending() {
+        assert_eq!(host_security_latest_version_string(3), "3 available");
     }
 
     // -------------------------------------------------------------------------
