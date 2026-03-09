@@ -183,6 +183,79 @@ Behaviour:
 4. Do **not** add a `svelte:window onkeydown` handler for Escape — `ModalBackdrop` already handles it.
 5. Do **not** duplicate `role="dialog"` or `aria-modal` attributes — `Modal` sets them on the card.
 
+## Batch action components
+
+Two shared components support multi-select batch operations across all list pages and extension
+DataTables.
+
+### `BatchActionBar.svelte`
+
+A fixed-position toolbar that appears at the bottom of the viewport when one or more items are
+selected. It shows the selected count, action buttons, and a deselect-all button.
+
+```svelte
+<BatchActionBar
+  selectedCount={selectedIds.size}
+  actions={batchActions}
+  onaction={requestBatchAction}
+  oncancel={() => selectedIds.clear()}
+/>
+```
+
+Props:
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `selectedCount` | `number` | — | Number of currently selected items. |
+| `actions` | `{ id: string; label: string; destructive?: boolean }[]` | — | Available batch actions. Destructive actions use `preset-filled-error-500`; others use `preset-filled-primary-500`. |
+| `onaction` | `(actionId: string) => void` | — | Called when the user clicks an action button. |
+| `oncancel` | `() => void` | — | Called when the user clicks "Deselect all". |
+
+Accessibility: `role="toolbar"` and `aria-label="Batch actions"`.
+
+### `BatchResultDialog.svelte`
+
+A modal dialog that displays partial-success results from a batch operation. It shows how many
+items succeeded, how many failed, and lists per-item error messages for failures.
+
+```svelte
+{#if batchResult}
+  <BatchResultDialog
+    title="Batch Approve Results"
+    response={batchResult}
+    onclose={() => (batchResult = null)}
+  />
+{/if}
+```
+
+Props:
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `title` | `string` | — | Dialog heading (e.g. `"Batch Approve Results"`). |
+| `response` | `BatchActionResponse` | — | The batch response containing `succeeded` and `failed` arrays. |
+| `onclose` | `() => void` | — | Called when the dialog is dismissed. |
+
+This dialog is only shown when the batch response contains failures. When all items succeed,
+pages show a `showSuccess` toast instead.
+
+### Page integration pattern
+
+Each list page follows a consistent pattern for batch actions:
+
+1. A `SvelteSet<string>` from `svelte/reactivity` tracks selected IDs. Use `SvelteSet` instead
+   of native `Set` to satisfy the `svelte/prefer-svelte-reactivity` ESLint rule.
+2. A select-all checkbox in `<thead>` supports checked, indeterminate, and unchecked states.
+3. Per-row checkboxes are only visible when the user has the required manage permission.
+4. `BatchActionBar` renders when `selectedIds.size > 0`.
+5. Destructive actions show a `ConfirmDialog` before executing.
+6. On success, a `showSuccess` toast is shown and the page reloads. On partial failure,
+   `BatchResultDialog` displays the results.
+7. Selection is cleared after a successful batch action.
+
+See [Batch Actions API docs](../api/batch-actions.md) for backend details and
+[end-user batch actions](../end-user/batch-actions.md) for the user-facing documentation.
+
 ## Testing modals
 
 Both `Modal.svelte` and `ModalBackdrop.svelte` have unit tests in

@@ -114,6 +114,43 @@ The `ids` of all selected rows are passed in the action params. The extension re
 full list and is responsible for processing each item. See
 [Extensions API](extensions.md) for the full extension action model.
 
+## Frontend Integration
+
+The frontend provides a multi-select UI for batch actions on all supported list pages. See
+[End-user batch actions](../end-user/batch-actions.md) for the user-facing documentation.
+
+### Shared components
+
+| Component | Purpose |
+| --- | --- |
+| `BatchActionBar.svelte` | Fixed-position toolbar at the viewport bottom. Shows selected count, action buttons (styled per `destructive` flag), and a deselect-all button. |
+| `BatchResultDialog.svelte` | Modal that displays partial-success results with per-item error messages. Only shown when failures occur; pure success uses a toast instead. |
+
+### Page integration pattern
+
+Each page follows the same pattern:
+
+1. A `SvelteSet<string>` tracks selected IDs (using `SvelteSet` for Svelte 5 reactivity).
+2. A select-all checkbox in `<thead>` supports checked, indeterminate, and unchecked states.
+3. Per-row checkboxes are only visible when the user has the required manage permission.
+4. `BatchActionBar` renders when `selectedIds.size > 0`.
+5. Destructive actions show a `ConfirmDialog` before executing.
+6. On success, a toast is shown and the page reloads. On partial failure, `BatchResultDialog`
+   displays the results.
+
+### Software items ignore action
+
+The software items page has an `ignore` batch action that is **not** a backend batch endpoint.
+It uses client-side orchestration: for each selected item, it fetches the detail to get host
+assignments, calls `unassignHostFromSoftwareItemWithIgnore` for each host, then deletes the
+software item. This mirrors the existing single-item ignore flow.
+
+### Extension SchemaTable
+
+When extensions declare actions with `batch_action: true`, `SchemaTable.svelte` automatically
+adds a checkbox column and renders `BatchActionBar` with the batch-capable actions. The
+extension action is invoked with an `ids` array in the params.
+
 ## Key Files
 
 | File | Purpose |
@@ -127,3 +164,8 @@ full list and is responsible for processing each item. See
 | `crates/ui/web-api/src/routes/autodiscovery.rs` | `batch_autodiscovery_ignores` handler |
 | `crates/ui/web-api/src/routes/plugin_configs.rs` | `batch_plugin_configs` handler |
 | `crates/shared/extension-framework/src/lib.rs` | `ActionDef` with `batch_action` field |
+| `frontend/src/lib/types.ts` | `BatchActionRequest`, `BatchActionResponse` TypeScript types |
+| `frontend/src/lib/api.ts` | `batchServices`, `batchHosts`, etc. API client functions |
+| `frontend/src/lib/components/BatchActionBar.svelte` | Shared batch action toolbar |
+| `frontend/src/lib/components/BatchResultDialog.svelte` | Shared partial-success results dialog |
+| `frontend/src/lib/components/extensions/SchemaTable.svelte` | Extension DataTable with batch support |
