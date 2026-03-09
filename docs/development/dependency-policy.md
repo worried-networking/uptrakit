@@ -69,7 +69,7 @@ features so builds that do not need them avoid the compile-time and binary-size 
 | `oidc` | `uptrakit-controller` | Propagates `uptrakit-web-api/oidc` | enabled |
 | `embed-frontend` | `uptrakit-controller` | `rust-embed` + embedded SvelteKit build | disabled |
 | `swagger-ui` | `uptrakit-web-api` | `utoipa-swagger-ui` | disabled |
-| `email` | `uptrakit-notification-plugin-registry` | `lettre` (SMTP client) via `uptrakit-notification-plugin-email` | disabled |
+| `email` | `uptrakit-notification-plugin-registry` | `mail-send` (SMTP client) via `uptrakit-notification-plugin-email` | disabled |
 | `mock` | `uptrakit-openapi-client` | `httpmock` (HTTP mocking) | disabled |
 | `daemon` | `uptrakit-plugin-releases-docker` | `bollard` (Docker daemon API) | enabled |
 

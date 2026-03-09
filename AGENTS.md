@@ -88,7 +88,7 @@ uptrakit/
 │   │   │   ├── core/                   # uptrakit-notification-plugin-core       (lib)  — NotificationPlugin trait, DeliveryMessage, MessageAction, NotificationPluginError, escape_html()
 │   │   │   ├── webhook/               # uptrakit-notification-plugin-webhook    (lib)  — Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing)
 │   │   │   ├── telegram/              # uptrakit-notification-plugin-telegram   (lib)  — Telegram plugin with inline keyboard (feature-gated)
-│   │   │   ├── email/                 # uptrakit-notification-plugin-email      (lib)  — Email plugin (SMTP via lettre, SmtpSettingsSnapshot, merge_smtp_into_config()) (feature-gated)
+│   │   │   ├── email/                 # uptrakit-notification-plugin-email      (lib)  — Email plugin (SMTP via mail-send, SmtpSettingsSnapshot, merge_smtp_into_config()) (feature-gated)
 │   │   │   └── registry/             # uptrakit-notification-plugin-registry   (lib)  — NotificationPluginRegistry, NotificationOps trait, NotificationRegistryConfig; re-exports core types
 │   │   └── discovery/
 │   │       └── proxmox-helper-scripts/ # uptrakit-plugin-discovery-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/Codeberg/npm/APT upstream; emits ReleasesGithub+GenericShell targets for GitHub-managed items, ReleasesForgejo+GenericShell targets for Codeberg-managed items (api_base_url="https://codeberg.org"; uses Forgejo plugin since Codeberg runs Forgejo), PackageManagerNpm target for npm-managed items, PackageManagerApt target for APT-managed items)
@@ -1239,7 +1239,7 @@ tenant-scoped rules, builds a `DeliveryMessage`, and hands it to the appropriate
 | `crates/plugins/notifications/core/` | `NotificationPlugin` trait, `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()` |
 | `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing) |
 | `crates/plugins/notifications/telegram/` | Telegram plugin with inline keyboard |
-| `crates/plugins/notifications/email/` | Email plugin (SMTP via lettre, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`) |
+| `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`) |
 | `crates/plugins/notifications/registry/` | `NotificationPluginRegistry`, `NotificationOps` trait, `NotificationRegistryConfig`; re-exports core types |
 | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, `NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus` enums |
 | `crates/ui/web-api/src/notifications/` | Internal `NotificationEvent`, `NotificationDispatcher`, `message_builder` |
@@ -1254,7 +1254,7 @@ tenant-scoped rules, builds a `DeliveryMessage`, and hands it to the appropriate
 | --- | --- | --- | --- |
 | `webhook` | notification-plugin-registry | yes | Always compiled |
 | `telegram` | notification-plugin-registry | no | Requires `teloxide-core` |
-| `email` | notification-plugin-registry | no | SMTP via lettre 0.11 (tokio1-rustls-tls) |
+| `email` | notification-plugin-registry | no | SMTP via mail-send (rustls) |
 | `notifications-telegram` | web-api, controller | no | Propagated to notification-plugin-registry |
 | `notifications-email` | web-api, controller | no | Propagated to notification-plugin-registry; requires global SMTP settings configured via `PUT /api/v1/settings/smtp` |
 

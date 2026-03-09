@@ -29,7 +29,7 @@ High-value targets in the dependency tree:
 | `rcgen` | Certificate generation | Rogue certificates, PKI compromise |
 | `rumqttc` | MQTT client | Broker credential theft, message manipulation |
 | `sea-orm` | Database ORM | SQL injection, data exfiltration |
-| `lettre` | SMTP email | Credential theft, email manipulation |
+| `mail-send` | SMTP email | Credential theft, email manipulation |
 
 ## Worst-case impact
 

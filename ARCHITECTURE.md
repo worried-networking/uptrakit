@@ -210,7 +210,7 @@ Notification plugins live under `crates/plugins/notifications/` with one crate p
 | `core/` | `uptrakit-notification-plugin-core` | `NotificationPlugin` trait, `DeliveryMessage`, `NotificationPluginError`, `escape_html()` |
 | `webhook/` | `uptrakit-notification-plugin-webhook` | Webhook plugin (SSRF-safe DNS, HMAC-SHA256 signatures) |
 | `telegram/` | `uptrakit-notification-plugin-telegram` | Telegram plugin (inline keyboard for actionable notifications) |
-| `email/` | `uptrakit-notification-plugin-email` | Email plugin (SMTP via lettre) |
+| `email/` | `uptrakit-notification-plugin-email` | Email plugin (SMTP via mail-send) |
 | `registry/` | `uptrakit-notification-plugin-registry` | `NotificationPluginRegistry`, `NotificationOps` trait, `NotificationRegistryConfig` |
 
 Each plugin is behind its own Cargo feature flag in the registry crate (`webhook` — default on, `telegram`,

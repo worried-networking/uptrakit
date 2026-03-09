@@ -26,7 +26,7 @@ This separation means adding a new notification plugin never requires changes to
 | `uptrakit-notification-plugin-core` | `crates/plugins/notifications/core/` | `NotificationPlugin` trait, `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()` |
 | `uptrakit-notification-plugin-webhook` | `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation, header blocklist, HMAC-SHA256 signing) |
 | `uptrakit-notification-plugin-telegram` | `crates/plugins/notifications/telegram/` | Telegram plugin (inline keyboard support) |
-| `uptrakit-notification-plugin-email` | `crates/plugins/notifications/email/` | Email plugin (SMTP via lettre, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`) |
+| `uptrakit-notification-plugin-email` | `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`) |
 | `uptrakit-notification-plugin-registry` | `crates/plugins/notifications/registry/` | `NotificationPluginRegistry`, `NotificationOps` trait, re-exports core types |
 | `uptrakit-web-api-types` | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, public enums (`NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus`) |
 | `uptrakit-web-api` | `crates/ui/web-api/src/notifications/` | Dispatcher, internal event types, `message_builder` |
@@ -39,7 +39,7 @@ This separation means adding a new notification plugin never requires changes to
 | --- | --- | --- | --- |
 | `webhook` | `notification-plugin-registry` | yes | Webhook plugin (always available) |
 | `telegram` | `notification-plugin-registry` | no | Telegram plugin with inline keyboard |
-| `email` | `notification-plugin-registry` | no | Email plugin (SMTP via lettre, async TLS) |
+| `email` | `notification-plugin-registry` | no | Email plugin (SMTP via mail-send, async TLS) |
 | `notifications-telegram` | `web-api`, `controller` | no | Propagated feature flag enabling Telegram |
 | `notifications-email` | `web-api`, `controller` | no | Propagated feature flag enabling email |
 | `notifications-all` | `web-api`, `controller` | no | Enables all optional notification plugins |
@@ -427,8 +427,9 @@ header against the channel's `webhook_secret` config field.
 
 `crates/plugins/notifications/email/src/lib.rs`
 
-The email plugin sends notifications via SMTP using the [lettre](https://lettre.rs/) 0.11 library with
-async Tokio support. It is gated on the `email` feature flag.
+The email plugin sends notifications via SMTP using the [mail-send](https://crates.io/crates/mail-send) 0.5 library with
+async Tokio support and [mail-builder](https://crates.io/crates/mail-builder) for message construction.
+It is gated on the `email` feature flag.
 
 ### Config split
 
@@ -539,7 +540,7 @@ The same merge logic is applied in the `test_channel` route handler
 | `crates/plugins/notifications/registry/src/lib.rs` | `NotificationPluginRegistry` -- compiled-in plugin lookup, `NotificationOps` trait |
 | `crates/plugins/notifications/webhook/src/lib.rs` | Webhook plugin (HMAC-SHA256 signing) |
 | `crates/plugins/notifications/telegram/src/lib.rs` | Telegram plugin (inline keyboard) |
-| `crates/plugins/notifications/email/src/lib.rs` | Email plugin (SMTP via lettre, multipart/alternative) |
+| `crates/plugins/notifications/email/src/lib.rs` | Email plugin (SMTP via mail-send, multipart/alternative) |
 | `crates/shared/web-api-types/src/notifications.rs` | Shared enums, request/response types, `Validate` impls |
 | `crates/ui/web-api/src/notifications/dispatcher.rs` | Fire-and-forget background dispatcher loop |
 | `crates/ui/web-api/src/notifications/events.rs` | `NotificationEvent`, `NotificationEventDetails`, `ActionParams` |
