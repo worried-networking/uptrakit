@@ -28,14 +28,8 @@ pub struct DiscardDiscoveredResponse {
 pub struct AutodiscoveryIgnoreResponse {
     /// Ignore rule UUID.
     pub id: Uuid,
-    /// Plugin config UUID this rule applies to.
-    pub plugin_config_id: Uuid,
-    /// Display name of the referenced plugin config.
-    pub plugin_config_name: String,
-    /// Plugin type string (e.g. `"homebrew"`).
-    pub plugin_type: String,
-    /// Package identifier to suppress.
-    pub package_identifier: String,
+    /// Software item display name to suppress.
+    pub name: String,
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
@@ -45,18 +39,16 @@ pub struct AutodiscoveryIgnoreResponse {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateAutodiscoveryIgnoreRequest {
-    /// Plugin config UUID the rule applies to.
-    pub plugin_config_id: Uuid,
-    /// Package identifier to permanently suppress from future discoveries.
-    pub package_identifier: String,
+    /// Software item display name to permanently suppress from future discoveries.
+    pub name: String,
 }
 
 impl Validate for CreateAutodiscoveryIgnoreRequest {
     fn validate(&self) -> Result<(), ValidationError> {
-        if self.package_identifier.trim().is_empty() {
+        if self.name.trim().is_empty() {
             return Err(ValidationError {
-                field: "package_identifier",
-                message: "package_identifier must not be empty".to_string(),
+                field: "name",
+                message: "name must not be empty".to_string(),
             });
         }
         Ok(())
@@ -67,26 +59,25 @@ impl Validate for CreateAutodiscoveryIgnoreRequest {
 mod tests {
     use super::*;
 
-    fn make_request(package_identifier: &str) -> CreateAutodiscoveryIgnoreRequest {
+    fn make_request(name: &str) -> CreateAutodiscoveryIgnoreRequest {
         CreateAutodiscoveryIgnoreRequest {
-            plugin_config_id: Uuid::nil(),
-            package_identifier: package_identifier.to_string(),
+            name: name.to_string(),
         }
     }
 
     #[test]
-    fn validate_accepts_non_empty_identifier() {
-        assert!(make_request("com.example.package").validate().is_ok());
+    fn validate_accepts_non_empty_name() {
+        assert!(make_request("FreshRSS").validate().is_ok());
     }
 
     #[test]
-    fn validate_rejects_empty_identifier() {
+    fn validate_rejects_empty_name() {
         let err = make_request("").validate().unwrap_err();
-        assert_eq!(err.field, "package_identifier");
+        assert_eq!(err.field, "name");
     }
 
     #[test]
-    fn validate_rejects_whitespace_only_identifier() {
+    fn validate_rejects_whitespace_only_name() {
         assert!(make_request("   ").validate().is_err());
     }
 }
