@@ -514,7 +514,7 @@ impl TenantManager {
                         item.software_item_id,
                         host.host_id,
                         &item.name,
-                        &host.friendly_name,
+                        display_name(&host.friendly_name, &host.hostname),
                         crate::ha_discovery::ReleaseInfo {
                             url: host.release_url.as_deref(),
                             notes: host.release_notes.as_deref(),

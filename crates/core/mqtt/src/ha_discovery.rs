@@ -261,7 +261,7 @@ pub struct ReleaseInfo<'a> {
 /// All entities for a given host are grouped under a single HA device
 /// (identified by `uptrakit_host_{tenant_id}_{host_id}`), named after the
 /// host's `friendly_name`. The entity itself is named after the software item.
-/// An explicit `default_entity_id` in the form
+/// An explicit `object_id` in the form
 /// `uptrakit_{friendly_name_slug}_{item_slug}` is included so that HA uses a
 /// stable, human-readable entity ID on first registration.
 ///
@@ -305,14 +305,14 @@ pub fn build_discovery_config(
     let uid = unique_id(tenant_id, item_id, host_id);
     let tenant_simple = tenant_id.simple().to_string();
     let host_simple = host_id.simple().to_string();
-    let default_entity_id = format!("uptrakit_{}_{}", slugify(friendly_name), slugify(item_name));
+    let object_id = format!("uptrakit_{}_{}", slugify(friendly_name), slugify(item_name));
 
     let mut config = serde_json::json!({
         "platform": "mqtt",
         "unique_id": uid,
         "name": item_name,
         "title": "Software Update",
-        "default_entity_id": default_entity_id,
+        "object_id": object_id,
         "state_topic": state_topic(topic_prefix, item_id, host_id),
         "latest_version_topic": latest_version_topic(topic_prefix, item_id, host_id),
         "command_topic": command_topic(topic_prefix, item_id, host_id),
@@ -749,14 +749,14 @@ pub fn build_host_packages_discovery_config(
     let uid = host_packages_unique_id(tenant_id, host_id);
     let host_simple = host_id.simple().to_string();
     let tenant_simple = tenant_id.simple().to_string();
-    let default_entity_id = format!("uptrakit_{}_packages", slugify(friendly_name));
+    let object_id = format!("uptrakit_{}_packages", slugify(friendly_name));
 
     serde_json::json!({
         "platform": "mqtt",
         "unique_id": uid,
         "name": null,
         "title": "Packages Update",
-        "default_entity_id": default_entity_id,
+        "object_id": object_id,
         "enabled_by_default": false,
         "state_topic": host_packages_state_topic(topic_prefix, host_id),
         "latest_version_topic": host_packages_latest_version_topic(topic_prefix, host_id),
@@ -978,14 +978,14 @@ pub fn build_host_security_discovery_config(
     let uid = host_security_unique_id(tenant_id, host_id);
     let host_simple = host_id.simple().to_string();
     let tenant_simple = tenant_id.simple().to_string();
-    let default_entity_id = format!("uptrakit_{}_security_updates", slugify(friendly_name));
+    let object_id = format!("uptrakit_{}_security_updates", slugify(friendly_name));
 
     serde_json::json!({
         "platform": "mqtt",
         "unique_id": uid,
         "name": null,
         "title": "Security Updates",
-        "default_entity_id": default_entity_id,
+        "object_id": object_id,
         "enabled_by_default": false,
         "state_topic": host_security_state_topic(topic_prefix, host_id),
         "latest_version_topic": host_security_latest_version_topic(topic_prefix, host_id),
@@ -1240,7 +1240,7 @@ pub fn build_host_connectivity_discovery_config(
     let uid = host_connectivity_unique_id(tenant_id, host_id);
     let host_simple = host_id.simple().to_string();
     let tenant_simple = tenant_id.simple().to_string();
-    let default_entity_id = format!("uptrakit_{}_agent", slugify(friendly_name));
+    let object_id = format!("uptrakit_{}_agent", slugify(friendly_name));
 
     let mut device = serde_json::json!({
         "identifiers": [format!("uptrakit_host_{tenant_simple}_{host_simple}")],
@@ -1261,7 +1261,7 @@ pub fn build_host_connectivity_discovery_config(
         "platform": "mqtt",
         "unique_id": uid,
         "name": format!("{friendly_name} agent"),
-        "default_entity_id": default_entity_id,
+        "object_id": object_id,
         "device_class": "connectivity",
         "enabled_by_default": true,
         "state_topic": host_connectivity_state_topic(topic_prefix, host_id),
@@ -1832,7 +1832,7 @@ mod tests {
     }
 
     #[test]
-    fn build_discovery_config_default_entity_id() {
+    fn build_discovery_config_object_id() {
         let v = build_discovery_config(
             "uptrakit",
             tenant(),
@@ -1843,13 +1843,13 @@ mod tests {
             ReleaseInfo::default(),
         );
         assert_eq!(
-            v["default_entity_id"],
+            v["object_id"],
             "uptrakit_pangolin_uk_home_yantsen_su_uptrakit_pangolin"
         );
     }
 
     #[test]
-    fn build_discovery_config_default_entity_id_simple_names() {
+    fn build_discovery_config_object_id_simple_names() {
         let v = build_discovery_config(
             "uptrakit",
             tenant(),
@@ -1859,7 +1859,7 @@ mod tests {
             "server1",
             ReleaseInfo::default(),
         );
-        assert_eq!(v["default_entity_id"], "uptrakit_server1_myapp");
+        assert_eq!(v["object_id"], "uptrakit_server1_myapp");
     }
 
     #[test]
@@ -2325,9 +2325,9 @@ mod tests {
     }
 
     #[test]
-    fn build_host_packages_discovery_config_default_entity_id() {
+    fn build_host_packages_discovery_config_object_id() {
         let v = build_host_packages_discovery_config("uptrakit", tenant(), host(), "My Server");
-        assert_eq!(v["default_entity_id"], "uptrakit_my_server_packages");
+        assert_eq!(v["object_id"], "uptrakit_my_server_packages");
     }
 
     #[test]
@@ -2559,12 +2559,9 @@ mod tests {
     }
 
     #[test]
-    fn build_host_security_discovery_config_default_entity_id() {
+    fn build_host_security_discovery_config_object_id() {
         let v = build_host_security_discovery_config("uptrakit", tenant(), host(), "My Server");
-        assert_eq!(
-            v["default_entity_id"],
-            "uptrakit_my_server_security_updates"
-        );
+        assert_eq!(v["object_id"], "uptrakit_my_server_security_updates");
     }
 
     #[test]
@@ -2848,7 +2845,7 @@ mod tests {
     }
 
     #[test]
-    fn build_host_connectivity_discovery_config_default_entity_id() {
+    fn build_host_connectivity_discovery_config_object_id() {
         let v = build_host_connectivity_discovery_config(
             "uptrakit",
             tenant(),
@@ -2858,7 +2855,7 @@ mod tests {
             None,
             None,
         );
-        assert_eq!(v["default_entity_id"], "uptrakit_my_server_agent");
+        assert_eq!(v["object_id"], "uptrakit_my_server_agent");
     }
 
     #[test]
