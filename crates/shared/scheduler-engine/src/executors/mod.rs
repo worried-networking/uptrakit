@@ -2,7 +2,7 @@ pub mod audit_log_cleanup;
 pub mod auth_cleanup;
 pub mod crl_renewal;
 pub mod detect_version;
-pub mod discover_host_packages;
+pub mod discover_software;
 pub mod fetch_releases;
 pub(crate) mod queries;
 pub mod service_cert_check;

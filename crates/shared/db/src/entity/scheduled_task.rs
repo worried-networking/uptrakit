@@ -25,8 +25,8 @@ pub enum ScheduledTaskType {
     CrlRenewal,
     #[sea_orm(string_value = "audit_log_cleanup")]
     AuditLogCleanup,
-    #[sea_orm(string_value = "discover_host_packages")]
-    DiscoverHostPackages,
+    #[sea_orm(string_value = "discover_software")]
+    DiscoverSoftware,
 }
 
 impl ScheduledTaskType {
@@ -41,7 +41,7 @@ impl ScheduledTaskType {
             Self::ServiceCertCheck => "Service Cert Check",
             Self::CrlRenewal => "CRL Renewal",
             Self::AuditLogCleanup => "Audit Log Cleanup",
-            Self::DiscoverHostPackages => "Discover Host Packages",
+            Self::DiscoverSoftware => "Discover Software",
         }
     }
 
@@ -115,6 +115,6 @@ mod tests {
         assert!(!ScheduledTaskType::FetchReleases.is_internal());
         assert!(!ScheduledTaskType::DetectVersion.is_internal());
         assert!(!ScheduledTaskType::AuditLogCleanup.is_internal());
-        assert!(!ScheduledTaskType::DiscoverHostPackages.is_internal());
+        assert!(!ScheduledTaskType::DiscoverSoftware.is_internal());
     }
 }

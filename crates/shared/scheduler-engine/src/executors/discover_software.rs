@@ -1,4 +1,4 @@
-//! Executor for the `discover_host_packages` scheduled task.
+//! Executor for the `discover_software` scheduled task.
 //!
 //! Sends `DiscoverSoftware` messages to every active agent-backed host for the
 //! tenant, triggering a full host-package rediscovery run. Packages that
@@ -37,12 +37,12 @@ use crate::notifier::SchedulerNotifier;
 /// 1. Host-specific allowlist → only those plugin types run on that host.
 /// 2. Tenant-wide allowlist → fallback when the host has no specific allowlist.
 /// 3. No allowlist → all discovery-capable plugin types run (default).
-pub struct DiscoverHostPackagesExecutor {
+pub struct DiscoverSoftwareExecutor {
     db: DatabaseConnection,
     notifier: Arc<dyn SchedulerNotifier>,
 }
 
-impl DiscoverHostPackagesExecutor {
+impl DiscoverSoftwareExecutor {
     pub fn new(db: DatabaseConnection, notifier: Arc<dyn SchedulerNotifier>) -> Self {
         Self { db, notifier }
     }
@@ -57,8 +57,8 @@ struct HostRow {
 }
 
 #[async_trait::async_trait]
-impl TaskExecutor for DiscoverHostPackagesExecutor {
-    #[tracing::instrument(skip_all, fields(task = "discover_host_packages"))]
+impl TaskExecutor for DiscoverSoftwareExecutor {
+    #[tracing::instrument(skip_all, fields(task = "discover_software"))]
     async fn execute(&self, task: &scheduled_task::Model) -> crate::error::Result<()> {
         let tenant_id = task.tenant_id;
 
@@ -124,7 +124,7 @@ impl TaskExecutor for DiscoverHostPackagesExecutor {
     }
 }
 
-impl DiscoverHostPackagesExecutor {
+impl DiscoverSoftwareExecutor {
     /// Query all non-deactivated hosts for the tenant that have an active service.
     async fn query_host_rows(&self, tenant_id: Uuid) -> crate::error::Result<Vec<HostRow>> {
         let rows: Vec<HostRow> = host::Entity::find()
@@ -294,7 +294,7 @@ mod tests {
         scheduled_task::Model {
             id: Uuid::now_v7(),
             tenant_id,
-            task_type: ScheduledTaskType::DiscoverHostPackages,
+            task_type: ScheduledTaskType::DiscoverSoftware,
             interval_seconds: 21600,
             jitter_seconds: 300,
             enabled: true,
@@ -317,7 +317,7 @@ mod tests {
         run_migrations(&db).await.unwrap();
 
         let notifier = Arc::new(NoopSchedulerNotifier);
-        let executor = DiscoverHostPackagesExecutor::new(db, notifier);
+        let executor = DiscoverSoftwareExecutor::new(db, notifier);
 
         executor.execute(&make_task(Uuid::now_v7())).await.unwrap();
     }

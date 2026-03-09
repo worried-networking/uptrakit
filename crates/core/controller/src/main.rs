@@ -595,8 +595,8 @@ async fn run(args: cli::Args) -> Result<()> {
             )),
         );
         sched.register(
-            ScheduledTaskType::DiscoverHostPackages,
-            Box::new(discover_host_packages::DiscoverHostPackagesExecutor::new(
+            ScheduledTaskType::DiscoverSoftware,
+            Box::new(discover_software::DiscoverSoftwareExecutor::new(
                 app_state.db().clone(),
                 Arc::clone(&notifier),
             )),

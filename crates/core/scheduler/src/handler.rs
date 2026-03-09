@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 use uptrakit_internal_wire::{Capability, ControllerMessage, DisconnectingPayload, ServiceMessage};
 use uptrakit_scheduler_engine::executors::{
     auth_cleanup::AuthCleanupExecutor, detect_version::DetectVersionExecutor,
-    discover_host_packages::DiscoverHostPackagesExecutor, fetch_releases::FetchReleasesExecutor,
+    discover_software::DiscoverSoftwareExecutor, fetch_releases::FetchReleasesExecutor,
     stale_lease_cleanup::StaleLeaseCleanupExecutor,
 };
 use uptrakit_scheduler_engine::{Scheduler, SchedulerConfig, SchedulerNotifier};
@@ -223,8 +223,8 @@ impl ServiceHandler for SchedulerHandler {
                     Box::new(DetectVersionExecutor::new(db.clone(), notifier.clone())),
                 );
                 scheduler.register(
-                    ScheduledTaskType::DiscoverHostPackages,
-                    Box::new(DiscoverHostPackagesExecutor::new(db, notifier)),
+                    ScheduledTaskType::DiscoverSoftware,
+                    Box::new(DiscoverSoftwareExecutor::new(db, notifier)),
                 );
 
                 // 8. Spawn the scheduler loop.
