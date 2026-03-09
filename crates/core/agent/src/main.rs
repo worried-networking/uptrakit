@@ -42,6 +42,15 @@ struct AgentHandler {
     last_update_accepted: Option<std::time::Instant>,
     /// Shared command executor, created once and reused across all message handlers.
     executor: Arc<dyn CommandExecutor>,
+    /// Receiving end of the background-result channel.
+    ///
+    /// Background tasks (version checks, discovery, batch updates) send their
+    /// completed [`ServiceMessage`] here so the event loop can forward them to
+    /// the controller without blocking on long-running operations.
+    bg_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
+    /// Sending end of the background-result channel, cloned into each spawned
+    /// background task.
+    bg_tx: tokio::sync::mpsc::Sender<ServiceMessage>,
 }
 
 #[async_trait::async_trait]
@@ -50,7 +59,7 @@ impl ServiceHandler for AgentHandler {
     const SERVICE_LABEL: &'static str = "uptrakit-agent service";
     const SERVICE_APP_NAME: &'static str = env!("CARGO_PKG_NAME");
 
-    type ServiceEvent = client::UpdateEvent;
+    type ServiceEvent = client::AgentEvent;
 
     async fn on_connected(
         &mut self,
@@ -89,7 +98,8 @@ impl ServiceHandler for AgentHandler {
                     );
                     return Ok(None);
                 }
-                Ok(client::handle_check_versions(payload, self.executor.clone(), conn).await)
+                client::spawn_check_versions(payload, self.executor.clone(), &self.bg_tx);
+                Ok(None)
             }
             ControllerMessage::ExecuteUpdate(payload) => {
                 if payload.host_machine_id != self.machine_id {
@@ -137,7 +147,8 @@ impl ServiceHandler for AgentHandler {
                     );
                     return Ok(None);
                 }
-                Ok(client::handle_discover_software(payload, self.executor.clone(), conn).await)
+                client::spawn_discover_software(payload, self.executor.clone(), &self.bg_tx);
+                Ok(None)
             }
             ControllerMessage::ExecuteBatchHostPackageUpdate(payload) => {
                 if payload.host_machine_id != self.machine_id {
@@ -167,12 +178,12 @@ impl ServiceHandler for AgentHandler {
                     return Ok(None);
                 }
                 self.last_update_accepted = Some(std::time::Instant::now());
-                Ok(client::handle_execute_batch_host_package_update(
+                client::spawn_execute_batch_host_package_update(
                     *payload,
                     self.executor.clone(),
-                    conn,
-                )
-                .await)
+                    &self.bg_tx,
+                );
+                Ok(None)
             }
             ControllerMessage::SetUpdateFreeze(payload) => {
                 handle_set_update_freeze(&self.freeze_file_path, payload).await;
@@ -186,18 +197,30 @@ impl ServiceHandler for AgentHandler {
     }
 
     async fn poll_service_event(&mut self) -> Self::ServiceEvent {
-        if let Some(ref mut update) = self.in_flight_update {
-            tokio::select! {
-                biased;
-                Some(output_msg) = update.output_rx.recv() => {
-                    client::UpdateEvent::Output(output_msg)
+        tokio::select! {
+            biased;
+            // In-flight update events (highest priority).
+            event = async {
+                if let Some(ref mut update) = self.in_flight_update {
+                    tokio::select! {
+                        biased;
+                        Some(output_msg) = update.output_rx.recv() => {
+                            client::UpdateEvent::Output(output_msg)
+                        }
+                        result = &mut update.handle => {
+                            client::UpdateEvent::Completed(result)
+                        }
+                    }
+                } else {
+                    std::future::pending().await
                 }
-                result = &mut update.handle => {
-                    client::UpdateEvent::Completed(result)
-                }
+            } => {
+                client::AgentEvent::Update(event)
             }
-        } else {
-            std::future::pending::<Self::ServiceEvent>().await
+            // Background task results (version checks, discovery, batch updates).
+            Some(msg) = self.bg_rx.recv() => {
+                client::AgentEvent::BackgroundResult(msg)
+            }
         }
     }
 
@@ -206,26 +229,39 @@ impl ServiceHandler for AgentHandler {
         event: Self::ServiceEvent,
         conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>> {
-        let Some(ref update) = self.in_flight_update else {
-            tracing::error!("received update event but no in-flight update exists");
-            return Ok(None);
-        };
-        let update_history_id = update.update_history_id;
-
         match event {
-            client::UpdateEvent::Output(output_msg) => {
-                client::send_update_output(conn, update_history_id, output_msg).await;
-            }
-            client::UpdateEvent::Completed(result) => {
-                if let Err(e) = client::send_update_result(conn, update_history_id, result).await {
-                    tracing::error!(error = %e, "failed to send UpdateResult; disconnecting");
-                    self.in_flight_update = None;
-                    return Ok(Some(LoopOutcome::Disconnected));
+            client::AgentEvent::Update(update_event) => {
+                let Some(ref update) = self.in_flight_update else {
+                    tracing::error!("received update event but no in-flight update exists");
+                    return Ok(None);
+                };
+                let update_history_id = update.update_history_id;
+
+                match update_event {
+                    client::UpdateEvent::Output(output_msg) => {
+                        client::send_update_output(conn, update_history_id, output_msg).await;
+                    }
+                    client::UpdateEvent::Completed(result) => {
+                        if let Err(e) =
+                            client::send_update_result(conn, update_history_id, result).await
+                        {
+                            tracing::error!(error = %e, "failed to send UpdateResult; disconnecting");
+                            self.in_flight_update = None;
+                            return Ok(Some(LoopOutcome::Disconnected));
+                        }
+                        self.in_flight_update = None;
+                    }
                 }
-                self.in_flight_update = None;
+                Ok(None)
+            }
+            client::AgentEvent::BackgroundResult(msg) => {
+                if let Some(outcome) = uptrakit_agent_core::send_background_result(conn, msg).await
+                {
+                    return Ok(Some(outcome));
+                }
+                Ok(None)
             }
         }
-        Ok(None)
     }
 
     fn capabilities(&self) -> BTreeSet<Capability> {
@@ -238,6 +274,12 @@ impl ServiceHandler for AgentHandler {
         cause: ShutdownCause,
         shutdown_timeout: std::time::Duration,
     ) -> LoopOutcome {
+        // Drain any completed background results so the controller receives
+        // them before we disconnect.
+        while let Ok(msg) = self.bg_rx.try_recv() {
+            conn.send_best_effort(msg).await;
+        }
+
         let (disconnect_reason, outcome) = default_resolve_shutdown(cause);
         client::handle_graceful_shutdown(
             conn,
@@ -353,12 +395,15 @@ async fn main() {
         .map(|dirs| dirs.state_dir().join("update-freeze"))
         .unwrap_or_else(|_| PathBuf::from("update-freeze"));
 
+    let (bg_tx, bg_rx) = tokio::sync::mpsc::channel(32);
     let mut handler = AgentHandler {
         machine_id: String::new(),
         in_flight_update: None,
         freeze_file_path,
         last_update_accepted: None,
         executor: client::make_executor(),
+        bg_rx,
+        bg_tx,
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
         "uptrakit-agent",

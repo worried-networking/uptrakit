@@ -154,13 +154,47 @@ pub async fn handle_graceful_shutdown(
     outcome
 }
 
+/// Spawn a background task that produces a [`ServiceMessage`] and sends it
+/// through the provided channel.
+///
+/// Long-running operations (version checks, software discovery, batch package
+/// updates) must not run inline in `on_message` — doing so blocks the event
+/// loop and causes the controller's WebSocket write timeout to fire. This
+/// helper clones the sender, spawns the future on the Tokio runtime, and
+/// forwards the result through the channel for the event loop to pick up.
+pub fn spawn_background(
+    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+    future: impl std::future::Future<Output = ServiceMessage> + Send + 'static,
+) {
+    let bg_tx = bg_tx.clone();
+    tokio::spawn(async move {
+        let msg = future.await;
+        let _ = bg_tx.send(msg).await;
+    });
+}
+
+/// Forward a background operation result to the controller.
+///
+/// Returns `Some(LoopOutcome::Disconnected)` if the send fails, signalling the
+/// caller to break out of the event loop so the reconnect logic can
+/// re-establish the session.
+pub async fn send_background_result(
+    conn: &mut ControllerConnection,
+    msg: ServiceMessage,
+) -> Option<LoopOutcome> {
+    if let Err(e) = conn.send_auto_paginate(msg).await {
+        tracing::error!(error = %e, "failed to send background operation result; disconnecting");
+        return Some(LoopOutcome::Disconnected);
+    }
+    None
+}
+
 /// Run version checks and return the result as a [`ServiceMessage`].
 ///
-/// This is the compute-only variant of [`handle_check_versions`] — it performs
-/// all version-check work but does not send the result over the connection.
-/// Callers that need to run version checks in a background task (e.g. the SSH
-/// agent) use this function and forward the returned message to the controller
-/// through a channel.
+/// Performs all version-check work and returns the result without sending it
+/// over the connection. Callers use [`spawn_background`] to run this in a
+/// background task and forward the returned message to the controller through
+/// a channel.
 #[tracing::instrument(skip_all, fields(assignment_count = payload.assignments.len()))]
 pub async fn run_check_versions(
     payload: uptrakit_internal_wire::CheckVersionsPayload,
@@ -179,31 +213,6 @@ pub async fn run_check_versions(
 
     tracing::debug!("version check complete");
     ServiceMessage::VersionCheckResults(VersionCheckResultsPayload { results })
-}
-
-/// Handle a `CheckVersions` message from the controller.
-///
-/// The `executor` is provided by the caller — `LocalCommandExecutor` for the
-/// regular agent, `SshCommandExecutor` for the SSH agent.
-///
-/// The `ctx` is used to inject connection-specific overrides (e.g. a remote
-/// Docker host for the SSH agent) into each plugin config before creation.
-///
-/// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
-#[tracing::instrument(skip_all, fields(assignment_count = payload.assignments.len()))]
-pub async fn handle_check_versions(
-    payload: uptrakit_internal_wire::CheckVersionsPayload,
-    executor: Arc<dyn CommandExecutor>,
-    conn: &mut ControllerConnection,
-    ctx: &ConnectionContext,
-) -> Option<LoopOutcome> {
-    let response = run_check_versions(payload, executor, ctx).await;
-    if let Err(e) = conn.send_auto_paginate(response).await {
-        tracing::error!(error = %e, "failed to send VersionCheckResults");
-        return Some(LoopOutcome::Disconnected);
-    }
-    tracing::debug!("sent VersionCheckResults");
-    None
 }
 
 /// Spawn an update task and return the in-flight update handle.
@@ -311,11 +320,9 @@ pub async fn handle_execute_update(
 
 /// Run a batch host package update and return the result as a [`ServiceMessage`].
 ///
-/// This is the compute-only variant of [`handle_execute_batch_host_package_update`]
-/// — it performs all update work but does not send the result over the connection.
-/// Callers that need to run batch updates in a background task (e.g. the SSH
-/// agent) use this function and forward the returned message to the controller
-/// through a channel.
+/// Performs all update work and returns the result without sending it over the
+/// connection. Callers use [`spawn_background`] to run this in a background
+/// task and forward the returned message to the controller through a channel.
 #[tracing::instrument(skip_all, fields(batch_id = %payload.batch_id, plugin_type = %payload.plugin_type))]
 pub async fn run_execute_batch_host_package_update(
     payload: ExecuteBatchHostPackageUpdatePayload,
@@ -338,37 +345,7 @@ pub async fn run_execute_batch_host_package_update(
     })
 }
 
-/// Handle an `ExecuteBatchHostPackageUpdate` message from the controller.
-///
-/// Instantiates the plugin for the batch, runs pre-update hooks, calls
-/// `execute_batch_update()`, runs post-update hooks, and sends back
-/// `BatchHostPackageUpdateResult` to the controller.
-///
-/// The `executor` is provided by the caller — `LocalCommandExecutor` for the
-/// regular agent, `SshCommandExecutor` for the SSH agent.
-///
-/// The `ctx` is used to inject connection-specific overrides into the plugin
-/// config before instantiation.
-///
-/// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
-#[tracing::instrument(skip_all, fields(batch_id = %payload.batch_id, plugin_type = %payload.plugin_type))]
-pub async fn handle_execute_batch_host_package_update(
-    payload: ExecuteBatchHostPackageUpdatePayload,
-    executor: Arc<dyn CommandExecutor>,
-    conn: &mut ControllerConnection,
-    ctx: &ConnectionContext,
-) -> Option<LoopOutcome> {
-    let response = run_execute_batch_host_package_update(payload, executor, ctx).await;
-    if let Err(e) = conn.send_auto_paginate(response).await {
-        tracing::error!(error = %e, "failed to send BatchHostPackageUpdateResult");
-        return Some(LoopOutcome::Disconnected);
-    }
-    tracing::info!("sent BatchHostPackageUpdateResult");
-    None
-}
-
-/// Inner batch-update logic shared by [`run_execute_batch_host_package_update`]
-/// and [`handle_execute_batch_host_package_update`].
+/// Inner batch-update logic for [`run_execute_batch_host_package_update`].
 async fn batch_host_package_update_inner(
     payload: &ExecuteBatchHostPackageUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
@@ -529,10 +506,9 @@ async fn batch_host_package_update_inner(
 
 /// Run software discovery and return the result as a [`ServiceMessage`].
 ///
-/// This is the compute-only variant of [`handle_discover_software`] — it
-/// performs all discovery work but does not send the result over the connection.
-/// Callers that need to run discovery in a background task (e.g. the SSH agent)
-/// use this function and forward the returned message to the controller through
+/// Performs all discovery work and returns the result without sending it over
+/// the connection. Callers use [`spawn_background`] to run this in a
+/// background task and forward the returned message to the controller through
 /// a channel.
 #[tracing::instrument(skip_all, fields(plugin_count = payload.plugins.len()))]
 pub async fn run_discover_software(
@@ -554,35 +530,7 @@ pub async fn run_discover_software(
     })
 }
 
-/// Handle a `DiscoverSoftware` message from the controller.
-///
-/// Iterates over each plugin assignment, attempts discovery via the plugin
-/// registry, and returns all results in a single `DiscoveryResults` message.
-/// Plugin-level errors are recorded in the result rather than aborting the
-/// entire discovery run.
-///
-/// The `ctx` is used to inject connection-specific overrides (e.g. a remote
-/// Docker host for the SSH agent) into each plugin config before creation.
-///
-/// Returns `Some(LoopOutcome::Disconnected)` if sending the response fails.
-#[tracing::instrument(skip_all, fields(plugin_count = payload.plugins.len()))]
-pub async fn handle_discover_software(
-    payload: DiscoverSoftwarePayload,
-    executor: Arc<dyn CommandExecutor>,
-    conn: &mut ControllerConnection,
-    ctx: &ConnectionContext,
-) -> Option<LoopOutcome> {
-    let response = run_discover_software(payload, executor, ctx).await;
-    if let Err(e) = conn.send_auto_paginate(response).await {
-        tracing::error!(error = %e, "failed to send DiscoveryResults");
-        return Some(LoopOutcome::Disconnected);
-    }
-    tracing::debug!("sent DiscoveryResults");
-    None
-}
-
-/// Inner discovery logic shared by [`run_discover_software`] and
-/// [`handle_discover_software`].
+/// Inner discovery logic for [`run_discover_software`].
 async fn discover_software_inner(
     payload: &DiscoverSoftwarePayload,
     executor: Arc<dyn CommandExecutor>,

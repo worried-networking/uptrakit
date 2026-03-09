@@ -571,11 +571,10 @@ pub(crate) fn spawn_check_versions_ssh(
     );
     let db = db.clone();
     let pool = pool.clone();
-    let bg_tx = bg_tx.clone();
-    tokio::spawn(async move {
+    uptrakit_agent_core::spawn_background(bg_tx, async move {
         let msg = run_check_versions_ssh(payload, &db, &pool).await;
         tracing::debug!(host_machine_id = %host_machine_id, "background CheckVersions task completed");
-        let _ = bg_tx.send(msg).await;
+        msg
     });
 }
 
@@ -657,11 +656,10 @@ pub(crate) fn spawn_discover_software_ssh(
     );
     let db = db.clone();
     let pool = pool.clone();
-    let bg_tx = bg_tx.clone();
-    tokio::spawn(async move {
+    uptrakit_agent_core::spawn_background(bg_tx, async move {
         let msg = run_discover_software_ssh(payload, &db, &pool).await;
         tracing::debug!(host_machine_id = %host_machine_id, "background DiscoverSoftware task completed");
-        let _ = bg_tx.send(msg).await;
+        msg
     });
 }
 
@@ -754,11 +752,10 @@ pub(crate) fn spawn_execute_batch_host_package_update_ssh(
     );
     let db = db.clone();
     let pool = pool.clone();
-    let bg_tx = bg_tx.clone();
-    tokio::spawn(async move {
+    uptrakit_agent_core::spawn_background(bg_tx, async move {
         let msg = run_execute_batch_host_package_update_ssh(payload, &db, &pool).await;
         tracing::debug!(host_machine_id = %host_machine_id, "background ExecuteBatchHostPackageUpdate task completed");
-        let _ = bg_tx.send(msg).await;
+        msg
     });
 }
 

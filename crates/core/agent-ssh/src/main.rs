@@ -455,12 +455,9 @@ impl ServiceHandler for SshAgentHandler {
             }
 
             SshAgentEvent::BackgroundResult(msg) => {
-                if let Err(e) = conn.send_auto_paginate(msg).await {
-                    tracing::error!(
-                        error = %e,
-                        "failed to send background operation result; disconnecting"
-                    );
-                    return Ok(Some(LoopOutcome::Disconnected));
+                if let Some(outcome) = uptrakit_agent_core::send_background_result(conn, msg).await
+                {
+                    return Ok(Some(outcome));
                 }
                 Ok(None)
             }
