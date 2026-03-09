@@ -391,8 +391,8 @@ mod tests {
     fn copy_order_has_all_tables() {
         assert_eq!(
             COPY_ORDER.len(),
-            46,
-            "COPY_ORDER must list all 46 app tables"
+            48,
+            "COPY_ORDER must list all 48 app tables"
         );
     }
 }

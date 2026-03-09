@@ -168,7 +168,6 @@ pub async fn list_hosts(
     // Batch-load tags for all hosts on this page.
     let host_tags_map = super::host_tags::load_host_tags_batch(tenant_db, &host_ids).await;
 
-
     let items: Vec<HostResponse> = hosts
         .into_iter()
         .map(|h| {

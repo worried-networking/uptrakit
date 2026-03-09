@@ -82,5 +82,4 @@ impl Related<super::host_tag_assignment::Entity> for Entity {
     }
 }
 
-
 impl ActiveModelBehavior for ActiveModel {}
