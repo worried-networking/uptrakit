@@ -11,8 +11,7 @@ use super::error::{DbMigrateError, Result};
 /// (parent tables first, leaf tables last).
 ///
 /// This is the reverse of the `drop_tables!` list in the initial migration's
-/// `down()` function, excluding the `controller_events` table that was dropped
-/// in a later migration.
+/// `down()` function, excluding tables that were dropped in later migrations.
 ///
 /// Used by tests to verify that every app table is covered by `copy_all`.
 #[cfg(test)]
@@ -45,9 +44,10 @@ pub(crate) const COPY_ORDER: &[&str] = &[
     "software_items",
     "host_software_items",
     "host_software_item_plugins",
-    "autodiscovery_ignores",
+    "software_ignores",
     "mqtt_clients",
     "mqtt_leases",
+    "update_batches",
     "update_history",
     "update_output_lines",
     "pending_device_flows",
@@ -62,6 +62,7 @@ pub(crate) const COPY_ORDER: &[&str] = &[
     "notification_log",
     "audit_logs",
     "system_audit_logs",
+    "system_enrollment_tokens",
     "proxmox_host_mappings",
 ];
 
@@ -109,9 +110,10 @@ pub async fn copy_all(
     copy!(SoftwareItem, "software_items");
     copy!(HostSoftwareItem, "host_software_items");
     copy!(HostSoftwareItemPlugin, "host_software_item_plugins");
-    copy!(AutodiscoveryIgnore, "autodiscovery_ignores");
+    copy!(SoftwareIgnore, "software_ignores");
     copy!(MqttClient, "mqtt_clients");
     copy!(MqttLease, "mqtt_leases");
+    copy!(UpdateBatch, "update_batches");
     copy!(UpdateHistory, "update_history");
     copy!(UpdateOutputLine, "update_output_lines");
     copy!(PendingDeviceFlow, "pending_device_flows");
@@ -126,6 +128,7 @@ pub async fn copy_all(
     copy!(NotificationLog, "notification_log");
     copy!(AuditLog, "audit_logs");
     copy!(SystemAuditLog, "system_audit_logs");
+    copy!(SystemEnrollmentToken, "system_enrollment_tokens");
     copy!(ProxmoxHostMapping, "proxmox_host_mappings");
 
     Ok(total)
@@ -144,6 +147,7 @@ pub async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
     }
 
     clean!(ProxmoxHostMapping, "proxmox_host_mappings");
+    clean!(SystemEnrollmentToken, "system_enrollment_tokens");
     clean!(SystemAuditLog, "system_audit_logs");
     clean!(AuditLog, "audit_logs");
     clean!(NotificationLog, "notification_log");
@@ -158,9 +162,10 @@ pub async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
     clean!(PendingDeviceFlow, "pending_device_flows");
     clean!(UpdateOutputLine, "update_output_lines");
     clean!(UpdateHistory, "update_history");
+    clean!(UpdateBatch, "update_batches");
     clean!(MqttLease, "mqtt_leases");
     clean!(MqttClient, "mqtt_clients");
-    clean!(AutodiscoveryIgnore, "autodiscovery_ignores");
+    clean!(SoftwareIgnore, "software_ignores");
     clean!(HostSoftwareItemPlugin, "host_software_item_plugins");
     clean!(HostSoftwareItem, "host_software_items");
     clean!(SoftwareItem, "software_items");
@@ -234,9 +239,10 @@ pub async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnection) -> R
     verify!(SoftwareItem, "software_items");
     verify!(HostSoftwareItem, "host_software_items");
     verify!(HostSoftwareItemPlugin, "host_software_item_plugins");
-    verify!(AutodiscoveryIgnore, "autodiscovery_ignores");
+    verify!(SoftwareIgnore, "software_ignores");
     verify!(MqttClient, "mqtt_clients");
     verify!(MqttLease, "mqtt_leases");
+    verify!(UpdateBatch, "update_batches");
     verify!(UpdateHistory, "update_history");
     verify!(UpdateOutputLine, "update_output_lines");
     verify!(PendingDeviceFlow, "pending_device_flows");
@@ -251,6 +257,7 @@ pub async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnection) -> R
     verify!(NotificationLog, "notification_log");
     verify!(AuditLog, "audit_logs");
     verify!(SystemAuditLog, "system_audit_logs");
+    verify!(SystemEnrollmentToken, "system_enrollment_tokens");
     verify!(ProxmoxHostMapping, "proxmox_host_mappings");
 
     Ok(total)
@@ -381,7 +388,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn copy_order_has_all_46_tables() {
+    fn copy_order_has_all_tables() {
         assert_eq!(
             COPY_ORDER.len(),
             46,

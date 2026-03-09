@@ -2,14 +2,14 @@ use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
-#[sea_orm(table_name = "host_package_ignores")]
+#[sea_orm(table_name = "software_ignores")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub tenant_id: Uuid,
-    pub host_id: Uuid,
-    pub plugin_config_id: Uuid,
-    pub package_identifier: String,
+    /// NULL = tenant-wide ignore, non-NULL = host-specific ignore.
+    pub host_id: Option<Uuid>,
+    pub name: String,
     pub created_at: OffsetDateTime,
 }
 
@@ -27,12 +27,6 @@ pub enum Relation {
         to = "super::host::Column::Id"
     )]
     Host,
-    #[sea_orm(
-        belongs_to = "super::plugin_config::Entity",
-        from = "Column::PluginConfigId",
-        to = "super::plugin_config::Column::Id"
-    )]
-    PluginConfig,
 }
 
 impl Related<super::tenant::Entity> for Entity {
@@ -44,12 +38,6 @@ impl Related<super::tenant::Entity> for Entity {
 impl Related<super::host::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Host.def()
-    }
-}
-
-impl Related<super::plugin_config::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::PluginConfig.def()
     }
 }
 

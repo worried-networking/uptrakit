@@ -1,9 +1,6 @@
 pub use super::api_rate_limit::{Entity as ApiRateLimit, Model as ApiRateLimitModel};
 pub use super::api_token::{Entity as ApiToken, Model as ApiTokenModel};
 pub use super::audit_log::{Entity as AuditLog, Model as AuditLogModel};
-pub use super::autodiscovery_ignore::{
-    Entity as AutodiscoveryIgnore, Model as AutodiscoveryIgnoreModel,
-};
 pub use super::ca_certificate::{Entity as CaCertificate, Model as CaCertificateModel};
 pub use super::crl_cache::{Entity as CrlCache, Model as CrlCacheModel};
 pub use super::data_encryption_key::{
@@ -14,13 +11,6 @@ pub use super::global_setting::{Entity as GlobalSetting, Model as GlobalSettingM
 pub use super::host::{Entity as Host, Model as HostModel};
 pub use super::host_discovery_allowlist::{
     Entity as HostDiscoveryAllowlist, Model as HostDiscoveryAllowlistModel,
-};
-pub use super::host_package::{Entity as HostPackage, Model as HostPackageModel};
-pub use super::host_package_ignore::{
-    Entity as HostPackageIgnore, Model as HostPackageIgnoreModel,
-};
-pub use super::host_package_update_history::{
-    Entity as HostPackageUpdateHistory, Model as HostPackageUpdateHistoryModel,
 };
 pub use super::host_software_item::{Entity as HostSoftwareItem, Model as HostSoftwareItemModel};
 pub use super::host_software_item_plugin::{
@@ -71,8 +61,12 @@ pub use super::service_host::{Entity as ServiceHost, Model as ServiceHostModel};
 pub use super::session::{Entity as Session, Model as SessionModel};
 pub use super::setting::{Entity as Setting, Model as SettingModel};
 pub use super::settings_version::{Entity as SettingsVersion, Model as SettingsVersionModel};
+pub use super::software_ignore::{Entity as SoftwareIgnore, Model as SoftwareIgnoreModel};
 pub use super::software_item::{Entity as SoftwareItem, Model as SoftwareItemModel};
 pub use super::system_audit_log::{Entity as SystemAuditLog, Model as SystemAuditLogModel};
+pub use super::system_enrollment_token::{
+    Entity as SystemEnrollmentToken, Model as SystemEnrollmentTokenModel,
+};
 pub use super::system_service::{
     Entity as SystemService, Model as SystemServiceModel, SystemServiceStatus,
 };

@@ -9,6 +9,8 @@ pub struct Model {
     pub host_id: Uuid,
     pub software_item_id: Uuid,
     pub qualifier: Option<String>,
+    pub plugin_config_id: Option<Uuid>,
+    pub package_identifier: Option<String>,
     pub installed_version: Option<String>,
     pub installed_version_detected_at: Option<OffsetDateTime>,
     pub latest_version: Option<String>,
@@ -20,6 +22,7 @@ pub struct Model {
     /// Classification of the available update (security, bugfix, feature, unknown).
     #[sea_orm(default_value = "unknown")]
     pub update_category: String,
+    pub deactivated_at: Option<OffsetDateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -36,6 +39,12 @@ pub enum Relation {
         to = "super::software_item::Column::Id"
     )]
     SoftwareItem,
+    #[sea_orm(
+        belongs_to = "super::plugin_config::Entity",
+        from = "Column::PluginConfigId",
+        to = "super::plugin_config::Column::Id"
+    )]
+    PluginConfig,
     #[sea_orm(has_many = "super::host_software_item_plugin::Entity")]
     HostSoftwareItemPlugins,
 }
@@ -49,6 +58,12 @@ impl Related<super::host::Entity> for Entity {
 impl Related<super::software_item::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::SoftwareItem.def()
+    }
+}
+
+impl Related<super::plugin_config::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::PluginConfig.def()
     }
 }
 
