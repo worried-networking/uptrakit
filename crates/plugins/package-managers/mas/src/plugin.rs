@@ -139,8 +139,7 @@ pub fn parse_mas_outdated(output: &str) -> HashMap<String, String> {
 pub struct MasPlugin {
     /// Stored for registry dispatch and forward-compatibility with future config fields.
     /// `MasConfig` currently has no data fields, so this is never read after construction.
-    #[allow(dead_code)]
-    config: MasConfig,
+    _config: MasConfig,
     executor: Arc<dyn CommandExecutor>,
 }
 
@@ -156,7 +155,10 @@ impl MasPlugin {
         config
             .validate()
             .map_err(|e| report!(PluginError::Configuration(e.to_string())))?;
-        Ok(Self { config, executor })
+        Ok(Self {
+            _config: config,
+            executor,
+        })
     }
 
     /// Run `mas list` and return the raw output.
@@ -566,7 +568,7 @@ mod tests {
 
     fn make_plugin(list_output: &str, outdated_output: &str) -> MasPlugin {
         MasPlugin {
-            config: MasConfig::default(),
+            _config: MasConfig::default(),
             executor: Arc::new(MockMasExecutor::new(list_output, outdated_output)),
         }
     }
@@ -823,7 +825,7 @@ mod tests {
     #[tokio::test]
     async fn detect_host_compatibility_incompatible() {
         let plugin = MasPlugin {
-            config: MasConfig::default(),
+            _config: MasConfig::default(),
             executor: Arc::new(MockMasExecutor::incompatible("")),
         };
         let compat = plugin
