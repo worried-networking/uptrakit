@@ -31,9 +31,6 @@
 		BatchActionResponse
 	} from '$lib/types';
 
-	type SubTab = 'configs' | 'allowlist';
-	let activeSubTab: SubTab = $state('configs');
-
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
 
@@ -380,203 +377,186 @@
 	}
 </script>
 
-<!-- Sub-tabs -->
-<div class="mb-4 flex gap-1">
-	<button
-		class="btn btn-sm {activeSubTab === 'configs' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-		onclick={() => (activeSubTab = 'configs')}
-	>
-		Configurations
-	</button>
-	<button
-		class="btn btn-sm {activeSubTab === 'allowlist' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-		onclick={() => (activeSubTab = 'allowlist')}
-	>
-		Discovery Allowlist
-	</button>
+<!-- Plugin Configurations -->
+<div class="mb-4 flex items-center justify-between">
+	<h2 class="h4">Configurations</h2>
+	{#if canManage}
+		<button class="btn preset-filled-primary-500" onclick={openCreateConfig}>Add Config</button>
+	{/if}
 </div>
 
-{#if activeSubTab === 'configs'}
-	<div class="mb-4 flex justify-end">
-		{#if canManage}
-			<button class="btn preset-filled-primary-500" onclick={openCreateConfig}>Add Config</button>
-		{/if}
-	</div>
-
-	{#if configsLoading}
-		<p class="text-center py-4">Loading...</p>
-	{:else}
-		<div class="table-wrap">
-			<table class="table">
-				<thead>
+{#if configsLoading}
+	<p class="text-center py-4">Loading...</p>
+{:else}
+	<div class="table-wrap">
+		<table class="table">
+			<thead>
+				<tr>
+					{#if canManage}
+						<th class="w-10">
+							<input
+								type="checkbox"
+								class="checkbox"
+								checked={configs.length > 0 && configSelectedIds.size === configs.length}
+								indeterminate={configSelectedIds.size > 0 && configSelectedIds.size < configs.length}
+								onchange={toggleConfigSelectAll}
+								aria-label="Select all"
+							/>
+						</th>
+					{/if}
+					<th>Name</th>
+					<th>Type</th>
+					<th>Status</th>
+					<th>Created</th>
+					{#if canManage}<th>Actions</th>{/if}
+				</tr>
+			</thead>
+			<tbody>
+				{#each configs as config (config.id)}
 					<tr>
 						{#if canManage}
-							<th class="w-10">
+							<td>
 								<input
 									type="checkbox"
 									class="checkbox"
-									checked={configs.length > 0 && configSelectedIds.size === configs.length}
-									indeterminate={configSelectedIds.size > 0 && configSelectedIds.size < configs.length}
-									onchange={toggleConfigSelectAll}
-									aria-label="Select all"
+									checked={configSelectedIds.has(config.id)}
+									onchange={() => toggleConfigSelect(config.id)}
+									aria-label="Select {config.name}"
 								/>
-							</th>
+							</td>
 						{/if}
-						<th>Name</th>
-						<th>Type</th>
-						<th>Status</th>
-						<th>Created</th>
-						{#if canManage}<th>Actions</th>{/if}
-					</tr>
-				</thead>
-				<tbody>
-					{#each configs as config (config.id)}
-						<tr>
-							{#if canManage}
-								<td>
-									<input
-										type="checkbox"
-										class="checkbox"
-										checked={configSelectedIds.has(config.id)}
-										onchange={() => toggleConfigSelect(config.id)}
-										aria-label="Select {config.name}"
-									/>
-								</td>
+						<td>{config.name}</td>
+						<td><span class="badge preset-tonal">{config.plugin_type}</span></td>
+						<td>
+							{#if config.enabled}
+								<span class="badge preset-filled-success-500">Enabled</span>
+							{:else}
+								<span class="badge preset-tonal">Disabled</span>
 							{/if}
-							<td>{config.name}</td>
-							<td><span class="badge preset-tonal">{config.plugin_type}</span></td>
+						</td>
+						<td>{formatDate(config.created_at)}</td>
+						{#if canManage}
 							<td>
-								{#if config.enabled}
-									<span class="badge preset-filled-success-500">Enabled</span>
-								{:else}
-									<span class="badge preset-tonal">Disabled</span>
-								{/if}
-							</td>
-							<td>{formatDate(config.created_at)}</td>
-							{#if canManage}
-								<td>
-									<div class="flex gap-1 flex-wrap">
-										<button class="btn btn-sm preset-tonal" onclick={() => openEditConfig(config)}>Edit</button>
-										{#if config.capabilities.includes(PluginCapability.DiscoverLocalSoftware)}
-											<button
-												class="btn btn-sm preset-tonal"
-												disabled={discoveringId === config.id}
-												onclick={() => triggerDiscover(config)}
-											>
-												{discoveringId === config.id ? '...' : 'Discover'}
-											</button>
-											<button
-												class="btn btn-sm preset-tonal"
-												disabled={discardingId === config.id}
-												onclick={() => triggerDiscard(config)}
-											>
-												{discardingId === config.id ? '...' : 'Discard'}
-											</button>
-										{/if}
+								<div class="flex gap-1 flex-wrap">
+									<button class="btn btn-sm preset-tonal" onclick={() => openEditConfig(config)}>Edit</button>
+									{#if config.capabilities.includes(PluginCapability.DiscoverLocalSoftware)}
 										<button
-											class="btn btn-sm preset-tonal-error"
-											onclick={() => (configDeleteConfirm = { id: config.id, name: config.name })}
+											class="btn btn-sm preset-tonal"
+											disabled={discoveringId === config.id}
+											onclick={() => triggerDiscover(config)}
 										>
-											Delete
+											{discoveringId === config.id ? '...' : 'Discover'}
 										</button>
-									</div>
-								</td>
-							{/if}
-						</tr>
-					{:else}
-						<tr>
-							<td colspan={canManage ? 7 : 4} class="py-8 text-center">
-								<p class="text-lg font-medium">No plugin configs</p>
-								<p class="mt-1 text-sm text-surface-500">Add a plugin configuration to enable version tracking.</p>
-							</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
-	{/if}
-
-	{#if canManage && configSelectedIds.size > 0}
-		<BatchActionBar
-			selectedCount={configSelectedIds.size}
-			actions={configBatchActions}
-			onaction={() => (configBatchConfirmAction = 'delete')}
-			oncancel={() => configSelectedIds.clear()}
-		/>
-	{/if}
-
-	{#if configBatchConfirmAction}
-		<ConfirmDialog
-			title="Batch Delete Plugin Configs"
-			messagePrefix="Are you sure you want to delete"
-			entityName="{configSelectedIds.size} plugin config(s)"
-			confirmLabel={configBatchSubmitting ? 'Deleting...' : 'Delete'}
-			confirmClass="preset-filled-error-500"
-			confirmDisabled={configBatchSubmitting}
-			onconfirm={executeConfigBatchAction}
-			oncancel={() => (configBatchConfirmAction = null)}
-		/>
-	{/if}
-
-	{#if configBatchResult}
-		<BatchResultDialog
-			title="Batch Action Results"
-			response={configBatchResult}
-			onclose={() => (configBatchResult = null)}
-		/>
-	{/if}
-{:else}
-	<!-- Discovery allowlist -->
-	<div class="mb-4">
-		<p class="text-sm text-surface-500 mb-3">
-			When the allowlist is empty, all discovery plugins are active. Once you add at least one entry, only the listed
-			plugin types will run discovery tenant-wide.
-		</p>
-		{#if canManage}
-			<div class="flex justify-end">
-				<button class="btn preset-filled-primary-500" onclick={openAddAllowlistEntry}>Add Plugin Type</button>
-			</div>
-		{/if}
-	</div>
-
-	{#if allowlistLoading}
-		<p class="text-center py-4">Loading...</p>
-	{:else if allowlist.length === 0}
-		<aside class="rounded-lg p-4 preset-tonal-surface">
-			<p class="font-medium">No restrictions — all discovery plugins are active.</p>
-			<p class="mt-1 text-sm text-surface-500">Add a plugin type to restrict discovery to only the listed types.</p>
-		</aside>
-	{:else}
-		<div class="table-wrap">
-			<table class="table">
-				<thead>
-					<tr>
-						<th>Plugin Type</th>
-						<th>Created</th>
-						{#if canManage}<th class="w-24">Actions</th>{/if}
-					</tr>
-				</thead>
-				<tbody>
-					{#each allowlist as entry (entry.id)}
-						<tr>
-							<td><span class="badge preset-tonal">{entry.plugin_type}</span></td>
-							<td>{formatDate(entry.created_at)}</td>
-							{#if canManage}
-								<td>
+										<button
+											class="btn btn-sm preset-tonal"
+											disabled={discardingId === config.id}
+											onclick={() => triggerDiscard(config)}
+										>
+											{discardingId === config.id ? '...' : 'Discard'}
+										</button>
+									{/if}
 									<button
 										class="btn btn-sm preset-tonal-error"
-										onclick={() => (allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
+										onclick={() => (configDeleteConfirm = { id: config.id, name: config.name })}
 									>
-										Remove
+										Delete
 									</button>
-								</td>
-							{/if}
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
+								</div>
+							</td>
+						{/if}
+					</tr>
+				{:else}
+					<tr>
+						<td colspan={canManage ? 7 : 4} class="py-8 text-center">
+							<p class="text-lg font-medium">No plugin configs</p>
+							<p class="mt-1 text-sm text-surface-500">Add a plugin configuration to enable version tracking.</p>
+						</td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+	</div>
+{/if}
+
+{#if canManage && configSelectedIds.size > 0}
+	<BatchActionBar
+		selectedCount={configSelectedIds.size}
+		actions={configBatchActions}
+		onaction={() => (configBatchConfirmAction = 'delete')}
+		oncancel={() => configSelectedIds.clear()}
+	/>
+{/if}
+
+{#if configBatchConfirmAction}
+	<ConfirmDialog
+		title="Batch Delete Plugin Configs"
+		messagePrefix="Are you sure you want to delete"
+		entityName="{configSelectedIds.size} plugin config(s)"
+		confirmLabel={configBatchSubmitting ? 'Deleting...' : 'Delete'}
+		confirmClass="preset-filled-error-500"
+		confirmDisabled={configBatchSubmitting}
+		onconfirm={executeConfigBatchAction}
+		oncancel={() => (configBatchConfirmAction = null)}
+	/>
+{/if}
+
+{#if configBatchResult}
+	<BatchResultDialog
+		title="Batch Action Results"
+		response={configBatchResult}
+		onclose={() => (configBatchResult = null)}
+	/>
+{/if}
+
+<!-- Discovery Allowlist -->
+<div class="mt-10 mb-4 flex items-center justify-between">
+	<h2 class="h4">Discovery Allowlist</h2>
+	{#if canManage}
+		<button class="btn preset-filled-primary-500" onclick={openAddAllowlistEntry}>Add Plugin Type</button>
 	{/if}
+</div>
+<p class="text-sm text-surface-500 mb-4">
+	When the allowlist is empty, all discovery plugins are active. Once you add at least one entry, only the listed plugin
+	types will run discovery tenant-wide.
+</p>
+
+{#if allowlistLoading}
+	<p class="text-center py-4">Loading...</p>
+{:else if allowlist.length === 0}
+	<aside class="rounded-lg p-4 preset-tonal-surface">
+		<p class="font-medium">No restrictions — all discovery plugins are active.</p>
+		<p class="mt-1 text-sm text-surface-500">Add a plugin type to restrict discovery to only the listed types.</p>
+	</aside>
+{:else}
+	<div class="table-wrap">
+		<table class="table">
+			<thead>
+				<tr>
+					<th>Plugin Type</th>
+					<th>Created</th>
+					{#if canManage}<th class="w-24">Actions</th>{/if}
+				</tr>
+			</thead>
+			<tbody>
+				{#each allowlist as entry (entry.id)}
+					<tr>
+						<td><span class="badge preset-tonal">{entry.plugin_type}</span></td>
+						<td>{formatDate(entry.created_at)}</td>
+						{#if canManage}
+							<td>
+								<button
+									class="btn btn-sm preset-tonal-error"
+									onclick={() => (allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
+								>
+									Remove
+								</button>
+							</td>
+						{/if}
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+	</div>
 {/if}
 
 <!-- Plugin config modal -->
