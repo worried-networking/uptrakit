@@ -1126,6 +1126,24 @@ Always use `reqwest::StatusCode` (re-exported as `uptrakit_openapi_client::Statu
 - **Serialization**: When a `StatusCode` must appear as a number in JSON, use `#[serde(serialize_with = "serialize_status_code")]`
 - **The only approved `.as_u16()` call** is inside serde serialization helpers for JSON wire compatibility
 
+## Tracing Status Codes
+
+When logging HTTP status codes in `tracing!` macros, use the `%` display format rather than
+`.as_u16()`:
+
+```rust
+// Correct — uses Display impl, emits "200 OK" or "404 Not Found"
+tracing::debug!(status = %response.status(), "request complete");
+
+// Wrong — emits a bare integer with no reason phrase
+tracing::debug!(status = response.status().as_u16(), "request complete");
+```
+
+The `StatusCode` type's `Display` implementation produces `"<code> <reason>"` (e.g., `"429 Too
+Many Requests"`), which is more informative in logs than a bare integer. The `.as_u16()` method
+is approved only inside serde serialization helpers where JSON wire compatibility requires a
+numeric value.
+
 ## Constant-Time Secret Comparison
 
 Externally-provided secrets (webhook tokens, API keys, and similar short-lived credentials) must

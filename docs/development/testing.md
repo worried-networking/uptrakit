@@ -27,6 +27,24 @@ handling paths, etc.).
 | Backward compatibility (old JSON shape still deserializes) | Missing field defaults correctly | Internal -- keep |
 | Wire protocol spec conformance | Serialized JSON matches asyncapi.yaml schema | Internal -- keep |
 
+**Prohibition: `thiserror` Display format string tests are forbidden.**
+
+Tests that construct a `thiserror`-derived error variant and assert `err.to_string()` equals a
+string that literally appears in the `#[error("...")]` attribute are testing `thiserror`'s string
+interpolation, not application logic. Such tests must be removed. This includes all tests of the
+form:
+
+```rust
+// Forbidden — tests thiserror, not our code
+let err = MyError::Configuration("bad value".to_string());
+assert_eq!(err.to_string(), "configuration error: bad value");
+```
+
+The `#[error("...")]` format string is a compile-time declaration. If the format string itself
+needs to change, the change is intentional and the tests would all need to be updated too —
+making them maintenance work rather than safety nets. Tests for custom hand-written `Display`
+implementations (not derived from `#[error]`) remain internal logic tests and are kept.
+
 ### Wire protocol tests: asyncapi.yaml is the source of truth
 
 Spec-conformance tests validate that Rust serialization matches the
