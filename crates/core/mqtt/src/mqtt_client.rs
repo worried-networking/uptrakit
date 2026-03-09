@@ -279,6 +279,13 @@ fn build_mqtt_options(config: &MqttConfig) -> MqttOptions {
                 .as_ref()
                 .map(|pem| pem.expose_secret().as_bytes().to_vec())
                 .unwrap_or_default();
+            // `alpn` is intentionally `None`: MQTT over TLS does not require
+            // ALPN negotiation and no broker in the supported set mandates it.
+            //
+            // `client_auth` is intentionally `None`: mTLS for broker
+            // authentication is not supported by this client. Server identity
+            // is verified via the CA certificate; the broker authenticates
+            // clients via MQTT username/password credentials instead.
             let tls_config = rumqttc::TlsConfiguration::Simple {
                 ca,
                 alpn: None,
