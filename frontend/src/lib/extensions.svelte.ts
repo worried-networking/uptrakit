@@ -36,6 +36,15 @@ export function getPanelExtensions(targetPage: string): ExtensionResponse[] {
 	return extensions.filter((e) => e.placement.type === 'panel' && e.placement.target_page === targetPage);
 }
 
+export function getTabExtensions(targetPage: string): ExtensionResponse[] {
+	return extensions.filter(
+		(e) =>
+			e.placement.type === 'panel' &&
+			(e.placement as { type: 'panel'; target_page: string; position: { type: string } }).target_page === targetPage &&
+			(e.placement as { type: 'panel'; target_page: string; position: { type: string } }).position.type === 'tab'
+	);
+}
+
 export function getContextMenuExtensions(targetEntity: string): ExtensionResponse[] {
 	return extensions.filter(
 		(e) => e.placement.type === 'context_menu_group' && e.placement.target_entity === targetEntity
