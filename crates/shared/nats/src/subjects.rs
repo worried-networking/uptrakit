@@ -25,12 +25,19 @@ pub fn batch_progress(batch_id: &Uuid) -> String {
     format!("{BATCH_PROGRESS_PREFIX}.{batch_id}")
 }
 
+/// The capability routing string that directs a message to the controller.
+///
+/// Used in `determine()` to distinguish controller-bound messages from
+/// capability-bound messages. Extracted as a named constant to avoid
+/// magic string literals scattered across routing logic.
+const CONTROLLER_ROUTING_CAP: &str = "controller";
+
 /// Determine the NATS subject for a message based on routing metadata.
 pub fn determine(target_service_id: Option<Uuid>, target_capability: Option<&str>) -> String {
     match (target_service_id, target_capability) {
         (Some(id), _) => format!("{SUBJECT_PREFIX}.service.{id}"),
         (None, Some(cap)) => {
-            if cap == "controller" {
+            if cap == CONTROLLER_ROUTING_CAP {
                 format!("{SUBJECT_PREFIX}.controller")
             } else {
                 format!("{SUBJECT_PREFIX}.capability.{cap}")
