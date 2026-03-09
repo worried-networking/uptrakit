@@ -62,6 +62,14 @@ pub enum AdminEvent {
     SystemServiceStatusChanged { id: Uuid, status: String },
     /// A scheduled task completed execution.
     SchedulerTaskCompleted { task_id: Uuid },
+    /// A host tag was created.
+    HostTagCreated { id: Uuid },
+    /// A host tag was updated.
+    HostTagUpdated { id: Uuid },
+    /// A host tag was deleted.
+    HostTagDeleted { id: Uuid },
+    /// Tag assignments changed on a host.
+    HostTagsChanged { host_id: Uuid },
 }
 
 impl AdminEvent {
@@ -85,6 +93,10 @@ impl AdminEvent {
             Self::BatchHostPackageUpdateCompleted { .. } => "batch_host_package_update_completed",
             Self::SystemServiceStatusChanged { .. } => "system_service_status_changed",
             Self::SchedulerTaskCompleted { .. } => "scheduler_task_completed",
+            Self::HostTagCreated { .. } => "host_tag_created",
+            Self::HostTagUpdated { .. } => "host_tag_updated",
+            Self::HostTagDeleted { .. } => "host_tag_deleted",
+            Self::HostTagsChanged { .. } => "host_tags_changed",
         }
     }
 }
@@ -129,6 +141,10 @@ mod tests {
                 status: "approved".to_string(),
             },
             AdminEvent::SchedulerTaskCompleted { task_id: id },
+            AdminEvent::HostTagCreated { id },
+            AdminEvent::HostTagUpdated { id },
+            AdminEvent::HostTagDeleted { id },
+            AdminEvent::HostTagsChanged { host_id: id },
         ]
     }
 
@@ -221,7 +237,7 @@ mod tests {
     fn event_name_count_matches_variant_count() {
         // If a new variant is added without updating event_name(), this
         // test will fail because all_variants() won't include it.
-        assert_eq!(all_variants().len(), 14);
+        assert_eq!(all_variants().len(), 18);
     }
 
     #[test]

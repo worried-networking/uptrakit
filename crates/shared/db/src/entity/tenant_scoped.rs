@@ -2,7 +2,7 @@ use sea_orm::EntityTrait;
 
 use super::{
     audit_log, enrollment_token, host, host_discovery_allowlist, host_package, host_package_ignore,
-    host_package_update_history, mqtt_client, notification_channel, notification_log,
+    host_package_update_history, host_tag, mqtt_client, notification_channel, notification_log,
     notification_rule, oidc_provider, plugin_config, proxmox_host_mapping, scheduled_task, service,
     setting, settings_version, software_item, tenant_discovery_allowlist, update_batch, user_role,
 };
@@ -139,6 +139,12 @@ impl TenantScoped for host_package_ignore::Entity {
 impl TenantScoped for host_package_update_history::Entity {
     fn tenant_id_column() -> Self::Column {
         host_package_update_history::Column::TenantId
+    }
+}
+
+impl TenantScoped for host_tag::Entity {
+    fn tenant_id_column() -> Self::Column {
+        host_tag::Column::TenantId
     }
 }
 

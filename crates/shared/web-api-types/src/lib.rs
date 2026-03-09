@@ -20,6 +20,7 @@ pub mod error;
 pub mod events;
 pub mod extensions;
 pub mod host_packages;
+pub mod host_tags;
 pub mod hosts;
 pub mod masked_url;
 pub mod mqtt_services;

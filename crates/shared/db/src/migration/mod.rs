@@ -27,6 +27,7 @@ mod m20260308_000002_fix_permission_uuid_storage;
 mod m20260308_000003_proxmox_hm_pagination_indexes;
 mod m20260309_000001_fix_permission_created_at_format;
 mod m20260309_000002_simplify_autodiscovery_ignores;
+mod m20260309_000003_host_tags;
 mod m20260310_000001_data_encryption_keys;
 mod m20260311_000001_update_history_status_index;
 mod m20260311_000002_audit_log_permissions;
@@ -82,6 +83,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260318_000001_host_software_item_qualifier::Migration),
             Box::new(m20260318_000002_cron_to_interval::Migration),
             Box::new(m20260309_000002_simplify_autodiscovery_ignores::Migration),
+            Box::new(m20260309_000003_host_tags::Migration),
         ]
     }
 }
@@ -116,10 +118,11 @@ mod tests {
     use crate::entity::{
         audit_log, crl_cache, data_encryption_key, global_setting, host_discovery_allowlist,
         host_package, host_package_ignore, host_package_update_history, host_software_item,
-        notification_channel, notification_log, notification_rule, plugin_config,
-        proxmox_host_mapping, revoked_token_jti, revoked_token_user, role, role_permission,
-        service, software_item, system_audit_log, system_enrollment_token, system_service,
-        system_service_certificate, tenant_discovery_allowlist, update_batch, update_history,
+        host_tag, host_tag_assignment, notification_channel, notification_log, notification_rule,
+        plugin_config, proxmox_host_mapping, revoked_token_jti, revoked_token_user, role,
+        role_permission, service, software_item, system_audit_log, system_enrollment_token,
+        system_service, system_service_certificate, tenant_discovery_allowlist, update_batch,
+        update_history,
     };
 
     /// Verify that the `has_update` generated column exists in `host_packages`.
@@ -285,6 +288,13 @@ mod tests {
 
         // Verify proxmox_host_mappings table exists.
         proxmox_host_mapping::Entity::find()
+            .count(&db)
+            .await
+            .unwrap();
+
+        // Verify host_tags and host_tag_assignments tables exist.
+        host_tag::Entity::find().count(&db).await.unwrap();
+        host_tag_assignment::Entity::find()
             .count(&db)
             .await
             .unwrap();

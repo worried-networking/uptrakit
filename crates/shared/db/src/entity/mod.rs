@@ -14,6 +14,8 @@ pub mod host_package_ignore;
 pub mod host_package_update_history;
 pub mod host_software_item;
 pub mod host_software_item_plugin;
+pub mod host_tag;
+pub mod host_tag_assignment;
 pub mod mqtt_client;
 pub mod mqtt_lease;
 pub mod notification_channel;

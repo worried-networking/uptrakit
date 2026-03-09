@@ -34,6 +34,8 @@ pub enum Relation {
     HostPackage,
     #[sea_orm(has_many = "super::host_package_update_history::Entity")]
     HostPackageUpdateHistory,
+    #[sea_orm(has_many = "super::host_tag_assignment::Entity")]
+    HostTagAssignment,
 }
 
 impl Related<super::tenant::Entity> for Entity {
@@ -77,6 +79,22 @@ impl Related<super::host_package::Entity> for Entity {
 impl Related<super::host_package_update_history::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::HostPackageUpdateHistory.def()
+    }
+}
+
+impl Related<super::host_tag::Entity> for Entity {
+    fn to() -> RelationDef {
+        super::host_tag_assignment::Relation::HostTag.def()
+    }
+
+    fn via() -> Option<RelationDef> {
+        Some(super::host_tag_assignment::Relation::Host.def().rev())
+    }
+}
+
+impl Related<super::host_tag_assignment::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::HostTagAssignment.def()
     }
 }
 

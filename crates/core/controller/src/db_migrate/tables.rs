@@ -39,6 +39,8 @@ pub(crate) const COPY_ORDER: &[&str] = &[
     "system_service_certificates",
     "hosts",
     "service_hosts",
+    "host_tags",
+    "host_tag_assignments",
     "plugin_configs",
     "software_items",
     "host_software_items",
@@ -101,6 +103,8 @@ pub async fn copy_all(
     copy!(SystemServiceCertificate, "system_service_certificates");
     copy!(Host, "hosts");
     copy!(ServiceHost, "service_hosts");
+    copy!(HostTag, "host_tags");
+    copy!(HostTagAssignment, "host_tag_assignments");
     copy!(PluginConfig, "plugin_configs");
     copy!(SoftwareItem, "software_items");
     copy!(HostSoftwareItem, "host_software_items");
@@ -161,6 +165,8 @@ pub async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
     clean!(HostSoftwareItem, "host_software_items");
     clean!(SoftwareItem, "software_items");
     clean!(PluginConfig, "plugin_configs");
+    clean!(HostTagAssignment, "host_tag_assignments");
+    clean!(HostTag, "host_tags");
     clean!(ServiceHost, "service_hosts");
     clean!(Host, "hosts");
     clean!(SystemServiceCertificate, "system_service_certificates");
@@ -222,6 +228,8 @@ pub async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnection) -> R
     verify!(SystemServiceCertificate, "system_service_certificates");
     verify!(Host, "hosts");
     verify!(ServiceHost, "service_hosts");
+    verify!(HostTag, "host_tags");
+    verify!(HostTagAssignment, "host_tag_assignments");
     verify!(PluginConfig, "plugin_configs");
     verify!(SoftwareItem, "software_items");
     verify!(HostSoftwareItem, "host_software_items");
@@ -373,11 +381,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn copy_order_has_all_44_tables() {
+    fn copy_order_has_all_46_tables() {
         assert_eq!(
             COPY_ORDER.len(),
-            44,
-            "COPY_ORDER must list all 44 app tables"
+            46,
+            "COPY_ORDER must list all 46 app tables"
         );
     }
 }

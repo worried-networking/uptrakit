@@ -26,6 +26,10 @@ pub use super::host_software_item::{Entity as HostSoftwareItem, Model as HostSof
 pub use super::host_software_item_plugin::{
     Entity as HostSoftwareItemPlugin, Model as HostSoftwareItemPluginModel,
 };
+pub use super::host_tag::{Entity as HostTag, Model as HostTagModel};
+pub use super::host_tag_assignment::{
+    Entity as HostTagAssignment, Model as HostTagAssignmentModel,
+};
 pub use super::mqtt_client::{Entity as MqttClient, Model as MqttClientModel};
 pub use super::mqtt_lease::{Entity as MqttLease, Model as MqttLeaseModel};
 pub use super::notification_channel::{
