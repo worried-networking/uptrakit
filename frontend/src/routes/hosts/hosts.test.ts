@@ -57,7 +57,8 @@ const sampleHost: HostResponse = {
 	created_at: '2024-01-01T00:00:00Z',
 	updated_at: '2024-01-01T00:00:00Z',
 	agents: [],
-	update_summary: { available_updates_count: 0, security_updates_count: 0 }
+	update_summary: { available_updates_count: 0, security_updates_count: 0 },
+	tags: []
 };
 
 // ---------------------------------------------------------------------------

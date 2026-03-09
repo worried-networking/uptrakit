@@ -62,7 +62,8 @@ const sampleHost: HostResponse = {
 		{ id: 'agent-001', friendly_name: 'Main Agent', status: 'approved' },
 		{ id: 'agent-002', friendly_name: 'Backup Agent', status: 'pending' }
 	],
-	update_summary: { available_updates_count: 0, security_updates_count: 0 }
+	update_summary: { available_updates_count: 0, security_updates_count: 0 },
+	tags: []
 };
 
 const sampleHistoryEntry: UpdateHistoryResponse = {

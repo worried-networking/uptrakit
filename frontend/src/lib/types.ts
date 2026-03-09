@@ -306,6 +306,38 @@ export interface HostUpdateSummary {
 	security_updates_count: number;
 }
 
+export interface HostTagResponse {
+	id: string;
+	name: string;
+	color: string;
+	description: string | null;
+	created_at: string;
+	updated_at: string;
+	host_count: number;
+}
+
+export interface HostTagSummary {
+	id: string;
+	name: string;
+	color: string;
+}
+
+export interface CreateHostTagRequest {
+	name: string;
+	color?: string;
+	description?: string;
+}
+
+export interface UpdateHostTagRequest {
+	name?: string;
+	color?: string;
+	description?: string | null;
+}
+
+export interface SetHostTagsRequest {
+	tag_ids: string[];
+}
+
 export interface HostResponse {
 	id: string;
 	machine_id: string;
@@ -320,6 +352,7 @@ export interface HostResponse {
 	updated_at: string;
 	agents: HostAgentSummary[];
 	update_summary: HostUpdateSummary;
+	tags: HostTagSummary[];
 }
 
 export interface UpdateHostRequest {

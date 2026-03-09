@@ -81,7 +81,12 @@ import type {
 	AuditLogEntry,
 	AuditLogListParams,
 	ExtensionResponse,
-	ExtensionProviderInfo
+	ExtensionProviderInfo,
+	HostTagResponse,
+	CreateHostTagRequest,
+	UpdateHostTagRequest,
+	SetHostTagsRequest,
+	HostTagSummary
 } from './types';
 
 const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
@@ -389,6 +394,45 @@ export function updateHost(id: string, data: UpdateHostRequest): Promise<HostRes
 
 export function deactivateHost(id: string): Promise<void> {
 	return requestVoid(`/hosts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+// --- Host Tag APIs ---
+
+export function getHostTags(
+	page?: number,
+	perPage?: number,
+	search?: string
+): Promise<PaginatedResponse<HostTagResponse>> {
+	const params = new URLSearchParams();
+	if (page != null) params.set('page', String(page));
+	if (perPage != null) params.set('per_page', String(perPage));
+	if (search) params.set('search', search);
+	const query = params.toString();
+	return request(`/host-tags${query ? `?${query}` : ''}`);
+}
+
+export function getHostTag(id: string): Promise<HostTagResponse> {
+	return request(`/host-tags/${encodeURIComponent(id)}`);
+}
+
+export function createHostTag(data: CreateHostTagRequest): Promise<HostTagResponse> {
+	return request('/host-tags', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export function updateHostTag(id: string, data: UpdateHostTagRequest): Promise<HostTagResponse> {
+	return request(`/host-tags/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export function deleteHostTag(id: string): Promise<void> {
+	return requestVoid(`/host-tags/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export function setHostTags(hostId: string, data: SetHostTagsRequest): Promise<HostTagSummary[]> {
+	return request(`/hosts/${encodeURIComponent(hostId)}/tags`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export function batchHostTags(action: string, ids: string[]): Promise<BatchActionResponse> {
+	return request('/host-tags/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
 }
 
 // --- Host Package APIs ---

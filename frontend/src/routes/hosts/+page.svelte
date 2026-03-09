@@ -16,6 +16,7 @@
 	import Pagination from '$lib/components/Pagination.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
+	import TagBadge from '$lib/components/TagBadge.svelte';
 
 	let hosts: HostResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -245,6 +246,7 @@
 						</th>
 					{/if}
 					<th>Name</th>
+					<th>Tags</th>
 					<th>Hostname</th>
 					<th>OS</th>
 					<th>Architecture</th>
@@ -274,6 +276,17 @@
 						{/if}
 						<td>
 							<a href="/hosts/{host.id}" class="hover:underline font-medium">{host.friendly_name}</a>
+						</td>
+						<td>
+							{#if host.tags && host.tags.length > 0}
+								<div class="flex flex-wrap gap-1">
+									{#each host.tags as tag (tag.id)}
+										<TagBadge name={tag.name} color={tag.color} />
+									{/each}
+								</div>
+							{:else}
+								<span class="text-surface-400">&mdash;</span>
+							{/if}
 						</td>
 						<td>{host.hostname}</td>
 						<td>{host.os_version ?? host.os_type ?? '\u2014'}</td>
@@ -321,7 +334,7 @@
 					</tr>
 				{:else}
 					<tr>
-						<td colspan={canManage ? 12 : 9} class="text-center py-8">
+						<td colspan={canManage ? 13 : 10} class="text-center py-8">
 							<p class="text-lg font-medium">No hosts discovered yet</p>
 							<p class="mt-1 text-sm text-surface-500">
 								Hosts appear here automatically when an approved agent reports from a new machine.

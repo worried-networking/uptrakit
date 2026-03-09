@@ -195,7 +195,11 @@ export type AdminEventType =
 	| 'host_packages_changed'
 	| 'batch_host_package_update_completed'
 	| 'system_service_status_changed'
-	| 'scheduler_task_completed';
+	| 'scheduler_task_completed'
+	| 'host_tag_created'
+	| 'host_tag_updated'
+	| 'host_tag_deleted'
+	| 'host_tags_changed';
 
 /** Callbacks for the admin event SSE connection. */
 export interface AdminEventCallbacks {

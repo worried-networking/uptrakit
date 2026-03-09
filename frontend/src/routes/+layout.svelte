@@ -87,6 +87,7 @@
 		{ href: '/services', label: 'Services', priority: 200 },
 		{ href: '/system-services', label: 'System Services', priority: 300, permission: Permission.ViewSystemServices },
 		{ href: '/hosts', label: 'Hosts', priority: 400 },
+		{ href: '/host-tags', label: 'Tags', priority: 450, permission: Permission.ViewHosts },
 		{ href: '/software', label: 'Software', priority: 500, permission: Permission.ViewSoftware },
 		{ href: '/history', label: 'History', priority: 800, permission: Permission.ViewSoftware },
 		{ href: '/audit-logs', label: 'Audit Logs', priority: 900, permission: Permission.ViewAuditLogs },

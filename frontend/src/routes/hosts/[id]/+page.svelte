@@ -12,7 +12,9 @@
 		listHostDiscoveryAllowlist,
 		addHostDiscoveryAllowlistEntry,
 		deleteHostDiscoveryAllowlistEntry,
-		listPluginTypes
+		listPluginTypes,
+		getHostTags,
+		setHostTags
 	} from '$lib/api';
 	import { formatDate, formatVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -26,8 +28,10 @@
 		ServiceStatus,
 		UpdateHistoryStatus,
 		HostDiscoveryAllowlistEntry,
-		PluginTypeInfo
+		PluginTypeInfo,
+		HostTagResponse
 	} from '$lib/types';
+	import TagBadge from '$lib/components/TagBadge.svelte';
 
 	const id = $derived(page.params.id as string);
 
@@ -54,6 +58,11 @@
 	let allowlistForm = $state({ plugin_type: '' });
 	let allowlistDeleteConfirm: { id: string; plugin_type: string } | null = $state(null);
 
+	// Tags state
+	let allTags: HostTagResponse[] = $state([]);
+	let showSetTagsModal: boolean = $state(false);
+	let selectedTagIds: string[] = $state([]);
+
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageHosts) ?? false);
 	const canManageSoftware = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
 	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
@@ -63,6 +72,7 @@
 
 	onMount(() => {
 		loadData();
+		loadAllTags();
 		if (canViewSoftware) {
 			loadPluginTypes();
 			loadHostAllowlist();
@@ -125,6 +135,44 @@
 			showError(e instanceof Error ? e.message : 'Failed to load host discovery allowlist');
 		} finally {
 			hostAllowlistLoading = false;
+		}
+	}
+
+	async function loadAllTags() {
+		try {
+			const result = await getHostTags(1, 100);
+			allTags = result.items;
+		} catch {
+			// Tags are non-critical — silently ignore
+		}
+	}
+
+	function openSetTagsModal() {
+		if (!host) return;
+		selectedTagIds = host.tags.map((t) => t.id);
+		showSetTagsModal = true;
+	}
+
+	function toggleTagSelection(tagId: string) {
+		if (selectedTagIds.includes(tagId)) {
+			selectedTagIds = selectedTagIds.filter((id) => id !== tagId);
+		} else {
+			selectedTagIds = [...selectedTagIds, tagId];
+		}
+	}
+
+	async function executeSetTags() {
+		if (!host || submitting) return;
+		submitting = true;
+		try {
+			const updatedTags = await setHostTags(host.id, { tag_ids: selectedTagIds });
+			host = { ...host, tags: updatedTags };
+			showSetTagsModal = false;
+			showSuccess('Tags updated');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to set tags');
+		} finally {
+			submitting = false;
 		}
 	}
 
@@ -327,6 +375,25 @@
 				</div>
 			</div>
 		</div>
+
+		<!-- Tags -->
+		<section class="mb-6">
+			<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+				<h2 class="h3">Tags</h2>
+				{#if canManage}
+					<button class="btn btn-sm preset-tonal-surface" onclick={openSetTagsModal}>Set Tags</button>
+				{/if}
+			</div>
+			{#if host.tags.length === 0}
+				<p class="text-sm text-surface-500">No tags assigned to this host.</p>
+			{:else}
+				<div class="flex flex-wrap gap-2">
+					{#each host.tags as tag (tag.id)}
+						<TagBadge name={tag.name} color={tag.color} />
+					{/each}
+				</div>
+			{/if}
+		</section>
 
 		<!-- Connected Agents -->
 		<section class="mb-6">
@@ -555,6 +622,43 @@
 		{#snippet footer()}
 			<button class="btn preset-tonal-surface" onclick={closeAllowlistModal}>Cancel</button>
 			<button class="btn preset-filled-primary-500" onclick={saveAllowlistEntry}>Add</button>
+		{/snippet}
+	</Modal>
+{/if}
+
+{#if showSetTagsModal}
+	<Modal title="Set Tags" onclose={() => (showSetTagsModal = false)}>
+		{#if allTags.length === 0}
+			<p class="text-sm text-surface-500">
+				No tags available. <a href="/host-tags" class="text-primary-500 hover:underline">Create a tag</a> first.
+			</p>
+		{:else}
+			<p class="mb-3 text-sm text-surface-500">Select the tags to assign to this host.</p>
+			<div class="space-y-2 max-h-64 overflow-y-auto">
+				{#each allTags as tag (tag.id)}
+					<label
+						class="flex items-center gap-3 rounded-md px-3 py-2 hover:bg-surface-100 dark:hover:bg-surface-800 cursor-pointer"
+					>
+						<input
+							type="checkbox"
+							class="checkbox"
+							checked={selectedTagIds.includes(tag.id)}
+							onchange={() => toggleTagSelection(tag.id)}
+						/>
+						<span class="inline-block h-3 w-3 rounded-full flex-shrink-0" style="background-color: {tag.color}"></span>
+						<span class="text-sm font-medium">{tag.name}</span>
+						{#if tag.description}
+							<span class="text-xs text-surface-500">{tag.description}</span>
+						{/if}
+					</label>
+				{/each}
+			</div>
+		{/if}
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={() => (showSetTagsModal = false)}>Cancel</button>
+			<button class="btn preset-filled-primary-500" disabled={submitting} onclick={executeSetTags}>
+				{submitting ? 'Saving...' : 'Save'}
+			</button>
 		{/snippet}
 	</Modal>
 {/if}
