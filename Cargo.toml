@@ -68,6 +68,8 @@ tokio-tungstenite = { version = "0.28", default-features = false, features = ["c
 zeroize = { version = "1", features = ["derive"] }
 async-nats = { version = "0.46", default-features = false, features = ["server_2_10", "server_2_11", "server_2_12", "aws-lc-rs", "jetstream"] }
 base64 = "0.22"
+rustix = { version = "1", default-features = false }
+libc = "0.2"
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustls-no-provider"] }
 serde_yaml_ng = "0.10"
 uptrakit-backoff = { path = "crates/shared/backoff" }

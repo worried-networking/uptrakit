@@ -24,6 +24,11 @@ pub enum CommandError {
 
     #[error("unsupported operation: {0}")]
     UnsupportedOperation(String),
+
+    /// PTY allocation failed during interactive command execution.
+    #[cfg(feature = "interactive")]
+    #[error("PTY allocation failed: {0}")]
+    PtyAllocationFailed(#[source] std::io::Error),
 }
 
 /// Result type alias for command operations.

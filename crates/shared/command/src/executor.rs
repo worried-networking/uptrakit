@@ -13,6 +13,24 @@ use uptrakit_shared_types::HookShell;
 
 use crate::types::UpdateOutputLine;
 
+/// Handle for an interactive command session with PTY support.
+///
+/// Returned by [`CommandExecutor::execute_interactive`]. The caller uses the
+/// channels to forward stdin data and signals to the running process, and
+/// receives notifications when the process appears to be waiting for input.
+#[cfg(feature = "interactive")]
+pub struct InteractiveHandle {
+    /// Send raw bytes to the process stdin (PTY master write end).
+    pub stdin_tx: mpsc::Sender<Vec<u8>>,
+    /// Send a signal number to the process group (e.g., 2 = SIGINT, 15 = SIGTERM).
+    pub signal_tx: mpsc::Sender<i32>,
+    /// Await process completion. Resolves with accumulated output and exit code.
+    pub completion: tokio::task::JoinHandle<crate::Result<CommandOutput>>,
+    /// Receives a notification when the process appears to be waiting for stdin
+    /// (no output for ~10 seconds while still running).
+    pub attention_rx: mpsc::Receiver<()>,
+}
+
 /// A bidirectional byte stream connected to a remote command's stdin/stdout.
 ///
 /// Implementations wrap transport-specific channel types (e.g. russh
@@ -238,6 +256,33 @@ pub trait CommandExecutor: Send + Sync {
             "stdio tunnel not supported by this executor".into()
         ))
     }
+
+    /// Whether this executor supports interactive (PTY-backed) execution.
+    ///
+    /// When `true`, [`execute_interactive`](Self::execute_interactive) can be
+    /// called to run a command with a real terminal, stdin forwarding, and
+    /// signal delivery. The default implementation returns `false`.
+    #[cfg(feature = "interactive")]
+    fn supports_interactive(&self) -> bool {
+        false
+    }
+
+    /// Execute a command interactively with PTY allocation.
+    ///
+    /// The returned [`InteractiveHandle`] provides channels for stdin/signal
+    /// forwarding and a completion future. Output is streamed via `output_tx`.
+    ///
+    /// The default implementation returns [`CommandError::UnsupportedOperation`].
+    #[cfg(feature = "interactive")]
+    async fn execute_interactive(
+        &self,
+        _spec: &CommandSpec,
+        _output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> crate::Result<InteractiveHandle> {
+        bail!(CommandError::UnsupportedOperation(
+            "interactive execution not supported by this executor".into()
+        ))
+    }
 }
 
 /// Convert a [`CommandSpec`] to a single shell-safe command string
@@ -356,6 +401,20 @@ impl CommandExecutor for LocalCommandExecutor {
         let (output, exit_code) = apply_timeout(fut, spec.timeout).await?;
         tracing::debug!(exit_code, "command completed");
         Ok(CommandOutput { output, exit_code })
+    }
+
+    #[cfg(feature = "interactive")]
+    fn supports_interactive(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "interactive")]
+    async fn execute_interactive(
+        &self,
+        spec: &CommandSpec,
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> crate::Result<InteractiveHandle> {
+        crate::interactive::run_interactive(spec, output_tx).await
     }
 }
 
