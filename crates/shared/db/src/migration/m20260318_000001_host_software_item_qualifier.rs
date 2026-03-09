@@ -282,7 +282,10 @@ fn build_hsi_table_old(table_name: impl IntoTableRef + Clone) -> TableCreateStat
 
 /// Build the new `host_software_item_plugins` schema (with `host_software_item_id`),
 /// targeting `table_name`.
-fn build_hsip_table(table_name: impl IntoTableRef + Clone) -> TableCreateStatement {
+fn build_hsip_table(
+    table_name: impl IntoTableRef + Clone,
+    hsi_target: impl IntoTableRef,
+) -> TableCreateStatement {
     Table::create()
         .table(table_name.clone())
         .col(
@@ -343,7 +346,7 @@ fn build_hsip_table(table_name: impl IntoTableRef + Clone) -> TableCreateStateme
             ForeignKey::create()
                 .name("fk_hsip_host_software_item_id")
                 .from(table_name, HostSoftwareItemPlugins::HostSoftwareItemId)
-                .to(HostSoftwareItems::Table, HostSoftwareItems::Id)
+                .to(hsi_target, HostSoftwareItems::Id)
                 .on_delete(ForeignKeyAction::Cascade),
         )
         .to_owned()
@@ -531,7 +534,10 @@ impl MigrationTrait for Migration {
 
             if hsip_orig_exists {
                 manager
-                    .create_table(build_hsip_table(HostSoftwareItemPluginsNew::Table))
+                    .create_table(build_hsip_table(
+                        HostSoftwareItemPluginsNew::Table,
+                        HostSoftwareItemsNew::Table,
+                    ))
                     .await?;
 
                 let hsip_select = Query::select()
