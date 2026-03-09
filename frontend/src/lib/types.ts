@@ -478,16 +478,12 @@ export interface DiscardDiscoveredResponse {
 
 export interface AutodiscoveryIgnoreResponse {
 	id: string;
-	plugin_config_id: string;
-	plugin_config_name: string;
-	plugin_type: string;
-	package_identifier: string;
+	name: string;
 	created_at: string;
 }
 
 export interface CreateAutodiscoveryIgnoreRequest {
-	plugin_config_id: string;
-	package_identifier: string;
+	name: string;
 }
 
 export interface UpdateSoftwareItemRequest {

@@ -68,8 +68,8 @@
 	let ignoresTotalPages: number = $state(1);
 	let ignoresTotalItems: number = $state(0);
 	let showIgnoreModal: boolean = $state(false);
-	let ignoreForm = $state({ plugin_config_id: '', package_identifier: '' });
-	let ignoreDeleteConfirm: { id: string; pkg: string } | null = $state(null);
+	let ignoreForm = $state({ name: '' });
+	let ignoreDeleteConfirm: { id: string; name: string } | null = $state(null);
 
 	// Discovery allowlist state
 	let allowlist: TenantDiscoveryAllowlistEntry[] = $state([]);
@@ -425,7 +425,7 @@
 	}
 
 	function openCreateIgnore() {
-		ignoreForm = { plugin_config_id: '', package_identifier: '' };
+		ignoreForm = { name: '' };
 		showIgnoreModal = true;
 	}
 
@@ -434,14 +434,13 @@
 	}
 
 	async function saveIgnore() {
-		if (!ignoreForm.plugin_config_id || !ignoreForm.package_identifier.trim()) {
-			showError('Plugin config and package identifier are required');
+		if (!ignoreForm.name.trim()) {
+			showError('Name is required');
 			return;
 		}
 		try {
 			await createAutodiscoveryIgnore({
-				plugin_config_id: ignoreForm.plugin_config_id,
-				package_identifier: ignoreForm.package_identifier.trim()
+				name: ignoreForm.name.trim()
 			});
 			showSuccess('Ignore rule created.');
 			closeIgnoreModal();
@@ -729,8 +728,7 @@
 										/>
 									</th>
 								{/if}
-								<th>Plugin Config</th>
-								<th>Package Identifier</th>
+								<th>Name</th>
 								<th>Created</th>
 								{#if canManage}<th class="w-24">Actions</th>{/if}
 							</tr>
@@ -745,21 +743,17 @@
 												class="checkbox"
 												checked={ignoreSelectedIds.has(ignore.id)}
 												onchange={() => toggleIgnoreSelect(ignore.id)}
-												aria-label="Select {ignore.package_identifier}"
+												aria-label="Select {ignore.name}"
 											/>
 										</td>
 									{/if}
-									<td>
-										<span class="font-medium">{ignore.plugin_config_name}</span>
-										<span class="ml-2 badge preset-tonal text-xs">{ignore.plugin_type}</span>
-									</td>
-									<td><code class="text-sm">{ignore.package_identifier}</code></td>
+									<td><span class="font-medium">{ignore.name}</span></td>
 									<td>{formatDate(ignore.created_at)}</td>
 									{#if canManage}
 										<td>
 											<button
 												class="btn btn-sm preset-tonal-error"
-												onclick={() => (ignoreDeleteConfirm = { id: ignore.id, pkg: ignore.package_identifier })}
+												onclick={() => (ignoreDeleteConfirm = { id: ignore.id, name: ignore.name })}
 											>
 												Delete
 											</button>
@@ -768,10 +762,10 @@
 								</tr>
 							{:else}
 								<tr>
-									<td colspan={canManage ? 6 : 3} class="py-8 text-center">
+									<td colspan={canManage ? 4 : 2} class="py-8 text-center">
 										<p class="text-lg font-medium">No ignore rules</p>
 										<p class="mt-1 text-sm text-surface-500">
-											Add ignore rules to suppress specific packages from autodiscovery.
+											Add ignore rules to suppress software items from autodiscovery by name.
 										</p>
 									</td>
 								</tr>
@@ -1021,32 +1015,13 @@
 {#if showIgnoreModal}
 	<Modal title="Add Ignore Rule" onclose={closeIgnoreModal}>
 		<label class="label">
-			<span>Plugin Config</span>
-			<select class="select" bind:value={ignoreForm.plugin_config_id}>
-				<option value="">— select —</option>
-				{#each configs as config (config.id)}
-					<option value={config.id}>{config.name} ({config.plugin_type})</option>
-				{/each}
-			</select>
-		</label>
-
-		<label class="label">
-			<span>Package Identifier</span>
-			<input
-				class="input"
-				type="text"
-				placeholder="e.g. owner/repo or image:tag"
-				bind:value={ignoreForm.package_identifier}
-			/>
+			<span>Software Item Name</span>
+			<input class="input" type="text" placeholder="e.g. FreshRSS or Plex Media Server" bind:value={ignoreForm.name} />
 		</label>
 
 		{#snippet footer()}
 			<button class="btn preset-tonal-surface" onclick={closeIgnoreModal}>Cancel</button>
-			<button
-				class="btn preset-filled-primary-500"
-				onclick={saveIgnore}
-				disabled={!ignoreForm.plugin_config_id || !ignoreForm.package_identifier.trim()}
-			>
+			<button class="btn preset-filled-primary-500" onclick={saveIgnore} disabled={!ignoreForm.name.trim()}>
 				Create
 			</button>
 		{/snippet}
@@ -1070,7 +1045,7 @@
 	<ConfirmDialog
 		title="Delete Ignore Rule"
 		messagePrefix="Are you sure you want to delete the ignore rule for"
-		entityName={ignoreDeleteConfirm.pkg}
+		entityName={ignoreDeleteConfirm.name}
 		confirmLabel="Delete"
 		confirmClass="preset-filled-error-500"
 		onconfirm={executeDeleteIgnore}

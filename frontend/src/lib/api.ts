@@ -773,13 +773,11 @@ export function discardHostDiscovered(hostId: string, pluginConfigId?: string): 
 
 export function getAutodiscoveryIgnores(
 	page?: number,
-	perPage?: number,
-	pluginConfigId?: string
+	perPage?: number
 ): Promise<PaginatedResponse<AutodiscoveryIgnoreResponse>> {
 	const params = new URLSearchParams();
 	if (page != null) params.set('page', String(page));
 	if (perPage != null) params.set('per_page', String(perPage));
-	if (pluginConfigId != null) params.set('plugin_config_id', pluginConfigId);
 	const query = params.toString();
 	return request(`/autodiscovery/ignores${query ? `?${query}` : ''}`);
 }
