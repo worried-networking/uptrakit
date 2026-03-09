@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
@@ -16,13 +17,17 @@
 		listDiscoveryAllowlist,
 		addDiscoveryAllowlistEntry,
 		deleteDiscoveryAllowlistEntry,
-		listPluginTypes
+		listPluginTypes,
+		batchPluginConfigs,
+		batchAutodiscoveryIgnores
 	} from '$lib/api';
 	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
+	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
+	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 	import { Permission, PluginCapability } from '$lib/types';
 	import type {
 		PluginConfigResponse,
@@ -30,7 +35,8 @@
 		TenantDiscoveryAllowlistEntry,
 		PluginTypeInfo,
 		FieldDef,
-		SelectOption
+		SelectOption,
+		BatchActionResponse
 	} from '$lib/types';
 
 	type ActiveTab = 'configs' | 'ignores' | 'allowlist';
@@ -71,6 +77,25 @@
 	let showAllowlistModal: boolean = $state(false);
 	let allowlistForm = $state({ plugin_type: '' });
 	let allowlistDeleteConfirm: { id: string; plugin_type: string } | null = $state(null);
+
+	// Batch state — plugin configs
+	let configSelectedIds = new SvelteSet<string>();
+	let configBatchConfirmAction: string | null = $state(null);
+	let configBatchResult: BatchActionResponse | null = $state(null);
+	let configBatchSubmitting: boolean = $state(false);
+
+	// Batch state — ignore rules
+	let ignoreSelectedIds = new SvelteSet<string>();
+	let ignoreBatchConfirmAction: string | null = $state(null);
+	let ignoreBatchResult: BatchActionResponse | null = $state(null);
+	let ignoreBatchSubmitting: boolean = $state(false);
+
+	const configBatchActions: { id: string; label: string; destructive?: boolean }[] = [
+		{ id: 'delete', label: 'Delete', destructive: true }
+	];
+	const ignoreBatchActions: { id: string; label: string; destructive?: boolean }[] = [
+		{ id: 'delete', label: 'Delete', destructive: true }
+	];
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
@@ -426,6 +451,84 @@
 		}
 	}
 
+	// ── Config batch functions ────────────────────────────────────────────
+
+	function toggleConfigSelectAll() {
+		if (configSelectedIds.size === configs.length) {
+			configSelectedIds.clear();
+		} else {
+			configSelectedIds.clear();
+			for (const c of configs) configSelectedIds.add(c.id);
+		}
+	}
+
+	function toggleConfigSelect(id: string) {
+		if (configSelectedIds.has(id)) {
+			configSelectedIds.delete(id);
+		} else {
+			configSelectedIds.add(id);
+		}
+	}
+
+	async function executeConfigBatchAction() {
+		if (!configBatchConfirmAction || configBatchSubmitting) return;
+		configBatchConfirmAction = null;
+		configBatchSubmitting = true;
+		try {
+			const response = await batchPluginConfigs('delete', [...configSelectedIds]);
+			if (response.failed.length > 0) {
+				configBatchResult = response;
+			} else {
+				showSuccess(`${response.succeeded.length} plugin config(s) deleted.`);
+			}
+			configSelectedIds.clear();
+			await loadConfigs();
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to delete plugin configs');
+		} finally {
+			configBatchSubmitting = false;
+		}
+	}
+
+	// ── Ignore batch functions ───────────────────────────────────────────
+
+	function toggleIgnoreSelectAll() {
+		if (ignoreSelectedIds.size === ignores.length) {
+			ignoreSelectedIds.clear();
+		} else {
+			ignoreSelectedIds.clear();
+			for (const i of ignores) ignoreSelectedIds.add(i.id);
+		}
+	}
+
+	function toggleIgnoreSelect(id: string) {
+		if (ignoreSelectedIds.has(id)) {
+			ignoreSelectedIds.delete(id);
+		} else {
+			ignoreSelectedIds.add(id);
+		}
+	}
+
+	async function executeIgnoreBatchAction() {
+		if (!ignoreBatchConfirmAction || ignoreBatchSubmitting) return;
+		ignoreBatchConfirmAction = null;
+		ignoreBatchSubmitting = true;
+		try {
+			const response = await batchAutodiscoveryIgnores('delete', [...ignoreSelectedIds]);
+			if (response.failed.length > 0) {
+				ignoreBatchResult = response;
+			} else {
+				showSuccess(`${response.succeeded.length} ignore rule(s) deleted.`);
+			}
+			ignoreSelectedIds.clear();
+			await loadIgnores(ignoresPage);
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to delete ignore rules');
+		} finally {
+			ignoreBatchSubmitting = false;
+		}
+	}
+
 	async function executeDeleteIgnore() {
 		if (!ignoreDeleteConfirm) return;
 		const { id } = ignoreDeleteConfirm;
@@ -484,6 +587,18 @@
 					<table class="table">
 						<thead>
 							<tr>
+								{#if canManage}
+									<th class="w-10">
+										<input
+											type="checkbox"
+											class="checkbox"
+											checked={configs.length > 0 && configSelectedIds.size === configs.length}
+											indeterminate={configSelectedIds.size > 0 && configSelectedIds.size < configs.length}
+											onchange={toggleConfigSelectAll}
+											aria-label="Select all"
+										/>
+									</th>
+								{/if}
 								<th>Name</th>
 								<th>Type</th>
 								<th>Status</th>
@@ -494,6 +609,17 @@
 						<tbody>
 							{#each configs as config (config.id)}
 								<tr>
+									{#if canManage}
+										<td>
+											<input
+												type="checkbox"
+												class="checkbox"
+												checked={configSelectedIds.has(config.id)}
+												onchange={() => toggleConfigSelect(config.id)}
+												aria-label="Select {config.name}"
+											/>
+										</td>
+									{/if}
 									<td>{config.name}</td>
 									<td><span class="badge preset-tonal">{config.plugin_type}</span></td>
 									<td>
@@ -536,7 +662,7 @@
 								</tr>
 							{:else}
 								<tr>
-									<td colspan={canManage ? 5 : 4} class="py-8 text-center">
+									<td colspan={canManage ? 7 : 4} class="py-8 text-center">
 										<p class="text-lg font-medium">No plugin configs</p>
 										<p class="mt-1 text-sm text-surface-500">Add a plugin configuration to enable version tracking.</p>
 									</td>
@@ -545,6 +671,36 @@
 						</tbody>
 					</table>
 				</div>
+			{/if}
+
+			{#if canManage && configSelectedIds.size > 0}
+				<BatchActionBar
+					selectedCount={configSelectedIds.size}
+					actions={configBatchActions}
+					onaction={() => (configBatchConfirmAction = 'delete')}
+					oncancel={() => configSelectedIds.clear()}
+				/>
+			{/if}
+
+			{#if configBatchConfirmAction}
+				<ConfirmDialog
+					title="Batch Delete Plugin Configs"
+					messagePrefix="Are you sure you want to delete"
+					entityName="{configSelectedIds.size} plugin config(s)"
+					confirmLabel={configBatchSubmitting ? 'Deleting...' : 'Delete'}
+					confirmClass="preset-filled-error-500"
+					confirmDisabled={configBatchSubmitting}
+					onconfirm={executeConfigBatchAction}
+					oncancel={() => (configBatchConfirmAction = null)}
+				/>
+			{/if}
+
+			{#if configBatchResult}
+				<BatchResultDialog
+					title="Batch Action Results"
+					response={configBatchResult}
+					onclose={() => (configBatchResult = null)}
+				/>
 			{/if}
 		{:else if activeTab === 'ignores'}
 			<!-- Ignore rules tab -->
@@ -561,6 +717,18 @@
 					<table class="table">
 						<thead>
 							<tr>
+								{#if canManage}
+									<th class="w-10">
+										<input
+											type="checkbox"
+											class="checkbox"
+											checked={ignores.length > 0 && ignoreSelectedIds.size === ignores.length}
+											indeterminate={ignoreSelectedIds.size > 0 && ignoreSelectedIds.size < ignores.length}
+											onchange={toggleIgnoreSelectAll}
+											aria-label="Select all"
+										/>
+									</th>
+								{/if}
 								<th>Plugin Config</th>
 								<th>Package Identifier</th>
 								<th>Created</th>
@@ -570,6 +738,17 @@
 						<tbody>
 							{#each ignores as ignore (ignore.id)}
 								<tr>
+									{#if canManage}
+										<td>
+											<input
+												type="checkbox"
+												class="checkbox"
+												checked={ignoreSelectedIds.has(ignore.id)}
+												onchange={() => toggleIgnoreSelect(ignore.id)}
+												aria-label="Select {ignore.package_identifier}"
+											/>
+										</td>
+									{/if}
 									<td>
 										<span class="font-medium">{ignore.plugin_config_name}</span>
 										<span class="ml-2 badge preset-tonal text-xs">{ignore.plugin_type}</span>
@@ -589,7 +768,7 @@
 								</tr>
 							{:else}
 								<tr>
-									<td colspan={canManage ? 4 : 3} class="py-8 text-center">
+									<td colspan={canManage ? 6 : 3} class="py-8 text-center">
 										<p class="text-lg font-medium">No ignore rules</p>
 										<p class="mt-1 text-sm text-surface-500">
 											Add ignore rules to suppress specific packages from autodiscovery.
@@ -605,6 +784,36 @@
 					totalPages={ignoresTotalPages}
 					total={ignoresTotalItems}
 					onPageChange={loadIgnores}
+				/>
+			{/if}
+
+			{#if canManage && ignoreSelectedIds.size > 0}
+				<BatchActionBar
+					selectedCount={ignoreSelectedIds.size}
+					actions={ignoreBatchActions}
+					onaction={() => (ignoreBatchConfirmAction = 'delete')}
+					oncancel={() => ignoreSelectedIds.clear()}
+				/>
+			{/if}
+
+			{#if ignoreBatchConfirmAction}
+				<ConfirmDialog
+					title="Batch Delete Ignore Rules"
+					messagePrefix="Are you sure you want to delete"
+					entityName="{ignoreSelectedIds.size} ignore rule(s)"
+					confirmLabel={ignoreBatchSubmitting ? 'Deleting...' : 'Delete'}
+					confirmClass="preset-filled-error-500"
+					confirmDisabled={ignoreBatchSubmitting}
+					onconfirm={executeIgnoreBatchAction}
+					oncancel={() => (ignoreBatchConfirmAction = null)}
+				/>
+			{/if}
+
+			{#if ignoreBatchResult}
+				<BatchResultDialog
+					title="Batch Action Results"
+					response={ignoreBatchResult}
+					onclose={() => (ignoreBatchResult = null)}
 				/>
 			{/if}
 		{:else}
