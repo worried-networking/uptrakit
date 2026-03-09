@@ -10,7 +10,9 @@
 		triggerSoftwareUpdate,
 		updateSoftwareItem,
 		deleteSoftwareItem,
-		unassignHostFromSoftwareItem
+		unassignHostFromSoftwareItem,
+		approveSoftwareItem,
+		unassignHostFromSoftwareItemWithIgnore
 	} from '$lib/api';
 	import { formatDate, formatVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -20,6 +22,7 @@
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
 	import EditHostAssignmentModal from '$lib/components/EditHostAssignmentModal.svelte';
+	import AssignToHostModal from '$lib/components/AssignToHostModal.svelte';
 	import { connectOutputStream } from '$lib/sse';
 	import type { SseConnectionState } from '$lib/sse';
 	import { Permission } from '$lib/types';
@@ -53,6 +56,23 @@
 	// Update confirm modal state
 	let updateModal: { host: SoftwareItemHostSummary; toVersion: string } | null = $state(null);
 	let updateTriggering: boolean = $state(false);
+
+	// Approve state
+	let approvingItem: boolean = $state(false);
+
+	// Ignore state
+	let confirmIgnore: boolean = $state(false);
+	let ignoreSubmitting: boolean = $state(false);
+
+	// Update All (multi-host) modal state
+	let updateAllModal: boolean = $state(false);
+	let updateAllDetail: SoftwareItemDetailResponse | null = $state(null);
+	let updateAllLoading: boolean = $state(false);
+	let updateAllSelectedHostIds: Set<string> = $state(new Set());
+	let updateAllTriggering: boolean = $state(false);
+
+	// Assign to Host modal state
+	let showAssignModal: boolean = $state(false);
 
 	// Configure plugins modal state
 	let configureModal: SoftwareItemHostSummary | null = $state(null);
@@ -298,6 +318,73 @@
 		liveStreamState = 'disconnected';
 	}
 
+	async function executeApprove() {
+		if (!item || approvingItem) return;
+		approvingItem = true;
+		try {
+			await approveSoftwareItem(item.id);
+			showSuccess(`"${item.name}" approved for version tracking`);
+			await loadItem(true);
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to approve software item.');
+		} finally {
+			approvingItem = false;
+		}
+	}
+
+	async function executeIgnore() {
+		if (!item || ignoreSubmitting) return;
+		const name = item.name;
+		confirmIgnore = false;
+		ignoreSubmitting = true;
+		try {
+			const detail = await getSoftwareItem(item.id);
+			await Promise.all(detail.hosts.map((h) => unassignHostFromSoftwareItemWithIgnore(item!.id, h.host_id)));
+			await deleteSoftwareItem(item.id);
+			showSuccess(`"${name}" will be ignored in future autodiscovery runs.`);
+			goto('/software');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to ignore software item.');
+			ignoreSubmitting = false;
+		}
+	}
+
+	async function openUpdateAllModal() {
+		if (!item) return;
+		updateAllModal = true;
+		updateAllDetail = null;
+		updateAllSelectedHostIds = new Set();
+		updateAllLoading = true;
+		try {
+			const detail = await getSoftwareItem(item.id);
+			updateAllDetail = detail;
+			updateAllSelectedHostIds = new Set(detail.hosts.filter((h) => h.update_available).map((h) => h.host_id));
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to load host details.');
+			updateAllModal = false;
+		} finally {
+			updateAllLoading = false;
+		}
+	}
+
+	async function executeUpdateAll() {
+		if (!item || !updateAllDetail || updateAllTriggering) return;
+		updateAllTriggering = true;
+		const targets = updateAllDetail.hosts.filter(
+			(h) => h.update_available && updateAllSelectedHostIds.has(h.host_id) && h.latest_version
+		);
+		const results = await Promise.allSettled(
+			targets.map((h) => triggerSoftwareUpdate(item!.id, h.host_id, { to_version: h.latest_version! }))
+		);
+		const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+		const failed = results.filter((r) => r.status === 'rejected').length;
+		if (succeeded > 0) showSuccess(`Update triggered for ${succeeded} host(s).`);
+		if (failed > 0) showError(`Failed to trigger update for ${failed} host(s).`);
+		updateAllTriggering = false;
+		updateAllModal = false;
+		await loadItem(true);
+	}
+
 	function getReleaseMeta(host: SoftwareItemHostSummary): ReleaseMeta | null {
 		const meta = host.latest_release_metadata;
 		if (!meta) return null;
@@ -360,6 +447,9 @@
 			<div>
 				<h1 class="h1">{item.name}</h1>
 				<div class="mt-2 flex flex-wrap items-center gap-2">
+					{#if item.discovery_state === 'pending'}
+						<span class="badge preset-filled-warning-500">Pending</span>
+					{/if}
 					{#if item.enabled}
 						<span class="badge preset-filled-success-500">Enabled</span>
 					{:else}
@@ -387,6 +477,23 @@
 			</div>
 			{#if canManage}
 				<div class="flex flex-wrap items-center gap-2">
+					{#if item.discovery_state === 'pending'}
+						<button class="btn preset-filled-success-500" onclick={executeApprove} disabled={approvingItem}>
+							{approvingItem ? 'Approving…' : 'Approve'}
+						</button>
+						<button
+							class="btn preset-filled-warning-500"
+							onclick={() => (confirmIgnore = true)}
+							disabled={ignoreSubmitting}
+						>
+							Ignore
+						</button>
+					{:else}
+						{#if item.update_available}
+							<button class="btn preset-filled-warning-500" onclick={openUpdateAllModal}> Update All </button>
+						{/if}
+						<button class="btn preset-tonal-surface" onclick={() => (showAssignModal = true)}> Assign to Host </button>
+					{/if}
 					<button class="btn preset-tonal-surface" onclick={checkAllVersions} disabled={checkingAll}>
 						{checkingAll ? 'Checking…' : 'Check All Versions'}
 					</button>
@@ -738,5 +845,93 @@
 		confirmDisabled={unassignSubmitting}
 		onconfirm={executeUnassign}
 		oncancel={() => (confirmUnassign = null)}
+	/>
+{/if}
+
+{#if confirmIgnore && item}
+	<Modal title="Ignore Software Item" onclose={() => (confirmIgnore = false)}>
+		<p class="text-sm">
+			Permanently ignore <strong>{item.name}</strong> from future autodiscovery runs?
+		</p>
+		<p class="mt-2 text-sm text-surface-500">
+			An ignore rule will be created so this package is not re-discovered. You can manage ignore rules under <a
+				href="/software?tab=ignores"
+				class="underline">Software → Ignore Rules</a
+			>.
+		</p>
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={() => (confirmIgnore = false)}>Cancel</button>
+			<button class="btn preset-filled-warning-500" disabled={ignoreSubmitting} onclick={executeIgnore}>
+				{ignoreSubmitting ? 'Ignoring…' : 'Ignore'}
+			</button>
+		{/snippet}
+	</Modal>
+{/if}
+
+{#if updateAllModal && item}
+	<Modal title="Trigger Update — {item.name}" onclose={() => (updateAllModal = false)} maxWidth="max-w-lg">
+		{#if updateAllLoading}
+			<p class="text-sm text-surface-500">Loading hosts…</p>
+		{:else if updateAllDetail}
+			<p class="text-sm text-surface-500 mb-2">
+				Select the hosts to update. Hosts that are already up to date cannot be selected.
+			</p>
+			<ul class="space-y-2">
+				{#each updateAllDetail.hosts as host (host.host_id)}
+					{@const upToDate = !host.update_available}
+					<li class="flex items-start gap-3 {upToDate ? 'opacity-50' : ''}">
+						<input
+							type="checkbox"
+							class="checkbox mt-0.5"
+							disabled={upToDate}
+							checked={updateAllSelectedHostIds.has(host.host_id)}
+							onchange={(e) => {
+								const next = new Set(updateAllSelectedHostIds);
+								if ((e.target as HTMLInputElement).checked) {
+									next.add(host.host_id);
+								} else {
+									next.delete(host.host_id);
+								}
+								updateAllSelectedHostIds = next;
+							}}
+						/>
+						<div class="flex-1 min-w-0">
+							<p class="text-sm font-medium truncate">
+								{host.friendly_name || host.hostname}
+							</p>
+							{#if upToDate}
+								<p class="text-xs text-surface-400">Already up to date</p>
+							{:else}
+								<p class="text-xs text-surface-500">
+									{host.installed_version ?? 'unknown'} → {host.latest_version}
+								</p>
+							{/if}
+						</div>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={() => (updateAllModal = false)}> Cancel </button>
+			<button
+				class="btn preset-filled-primary-500"
+				disabled={updateAllSelectedHostIds.size === 0 || updateAllTriggering}
+				onclick={executeUpdateAll}
+			>
+				{updateAllTriggering ? 'Triggering…' : `Update ${updateAllSelectedHostIds.size} host(s)`}
+			</button>
+		{/snippet}
+	</Modal>
+{/if}
+
+{#if showAssignModal && item}
+	<AssignToHostModal
+		softwareItemId={item.id}
+		softwareItemName={item.name}
+		onclose={() => (showAssignModal = false)}
+		onsuccess={() => {
+			showAssignModal = false;
+			loadItem(true);
+		}}
 	/>
 {/if}
