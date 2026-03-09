@@ -428,7 +428,13 @@ async fn init_data_key_ring(db: &sea_orm::DatabaseConnection) {
         }
     };
 
-    let ring = uptrakit_crypto::DataKeyRing::new(keys, active.clone());
+    let ring = match uptrakit_crypto::DataKeyRing::new(keys, active.clone()) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to construct data key ring");
+            return;
+        }
+    };
     if let Err(e) = uptrakit_crypto::init_data_key_ring(ring) {
         tracing::warn!(error = %e, "data key ring already initialized (harmless)");
     } else {

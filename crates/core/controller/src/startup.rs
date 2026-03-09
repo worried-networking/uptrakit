@@ -404,7 +404,7 @@ fn build_and_init_ring(
         ))
     })?;
 
-    let ring = uptrakit_crypto::DataKeyRing::new(keys, active.clone());
+    let ring = uptrakit_crypto::DataKeyRing::new(keys, active.clone()).context_to()?;
     uptrakit_crypto::init_data_key_ring(ring).context_to()?;
     tracing::info!(
         active_key_id = %active,

@@ -74,6 +74,9 @@ pub enum CryptoError {
     #[error("master key does not match existing encrypted data")]
     MasterKeyMismatch,
 
+    #[error("active_key_id is not present in the provided keys map")]
+    MissingActiveKey,
+
     #[error(
         "duplicate column AAD: column '{column}' in table '{new_table}' conflicts with existing AAD '{existing_aad}'"
     )]
@@ -144,18 +147,17 @@ impl DataKeyRing {
     /// * `keys` — Map of key_id → raw DEK bytes.
     /// * `active_key_id` — The key_id of the DEK to use for new encryptions.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if `active_key_id` is not present in `keys`.
-    pub fn new(keys: HashMap<String, Zeroizing<[u8; 32]>>, active_key_id: String) -> Self {
-        assert!(
-            keys.contains_key(&active_key_id),
-            "active_key_id must be present in keys"
-        );
-        Self {
+    /// Returns [`CryptoError::MissingActiveKey`] if `active_key_id` is not present in `keys`.
+    pub fn new(keys: HashMap<String, Zeroizing<[u8; 32]>>, active_key_id: String) -> Result<Self> {
+        if !keys.contains_key(&active_key_id) {
+            bail!(CryptoError::MissingActiveKey);
+        }
+        Ok(Self {
             keys,
             active_key_id,
-        }
+        })
     }
 
     /// Returns the key_id of the active DEK.
@@ -164,10 +166,16 @@ impl DataKeyRing {
     }
 
     /// Returns the raw key bytes for the active DEK.
+    ///
+    /// # Panics (impossible)
+    ///
+    /// The invariant that `active_key_id` is present in `keys` is established
+    /// at construction time by [`DataKeyRing::new`]. This `.expect()` can never
+    /// be reached in practice.
     fn active_key(&self) -> &Zeroizing<[u8; 32]> {
         self.keys
             .get(&self.active_key_id)
-            .expect("active key must exist in ring")
+            .expect("active key must exist in ring — invariant established at construction")
     }
 
     /// Look up a DEK by its key_id.
@@ -1771,7 +1779,7 @@ mod tests {
         let mut keys = HashMap::new();
         let active_id = dek.key_id.clone();
         keys.insert(dek.key_id, dek.key);
-        let ring = DataKeyRing::new(keys, active_id);
+        let ring = DataKeyRing::new(keys, active_id).expect("test ring construction");
         let _ = init_data_key_ring(ring);
     }
 
