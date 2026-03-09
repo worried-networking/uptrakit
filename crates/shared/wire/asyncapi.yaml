@@ -1218,8 +1218,8 @@ components:
         Additionally, the `host_package_hosts` field (default: empty array) contains
         per-host package summary data. The MQTT service publishes these to:
 
-        - `{prefix}/hosts/{host_id}/state` — `"N updates pending"` or `"up-to-date"`
-        - `{prefix}/hosts/{host_id}/latest_version` — always `"up-to-date"`
+        - `{prefix}/hosts/{host_id}/state` — `"unknown"` when updates pending, `"up-to-date"` otherwise
+        - `{prefix}/hosts/{host_id}/latest_version` — `"N available"` when updates pending, `"up-to-date"` otherwise
         - `{prefix}/hosts/{host_id}/attributes` — JSON: `{"in_progress": bool, "pending_count": N}`
 
         The `attributes` topic payload is recognised by the Home Assistant

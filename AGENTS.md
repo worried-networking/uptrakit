@@ -736,13 +736,13 @@ All topics use the MQTT client's `topic_prefix` field.
 
 | Topic | Retained | Direction | Purpose |
 | --- | :---: | --- | --- |
-| `{prefix}/hosts/{host_id}/state` | ✓ | publish | `"N updates pending"` or `"up-to-date"` |
-| `{prefix}/hosts/{host_id}/latest_version` | ✓ | publish | Always `"up-to-date"` |
+| `{prefix}/hosts/{host_id}/state` | ✓ | publish | `"unknown"` when updates pending, `"up-to-date"` otherwise |
+| `{prefix}/hosts/{host_id}/latest_version` | ✓ | publish | `"N available"` when updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/attributes` | ✓ | publish | JSON: `{"in_progress": bool, "pending_count": N}` |
 | `{prefix}/hosts/{host_id}/set` | — | subscribe | Receives `"install"` → triggers batch update (all packages) |
 | `{ha_prefix}/update/uptrakit_pkgs_{t}_{h}/config` | ✓ | publish | HA discovery config for host packages entity (disabled by default) |
-| `{prefix}/hosts/{host_id}/security/state` | ✓ | publish | `"N security updates pending"` or `"up-to-date"` |
-| `{prefix}/hosts/{host_id}/security/latest_version` | ✓ | publish | Always `"up-to-date"` |
+| `{prefix}/hosts/{host_id}/security/state` | ✓ | publish | `"unknown"` when security updates pending, `"up-to-date"` otherwise |
+| `{prefix}/hosts/{host_id}/security/latest_version` | ✓ | publish | `"N available"` when security updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/security/attributes` | ✓ | publish | JSON: `{"in_progress": bool, "pending_count": N}` |
 | `{prefix}/hosts/{host_id}/security/set` | — | subscribe | Receives `"install"` → triggers security-only batch update |
 | `{ha_prefix}/update/uptrakit_sec_{t}_{h}/config` | ✓ | publish | HA discovery config for security updates entity (disabled by default) |

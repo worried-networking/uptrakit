@@ -27,12 +27,12 @@ tracked host package:
 
 | Topic | Retained | Purpose |
 | --- | :---: | --- |
-| `{prefix}/hosts/{host_id}/state` | ✓ | `"N updates pending"` or `"up-to-date"` |
-| `{prefix}/hosts/{host_id}/latest_version` | ✓ | Always `"up-to-date"` |
+| `{prefix}/hosts/{host_id}/state` | ✓ | `"unknown"` when updates pending, `"up-to-date"` otherwise |
+| `{prefix}/hosts/{host_id}/latest_version` | ✓ | `"N available"` when updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/attributes` | ✓ | JSON: `{"in_progress": bool, "pending_count": N}` |
 | `{prefix}/hosts/{host_id}/set` | — | Command topic — publish `"install"` to update all outdated packages |
-| `{prefix}/hosts/{host_id}/security/state` | ✓ | `"N security updates pending"` or `"up-to-date"` |
-| `{prefix}/hosts/{host_id}/security/latest_version` | ✓ | Always `"up-to-date"` |
+| `{prefix}/hosts/{host_id}/security/state` | ✓ | `"unknown"` when security updates pending, `"up-to-date"` otherwise |
+| `{prefix}/hosts/{host_id}/security/latest_version` | ✓ | `"N available"` when security updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/security/attributes` | ✓ | JSON: `{"in_progress": bool, "pending_count": N}` |
 | `{prefix}/hosts/{host_id}/security/set` | — | Command topic — publish `"install"` to update security packages only |
 
@@ -174,13 +174,14 @@ If a host has no tracked packages, no entities are published for it.
 
 ### What the Entities Show
 
-| State | Meaning |
-| --- | --- |
-| `"N updates pending"` | N packages have a known newer version available |
-| `"up-to-date"` | All packages are at their latest known version |
+| Pending | `state` (installed) | `latest_version` | HA behaviour |
+| --- | --- | --- | --- |
+| 0 | `"up-to-date"` | `"up-to-date"` | No update badge |
+| N > 0 | `"unknown"` | `"N available"` | Update badge, shows "N available" |
 
-Home Assistant shows the **Update available** badge whenever `installed_version != latest_version`
-(i.e. `state != "up-to-date"`).
+Home Assistant shows the **Update available** badge whenever `installed_version != latest_version`.
+When updates are pending, `state` is `"unknown"` (there is no single aggregate installed version)
+and `latest_version` shows the count, triggering the badge.
 
 Each entity exposes two attributes:
 
