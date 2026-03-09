@@ -31,7 +31,7 @@
 
 	let showCreateModal: boolean = $state(false);
 	let editTag: { id: string; name: string; color: string; description: string } | null = $state(null);
-	let createForm = $state({ name: '', color: '#6366f1', description: '' });
+	let createForm = $state({ name: '', color: '', description: '' });
 
 	let selectedIds = new SvelteSet<string>();
 	let batchConfirmAction: string | null = $state(null);
@@ -121,7 +121,7 @@
 	}
 
 	function openCreateDialog() {
-		createForm = { name: '', color: '#6366f1', description: '' };
+		createForm = { name: '', color: '', description: '' };
 		showCreateModal = true;
 	}
 
@@ -141,7 +141,7 @@
 			error = null;
 			await createHostTag({
 				name: createForm.name,
-				color: createForm.color,
+				color: createForm.color || undefined,
 				description: createForm.description || undefined
 			});
 			showCreateModal = false;
@@ -418,10 +418,28 @@
 					<input class="input" type="text" bind:value={createForm.name} placeholder="e.g. production" />
 				</label>
 				<label class="label">
-					<span>Color</span>
+					<span>Color <span class="text-surface-400 text-sm font-normal">(optional)</span></span>
 					<div class="flex items-center gap-2">
-						<input type="color" bind:value={createForm.color} class="h-10 w-10 cursor-pointer rounded border-0" />
-						<input class="input flex-1" type="text" bind:value={createForm.color} placeholder="#6366f1" />
+						{#if createForm.color}
+							<input
+								type="color"
+								bind:value={createForm.color}
+								class="h-10 w-10 cursor-pointer rounded border-0 flex-shrink-0"
+							/>
+							<input class="input flex-1" type="text" bind:value={createForm.color} placeholder="#RRGGBB" />
+							<button
+								type="button"
+								class="btn btn-sm preset-tonal-surface flex-shrink-0"
+								onclick={() => (createForm.color = '')}>Auto</button
+							>
+						{:else}
+							<span class="text-surface-500 text-sm flex-1">Auto-assigned from palette</span>
+							<button
+								type="button"
+								class="btn btn-sm preset-tonal-surface flex-shrink-0"
+								onclick={() => (createForm.color = '#3B82F6')}>Pick color</button
+							>
+						{/if}
 					</div>
 				</label>
 				<label class="label">
