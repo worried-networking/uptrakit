@@ -1,6 +1,8 @@
 use sea_orm::DatabaseConnection;
 use sea_orm_migration::prelude::*;
 
+pub mod helpers;
+
 mod m20260209_000001_initial;
 mod m20260227_000001_drop_controller_events;
 mod m20260227_000002_remove_event_cleanup_tasks;

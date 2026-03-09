@@ -90,7 +90,7 @@ uptrakit/
 │   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, batch host package updates, handle_check_versions/execute_update/handle_execute_batch_host_package_update/graceful_shutdown; start_update() for per-host parallel use by SSH agent; batch_check_versions() groups assignments by (PluginType, effective_config), calls batch_detect_installed_version in parallel, refreshes package index once per fetch group, then calls batch_fetch_releases in parallel
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor; SudoAwareCommandExecutor (wraps any executor, prepends sudo based on SudoContext); SudoPolicy enum (auto/force_with/force_without); CommandSpec.privileged flag; StdioTunnel trait (bidirectional byte-stream tunnel for remote command I/O); RemoteExecutor trait + RemoteCommandResult (transport-agnostic remote command execution for SSH and PVE guest exec)
 │   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption with envelope encryption (KEK wraps DEKs); EncryptedString, init_master_key, DataKeyRing; ENC:v1/v2/v3 formats (v3 = current default with DEK + AAD); column AAD registry (register_column_aad); DEK wrap/unwrap; O(1) master key rotation support
-│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities (hosts, software_items, host_packages, host_package_ignores, host_package_update_history, etc.); `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`
+│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities (hosts, software_items, host_packages, host_package_ignores, host_package_update_history, etc.); `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`; `migration::helpers` module provides reusable SQLite table-recreation helpers (set_foreign_keys, check_crash_recovery, drop_original, rename_temp, is_sqlite)
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── extension-framework/        # uptrakit-extension-framework            (lib)  — UI extension framework types: ExtensionManifest, ActionDef, FieldDef, FormDef, RowVisibleWhen, RowCondition, wire payloads; ActionDef supports `confirm_entity_field` for destructive action confirmation dialogs; standalone crate so plugins don't depend on uptrakit-internal-wire
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared macros (impl_report_conversion!)
@@ -309,9 +309,13 @@ These are non-negotiable design constraints. Do not violate them.
    - Rate limiter (`crates/ui/web-api-auth/src/auth/rate_limit.rs`): `CASE WHEN` in `ON CONFLICT DO UPDATE` — SeaORM's
      `on_conflict` builder doesn't support conditional expressions. Fully parameterized (no injection risk).
    - SQLite-specific functions (`strftime`, `typeof`) in migrations — no sea_query equivalent.
-   - `PRAGMA foreign_keys` in migrations — SQLite-specific pragma with no sea_query equivalent.
+   - `PRAGMA foreign_keys` in migrations — SQLite-specific pragma with no sea_query equivalent
+     (use `helpers::set_foreign_keys()` from `migration::helpers`).
    - `CREATE TABLE new AS SELECT * FROM old` in tests — SQLite-specific shorthand for crash simulation.
-   See [database-migrations.md](docs/development/database-migrations.md) for the full exceptions table.
+   - `CASE` expressions in `INSERT...SELECT` during table recreation — sea_query's builder
+     does not support `CASE` in the SELECT column list.
+   See [database-migrations.md](docs/development/database-migrations.md) for the full exceptions table
+   and the table recreation guide with shared helpers.
 1. **Cover new logic with tests.** Cover success and failure paths.
 1. **Document everything.** Any code change must be properly documented either in the code, or in the separate
    documentation. Any changes to the agent-controller wire protocol must be documented in

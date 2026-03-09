@@ -1,5 +1,6 @@
-use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
+
+use super::helpers::{self, CrashRecoveryState};
 
 /// Replace `cron_expression TEXT` with `interval_seconds INTEGER` + `jitter_seconds INTEGER`
 /// in the `scheduled_tasks` table.
@@ -24,22 +25,6 @@ use sea_orm_migration::prelude::*;
 /// | discover_host_packages | `0 */6 * * *`  | 21600           | 300            |
 #[derive(DeriveMigrationName)]
 pub struct Migration;
-
-/// Suspend or resume FK enforcement on SQLite.
-///
-/// On PostgreSQL and MySQL the `PRAGMA` statement is not recognised; this
-/// function is a no-op for those backends.
-async fn set_foreign_keys(manager: &SchemaManager<'_>, enabled: bool) -> Result<(), DbErr> {
-    if manager.get_database_backend() == DbBackend::Sqlite {
-        let pragma = if enabled {
-            "PRAGMA foreign_keys = ON"
-        } else {
-            "PRAGMA foreign_keys = OFF"
-        };
-        manager.get_connection().execute_unprepared(pragma).await?;
-    }
-    Ok(())
-}
 
 /// Non-generated data columns of the new `scheduled_tasks` schema (without `cron_expression`).
 #[derive(Copy, Clone, DeriveIden)]
@@ -148,7 +133,7 @@ fn build_new_schema(table_name: impl IntoTableRef + Clone) -> TableCreateStateme
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        if manager.get_database_backend() == DbBackend::Sqlite {
+        if helpers::is_sqlite(manager) {
             self.up_sqlite(manager).await
         } else {
             self.up_alter(manager).await
@@ -166,20 +151,13 @@ impl MigrationTrait for Migration {
 impl Migration {
     /// SQLite path: table recreation (create new → copy with CASE mapping → drop old → rename).
     async fn up_sqlite(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-        set_foreign_keys(manager, false).await?;
+        helpers::set_foreign_keys(manager, false).await?;
 
-        // Crash recovery: same three-state pattern as m20260302_000003.
-        let new_exists = manager.has_table("scheduled_tasks_new").await?;
-        let orig_exists = manager.has_table("scheduled_tasks").await?;
-
-        if new_exists && orig_exists {
-            // State B: discard incomplete temp table.
-            manager
-                .drop_table(Table::drop().table(ScheduledTasksNew::Table).to_owned())
+        let state =
+            helpers::check_crash_recovery(manager, "scheduled_tasks", "scheduled_tasks_new")
                 .await?;
-        }
 
-        if orig_exists {
+        if state == CrashRecoveryState::Normal {
             // Create the replacement table with the new schema.
             manager
                 .create_table(build_new_schema(ScheduledTasksNew::Table))
@@ -228,26 +206,14 @@ impl Migration {
                 )
                 .await?;
 
-            // Drop old table.
-            manager
-                .drop_table(Table::drop().table(ScheduledTasks::Table).to_owned())
-                .await?;
+            helpers::drop_original(manager, "scheduled_tasks").await?;
         }
-        // else (State C): scheduled_tasks_new already holds the full dataset.
 
-        // Rename replacement → canonical name.
-        manager
-            .rename_table(
-                Table::rename()
-                    .table(ScheduledTasksNew::Table, ScheduledTasks::Table)
-                    .to_owned(),
-            )
-            .await?;
+        helpers::rename_temp(manager, "scheduled_tasks_new", "scheduled_tasks").await?;
 
-        // Recreate indexes.
         self.create_indexes(manager).await?;
 
-        set_foreign_keys(manager, true).await?;
+        helpers::set_foreign_keys(manager, true).await?;
         Ok(())
     }
 

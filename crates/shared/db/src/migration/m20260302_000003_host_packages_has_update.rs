@@ -1,6 +1,7 @@
-use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
+
+use super::helpers::{self, CrashRecoveryState};
 
 /// Add `has_update` stored generated column and covering indexes to `host_packages`.
 ///
@@ -57,22 +58,6 @@ const DATA_COLS: [Col; 18] = [
     Col::UpdatedAt,
     Col::DeactivatedAt,
 ];
-
-/// Suspend or resume FK enforcement on SQLite.
-///
-/// On PostgreSQL and MySQL the `PRAGMA` statement is not recognised; this
-/// function is a no-op for those backends.
-async fn set_foreign_keys(manager: &SchemaManager<'_>, enabled: bool) -> Result<(), DbErr> {
-    if manager.get_database_backend() == DbBackend::Sqlite {
-        let pragma = if enabled {
-            "PRAGMA foreign_keys = ON"
-        } else {
-            "PRAGMA foreign_keys = OFF"
-        };
-        manager.get_connection().execute_unprepared(pragma).await?;
-    }
-    Ok(())
-}
 
 /// Build and execute `INSERT INTO <target> (<cols>) SELECT <cols> FROM <source>`.
 async fn copy_table(
@@ -177,59 +162,25 @@ fn build_host_packages_table(
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Suspend FK enforcement on SQLite while the table swap is in progress.
-        set_foreign_keys(manager, false).await?;
+        helpers::set_foreign_keys(manager, false).await?;
 
-        // Recover from a previous partial run.  Three states are possible:
-        //
-        //   A. host_packages exists, host_packages_new does not
-        //      → normal path; fall through to the create/copy/drop block below.
-        //
-        //   B. Both host_packages and host_packages_new exist
-        //      → a previous run created the temp table but did not complete.
-        //        The original data is still intact.  Discard the partial temp
-        //        table and restart from scratch (treated as State A).
-        //
-        //   C. host_packages_new exists but host_packages does not
-        //      → a previous run copied the data and dropped the original, but
-        //        the rename never happened.  Skip the create/copy/drop steps
-        //        and proceed directly to the rename.
-        let new_exists = manager.has_table("host_packages_new").await?;
-        let orig_exists = manager.has_table("host_packages").await?;
+        let state =
+            helpers::check_crash_recovery(manager, "host_packages", "host_packages_new").await?;
 
-        if new_exists && orig_exists {
-            // State B: discard the incomplete temp table; fall through to State A.
-            manager
-                .drop_table(Table::drop().table(HostPackagesNew::Table).to_owned())
-                .await?;
-        }
-
-        if orig_exists {
-            // State A (or recovered from B): create replacement, copy, drop original.
-
-            // Step 1: create the replacement table (identical schema + has_update).
+        if state == CrashRecoveryState::Normal {
+            // Create the replacement table (identical schema + has_update).
             manager
                 .create_table(build_host_packages_table(HostPackagesNew::Table, true))
                 .await?;
 
-            // Step 2: copy all non-generated rows; has_update is computed by the engine.
+            // Copy all non-generated rows; has_update is computed by the engine.
             copy_table(manager, HostPackages::Table, HostPackagesNew::Table).await?;
 
-            // Step 3: drop the original table (its indexes are dropped implicitly).
-            manager
-                .drop_table(Table::drop().table(HostPackages::Table).to_owned())
-                .await?;
+            // Drop the original table (its indexes are dropped implicitly).
+            helpers::drop_original(manager, "host_packages").await?;
         }
-        // else (State C): host_packages_new already holds the full dataset.
 
-        // Step 4: rename the replacement table to the canonical name.
-        manager
-            .rename_table(
-                Table::rename()
-                    .table(HostPackagesNew::Table, HostPackages::Table)
-                    .to_owned(),
-            )
-            .await?;
+        helpers::rename_temp(manager, "host_packages_new", "host_packages").await?;
 
         // Step 5: recreate the three original indexes.
         manager
@@ -308,31 +259,19 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Step 7: re-enable FK enforcement on SQLite.
-        set_foreign_keys(manager, true).await?;
+        helpers::set_foreign_keys(manager, true).await?;
 
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Recreate the table without the has_update column using the same
-        // 12-step approach as `up`.
-        set_foreign_keys(manager, false).await?;
+        helpers::set_foreign_keys(manager, false).await?;
 
-        // Same three-state recovery logic as `up`, mirrored for `down`.
-        let bak_exists = manager.has_table("host_packages_bak").await?;
-        let orig_exists = manager.has_table("host_packages").await?;
+        let state =
+            helpers::check_crash_recovery(manager, "host_packages", "host_packages_bak").await?;
 
-        if bak_exists && orig_exists {
-            // Incomplete previous down run: discard the partial backup table.
-            manager
-                .drop_table(Table::drop().table(HostPackagesBak::Table).to_owned())
-                .await?;
-        }
-
-        if orig_exists {
-            // Create the pre-migration schema (no has_update column) under a
-            // temporary name.
+        if state == CrashRecoveryState::Normal {
+            // Create the pre-migration schema (no has_update column).
             manager
                 .create_table(build_host_packages_table(HostPackagesBak::Table, false))
                 .await?;
@@ -340,21 +279,11 @@ impl MigrationTrait for Migration {
             // Copy all data rows (DATA_COLS, which already excludes has_update).
             copy_table(manager, HostPackages::Table, HostPackagesBak::Table).await?;
 
-            // Drop the current table (drops the three new indexes implicitly).
-            manager
-                .drop_table(Table::drop().table(HostPackages::Table).to_owned())
-                .await?;
+            // Drop the current table (drops the new indexes implicitly).
+            helpers::drop_original(manager, "host_packages").await?;
         }
-        // else: host_packages_bak already holds the data; fall through to rename.
 
-        // Rename the backup to the canonical name.
-        manager
-            .rename_table(
-                Table::rename()
-                    .table(HostPackagesBak::Table, HostPackages::Table)
-                    .to_owned(),
-            )
-            .await?;
+        helpers::rename_temp(manager, "host_packages_bak", "host_packages").await?;
 
         // Restore the original indexes.
         manager
@@ -392,7 +321,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        set_foreign_keys(manager, true).await?;
+        helpers::set_foreign_keys(manager, true).await?;
 
         Ok(())
     }

@@ -587,56 +587,146 @@ let insert = Query::insert()
 db.execute(&insert).await.expect("insert");
 ```
 
-### Table recreation (SQLite ALTER COLUMN workaround)
+### Table recreation (SQLite column changes)
 
-SQLite has no `ALTER COLUMN` statement. To change a column type or nullability, recreate the
-table: create a new table with the correct schema, copy data, drop the old table, and rename:
+SQLite does not support `ALTER TABLE ALTER COLUMN`, and its `ALTER TABLE DROP COLUMN` fails
+when the column is referenced by an index, FK constraint, trigger, or view. The standard
+workaround is the **table recreation** pattern.
+
+#### When to use table recreation
+
+| Operation | Approach |
+| --- | --- |
+| Add a new column (no constraints referencing it) | `ALTER TABLE ADD COLUMN` — no recreation needed |
+| Drop a column referenced by an index or FK | Table recreation |
+| Change a column's type or nullability | Table recreation |
+| Add a `GENERATED ALWAYS AS` stored column | Table recreation |
+| Restructure a table's schema | Table recreation |
+
+For PostgreSQL and MySQL, `ALTER TABLE ADD/DROP/ALTER COLUMN` works directly. Migrations
+that need table recreation on SQLite should branch on the backend using
+`helpers::is_sqlite(manager)` and use `ALTER TABLE` on other backends.
+
+#### Shared helpers
+
+Reusable helpers live in `crates/shared/db/src/migration/helpers.rs` (imported as
+`super::helpers` from migration modules):
+
+| Helper | Purpose |
+| --- | --- |
+| `set_foreign_keys(manager, enabled)` | Suspend/resume FK enforcement on SQLite (no-op on PostgreSQL/MySQL) |
+| `check_crash_recovery(manager, table, temp)` | Detect partial previous runs and return the appropriate recovery state |
+| `drop_original(manager, table)` | Drop the original table after data has been copied to the temp table |
+| `rename_temp(manager, temp, canonical)` | Rename the temp table to the canonical name |
+| `is_sqlite(manager)` | Check whether the current backend is SQLite |
+
+#### Crash recovery (three-state model)
+
+A table recreation can crash at any point. The migration must handle three possible
+states on re-entry:
+
+| State | Original table | Temp table | Action |
+| --- | --- | --- | --- |
+| **A** (normal) | Exists | Does not exist | Full recreation: create → copy → drop → rename |
+| **B** (partial) | Exists | Exists | Discard temp (original data intact), restart as State A |
+| **C** (rename pending) | Does not exist | Exists | Skip to rename (data already copied) |
+
+`check_crash_recovery()` detects the current state automatically. In State B it drops the
+partial temp table and returns `Normal`. In State C it returns `RenameOnly`.
+
+#### Complete pattern with helpers
 
 ```rust
-// 1. Create the replacement table.
-manager
-    .create_table(
-        Table::create()
-            .table(SshHostsNew::Table)
-            // ... columns with corrected schema ...
-            .to_owned(),
-    )
-    .await?;
+use crate::migration::helpers::{self, CrashRecoveryState};
 
-// 2. Copy data from the old table.
-let insert = Query::insert()
-    .into_table(SshHostsNew::Table)
-    .columns([SshHostsNew::Id, SshHostsNew::Name, /* ... */])
-    .select_from(
-        Query::select()
-            .column(SshHosts::Id)
-            .column(SshHosts::Name)
-            // ... all columns in the same order ...
-            .from(SshHosts::Table)
-            .to_owned(),
-    )
-    .map_err(|e| DbErr::Migration(e.to_string()))?
+async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+    // 1. Suspend FK enforcement (prevents violations during the swap).
+    helpers::set_foreign_keys(manager, false).await?;
+
+    // 2. Detect and recover from partial previous runs.
+    let state = helpers::check_crash_recovery(
+        manager, "my_table", "my_table_new",
+    ).await?;
+
+    if state == CrashRecoveryState::Normal {
+        // 3. Create the replacement table with the new schema.
+        manager.create_table(build_new_schema()).await?;
+
+        // 4. Copy data from old → new.
+        copy_data(manager).await?;
+
+        // 5. Drop the original table (indexes are dropped implicitly).
+        helpers::drop_original(manager, "my_table").await?;
+    }
+    // If RenameOnly, the temp table already has the complete dataset.
+
+    // 6. Rename temp → canonical.
+    helpers::rename_temp(manager, "my_table_new", "my_table").await?;
+
+    // 7. Recreate indexes (they were dropped with the old table).
+    create_indexes(manager).await?;
+
+    // 8. Re-enable FK enforcement.
+    helpers::set_foreign_keys(manager, true).await?;
+    Ok(())
+}
+```
+
+#### Data copy strategies
+
+**Simple column-for-column copy** — use a sea_query `INSERT...SELECT`:
+
+```rust
+let select = Query::select().columns(DATA_COLS).from(OldTable::Table).to_owned();
+let mut insert = Query::insert()
+    .into_table(NewTable::Table)
+    .columns(DATA_COLS)
     .to_owned();
-manager.exec_stmt(insert).await?;
+insert
+    .select_from(select)
+    .map_err(|e| DbErr::Custom(e.to_string()))?;
+manager.execute(insert).await?;
+```
 
-// 3. Drop the old table.
-manager
-    .drop_table(Table::drop().table(SshHosts::Table).to_owned())
-    .await?;
+**Complex transformation** (e.g., mapping values via `CASE`, using `strftime`) — use
+`execute_unprepared` with a justification comment:
 
-// 4. Rename the new table to the original name.
+```rust
+// CASE expressions in INSERT...SELECT cannot be expressed with sea_query's
+// typed builder. execute_unprepared is the accepted pattern for complex
+// data transformations in migrations.
 manager
-    .rename_table(
-        Table::rename()
-            .table(SshHostsNew::Table, SshHosts::Table)
-            .to_owned(),
+    .get_connection()
+    .execute_unprepared(
+        "INSERT INTO my_table_new (id, name, category) \
+         SELECT id, name, \
+           CASE status WHEN 'active' THEN 'enabled' ELSE 'disabled' END \
+         FROM my_table",
     )
     .await?;
 ```
 
-If the data copy requires SQLite-specific functions (e.g. `strftime`), the `INSERT...SELECT`
-step must use `execute_unprepared()` with a justification comment. The table creation, drop,
-and rename steps should still use sea_query builders.
+#### Backend branching
+
+When a migration uses table recreation on SQLite but `ALTER TABLE` on PostgreSQL/MySQL:
+
+```rust
+async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+    if helpers::is_sqlite(manager) {
+        self.up_sqlite(manager).await
+    } else {
+        self.up_alter(manager).await
+    }
+}
+```
+
+#### Reference implementations
+
+- `m20260302_000003_host_packages_has_update.rs` — table recreation with
+  `GENERATED ALWAYS AS` stored column, both `up` and `down` use the helpers
+- `m20260318_000001_cron_to_interval.rs` — table recreation with `CASE`-based
+  data transformation, backend branching (SQLite recreation vs. PostgreSQL
+  `ALTER TABLE`)
 
 ### DROP TABLE in tests
 
