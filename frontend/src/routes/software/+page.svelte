@@ -16,7 +16,7 @@
 		unassignHostFromSoftwareItemWithIgnore,
 		batchSoftwareItems
 	} from '$lib/api';
-	import { formatDate, formatVersion, parseUrlParam, parseUrlPage } from '$lib/utils';
+	import { formatDate, formatVersion, parseUrlPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
@@ -29,9 +29,9 @@
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 	import type { SoftwareItemResponse, SoftwareItemDetailResponse, BatchActionResponse } from '$lib/types';
 	import { Permission } from '$lib/types';
-
-	type FilterTab = 'all' | 'pending' | 'active';
-	const FILTER_TAB_VALUES = ['all', 'pending', 'active'] as const satisfies readonly FilterTab[];
+	import { getTabExtensions } from '$lib/extensions.svelte';
+	import IgnoreRulesTab from './IgnoreRulesTab.svelte';
+	import ExtensionTabContent from '$lib/components/extensions/ExtensionTabContent.svelte';
 
 	let items: SoftwareItemResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -47,7 +47,10 @@
 	let submitting: boolean = $state(false);
 	let checkingVersionsId: string | null = $state(null);
 	let approvingId: string | null = $state(null);
-	let activeTab: FilterTab = $state(parseUrlParam(page.url, 'tab', FILTER_TAB_VALUES, 'all'));
+	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'all');
+
+	const tabExtensions = $derived(getTabExtensions('software'));
+	const isItemsTab = $derived(activeTab === 'all' || activeTab === 'pending' || activeTab === 'active');
 	let editItem: { id: string; name: string; enabled: boolean } | null = $state(null);
 	let editForm = $state({ name: '', enabled: true });
 	let editSubmitting: boolean = $state(false);
@@ -82,7 +85,7 @@
 	$effect(() => {
 		const parts: string[] = [];
 		if (activeTab !== 'all') parts.push(`tab=${activeTab}`);
-		if (currentPage > 1) parts.push(`page=${currentPage}`);
+		if (isItemsTab && currentPage > 1) parts.push(`page=${currentPage}`);
 		const search = parts.join('&');
 		goto(search ? `${location.pathname}?${search}` : location.pathname, {
 			replaceState: true,
@@ -144,11 +147,13 @@
 		}
 	}
 
-	function switchTab(tab: FilterTab) {
+	function switchTab(tab: string) {
 		if (activeTab === tab) return;
 		currentPage = 1;
 		activeTab = tab;
-		loadAll(1);
+		if (tab === 'all' || tab === 'pending' || tab === 'active') {
+			loadAll(1);
+		}
 	}
 
 	function toggleMenu(id: string, button: HTMLElement) {
@@ -391,9 +396,8 @@
 			<p>You do not have permission to view software items.</p>
 		</aside>
 	{:else}
-		<div class="mb-4 flex items-center justify-between">
-			<!-- Filter tabs -->
-			<div class="flex gap-1">
+		<div class="mb-4 flex items-center justify-between gap-2 flex-wrap">
+			<div class="flex gap-1 flex-wrap">
 				<button
 					class="btn btn-sm {activeTab === 'all' ? 'preset-filled-primary-500' : 'preset-tonal'}"
 					onclick={() => switchTab('all')}
@@ -412,325 +416,349 @@
 				>
 					Active
 				</button>
+				<button
+					class="btn btn-sm {activeTab === 'ignores' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+					onclick={() => switchTab('ignores')}
+				>
+					Ignore Rules
+				</button>
+				{#each tabExtensions as ext (ext.id)}
+					<button
+						class="btn btn-sm {activeTab === ext.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
+						onclick={() => switchTab(ext.id)}
+					>
+						{ext.label}
+					</button>
+				{/each}
 			</div>
-			{#if canManage}
-				<button class="btn preset-filled-primary-500" onclick={() => (showAddModal = true)}> Add Software </button>
+			{#if isItemsTab && canManage}
+				<button class="btn preset-filled-primary-500" onclick={() => (showAddModal = true)}>Add Software</button>
 			{/if}
 		</div>
 
-		{#if error}
-			<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-				<p>{error}</p>
-				<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAll(currentPage)}>Retry</button>
-			</aside>
-		{/if}
+		{#if isItemsTab}
+			{#if error}
+				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
+					<p>{error}</p>
+					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAll(currentPage)}>Retry</button>
+				</aside>
+			{/if}
 
-		<div class="table-wrap">
-			<table class="table">
-				<thead>
-					<tr>
-						{#if canManage}
-							<th class="w-10">
-								<input
-									type="checkbox"
-									class="checkbox"
-									checked={items.length > 0 && batchSelectedIds.size === items.length}
-									indeterminate={batchSelectedIds.size > 0 && batchSelectedIds.size < items.length}
-									onchange={toggleBatchSelectAll}
-									aria-label="Select all"
-								/>
-							</th>
-						{/if}
-						<th>Name</th>
-						<th>Plugins</th>
-						<th>Status</th>
-						<th>Hosts</th>
-						<th>Last Checked</th>
-						{#if canManage}
-							<th class="w-20"></th>
-						{/if}
-					</tr>
-				</thead>
-				<tbody>
-					{#if loading}
+			<div class="table-wrap">
+				<table class="table">
+					<thead>
 						<tr>
-							<td colspan={canManage ? 8 : 5} class="py-6 text-center">Loading...</td>
+							{#if canManage}
+								<th class="w-10">
+									<input
+										type="checkbox"
+										class="checkbox"
+										checked={items.length > 0 && batchSelectedIds.size === items.length}
+										indeterminate={batchSelectedIds.size > 0 && batchSelectedIds.size < items.length}
+										onchange={toggleBatchSelectAll}
+										aria-label="Select all"
+									/>
+								</th>
+							{/if}
+							<th>Name</th>
+							<th>Plugins</th>
+							<th>Status</th>
+							<th>Hosts</th>
+							<th>Last Checked</th>
+							{#if canManage}
+								<th class="w-20"></th>
+							{/if}
 						</tr>
-					{:else}
-						{#each items as item (item.id)}
+					</thead>
+					<tbody>
+						{#if loading}
 							<tr>
-								{#if canManage}
-									<td>
-										<input
-											type="checkbox"
-											class="checkbox"
-											checked={batchSelectedIds.has(item.id)}
-											onchange={() => toggleBatchSelect(item.id)}
-											aria-label="Select {item.name}"
-										/>
-									</td>
-								{/if}
-								<td>
-									<a href="/software/{item.id}" class="hover:underline font-medium">{item.name}</a>
-								</td>
-								<td class="text-sm text-surface-500">
-									{item.plugins.map((p) => pluginTypeNames.get(p) ?? p).join(', ') || '\u2014'}
-								</td>
-								<td>
-									{#if item.discovery_state === 'pending'}
-										<span class="badge preset-filled-warning-500">Pending</span>
-									{:else}
-										{#if item.update_available}
-											{#if canManage}
-												<button
-													class="badge preset-filled-warning-500 cursor-pointer hover:opacity-80"
-													onclick={() => openUpdateModal(item)}
-												>
-													Update Available
-												</button>
-											{:else}
-												<span class="badge preset-filled-warning-500">Update Available</span>
-											{/if}
-										{/if}
-										{#if !item.enabled}
-											<span class="badge preset-tonal">Disabled</span>
-										{/if}
-										{#if !item.update_available && item.enabled}
-											<span class="text-surface-400">—</span>
-										{/if}
-									{/if}
-								</td>
-								<td>{item.host_count}</td>
-								<td>
-									{formatDate(item.last_checked_at)}
-									{#if item.latest_version}
-										<span class="block text-xs text-surface-500" title={item.latest_version}
-											>{formatVersion(item.latest_version)} available</span
-										>
-									{/if}
-								</td>
-								{#if canManage}
-									<td>
-										<div class="actions-menu">
-											<button
-												class="btn btn-sm preset-tonal"
-												aria-label="Actions for {item.name}"
-												onclick={(e) => {
-													e.stopPropagation();
-													toggleMenu(item.id, e.currentTarget);
-												}}
-											>
-												&#8943;
-											</button>
-										</div>
-									</td>
-								{/if}
+								<td colspan={canManage ? 8 : 5} class="py-6 text-center">Loading...</td>
 							</tr>
 						{:else}
-							<tr>
-								<td colspan={canManage ? 8 : 5} class="py-8 text-center">
-									{#if activeTab === 'pending'}
-										<p class="text-lg font-medium">No pending items</p>
-										<p class="mt-1 text-sm text-surface-500">No discovered software awaiting review.</p>
-									{:else if activeTab === 'active'}
-										<p class="text-lg font-medium">No active software</p>
-										<p class="mt-1 text-sm text-surface-500">Register or approve software to start tracking.</p>
-									{:else}
-										<p class="text-lg font-medium">No software registered yet</p>
-										<p class="mt-1 text-sm text-surface-500">Register a package to start tracking.</p>
+							{#each items as item (item.id)}
+								<tr>
+									{#if canManage}
+										<td>
+											<input
+												type="checkbox"
+												class="checkbox"
+												checked={batchSelectedIds.has(item.id)}
+												onchange={() => toggleBatchSelect(item.id)}
+												aria-label="Select {item.name}"
+											/>
+										</td>
 									{/if}
-								</td>
-							</tr>
-						{/each}
-					{/if}
-				</tbody>
-			</table>
-		</div>
+									<td>
+										<a href="/software/{item.id}" class="hover:underline font-medium">{item.name}</a>
+									</td>
+									<td class="text-sm text-surface-500">
+										{item.plugins.map((p) => pluginTypeNames.get(p) ?? p).join(', ') || '\u2014'}
+									</td>
+									<td>
+										{#if item.discovery_state === 'pending'}
+											<span class="badge preset-filled-warning-500">Pending</span>
+										{:else}
+											{#if item.update_available}
+												{#if canManage}
+													<button
+														class="badge preset-filled-warning-500 cursor-pointer hover:opacity-80"
+														onclick={() => openUpdateModal(item)}
+													>
+														Update Available
+													</button>
+												{:else}
+													<span class="badge preset-filled-warning-500">Update Available</span>
+												{/if}
+											{/if}
+											{#if !item.enabled}
+												<span class="badge preset-tonal">Disabled</span>
+											{/if}
+											{#if !item.update_available && item.enabled}
+												<span class="text-surface-400">—</span>
+											{/if}
+										{/if}
+									</td>
+									<td>{item.host_count}</td>
+									<td>
+										{formatDate(item.last_checked_at)}
+										{#if item.latest_version}
+											<span class="block text-xs text-surface-500" title={item.latest_version}
+												>{formatVersion(item.latest_version)} available</span
+											>
+										{/if}
+									</td>
+									{#if canManage}
+										<td>
+											<div class="actions-menu">
+												<button
+													class="btn btn-sm preset-tonal"
+													aria-label="Actions for {item.name}"
+													onclick={(e) => {
+														e.stopPropagation();
+														toggleMenu(item.id, e.currentTarget);
+													}}
+												>
+													&#8943;
+												</button>
+											</div>
+										</td>
+									{/if}
+								</tr>
+							{:else}
+								<tr>
+									<td colspan={canManage ? 8 : 5} class="py-8 text-center">
+										{#if activeTab === 'pending'}
+											<p class="text-lg font-medium">No pending items</p>
+											<p class="mt-1 text-sm text-surface-500">No discovered software awaiting review.</p>
+										{:else if activeTab === 'active'}
+											<p class="text-lg font-medium">No active software</p>
+											<p class="mt-1 text-sm text-surface-500">Register or approve software to start tracking.</p>
+										{:else}
+											<p class="text-lg font-medium">No software registered yet</p>
+											<p class="mt-1 text-sm text-surface-500">Register a package to start tracking.</p>
+										{/if}
+									</td>
+								</tr>
+							{/each}
+						{/if}
+					</tbody>
+				</table>
+			</div>
 
-		<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadAll} />
+			<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadAll} />
 
-		{#if canManage && batchSelectedIds.size > 0}
-			<BatchActionBar
-				selectedCount={batchSelectedIds.size}
-				actions={batchActions}
-				onaction={requestBatchAction}
-				oncancel={() => batchSelectedIds.clear()}
-			/>
-		{/if}
-
-		{#if batchConfirmAction}
-			<ConfirmDialog
-				title="Batch {batchConfirmAction}"
-				messagePrefix="Are you sure you want to {batchConfirmAction}"
-				entityName="{batchSelectedIds.size} software item(s)"
-				confirmLabel={submitting
-					? 'Processing...'
-					: batchConfirmAction === 'approve'
-						? 'Approve'
-						: batchConfirmAction === 'ignore'
-							? 'Ignore'
-							: 'Delete'}
-				confirmClass={batchConfirmAction === 'approve'
-					? 'preset-filled-success-500'
-					: batchConfirmAction === 'ignore'
-						? 'preset-filled-warning-500'
-						: 'preset-filled-error-500'}
-				confirmDisabled={submitting}
-				onconfirm={executeBatchAction}
-				oncancel={() => (batchConfirmAction = null)}
-			/>
-		{/if}
-
-		{#if batchResult}
-			<BatchResultDialog title="Batch Action Results" response={batchResult} onclose={() => (batchResult = null)} />
-		{/if}
-
-		{#if openMenuId}
-			{@const item = items.find((i) => i.id === openMenuId)}
-			{#if item}
-				<ContextMenu top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
-					{#if item.discovery_state === 'pending'}
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-								role="menuitem"
-								tabindex="-1"
-								onclick={() => openEditModal(item)}
-							>
-								Edit
-							</button>
-						</li>
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
-								role="menuitem"
-								tabindex="-1"
-								disabled={approvingId === item.id}
-								onclick={() => approveItem(item)}
-							>
-								{approvingId === item.id ? 'Approving…' : 'Approve'}
-							</button>
-						</li>
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm text-warning-600 dark:text-warning-400 hover:bg-surface-200 dark:hover:bg-surface-800"
-								role="menuitem"
-								tabindex="-1"
-								onclick={() => requestIgnore(item)}
-							>
-								Ignore
-							</button>
-						</li>
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-								role="menuitem"
-								tabindex="-1"
-								onclick={() => requestDelete(item)}
-							>
-								Delete
-							</button>
-						</li>
-					{:else}
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-								role="menuitem"
-								tabindex="-1"
-								onclick={() => openEditModal(item)}
-							>
-								Edit
-							</button>
-						</li>
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
-								role="menuitem"
-								tabindex="-1"
-								disabled={checkingVersionsId === item.id}
-								onclick={() => triggerVersionCheck(item)}
-							>
-								{checkingVersionsId === item.id ? 'Checking…' : 'Check Versions'}
-							</button>
-						</li>
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-								role="menuitem"
-								tabindex="-1"
-								onclick={() => openAssignModal(item)}
-							>
-								Assign to Host
-							</button>
-						</li>
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-								role="menuitem"
-								tabindex="-1"
-								onclick={() => requestDelete(item)}
-							>
-								Delete
-							</button>
-						</li>
-					{/if}
-				</ContextMenu>
+			{#if canManage && batchSelectedIds.size > 0}
+				<BatchActionBar
+					selectedCount={batchSelectedIds.size}
+					actions={batchActions}
+					onaction={requestBatchAction}
+					oncancel={() => batchSelectedIds.clear()}
+				/>
 			{/if}
-		{/if}
 
-		{#if confirmDelete}
-			<ConfirmDialog
-				title="Delete Software Item"
-				messagePrefix="Are you sure you want to delete"
-				entityName={confirmDelete.name}
-				confirmLabel={submitting ? 'Deleting...' : 'Delete'}
-				confirmClass="preset-filled-error-500"
-				confirmDisabled={submitting}
-				onconfirm={executeDelete}
-				oncancel={() => (confirmDelete = null)}
-			/>
-		{/if}
+			{#if batchConfirmAction}
+				<ConfirmDialog
+					title="Batch {batchConfirmAction}"
+					messagePrefix="Are you sure you want to {batchConfirmAction}"
+					entityName="{batchSelectedIds.size} software item(s)"
+					confirmLabel={submitting
+						? 'Processing...'
+						: batchConfirmAction === 'approve'
+							? 'Approve'
+							: batchConfirmAction === 'ignore'
+								? 'Ignore'
+								: 'Delete'}
+					confirmClass={batchConfirmAction === 'approve'
+						? 'preset-filled-success-500'
+						: batchConfirmAction === 'ignore'
+							? 'preset-filled-warning-500'
+							: 'preset-filled-error-500'}
+					confirmDisabled={submitting}
+					onconfirm={executeBatchAction}
+					oncancel={() => (batchConfirmAction = null)}
+				/>
+			{/if}
 
-		{#if confirmIgnore}
-			<Modal title="Ignore Software Item" onclose={() => (confirmIgnore = null)}>
-				<p class="text-sm">
-					Permanently ignore <strong>{confirmIgnore.name}</strong> from future autodiscovery runs?
-				</p>
-				<p class="mt-2 text-sm text-surface-500">
-					An ignore rule will be created so this package is not re-discovered. You can manage ignore rules under <a
-						href="/plugin-configs"
-						class="underline">Plugin Configs → Ignore Rules</a
-					>.
-				</p>
-				{#snippet footer()}
-					<button class="btn preset-tonal-surface" onclick={() => (confirmIgnore = null)}>Cancel</button>
-					<button class="btn preset-filled-warning-500" disabled={ignoreSubmitting} onclick={executeIgnore}>
-						{ignoreSubmitting ? 'Ignoring…' : 'Ignore'}
-					</button>
-				{/snippet}
-			</Modal>
-		{/if}
+			{#if batchResult}
+				<BatchResultDialog title="Batch Action Results" response={batchResult} onclose={() => (batchResult = null)} />
+			{/if}
 
-		{#if assignItem}
-			<AssignToHostModal
-				softwareItemId={assignItem.id}
-				softwareItemName={assignItem.name}
-				onclose={() => (assignItem = null)}
-				onsuccess={() => {
-					assignItem = null;
-					loadAll(currentPage);
-				}}
-			/>
-		{/if}
+			{#if openMenuId}
+				{@const item = items.find((i) => i.id === openMenuId)}
+				{#if item}
+					<ContextMenu top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
+						{#if item.discovery_state === 'pending'}
+							<li>
+								<button
+									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+									role="menuitem"
+									tabindex="-1"
+									onclick={() => openEditModal(item)}
+								>
+									Edit
+								</button>
+							</li>
+							<li>
+								<button
+									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
+									role="menuitem"
+									tabindex="-1"
+									disabled={approvingId === item.id}
+									onclick={() => approveItem(item)}
+								>
+									{approvingId === item.id ? 'Approving…' : 'Approve'}
+								</button>
+							</li>
+							<li>
+								<button
+									class="w-full rounded-md px-3 py-2 text-left text-sm text-warning-600 dark:text-warning-400 hover:bg-surface-200 dark:hover:bg-surface-800"
+									role="menuitem"
+									tabindex="-1"
+									onclick={() => requestIgnore(item)}
+								>
+									Ignore
+								</button>
+							</li>
+							<li>
+								<button
+									class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+									role="menuitem"
+									tabindex="-1"
+									onclick={() => requestDelete(item)}
+								>
+									Delete
+								</button>
+							</li>
+						{:else}
+							<li>
+								<button
+									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+									role="menuitem"
+									tabindex="-1"
+									onclick={() => openEditModal(item)}
+								>
+									Edit
+								</button>
+							</li>
+							<li>
+								<button
+									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
+									role="menuitem"
+									tabindex="-1"
+									disabled={checkingVersionsId === item.id}
+									onclick={() => triggerVersionCheck(item)}
+								>
+									{checkingVersionsId === item.id ? 'Checking…' : 'Check Versions'}
+								</button>
+							</li>
+							<li>
+								<button
+									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+									role="menuitem"
+									tabindex="-1"
+									onclick={() => openAssignModal(item)}
+								>
+									Assign to Host
+								</button>
+							</li>
+							<li>
+								<button
+									class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+									role="menuitem"
+									tabindex="-1"
+									onclick={() => requestDelete(item)}
+								>
+									Delete
+								</button>
+							</li>
+						{/if}
+					</ContextMenu>
+				{/if}
+			{/if}
 
-		{#if showAddModal}
-			<AddSoftwareModal
-				onclose={() => (showAddModal = false)}
-				onsuccess={() => {
-					showAddModal = false;
-					loadAll(1);
-				}}
-			/>
+			{#if confirmDelete}
+				<ConfirmDialog
+					title="Delete Software Item"
+					messagePrefix="Are you sure you want to delete"
+					entityName={confirmDelete.name}
+					confirmLabel={submitting ? 'Deleting...' : 'Delete'}
+					confirmClass="preset-filled-error-500"
+					confirmDisabled={submitting}
+					onconfirm={executeDelete}
+					oncancel={() => (confirmDelete = null)}
+				/>
+			{/if}
+
+			{#if confirmIgnore}
+				<Modal title="Ignore Software Item" onclose={() => (confirmIgnore = null)}>
+					<p class="text-sm">
+						Permanently ignore <strong>{confirmIgnore.name}</strong> from future autodiscovery runs?
+					</p>
+					<p class="mt-2 text-sm text-surface-500">
+						An ignore rule will be created so this package is not re-discovered. You can manage ignore rules under <a
+							href="/software?tab=ignores"
+							class="underline">Software → Ignore Rules</a
+						>.
+					</p>
+					{#snippet footer()}
+						<button class="btn preset-tonal-surface" onclick={() => (confirmIgnore = null)}>Cancel</button>
+						<button class="btn preset-filled-warning-500" disabled={ignoreSubmitting} onclick={executeIgnore}>
+							{ignoreSubmitting ? 'Ignoring…' : 'Ignore'}
+						</button>
+					{/snippet}
+				</Modal>
+			{/if}
+
+			{#if assignItem}
+				<AssignToHostModal
+					softwareItemId={assignItem.id}
+					softwareItemName={assignItem.name}
+					onclose={() => (assignItem = null)}
+					onsuccess={() => {
+						assignItem = null;
+						loadAll(currentPage);
+					}}
+				/>
+			{/if}
+
+			{#if showAddModal}
+				<AddSoftwareModal
+					onclose={() => (showAddModal = false)}
+					onsuccess={() => {
+						showAddModal = false;
+						loadAll(1);
+					}}
+				/>
+			{/if}
+		{:else if activeTab === 'ignores'}
+			<IgnoreRulesTab />
+		{:else}
+			{#each tabExtensions as ext (ext.id)}
+				{#if activeTab === ext.id}
+					<ExtensionTabContent extension={ext} />
+				{/if}
+			{/each}
 		{/if}
 	{/if}
 {/if}
