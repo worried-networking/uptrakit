@@ -993,15 +993,20 @@ mod tests {
         assert!(cmd.contains("tee -a"));
         assert!(cmd.contains("chmod 600"));
         assert!(cmd.contains("chown -R"));
-        assert!(cmd.contains("no-pty"));
+        let restrictions = authorized_keys_restrictions();
+        assert!(
+            cmd.contains(restrictions),
+            "authorized_keys must include restrictions: {cmd}"
+        );
     }
 
     #[test]
     fn cmd_authorized_keys_includes_restrictions() {
         let cmd =
             cmd_setup_authorized_keys("/home/svc", "ssh-ed25519 AAAA...", "svc", false, "uptrakit");
+        let expected = format!("{} ssh-ed25519", authorized_keys_restrictions());
         assert!(
-            cmd.contains("no-pty,no-agent-forwarding,no-X11-forwarding ssh-ed25519"),
+            cmd.contains(&expected),
             "authorized_keys entry must include restriction prefix: {cmd}"
         );
     }
