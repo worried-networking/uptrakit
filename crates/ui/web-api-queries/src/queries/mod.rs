@@ -8,6 +8,7 @@ pub mod autodiscovery;
 pub mod discovery_allowlist;
 pub mod enrollment_tokens;
 pub mod host_packages;
+pub mod host_tags;
 pub mod hosts;
 pub mod mqtt_software_states;
 pub mod notifications;

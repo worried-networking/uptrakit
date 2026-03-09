@@ -16,6 +16,7 @@ pub mod events_stream;
 pub mod extensions;
 pub mod health;
 pub mod host_packages;
+pub mod host_tags;
 pub mod hosts;
 pub mod notifications;
 pub mod oidc_auth;
@@ -791,7 +792,8 @@ mod tests {
             "last_seen_at": null,
             "created_at": "2024-01-01T00:00:00Z",
             "updated_at": "2024-01-01T00:00:00Z",
-            "agents": []
+            "agents": [],
+            "tags": []
         })
     }
 

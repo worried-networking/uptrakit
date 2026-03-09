@@ -11,6 +11,7 @@ pub mod events;
 pub mod extensions;
 pub mod health;
 pub mod host_packages;
+pub mod host_tags;
 pub mod hosts;
 pub mod notifications;
 pub mod ocsp;

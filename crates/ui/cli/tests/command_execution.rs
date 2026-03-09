@@ -41,6 +41,7 @@ fn sample_host() -> HostResponse {
         created_at: datetime!(2025-01-01 00:00:00 UTC),
         updated_at: datetime!(2025-01-01 00:00:00 UTC),
         agents: vec![],
+        tags: vec![],
         update_summary: Default::default(),
     }
 }

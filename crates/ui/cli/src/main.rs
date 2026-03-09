@@ -131,6 +131,11 @@ enum Commands {
         #[command(subcommand)]
         command: NotificationsCommands,
     },
+    /// Manage host tags
+    HostTags {
+        #[command(subcommand)]
+        command: HostTagsCommands,
+    },
     /// Manage host packages (system-level package updates)
     HostPackages {
         #[command(subcommand)]
@@ -247,6 +252,76 @@ enum HostsCommands {
         /// Action to perform (e.g. deactivate, delete)
         action: String,
         /// Host UUIDs (space-separated)
+        ids: Vec<Uuid>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum HostTagsCommands {
+    /// List all host tags
+    List {
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+        /// Search by name
+        #[arg(long)]
+        search: Option<String>,
+    },
+    /// Show host tag details
+    Show {
+        /// Host tag UUID
+        id: Uuid,
+    },
+    /// Create a new host tag
+    Create {
+        /// Tag name
+        #[arg(long)]
+        name: String,
+        /// Tag color (hex, e.g. #3B82F6). Auto-generated if omitted.
+        #[arg(long)]
+        color: Option<String>,
+        /// Tag description
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// Update a host tag
+    Update {
+        /// Host tag UUID
+        id: Uuid,
+        /// New name
+        #[arg(long)]
+        name: Option<String>,
+        /// New color (hex, e.g. #3B82F6)
+        #[arg(long)]
+        color: Option<String>,
+        /// New description
+        #[arg(long)]
+        description: Option<String>,
+        /// Clear the description
+        #[arg(long)]
+        clear_description: bool,
+    },
+    /// Delete a host tag
+    Delete {
+        /// Host tag UUID
+        id: Uuid,
+    },
+    /// Set tags on a host (replaces existing tags)
+    Set {
+        /// Host UUID
+        host_id: Uuid,
+        /// Tag UUIDs (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<Uuid>,
+    },
+    /// Perform a batch action on multiple host tags
+    Batch {
+        /// Action to perform (e.g. delete)
+        action: String,
+        /// Host tag UUIDs (space-separated)
         ids: Vec<Uuid>,
     },
 }
@@ -2215,6 +2290,109 @@ async fn run(cli: Cli) -> error::Result<()> {
                     .await?;
                     std::process::exit(result.exit_code());
                 }
+            }
+        },
+        Commands::HostTags { command } => match command {
+            HostTagsCommands::List {
+                page,
+                per_page,
+                search,
+            } => {
+                let resp = commands::host_tags::list(commands::host_tags::ListParams {
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                    page,
+                    per_page,
+                    search,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            HostTagsCommands::Show { id } => {
+                let resp = commands::host_tags::show(commands::host_tags::ShowParams {
+                    id: &id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            HostTagsCommands::Create {
+                name,
+                color,
+                description,
+            } => {
+                let resp = commands::host_tags::create(commands::host_tags::CreateParams {
+                    name,
+                    color,
+                    description,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            HostTagsCommands::Update {
+                id,
+                name,
+                color,
+                description,
+                clear_description,
+            } => {
+                let resp = commands::host_tags::update(commands::host_tags::UpdateParams {
+                    id: &id,
+                    name,
+                    color,
+                    description,
+                    clear_description,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            HostTagsCommands::Delete { id } => {
+                let resp = commands::host_tags::delete(commands::host_tags::DeleteParams {
+                    id: &id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            HostTagsCommands::Set { host_id, tags } => {
+                let resp = commands::host_tags::set_tags(commands::host_tags::SetParams {
+                    host_id: &host_id,
+                    tag_ids: tags,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            HostTagsCommands::Batch { action, ids } => {
+                let resp = commands::host_tags::batch(
+                    &action,
+                    &ids,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
             }
         },
         Commands::HostPackages { command } => match command {

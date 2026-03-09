@@ -78,6 +78,22 @@ pub(crate) mod discovery_allowlist {
     }
 }
 
+pub(crate) mod host_tags {
+    use uuid::Uuid;
+    /// `GET /api/v1/host-tags` · `POST /api/v1/host-tags`
+    pub(crate) const BASE: &str = "/api/v1/host-tags";
+    /// `POST /api/v1/host-tags/batch`
+    pub(crate) const BATCH: &str = "/api/v1/host-tags/batch";
+    /// `GET /api/v1/host-tags/{id}` · `PUT …` · `DELETE …`
+    pub(crate) fn by_id(id: &Uuid) -> String {
+        format!("/api/v1/host-tags/{id}")
+    }
+    /// `PUT /api/v1/hosts/{host_id}/tags`
+    pub(crate) fn host_tags(host_id: &Uuid) -> String {
+        format!("/api/v1/hosts/{host_id}/tags")
+    }
+}
+
 pub(crate) mod hosts {
     use uuid::Uuid;
     /// `GET /api/v1/hosts`
