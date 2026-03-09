@@ -1,16 +1,14 @@
 //! SMTP email notification plugin.
 //!
-//! Delivers notifications via SMTP using `lettre`. Per-channel configuration
+//! Delivers notifications via SMTP using `mail-send`. Per-channel configuration
 //! contains only the recipient addresses; SMTP server credentials and sender
 //! identity are supplied at delivery time from the merged global SMTP settings.
 
 use std::time::Duration;
 
 use async_trait::async_trait;
-use lettre::message::header::ContentType;
-use lettre::message::{MultiPart, SinglePart};
-use lettre::transport::smtp::authentication::Credentials;
-use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
+use mail_builder::MessageBuilder;
+use mail_send::SmtpClientBuilder;
 use rootcause::prelude::*;
 use serde::Deserialize;
 
@@ -136,6 +134,73 @@ impl SmtpSettingsSnapshot {
 /// [`deliver`](EmailPlugin::deliver) is called.
 pub struct EmailPlugin;
 
+/// Connection timeout applied to every SMTP connection.
+///
+/// Prevents the client from hanging indefinitely when the server is
+/// unreachable or a firewall silently drops SYN packets.
+const SMTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Connect to the SMTP server and send a single message.
+///
+/// `mail-send`'s `connect()` returns `SmtpClient<TlsStream<TcpStream>>` while
+/// `connect_plain()` returns `SmtpClient<TcpStream>` — different concrete types.
+/// This function encapsulates the TLS-mode dispatch so callers don't need to
+/// deal with the type divergence.
+async fn send_email(cfg: &EmailConfig, message: MessageBuilder<'_>) -> Result<()> {
+    let mut builder =
+        SmtpClientBuilder::new(cfg.smtp_host.as_str(), cfg.smtp_port).timeout(SMTP_CONNECT_TIMEOUT);
+
+    if let (Some(user), Some(pass)) = (&cfg.smtp_username, &cfg.smtp_password)
+        && !user.is_empty()
+    {
+        builder = builder.credentials((user.as_str(), pass.as_str()));
+    }
+
+    match cfg.tls_mode.as_str() {
+        "tls" => {
+            builder = builder.implicit_tls(true);
+            let mut client = builder.connect().await.map_err(|e| {
+                report!(NotificationPluginError::DeliveryFailed(format!(
+                    "SMTP TLS connection failed: {e}"
+                )))
+            })?;
+            client.send(message).await.map_err(|e| {
+                report!(NotificationPluginError::DeliveryFailed(format!(
+                    "SMTP send failed: {e}"
+                )))
+            })?;
+        }
+        "none" => {
+            let mut client = builder.connect_plain().await.map_err(|e| {
+                report!(NotificationPluginError::DeliveryFailed(format!(
+                    "SMTP plaintext connection failed: {e}"
+                )))
+            })?;
+            client.send(message).await.map_err(|e| {
+                report!(NotificationPluginError::DeliveryFailed(format!(
+                    "SMTP send failed: {e}"
+                )))
+            })?;
+        }
+        _ => {
+            // Default: STARTTLS
+            builder = builder.implicit_tls(false);
+            let mut client = builder.connect().await.map_err(|e| {
+                report!(NotificationPluginError::DeliveryFailed(format!(
+                    "SMTP STARTTLS connection failed: {e}"
+                )))
+            })?;
+            client.send(message).await.map_err(|e| {
+                report!(NotificationPluginError::DeliveryFailed(format!(
+                    "SMTP send failed: {e}"
+                )))
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
 #[async_trait]
 impl NotificationPlugin for EmailPlugin {
     fn channel_type(&self) -> &'static str {
@@ -169,19 +234,12 @@ impl NotificationPlugin for EmailPlugin {
             ));
         }
 
-        let mailer = build_mailer(&cfg)?;
-
         // Build From header
         let from_header = if let Some(ref name) = cfg.from_name {
             format!("{name} <{}>", cfg.from_address)
         } else {
             cfg.from_address.clone()
         };
-        let from_mailbox: lettre::message::Mailbox = from_header.parse().map_err(|e| {
-            report!(NotificationPluginError::InvalidConfig(format!(
-                "invalid from address: {e}"
-            )))
-        })?;
 
         // Build the HTML body — use existing HTML if provided, otherwise escape plain text.
         let html_body = if let Some(ref html) = message.body_html {
@@ -192,40 +250,14 @@ impl NotificationPlugin for EmailPlugin {
 
         // Send one message per recipient.
         for to_addr in &cfg.to_addresses {
-            let to_mailbox: lettre::message::Mailbox = to_addr.parse().map_err(|e| {
-                report!(NotificationPluginError::InvalidConfig(format!(
-                    "invalid to address '{to_addr}': {e}"
-                )))
-            })?;
-
-            let email = Message::builder()
-                .from(from_mailbox.clone())
-                .to(to_mailbox)
+            let email = MessageBuilder::new()
+                .from(from_header.as_str())
+                .to(to_addr.as_str())
                 .subject(&message.title)
-                .multipart(
-                    MultiPart::alternative()
-                        .singlepart(
-                            SinglePart::builder()
-                                .header(ContentType::TEXT_PLAIN)
-                                .body(message.body.clone()),
-                        )
-                        .singlepart(
-                            SinglePart::builder()
-                                .header(ContentType::TEXT_HTML)
-                                .body(html_body.clone()),
-                        ),
-                )
-                .map_err(|e| {
-                    report!(NotificationPluginError::DeliveryFailed(format!(
-                        "failed to build email message: {e}"
-                    )))
-                })?;
+                .text_body(&message.body)
+                .html_body(&html_body);
 
-            mailer.send(email).await.map_err(|e| {
-                report!(NotificationPluginError::DeliveryFailed(format!(
-                    "SMTP delivery failed to {to_addr}: {e}"
-                )))
-            })?;
+            send_email(&cfg, email).await?;
 
             tracing::debug!(to = %to_addr, "email notification delivered");
         }
@@ -270,71 +302,6 @@ impl NotificationPlugin for EmailPlugin {
     fn mask_config_secrets(&self, config: &serde_json::Value) -> serde_json::Value {
         config.clone()
     }
-}
-
-/// Connection timeout applied to every SMTP transport variant.
-///
-/// Prevents the mailer from hanging indefinitely when the server is
-/// unreachable or a firewall silently drops SYN packets.
-const SMTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// Build an async SMTP mailer from the merged [`EmailConfig`].
-///
-/// Selects the transport variant based on `tls_mode`:
-/// - `"tls"` — SMTPS (implicit TLS, typically port 465)
-/// - `"starttls"` — SMTP with STARTTLS upgrade (typically port 587, **default**)
-/// - `"none"` — plaintext SMTP (not recommended for production)
-fn build_mailer(cfg: &EmailConfig) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
-    let creds = match (&cfg.smtp_username, &cfg.smtp_password) {
-        (Some(user), Some(pass)) if !user.is_empty() => {
-            Some(Credentials::new(user.clone(), pass.clone()))
-        }
-        _ => None,
-    };
-
-    let transport = match cfg.tls_mode.as_str() {
-        "tls" => {
-            let mut builder =
-                AsyncSmtpTransport::<Tokio1Executor>::relay(&cfg.smtp_host).map_err(|e| {
-                    report!(NotificationPluginError::DeliveryFailed(format!(
-                        "failed to build TLS SMTP transport: {e}"
-                    )))
-                })?;
-            builder = builder.port(cfg.smtp_port);
-            builder = builder.timeout(Some(SMTP_CONNECT_TIMEOUT));
-            if let Some(c) = creds {
-                builder = builder.credentials(c);
-            }
-            builder.build()
-        }
-        "none" => {
-            let mut builder =
-                AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.smtp_host);
-            builder = builder.port(cfg.smtp_port);
-            builder = builder.timeout(Some(SMTP_CONNECT_TIMEOUT));
-            if let Some(c) = creds {
-                builder = builder.credentials(c);
-            }
-            builder.build()
-        }
-        _ => {
-            // Default: "starttls"
-            let mut builder = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.smtp_host)
-                .map_err(|e| {
-                    report!(NotificationPluginError::DeliveryFailed(format!(
-                        "failed to build STARTTLS SMTP transport: {e}"
-                    )))
-                })?;
-            builder = builder.port(cfg.smtp_port);
-            builder = builder.timeout(Some(SMTP_CONNECT_TIMEOUT));
-            if let Some(c) = creds {
-                builder = builder.credentials(c);
-            }
-            builder.build()
-        }
-    };
-
-    Ok(transport)
 }
 
 #[cfg(test)]
