@@ -59,6 +59,10 @@ pub enum NotificationEventDetails {
         completed_count: i64,
         failed_count: i64,
     },
+    StdinAttention {
+        update_history_id: Uuid,
+        hint: Option<String>,
+    },
 }
 
 /// Parameters for actionable notifications (only `UpdateAvailable`).
@@ -92,6 +96,9 @@ impl NotificationEvent {
             }
             NotificationEventDetails::BatchUpdatePartiallyCompleted { .. } => {
                 NotificationEventType::BatchUpdatePartiallyCompleted
+            }
+            NotificationEventDetails::StdinAttention { .. } => {
+                NotificationEventType::StdinAttention
             }
         }
     }

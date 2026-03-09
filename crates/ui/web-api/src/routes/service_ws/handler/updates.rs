@@ -1142,6 +1142,42 @@ pub async fn handle_stdin_attention(
         .send_stdin_attention(payload.update_history_id, payload.hint.clone())
         .await;
 
+    // Fire notification so admins can be alerted that input is needed.
+    if let Ok(Some(record)) = update_history::Entity::find_by_id(payload.update_history_id)
+        .one(state.db())
+        .await
+    {
+        let host_name = host::Entity::find_by_id(record.host_id)
+            .one(state.db())
+            .await
+            .ok()
+            .flatten()
+            .map(|h| h.friendly_name);
+
+        let sw_name =
+            uptrakit_shared_db::entity::software_item::Entity::find_by_id(record.software_item_id)
+                .one(state.db())
+                .await
+                .ok()
+                .flatten()
+                .map(|s| s.name);
+
+        state
+            .notification_dispatcher
+            .dispatch(crate::notifications::events::NotificationEvent {
+                tenant_id: record.tenant_id,
+                host_id: Some(record.host_id),
+                host_name,
+                software_item_id: Some(record.software_item_id),
+                software_item_name: sw_name,
+                plugin_type: None,
+                details: crate::notifications::events::NotificationEventDetails::StdinAttention {
+                    update_history_id: payload.update_history_id,
+                    hint: payload.hint.clone(),
+                },
+            });
+    }
+
     tracing::debug!(
         hint = ?payload.hint,
         "broadcast StdinAttention for update"
