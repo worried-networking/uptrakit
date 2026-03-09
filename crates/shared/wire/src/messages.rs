@@ -16,8 +16,9 @@ use super::payloads::{
     PingPayload, PongPayload, RejectedPayload, ReportHostsPayload, ReportPluginConfigPayload,
     ReportPluginConfigResponsePayload, RequestCaRotationPayload, RequestCertRenewalPayload,
     RequestCrlRenewalPayload, ServerRestartingPayload, ServiceCredentialsPayload,
-    ServiceSettingsPayload, SetUpdateFreezePayload, TokenRevokedPayload, UpdateCapabilitiesPayload,
-    UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload, VersionCheckResultsPayload,
+    ServiceSettingsPayload, SetUpdateFreezePayload, StdinAttentionPayload, TokenRevokedPayload,
+    UpdateCapabilitiesPayload, UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload,
+    UpdateStdinDataPayload, VersionCheckResultsPayload,
 };
 use uptrakit_shared_types::HookShell;
 
@@ -134,6 +135,13 @@ pub enum ServiceMessage {
     #[serde(alias = "batch_host_package_update_result")]
     BatchUpdateResult(BatchUpdateResultPayload),
     DiscoveryResults(DiscoveryResultsPayload),
+    /// Agent → Controller: the update process appears to be waiting for stdin input.
+    ///
+    /// Sent when the agent detects that the process has produced no output for
+    /// a sustained period while still running (heuristic: ~10 seconds of silence).
+    /// The controller broadcasts this to interactive session subscribers and may
+    /// trigger notifications.
+    StdinAttention(StdinAttentionPayload),
     // -- MQTT-specific --
     Register(MqttRegisterPayload),
     ReleaseTenants(MqttReleaseTenantsPayload),
@@ -239,6 +247,13 @@ pub enum ControllerMessage {
     ExecuteBatchUpdate(Box<ExecuteBatchUpdatePayload>),
     DiscoverSoftware(DiscoverSoftwarePayload),
     SetUpdateFreeze(SetUpdateFreezePayload),
+    /// Controller → Agent: forward stdin data or a signal to the running update process.
+    ///
+    /// Only sent to agents that advertise the `InteractiveUpdates` capability
+    /// and have an in-flight interactive update matching the `update_history_id`.
+    ///
+    /// **Security**: session-targeted, NEVER published to NATS.
+    UpdateStdinData(UpdateStdinDataPayload),
     // -- MQTT-specific --
     Registered(MqttRegisteredPayload),
     TenantAssignments(MqttTenantAssignmentsPayload),
@@ -338,6 +353,7 @@ impl ControllerMessage {
                 | ControllerMessage::TenantRevoked(_)
                 | ControllerMessage::ExtensionRequest(_)
                 | ControllerMessage::ExtensionResponse(_)
+                | ControllerMessage::UpdateStdinData(_)
                 | ControllerMessage::Unknown
         )
     }

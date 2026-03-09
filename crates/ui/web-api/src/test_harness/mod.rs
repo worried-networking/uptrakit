@@ -233,6 +233,8 @@ pub async fn build_test_state(
         )),
         extension_proxy: Arc::new(crate::extension_proxy::ExtensionProxy::new()),
         reject_dangerous_commands: false,
+        #[cfg(feature = "interactive")]
+        interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
     });
 
     (state, jwt)

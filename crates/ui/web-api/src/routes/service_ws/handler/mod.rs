@@ -496,6 +496,15 @@ pub(crate) async fn handle_authenticated_loop(
                             }
 
                             // -------------------------------------------------
+                            // StdinAttention (requires UpdateHooks)
+                            // -------------------------------------------------
+                            ServiceMessage::StdinAttention(payload) if has_update_hooks => {
+                                if updates::handle_stdin_attention(state, service_id, &payload, &linked_host_ids).await.is_break() {
+                                    break;
+                                }
+                            }
+
+                            // -------------------------------------------------
                             // DiscoveryResults (requires SoftwareDiscovery)
                             // -------------------------------------------------
                             ServiceMessage::DiscoveryResults(payload)

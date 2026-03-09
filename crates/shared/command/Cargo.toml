@@ -7,6 +7,10 @@ repository.workspace = true
 version.workspace = true
 publish = false
 
+[features]
+default = []
+interactive = ["libc"]
+
 [dependencies]
 async-trait = { workspace = true }
 thiserror = { workspace = true }
@@ -14,10 +18,14 @@ rootcause = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true, features = ["process", "io-util", "sync", "rt", "macros", "time"] }
 uptrakit-shared-types = { workspace = true }
+rustix = { workspace = true, features = ["pty", "process", "termios", "stdio"], optional = true }
+libc = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
+rustix = { workspace = true, features = ["pty", "process", "termios", "stdio"] }
+libc = { workspace = true }
 
 [lints]
 workspace = true

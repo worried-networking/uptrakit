@@ -315,6 +315,7 @@ pub(super) async fn handle_mqtt_trigger_update(
             actor_type: ActorType::Mqtt,
             actor_id: &payload.mqtt_client_id.to_string(),
             release_info: None,
+            interactive: false,
         },
     )
     .await

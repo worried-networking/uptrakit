@@ -690,6 +690,7 @@ pub async fn trigger_update(
             actor_type: ActorType::User,
             actor_id: &user.user_id.to_string(),
             release_info,
+            interactive: req.interactive,
         },
     )
     .await

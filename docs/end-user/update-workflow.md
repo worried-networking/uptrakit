@@ -11,6 +11,10 @@
   (`GET /api/v1/update-history/{id}/output/stream`). The Web UI renders output in an xterm.js terminal
   with full ANSI color support. The CLI supports `--follow` on `update trigger` and `history tail` for
   terminal-native streaming. See [Update History](update-history.md) for details.
+- **Interactive updates**: when a package manager may prompt for input (e.g., APT config file
+  conflicts), updates can be triggered in interactive mode with `--interactive`. This allocates
+  a PTY on the target host and keeps stdin open for bidirectional terminal I/O. See
+  [Interactive Updates](interactive-updates.md) for details.
 
 ## Update Categories
 

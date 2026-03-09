@@ -28,6 +28,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Proxmox VE Integration](end-user/proxmox.md) | Proxmox VE VM/CT discovery, manual host matching, and plugin configuration. See also: [Proxmox Plugin Development](development/proxmox-plugin.md). |
 | [Unified Software Tracking](architecture/unified-software-tracking.md) | Software tracking data model, featured vs non-featured items, batch updates, and host summaries. See also: [Autodiscovery](end-user/autodiscovery.md), [Software Item Entity](architecture/software-item-entity.md). |
 | [Update History](end-user/update-history.md) | Viewing update history, status reference, filters, and triggering updates. See also: [Update Workflow](end-user/update-workflow.md), [Update History Entity](architecture/update-history-entity.md). |
+| [Interactive Updates](end-user/interactive-updates.md) | Bidirectional terminal I/O for update sessions with PTY allocation and stdin forwarding. See also: [Interactive Updates API](api/interactive-updates.md), [Interactive Updates Security](security/interactive-updates.md). |
 | [Audit Logs](end-user/audit-logs.md) | Viewing audit logs (tenant and system), filter reference, permissions, and CLI usage. See also: [Audit Logs API](api/audit-logs.md), [Audit Logs Security](security/audit-logs.md). |
 | [Profile and API Tokens](end-user/profile-tokens.md) | Account info, API token lifecycle, security best practices. See also: [Auth Flows](api/auth-flows.md), [Auth and Authorization](security/auth-and-authorization.md). |
 | [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md) | Reverse proxy deployment choices, headers, and API snippets. See also: [PKI and Certificates](security/pki-certificates.md), [Reverse Proxy Security](security/reverse-proxy-security.md). |
@@ -47,6 +48,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Notifications](api/notifications.md) | Notification channel, rule, and delivery log REST API reference. See also: [Notifications Guide](end-user/notifications.md), [Notifications Security](security/notifications-security.md). |
 | [Audit Logs API](api/audit-logs.md) | Audit log REST API reference: endpoints, filter parameters, response schema, permissions. See also: [Audit Logs Guide](end-user/audit-logs.md), [Audit Logs Security](security/audit-logs.md). |
 | [Batch Actions](api/batch-actions.md) | Batch/group action endpoints for bulk management operations (services, hosts, software items, etc.). See also: [CLI Usage Guide](end-user/cli-usage.md), [Extensions API](api/extensions.md). |
+| [Interactive Updates API](api/interactive-updates.md) | Interactive WebSocket endpoint, message formats, and wire protocol for bidirectional update sessions. See also: [Interactive Updates Guide](end-user/interactive-updates.md), [Interactive Updates Security](security/interactive-updates.md). |
 
 ## Security
 
@@ -64,6 +66,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [SSH Agent Secrets](security/ssh-agent-secrets.md) | SSH agent secret storage, master key management, and threat model. See also: [SSH Agent Architecture](architecture/ssh-agent.md), [Secrets and Encryption](security/secrets-and-encryption.md). |
 | [Notifications Security](security/notifications-security.md) | Notification secret storage, callback verification, action token lifecycle, and tenant isolation. See also: [Notifications API](api/notifications.md), [Notifications Development](development/notifications.md). |
 | [Audit Logs Security](security/audit-logs.md) | Audit log data scope, tenant isolation (two-table design, no FK on tenant_id), access permissions, retention/GDPR, backend security properties. See also: [Audit Logs Development](development/audit-logs.md), [Audit Logs API](api/audit-logs.md). |
+| [Interactive Updates Security](security/interactive-updates.md) | Threat model, permission model, audit logging, and wire protocol security for interactive update sessions. See also: [Interactive Updates API](api/interactive-updates.md), [Interactive Updates Development](development/interactive-updates.md). |
 
 ## Architecture
 
@@ -107,6 +110,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Proxmox VE Plugin](development/proxmox-plugin.md) | Proxmox VE infrastructure plugin internals: client, discovery, matching, extensions, DB schema. See also: [Proxmox End-User Guide](end-user/proxmox.md). |
 | [Embedded Frontend](development/embedded-frontend.md) | Building the controller with the frontend embedded in the binary (`embed-frontend` feature). See also: [Setup](development/setup.md), [Deployment Guides](end-user/deployment/README.md). |
 | [Docker](development/docker.md) | Docker image build, CI workflow, and local development with docker-compose. See also: [Docker Deployment](end-user/deployment/docker.md). |
+| [Interactive Updates](development/interactive-updates.md) | Interactive updates feature: PTY allocation, feature gate strategy, architecture, testing. See also: [Interactive Updates API](api/interactive-updates.md), [Interactive Updates Security](security/interactive-updates.md). |
 
 ## Deployment Guides
 

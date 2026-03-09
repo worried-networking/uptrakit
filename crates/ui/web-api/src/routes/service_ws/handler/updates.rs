@@ -338,6 +338,7 @@ pub(super) async fn deliver_pending_updates(
             post_update_hooks: resolved_hooks.post_update_hooks,
             release_info,
             timeout: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT,
+            interactive: false,
         };
 
         let msg = ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
@@ -1108,4 +1109,78 @@ fn build_plugin_assignment(
         package_identifier: assignment.package_identifier.clone(),
         config: merged_config,
     })
+}
+
+/// Handle a `StdinAttention` message from the agent.
+///
+/// Broadcasts a stdin attention event to all SSE subscribers of the update.
+#[tracing::instrument(skip_all, fields(%service_id, update_history_id = %payload.update_history_id))]
+pub async fn handle_stdin_attention(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    payload: &uptrakit_internal_wire::StdinAttentionPayload,
+    linked_host_ids: &HashSet<uuid::Uuid>,
+) -> LoopAction {
+    // Validate that this service owns the update
+    if let Err(e) = validate_update_ownership(
+        &state.db,
+        service_id,
+        payload.update_history_id,
+        linked_host_ids,
+    )
+    .await
+    {
+        tracing::warn!(
+            error = %e,
+            "StdinAttention ownership validation failed"
+        );
+        return LoopAction::Continue;
+    }
+
+    state
+        .update_output_broadcaster
+        .send_stdin_attention(payload.update_history_id, payload.hint.clone())
+        .await;
+
+    // Fire notification so admins can be alerted that input is needed.
+    if let Ok(Some(record)) = update_history::Entity::find_by_id(payload.update_history_id)
+        .one(state.db())
+        .await
+    {
+        let host_name = host::Entity::find_by_id(record.host_id)
+            .one(state.db())
+            .await
+            .ok()
+            .flatten()
+            .map(|h| h.friendly_name);
+
+        let sw_name =
+            uptrakit_shared_db::entity::software_item::Entity::find_by_id(record.software_item_id)
+                .one(state.db())
+                .await
+                .ok()
+                .flatten()
+                .map(|s| s.name);
+
+        state
+            .notification_dispatcher
+            .dispatch(crate::notifications::events::NotificationEvent {
+                tenant_id: record.tenant_id,
+                host_id: Some(record.host_id),
+                host_name,
+                software_item_id: Some(record.software_item_id),
+                software_item_name: sw_name,
+                plugin_type: None,
+                details: crate::notifications::events::NotificationEventDetails::StdinAttention {
+                    update_history_id: payload.update_history_id,
+                    hint: payload.hint.clone(),
+                },
+            });
+    }
+
+    tracing::debug!(
+        hint = ?payload.hint,
+        "broadcast StdinAttention for update"
+    );
+    LoopAction::Continue
 }

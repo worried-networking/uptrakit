@@ -504,6 +504,7 @@ pub(crate) async fn handle_execute_update_ssh(
             update_history_id: _,
             mut handle,
             mut output_rx,
+            ..
         } = in_flight;
         loop {
             tokio::select! {

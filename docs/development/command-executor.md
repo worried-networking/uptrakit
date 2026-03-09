@@ -97,6 +97,14 @@ pub trait CommandExecutor: Send + Sync {
 
 Both return `Result<CommandOutput>` -- errors are raised when the process fails to spawn or exits with a non-zero code.
 
+When compiled with the `interactive` feature, the trait gains two additional methods:
+
+- `execute_interactive()` -- allocates a PTY and returns an `InteractiveHandle` for bidirectional I/O.
+- `supports_interactive()` -- returns `true` if the executor supports interactive execution.
+
+See [Interactive Updates Development](interactive-updates.md) for details on the `InteractiveHandle`
+type and the PTY implementation.
+
 ### `LocalCommandExecutor`
 
 The default implementation. Delegates to `tokio::process::Command` on the local machine.

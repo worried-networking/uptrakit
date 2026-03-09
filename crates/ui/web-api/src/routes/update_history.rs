@@ -18,7 +18,9 @@ use axum::{
 };
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, RelationTrait};
 use uptrakit_shared_db::entity::{host, update_history, update_output_line};
-use uptrakit_web_api_types::update_history::{OutputLineSSE, UpdateCompletedSSE};
+use uptrakit_web_api_types::update_history::{
+    OutputLineSSE, StdinAttentionSSE, UpdateCompletedSSE,
+};
 use uuid::Uuid;
 
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
@@ -250,6 +252,12 @@ pub async fn stream_update_output(
                                     yield Ok::<_, Infallible>(Event::default().event("completed").data(json));
                                 }
                                 return;
+                            }
+                            Ok(BroadcastEvent::StdinAttention { hint }) => {
+                                let payload = StdinAttentionSSE { hint };
+                                if let Ok(json) = serde_json::to_string(&payload) {
+                                    yield Ok::<_, Infallible>(Event::default().event("stdin_attention").data(json));
+                                }
                             }
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                                 tracing::debug!(lagged = n, "SSE subscriber lagged, continuing");

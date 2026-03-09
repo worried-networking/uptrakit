@@ -22,6 +22,7 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::UpdateResult(p) => p.wire_validate(),
             ServiceMessage::BatchUpdateResult(p) => p.wire_validate(),
             ServiceMessage::DiscoveryResults(p) => p.wire_validate(),
+            ServiceMessage::StdinAttention(p) => p.wire_validate(),
             ServiceMessage::Register(p) => p.wire_validate(),
             ServiceMessage::ReleaseTenants(p) => p.wire_validate(),
             ServiceMessage::MqttClientStatus(_) => Ok(()),
@@ -65,6 +66,7 @@ impl WireValidate for ControllerMessage {
             ControllerMessage::ExecuteBatchUpdate(p) => p.wire_validate(),
             ControllerMessage::DiscoverSoftware(p) => p.wire_validate(),
             ControllerMessage::SetUpdateFreeze(p) => p.wire_validate(),
+            ControllerMessage::UpdateStdinData(p) => p.wire_validate(),
             ControllerMessage::Registered(_) => Ok(()),
             ControllerMessage::TenantAssignments(p) => p.wire_validate(),
             ControllerMessage::TenantConfigUpdated(p) => p.wire_validate(),
@@ -974,6 +976,20 @@ impl WireValidate for SetUpdateFreezePayload {
     }
 }
 
+impl WireValidate for UpdateStdinDataPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.data, MAX_STDIN_DATA_LEN, "data")?;
+        Ok(())
+    }
+}
+
+impl WireValidate for StdinAttentionPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_opt_string_len(&self.hint, MAX_MEDIUM_STRING_LEN, "hint")?;
+        Ok(())
+    }
+}
+
 impl WireValidate for MqttTenantAssignmentsPayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_vec_len(&self.tenants, MAX_MQTT_TENANTS, "tenants")?;
@@ -1325,6 +1341,7 @@ mod tests {
                 require_attestation: false,
             }),
             timeout: std::time::Duration::from_secs(60),
+            interactive: false,
         };
         assert!(payload.wire_validate().is_ok());
     }
@@ -1353,6 +1370,7 @@ mod tests {
             post_update_hooks: vec![],
             release_info: None,
             timeout: std::time::Duration::from_secs(60),
+            interactive: false,
         };
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "pre_update_hooks");
@@ -1631,6 +1649,44 @@ mod tests {
             plugin_type: "infrastructure_proxmox".to_string(),
             name: "pve.local".to_string(),
             config: serde_json::Value::String("x".repeat(MAX_PLUGIN_CONFIG_JSON_LEN + 1)),
+        });
+        assert!(msg.wire_validate().is_err());
+    }
+
+    #[test]
+    fn update_stdin_data_validates() {
+        let msg = ControllerMessage::UpdateStdinData(UpdateStdinDataPayload {
+            update_history_id: uuid::Uuid::nil(),
+            data: "aGVsbG8=".to_string(),
+            signal: None,
+        });
+        assert!(msg.wire_validate().is_ok());
+    }
+
+    #[test]
+    fn update_stdin_data_rejects_oversized_data() {
+        let msg = ControllerMessage::UpdateStdinData(UpdateStdinDataPayload {
+            update_history_id: uuid::Uuid::nil(),
+            data: "x".repeat(MAX_STDIN_DATA_LEN + 1),
+            signal: None,
+        });
+        assert!(msg.wire_validate().is_err());
+    }
+
+    #[test]
+    fn stdin_attention_validates() {
+        let msg = ServiceMessage::StdinAttention(StdinAttentionPayload {
+            update_history_id: uuid::Uuid::nil(),
+            hint: Some("waiting for config file conflict resolution".to_string()),
+        });
+        assert!(msg.wire_validate().is_ok());
+    }
+
+    #[test]
+    fn stdin_attention_rejects_oversized_hint() {
+        let msg = ServiceMessage::StdinAttention(StdinAttentionPayload {
+            update_history_id: uuid::Uuid::nil(),
+            hint: Some("x".repeat(MAX_MEDIUM_STRING_LEN + 1)),
         });
         assert!(msg.wire_validate().is_err());
     }

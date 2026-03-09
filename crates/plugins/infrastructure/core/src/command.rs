@@ -24,6 +24,7 @@ uptrakit_shared_macros::impl_report_conversion!(
             uptrakit_command::CommandError::TimedOut => PluginError::TimedOut,
             uptrakit_command::CommandError::UnsupportedShell(s) => PluginError::UnsupportedShell(s),
             uptrakit_command::CommandError::UnsupportedOperation(s) => PluginError::UnsupportedOperation(s),
+            uptrakit_command::CommandError::PtyAllocationFailed(io) => PluginError::CommandSpawn(io),
         }
     }
 );

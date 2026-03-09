@@ -435,6 +435,9 @@ enum UpdateCommands {
         /// Follow (tail) update output in real-time after triggering
         #[arg(long, short)]
         follow: bool,
+        /// Request interactive (PTY) mode for the update session
+        #[arg(long, short)]
+        interactive: bool,
     },
     /// Trigger a batch update for all outdated items on a host
     BatchHost {
@@ -2056,6 +2059,7 @@ async fn run(cli: Cli) -> error::Result<()> {
                 release_tag,
                 release_url,
                 follow,
+                interactive,
             } => {
                 let resp = commands::update::trigger(commands::update::TriggerParams {
                     item_id: &item_id,
@@ -2067,6 +2071,7 @@ async fn run(cli: Cli) -> error::Result<()> {
                     token: cli.token.as_deref(),
                     insecure,
                     request_timeout,
+                    interactive,
                 })
                 .await?;
                 output::print_output(format, &resp)?;
@@ -3862,6 +3867,7 @@ mod tests {
                         release_tag,
                         release_url,
                         follow,
+                        interactive,
                     },
             }) => {
                 assert_eq!(item_id, uuid(ITEM_UUID));
@@ -3870,6 +3876,7 @@ mod tests {
                 assert!(release_tag.is_none());
                 assert!(release_url.is_none());
                 assert!(!follow);
+                assert!(!interactive);
             }
             _ => panic!("expected Update Trigger"),
         }
@@ -4001,6 +4008,29 @@ mod tests {
                 assert!(follow);
             }
             _ => panic!("expected Update Trigger with follow"),
+        }
+    }
+
+    #[test]
+    fn update_trigger_interactive_flag_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "update",
+            "trigger",
+            ITEM_UUID,
+            HOST_UUID,
+            "--to-version",
+            "2.0.0",
+            "--interactive",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::Update {
+                command: UpdateCommands::Trigger { interactive, .. },
+            }) => {
+                assert!(interactive);
+            }
+            _ => panic!("expected Update Trigger with interactive"),
         }
     }
 

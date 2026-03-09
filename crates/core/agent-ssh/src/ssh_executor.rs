@@ -97,6 +97,32 @@ impl CommandExecutor for SshCommandExecutor {
         true
     }
 
+    #[cfg(feature = "interactive")]
+    fn supports_interactive(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "interactive")]
+    async fn execute_interactive(
+        &self,
+        spec: &CommandSpec,
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> uptrakit_command::Result<uptrakit_command::executor::InteractiveHandle> {
+        let remote_cmd = build_remote_command_string(spec)?;
+        tracing::debug!(
+            cmd_len = remote_cmd.len(),
+            "executing interactive remote SSH command"
+        );
+        self.session
+            .exec_command_interactive(&remote_cmd, output_tx)
+            .await
+            .map_err(|e| {
+                report!(CommandError::CommandSpawn(std::io::Error::other(
+                    e.to_string()
+                )))
+            })
+    }
+
     async fn open_stdio_tunnel(
         &self,
         command: &str,

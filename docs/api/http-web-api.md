@@ -259,6 +259,23 @@ Types are defined in `crates/shared/web-api-types/src/update_history.rs`:
 | `crates/ui/web-api/src/update_output_broadcaster.rs` | In-process broadcast registry (`UpdateOutputBroadcaster`) |
 | `crates/shared/web-api-types/src/update_history.rs` | SSE event types (`OutputLineSSE`, `UpdateCompletedSSE`) |
 
+## Interactive Update WebSocket
+
+`GET /api/v1/update-history/{id}/interactive` — WebSocket endpoint for bidirectional terminal I/O
+with an interactive update session. Requires the `ManageSoftware` permission. Only available when
+the controller is compiled with the `interactive` feature.
+
+This endpoint provides the same output streaming as the SSE endpoint above, plus the ability to
+send stdin data and signals to the update process. See [Interactive Updates API](interactive-updates.md)
+for the full protocol reference.
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/ui/web-api/src/routes/interactive_ws.rs` | WebSocket endpoint handler |
+| `crates/ui/web-api/src/interactive_sessions.rs` | Single-writer session registry |
+
 ## Batch Update Endpoints
 
 Batch updates allow triggering multiple updates in a single request with controller-managed

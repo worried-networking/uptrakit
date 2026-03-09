@@ -323,7 +323,7 @@ pub async fn run_proxmox_bootstrap(
 
     let ak_entry = format!(
         "{} {stripped_pubkey} {service_comment}",
-        bootstrap::AUTHORIZED_KEYS_RESTRICTIONS
+        bootstrap::authorized_keys_restrictions()
     );
 
     if to_remove.is_empty() {

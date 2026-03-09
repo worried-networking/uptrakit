@@ -44,11 +44,12 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 ### Agent-specific (service -> controller)
 
 `report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`, `discovery_results`,
-`batch_update_result`
+`batch_update_result`, `stdin_attention`
 
 ### SSH agent-specific (service -> controller)
 
-`report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`, `discovery_results`
+`report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`, `discovery_results`,
+`stdin_attention`
 
 > **Note:** For the SSH agent, `report_hosts` is sent both at connect time and dynamically during a
 > session whenever the local `ssh_hosts` database changes (host added, removed, or updated). The
@@ -93,10 +94,10 @@ entirely (`LoopOutcome::Shutdown`), while `server_restarting` causes it to recon
 ### Agent-specific (controller -> service)
 
 `check_versions`, `execute_update`, `discover_software`, `execute_batch_update`,
-`set_update_freeze`
+`set_update_freeze`, `update_stdin_data`
 
-Both the regular agent and the SSH agent receive `check_versions`, `execute_update`, `discover_software`, and
-`execute_batch_update` messages.
+Both the regular agent and the SSH agent receive `check_versions`, `execute_update`, `discover_software`,
+`execute_batch_update`, and `update_stdin_data` messages.
 The `host_machine_id` field in each payload determines which host the operation targets
 (see [`host_machine_id` Field](#host_machine_id-field)).
 
@@ -216,6 +217,7 @@ and is not sent to the agent.
 | `post_update_hooks` | `Vec<HookCommand>` | Post-update hook commands |
 | `release_info` | `ReleaseInfo?` | Release metadata from the upstream source. Only present for GitHub Releases items. See [`ReleaseInfo` fields](#releaseinfo-fields). |
 | `timeout_seconds` | `Duration` | Maximum execution time for the entire update (including hooks). Rust field is `timeout`, serialized as seconds on the wire (`timeout_seconds`). Defaults to 7200 (2 hours) when omitted. |
+| `interactive` | bool | When `true`, the agent allocates a PTY and keeps stdin open for forwarding. Defaults to `false`. Only honoured when the agent advertises `InteractiveUpdates`. See [Interactive Updates](interactive-updates.md). |
 
 #### `ReleaseInfo` fields
 
@@ -380,6 +382,55 @@ messages. When `false`, the agent removes the file and resumes normal operation.
 | `reason` | `string` | No | Optional human-readable reason (logged by the agent). |
 
 This message is safe for NATS publication (no credentials in the payload).
+
+#### `update_stdin_data` payload
+
+Carries stdin data or a signal to the agent for a specific interactive update. This
+message is session-targeted and is **not** NATS-publishable — it is only sent over the
+direct WebSocket connection between the controller and the agent.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 6,
+  "type": "update_stdin_data",
+  "update_history_id": "770e8400-...",
+  "data": "eQo=",
+  "signal": null
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `update_history_id` | UUID | Yes | The in-flight update to target. |
+| `data` | string | Yes | Base64-encoded raw bytes to write to stdin. May be empty when `signal` is set. Max 64 KB. |
+| `signal` | integer | No | When set, sends this signal to the process group instead of writing stdin. `2` = SIGINT, `15` = SIGTERM. |
+
+The controller only sends this message to agents that advertise the `InteractiveUpdates`
+capability. See [Interactive Updates](interactive-updates.md) for the full flow.
+
+#### `stdin_attention` payload (service to controller)
+
+Sent by the agent when the update process appears to be waiting for stdin input (heuristic:
+no output for 10 seconds while the process is still running).
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 7,
+  "type": "stdin_attention",
+  "update_history_id": "770e8400-...",
+  "hint": "Configuration file '/etc/foo.conf' has been modified..."
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `update_history_id` | UUID | Yes | The update that is waiting for input. |
+| `hint` | string | No | Optional context about what the process might be waiting for. |
+
+The controller broadcasts this as a `stdin_attention` SSE event and dispatches a
+notification (if rules are configured for the `StdinAttention` event type).
 
 ### MQTT-specific (controller -> service)
 
@@ -780,17 +831,20 @@ The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incomp
 | `MasterKeyAccess` | `master_key_access` | Service requires the master encryption key. Requires `system_service`. |
 | `CaManagement` | `ca_management` | Service can request CA certificate rotation. Requires `system_service`. |
 | `UiExtensions` | `ui_extensions` | Service has UI extensions to register via `extension_register`. The controller gates `extension_register` processing on this capability. See [UI Extension Architecture](../architecture/ui-extensions.md). |
+| `InteractiveUpdates` | `interactive_updates` | Service supports interactive (PTY-based) update sessions with stdin forwarding. Only advertised when compiled with the `interactive` feature. The controller gates `update_stdin_data` and `interactive: true` on this capability. See [Interactive Updates](interactive-updates.md). |
 | `Other(String)` | *(any unknown string)* | Forward-compatible catch-all. Never participates in intersection. |
 
 ### Advertised Sets per Component
 
-| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `mqtt_bridge` | `ssh_remote` | `system_service` | `scheduler` | `database_access` | `nats_access` | `master_key_access` | `ca_management` | `ui_extensions` |
-| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Controller | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Agent | ✓ | ✓ | ✓ | — | — | — | — | — | — | — | — | — |
-| SSH Agent | ✓ | ✓ | ✓ | — | ✓ | — | — | — | — | — | — | ✓ |
-| MQTT Bridge | — | — | ✓ | ✓ | — | ✓ | — | — | — | — | — | — |
-| External Scheduler | — | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `mqtt_bridge` | `ssh_remote` | `system_service` | `scheduler` | `database_access` | `nats_access` | `master_key_access` | `ca_management` | `ui_extensions` | `interactive_updates` |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Controller | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Agent | ✓ | ✓ | ✓ | — | — | — | — | — | — | — | — | — | ✓\* |
+| SSH Agent | ✓ | ✓ | ✓ | — | ✓ | — | — | — | — | — | — | ✓ | ✓\* |
+| MQTT Bridge | — | — | ✓ | ✓ | — | ✓ | — | — | — | — | — | — | — |
+| External Scheduler | — | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+
+\* Only when compiled with the `interactive` Cargo feature.
 
 The controller advertises all known capabilities so every service can compute its agreed set regardless of its type.
 

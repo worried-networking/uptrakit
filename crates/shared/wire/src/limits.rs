@@ -140,6 +140,12 @@ pub const MAX_EXTENSION_RESPONSE_LEN: usize = 1_048_576;
 /// Maximum byte length of plugin config JSON in a `ReportPluginConfig` message.
 pub const MAX_PLUGIN_CONFIG_JSON_LEN: usize = 65_536;
 
+/// Maximum byte length of stdin data in an `UpdateStdinData` message (64 KB).
+///
+/// Base64-encoded bytes written to the process PTY. 64 KB is generous for
+/// interactive input; typical keystrokes are a few bytes each.
+pub const MAX_STDIN_DATA_LEN: usize = 65_536;
+
 // ── Pagination limits ───────────────────────────────────────────────────────
 
 /// Maximum number of pages in a single paginated report.

@@ -822,6 +822,34 @@ operations:
       works, and the freeze persists across agent restarts. The message is safe
       for NATS publication — it contains no credential material.
 
+  receiveUpdateStdinData:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/updateStdinData"
+    summary: Agent receives stdin data for an interactive update
+    description: |
+      The controller forwards stdin data (or a signal) to the agent for
+      a specific in-flight interactive update. The agent writes the data
+      to the PTY master fd or sends the signal to the process group.
+
+      This message is session-targeted and is NOT NATS-publishable. It is
+      only sent to agents that advertise the `InteractiveUpdates` capability.
+
+  sendStdinAttention:
+    action: send
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/stdinAttention"
+    summary: Agent signals that an update is waiting for stdin input
+    description: |
+      Sent when the agent detects that an interactive update process may be
+      waiting for stdin input (heuristic: no output for 10 seconds while
+      the process is still alive). The controller broadcasts this as an SSE
+      event and dispatches a notification if rules are configured.
+
   sendUpdateCapabilities:
     action: send
     channel:
@@ -1351,6 +1379,34 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/setUpdateFreezePayload"
+
+    updateStdinData:
+      name: update_stdin_data
+      title: Update Stdin Data Message
+      summary: Controller forwards stdin data or a signal to an agent for an interactive update
+      description: |
+        Carries base64-encoded stdin bytes or a signal number to the agent for a
+        specific in-flight interactive update. The agent writes the decoded bytes
+        to the PTY master fd or sends the signal to the process group.
+
+        This message is session-targeted and is NOT NATS-publishable. It is only
+        sent to agents that advertise the `InteractiveUpdates` capability.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/updateStdinDataPayload"
+
+    stdinAttention:
+      name: stdin_attention
+      title: Stdin Attention Message
+      summary: Agent signals that an interactive update is waiting for stdin input
+      description: |
+        Sent when the agent detects that an interactive update process may be
+        waiting for stdin input (heuristic: no output for 10 seconds while
+        the process is still alive). The controller broadcasts this as a
+        `stdin_attention` SSE event and dispatches a notification.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/stdinAttentionPayload"
 
     updateCapabilities:
       name: update_capabilities
@@ -2652,6 +2708,13 @@ components:
           default: 7200
           examples:
             - 7200
+        interactive:
+          type: boolean
+          description: |
+            When true, the agent allocates a PTY and keeps stdin open for
+            forwarding. Defaults to false. Only honoured when the agent
+            advertises the `InteractiveUpdates` capability.
+          default: false
 
     updateStartedPayload:
       type: object
@@ -4178,6 +4241,81 @@ components:
             - "emergency maintenance window"
             - "investigating failed update"
 
+    updateStdinDataPayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+        - update_history_id
+        - data
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Wire protocol version.
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: update_stdin_data
+          description: Message type discriminator
+        update_history_id:
+          type: string
+          format: uuid
+          description: The in-flight update to target.
+        data:
+          type: string
+          description: |
+            Base64-encoded raw bytes to write to stdin. May be empty when
+            `signal` is set. Maximum 64 KB encoded.
+        signal:
+          type: integer
+          format: int32
+          description: |
+            When set, sends this signal to the process group instead of writing
+            stdin. Values: 2 = SIGINT, 15 = SIGTERM.
+          examples:
+            - 2
+            - 15
+
+    stdinAttentionPayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+        - update_history_id
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Wire protocol version.
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: stdin_attention
+          description: Message type discriminator
+        update_history_id:
+          type: string
+          format: uuid
+          description: The update that is waiting for input.
+        hint:
+          type: string
+          description: |
+            Optional context about what the process might be waiting for.
+          examples:
+            - "Configuration file '/etc/foo.conf' has been modified..."
+
     serviceCredentialsPayload:
       type: object
       required:
@@ -4311,8 +4449,9 @@ components:
             `software_discovery`, `update_hooks`, `graceful_shutdown`,
             `mqtt_bridge`, `ssh_remote`, `scheduler`, `database_access`,
             `nats_access`, `master_key_access`, `ca_management`,
-            `system_service`, and `ui_extensions`. Unknown strings are stored as
-            forward-compat `Other` variants and are ignored for gating decisions.
+            `system_service`, `ui_extensions`, and `interactive_updates`. Unknown
+            strings are stored as forward-compat `Other` variants and are ignored
+            for gating decisions.
 
     extensionRegisterPayload:
       type: object

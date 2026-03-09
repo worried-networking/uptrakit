@@ -70,7 +70,7 @@ pub async fn require_auth(
 
 /// Lightweight error type for authentication failures, replacing `Result<_, Response>`
 /// to avoid the `clippy::result_large_err` lint.
-enum AuthFailure {
+pub(crate) enum AuthFailure {
     Unauthorized(&'static str),
     Forbidden(&'static str),
     InternalError,
@@ -89,7 +89,7 @@ impl IntoResponse for AuthFailure {
 }
 
 /// Authenticate using a `upk_`-prefixed API token (requires DB lookup).
-async fn authenticate_api_token(
+pub(crate) async fn authenticate_api_token(
     state: &AppState,
     token: &str,
 ) -> std::result::Result<AuthenticatedUser, AuthFailure> {
@@ -127,7 +127,7 @@ async fn authenticate_api_token(
 }
 
 /// Authenticate using a JWT access token (stateless validation + denylist check).
-async fn authenticate_jwt(
+pub(crate) async fn authenticate_jwt(
     state: &AppState,
     token: &str,
 ) -> std::result::Result<AuthenticatedUser, AuthFailure> {
@@ -350,6 +350,8 @@ mod tests {
             )),
             extension_proxy: Arc::new(crate::extension_proxy::ExtensionProxy::new()),
             reject_dangerous_commands: false,
+            #[cfg(feature = "interactive")]
+            interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })
     }
 

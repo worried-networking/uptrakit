@@ -33,6 +33,8 @@ pub enum BroadcastEvent {
         status: String,
         error: Option<String>,
     },
+    /// The update process appears to be waiting for stdin input.
+    StdinAttention { hint: Option<String> },
 }
 
 /// Internal state for a single update's broadcast channel.
@@ -108,6 +110,17 @@ impl UpdateOutputBroadcaster {
         if let Some(entry) = channels.remove(&update_history_id) {
             let event = BroadcastEvent::Completed { status, error };
             let _ = entry.tx.send(event);
+        }
+    }
+
+    /// Send a stdin attention event to all subscribers of the given update.
+    ///
+    /// Called when the agent reports that the update process appears to be
+    /// waiting for stdin input.
+    pub async fn send_stdin_attention(&self, update_history_id: Uuid, hint: Option<String>) {
+        let channels = self.channels.read().await;
+        if let Some(entry) = channels.get(&update_history_id) {
+            let _ = entry.tx.send(BroadcastEvent::StdinAttention { hint });
         }
     }
 

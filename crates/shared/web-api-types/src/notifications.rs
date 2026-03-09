@@ -41,6 +41,8 @@ pub enum NotificationEventType {
     CaRotated,
     BatchUpdateCompleted,
     BatchUpdatePartiallyCompleted,
+    /// An interactive update process appears to be waiting for stdin input.
+    StdinAttention,
 }
 
 impl NotificationEventType {
@@ -54,6 +56,7 @@ impl NotificationEventType {
             Self::CaRotated => "ca_rotated",
             Self::BatchUpdateCompleted => "batch_update_completed",
             Self::BatchUpdatePartiallyCompleted => "batch_update_partially_completed",
+            Self::StdinAttention => "stdin_attention",
         }
     }
 }
@@ -82,6 +85,7 @@ impl FromStr for NotificationEventType {
             "ca_rotated" => Ok(Self::CaRotated),
             "batch_update_completed" => Ok(Self::BatchUpdateCompleted),
             "batch_update_partially_completed" => Ok(Self::BatchUpdatePartiallyCompleted),
+            "stdin_attention" => Ok(Self::StdinAttention),
             _ => Err(ParseNotificationEventTypeError),
         }
     }

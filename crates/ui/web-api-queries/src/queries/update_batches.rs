@@ -419,6 +419,7 @@ pub async fn create_batch(
                     update_history_id,
                     to_version: candidate.latest_version.clone(),
                     release_info: None,
+                    interactive: false,
                 },
             )
             .await?;
@@ -544,6 +545,7 @@ pub async fn dispatch_next_in_batch(
                     update_history_id: next_record.id,
                     to_version: next_record.to_version.unwrap_or_default(),
                     release_info: None,
+                    interactive: false,
                 },
             )
             .await;

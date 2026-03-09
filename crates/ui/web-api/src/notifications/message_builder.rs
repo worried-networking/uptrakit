@@ -173,6 +173,16 @@ fn build_content(event: &NotificationEvent) -> (String, String, String) {
             );
             (title, body, body_html)
         }
+        NotificationEventDetails::StdinAttention { hint, .. } => {
+            let title = "Update Waiting for Input".to_string();
+            let hint_msg = hint.as_deref().unwrap_or("No additional details available");
+            let body = format!("An interactive update is waiting for input. Hint: {hint_msg}");
+            let body_html = format!(
+                "An interactive update is waiting for input. Hint: <b>{}</b>",
+                escape_html(hint_msg)
+            );
+            (title, body, body_html)
+        }
     }
 }
 

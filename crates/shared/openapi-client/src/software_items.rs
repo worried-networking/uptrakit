@@ -267,6 +267,7 @@ mod tests {
         let req = TriggerUpdateRequest {
             to_version: "2.0.0".to_string(),
             release_info: None,
+            interactive: false,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["to_version"], "2.0.0");
@@ -282,6 +283,7 @@ mod tests {
                 release_url: "https://example.com/releases/v2.0.0".to_string(),
                 assets: vec![],
             }),
+            interactive: false,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["to_version"], "2.0.0");
