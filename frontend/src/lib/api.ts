@@ -1,5 +1,6 @@
 import { getAccessToken, setAccessToken, setSessionExpired } from './auth.svelte';
 import type {
+	BatchActionResponse,
 	AgentCertificateSettings,
 	ApiTokenListResponse,
 	AssignHostsRequest,
@@ -972,6 +973,39 @@ export async function listSystemAuditLogs(params?: AuditLogListParams): Promise<
 	if (params?.per_page) p.set('per_page', String(params.per_page));
 	const qs = p.toString();
 	return request<PaginatedResponse<AuditLogEntry>>(`/system-audit-logs${qs ? '?' + qs : ''}`);
+}
+
+// ── Batch Actions ─────────────────────────────────────────────────────
+
+export function batchServices(action: string, ids: string[]): Promise<BatchActionResponse> {
+	return request('/services/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
+}
+
+export function batchSystemServices(action: string, ids: string[]): Promise<BatchActionResponse> {
+	return request('/system-services/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
+}
+
+export function batchSoftwareItems(action: string, ids: string[]): Promise<BatchActionResponse> {
+	return request('/software-items/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
+}
+
+export function batchHosts(action: string, ids: string[]): Promise<BatchActionResponse> {
+	return request('/hosts/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
+}
+
+export function batchHostPackages(hostId: string, action: string, ids: string[]): Promise<BatchActionResponse> {
+	return request(`/hosts/${encodeURIComponent(hostId)}/packages/batch`, {
+		method: 'POST',
+		body: JSON.stringify({ action, ids })
+	});
+}
+
+export function batchAutodiscoveryIgnores(action: string, ids: string[]): Promise<BatchActionResponse> {
+	return request('/autodiscovery/ignores/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
+}
+
+export function batchPluginConfigs(action: string, ids: string[]): Promise<BatchActionResponse> {
+	return request('/plugin-configs/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
 }
 
 // ── Extensions ────────────────────────────────────────────────────────

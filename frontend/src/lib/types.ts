@@ -893,6 +893,8 @@ export interface ActionDef {
 	row_visible_when?: RowVisibleWhen;
 	/** Row data field to use as the entity name in the confirmation dialog for destructive actions. */
 	confirm_entity_field?: string;
+	/** When true, this action supports batch execution with multiple selected rows. */
+	batch_action?: boolean;
 }
 
 export type ContextSelectorSource =
@@ -947,6 +949,27 @@ export interface ExtensionResponse {
 	/** Resolved action catalogue for this extension's source. */
 	actions: ActionDef[];
 	provider_count: number;
+}
+
+// ── Batch Actions ─────────────────────────────────────────────────────
+
+export interface BatchActionRequest {
+	action: string;
+	ids: string[];
+}
+
+export interface BatchActionSuccess {
+	id: string;
+}
+
+export interface BatchActionFailure {
+	id: string;
+	error: string;
+}
+
+export interface BatchActionResponse {
+	succeeded: BatchActionSuccess[];
+	failed: BatchActionFailure[];
 }
 
 export interface ExtensionProviderInfo {
