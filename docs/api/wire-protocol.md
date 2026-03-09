@@ -472,6 +472,10 @@ See [Tracing Conventions](../development/tracing.md) for the full tracing guide.
 | Approval timeout (client) | 30 minutes | The `wait_for_approval` loop times out after 30 minutes. The caller retries the enrollment flow on timeout. |
 | Per-hook timeout (agent) | 5 minutes | Individual pre/post-update hooks are killed after 300 seconds. |
 | Update cooldown (agent) | 5 seconds | Agents reject consecutive updates within the cooldown period. |
+| Report pagination total timeout | 5 minutes | All pages of a paginated report must arrive within 5 minutes of the first page. |
+| Report pagination idle timeout | 15 seconds | Consecutive pages must arrive within 15 seconds of each other. |
+| Maximum report pages | 50 | A single paginated report can have at most 50 pages. |
+| Maximum pending reports | 10 | At most 10 paginated reports can be in-flight per connection. |
 
 ### Payload Size Limits
 
@@ -521,6 +525,91 @@ This prevents boundary burst attacks where a fixed-window limiter would allow
 2× the configured limit (N at the end of one window + N at the start of the
 next). When the estimate exceeds `WS_MESSAGE_RATE_LIMIT` (50), the connection
 is closed with `CloseReason::RateLimitExceeded`.
+
+## Report Pagination
+
+When a service-to-controller report payload (`discovery_results`, `version_check_results`,
+`report_hosts`, `batch_host_package_update_result`) exceeds 768 KB
+(`PAGINATION_SIZE_THRESHOLD`), the sender automatically splits it across multiple WebSocket
+frames. Each frame carries pagination metadata in the envelope.
+
+### Envelope Fields
+
+The `ServiceEnvelope` gains an optional `pagination` object (omitted for single-message
+reports):
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 42,
+  "pagination": {
+    "report_id": "550e8400-e29b-41d4-a716-446655440000",
+    "page": 1,
+    "total_pages": 3
+  },
+  "type": "discovery_results",
+  "data": { "..." }
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `report_id` | UUID | Groups all pages of the same logical report. |
+| `page` | u32 | 1-based page number. |
+| `total_pages` | u32 | Total number of pages (known upfront by the sender). |
+
+### Pagination Limits
+
+| Constant | Value | Description |
+| --- | --- | --- |
+| `PAGINATION_SIZE_THRESHOLD` | 786,432 (768 KB) | Payloads above this size are split into pages. |
+| `MAX_REPORT_PAGES` | 50 | Maximum pages per report. |
+| `MAX_PENDING_REPORTS_PER_CONNECTION` | 10 | Maximum concurrent in-flight paginated reports per connection. |
+| `REPORT_TOTAL_TIMEOUT` | 300 seconds | Maximum wall-clock time for all pages of a report. |
+| `REPORT_IDLE_TIMEOUT` | 15 seconds | Maximum time between consecutive pages. |
+
+All limits are defined in `crates/shared/wire/src/limits.rs`.
+
+### How It Works
+
+**Sender side (`ControllerConnection::send_auto_paginate`):**
+
+1. Serialize the full payload and check its size against `PAGINATION_SIZE_THRESHOLD`.
+2. If under the threshold, send as a single message with no `pagination` field (zero overhead).
+3. If over the threshold, split the payload's primary `Vec` field across pages. Each item
+   (e.g. each `DiscoveryPluginResult`) stays whole -- never split across pages.
+4. Assign a random `report_id` (UUID v4) and stamp each page with `page` / `total_pages`.
+5. Send each page as a separate WebSocket text frame with its own sequence number.
+
+**Controller side (`ReportTracker`):**
+
+1. Each page is processed immediately and dropped (no payload buffering).
+2. A lightweight `ReportTracker` (per-connection, ~200 bytes per pending report) records
+   which pages have arrived.
+3. For `discovery_results`, the accumulated discovered-software count is tracked across
+   pages; the `NewSoftwareDiscovered` notification is emitted only on the final page.
+4. For other report types, each page's finalization (e.g. `push_software_states_for_tenant`)
+   runs independently -- the controller does not defer processing.
+5. Expired reports (idle timeout or total timeout exceeded) are evicted automatically.
+
+### Design Constraints
+
+- **No payload buffering**: The controller stores only page-arrival metadata (~200 bytes per
+  report), not the payloads themselves. This prevents memory-based DDoS.
+- **Per-connection state**: Pagination tracking lives in a local variable with the same
+  lifetime as the WebSocket session. There is no cross-controller coordination (HA safe).
+- **Snapshot semantics preserved**: Each `DiscoveryPluginResult` stays whole on a single
+  page. Since deactivation of missing packages is per-plugin-config, it runs correctly on
+  each page independently.
+
+### Paginatable Payload Types
+
+| Payload type | Splittable field | Into `ServiceMessage` variant |
+| --- | --- | --- |
+| `DiscoveryResultsPayload` | `results: Vec<DiscoveryPluginResult>` | `discovery_results` |
+| `VersionCheckResultsPayload` | `results: Vec<VersionCheckResult>` | `version_check_results` |
+| `ReportHostsPayload` | `hosts: Vec<HostInfo>` | `report_hosts` |
+| `BatchHostPackageUpdateResultPayload` | `results: Vec<BatchHostPackageUpdateResult>` | `batch_host_package_update_result` |
 
 ## Error Codes
 

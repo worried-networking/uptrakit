@@ -106,7 +106,7 @@ pub(crate) async fn report_enrolled_hosts(
         capabilities: ssh_agent_capabilities(),
     });
 
-    if let Err(e) = conn.send(msg).await {
+    if let Err(e) = conn.send_auto_paginate(msg).await {
         tracing::warn!(error = %e, "failed to send ReportHosts message");
     } else {
         tracing::info!(host_count = total, "reported enrolled hosts to controller");
@@ -344,7 +344,7 @@ pub(crate) async fn report_hosts_after_config_change(
         capabilities: ssh_agent_capabilities(),
     });
 
-    if let Err(e) = conn.send(msg).await {
+    if let Err(e) = conn.send_auto_paginate(msg).await {
         tracing::warn!(
             error = %e,
             "failed to send ReportHosts after dynamic host config change"

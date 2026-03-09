@@ -103,7 +103,7 @@ uptrakit/
 │   │   ├── audit-log/                  # uptrakit-audit-log                      (lib)  — AuditLogBackend trait, AuditEntry, AuditFilter, AuditLogDispatcher; backends: NoopBackend, DatabaseBackend (cfg db), JournaldBackend (cfg journald), MultiplexBackend; fire-and-forget dispatcher pattern
 │   │   ├── notification-channels/      # uptrakit-notification-channels          (lib)  — NotificationChannel trait, DeliveryMessage, ChannelRegistry(ChannelRegistryConfig); shared escape_html(); webhook (default, SSRF validation + header blocklist) + telegram + email (feature-gated) channel impls
 │   │   ├── update-hooks/               # uptrakit-update-hooks                  (lib)  — update hook resolution and config merge logic (extracted from web-api)
-│   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields; re-exports `uptrakit-extension-framework` as `extension` module
+│   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields; report pagination (`paginate.rs` Paginatable trait + `report_tracker.rs` ReportTracker); re-exports `uptrakit-extension-framework` as `extension` module
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, host-packages, services, software-items, plugin-configs, autodiscovery, checks, updates, batch-updates, history, scheduler, settings); `update trigger --follow` and `history tail` use SSE streaming; `update batch-host/batch-item --follow` and `update-batches follow` use batch progress SSE; lib target exposes modules for integration tests
 │       ├── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API layer; routes, middleware (security_headers, request_id, request_log, resolve_ip, rate_limit, resolve_proxy_headers, require_auth, audit_log, permission, tenant_context), AppState, router; /healthz (liveness) + /readyz (readiness: DB + CA checks); event_broadcaster.rs (per-tenant admin event SSE), device_flow_broadcaster.rs (device auth SSE); re-exports auth/queries from sibling crates; test_harness/ shared integration test fixtures (TestApp, TestClient, DB/HTTP helpers); integration_tests/ REST API + WebSocket integration tests (#[cfg(all(test, feature = "db-sqlite"))])
@@ -325,6 +325,11 @@ These are non-negotiable design constraints. Do not violate them.
    trait validates per-field and per-collection size limits after deserialization. Add limit constants in
    `crates/shared/wire/src/limits.rs`. Use `check_vec_len()`, `check_string_len()`, and `check_opt_string_len()`
    helpers. See [Wire Protocol — Payload Size Limits](docs/api/wire-protocol.md#payload-size-limits).
+1. **Large report payloads must use `send_auto_paginate()`.** When sending `DiscoveryResults`,
+   `VersionCheckResults`, `ReportHosts`, or `BatchHostPackageUpdateResult` from a service, always use
+   `conn.send_auto_paginate(msg)` instead of `conn.send(msg)`. This automatically splits payloads exceeding
+   768 KB into pages. New paginatable types must implement the `Paginatable` trait in
+   `crates/shared/wire/src/paginate.rs`. See [Wire Protocol — Report Pagination](docs/api/wire-protocol.md#report-pagination).
 1. **Command-bearing plugin config fields must be validated.** Plugin configs with command strings
    (`version_command`, `update_command`, `post_pull_command`, hook `commands` arrays) must validate command length
    via `validate_command_length()` from `uptrakit-shared-types::command_validation`. Hook command counts must be

@@ -198,7 +198,7 @@ pub async fn handle_check_versions(
     ctx: &ConnectionContext,
 ) -> Option<LoopOutcome> {
     let response = run_check_versions(payload, executor, ctx).await;
-    if let Err(e) = conn.send(response).await {
+    if let Err(e) = conn.send_auto_paginate(response).await {
         tracing::error!(error = %e, "failed to send VersionCheckResults");
         return Some(LoopOutcome::Disconnected);
     }
@@ -359,7 +359,7 @@ pub async fn handle_execute_batch_host_package_update(
     ctx: &ConnectionContext,
 ) -> Option<LoopOutcome> {
     let response = run_execute_batch_host_package_update(payload, executor, ctx).await;
-    if let Err(e) = conn.send(response).await {
+    if let Err(e) = conn.send_auto_paginate(response).await {
         tracing::error!(error = %e, "failed to send BatchHostPackageUpdateResult");
         return Some(LoopOutcome::Disconnected);
     }
@@ -573,7 +573,7 @@ pub async fn handle_discover_software(
     ctx: &ConnectionContext,
 ) -> Option<LoopOutcome> {
     let response = run_discover_software(payload, executor, ctx).await;
-    if let Err(e) = conn.send(response).await {
+    if let Err(e) = conn.send_auto_paginate(response).await {
         tracing::error!(error = %e, "failed to send DiscoveryResults");
         return Some(LoopOutcome::Disconnected);
     }

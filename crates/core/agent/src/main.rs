@@ -60,7 +60,7 @@ impl ServiceHandler for AgentHandler {
         let host_info = crate::host_info::collect_host_info();
         // Capture and store the machine_id for use in on_message() validation.
         self.machine_id = host_info.machine_id.clone();
-        conn.send(ServiceMessage::ReportHosts(ReportHostsPayload {
+        conn.send_auto_paginate(ServiceMessage::ReportHosts(ReportHostsPayload {
             hosts: vec![host_info],
             agent_version: env!("CARGO_PKG_VERSION").to_string(),
             capabilities: agent_capabilities(),

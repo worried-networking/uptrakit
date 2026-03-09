@@ -455,7 +455,7 @@ impl ServiceHandler for SshAgentHandler {
             }
 
             SshAgentEvent::BackgroundResult(msg) => {
-                if let Err(e) = conn.send(msg).await {
+                if let Err(e) = conn.send_auto_paginate(msg).await {
                     tracing::error!(
                         error = %e,
                         "failed to send background operation result; disconnecting"

@@ -14,7 +14,7 @@ use serde::Deserialize;
 use tokio_rustls::TlsConnector;
 use uptrakit_internal_wire::{
     CURRENT_PROTOCOL_VERSION, Capability, CloseReason, ControllerEnvelope, ControllerMessage,
-    IncomingSeq, OutgoingSeq, ServiceMessage,
+    IncomingSeq, OutgoingSeq, Paginatable, ServiceMessage, paginate::paginate_payload,
 };
 
 use crate::error::{EnrollmentError, ProtocolError, Result};
@@ -217,6 +217,78 @@ impl ControllerConnection {
     /// Sets the agreed capability set (called by the event loop after negotiation).
     pub(crate) fn set_agreed_capabilities(&mut self, caps: BTreeSet<Capability>) {
         self.agreed_capabilities = caps;
+    }
+
+    /// Send a [`Paginatable`] payload, automatically splitting it into pages
+    /// when the serialized size exceeds the pagination threshold.
+    ///
+    /// Small payloads are sent as a single message with no pagination metadata
+    /// (zero overhead). Large payloads are split into pages, each sent as a
+    /// separate WebSocket frame with pagination metadata attached.
+    ///
+    /// Each page is a complete, independently processable message. The
+    /// controller tracks page arrival and defers only lightweight finalization
+    /// (e.g. notification emission) until the final page.
+    pub async fn send_paginated<P: Paginatable>(&mut self, payload: P) -> Result<()> {
+        let pages = paginate_payload(payload).context_to::<EnrollmentError>()?;
+        let page_count = pages.len();
+
+        for (i, page) in pages.into_iter().enumerate() {
+            let msg = page.payload.into_message();
+            let envelope = self.out_seq.wrap_service_paginated(
+                msg,
+                uptrakit_internal_wire::current_trace_context(),
+                page.pagination,
+            );
+            let json = serde_json::to_string(&envelope).context_to::<EnrollmentError>()?;
+
+            if let Err(e) = tokio::time::timeout(
+                SEND_TIMEOUT,
+                self.ws
+                    .send(tokio_tungstenite::tungstenite::Message::Text(json.into())),
+            )
+            .await
+            .map_err(|_| report!(EnrollmentError::Protocol(ProtocolError::SendTimeout)))
+            {
+                tracing::error!(
+                    page = i + 1,
+                    total_pages = page_count,
+                    error = %e,
+                    "failed to send paginated message page"
+                );
+                return Err(e);
+            }
+
+            if page_count > 1 {
+                tracing::debug!(
+                    page = i + 1,
+                    total_pages = page_count,
+                    "sent paginated message page"
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Send a [`ServiceMessage`], automatically paginating paginatable payload
+    /// types when they exceed the wire size threshold.
+    ///
+    /// Paginatable variants (`DiscoveryResults`, `VersionCheckResults`,
+    /// `ReportHosts`, `BatchHostPackageUpdateResult`) are split into pages
+    /// transparently. All other variants are sent as a single message.
+    ///
+    /// This is the recommended method for sending report-style messages.
+    pub async fn send_auto_paginate(&mut self, msg: ServiceMessage) -> Result<()> {
+        match msg {
+            ServiceMessage::DiscoveryResults(payload) => self.send_paginated(payload).await,
+            ServiceMessage::VersionCheckResults(payload) => self.send_paginated(payload).await,
+            ServiceMessage::ReportHosts(payload) => self.send_paginated(payload).await,
+            ServiceMessage::BatchHostPackageUpdateResult(payload) => {
+                self.send_paginated(payload).await
+            }
+            other => self.send(other).await,
+        }
     }
 
     /// Send a [`ServiceMessage`] on a best-effort basis.

@@ -100,6 +100,25 @@ info:
     - **Approval polling:** The controller polls the database for approval status
       changes at a fixed 5-second interval, independent of client ping frequency.
 
+    ## Report Pagination
+
+    Large reports (e.g., discovery results) may exceed the maximum WebSocket message
+    size. When the serialized payload exceeds a size threshold, the sender splits it
+    into multiple pages sharing the same `report_id`. Each page carries a `pagination`
+    envelope field with `report_id`, `page`, and `total_pages`. Single-message reports
+    omit the `pagination` field entirely.
+
+    **Constants:**
+    - `PAGINATION_SIZE_THRESHOLD`: 786,432 bytes (768 KB) — payloads larger than this are paginated
+    - `MAX_REPORT_PAGES`: 50 — maximum number of pages per report
+    - `MAX_PENDING_REPORTS_PER_CONNECTION`: 10 — concurrent incomplete reports per connection
+    - `REPORT_TOTAL_TIMEOUT`: 300 s — maximum wall-clock time to receive all pages of a report
+    - `REPORT_IDLE_TIMEOUT`: 15 s — maximum gap between consecutive pages before the report is dropped
+
+    The receiver reassembles pages by `report_id` and processes the full report only
+    after all pages have arrived. Incomplete reports are discarded after the idle or
+    total timeout expires.
+
     ### Client-side Timeouts (enrollment crate)
 
     - **TCP connect timeout:** 30 seconds. The enrollment client aborts the TCP
@@ -3672,6 +3691,12 @@ components:
           description: Per-plugin discovery results
           items:
             $ref: "#/components/schemas/discoveryPluginResult"
+        pagination:
+          $ref: "#/components/schemas/reportPagination"
+          description: |
+            Present only for paginated reports. Omitted for single-message reports.
+            When present, the receiver must buffer pages by `report_id` and process
+            the full report only after all pages have arrived.
 
     executeBatchHostPackageUpdatePayload:
       type: object
@@ -4454,3 +4479,71 @@ components:
           description: 64-bit span identifier as 16 lowercase hex characters (optional)
           examples:
             - "fedcba9876543210"
+
+    reportPagination:
+      type: object
+      description: |
+        Pagination metadata for multi-page reports. When a report payload exceeds
+        `PAGINATION_SIZE_THRESHOLD` (768 KB), the sender splits it into multiple
+        WebSocket messages sharing the same `report_id`. Each message carries this
+        object so the receiver can reassemble pages in order.
+      required:
+        - report_id
+        - page
+        - total_pages
+      properties:
+        report_id:
+          type: string
+          format: uuid
+          description: Unique identifier grouping all pages of the same logical report
+          examples:
+            - "019522a0-7fff-7000-8000-000000000001"
+        page:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 50
+          description: 1-based page number within the report
+          examples:
+            - 1
+        total_pages:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 50
+          description: Total number of pages in the report
+          examples:
+            - 3
+
+    serviceEnvelope:
+      type: object
+      description: |
+        Common envelope fields present on every service-to-controller message.
+        Individual payload schemas (e.g., `pingPayload`, `discoveryResultsPayload`)
+        include these fields inline. This schema documents the shared structure
+        for reference; it is not used as a `$ref` target by payload schemas.
+      required:
+        - protocol_version
+        - seq
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        trace_context:
+          $ref: "#/components/schemas/traceContext"
+          description: |
+            Optional distributed tracing context. See `traceContext` schema.
+        pagination:
+          $ref: "#/components/schemas/reportPagination"
+          description: |
+            Present only for paginated reports. Omitted for single-message reports.

@@ -394,7 +394,9 @@ The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared 
 - **TLS/CA**: TLS connector builders (server-only and mTLS), CA bootstrap (cached, file, PKI endpoint, TOFU, system trust), CA staleness checks.
 - **ControllerConnection**: Shared authenticated WebSocket connection with envelope serialization, sequence validation, Ping/Pong handling, and
   close-frame reason tracking. Used by all services regardless of capability set. Sequence validation is performed before
-  full message deserialization to ensure unrecognized messages do not cause sequence mismatches.
+  full message deserialization to ensure unrecognized messages do not cause sequence mismatches. The `send_auto_paginate`
+  method automatically splits large report payloads (discovery results, version checks, host reports, batch updates) into
+  pages when they exceed the 768 KB pagination threshold.
 - **CertificateRenewalHandler**: Handles certificate lifecycle messages (`CaBundleUpdated`, `RequestCertRenewal`, `Certificate`) automatically in the
   event loop. Also provides shared renewal timer helpers (`create_renewal_sleep`, `update_renewal_schedule`, `compute_renewal_delay`).
 - **Backoff**: Exponential backoff with jitter for reconnection delays.
