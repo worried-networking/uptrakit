@@ -601,11 +601,18 @@ workaround is the **table recreation** pattern.
 | Drop a column referenced by an index or FK | Table recreation |
 | Change a column's type or nullability | Table recreation |
 | Add a `GENERATED ALWAYS AS` stored column | Table recreation |
+| Add a foreign key to an existing table | Table recreation (SQLite has no `ALTER TABLE ADD CONSTRAINT`) |
 | Restructure a table's schema | Table recreation |
 
-For PostgreSQL and MySQL, `ALTER TABLE ADD/DROP/ALTER COLUMN` works directly. Migrations
-that need table recreation on SQLite should branch on the backend using
-`helpers::is_sqlite(manager)` and use `ALTER TABLE` on other backends.
+For PostgreSQL and MySQL, `ALTER TABLE ADD/DROP/ALTER COLUMN` and `ALTER TABLE ADD CONSTRAINT`
+work directly. Migrations that need table recreation on SQLite should branch on the backend
+using `helpers::is_sqlite(manager)` and use `ALTER TABLE` on other backends.
+
+**All steps — table creation, data copy, drop, rename, and index recreation — must use
+sea_query builders or the shared helpers.** Never use raw SQL strings for these operations.
+The only accepted exception is the data copy step when it requires constructs that sea_query
+cannot express (e.g., `CASE` expressions or SQLite-specific functions like `strftime`); see
+[Data copy strategies](#data-copy-strategies) below.
 
 #### Shared helpers
 
@@ -674,7 +681,8 @@ async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
 
 #### Data copy strategies
 
-**Simple column-for-column copy** — use a sea_query `INSERT...SELECT`:
+**Always prefer sea_query builders.** The data copy step must use sea_query's
+`INSERT...SELECT` builder whenever possible:
 
 ```rust
 let select = Query::select().columns(DATA_COLS).from(OldTable::Table).to_owned();
@@ -688,8 +696,10 @@ insert
 manager.execute(insert).await?;
 ```
 
-**Complex transformation** (e.g., mapping values via `CASE`, using `strftime`) — use
-`execute_unprepared` with a justification comment:
+**`execute_unprepared` exception** — only when the `INSERT...SELECT` requires constructs
+that sea_query's builder cannot express (e.g., `CASE` expressions in the `SELECT` column
+list, or SQLite-specific functions like `strftime`). Every such call **must** include an
+inline comment naming the specific sea_query limitation:
 
 ```rust
 // CASE expressions in INSERT...SELECT cannot be expressed with sea_query's
@@ -705,6 +715,9 @@ manager
     )
     .await?;
 ```
+
+If the copy is a straightforward column mapping (even with column renames), use
+sea_query — do not reach for `execute_unprepared` as a convenience shortcut.
 
 #### Backend branching
 
