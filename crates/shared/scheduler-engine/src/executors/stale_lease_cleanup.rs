@@ -8,7 +8,7 @@ use crate::error::SchedulerError;
 use crate::executor::TaskExecutor;
 
 /// Maximum allowed age of an MQTT lease heartbeat before considering it stale.
-const STALE_AFTER_SECS: i64 = 60;
+const STALE_AFTER_SECS: i64 = 300;
 
 /// Cleans stale MQTT leases whose heartbeat has expired.
 ///
