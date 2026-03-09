@@ -236,6 +236,19 @@ impl GitLabPlugin {
     }
 }
 
+/// Parse the URL from a `Link: <url>; rel="next"` HTTP response header.
+///
+/// Returns `None` if the header is absent or contains no `rel="next"` entry.
+fn parse_link_next(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    let link = headers.get("link")?.to_str().ok()?;
+    link.split(',').find_map(|part| {
+        let mut it = part.trim().splitn(2, ';');
+        let url = it.next()?.trim().trim_matches(|c| c == '<' || c == '>');
+        let rel = it.next()?.trim();
+        (rel == r#"rel="next""#).then(|| url.to_owned())
+    })
+}
+
 #[async_trait]
 impl Plugin for GitLabPlugin {
     fn plugin_type(&self) -> PluginType {
@@ -257,51 +270,65 @@ impl Plugin for GitLabPlugin {
             )))
         })?;
 
-        let url = self.releases_url(&encoded_path);
-        tracing::debug!(url = %url, "fetching GitLab releases");
+        let initial_url = self.releases_url(&encoded_path);
+        tracing::debug!(url = %initial_url, "fetching GitLab releases");
 
-        let response = self.client.get(&url).send().await.map_err(|e| {
-            report!(PluginError::Configuration(format!(
-                "HTTP request failed: {e}"
-            )))
-        })?;
+        const MAX_PAGES: usize = 10;
+        let mut all_releases: Vec<GitLabRelease> = Vec::new();
+        let mut url = initial_url;
 
-        let status = response.status();
-        self.check_rate_limit(response.headers(), package_identifier);
+        'pages: for _ in 0..MAX_PAGES {
+            let response = self.client.get(&url).send().await.map_err(|e| {
+                report!(PluginError::Configuration(format!(
+                    "HTTP request failed: {e}"
+                )))
+            })?;
 
-        if !status.is_success() {
-            tracing::debug!(status = %status, "GitLab API returned error status");
+            let status = response.status();
+            self.check_rate_limit(response.headers(), package_identifier);
 
-            if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                bail!(PluginError::Configuration(
-                    "GitLab API rate limit exceeded".to_string()
-                ));
+            if !status.is_success() {
+                tracing::debug!(status = %status, "GitLab API returned error status");
+
+                if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    bail!(PluginError::Configuration(
+                        "GitLab API rate limit exceeded".to_string()
+                    ));
+                }
+
+                let body = response.text().await.unwrap_or_default();
+                let message = serde_json::from_str::<GitLabApiError>(&body)
+                    .map(|e| e.message)
+                    .unwrap_or(body);
+
+                return Err(report!(GitLabError::ApiError { status, message })).context_to();
             }
 
-            let body = response.text().await.unwrap_or_default();
-            let message = serde_json::from_str::<GitLabApiError>(&body)
-                .map(|e| e.message)
-                .unwrap_or(body);
+            let next_url = parse_link_next(response.headers());
+            let page: Vec<GitLabRelease> = response.json().await.map_err(|e| {
+                report!(PluginError::Serialization(format!(
+                    "failed to parse GitLab API response: {e}"
+                )))
+            })?;
 
-            return Err(report!(GitLabError::ApiError { status, message })).context_to();
+            if page.is_empty() {
+                break 'pages;
+            }
+            all_releases.extend(page);
+            match next_url {
+                Some(next) => url = next,
+                None => break 'pages,
+            }
         }
 
-        let releases: Vec<GitLabRelease> = response.json().await.map_err(|e| {
-            report!(PluginError::Serialization(format!(
-                "failed to parse GitLab API response: {e}"
-            )))
-        })?;
-
         // Build the web UI release URL base from the API base and project path.
-        // Format: https://gitlab.com/{namespace}/{project}/-/releases/{tag}
-        // We reconstruct the unencoded path for the web URL.
         let web_base = format!(
             "{}/{}/-/releases",
             self.config.api_base_url(),
             package_identifier
         );
 
-        let upstream_releases: Vec<UpstreamRelease> = releases
+        let upstream_releases: Vec<UpstreamRelease> = all_releases
             .iter()
             .filter_map(|r| {
                 let mut upstream = self.convert_release(r)?;
@@ -312,7 +339,7 @@ impl Plugin for GitLabPlugin {
 
         tracing::debug!(
             count = upstream_releases.len(),
-            total = releases.len(),
+            total = all_releases.len(),
             "fetched GitLab releases"
         );
 
@@ -581,5 +608,41 @@ mod tests {
     async fn plugin_creation_succeeds_with_empty_config() {
         let config = GitLabConfig::default();
         assert!(GitLabPlugin::new(config, test_executor()).await.is_ok());
+    }
+
+    // ── parse_link_next tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn parse_link_next_returns_next_url() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "link",
+            r#"<https://api.example.com/releases?page=2&per_page=100>; rel="next", <https://api.example.com/releases?page=5&per_page=100>; rel="last""#
+                .parse()
+                .unwrap(),
+        );
+        let next = parse_link_next(&headers);
+        assert_eq!(
+            next.as_deref(),
+            Some("https://api.example.com/releases?page=2&per_page=100")
+        );
+    }
+
+    #[test]
+    fn parse_link_next_absent_when_no_next_rel() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "link",
+            r#"<https://api.example.com/releases?page=1&per_page=100>; rel="first""#
+                .parse()
+                .unwrap(),
+        );
+        assert!(parse_link_next(&headers).is_none());
+    }
+
+    #[test]
+    fn parse_link_next_absent_when_no_link_header() {
+        let headers = reqwest::header::HeaderMap::new();
+        assert!(parse_link_next(&headers).is_none());
     }
 }

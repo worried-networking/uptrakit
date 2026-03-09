@@ -407,6 +407,19 @@ impl GitHubPlugin {
     }
 }
 
+/// Parse the URL from a `Link: <url>; rel="next"` HTTP response header.
+///
+/// Returns `None` if the header is absent or contains no `rel="next"` entry.
+fn parse_link_next(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    let link = headers.get("link")?.to_str().ok()?;
+    link.split(',').find_map(|part| {
+        let mut it = part.trim().splitn(2, ';');
+        let url = it.next()?.trim().trim_matches(|c| c == '<' || c == '>');
+        let rel = it.next()?.trim();
+        (rel == r#"rel="next""#).then(|| url.to_owned())
+    })
+}
+
 #[async_trait]
 impl Plugin for GitHubPlugin {
     fn plugin_type(&self) -> PluginType {
@@ -428,72 +441,87 @@ impl Plugin for GitHubPlugin {
             )))
         })?;
 
-        let url = self.releases_url(owner, repo);
-        tracing::debug!(url = %url, "fetching GitHub releases");
+        let initial_url = self.releases_url(owner, repo);
+        tracing::debug!(url = %initial_url, "fetching GitHub releases");
 
-        let response = self.client.get(&url).send().await.map_err(|e| {
-            report!(PluginError::Configuration(format!(
-                "HTTP request failed: {e}"
-            )))
-        })?;
+        const MAX_PAGES: usize = 10;
+        let mut all_releases: Vec<GitHubRelease> = Vec::new();
+        let mut url = initial_url;
 
-        let status = response.status();
-        self.check_rate_limit(response.headers(), package_identifier);
+        'pages: for _ in 0..MAX_PAGES {
+            let response = self.client.get(&url).send().await.map_err(|e| {
+                report!(PluginError::Configuration(format!(
+                    "HTTP request failed: {e}"
+                )))
+            })?;
 
-        if !status.is_success() {
-            tracing::debug!(status = %status, "GitHub API returned error status");
-            // Check for rate limiting
-            if status == reqwest::StatusCode::FORBIDDEN
-                || status == reqwest::StatusCode::TOO_MANY_REQUESTS
-            {
-                let remaining = response
-                    .headers()
-                    .get("x-ratelimit-remaining")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok());
+            let status = response.status();
+            self.check_rate_limit(response.headers(), package_identifier);
 
-                if remaining == Some(0) {
-                    let reset_at = response
+            if !status.is_success() {
+                tracing::debug!(status = %status, "GitHub API returned error status");
+                if status == reqwest::StatusCode::FORBIDDEN
+                    || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                {
+                    let remaining = response
                         .headers()
-                        .get("x-ratelimit-reset")
+                        .get("x-ratelimit-remaining")
                         .and_then(|v| v.to_str().ok())
-                        .unwrap_or("unknown")
-                        .to_string();
-                    bail!(PluginError::Configuration(format!(
-                        "GitHub API rate limit exceeded (resets at {reset_at})"
-                    )));
+                        .and_then(|s| s.parse::<u64>().ok());
+
+                    if remaining == Some(0) {
+                        let reset_at = response
+                            .headers()
+                            .get("x-ratelimit-reset")
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        bail!(PluginError::Configuration(format!(
+                            "GitHub API rate limit exceeded (resets at {reset_at})"
+                        )));
+                    }
                 }
+
+                let body = response.text().await.unwrap_or_default();
+                let message = serde_json::from_str::<GitHubApiError>(&body)
+                    .map(|e| e.message)
+                    .unwrap_or(body);
+
+                return Err(report!(GitHubError::ApiError { status, message })).context_to();
             }
 
-            let body = response.text().await.unwrap_or_default();
-            let message = serde_json::from_str::<GitHubApiError>(&body)
-                .map(|e| e.message)
-                .unwrap_or(body);
+            let next_url = parse_link_next(response.headers());
+            let page: Vec<GitHubRelease> = response.json().await.map_err(|e| {
+                report!(PluginError::Serialization(format!(
+                    "failed to parse GitHub API response: {e}"
+                )))
+            })?;
 
-            return Err(report!(GitHubError::ApiError { status, message })).context_to();
+            if page.is_empty() {
+                break 'pages;
+            }
+            all_releases.extend(page);
+            match next_url {
+                Some(next) => url = next,
+                None => break 'pages,
+            }
         }
 
-        let releases: Vec<GitHubRelease> = response.json().await.map_err(|e| {
-            report!(PluginError::Serialization(format!(
-                "failed to parse GitHub API response: {e}"
-            )))
-        })?;
-
-        let mut upstream_releases: Vec<UpstreamRelease> = releases
+        let mut upstream_releases: Vec<UpstreamRelease> = all_releases
             .iter()
             .filter_map(|r| self.convert_release(r))
             .collect();
 
         tracing::debug!(
             count = upstream_releases.len(),
-            total = releases.len(),
+            total = all_releases.len(),
             "fetched GitHub releases"
         );
 
         // Attestation check for the latest (first) release.
         if self.config.verify_attestation
             && let Some(latest) = upstream_releases.first_mut()
-            && let Some(gh_release) = releases.iter().find(|r| r.tag_name == latest.tag)
+            && let Some(gh_release) = all_releases.iter().find(|r| r.tag_name == latest.tag)
         {
             let status = self
                 .check_release_attestation(owner, repo, &gh_release.assets, &mut latest.assets)
@@ -1410,5 +1438,41 @@ mod tests {
     #[test]
     fn format_size_none() {
         assert_eq!(format_size(None), "unknown size");
+    }
+
+    // ── parse_link_next tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn parse_link_next_returns_next_url() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "link",
+            r#"<https://api.example.com/releases?page=2&per_page=100>; rel="next", <https://api.example.com/releases?page=5&per_page=100>; rel="last""#
+                .parse()
+                .unwrap(),
+        );
+        let next = parse_link_next(&headers);
+        assert_eq!(
+            next.as_deref(),
+            Some("https://api.example.com/releases?page=2&per_page=100")
+        );
+    }
+
+    #[test]
+    fn parse_link_next_absent_when_no_next_rel() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "link",
+            r#"<https://api.example.com/releases?page=1&per_page=100>; rel="first""#
+                .parse()
+                .unwrap(),
+        );
+        assert!(parse_link_next(&headers).is_none());
+    }
+
+    #[test]
+    fn parse_link_next_absent_when_no_link_header() {
+        let headers = reqwest::header::HeaderMap::new();
+        assert!(parse_link_next(&headers).is_none());
     }
 }
