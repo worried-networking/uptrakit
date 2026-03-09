@@ -410,6 +410,13 @@ ______________________________________________________________________
     list snapshots, rollback snapshot), snapshot lifecycle management, integration with the
     update pipeline, and UI controls. Phase 1 (discovery + manual matching) is complete.
 
+### Interactive Updates
+
+Completed: bidirectional terminal I/O for update sessions via PTY allocation, stdin forwarding,
+attention detection, dedicated WebSocket endpoint, single-writer session management,
+`InteractiveUpdates` capability, `StdinAttention` notification event, CLI `--interactive` flag.
+Feature-gated behind the `interactive` Cargo feature.
+
 ### Update Batching & Orchestration
 
 Completed: batch update system (host-wide + item-wide), update category classification, batch

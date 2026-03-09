@@ -164,6 +164,7 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 | `nats` | No | Enables NATS JetStream transport for cross-controller messaging. Propagates to `uptrakit-web-api/nats`. |
 | `swagger-ui` | No | Swagger UI at `/swagger-ui` |
 | `embed-frontend` | No | Embeds the SvelteKit frontend build into the binary via `rust-embed`. Requires `frontend/build/` to exist at compile time. Removes the `--static-dir` CLI argument. See [Embedded Frontend](docs/development/embedded-frontend.md). |
+| `interactive` | No | Interactive (PTY-based) update sessions with stdin forwarding. Propagates to `uptrakit-web-api/interactive`. Adds the interactive WebSocket endpoint and `InteractiveSessionRegistry`. See [Interactive Updates](docs/development/interactive-updates.md). |
 
 ### Web-API feature flags
 
@@ -175,6 +176,7 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 | `db-postgres` | No | PostgreSQL backend. Propagates to `uptrakit-web-api-queries/db-postgres`. |
 | `db-mysql` | No | MySQL backend. Propagates to `uptrakit-web-api-queries/db-mysql`. |
 | `db-all` | No | All database backends. Propagates to `uptrakit-web-api-queries/db-all`. |
+| `interactive` | No | Interactive update WebSocket endpoint (`/api/v1/update-history/{id}/interactive`), `InteractiveSessionRegistry`. Propagates to `uptrakit-command/interactive` via `uptrakit-agent-core`. |
 
 ### Build profiles
 
@@ -842,7 +844,10 @@ Each service declares a `BTreeSet<Capability>` at enrollment time. The set is pe
 | `NatsAccess` | `nats_access` | -- | -- | -- | yes | yes |
 | `MasterKeyAccess` | `master_key_access` | -- | -- | -- | yes | yes |
 | `CaManagement` | `ca_management` | -- | -- | -- | -- | yes |
+| `InteractiveUpdates` | `interactive_updates` | yes* | yes* | -- | -- | yes |
 | `Other(String)` | *(unknown)* | -- | -- | -- | -- | -- |
+
+\* Only when compiled with the `interactive` Cargo feature.
 
 `Other(String)` is a forward-compat catch-all received from newer peers; it never participates in intersection
 (`Capability::is_known()` returns `false` for it).
@@ -1263,8 +1268,10 @@ tenant-scoped rules, builds a `DeliveryMessage`, and hands it to the appropriate
 ### Event types
 
 `update_available`, `update_completed`, `update_failed`, `new_software_discovered`, `new_service_enrolled`,
-`ca_rotated`. Events are wired into existing WebSocket handlers (`messages.rs`, `updates.rs`), `services.rs`,
-and `settings_ca.rs`.
+`ca_rotated`, `batch_update_completed`, `batch_update_partially_completed`, `stdin_attention`.
+Events are wired into existing WebSocket handlers (`messages.rs`, `updates.rs`), `services.rs`,
+and `settings_ca.rs`. The `stdin_attention` event is dispatched when an interactive update appears
+to be waiting for stdin input.
 
 ### Permissions
 

@@ -146,6 +146,13 @@ Batch actions are also available for hosts, software items, plugin configs,
 and software ignores. See [Batch Actions API](batch-actions.md) for the full reference
 including request/response schema and supported actions per resource.
 
+## Interactive Updates
+
+When an update is triggered with `interactive: true`, the agent allocates a PTY and keeps stdin
+open for bidirectional terminal I/O. The controller provides a WebSocket endpoint at
+`GET /api/v1/update-history/{id}/interactive` for admin clients to send keystrokes and receive
+output in real time. See [Interactive Updates API](interactive-updates.md) for the full protocol.
+
 ## Update Hooks
 
 Update hooks (systemd, Docker Compose, custom commands) inject metadata in `update_output`. Document any new hook configuration in

@@ -332,6 +332,22 @@ An in-process `UpdateOutputBroadcaster` (`crates/ui/web-api/src/update_output_br
 out to both the database and any SSE subscribers. The SSE handler replays stored lines on connect and then streams new
 lines in real time. The frontend renders output in an xterm.js terminal with full ANSI color support.
 
+## Interactive updates (feature-gated)
+
+When compiled with the `interactive` Cargo feature, agents can allocate a PTY for update processes
+and keep stdin open for bidirectional terminal I/O. The controller exposes a WebSocket endpoint at
+`GET /api/v1/update-history/{id}/interactive` that relays stdin data from admin clients to the
+agent's PTY and streams output back. This enables admins to respond to package manager prompts
+(e.g., APT config file conflicts) and send signals (Ctrl+C) to running updates.
+
+The feature is gated behind an `interactive` Cargo feature that propagates through the crate chain:
+`uptrakit-command` → `uptrakit-agent-core` → `uptrakit-agent`/`uptrakit-agent-ssh` → `uptrakit-web-api`
+→ `uptrakit-controller`. Wire protocol types are unconditional for forward compatibility. Agents
+advertise the `InteractiveUpdates` capability when compiled with this feature.
+
+See [Interactive Updates API](docs/api/interactive-updates.md) and
+[Interactive Updates Development](docs/development/interactive-updates.md) for details.
+
 ## Admin events SSE
 
 The controller pushes lightweight admin events to the frontend via `GET /api/v1/events/stream`.

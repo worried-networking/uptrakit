@@ -108,6 +108,7 @@ to carry a JSON payload.
 | `batch_update_completed` | `{"host_id":"<uuid>"}` | Batch update done |
 | `system_service_status_changed` | `{"id":"<uuid>","status":"<string>"}` | System service status changed |
 | `scheduler_task_completed` | `{"task_id":"<uuid>"}` | Scheduled task done |
+| `stdin_attention` | `{"update_history_id":"<uuid>","host_id":"<uuid>","software_item_id":"<uuid>","hint":"<string or null>"}` | Interactive update waiting for stdin input |
 
 ## Event Format Example
 
