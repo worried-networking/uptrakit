@@ -70,7 +70,7 @@ impl ProxmoxClient {
 
         tracing::trace!(
             path,
-            status = status.as_u16(),
+            status = %status,
             "received Proxmox API response"
         );
 
