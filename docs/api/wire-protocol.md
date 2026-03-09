@@ -383,7 +383,54 @@ This message is safe for NATS publication (no credentials in the payload).
 
 ### MQTT-specific (controller -> service)
 
-`registered`, `tenant_assignments`, `tenant_config_updated`, `tenant_revoked`, `software_states`
+`registered`, `tenant_assignments`, `tenant_config_updated`, `tenant_revoked`, `software_states`,
+`host_connectivity_updated`
+
+#### `host_connectivity_updated` payload
+
+Sent by the controller (and forwarded via NATS JetStream with `target_capability = "mqtt_bridge"`)
+whenever an agent connects or disconnects. MQTT services use this to publish
+`{prefix}/hosts/{host_id}/connectivity/state` and `{prefix}/hosts/{host_id}/connectivity/attributes`
+on behalf of the affected tenant.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 1,
+  "type": "host_connectivity_updated",
+  "tenant_id": "550e8400-e29b-41d4-a716-446655440000",
+  "updates": [
+    {
+      "host_id": "770e8400-e29b-41d4-a716-446655440001",
+      "online": true,
+      "last_seen_at": "2025-01-15T12:34:56Z",
+      "agent_version": "1.2.3"
+    }
+  ]
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `tenant_id` | UUID | Yes | Tenant the affected hosts belong to |
+| `updates` | `HostConnectivityUpdate[]` | Yes | One entry per affected host |
+
+**`HostConnectivityUpdate` fields:**
+
+| Field | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `host_id` | UUID | Yes | Host UUID |
+| `online` | boolean | Yes | `true` when the agent connected, `false` when disconnected |
+| `last_seen_at` | string? | No | ISO 8601 timestamp of the connect/disconnect event |
+| `agent_version` | string? | No | Agent version string (present on connect; absent on disconnect) |
+
+This message is safe for NATS publication (`is_nats_publishable() = true`): it contains no
+credentials, no PEM data, and no plugin configuration.
+
+**Multi-controller behaviour:** The event is always published by the controller that owns the
+agent's WebSocket connection — not inferred from a database scan. MQTT services on all controllers
+receive the event via NATS and update their in-memory connectivity cache accordingly. This ensures
+that `connectivity/state` is correct even in deployments with multiple controllers.
 
 ## `host_machine_id` Field
 
@@ -498,6 +545,9 @@ deserialization failures (hard fail, connection close).
 | `MAX_DISCOVERIES_PER_PLUGIN` | 1,000 | `DiscoveryPluginResult.discoveries` |
 | `MAX_HOOK_ARGS` | 100 | `HookCommand::Exec.args` |
 | `MAX_RELEASE_ASSETS` | 500 | `ReleaseInfo.assets` |
+| `MAX_MQTT_HOSTS` | 5,000 | `MqttSoftwareStatesPayload.hosts` (host metadata entries) |
+| `MAX_HOST_TAGS` | 100 | `MqttHostMetadata.tags` (tags per host) |
+| `MAX_CONNECTIVITY_UPDATES` | 500 | `HostConnectivityUpdatedPayload.updates` |
 
 #### String length limits
 

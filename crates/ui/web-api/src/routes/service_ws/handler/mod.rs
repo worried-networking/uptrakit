@@ -36,9 +36,9 @@ use uptrakit_internal_wire::limits::WireValidate;
 use uptrakit_internal_wire::report_tracker::ReportTracker;
 use uptrakit_internal_wire::{
     ApprovedPayload, Capability, CertificatePayload, CloseReason, ControllerMessage, ErrorCode,
-    ErrorPayload, IncomingSeq, MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq,
-    PingPayload, RejectedPayload, ServiceCredentialsPayload, ServiceMessage,
-    UpdateCapabilitiesPayload,
+    ErrorPayload, HostConnectivityUpdate, IncomingSeq, MqttRegisteredPayload,
+    MqttTenantAssignmentsPayload, OutgoingSeq, PingPayload, RejectedPayload,
+    ServiceCredentialsPayload, ServiceMessage, UpdateCapabilitiesPayload,
 };
 use uptrakit_shared_db::entity::{service, system_service as sys_svc_entity};
 use uptrakit_shared_macros::impl_report_conversion;
@@ -834,6 +834,27 @@ pub(crate) async fn handle_authenticated_loop(
         && let Err(e) = lc.release_all_for_service(&service_id).await
     {
         tracing::error!(error = %e, "failed to release leases on disconnect");
+    }
+
+    // Notify MQTT services that this agent's hosts are now offline.
+    // Only relevant for non-system, non-MQTT services with linked hosts.
+    if !is_system
+        && !is_mqtt
+        && has_software_discovery
+        && let Some(tenant_id) = service_tenant_id
+        && !linked_host_ids.is_empty()
+    {
+        let now = time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default();
+        let updates: Vec<HostConnectivityUpdate> = linked_host_ids
+            .iter()
+            .map(|&host_id| HostConnectivityUpdate::offline(host_id, Some(now.clone())))
+            .collect();
+        state
+            .notification_service
+            .send_connectivity_update(tenant_id, updates)
+            .await;
     }
 
     if is_external_scheduler {

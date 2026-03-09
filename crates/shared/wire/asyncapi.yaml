@@ -203,6 +203,8 @@ channels:
         $ref: "#/components/messages/mqttTenantRevoked"
       softwareStates:
         $ref: "#/components/messages/softwareStates"
+      hostConnectivityUpdated:
+        $ref: "#/components/messages/hostConnectivityUpdated"
       mqttTriggerUpdate:
         $ref: "#/components/messages/mqttTriggerUpdate"
       mqttTriggerHostPackageUpdate:
@@ -652,8 +654,29 @@ operations:
     description: |
       Sent after tenant assignment and after any version check or update result.
       Contains per-host installed/latest version data for all active software
-      items of the tenant. The MQTT service uses this to publish Home Assistant
-      discovery topics and state topics for the broker.
+      items of the tenant, plus per-host metadata (OS info, tags, agent info).
+      The MQTT service uses this to publish Home Assistant discovery topics and
+      state topics for the broker.
+
+      Safe for cross-controller delivery via NATS (contains no credentials).
+
+  receiveHostConnectivityUpdated:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/hostConnectivityUpdated"
+    summary: MQTT service receives agent connectivity updates from controller
+    description: |
+      Published by the controller that owns the agent's WebSocket connection
+      whenever an agent connects (`online: true`) or disconnects (`online: false`).
+      Forwarded to all controllers via NATS JetStream with
+      `target_capability = "mqtt_bridge"` so every MQTT service sees it regardless
+      of which controller the agent is connected to.
+
+      The MQTT service updates its in-memory connectivity cache and publishes:
+      - `{prefix}/hosts/{host_id}/connectivity/state` — `"online"` or `"offline"`
+      - `{prefix}/hosts/{host_id}/connectivity/attributes` — `{"last_seen":"…","version":"…"}`
 
       Safe for cross-controller delivery via NATS (contains no credentials).
 
@@ -1213,14 +1236,24 @@ components:
 
         - `{prefix}/hosts/{host_id}/items/{item_id}/state` — installed version string
         - `{prefix}/hosts/{host_id}/items/{item_id}/latest_version` — latest version string
-        - `{prefix}/hosts/{host_id}/items/{item_id}/attributes` — JSON attributes: `{"in_progress": true/false}`
+        - `{prefix}/hosts/{host_id}/items/{item_id}/attributes` — JSON: `{"in_progress":…,"update_category":…,"release_date":…,"last_checked_at":…}`
 
         Additionally, the `host_package_hosts` field (default: empty array) contains
         per-host package summary data. The MQTT service publishes these to:
 
         - `{prefix}/hosts/{host_id}/state` — `"unknown"` when updates pending, `"up-to-date"` otherwise
         - `{prefix}/hosts/{host_id}/latest_version` — `"N available"` when updates pending, `"up-to-date"` otherwise
-        - `{prefix}/hosts/{host_id}/attributes` — JSON: `{"in_progress": bool, "pending_count": N}`
+        - `{prefix}/hosts/{host_id}/attributes` — JSON: `{"in_progress":…,"pending_count":N,"total_count":N,"bugfix_count":N,"feature_count":N}`
+
+        The `hosts` field (default: empty array) contains per-host metadata. The MQTT
+        service publishes these to retained topics:
+
+        - `{prefix}/hosts/{host_id}/info` — JSON: `{"os_type":…,"os_version":…,"architecture":…}`
+        - `{prefix}/hosts/{host_id}/tags` — JSON array of tag name strings
+        - `{prefix}/hosts/{host_id}/agent` — JSON: `{"last_seen":…,"version":…}`
+
+        When Home Assistant Discovery is enabled, the MQTT service also publishes a
+        `binary_sensor` discovery config for each host's agent connectivity sensor.
 
         The `attributes` topic payload is recognised by the Home Assistant
         `update` entity as a first-class `in_progress` attribute, which causes
@@ -1228,6 +1261,25 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/softwareStatesPayload"
+
+    hostConnectivityUpdated:
+      name: host_connectivity_updated
+      title: Host Connectivity Updated Message
+      summary: Controller notifies MQTT services of agent connect/disconnect events (MQTT-only)
+      description: |
+        Published by the controller that owns the agent's WebSocket connection
+        immediately when an agent connects (`online: true`) or disconnects
+        (`online: false`). Forwarded to all other controllers via NATS JetStream
+        with `target_capability = "mqtt_bridge"` so every MQTT service sees it.
+
+        The MQTT service updates its connectivity cache and publishes retained topics:
+        - `{prefix}/hosts/{host_id}/connectivity/state` — `"online"` or `"offline"`
+        - `{prefix}/hosts/{host_id}/connectivity/attributes` — `{"last_seen":…,"version":…}`
+
+        Safe for NATS publication (no credentials, no plugin config).
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/hostConnectivityUpdatedPayload"
 
     mqttTriggerUpdate:
       name: mqtt_trigger_update
@@ -3207,6 +3259,30 @@ components:
         release_notes:
           type: string
           description: Release notes or changelog text (absent when unavailable)
+        update_category:
+          type: string
+          enum: [security, bugfix, feature, unknown]
+          description: |
+            Classification of the available update. Absent when no update is
+            available or when the category is not known. Enables HA automations
+            like "notify on security update available".
+        release_date:
+          type: string
+          format: date
+          description: |
+            ISO 8601 date (`YYYY-MM-DD`) of the latest release. Absent when
+            release metadata (`latest_release_metadata`) is not yet available.
+          examples:
+            - "2025-01-15"
+        last_checked_at:
+          type: string
+          format: date-time
+          description: |
+            ISO 8601 timestamp of the last installed-version detection on this
+            host for this software item. Absent if the version has never been
+            checked (`installed_version_detected_at` is NULL in the DB).
+          examples:
+            - "2025-01-15T12:00:00Z"
 
     mqttSoftwareStateItem:
       type: object
@@ -3283,12 +3359,174 @@ components:
           format: int32
           minimum: 0
           description: Total number of enabled, non-deactivated packages tracked for this host.
+        bugfix_count:
+          type: integer
+          format: int32
+          minimum: 0
+          description: |
+            Number of pending packages with `update_category = "bugfix"`.
+            Absent from payloads generated by older controllers (default: 0).
+        feature_count:
+          type: integer
+          format: int32
+          minimum: 0
+          description: |
+            Number of pending packages with `update_category = "feature"`.
+            Absent from payloads generated by older controllers (default: 0).
         update_in_progress:
           type: boolean
           description: |
             Whether a batch host package update is currently pending or in progress
             for this host. Set to `true` from the moment a batch is created until
             all history records reach a terminal state.
+
+    mqttHostMetadata:
+      type: object
+      required:
+        - host_id
+        - hostname
+        - friendly_name
+      description: |
+        Per-host metadata included in `software_states` payloads. Sourced exclusively
+        from the shared database so it is safe to compute on any controller in a
+        multi-controller deployment. Covers every unique host referenced by the
+        `items` or `host_package_hosts` arrays.
+      properties:
+        host_id:
+          type: string
+          format: uuid
+          description: Host UUID
+          examples:
+            - 770e8400-e29b-41d4-a716-446655440001
+        hostname:
+          type: string
+          description: Raw hostname string
+          examples:
+            - web-server-01
+        friendly_name:
+          type: string
+          description: User-defined display name
+          examples:
+            - "Web Server 01"
+        os_type:
+          type: string
+          description: Operating system type (e.g. `"linux"`, `"darwin"`). Absent if not yet reported.
+          examples:
+            - linux
+        os_version:
+          type: string
+          description: |
+            Human-readable OS version string (e.g. `"Ubuntu 24.04"`).
+            Absent if not yet reported.
+          examples:
+            - "Ubuntu 24.04"
+        architecture:
+          type: string
+          description: |
+            CPU architecture (e.g. `"x86_64"`, `"aarch64"`).
+            Absent if not yet reported.
+          examples:
+            - x86_64
+        tags:
+          type: array
+          default: []
+          description: |
+            Tag names assigned to this host (from `host_tag_assignment JOIN host_tag`).
+            Limited to `MAX_HOST_TAGS` (100) entries.
+          items:
+            type: string
+            maxLength: 1024
+          examples:
+            - - production
+              - web-server
+        agent_version:
+          type: string
+          description: |
+            Version string of the newest active agent service for this host
+            (from `services.client_version`). Absent if no agent service exists.
+          examples:
+            - "1.2.3"
+        agent_last_seen_at:
+          type: string
+          format: date-time
+          description: |
+            ISO 8601 timestamp of the agent's last activity
+            (from `services.last_seen_at`). Absent if no agent service exists.
+          examples:
+            - "2025-01-15T12:00:00Z"
+
+    hostConnectivityUpdatedPayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+        - tenant_id
+        - updates
+      description: |
+        Published by the controller that owns the agent's WebSocket connection when
+        an agent connects or disconnects. Forwarded via NATS JetStream to all
+        controllers with `target_capability = "mqtt_bridge"`.
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: host_connectivity_updated
+          description: Message type discriminator
+        tenant_id:
+          type: string
+          format: uuid
+          description: Tenant UUID the affected hosts belong to
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+        updates:
+          type: array
+          description: |
+            One entry per affected host. Limited to `MAX_CONNECTIVITY_UPDATES` (500) entries.
+          items:
+            $ref: "#/components/schemas/hostConnectivityUpdate"
+
+    hostConnectivityUpdate:
+      type: object
+      required:
+        - host_id
+        - online
+      description: Connectivity status for a single host.
+      properties:
+        host_id:
+          type: string
+          format: uuid
+          description: Host UUID
+          examples:
+            - 770e8400-e29b-41d4-a716-446655440001
+        online:
+          type: boolean
+          description: |
+            `true` when the agent connected; `false` when disconnected.
+        last_seen_at:
+          type: string
+          format: date-time
+          description: |
+            ISO 8601 timestamp of the connect or disconnect event.
+            Absent if not available.
+          examples:
+            - "2025-01-15T12:34:56Z"
+        agent_version:
+          type: string
+          description: |
+            Agent version string. Present on connect; absent on disconnect.
+          examples:
+            - "1.2.3"
 
     mqttTriggerHostPackageUpdatePayload:
       type: object
@@ -3395,6 +3633,18 @@ components:
             empty array — receivers must tolerate the missing field).
           items:
             $ref: "#/components/schemas/mqttHostPackageHostState"
+        hosts:
+          type: array
+          default: []
+          description: |
+            Per-host metadata (OS info, tags, agent info) for every unique host
+            referenced by the `items` or `host_package_hosts` arrays. Sourced
+            exclusively from the shared DB — safe to compute on any controller.
+            Absent from payloads generated by older controllers (defaults to
+            empty array — receivers must tolerate the missing field).
+            Limited to `MAX_MQTT_HOSTS` (5,000) entries.
+          items:
+            $ref: "#/components/schemas/mqttHostMetadata"
 
     mqttTriggerUpdatePayload:
       type: object

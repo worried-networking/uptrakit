@@ -716,12 +716,17 @@ Key invariants:
 All topics use the MQTT client's `topic_prefix` field. All host-scoped topics share the
 `{prefix}/hosts/{host_id}` prefix (implemented via `host_topic_prefix()` in `ha_discovery.rs`).
 
-**Per-host identity topics** (`{h}` = host UUID):
+**Per-host identity and metadata topics** (`{h}` = host UUID):
 
 | Topic | Retained | Direction | Purpose |
 | --- | :---: | --- | --- |
-| `{prefix}/hosts/{host_id}/hostname` | ✓ | publish | Raw hostname string (MQTT explorer visibility) |
-| `{prefix}/hosts/{host_id}/friendly_name` | ✓ | publish | User-defined display name (MQTT explorer visibility) |
+| `{prefix}/hosts/{host_id}/hostname` | ✓ | publish | Raw hostname string |
+| `{prefix}/hosts/{host_id}/friendly_name` | ✓ | publish | User-defined display name |
+| `{prefix}/hosts/{host_id}/info` | ✓ | publish | JSON: `{"os_type":…,"os_version":…,"architecture":…}` |
+| `{prefix}/hosts/{host_id}/tags` | ✓ | publish | JSON array of tag name strings |
+| `{prefix}/hosts/{host_id}/agent` | ✓ | publish | JSON: `{"last_seen":…,"version":…}` |
+| `{prefix}/hosts/{host_id}/connectivity/state` | ✓ | publish | `"online"` or `"offline"` (event-driven, via `HostConnectivityUpdated`) |
+| `{prefix}/hosts/{host_id}/connectivity/attributes` | ✓ | publish | JSON: `{"last_seen":…,"version":…}` |
 
 **Software item topics** (`{t}` = tenant UUID hex, `{i}` = item UUID hex, `{h}` = host UUID hex):
 
@@ -729,7 +734,7 @@ All topics use the MQTT client's `topic_prefix` field. All host-scoped topics sh
 | --- | :---: | --- | --- |
 | `{prefix}/hosts/{host_id}/items/{item_id}/state` | ✓ | publish | Installed version string |
 | `{prefix}/hosts/{host_id}/items/{item_id}/latest_version` | ✓ | publish | Latest available version string |
-| `{prefix}/hosts/{host_id}/items/{item_id}/attributes` | ✓ | publish | JSON attributes: `{"in_progress": true/false}` |
+| `{prefix}/hosts/{host_id}/items/{item_id}/attributes` | ✓ | publish | JSON: `{"in_progress":…,"update_category":…,"release_date":…,"last_checked_at":…}` |
 | `{prefix}/hosts/{host_id}/items/{item_id}/set` | — | subscribe | Receives `"install"` from HA |
 | `{ha_prefix}/update/uptrakit/{t}_{h}_{i}/config` | ✓ | publish | HA discovery config (JSON) |
 | `{ha_prefix}/status` | — | subscribe | HA birth/will (`"online"` / `"offline"`) |
@@ -740,7 +745,7 @@ All topics use the MQTT client's `topic_prefix` field. All host-scoped topics sh
 | --- | :---: | --- | --- |
 | `{prefix}/hosts/{host_id}/state` | ✓ | publish | `"unknown"` when updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/latest_version` | ✓ | publish | `"N available"` when updates pending, `"up-to-date"` otherwise |
-| `{prefix}/hosts/{host_id}/attributes` | ✓ | publish | JSON: `{"in_progress": bool, "pending_count": N}` |
+| `{prefix}/hosts/{host_id}/attributes` | ✓ | publish | JSON: `{"in_progress":…,"pending_count":N,"total_count":N,"bugfix_count":N,"feature_count":N}` |
 | `{prefix}/hosts/{host_id}/set` | — | subscribe | Receives `"install"` → triggers batch update (all non-featured items) |
 | `{ha_prefix}/update/uptrakit/{t}_{h}_pkgs/config` | ✓ | publish | HA discovery config for host summary entity (disabled by default) |
 | `{prefix}/hosts/{host_id}/security/state` | ✓ | publish | `"unknown"` when security updates pending, `"up-to-date"` otherwise |
@@ -748,6 +753,7 @@ All topics use the MQTT client's `topic_prefix` field. All host-scoped topics sh
 | `{prefix}/hosts/{host_id}/security/attributes` | ✓ | publish | JSON: `{"in_progress": bool, "pending_count": N}` |
 | `{prefix}/hosts/{host_id}/security/set` | — | subscribe | Receives `"install"` → triggers security-only batch update |
 | `{ha_prefix}/update/uptrakit/{t}_{h}_sec/config` | ✓ | publish | HA discovery config for security updates entity (disabled by default) |
+| `{ha_prefix}/binary_sensor/uptrakit/{t}_{h}_conn/config` | ✓ | publish | HA discovery config for connectivity `binary_sensor` (enabled by default) |
 
 All entities for a given host share a single HA device: `uptrakit_host_{t}_{h}` (name = `friendly_name`).
 
@@ -762,16 +768,21 @@ Security update entities: unique_id `uptrakit_{t}_{h}_sec`,
 entity name `"{friendly_name} security updates"`,
 `default_entity_id` = `uptrakit_{fn_slug}_security_updates`. Install triggers a `security_only = true` batch.
 
+Connectivity sensor: unique_id `uptrakit_{t}_{h}_conn`, entity name `"{friendly_name} agent"`,
+platform `binary_sensor`, `device_class = "connectivity"`. **Enabled by default** in HA.
+Published immediately on agent connect/disconnect via `ControllerMessage::HostConnectivityUpdated`
+(NATS-routed to all MQTT services, not computed from a DB scan).
+
 #### Key files
 
 | File | Purpose |
 | --- | --- |
-| `crates/core/mqtt/src/ha_discovery.rs` | Pure HA topic/config helpers for software items, host summaries, and security entities; `parse_command_topic`, `parse_host_summary_command_topic`, `parse_host_security_command_topic` |
-| `crates/core/mqtt/src/tenant_manager.rs` | `TenantManager`: software state + host summary state cache, `publish_host_summary_states`, `resolve_update_trigger`, `resolve_host_batch_update_trigger`, `resolve_host_security_update_trigger` |
+| `crates/core/mqtt/src/ha_discovery.rs` | Pure HA topic/config helpers for software items, host summaries, security entities, metadata topics, and connectivity `binary_sensor`; `parse_command_topic`, `parse_host_packages_command_topic`, `parse_host_security_command_topic` |
+| `crates/core/mqtt/src/tenant_manager.rs` | `TenantManager`: software state + host summary state cache + host metadata cache + connectivity cache (`connectivity_cache: HashMap<(tenant_id, host_id), ConnectivityState>`); `publish_host_metadata`, `publish_connectivity_for_host`, `handle_host_connectivity_updated` |
 | `crates/core/mqtt/src/mqtt_client.rs` | `MqttServiceEvent` enum, `publish_retained`, `subscribe_topic`, HA status topic handling |
-| `crates/core/mqtt/src/main.rs` | `on_service_event` dispatch; `ControllerMessage::SoftwareStates` handler; `MqttTriggerHostBatchUpdate` dispatch |
-| `crates/ui/web-api-queries/src/queries/mqtt_software_states.rs` | Bulk query loading enabled software items + `load_host_summary_states_for_tenant` |
-| `crates/ui/web-api/src/notification_service.rs` | `push_software_states_for_tenant` (local broadcast + optional NATS publish); merges host summary states |
+| `crates/core/mqtt/src/main.rs` | `on_service_event` dispatch; `ControllerMessage::SoftwareStates` handler; `ControllerMessage::HostConnectivityUpdated` handler; `MqttTriggerHostBatchUpdate` dispatch |
+| `crates/ui/web-api-queries/src/queries/mqtt_software_states.rs` | Bulk query loading enabled software items + host summaries (from `host_software_item`) + `build_host_metadata` (OS info, tags, agent info) |
+| `crates/ui/web-api/src/notification_service.rs` | `push_software_states_for_tenant` (local broadcast + optional NATS publish); `send_connectivity_update` (wraps `HostConnectivityUpdated`, local broadcast + NATS) |
 | `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs` | `MqttTriggerUpdate` and `MqttTriggerHostBatchUpdate` handlers |
 | `crates/ui/web-api-queries/src/queries/update_triggers.rs` | `trigger_update_for_host` (refactored into `validate_update_preconditions`, `create_update_history_record`, `dispatch_update_to_agent` layers); shared by REST, MQTT, and batch handlers |
 | `crates/ui/web-api-queries/src/queries/update_batches.rs` | Batch update logic: `find_outdated_items_for_host`, `create_batch`, `dispatch_next_in_batch`, `trigger_all_host_batch_updates_for_host` |
@@ -782,9 +793,9 @@ entity name `"{friendly_name} security updates"`,
 | `crates/shared/openapi-client/src/update_batches.rs` | Typed HTTP client methods for batch endpoints |
 | `crates/shared/openapi-client/src/batch_progress_stream.rs` | SSE streaming client for batch progress events |
 | `crates/ui/cli/src/commands/batch_update.rs` | CLI batch update commands |
-| `docs/end-user/home-assistant-mqtt.md` | Full end-user setup guide including host summary entities |
-| `docs/api/wire-protocol.md` | `software_states`, `mqtt_trigger_update`, and `mqtt_trigger_host_batch_update` payload docs |
-| `crates/shared/wire/asyncapi.yaml` | AsyncAPI schemas for both new messages |
+| `docs/end-user/home-assistant-mqtt.md` | Full end-user setup guide including host summary entities, metadata topics, and connectivity sensor |
+| `docs/api/wire-protocol.md` | `software_states`, `host_connectivity_updated`, `mqtt_trigger_update`, and `mqtt_trigger_host_batch_update` payload docs |
+| `crates/shared/wire/asyncapi.yaml` | AsyncAPI schemas for all messages and schemas |
 
 ### Service ping interval
 

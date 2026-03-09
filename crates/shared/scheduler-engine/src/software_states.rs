@@ -43,6 +43,7 @@ pub async fn load_software_states_for_tenant(
             tenant_id,
             items: vec![],
             host_summaries: vec![],
+            hosts: vec![],
         });
     }
 
@@ -127,6 +128,12 @@ pub async fn load_software_states_for_tenant(
                             update_in_progress: false,
                             release_url,
                             release_notes,
+                            // The scheduler-engine does not fetch per-item
+                            // update metadata; these fields are populated by
+                            // the web-api-queries path instead.
+                            update_category: None,
+                            release_date: None,
+                            last_checked_at: None,
                         })
                     })
                     .collect()
@@ -149,6 +156,7 @@ pub async fn load_software_states_for_tenant(
         tenant_id,
         items: result_items,
         host_summaries: vec![],
+        hosts: vec![],
     })
 }
 

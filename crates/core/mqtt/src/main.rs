@@ -91,6 +91,17 @@ impl ServiceHandler for MqttHandler {
                 self.tenant_mgr.update_software_states(payload).await;
                 Ok(None)
             }
+            ControllerMessage::HostConnectivityUpdated(payload) => {
+                tracing::debug!(
+                    tenant_id = %payload.tenant_id,
+                    updates = payload.updates.len(),
+                    "received HostConnectivityUpdated"
+                );
+                self.tenant_mgr
+                    .handle_host_connectivity_updated(payload.tenant_id, payload.updates)
+                    .await;
+                Ok(None)
+            }
             _ => {
                 tracing::debug!("ignoring unrecognized message in authenticated loop");
                 Ok(None)

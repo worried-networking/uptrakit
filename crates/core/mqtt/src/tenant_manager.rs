@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
+use uptrakit_internal_wire::HostConnectivityUpdate;
 use uptrakit_internal_wire::MqttTenantConfig;
 use uuid::Uuid;
 
@@ -18,6 +19,14 @@ struct ClientState {
     ha_discovery_prefix: String,
 }
 
+/// Cached connectivity state for a single host within a tenant.
+#[derive(Debug, Clone)]
+struct ConnectivityState {
+    online: bool,
+    last_seen_at: Option<String>,
+    agent_version: Option<String>,
+}
+
 /// Manages per-MQTT-client lifecycles with push-based config updates.
 ///
 /// Unlike the database-polling version, this manager receives configuration
@@ -26,8 +35,17 @@ pub struct TenantManager {
     clients: HashMap<Uuid, ClientState>,
     event_tx: Option<mpsc::Sender<MqttServiceEvent>>,
     software_states: HashMap<Uuid, Vec<uptrakit_internal_wire::MqttSoftwareStateItem>>,
-    /// Cached per-host package states, keyed by tenant_id.
+    /// Cached per-host summary states, keyed by tenant_id.
     host_summary_states: HashMap<Uuid, Vec<uptrakit_internal_wire::MqttHostSummary>>,
+    /// Cached per-host metadata (OS info, tags, agent last_seen), keyed by tenant_id.
+    host_metadata: HashMap<Uuid, Vec<uptrakit_internal_wire::MqttHostMetadata>>,
+    /// Cached per-host connectivity state, keyed by `(tenant_id, host_id)`.
+    ///
+    /// Updated by `HostConnectivityUpdated` events from the controller. Not
+    /// sourced from `SoftwareStates` so that multi-controller deployments
+    /// always receive the authoritative online/offline state from whichever
+    /// controller holds the agent WebSocket connection.
+    connectivity_cache: HashMap<(Uuid, Uuid), ConnectivityState>,
 }
 
 impl TenantManager {
@@ -37,6 +55,8 @@ impl TenantManager {
             event_tx,
             software_states: HashMap::new(),
             host_summary_states: HashMap::new(),
+            host_metadata: HashMap::new(),
+            connectivity_cache: HashMap::new(),
         }
     }
 
@@ -111,16 +131,18 @@ impl TenantManager {
         &mut self,
         payload: uptrakit_internal_wire::MqttSoftwareStatesPayload,
     ) {
+        let tenant_id = payload.tenant_id;
         self.software_states
-            .insert(payload.tenant_id, payload.items.clone());
+            .insert(tenant_id, payload.items.clone());
         self.host_summary_states
-            .insert(payload.tenant_id, payload.host_summaries.clone());
+            .insert(tenant_id, payload.host_summaries.clone());
+        self.host_metadata.insert(tenant_id, payload.hosts.clone());
 
         // Collect client IDs for this tenant (all of them, not just HA-enabled).
         let client_ids: Vec<uuid::Uuid> = self
             .clients
             .iter()
-            .filter(|(_, s)| s.tenant_id == payload.tenant_id)
+            .filter(|(_, s)| s.tenant_id == tenant_id)
             .map(|(id, _)| *id)
             .collect();
 
@@ -129,6 +151,47 @@ impl TenantManager {
                 .await;
             self.publish_host_summary_states(client_id, &payload.host_summaries)
                 .await;
+            self.publish_host_metadata(client_id, &payload.hosts).await;
+        }
+    }
+
+    /// Handle a `HostConnectivityUpdated` message from the controller.
+    ///
+    /// Updates the in-memory connectivity cache and publishes the connectivity
+    /// state and attributes topics for affected hosts across all clients of
+    /// that tenant. Connectivity discovery configs are published for
+    /// HA-enabled clients on first sight of a host.
+    #[tracing::instrument(skip_all, fields(tenant_id = %tenant_id))]
+    pub async fn handle_host_connectivity_updated(
+        &mut self,
+        tenant_id: Uuid,
+        updates: Vec<HostConnectivityUpdate>,
+    ) {
+        // Update cache.
+        for update in &updates {
+            self.connectivity_cache.insert(
+                (tenant_id, update.host_id),
+                ConnectivityState {
+                    online: update.online,
+                    last_seen_at: update.last_seen_at.clone(),
+                    agent_version: update.agent_version.clone(),
+                },
+            );
+        }
+
+        // Publish to all clients for this tenant.
+        let client_ids: Vec<Uuid> = self
+            .clients
+            .iter()
+            .filter(|(_, s)| s.tenant_id == tenant_id)
+            .map(|(id, _)| *id)
+            .collect();
+
+        for client_id in client_ids {
+            for update in &updates {
+                self.publish_connectivity_for_host(client_id, tenant_id, update.host_id)
+                    .await;
+            }
         }
     }
 
@@ -149,6 +212,20 @@ impl TenantManager {
             self.publish_host_summary_states(*mqtt_client_id, &host_states)
                 .await;
         }
+        if let Some(metadata) = self.host_metadata.get(&tenant_id).cloned() {
+            self.publish_host_metadata(*mqtt_client_id, &metadata).await;
+        }
+        // Republish connectivity topics for all cached hosts of this tenant.
+        let host_ids: Vec<Uuid> = self
+            .connectivity_cache
+            .keys()
+            .filter(|(tid, _)| *tid == tenant_id)
+            .map(|(_, hid)| *hid)
+            .collect();
+        for host_id in host_ids {
+            self.publish_connectivity_for_host(*mqtt_client_id, tenant_id, host_id)
+                .await;
+        }
     }
 
     /// Called when HA sends its birth message (restarted): republish only HA
@@ -156,8 +233,8 @@ impl TenantManager {
     ///
     /// State and version topics are retained on the broker and do not need
     /// re-sending after an HA restart. Only the `{ha_prefix}/update/.../config`
-    /// messages need to be republished so that HA re-registers its `update`
-    /// entities.
+    /// and `{ha_prefix}/binary_sensor/.../config` messages need to be
+    /// republished so that HA re-registers its entities.
     #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
     pub async fn handle_ha_online(&mut self, mqtt_client_id: &uuid::Uuid) {
         let Some(state) = self.clients.get(mqtt_client_id) else {
@@ -172,6 +249,17 @@ impl TenantManager {
         }
         if let Some(host_states) = self.host_summary_states.get(&tenant_id).cloned() {
             self.publish_host_summary_ha_configs_only(*mqtt_client_id, &host_states)
+                .await;
+        }
+        // Republish connectivity discovery configs for all known hosts.
+        let host_ids: Vec<Uuid> = self
+            .connectivity_cache
+            .keys()
+            .filter(|(tid, _)| *tid == tenant_id)
+            .map(|(_, hid)| *hid)
+            .collect();
+        for host_id in host_ids {
+            self.publish_connectivity_discovery_config(*mqtt_client_id, tenant_id, host_id)
                 .await;
         }
     }
@@ -390,16 +478,20 @@ impl TenantManager {
                     );
                 }
 
-                // Always: publish JSON attributes (in_progress flag).
+                // Always: publish JSON attributes.
                 let at = crate::ha_discovery::json_attributes_topic(
                     topic_prefix,
                     item.software_item_id,
                     host.host_id,
                 );
-                let attributes_bytes =
-                    crate::ha_discovery::build_attributes_payload(host.update_in_progress)
-                        .to_string()
-                        .into_bytes();
+                let attributes_bytes = crate::ha_discovery::build_attributes_payload(
+                    host.update_in_progress,
+                    host.update_category.as_deref(),
+                    host.release_date.as_deref(),
+                    host.last_checked_at.as_deref(),
+                )
+                .to_string()
+                .into_bytes();
                 if let Err(e) = state.handle.publish_retained(&at, attributes_bytes).await {
                     tracing::warn!(
                         error = ?e,
@@ -611,6 +703,9 @@ impl TenantManager {
             let attributes_bytes = crate::ha_discovery::build_host_packages_attributes_payload(
                 hs.update_in_progress,
                 hs.pending_count,
+                hs.total_count,
+                hs.bugfix_count,
+                hs.feature_count,
             )
             .to_string()
             .into_bytes();
@@ -698,7 +793,7 @@ impl TenantManager {
             // Always: publish security entity JSON attributes.
             let sec_at =
                 crate::ha_discovery::host_security_json_attributes_topic(topic_prefix, hs.host_id);
-            let sec_attributes_bytes = crate::ha_discovery::build_host_packages_attributes_payload(
+            let sec_attributes_bytes = crate::ha_discovery::build_host_security_attributes_payload(
                 hs.update_in_progress,
                 hs.security_pending_count,
             )
@@ -828,6 +923,227 @@ impl TenantManager {
                     "failed to publish host security HA discovery config"
                 );
             }
+        }
+    }
+
+    /// Publish per-host metadata topics (info, tags, agent) for all hosts in
+    /// `metadata`.
+    ///
+    /// For each host:
+    /// - Publishes `{prefix}/hosts/{host_id}/info` (retained) — OS info JSON
+    /// - Publishes `{prefix}/hosts/{host_id}/tags` (retained) — JSON array of tags
+    /// - Publishes `{prefix}/hosts/{host_id}/agent` (retained) — last_seen + version JSON
+    ///
+    /// Also publishes the HA connectivity `binary_sensor` discovery config for
+    /// HA-enabled clients on first sight of a host (discovery config is idempotent
+    /// to re-publish so we do it every time).
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
+    async fn publish_host_metadata(
+        &self,
+        mqtt_client_id: uuid::Uuid,
+        metadata: &[uptrakit_internal_wire::MqttHostMetadata],
+    ) {
+        let Some(state) = self.clients.get(&mqtt_client_id) else {
+            return;
+        };
+
+        let topic_prefix = &state.topic_prefix;
+        let tenant_id = state.tenant_id;
+        let ha_prefix = &state.ha_discovery_prefix;
+
+        for host in metadata {
+            // Info topic.
+            let info_topic = crate::ha_discovery::host_info_topic(topic_prefix, host.host_id);
+            let info_bytes = crate::ha_discovery::build_host_info_payload(
+                host.os_type.as_deref(),
+                host.os_version.as_deref(),
+                host.architecture.as_deref(),
+            )
+            .to_string()
+            .into_bytes();
+            if let Err(e) = state.handle.publish_retained(&info_topic, info_bytes).await {
+                tracing::warn!(
+                    error = ?e,
+                    %mqtt_client_id,
+                    host_id = %host.host_id,
+                    "failed to publish host info topic"
+                );
+            }
+
+            // Tags topic.
+            let tags_topic = crate::ha_discovery::host_tags_topic(topic_prefix, host.host_id);
+            let tags_bytes = serde_json::to_string(&host.tags)
+                .unwrap_or_else(|_| "[]".to_string())
+                .into_bytes();
+            if let Err(e) = state.handle.publish_retained(&tags_topic, tags_bytes).await {
+                tracing::warn!(
+                    error = ?e,
+                    %mqtt_client_id,
+                    host_id = %host.host_id,
+                    "failed to publish host tags topic"
+                );
+            }
+
+            // Agent topic.
+            let agent_topic = crate::ha_discovery::host_agent_topic(topic_prefix, host.host_id);
+            let agent_bytes = crate::ha_discovery::build_host_agent_payload(
+                host.agent_last_seen_at.as_deref(),
+                host.agent_version.as_deref(),
+            )
+            .to_string()
+            .into_bytes();
+            if let Err(e) = state
+                .handle
+                .publish_retained(&agent_topic, agent_bytes)
+                .await
+            {
+                tracing::warn!(
+                    error = ?e,
+                    %mqtt_client_id,
+                    host_id = %host.host_id,
+                    "failed to publish host agent topic"
+                );
+            }
+
+            // HA-only: publish connectivity binary_sensor discovery config.
+            if state.ha_discovery {
+                let config_topic = crate::ha_discovery::host_connectivity_discovery_config_topic(
+                    ha_prefix,
+                    tenant_id,
+                    host.host_id,
+                );
+                let config_json = crate::ha_discovery::build_host_connectivity_discovery_config(
+                    topic_prefix,
+                    tenant_id,
+                    host.host_id,
+                    &host.friendly_name,
+                );
+                let config_bytes = config_json.to_string().into_bytes();
+                if let Err(e) = state
+                    .handle
+                    .publish_retained(&config_topic, config_bytes)
+                    .await
+                {
+                    tracing::warn!(
+                        error = ?e,
+                        %mqtt_client_id,
+                        host_id = %host.host_id,
+                        "failed to publish host connectivity HA discovery config"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Publish connectivity state and attributes topics for a single host.
+    ///
+    /// If no entry exists in `connectivity_cache` for `(tenant_id, host_id)`,
+    /// this method is a no-op (connectivity is unknown until the first
+    /// `HostConnectivityUpdated` event arrives).
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id, %host_id))]
+    async fn publish_connectivity_for_host(
+        &self,
+        mqtt_client_id: uuid::Uuid,
+        tenant_id: Uuid,
+        host_id: Uuid,
+    ) {
+        let Some(state) = self.clients.get(&mqtt_client_id) else {
+            return;
+        };
+        let Some(conn) = self.connectivity_cache.get(&(tenant_id, host_id)) else {
+            return;
+        };
+
+        let topic_prefix = &state.topic_prefix;
+
+        // State topic: "online" or "offline".
+        let state_payload = if conn.online { "online" } else { "offline" };
+        let state_topic = crate::ha_discovery::host_connectivity_state_topic(topic_prefix, host_id);
+        if let Err(e) = state
+            .handle
+            .publish_retained(&state_topic, state_payload.as_bytes().to_vec())
+            .await
+        {
+            tracing::warn!(
+                error = ?e,
+                %mqtt_client_id,
+                %host_id,
+                "failed to publish connectivity state topic"
+            );
+        }
+
+        // Attributes topic.
+        let attr_topic =
+            crate::ha_discovery::host_connectivity_attributes_topic(topic_prefix, host_id);
+        let attr_bytes = crate::ha_discovery::build_host_connectivity_attributes_payload(
+            conn.last_seen_at.as_deref(),
+            conn.agent_version.as_deref(),
+        )
+        .to_string()
+        .into_bytes();
+        if let Err(e) = state.handle.publish_retained(&attr_topic, attr_bytes).await {
+            tracing::warn!(
+                error = ?e,
+                %mqtt_client_id,
+                %host_id,
+                "failed to publish connectivity attributes topic"
+            );
+        }
+    }
+
+    /// Publish only the HA connectivity `binary_sensor` discovery config for a
+    /// single host.
+    ///
+    /// Looks up the friendly name from the host metadata cache; if absent,
+    /// falls back to the host_id string so the topic is still published.
+    /// Called from `handle_ha_online` to re-register entities after HA restarts.
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id, %host_id))]
+    async fn publish_connectivity_discovery_config(
+        &self,
+        mqtt_client_id: uuid::Uuid,
+        tenant_id: Uuid,
+        host_id: Uuid,
+    ) {
+        let Some(state) = self.clients.get(&mqtt_client_id) else {
+            return;
+        };
+        if !state.ha_discovery {
+            return;
+        }
+
+        let topic_prefix = &state.topic_prefix;
+        let ha_prefix = &state.ha_discovery_prefix;
+
+        // Resolve friendly name from host metadata cache.
+        let host_id_str = host_id.to_string();
+        let friendly_name = self
+            .host_metadata
+            .get(&tenant_id)
+            .and_then(|hosts| hosts.iter().find(|h| h.host_id == host_id))
+            .map(|h| h.friendly_name.as_str())
+            .unwrap_or(host_id_str.as_str());
+
+        let config_topic = crate::ha_discovery::host_connectivity_discovery_config_topic(
+            ha_prefix, tenant_id, host_id,
+        );
+        let config_json = crate::ha_discovery::build_host_connectivity_discovery_config(
+            topic_prefix,
+            tenant_id,
+            host_id,
+            friendly_name,
+        );
+        let config_bytes = config_json.to_string().into_bytes();
+        if let Err(e) = state
+            .handle
+            .publish_retained(&config_topic, config_bytes)
+            .await
+        {
+            tracing::warn!(
+                error = ?e,
+                %mqtt_client_id,
+                %host_id,
+                "failed to publish connectivity HA discovery config"
+            );
         }
     }
 
@@ -1170,6 +1486,7 @@ mod tests {
                 hosts: vec![],
             }],
             host_summaries: vec![],
+            hosts: vec![],
         };
 
         // No connected clients — but the cache must still be updated.
@@ -1213,6 +1530,7 @@ mod tests {
                 hosts: vec![],
             }],
             host_summaries: vec![],
+            hosts: vec![],
         };
         manager.update_software_states(first).await;
 
@@ -1231,6 +1549,7 @@ mod tests {
                 },
             ],
             host_summaries: vec![],
+            hosts: vec![],
         };
         manager.update_software_states(second).await;
 

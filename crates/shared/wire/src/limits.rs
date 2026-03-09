@@ -91,6 +91,15 @@ pub const MAX_SOFTWARE_STATE_HOSTS: usize = 500;
 /// Maximum number of host package host states.
 pub const MAX_HOST_PACKAGE_HOST_STATES: usize = 2_000;
 
+/// Maximum number of host metadata entries in a `SoftwareStates` message.
+pub const MAX_MQTT_HOSTS: usize = 2_000;
+
+/// Maximum number of tags per host in a `MqttHostMetadata` entry.
+pub const MAX_HOST_TAGS: usize = 100;
+
+/// Maximum number of connectivity updates in a `HostConnectivityUpdated` message.
+pub const MAX_CONNECTIVITY_UPDATES: usize = 500;
+
 /// Maximum number of active MQTT client IDs.
 pub const MAX_ACTIVE_MQTT_CLIENTS: usize = 500;
 

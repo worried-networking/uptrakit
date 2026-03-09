@@ -360,9 +360,15 @@ pub async fn set_host_tags(
 
     match tag_queries::set_host_tags(&tenant_db, host_id, &body.tag_ids).await {
         Ok(tags) => {
+            let tenant_id = tenant_db.tenant_id;
             state
                 .event_broadcaster
-                .send(tenant_db.tenant_id, AdminEvent::HostTagsChanged { host_id })
+                .send(tenant_id, AdminEvent::HostTagsChanged { host_id })
+                .await;
+            // Refresh MQTT `{prefix}/hosts/{h}/tags` for all connected MQTT services.
+            state
+                .notification_service
+                .push_software_states_for_tenant(tenant_db.db(), tenant_id)
                 .await;
             (StatusCode::OK, Json(tags)).into_response()
         }

@@ -176,18 +176,43 @@ pub fn friendly_name_topic(topic_prefix: &str, host_id: Uuid) -> String {
 /// - `true` — an update is pending dispatch or executing on the agent
 ///   (displays a spinner in the HA UI).
 ///
+/// Optional fields are omitted from the JSON when `None`:
+/// - `update_category` — classification of the pending update
+///   (`"security"`, `"bugfix"`, `"feature"`, or `"unknown"`).
+/// - `release_date` — ISO 8601 date string of the latest release (`"2025-01-15"`).
+/// - `last_checked_at` — ISO 8601 datetime when the version was last detected.
+///
 /// # Examples
 ///
 /// ```
 /// # use uptrakit_mqtt::ha_discovery::build_attributes_payload;
-/// let payload = build_attributes_payload(true);
+/// let payload = build_attributes_payload(true, None, None, None);
 /// assert_eq!(payload["in_progress"], true);
+/// assert!(payload.get("update_category").is_none());
 ///
-/// let payload = build_attributes_payload(false);
+/// let payload = build_attributes_payload(false, Some("security"), Some("2025-01-15"), None);
 /// assert_eq!(payload["in_progress"], false);
+/// assert_eq!(payload["update_category"], "security");
+/// assert_eq!(payload["release_date"], "2025-01-15");
+/// assert!(payload.get("last_checked_at").is_none());
 /// ```
-pub fn build_attributes_payload(in_progress: bool) -> serde_json::Value {
-    serde_json::json!({ "in_progress": in_progress })
+pub fn build_attributes_payload(
+    in_progress: bool,
+    update_category: Option<&str>,
+    release_date: Option<&str>,
+    last_checked_at: Option<&str>,
+) -> serde_json::Value {
+    let mut v = serde_json::json!({ "in_progress": in_progress });
+    if let Some(cat) = update_category {
+        v["update_category"] = serde_json::Value::String(cat.to_string());
+    }
+    if let Some(rd) = release_date {
+        v["release_date"] = serde_json::Value::String(rd.to_string());
+    }
+    if let Some(lca) = last_checked_at {
+        v["last_checked_at"] = serde_json::Value::String(lca.to_string());
+    }
+    v
 }
 
 /// Returns a unique ID string for this `(tenant, software_item, host)` triple.
@@ -543,21 +568,60 @@ pub fn host_packages_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
 /// Returns a [`serde_json::Value`] to be serialized and published (retained)
 /// to [`host_packages_json_attributes_topic`].
 ///
+/// Fields:
+/// - `in_progress` — whether a batch update is pending/running.
+/// - `pending_count` — number of packages with available updates.
+/// - `total_count` — total number of tracked packages.
+/// - `bugfix_count` — pending packages classified as `"bugfix"`.
+/// - `feature_count` — pending packages classified as `"feature"`.
+///
 /// # Examples
 ///
 /// ```
 /// # use uptrakit_mqtt::ha_discovery::build_host_packages_attributes_payload;
-/// let payload = build_host_packages_attributes_payload(true, 3);
+/// let payload = build_host_packages_attributes_payload(true, 3, 10, 1, 2);
 /// assert_eq!(payload["in_progress"], true);
 /// assert_eq!(payload["pending_count"], 3u32);
+/// assert_eq!(payload["total_count"], 10u32);
+/// assert_eq!(payload["bugfix_count"], 1u32);
+/// assert_eq!(payload["feature_count"], 2u32);
 /// ```
 pub fn build_host_packages_attributes_payload(
     in_progress: bool,
     pending_count: u32,
+    total_count: u32,
+    bugfix_count: u32,
+    feature_count: u32,
 ) -> serde_json::Value {
     serde_json::json!({
         "in_progress": in_progress,
-        "pending_count": pending_count
+        "pending_count": pending_count,
+        "total_count": total_count,
+        "bugfix_count": bugfix_count,
+        "feature_count": feature_count,
+    })
+}
+
+/// Build the JSON attributes payload for a host's security updates entity.
+///
+/// Returns a [`serde_json::Value`] to be serialized and published (retained)
+/// to [`host_security_json_attributes_topic`].
+///
+/// # Examples
+///
+/// ```
+/// # use uptrakit_mqtt::ha_discovery::build_host_security_attributes_payload;
+/// let payload = build_host_security_attributes_payload(false, 2);
+/// assert_eq!(payload["in_progress"], false);
+/// assert_eq!(payload["pending_count"], 2u32);
+/// ```
+pub fn build_host_security_attributes_payload(
+    in_progress: bool,
+    security_pending_count: u32,
+) -> serde_json::Value {
+    serde_json::json!({
+        "in_progress": in_progress,
+        "pending_count": security_pending_count,
     })
 }
 
@@ -936,6 +1000,319 @@ pub fn build_host_security_discovery_config(
     })
 }
 
+// =============================================================================
+// Host metadata and connectivity entity helpers
+// =============================================================================
+
+/// Returns the MQTT topic carrying the OS info JSON for a host.
+///
+/// Format: `{prefix}/hosts/{host_id}/info`
+///
+/// Published as a retained JSON payload. See [`build_host_info_payload`].
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_info_topic;
+/// let topic = host_info_topic("uptrakit", Uuid::nil());
+/// assert!(topic.ends_with("/info"));
+/// ```
+pub fn host_info_topic(prefix: &str, host_id: Uuid) -> String {
+    let hp = host_topic_prefix(prefix, host_id);
+    format!("{hp}/info")
+}
+
+/// Returns the MQTT topic carrying the tag list JSON for a host.
+///
+/// Format: `{prefix}/hosts/{host_id}/tags`
+///
+/// Published as a retained JSON array of tag name strings.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_tags_topic;
+/// let topic = host_tags_topic("uptrakit", Uuid::nil());
+/// assert!(topic.ends_with("/tags"));
+/// ```
+pub fn host_tags_topic(prefix: &str, host_id: Uuid) -> String {
+    let hp = host_topic_prefix(prefix, host_id);
+    format!("{hp}/tags")
+}
+
+/// Returns the MQTT topic carrying the agent info JSON for a host.
+///
+/// Format: `{prefix}/hosts/{host_id}/agent`
+///
+/// Published as a retained JSON payload. See [`build_host_agent_payload`].
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_agent_topic;
+/// let topic = host_agent_topic("uptrakit", Uuid::nil());
+/// assert!(topic.ends_with("/agent"));
+/// ```
+pub fn host_agent_topic(prefix: &str, host_id: Uuid) -> String {
+    let hp = host_topic_prefix(prefix, host_id);
+    format!("{hp}/agent")
+}
+
+/// Returns the MQTT topic carrying the connectivity state string for a host.
+///
+/// Format: `{prefix}/hosts/{host_id}/connectivity/state`
+///
+/// Published as a retained `"online"` or `"offline"` string.
+/// Updated by the `HostConnectivityUpdated` event from the controller.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_connectivity_state_topic;
+/// let topic = host_connectivity_state_topic("uptrakit", Uuid::nil());
+/// assert!(topic.ends_with("/connectivity/state"));
+/// ```
+pub fn host_connectivity_state_topic(prefix: &str, host_id: Uuid) -> String {
+    let hp = host_topic_prefix(prefix, host_id);
+    format!("{hp}/connectivity/state")
+}
+
+/// Returns the MQTT topic carrying the connectivity attributes JSON for a host.
+///
+/// Format: `{prefix}/hosts/{host_id}/connectivity/attributes`
+///
+/// Published as a retained JSON payload with `last_seen` (ISO 8601 string or
+/// `null`) and `version` (agent version string or `null`).
+/// Updated by the `HostConnectivityUpdated` event from the controller.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_connectivity_attributes_topic;
+/// let topic = host_connectivity_attributes_topic("uptrakit", Uuid::nil());
+/// assert!(topic.ends_with("/connectivity/attributes"));
+/// ```
+pub fn host_connectivity_attributes_topic(prefix: &str, host_id: Uuid) -> String {
+    let hp = host_topic_prefix(prefix, host_id);
+    format!("{hp}/connectivity/attributes")
+}
+
+/// Returns a unique ID string for a host's connectivity `binary_sensor` entity.
+///
+/// Format: `uptrakit_{tenant_id_no_dashes}_{host_id_no_dashes}_conn`
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_connectivity_unique_id;
+/// let uid = host_connectivity_unique_id(Uuid::nil(), Uuid::nil());
+/// assert!(uid.starts_with("uptrakit_"));
+/// assert!(uid.ends_with("_conn"));
+/// assert!(!uid.contains('-'));
+/// ```
+pub fn host_connectivity_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
+    let t = tenant_id.simple();
+    let h = host_id.simple();
+    format!("uptrakit_{t}_{h}_conn")
+}
+
+/// Returns the HA MQTT discovery config topic for a host's connectivity
+/// `binary_sensor` entity.
+///
+/// Format: `{ha_prefix}/binary_sensor/uptrakit/{t}_{h}_conn/config`
+///
+/// Uses the `binary_sensor` platform namespace (not `update`) so that HA
+/// creates a connectivity sensor rather than an update entity. The `uptrakit`
+/// node_id groups all Uptrakit configs under a single namespace.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_connectivity_discovery_config_topic;
+/// let topic = host_connectivity_discovery_config_topic("homeassistant", Uuid::nil(), Uuid::nil());
+/// assert!(topic.starts_with("homeassistant/binary_sensor/uptrakit/"));
+/// assert!(topic.ends_with("_conn/config"));
+/// ```
+pub fn host_connectivity_discovery_config_topic(
+    ha_prefix: &str,
+    tenant_id: Uuid,
+    host_id: Uuid,
+) -> String {
+    let uid = host_connectivity_unique_id(tenant_id, host_id);
+    let object_id = uid.strip_prefix("uptrakit_").unwrap_or(&uid);
+    format!("{ha_prefix}/binary_sensor/uptrakit/{object_id}/config")
+}
+
+/// Build the JSON attributes payload for a host's connectivity entity.
+///
+/// Returns a [`serde_json::Value`] to be serialized and published (retained)
+/// to [`host_connectivity_attributes_topic`].
+///
+/// Both fields are optional:
+/// - `last_seen` — ISO 8601 datetime string of the agent's last contact.
+/// - `version` — agent version string.
+///
+/// # Examples
+///
+/// ```
+/// # use uptrakit_mqtt::ha_discovery::build_host_connectivity_attributes_payload;
+/// let payload = build_host_connectivity_attributes_payload(
+///     Some("2025-01-15T12:00:00Z"),
+///     Some("1.2.3"),
+/// );
+/// assert_eq!(payload["last_seen"], "2025-01-15T12:00:00Z");
+/// assert_eq!(payload["version"], "1.2.3");
+///
+/// let payload = build_host_connectivity_attributes_payload(None, None);
+/// assert!(payload["last_seen"].is_null());
+/// assert!(payload["version"].is_null());
+/// ```
+pub fn build_host_connectivity_attributes_payload(
+    last_seen: Option<&str>,
+    version: Option<&str>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "last_seen": last_seen,
+        "version": version,
+    })
+}
+
+/// Build the HA MQTT discovery JSON for a host's connectivity `binary_sensor`
+/// entity.
+///
+/// Creates one `binary_sensor` per host that surfaces whether the Uptrakit
+/// agent is currently connected (`"online"`) or not (`"offline"`). The entity
+/// is **enabled by default** because connectivity monitoring is core
+/// operational value.
+///
+/// The device identifier is the same as the update entities for this host
+/// (`uptrakit_host_{tenant}_{host}`), so the sensor appears under the same
+/// HA device as the package and software item update entities.
+///
+/// The returned JSON should be published (retained) on
+/// [`host_connectivity_discovery_config_topic`].
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::build_host_connectivity_discovery_config;
+/// let v = build_host_connectivity_discovery_config(
+///     "uptrakit",
+///     Uuid::nil(),
+///     Uuid::nil(),
+///     "myserver",
+/// );
+/// assert_eq!(v["platform"], "mqtt");
+/// assert_eq!(v["device_class"], "connectivity");
+/// assert_eq!(v["payload_on"], "online");
+/// assert_eq!(v["payload_off"], "offline");
+/// assert_eq!(v["enabled_by_default"], true);
+/// ```
+pub fn build_host_connectivity_discovery_config(
+    topic_prefix: &str,
+    tenant_id: Uuid,
+    host_id: Uuid,
+    friendly_name: &str,
+) -> serde_json::Value {
+    let uid = host_connectivity_unique_id(tenant_id, host_id);
+    let host_simple = host_id.simple().to_string();
+    let tenant_simple = tenant_id.simple().to_string();
+    let default_entity_id = format!("uptrakit_{}_agent", slugify(friendly_name));
+
+    serde_json::json!({
+        "platform": "mqtt",
+        "unique_id": uid,
+        "name": format!("{friendly_name} agent"),
+        "default_entity_id": default_entity_id,
+        "device_class": "connectivity",
+        "enabled_by_default": true,
+        "state_topic": host_connectivity_state_topic(topic_prefix, host_id),
+        "json_attributes_topic": host_connectivity_attributes_topic(topic_prefix, host_id),
+        "payload_on": "online",
+        "payload_off": "offline",
+        "availability_topic": format!("{topic_prefix}/status"),
+        "payload_available": "online",
+        "payload_not_available": "offline",
+        "device": {
+            "identifiers": [format!("uptrakit_host_{tenant_simple}_{host_simple}")],
+            "name": friendly_name,
+            "manufacturer": "Uptrakit"
+        }
+    })
+}
+
+/// Build the JSON OS info payload for a host.
+///
+/// Returns a [`serde_json::Value`] to be serialized and published (retained)
+/// to [`host_info_topic`].
+///
+/// All fields are optional and represented as JSON `null` when absent.
+///
+/// # Examples
+///
+/// ```
+/// # use uptrakit_mqtt::ha_discovery::build_host_info_payload;
+/// let payload = build_host_info_payload(
+///     Some("Linux"),
+///     Some("Ubuntu 24.04"),
+///     Some("x86_64"),
+/// );
+/// assert_eq!(payload["os_type"], "Linux");
+/// assert_eq!(payload["os_version"], "Ubuntu 24.04");
+/// assert_eq!(payload["architecture"], "x86_64");
+///
+/// let payload = build_host_info_payload(None, None, None);
+/// assert!(payload["os_type"].is_null());
+/// ```
+pub fn build_host_info_payload(
+    os_type: Option<&str>,
+    os_version: Option<&str>,
+    architecture: Option<&str>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "os_type": os_type,
+        "os_version": os_version,
+        "architecture": architecture,
+    })
+}
+
+/// Build the JSON agent info payload for a host.
+///
+/// Returns a [`serde_json::Value`] to be serialized and published (retained)
+/// to [`host_agent_topic`].
+///
+/// Both fields are optional and represented as JSON `null` when absent.
+///
+/// # Examples
+///
+/// ```
+/// # use uptrakit_mqtt::ha_discovery::build_host_agent_payload;
+/// let payload = build_host_agent_payload(Some("2025-01-15T12:00:00Z"), Some("1.2.3"));
+/// assert_eq!(payload["last_seen"], "2025-01-15T12:00:00Z");
+/// assert_eq!(payload["version"], "1.2.3");
+///
+/// let payload = build_host_agent_payload(None, None);
+/// assert!(payload["last_seen"].is_null());
+/// assert!(payload["version"].is_null());
+/// ```
+pub fn build_host_agent_payload(
+    last_seen: Option<&str>,
+    version: Option<&str>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "last_seen": last_seen,
+        "version": version,
+    })
+}
+
 /// Try to parse a host security command topic back to the `host_id`.
 ///
 /// Returns `None` if the topic doesn't match
@@ -1137,22 +1514,44 @@ mod tests {
 
     #[test]
     fn build_attributes_payload_in_progress_true() {
-        let payload = build_attributes_payload(true);
+        let payload = build_attributes_payload(true, None, None, None);
         assert_eq!(payload["in_progress"], true);
     }
 
     #[test]
     fn build_attributes_payload_in_progress_false() {
-        let payload = build_attributes_payload(false);
+        let payload = build_attributes_payload(false, None, None, None);
         assert_eq!(payload["in_progress"], false);
     }
 
     #[test]
     fn build_attributes_payload_is_valid_json() {
-        let payload = build_attributes_payload(true);
+        let payload = build_attributes_payload(true, None, None, None);
         let s = payload.to_string();
         let reparsed: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(reparsed["in_progress"], true);
+    }
+
+    #[test]
+    fn build_attributes_payload_with_all_optional_fields() {
+        let payload = build_attributes_payload(
+            false,
+            Some("security"),
+            Some("2025-01-15"),
+            Some("2025-01-15T12:00:00Z"),
+        );
+        assert_eq!(payload["in_progress"], false);
+        assert_eq!(payload["update_category"], "security");
+        assert_eq!(payload["release_date"], "2025-01-15");
+        assert_eq!(payload["last_checked_at"], "2025-01-15T12:00:00Z");
+    }
+
+    #[test]
+    fn build_attributes_payload_omits_none_optional_fields() {
+        let payload = build_attributes_payload(true, None, Some("2025-01-15"), None);
+        assert!(payload.get("update_category").is_none());
+        assert_eq!(payload["release_date"], "2025-01-15");
+        assert!(payload.get("last_checked_at").is_none());
     }
 
     // -------------------------------------------------------------------------
@@ -1821,16 +2220,40 @@ mod tests {
 
     #[test]
     fn build_host_packages_attributes_payload_in_progress() {
-        let payload = build_host_packages_attributes_payload(true, 5);
+        let payload = build_host_packages_attributes_payload(true, 5, 20, 3, 2);
         assert_eq!(payload["in_progress"], true);
         assert_eq!(payload["pending_count"], 5u32);
+        assert_eq!(payload["total_count"], 20u32);
+        assert_eq!(payload["bugfix_count"], 3u32);
+        assert_eq!(payload["feature_count"], 2u32);
     }
 
     #[test]
     fn build_host_packages_attributes_payload_idle() {
-        let payload = build_host_packages_attributes_payload(false, 0);
+        let payload = build_host_packages_attributes_payload(false, 0, 10, 0, 0);
         assert_eq!(payload["in_progress"], false);
         assert_eq!(payload["pending_count"], 0u32);
+        assert_eq!(payload["total_count"], 10u32);
+        assert_eq!(payload["bugfix_count"], 0u32);
+        assert_eq!(payload["feature_count"], 0u32);
+    }
+
+    // -------------------------------------------------------------------------
+    // build_host_security_attributes_payload
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn build_host_security_attributes_payload_with_pending() {
+        let payload = build_host_security_attributes_payload(false, 2);
+        assert_eq!(payload["in_progress"], false);
+        assert_eq!(payload["pending_count"], 2u32);
+    }
+
+    #[test]
+    fn build_host_security_attributes_payload_in_progress() {
+        let payload = build_host_security_attributes_payload(true, 1);
+        assert_eq!(payload["in_progress"], true);
+        assert_eq!(payload["pending_count"], 1u32);
     }
 
     // -------------------------------------------------------------------------
@@ -2168,5 +2591,237 @@ mod tests {
         // NOT match the packages parser (the UUID segment contains '/security').
         let sec_topic = host_security_command_topic("uptrakit", host());
         assert!(parse_host_packages_command_topic("uptrakit", &sec_topic).is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // host_info_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_info_topic_format() {
+        let t = host_info_topic("uptrakit", host());
+        assert_eq!(
+            t,
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/info"
+        );
+    }
+
+    #[test]
+    fn host_info_topic_ends_with_info() {
+        assert!(host_info_topic("pfx", host()).ends_with("/info"));
+    }
+
+    // -------------------------------------------------------------------------
+    // host_tags_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_tags_topic_format() {
+        let t = host_tags_topic("uptrakit", host());
+        assert_eq!(
+            t,
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/tags"
+        );
+    }
+
+    #[test]
+    fn host_tags_topic_ends_with_tags() {
+        assert!(host_tags_topic("pfx", host()).ends_with("/tags"));
+    }
+
+    // -------------------------------------------------------------------------
+    // host_agent_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_agent_topic_format() {
+        let t = host_agent_topic("uptrakit", host());
+        assert_eq!(
+            t,
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/agent"
+        );
+    }
+
+    #[test]
+    fn host_agent_topic_ends_with_agent() {
+        assert!(host_agent_topic("pfx", host()).ends_with("/agent"));
+    }
+
+    // -------------------------------------------------------------------------
+    // host_connectivity_state_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_connectivity_state_topic_format() {
+        let t = host_connectivity_state_topic("uptrakit", host());
+        assert_eq!(
+            t,
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/connectivity/state"
+        );
+    }
+
+    #[test]
+    fn host_connectivity_state_topic_ends_correctly() {
+        assert!(host_connectivity_state_topic("pfx", host()).ends_with("/connectivity/state"));
+    }
+
+    // -------------------------------------------------------------------------
+    // host_connectivity_attributes_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_connectivity_attributes_topic_format() {
+        let t = host_connectivity_attributes_topic("uptrakit", host());
+        assert_eq!(
+            t,
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/connectivity/attributes"
+        );
+    }
+
+    #[test]
+    fn host_connectivity_attributes_topic_ends_correctly() {
+        assert!(
+            host_connectivity_attributes_topic("pfx", host()).ends_with("/connectivity/attributes")
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // host_connectivity_unique_id
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_connectivity_unique_id_starts_and_ends_correctly() {
+        let uid = host_connectivity_unique_id(tenant(), host());
+        assert!(uid.starts_with("uptrakit_"));
+        assert!(uid.ends_with("_conn"));
+    }
+
+    #[test]
+    fn host_connectivity_unique_id_no_dashes() {
+        assert!(!host_connectivity_unique_id(tenant(), host()).contains('-'));
+    }
+
+    #[test]
+    fn host_connectivity_unique_id_differs_from_packages() {
+        assert_ne!(
+            host_connectivity_unique_id(tenant(), host()),
+            host_packages_unique_id(tenant(), host())
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // host_connectivity_discovery_config_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_connectivity_discovery_config_topic_format() {
+        let topic = host_connectivity_discovery_config_topic("homeassistant", tenant(), host());
+        assert!(topic.starts_with("homeassistant/binary_sensor/uptrakit/"));
+        assert!(topic.ends_with("_conn/config"));
+    }
+
+    // -------------------------------------------------------------------------
+    // build_host_connectivity_discovery_config
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn build_host_connectivity_discovery_config_platform_mqtt() {
+        let v = build_host_connectivity_discovery_config("uptrakit", tenant(), host(), "myserver");
+        assert_eq!(v["platform"], "mqtt");
+    }
+
+    #[test]
+    fn build_host_connectivity_discovery_config_device_class_connectivity() {
+        let v = build_host_connectivity_discovery_config("uptrakit", tenant(), host(), "myserver");
+        assert_eq!(v["device_class"], "connectivity");
+    }
+
+    #[test]
+    fn build_host_connectivity_discovery_config_enabled_by_default() {
+        let v = build_host_connectivity_discovery_config("uptrakit", tenant(), host(), "myserver");
+        assert_eq!(v["enabled_by_default"], true);
+    }
+
+    #[test]
+    fn build_host_connectivity_discovery_config_payloads() {
+        let v = build_host_connectivity_discovery_config("uptrakit", tenant(), host(), "myserver");
+        assert_eq!(v["payload_on"], "online");
+        assert_eq!(v["payload_off"], "offline");
+    }
+
+    #[test]
+    fn build_host_connectivity_discovery_config_name_includes_agent() {
+        let v = build_host_connectivity_discovery_config("uptrakit", tenant(), host(), "myserver");
+        assert_eq!(v["name"], "myserver agent");
+    }
+
+    #[test]
+    fn build_host_connectivity_discovery_config_default_entity_id() {
+        let v = build_host_connectivity_discovery_config("uptrakit", tenant(), host(), "My Server");
+        assert_eq!(v["default_entity_id"], "uptrakit_my_server_agent");
+    }
+
+    #[test]
+    fn build_host_connectivity_discovery_config_device_same_as_packages() {
+        let conn = build_host_connectivity_discovery_config("uptrakit", tenant(), host(), "h");
+        let pkg = build_host_packages_discovery_config("uptrakit", tenant(), host(), "h");
+        assert_eq!(conn["device"]["identifiers"], pkg["device"]["identifiers"]);
+    }
+
+    // -------------------------------------------------------------------------
+    // build_host_info_payload
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn build_host_info_payload_all_fields() {
+        let p = build_host_info_payload(Some("Linux"), Some("Ubuntu 24.04"), Some("x86_64"));
+        assert_eq!(p["os_type"], "Linux");
+        assert_eq!(p["os_version"], "Ubuntu 24.04");
+        assert_eq!(p["architecture"], "x86_64");
+    }
+
+    #[test]
+    fn build_host_info_payload_null_fields() {
+        let p = build_host_info_payload(None, None, None);
+        assert!(p["os_type"].is_null());
+        assert!(p["os_version"].is_null());
+        assert!(p["architecture"].is_null());
+    }
+
+    // -------------------------------------------------------------------------
+    // build_host_agent_payload
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn build_host_agent_payload_all_fields() {
+        let p = build_host_agent_payload(Some("2025-01-15T12:00:00Z"), Some("1.2.3"));
+        assert_eq!(p["last_seen"], "2025-01-15T12:00:00Z");
+        assert_eq!(p["version"], "1.2.3");
+    }
+
+    #[test]
+    fn build_host_agent_payload_null_fields() {
+        let p = build_host_agent_payload(None, None);
+        assert!(p["last_seen"].is_null());
+        assert!(p["version"].is_null());
+    }
+
+    // -------------------------------------------------------------------------
+    // build_host_connectivity_attributes_payload
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn build_host_connectivity_attributes_payload_with_values() {
+        let p =
+            build_host_connectivity_attributes_payload(Some("2025-01-15T12:00:00Z"), Some("1.2.3"));
+        assert_eq!(p["last_seen"], "2025-01-15T12:00:00Z");
+        assert_eq!(p["version"], "1.2.3");
+    }
+
+    #[test]
+    fn build_host_connectivity_attributes_payload_nulls() {
+        let p = build_host_connectivity_attributes_payload(None, None);
+        assert!(p["last_seen"].is_null());
+        assert!(p["version"].is_null());
     }
 }

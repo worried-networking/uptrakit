@@ -1,4 +1,7 @@
-use uptrakit_internal_wire::{Capability, ControllerMessage, MqttSoftwareStatesPayload};
+use uptrakit_internal_wire::{
+    Capability, ControllerMessage, HostConnectivityUpdate, HostConnectivityUpdatedPayload,
+    MqttSoftwareStatesPayload,
+};
 use uuid::Uuid;
 
 use crate::service_connections::ServiceConnectionRegistry;
@@ -142,6 +145,35 @@ impl NotificationService {
     #[tracing::instrument(skip_all)]
     pub async fn deliver_software_states(&self, payload: MqttSoftwareStatesPayload) {
         let msg = ControllerMessage::SoftwareStates(payload);
+        // Deliver to locally connected MQTT services immediately.
+        self.registry
+            .broadcast_by_capability(&Capability::MqttBridge, msg.clone())
+            .await;
+        // Publish to NATS for cross-controller delivery (MQTT-only).
+        self.maybe_publish_nats(None, Some("mqtt_bridge"), msg)
+            .await;
+    }
+
+    /// Publish a `HostConnectivityUpdated` event to all locally connected MQTT
+    /// services and to NATS for cross-controller delivery.
+    ///
+    /// This is the authoritative mechanism for notifying MQTT services that an
+    /// agent has connected or disconnected. Unlike `SoftwareStates`, connectivity
+    /// state is sourced from the live WebSocket session on the controller that
+    /// owns the agent connection — not from a DB query — so it must be delivered
+    /// as an event rather than included in the `SoftwareStates` payload.
+    ///
+    /// Multi-controller safety: `HostConnectivityUpdated` is NATS-publishable
+    /// (contains no credentials) so all MQTT services across the cluster receive
+    /// it regardless of which controller holds the agent WebSocket.
+    #[tracing::instrument(skip_all, fields(%tenant_id))]
+    pub async fn send_connectivity_update(
+        &self,
+        tenant_id: Uuid,
+        updates: Vec<HostConnectivityUpdate>,
+    ) {
+        let payload = HostConnectivityUpdatedPayload::new(tenant_id, updates);
+        let msg = ControllerMessage::HostConnectivityUpdated(payload);
         // Deliver to locally connected MQTT services immediately.
         self.registry
             .broadcast_by_capability(&Capability::MqttBridge, msg.clone())

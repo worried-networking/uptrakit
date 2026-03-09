@@ -9,15 +9,15 @@ use super::payloads::{
     ApprovedPayload, BatchUpdateResultPayload, CaBundleUpdatedPayload, CertificatePayload,
     CheckVersionsPayload, DisconnectingPayload, DiscoverSoftwarePayload, DiscoveryResultsPayload,
     EnrollPayload, EnrolledPayload, ExecuteBatchUpdatePayload, ExecuteUpdatePayload,
-    MqttClientCreatedPayload, MqttClientStatusPayload, MqttRegisterPayload, MqttRegisteredPayload,
-    MqttReleaseTenantsPayload, MqttSoftwareStatesPayload, MqttTenantAssignmentsPayload,
-    MqttTenantConfigUpdatedPayload, MqttTenantRevokedPayload, MqttTriggerHostBatchUpdatePayload,
-    MqttUpdateTriggerPayload, PingPayload, PongPayload, RejectedPayload, ReportHostsPayload,
-    ReportPluginConfigPayload, ReportPluginConfigResponsePayload, RequestCaRotationPayload,
-    RequestCertRenewalPayload, RequestCrlRenewalPayload, ServerRestartingPayload,
-    ServiceCredentialsPayload, ServiceSettingsPayload, SetUpdateFreezePayload, TokenRevokedPayload,
-    UpdateCapabilitiesPayload, UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload,
-    VersionCheckResultsPayload,
+    HostConnectivityUpdatedPayload, MqttClientCreatedPayload, MqttClientStatusPayload,
+    MqttRegisterPayload, MqttRegisteredPayload, MqttReleaseTenantsPayload,
+    MqttSoftwareStatesPayload, MqttTenantAssignmentsPayload, MqttTenantConfigUpdatedPayload,
+    MqttTenantRevokedPayload, MqttTriggerHostBatchUpdatePayload, MqttUpdateTriggerPayload,
+    PingPayload, PongPayload, RejectedPayload, ReportHostsPayload, ReportPluginConfigPayload,
+    ReportPluginConfigResponsePayload, RequestCaRotationPayload, RequestCertRenewalPayload,
+    RequestCrlRenewalPayload, ServerRestartingPayload, ServiceCredentialsPayload,
+    ServiceSettingsPayload, SetUpdateFreezePayload, TokenRevokedPayload, UpdateCapabilitiesPayload,
+    UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload, VersionCheckResultsPayload,
 };
 use uptrakit_shared_types::HookShell;
 
@@ -246,6 +246,15 @@ pub enum ControllerMessage {
     TenantRevoked(MqttTenantRevokedPayload),
     MqttClientCreated(MqttClientCreatedPayload),
     SoftwareStates(MqttSoftwareStatesPayload),
+    /// Agent connectivity changed for one or more hosts.
+    ///
+    /// Published to NATS with `target_capability = "mqtt_bridge"` by the controller
+    /// that owns the agent WebSocket connection (on connect and disconnect). The MQTT
+    /// service updates its per-tenant connectivity cache and publishes the
+    /// `{prefix}/hosts/{h}/connectivity/state` retained topic.
+    ///
+    /// **Safe to publish via NATS** — contains no credential material.
+    HostConnectivityUpdated(HostConnectivityUpdatedPayload),
     // -- UI Extensions --
     /// Proxied action invocation from the controller to a service.
     ///

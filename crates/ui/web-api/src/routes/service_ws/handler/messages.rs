@@ -14,8 +14,9 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uptrakit_internal_wire::report_tracker::{PageOutcome, ReportTracker};
 use uptrakit_internal_wire::{
     CertificatePayload, CloseReason, ControllerMessage, DiscoveryResultsPayload, ErrorCode,
-    ErrorPayload, OutgoingSeq, ReportHostsPayload, ReportPagination, ReportPluginConfigPayload,
-    ReportPluginConfigResponsePayload, RequestCrlRenewalPayload, VersionCheckResultsPayload,
+    ErrorPayload, HostConnectivityUpdate, OutgoingSeq, ReportHostsPayload, ReportPagination,
+    ReportPluginConfigPayload, ReportPluginConfigResponsePayload, RequestCrlRenewalPayload,
+    VersionCheckResultsPayload,
 };
 use uptrakit_shared_db::entity::{host, host_software_item, service, service_host, software_item};
 
@@ -357,6 +358,28 @@ pub(super) async fn handle_report_hosts(
     // Refresh cached host IDs.
     if let Ok(ids) = load_linked_host_ids(state.db(), service_id).await {
         *linked_host_ids = ids;
+    }
+
+    // Notify MQTT services that this agent's hosts are online.
+    if !linked_host_ids.is_empty() {
+        let now = time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default();
+        let agent_version = payload.agent_version.clone();
+        let updates: Vec<HostConnectivityUpdate> = linked_host_ids
+            .iter()
+            .map(|&host_id| {
+                HostConnectivityUpdate::online(
+                    host_id,
+                    Some(now.clone()),
+                    Some(agent_version.clone()),
+                )
+            })
+            .collect();
+        state
+            .notification_service
+            .send_connectivity_update(service_model.tenant_id, updates)
+            .await;
     }
 
     LoopAction::Continue

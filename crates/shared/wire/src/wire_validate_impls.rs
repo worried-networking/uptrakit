@@ -71,6 +71,7 @@ impl WireValidate for ControllerMessage {
             ControllerMessage::TenantRevoked(p) => p.wire_validate(),
             ControllerMessage::MqttClientCreated(_) => Ok(()),
             ControllerMessage::SoftwareStates(p) => p.wire_validate(),
+            ControllerMessage::HostConnectivityUpdated(p) => p.wire_validate(),
             ControllerMessage::ReportPluginConfigResponse(p) => p.wire_validate(),
             ControllerMessage::ExtensionRequest(p) => p.wire_validate(),
             ControllerMessage::ExtensionResponse(p) => p.wire_validate(),
@@ -1019,11 +1020,15 @@ impl WireValidate for MqttSoftwareStatesPayload {
             MAX_HOST_PACKAGE_HOST_STATES,
             "host_summaries",
         )?;
+        check_vec_len(&self.hosts, MAX_MQTT_HOSTS, "hosts")?;
         for item in &self.items {
             item.wire_validate()?;
         }
         for host_state in &self.host_summaries {
             host_state.wire_validate()?;
+        }
+        for host in &self.hosts {
+            host.wire_validate()?;
         }
         Ok(())
     }
@@ -1052,6 +1057,17 @@ impl WireValidate for MqttSoftwareStateHostEntry {
         check_opt_string_len(&self.latest_version, MAX_SHORT_STRING_LEN, "latest_version")?;
         check_opt_string_len(&self.release_url, MAX_MEDIUM_STRING_LEN, "release_url")?;
         check_opt_string_len(&self.release_notes, MAX_LONG_STRING_LEN, "release_notes")?;
+        check_opt_string_len(
+            &self.update_category,
+            MAX_SHORT_STRING_LEN,
+            "update_category",
+        )?;
+        check_opt_string_len(&self.release_date, MAX_SHORT_STRING_LEN, "release_date")?;
+        check_opt_string_len(
+            &self.last_checked_at,
+            MAX_SHORT_STRING_LEN,
+            "last_checked_at",
+        )?;
         Ok(())
     }
 }
@@ -1060,6 +1076,38 @@ impl WireValidate for MqttHostSummary {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.hostname, MAX_SHORT_STRING_LEN, "hostname")?;
         check_string_len(&self.friendly_name, MAX_SHORT_STRING_LEN, "friendly_name")?;
+        Ok(())
+    }
+}
+
+impl WireValidate for MqttHostMetadata {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.hostname, MAX_SHORT_STRING_LEN, "hostname")?;
+        check_string_len(&self.friendly_name, MAX_SHORT_STRING_LEN, "friendly_name")?;
+        check_opt_string_len(&self.os_type, MAX_SHORT_STRING_LEN, "os_type")?;
+        check_opt_string_len(&self.os_version, MAX_SHORT_STRING_LEN, "os_version")?;
+        check_opt_string_len(&self.architecture, MAX_SHORT_STRING_LEN, "architecture")?;
+        check_vec_len(&self.tags, MAX_HOST_TAGS, "tags")?;
+        for tag in &self.tags {
+            check_string_len(tag, MAX_SHORT_STRING_LEN, "tags[]")?;
+        }
+        check_opt_string_len(&self.agent_version, MAX_SHORT_STRING_LEN, "agent_version")?;
+        check_opt_string_len(
+            &self.agent_last_seen_at,
+            MAX_SHORT_STRING_LEN,
+            "agent_last_seen_at",
+        )?;
+        Ok(())
+    }
+}
+
+impl WireValidate for HostConnectivityUpdatedPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_vec_len(&self.updates, MAX_CONNECTIVITY_UPDATES, "updates")?;
+        for update in &self.updates {
+            check_opt_string_len(&update.last_seen_at, MAX_SHORT_STRING_LEN, "last_seen_at")?;
+            check_opt_string_len(&update.agent_version, MAX_SHORT_STRING_LEN, "agent_version")?;
+        }
         Ok(())
     }
 }

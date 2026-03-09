@@ -2501,6 +2501,8 @@ mod tests {
             pending_count: 3,
             security_pending_count: 1,
             total_count: 42,
+            bugfix_count: 2,
+            feature_count: 1,
             update_in_progress: false,
         };
         let json = serde_json::to_string(&state).unwrap();
@@ -2537,8 +2539,11 @@ mod tests {
                 pending_count: 5,
                 security_pending_count: 2,
                 total_count: 100,
+                bugfix_count: 3,
+                feature_count: 2,
                 update_in_progress: true,
             }],
+            hosts: vec![],
         };
         let json = serde_json::to_string(&payload).unwrap();
         let deserialized: MqttSoftwareStatesPayload = serde_json::from_str(&json).unwrap();

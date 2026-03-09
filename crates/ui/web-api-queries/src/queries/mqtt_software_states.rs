@@ -1,12 +1,17 @@
 //! Query helper that loads software state data for MQTT `SoftwareStates` push messages.
 
-use sea_orm::{ColumnTrait, Condition, EntityTrait, FromQueryResult, QueryFilter, QuerySelect};
+use sea_orm::{
+    ColumnTrait, Condition, EntityTrait, FromQueryResult, QueryFilter, QuerySelect,
+    RelationTrait as _,
+};
 use std::collections::{HashMap, HashSet};
 use uptrakit_internal_wire::{
-    MqttHostSummary, MqttSoftwareStateHostEntry, MqttSoftwareStateItem, MqttSoftwareStatesPayload,
+    MqttHostMetadata, MqttHostSummary, MqttSoftwareStateHostEntry, MqttSoftwareStateItem,
+    MqttSoftwareStatesPayload,
 };
 use uptrakit_shared_db::entity::{
-    host, host_software_item, prelude::*, software_item, update_history,
+    host, host_software_item, host_tag, host_tag_assignment, prelude::*, service, service_host,
+    software_item, update_history,
 };
 use uuid::Uuid;
 
@@ -16,6 +21,7 @@ struct HostSoftwareItemRow {
     host_id: Uuid,
     software_item_id: Uuid,
     installed_version: Option<String>,
+    installed_version_detected_at: Option<time::OffsetDateTime>,
     latest_version: Option<String>,
     latest_release_metadata: Option<serde_json::Value>,
     update_category: String,
@@ -54,6 +60,7 @@ pub async fn load_software_states_for_tenant(
             tenant_id,
             items: vec![],
             host_summaries: vec![],
+            hosts: vec![],
         });
     }
 
@@ -65,6 +72,7 @@ pub async fn load_software_states_for_tenant(
         .column(host_software_item::Column::HostId)
         .column(host_software_item::Column::SoftwareItemId)
         .column(host_software_item::Column::InstalledVersion)
+        .column(host_software_item::Column::InstalledVersionDetectedAt)
         .column(host_software_item::Column::LatestVersion)
         .column(host_software_item::Column::LatestReleaseMetadata)
         .column(host_software_item::Column::UpdateCategory)
@@ -158,8 +166,12 @@ pub async fn load_software_states_for_tenant(
                         };
                         let update_in_progress =
                             active_updates.contains(&(link.host_id, link.software_item_id));
-                        let (release_url, release_notes) =
+                        let (release_url, release_notes, release_date) =
                             extract_release_info(link.latest_release_metadata.as_ref());
+                        let last_checked_at = link.installed_version_detected_at.map(|dt| {
+                            dt.format(&time::format_description::well_known::Rfc3339)
+                                .unwrap_or_default()
+                        });
                         Some(MqttSoftwareStateHostEntry {
                             host_id: host.id,
                             hostname: host.hostname.clone(),
@@ -170,6 +182,9 @@ pub async fn load_software_states_for_tenant(
                             update_in_progress,
                             release_url,
                             release_notes,
+                            update_category: Some(link.update_category.clone()),
+                            release_date,
+                            last_checked_at,
                         })
                     })
                     .collect()
@@ -210,22 +225,25 @@ pub async fn load_software_states_for_tenant(
             continue;
         };
 
+        let is_outdated = |r: &&&HostSoftwareItemRow| {
+            matches!(
+                (&r.installed_version, &r.latest_version),
+                (Some(installed), Some(latest)) if installed != latest
+            )
+        };
         let total_count = rows.len() as u32;
-        let pending_count = rows
-            .iter()
-            .filter(|r| match (&r.installed_version, &r.latest_version) {
-                (Some(installed), Some(latest)) => installed != latest,
-                _ => false,
-            })
-            .count() as u32;
+        let pending_count = rows.iter().filter(is_outdated).count() as u32;
         let security_pending_count = rows
             .iter()
-            .filter(|r| {
-                matches!(
-                    (&r.installed_version, &r.latest_version),
-                    (Some(installed), Some(latest)) if installed != latest
-                ) && r.update_category == "security"
-            })
+            .filter(|r| is_outdated(r) && r.update_category == "security")
+            .count() as u32;
+        let bugfix_count = rows
+            .iter()
+            .filter(|r| is_outdated(r) && r.update_category == "bugfix")
+            .count() as u32;
+        let feature_count = rows
+            .iter()
+            .filter(|r| is_outdated(r) && r.update_category == "feature")
             .count() as u32;
         let update_in_progress = unfeatured_in_progress_hosts.contains(&host_id);
 
@@ -237,22 +255,150 @@ pub async fn load_software_states_for_tenant(
             security_pending_count,
             total_count,
             update_in_progress,
+            bugfix_count,
+            feature_count,
         });
     }
+
+    // 8. Build MqttHostMetadata for all active hosts.
+    let host_metadata = build_host_metadata(db, &active_hosts).await?;
 
     Ok(MqttSoftwareStatesPayload {
         tenant_id,
         items: result_items,
         host_summaries,
+        hosts: host_metadata,
     })
 }
 
-/// Extract `release_url` and `release_notes` from a `latest_release_metadata` JSON blob.
+// ---------------------------------------------------------------------------
+// Host metadata
+// ---------------------------------------------------------------------------
+
+/// Projection for host tags.
+#[derive(Debug, FromQueryResult)]
+struct HostTagRow {
+    host_id: Uuid,
+    name: String,
+}
+
+/// Projection for agent info linked to a host.
+#[derive(Debug, FromQueryResult)]
+struct AgentInfoRow {
+    host_id: Uuid,
+    client_version: Option<String>,
+    last_seen_at: Option<time::OffsetDateTime>,
+}
+
+/// Build `Vec<MqttHostMetadata>` for all hosts in `active_hosts`.
 ///
-/// Returns `(None, None)` when `metadata` is `None` or the expected keys are absent.
-fn extract_release_info(metadata: Option<&serde_json::Value>) -> (Option<String>, Option<String>) {
+/// Performs two additional bulk queries:
+/// 1. `host_tag_assignments JOIN host_tags` to get tag names per host.
+/// 2. `service_hosts JOIN services` to get agent version and last_seen_at.
+async fn build_host_metadata(
+    db: &sea_orm::DatabaseConnection,
+    active_hosts: &HashMap<Uuid, host::Model>,
+) -> Result<Vec<MqttHostMetadata>, sea_orm::DbErr> {
+    if active_hosts.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let host_ids: Vec<Uuid> = active_hosts.keys().copied().collect();
+
+    // 1. Load tags for all hosts in a single join query.
+    let tag_rows: Vec<HostTagRow> = HostTagAssignment::find()
+        .select_only()
+        .column(host_tag_assignment::Column::HostId)
+        .column_as(host_tag::Column::Name, "name")
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            host_tag_assignment::Relation::HostTag.def(),
+        )
+        .filter(host_tag_assignment::Column::HostId.is_in(host_ids.clone()))
+        // Exclude deactivated tags.
+        .filter(host_tag::Column::DeactivatedAt.is_null())
+        .into_model::<HostTagRow>()
+        .all(db)
+        .await?;
+
+    // Index tags by host_id.
+    let mut tags_by_host: HashMap<Uuid, Vec<String>> = HashMap::new();
+    for row in tag_rows {
+        tags_by_host.entry(row.host_id).or_default().push(row.name);
+    }
+
+    // 2. Load agent info (client_version, last_seen_at) for all hosts.
+    //    Uses service_hosts JOIN services, picking approved, non-deactivated agents.
+    let agent_rows: Vec<AgentInfoRow> = ServiceHost::find()
+        .select_only()
+        .column(service_host::Column::HostId)
+        .column_as(service::Column::ClientVersion, "client_version")
+        .column_as(service::Column::LastSeenAt, "last_seen_at")
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            service_host::Relation::Service.def(),
+        )
+        .filter(service_host::Column::HostId.is_in(host_ids))
+        .filter(service::Column::Status.eq(ServiceStatus::Approved))
+        .filter(service::Column::DeactivatedAt.is_null())
+        .into_model::<AgentInfoRow>()
+        .all(db)
+        .await?;
+
+    // Index agent info by host_id — take the most-recently-seen agent per host.
+    let mut agent_by_host: HashMap<Uuid, AgentInfoRow> = HashMap::new();
+    for row in agent_rows {
+        let entry = agent_by_host
+            .entry(row.host_id)
+            .or_insert_with(|| AgentInfoRow {
+                host_id: row.host_id,
+                client_version: None,
+                last_seen_at: None,
+            });
+        // Prefer the agent with the latest last_seen_at.
+        if row.last_seen_at > entry.last_seen_at {
+            entry.client_version = row.client_version;
+            entry.last_seen_at = row.last_seen_at;
+        }
+    }
+
+    // 3. Build result.
+    let mut metadata: Vec<MqttHostMetadata> = Vec::with_capacity(active_hosts.len());
+    for host in active_hosts.values() {
+        let tags = tags_by_host.remove(&host.id).unwrap_or_default();
+        let agent = agent_by_host.remove(&host.id);
+        let agent_last_seen_at = agent.as_ref().and_then(|a| {
+            a.last_seen_at.map(|dt| {
+                dt.format(&time::format_description::well_known::Rfc3339)
+                    .unwrap_or_default()
+            })
+        });
+        let agent_version = agent.and_then(|a| a.client_version);
+
+        let mut m =
+            MqttHostMetadata::new(host.id, host.hostname.clone(), host.friendly_name.clone());
+        m.os_type = host.os_type.clone();
+        m.os_version = host.os_version.clone();
+        m.architecture = host.architecture.clone();
+        m.tags = tags;
+        m.agent_version = agent_version;
+        m.agent_last_seen_at = agent_last_seen_at;
+        metadata.push(m);
+    }
+
+    Ok(metadata)
+}
+
+/// Extract `release_url`, `release_notes`, and `release_date` from a
+/// `latest_release_metadata` JSON blob.
+///
+/// Returns `(None, None, None)` when `metadata` is `None` or the expected
+/// keys are absent.
+fn extract_release_info(
+    metadata: Option<&serde_json::Value>,
+) -> (Option<String>, Option<String>, Option<String>) {
     let Some(meta) = metadata else {
-        return (None, None);
+        return (None, None, None);
     };
     let url = meta
         .get("release_url")
@@ -262,7 +408,13 @@ fn extract_release_info(metadata: Option<&serde_json::Value>) -> (Option<String>
         .get("release_notes")
         .and_then(|v| v.as_str())
         .map(String::from);
-    (url, notes)
+    // `published_at` may be a full ISO 8601 datetime or a date-only string.
+    // We take the first 10 chars (YYYY-MM-DD) for the MQTT date field.
+    let release_date = meta
+        .get("published_at")
+        .and_then(|v| v.as_str())
+        .map(|s| s.chars().take(10).collect::<String>());
+    (url, notes, release_date)
 }
 
 #[cfg(test)]
@@ -271,7 +423,7 @@ mod tests {
 
     #[test]
     fn extract_release_info_none_input() {
-        assert_eq!(extract_release_info(None), (None, None));
+        assert_eq!(extract_release_info(None), (None, None, None));
     }
 
     #[test]
@@ -280,32 +432,52 @@ mod tests {
             "release_url": "https://github.com/owner/repo/releases/tag/v1.3.0",
             "release_notes": "## What's new\n- Feature A"
         });
-        let (url, notes) = extract_release_info(Some(&meta));
+        let (url, notes, date) = extract_release_info(Some(&meta));
         assert_eq!(
             url.as_deref(),
             Some("https://github.com/owner/repo/releases/tag/v1.3.0")
         );
         assert_eq!(notes.as_deref(), Some("## What's new\n- Feature A"));
+        assert!(date.is_none());
     }
 
     #[test]
     fn extract_release_info_missing_fields() {
         let meta = serde_json::json!({ "tag": "v1.3.0" });
-        assert_eq!(extract_release_info(Some(&meta)), (None, None));
+        assert_eq!(extract_release_info(Some(&meta)), (None, None, None));
     }
 
     #[test]
     fn extract_release_info_only_url() {
         let meta = serde_json::json!({ "release_url": "https://example.com" });
-        let (url, notes) = extract_release_info(Some(&meta));
+        let (url, notes, date) = extract_release_info(Some(&meta));
         assert_eq!(url.as_deref(), Some("https://example.com"));
         assert!(notes.is_none());
+        assert!(date.is_none());
     }
 
     #[test]
     fn extract_release_info_non_string_values_ignored() {
         let meta = serde_json::json!({ "release_url": 42, "release_notes": true });
-        assert_eq!(extract_release_info(Some(&meta)), (None, None));
+        assert_eq!(extract_release_info(Some(&meta)), (None, None, None));
+    }
+
+    #[test]
+    fn extract_release_info_published_at_datetime() {
+        let meta = serde_json::json!({
+            "release_url": "https://example.com",
+            "published_at": "2025-01-15T10:00:00Z"
+        });
+        let (url, _notes, date) = extract_release_info(Some(&meta));
+        assert_eq!(url.as_deref(), Some("https://example.com"));
+        assert_eq!(date.as_deref(), Some("2025-01-15"));
+    }
+
+    #[test]
+    fn extract_release_info_published_at_date_only() {
+        let meta = serde_json::json!({ "published_at": "2025-06-30" });
+        let (_url, _notes, date) = extract_release_info(Some(&meta));
+        assert_eq!(date.as_deref(), Some("2025-06-30"));
     }
 
     // -------------------------------------------------------------------------
@@ -321,6 +493,7 @@ mod tests {
             host_id: Uuid::nil(),
             software_item_id: Uuid::nil(),
             installed_version: installed.map(String::from),
+            installed_version_detected_at: None,
             latest_version: latest.map(String::from),
             latest_release_metadata: None,
             update_category: category.to_string(),

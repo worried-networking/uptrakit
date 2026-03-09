@@ -728,6 +728,132 @@ fn default_ha_discovery_prefix() -> String {
     "homeassistant".to_string()
 }
 
+/// Per-host metadata published to MQTT for MQTT-browser visibility and Home Assistant.
+///
+/// Included in [`MqttSoftwareStatesPayload`]. All fields are sourced exclusively
+/// from the shared DB — safe for multi-controller deployments.
+///
+/// Intentionally excludes `ip_address` (network topology risk) and `agent_online`
+/// (must come from the event-driven [`HostConnectivityUpdatedPayload`]).
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttHostMetadata {
+    /// Host UUID.
+    pub host_id: Uuid,
+    /// Hostname as reported by the agent.
+    pub hostname: String,
+    /// User-defined display name.
+    pub friendly_name: String,
+    /// Operating system type (e.g. `"linux"`, `"macos"`). `null` when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os_type: Option<String>,
+    /// Operating system version (e.g. `"Ubuntu 24.04 LTS"`). `null` when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os_version: Option<String>,
+    /// CPU architecture (e.g. `"x86_64"`, `"aarch64"`). `null` when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub architecture: Option<String>,
+    /// Organisational tag names assigned to this host (e.g. `["production", "web-server"]`).
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Agent binary version string (e.g. `"0.2.1"`). `null` when never connected.
+    ///
+    /// Sourced from `services.client_version` for the newest approved, non-deactivated
+    /// agent linked to this host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_version: Option<String>,
+    /// ISO 8601 timestamp of when the agent last sent a message.
+    ///
+    /// Sourced from `services.last_seen_at`. `null` when never seen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_last_seen_at: Option<String>,
+}
+
+impl MqttHostMetadata {
+    /// Creates a new `MqttHostMetadata` with required fields.
+    pub fn new(host_id: Uuid, hostname: String, friendly_name: String) -> Self {
+        Self {
+            host_id,
+            hostname,
+            friendly_name,
+            os_type: None,
+            os_version: None,
+            architecture: None,
+            tags: Vec::new(),
+            agent_version: None,
+            agent_last_seen_at: None,
+        }
+    }
+}
+
+/// Connectivity status for a single host, used in [`HostConnectivityUpdatedPayload`].
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostConnectivityUpdate {
+    /// Host UUID.
+    pub host_id: Uuid,
+    /// Whether the agent is currently connected (`true` = online, `false` = offline).
+    pub online: bool,
+    /// Timestamp of last agent activity (ISO 8601). `null` when unavailable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seen_at: Option<String>,
+    /// Agent binary version. Present on connect; `null` on disconnect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_version: Option<String>,
+}
+
+impl HostConnectivityUpdate {
+    /// Creates an online update.
+    pub fn online(
+        host_id: Uuid,
+        last_seen_at: Option<String>,
+        agent_version: Option<String>,
+    ) -> Self {
+        Self {
+            host_id,
+            online: true,
+            last_seen_at,
+            agent_version,
+        }
+    }
+
+    /// Creates an offline update.
+    pub fn offline(host_id: Uuid, last_seen_at: Option<String>) -> Self {
+        Self {
+            host_id,
+            online: false,
+            last_seen_at,
+            agent_version: None,
+        }
+    }
+}
+
+/// Controller → MQTT service: agent connectivity changed for one or more hosts.
+///
+/// Published to NATS with `target_capability = "mqtt_bridge"` so that the MQTT
+/// service on whichever controller the agent is connected to broadcasts the
+/// connectivity state to **all** MQTT services across the cluster. This is the
+/// canonical source of truth for `{prefix}/hosts/{h}/connectivity/state`.
+///
+/// Multi-controller safety: published by the controller that owns the agent
+/// WebSocket connection (the only one with authoritative live state). All other
+/// controllers receive this via NATS and update their caches.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostConnectivityUpdatedPayload {
+    /// Tenant this update belongs to.
+    pub tenant_id: Uuid,
+    /// One entry per host whose connectivity changed.
+    pub updates: Vec<HostConnectivityUpdate>,
+}
+
+impl HostConnectivityUpdatedPayload {
+    /// Creates a new payload.
+    pub fn new(tenant_id: Uuid, updates: Vec<HostConnectivityUpdate>) -> Self {
+        Self { tenant_id, updates }
+    }
+}
+
 /// Controller -> MQTT service: current software version state for a tenant.
 ///
 /// Sent after tenant assignment and after any version check or update result.
@@ -746,6 +872,12 @@ pub struct MqttSoftwareStatesPayload {
     /// with older MQTT services.
     #[serde(default, alias = "host_package_hosts")]
     pub host_summaries: Vec<MqttHostSummary>,
+    /// Per-host metadata for all hosts referenced in `items` or `host_summaries`.
+    ///
+    /// Includes OS info, tags, and agent last-seen data. Sourced exclusively from DB.
+    /// Defaults to an empty list for backward compatibility with older MQTT services.
+    #[serde(default)]
+    pub hosts: Vec<MqttHostMetadata>,
 }
 
 /// A single software item entry in [`MqttSoftwareStatesPayload`].
@@ -789,6 +921,21 @@ pub struct MqttSoftwareStateHostEntry {
     /// Release notes or changelog text, if available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_notes: Option<String>,
+    /// Classification of the update (e.g. `"security"`, `"bugfix"`, `"feature"`, `"unknown"`).
+    ///
+    /// Sourced from `host_software_item.update_category`. Defaults to `"unknown"` when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_category: Option<String>,
+    /// Date when the latest release was published (ISO 8601 date string, e.g. `"2025-01-15"`).
+    ///
+    /// Extracted from `latest_release_metadata.published_at`. `null` when metadata is absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_date: Option<String>,
+    /// Timestamp when the installed version was last detected (ISO 8601).
+    ///
+    /// Sourced from `host_software_item.installed_version_detected_at`. `null` when never checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_checked_at: Option<String>,
 }
 
 /// MQTT service -> Controller: request to trigger a software update.
@@ -830,6 +977,16 @@ pub struct MqttHostSummary {
     pub total_count: u32,
     /// Whether a batch update is currently pending or in progress for this host.
     pub update_in_progress: bool,
+    /// Count of pending packages where `update_category = "bugfix"`.
+    ///
+    /// Defaults to `0` when absent (older controller that does not compute this field).
+    #[serde(default)]
+    pub bugfix_count: u32,
+    /// Count of pending packages where `update_category = "feature"`.
+    ///
+    /// Defaults to `0` when absent (older controller that does not compute this field).
+    #[serde(default)]
+    pub feature_count: u32,
 }
 
 /// MQTT service → Controller: trigger a batch update of all outdated software items on a host.
