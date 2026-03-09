@@ -98,10 +98,10 @@
 				Permission.ViewSettings,
 				Permission.ManageSettings,
 				Permission.ViewSoftware,
-				Permission.ManageSoftware
+				Permission.ManageSoftware,
+				Permission.ManageGlobalSettings
 			]
-		},
-		{ href: '/settings/global', label: 'Global Settings', priority: 1100, permission: Permission.ManageGlobalSettings }
+		}
 	];
 
 	// Merge built-in and extension nav items, sorted by priority then label.

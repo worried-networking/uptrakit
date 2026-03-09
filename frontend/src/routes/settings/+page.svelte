@@ -24,13 +24,17 @@
 	import EnrollmentTokenSettings from './EnrollmentTokenSettings.svelte';
 	import PluginConfigsTab from './PluginConfigsTab.svelte';
 	import SchedulerTab from './SchedulerTab.svelte';
+	import GlobalSettingsTab from './GlobalSettingsTab.svelte';
 	import ExtensionTabContent from '$lib/components/extensions/ExtensionTabContent.svelte';
 
 	// ── Permissions ─────────────────────────────────────────────────────
 	const canManageSettings = $derived(getUser()?.permissions.includes(Permission.ManageSettings) ?? false);
 	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManageSoftware = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
-	const hasAnyTabPermission = $derived(canManageSettings || canViewSoftware || canManageSoftware);
+	const canManageGlobalSettings = $derived(getUser()?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
+	const hasAnyTabPermission = $derived(
+		canManageSettings || canViewSoftware || canManageSoftware || canManageGlobalSettings
+	);
 
 	// ── Tab state ────────────────────────────────────────────────────────
 	const tabExtensions = $derived(getTabExtensions('settings'));
@@ -51,12 +55,14 @@
 		const isBuiltinAccessible =
 			(activeTab === 'general' && canManageSettings) ||
 			(activeTab === 'plugin-configs' && canViewSoftware) ||
-			(activeTab === 'scheduler' && canManageSoftware);
+			(activeTab === 'scheduler' && canManageSoftware) ||
+			(activeTab === 'global-settings' && canManageGlobalSettings);
 		const isExtAccessible = tabExtensions.some((e) => e.id === activeTab);
 		if (!isBuiltinAccessible && !isExtAccessible) {
 			if (canManageSettings) activeTab = 'general';
 			else if (canViewSoftware) activeTab = 'plugin-configs';
 			else if (canManageSoftware) activeTab = 'scheduler';
+			else if (canManageGlobalSettings) activeTab = 'global-settings';
 			else if (tabExtensions.length > 0) activeTab = tabExtensions[0].id;
 		}
 	});
@@ -205,6 +211,14 @@
 				Scheduler
 			</button>
 		{/if}
+		{#if canManageGlobalSettings}
+			<button
+				class="btn btn-sm {activeTab === 'global-settings' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				onclick={() => (activeTab = 'global-settings')}
+			>
+				Global Settings
+			</button>
+		{/if}
 		{#each tabExtensions as ext (ext.id)}
 			<button
 				class="btn btn-sm {activeTab === ext.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
@@ -275,6 +289,10 @@
 		<!-- Scheduler tab -->
 	{:else if activeTab === 'scheduler'}
 		<SchedulerTab />
+
+		<!-- Global Settings tab -->
+	{:else if activeTab === 'global-settings'}
+		<GlobalSettingsTab />
 
 		<!-- Extension tabs -->
 	{:else}
