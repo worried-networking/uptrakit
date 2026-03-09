@@ -30,7 +30,6 @@ use crate::AppState;
         (name = "Autodiscovery", description = "Automatic software discovery management"),
         (name = "Update Batches", description = "Batch update operations"),
         (name = "Host Tags", description = "Host tag management"),
-        (name = "Host Packages", description = "Host-level package tracking and ignore rules"),
         (name = "Notifications", description = "Notification channel, rule, and log management"),
         (name = "Global Settings", description = "Infrastructure-scoped settings requiring global administrator access"),
         (name = "Audit Logs", description = "Tenant and system-level audit log access")
@@ -112,7 +111,6 @@ use crate::AppState;
         crate::routes::software_items::approve_software_item,
         crate::routes::software_items::batch_software_items,
         crate::routes::hosts::discover_host,
-        crate::routes::hosts::discard_host_discovered,
         // Host tags
         crate::routes::host_tags::list_host_tags,
         crate::routes::host_tags::create_host_tag,
@@ -121,18 +119,7 @@ use crate::AppState;
         crate::routes::host_tags::delete_host_tag,
         crate::routes::host_tags::batch_host_tags,
         crate::routes::host_tags::set_host_tags,
-        // Host packages
-        crate::routes::host_packages::list_host_packages,
-        crate::routes::host_packages::get_host_package,
-        crate::routes::host_packages::update_host_package,
-        crate::routes::host_packages::delete_host_package,
-        crate::routes::host_packages::promote_host_package,
-        crate::routes::host_packages::list_host_package_ignores,
-        crate::routes::host_packages::create_host_package_ignore,
-        crate::routes::host_packages::delete_host_package_ignore,
-        crate::routes::host_packages::batch_host_packages,
         crate::routes::plugin_configs::discover_plugin_config,
-        crate::routes::plugin_configs::discard_plugin_config_discovered,
         crate::routes::autodiscovery::list_autodiscovery_ignores,
         crate::routes::autodiscovery::create_autodiscovery_ignore,
         crate::routes::autodiscovery::delete_autodiscovery_ignore,
@@ -260,9 +247,8 @@ use crate::AppState;
             crate::routes::update_history::UpdateHistoryResponse,
             crate::routes::update_history::UpdateStatus,
             crate::routes::hosts::TriggerDiscoveryResponse,
-            crate::routes::hosts::DiscardDiscoveredResponse,
-            crate::routes::autodiscovery::AutodiscoveryIgnoreResponse,
-            crate::routes::autodiscovery::CreateAutodiscoveryIgnoreRequest,
+            crate::routes::autodiscovery::SoftwareIgnoreResponse,
+            crate::routes::autodiscovery::CreateSoftwareIgnoreRequest,
             crate::routes::discovery_allowlist::TenantDiscoveryAllowlistEntry,
             crate::routes::discovery_allowlist::HostDiscoveryAllowlistEntry,
             crate::routes::discovery_allowlist::CreateDiscoveryAllowlistEntryRequest,
@@ -272,7 +258,7 @@ use crate::AppState;
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::software_items::SoftwareItemResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::update_history::UpdateHistoryResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::plugin_configs::PluginConfigResponse>,
-            uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::autodiscovery::AutodiscoveryIgnoreResponse>,
+            uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::autodiscovery::SoftwareIgnoreResponse>,
             // Host tags
             crate::routes::host_tags::HostTagResponse,
             crate::routes::host_tags::HostTagSummary,
@@ -280,16 +266,6 @@ use crate::AppState;
             crate::routes::host_tags::UpdateHostTagRequest,
             crate::routes::host_tags::SetHostTagsRequest,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::host_tags::HostTagResponse>,
-            // Host packages
-            crate::routes::host_packages::HostPackageResponse,
-            crate::routes::host_packages::HostPackageDetailResponse,
-            uptrakit_web_api_types::host_packages::HostPackageUpdateHistoryResponse,
-            crate::routes::host_packages::UpdateHostPackageRequest,
-            crate::routes::host_packages::PromoteHostPackageRequest,
-            crate::routes::host_packages::HostPackageIgnoreResponse,
-            crate::routes::host_packages::CreateHostPackageIgnoreRequest,
-            crate::routes::host_packages::HostUpdateSummary,
-            uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::host_packages::HostPackageResponse>,
             crate::routes::notifications::CreateNotificationChannelRequest,
             crate::routes::notifications::UpdateNotificationChannelRequest,
             crate::routes::notifications::NotificationChannelResponse,
@@ -580,7 +556,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ))
         .routes(routes!(crate::routes::software_items::batch_software_items))
         .routes(routes!(crate::routes::hosts::discover_host))
-        .routes(routes!(crate::routes::hosts::discard_host_discovered))
         // Host tags
         .routes(routes!(
             crate::routes::host_tags::list_host_tags,
@@ -593,27 +568,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             crate::routes::host_tags::delete_host_tag
         ))
         .routes(routes!(crate::routes::host_tags::set_host_tags))
-        // Host packages
-        .routes(routes!(crate::routes::host_packages::list_host_packages))
-        .routes(routes!(
-            crate::routes::host_packages::get_host_package,
-            crate::routes::host_packages::update_host_package,
-            crate::routes::host_packages::delete_host_package
-        ))
-        .routes(routes!(crate::routes::host_packages::promote_host_package))
-        .routes(routes!(
-            crate::routes::host_packages::list_host_package_ignores,
-            crate::routes::host_packages::create_host_package_ignore
-        ))
-        .routes(routes!(
-            crate::routes::host_packages::delete_host_package_ignore
-        ))
-        .routes(routes!(crate::routes::host_packages::batch_host_packages))
         .routes(routes!(
             crate::routes::plugin_configs::discover_plugin_config
-        ))
-        .routes(routes!(
-            crate::routes::plugin_configs::discard_plugin_config_discovered
         ))
         .routes(routes!(
             crate::routes::autodiscovery::list_autodiscovery_ignores,

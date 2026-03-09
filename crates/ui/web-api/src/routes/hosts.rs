@@ -1,7 +1,6 @@
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageHosts, CanManageSoftware, CanViewHosts};
-use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::hosts as host_queries;
 use crate::routes::service_ws::trigger_discovery_for_agent_host;
 use crate::tenant_db::TenantDb;
@@ -18,9 +17,7 @@ use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
-pub use uptrakit_web_api_types::autodiscovery::{
-    DiscardDiscoveredResponse, TriggerDiscoveryResponse,
-};
+pub use uptrakit_web_api_types::autodiscovery::TriggerDiscoveryResponse;
 pub use uptrakit_web_api_types::batch_actions::{
     BatchActionFailure, BatchActionRequest, BatchActionResponse, BatchActionSuccess,
 };
@@ -255,66 +252,6 @@ pub async fn discover_host(
         .into_response()
 }
 
-/// Bulk-discard all pending discovered software items for a host.
-///
-/// Optionally filter by plugin config. No autodiscovery ignore rules are created.
-#[utoipa::path(
-    delete,
-    path = "/api/v1/hosts/{id}/discovered",
-    params(
-        ("id" = Uuid, Path, description = "Host UUID"),
-        ("plugin_config_id" = Option<Uuid>, Query, description = "Filter by plugin config UUID")
-    ),
-    extensions(("x-required-permission" = json!("manage_software"))),
-    responses(
-        (status = 200, description = "Pending items discarded", body = DiscardDiscoveredResponse),
-        (status = 404, description = "Host not found")
-    ),
-    tag = "Hosts",
-    security(("bearer_token" = []))
-)]
-#[tracing::instrument(skip_all)]
-pub async fn discard_host_discovered(
-    tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
-    Path(host_id): Path<Uuid>,
-    Query(params): Query<DiscardDiscoveredParams>,
-) -> Response {
-    // Verify host belongs to tenant.
-    let exists = match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
-        .filter(host::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
-        .await
-    {
-        Ok(Some(_)) => true,
-        Ok(None) => false,
-        Err(e) => {
-            tracing::error!("DB error: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    if !exists {
-        return error_response(StatusCode::NOT_FOUND, "Host not found");
-    }
-
-    match autodiscovery_queries::discard_pending_items(
-        tenant_db.db(),
-        tenant_db.tenant_id,
-        Some(host_id),
-        params.plugin_config_id,
-    )
-    .await
-    {
-        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(e) => {
-            tracing::error!("Failed to discard pending items: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
-    }
-}
-
 /// Perform a batch action on multiple hosts.
 ///
 /// Supported actions: `deactivate`.
@@ -380,9 +317,4 @@ pub async fn batch_hosts(
     };
 
     (StatusCode::OK, Json(response)).into_response()
-}
-
-#[derive(serde::Deserialize, Default)]
-pub struct DiscardDiscoveredParams {
-    pub plugin_config_id: Option<uuid::Uuid>,
 }

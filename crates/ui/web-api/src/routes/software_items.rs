@@ -26,7 +26,6 @@ use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
     service_host, software_item,
 };
-use uptrakit_shared_types::SoftwareDiscoveryState;
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
@@ -290,7 +289,7 @@ pub async fn create_software_item(
     params(
         ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
         ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)"),
-        ("discovery_state" = Option<String>, Query, description = "Filter by discovery state: \"pending\" or \"approved\". Omit to return all items.")
+        ("featured" = Option<bool>, Query, description = "Filter by featured status. Omit to return all items.")
     ),
     extensions(("x-required-permission" = json!("view_software"))),
     responses(
@@ -412,10 +411,10 @@ pub async fn delete_software_item(
     }
 }
 
-/// Approve a pending discovered software item.
+/// Approve a discovered software item by marking it as featured.
 ///
-/// Sets `discovery_state = 'approved'` and enables the item for version
-/// tracking and update management.
+/// Sets `featured = true` so the item appears in MQTT software state entities
+/// and update management dashboards.
 #[utoipa::path(
     post,
     path = "/api/v1/software-items/{id}/approve",
@@ -424,7 +423,7 @@ pub async fn delete_software_item(
     responses(
         (status = 200, description = "Software item approved", body = SoftwareItemResponse),
         (status = 404, description = "Software item not found"),
-        (status = 409, description = "Item is not in pending discovery state")
+        (status = 409, description = "Item is already featured")
     ),
     tag = "Software Items",
     security(("bearer_token" = []))
@@ -449,17 +448,13 @@ pub async fn approve_software_item(
         }
     };
 
-    if item.discovery_state != Some(SoftwareDiscoveryState::Pending) {
-        return error_response(
-            StatusCode::CONFLICT,
-            "Software item is not in pending discovery state",
-        );
+    if item.featured {
+        return error_response(StatusCode::CONFLICT, "Software item is already featured");
     }
 
     let now = OffsetDateTime::now_utc();
     let mut active: software_item::ActiveModel = item.into();
-    active.discovery_state = Set(Some(SoftwareDiscoveryState::Approved));
-    active.enabled = Set(true);
+    active.featured = Set(true);
     active.updated_at = Set(now);
 
     let updated = match active.update(tenant_db.db()).await {
@@ -583,6 +578,7 @@ pub async fn unassign_host(
                     tenant_db.db(),
                     tenant_db.tenant_id,
                     &name,
+                    None,
                 )
                 .await
             {
@@ -1008,7 +1004,7 @@ pub async fn check_versions(
             name: item.name.clone(),
             detect_version,
             fetch_releases,
-            host_package_id: None,
+            host_software_item_id: None,
         };
 
         let msg = uptrakit_internal_wire::ControllerMessage::CheckVersions(
@@ -1242,7 +1238,7 @@ pub async fn check_versions_host(
         name: item.name.clone(),
         detect_version,
         fetch_releases,
-        host_package_id: None,
+        host_software_item_id: None,
     };
 
     let msg = uptrakit_internal_wire::ControllerMessage::CheckVersions(
@@ -1292,16 +1288,36 @@ pub async fn batch_software_items(
 
     let (succeeded_ids, failed) = match body.action.as_str() {
         "approve" => {
-            match item_queries::batch_approve_software_items(&tenant_db, &body.ids).await {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::error!("batch approve failed: {e}");
-                    return error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Internal server error",
-                    );
+            // Inline batch approve: set featured = true for matching items.
+            let now = OffsetDateTime::now_utc();
+            let mut succeeded = Vec::new();
+            let mut failures: Vec<(Uuid, String)> = Vec::new();
+            for &id in &body.ids {
+                match software_item::Entity::find_by_id(id)
+                    .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+                    .filter(software_item::Column::DeactivatedAt.is_null())
+                    .one(tenant_db.db())
+                    .await
+                {
+                    Ok(Some(item)) => {
+                        if item.featured {
+                            // Already featured -- still count as success (idempotent).
+                            succeeded.push(id);
+                            continue;
+                        }
+                        let mut active: software_item::ActiveModel = item.into();
+                        active.featured = Set(true);
+                        active.updated_at = Set(now);
+                        match active.update(tenant_db.db()).await {
+                            Ok(_) => succeeded.push(id),
+                            Err(e) => failures.push((id, e.to_string())),
+                        }
+                    }
+                    Ok(None) => failures.push((id, "not found".to_string())),
+                    Err(e) => failures.push((id, e.to_string())),
                 }
             }
+            (succeeded, failures)
         }
         "delete" => match item_queries::batch_delete_software_items(&tenant_db, &body.ids).await {
             Ok(r) => r,

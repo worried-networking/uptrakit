@@ -1,7 +1,6 @@
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageCommands, CanManageSoftware, CanViewSoftware};
-use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::plugin_configs::{self as pc_queries, PluginConfigError};
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -15,7 +14,7 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use uptrakit_shared_db::entity::{host, plugin_config, prelude::*, service, service_host};
-use uptrakit_web_api_types::autodiscovery::{DiscardDiscoveredResponse, TriggerDiscoveryResponse};
+use uptrakit_web_api_types::autodiscovery::TriggerDiscoveryResponse;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
@@ -511,62 +510,6 @@ pub async fn discover_plugin_config(
         }),
     )
         .into_response()
-}
-
-/// Bulk-discard all pending discovered software items for a plugin configuration.
-///
-/// No autodiscovery ignore rules are created.
-#[utoipa::path(
-    delete,
-    path = "/api/v1/plugin-configs/{id}/discovered",
-    params(("id" = Uuid, Path, description = "Plugin config UUID")),
-    extensions(("x-required-permission" = json!("manage_software"))),
-    responses(
-        (status = 200, description = "Pending items discarded", body = DiscardDiscoveredResponse),
-        (status = 404, description = "Plugin config not found")
-    ),
-    tag = "Plugin Configs",
-    security(("bearer_token" = []))
-)]
-#[tracing::instrument(skip_all)]
-pub async fn discard_plugin_config_discovered(
-    tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
-    Path(config_id): Path<Uuid>,
-) -> Response {
-    // Verify plugin config belongs to tenant.
-    let exists = match PluginConfig::find_by_id(config_id)
-        .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))
-        .filter(plugin_config::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
-        .await
-    {
-        Ok(Some(_)) => true,
-        Ok(None) => false,
-        Err(e) => {
-            tracing::error!("DB error: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    if !exists {
-        return error_response(StatusCode::NOT_FOUND, "Plugin config not found");
-    }
-
-    match autodiscovery_queries::discard_pending_items(
-        tenant_db.db(),
-        tenant_db.tenant_id,
-        None,
-        Some(config_id),
-    )
-    .await
-    {
-        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(e) => {
-            tracing::error!("Failed to discard pending items: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
-    }
 }
 
 // ── Security audit helpers ────────────────────────────────────────────────────

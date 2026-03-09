@@ -281,6 +281,9 @@ async fn host_count_excludes_deactivated_hosts() {
             last_updated_at: Set(None),
             linked_at: Set(now),
             update_category: Set("unknown".to_string()),
+            plugin_config_id: Set(None),
+            package_identifier: Set(None),
+            deactivated_at: Set(None),
         }
         .insert(&app.db)
         .await

@@ -202,7 +202,7 @@ pub async fn stream_update_output(
                 id: record_id,
                 text: record.output.clone(),
                 stream: "stdout".to_string(),
-                timestamp: record.completed_at.unwrap_or(record.started_at),
+                timestamp: record.completed_at.or(record.started_at).unwrap_or_else(time::OffsetDateTime::now_utc),
                 seq: 0,
             };
             if let Ok(json) = serde_json::to_string(&payload) {

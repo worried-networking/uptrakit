@@ -19,7 +19,7 @@ use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
 pub use uptrakit_web_api_types::autodiscovery::{
-    AutodiscoveryIgnoreResponse, CreateAutodiscoveryIgnoreRequest,
+    CreateSoftwareIgnoreRequest, SoftwareIgnoreResponse,
 };
 pub use uptrakit_web_api_types::batch_actions::{
     BatchActionFailure, BatchActionRequest, BatchActionResponse, BatchActionSuccess,
@@ -36,7 +36,7 @@ pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams
     ),
     extensions(("x-required-permission" = json!("view_software"))),
     responses(
-        (status = 200, description = "Paginated list of ignore rules", body = PaginatedResponse<AutodiscoveryIgnoreResponse>),
+        (status = 200, description = "Paginated list of ignore rules", body = PaginatedResponse<SoftwareIgnoreResponse>),
     ),
     tag = "Autodiscovery",
     security(("bearer_token" = []))
@@ -69,11 +69,11 @@ pub async fn list_autodiscovery_ignores(
 #[utoipa::path(
     post,
     path = "/api/v1/autodiscovery/ignores",
-    request_body = CreateAutodiscoveryIgnoreRequest,
+    request_body = CreateSoftwareIgnoreRequest,
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
-        (status = 201, description = "Ignore rule created", body = AutodiscoveryIgnoreResponse),
-        (status = 200, description = "Ignore rule already exists", body = AutodiscoveryIgnoreResponse),
+        (status = 201, description = "Ignore rule created", body = SoftwareIgnoreResponse),
+        (status = 200, description = "Ignore rule already exists", body = SoftwareIgnoreResponse),
         (status = 400, description = "Invalid input"),
     ),
     tag = "Autodiscovery",
@@ -83,10 +83,10 @@ pub async fn list_autodiscovery_ignores(
 pub async fn create_autodiscovery_ignore(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Json(req): Json<CreateAutodiscoveryIgnoreRequest>,
+    Json(req): Json<CreateSoftwareIgnoreRequest>,
 ) -> Response {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    use uptrakit_shared_db::entity::{autodiscovery_ignore, prelude::*};
+    use uptrakit_shared_db::entity::{prelude::*, software_ignore};
 
     if let Err(e) = req.validate() {
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
@@ -99,6 +99,7 @@ pub async fn create_autodiscovery_ignore(
         tenant_db.db(),
         tenant_db.tenant_id,
         &name,
+        req.host_id,
     )
     .await
     {
@@ -110,19 +111,23 @@ pub async fn create_autodiscovery_ignore(
     };
 
     // Fetch the current rule to get the correct ID and created_at.
-    let rule = match AutodiscoveryIgnore::find()
-        .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_db.tenant_id))
-        .filter(autodiscovery_ignore::Column::Name.eq(&name))
-        .one(tenant_db.db())
-        .await
-    {
+    let mut query = SoftwareIgnore::find()
+        .filter(software_ignore::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(software_ignore::Column::Name.eq(&name));
+    if let Some(host_id) = req.host_id {
+        query = query.filter(software_ignore::Column::HostId.eq(host_id));
+    } else {
+        query = query.filter(software_ignore::Column::HostId.is_null());
+    }
+    let rule = match query.one(tenant_db.db()).await {
         Ok(Some(r)) => r,
         Ok(None) | Err(_) => {
             return (
                 StatusCode::CREATED,
-                Json(AutodiscoveryIgnoreResponse {
+                Json(SoftwareIgnoreResponse {
                     id: uuid::Uuid::nil(),
                     name,
+                    host_id: req.host_id,
                     created_at: time::OffsetDateTime::now_utc(),
                 }),
             )
@@ -138,9 +143,10 @@ pub async fn create_autodiscovery_ignore(
 
     (
         status,
-        Json(AutodiscoveryIgnoreResponse {
+        Json(SoftwareIgnoreResponse {
             id: rule.id,
             name: rule.name,
+            host_id: rule.host_id,
             created_at: rule.created_at,
         }),
     )

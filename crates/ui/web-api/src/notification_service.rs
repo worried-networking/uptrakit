@@ -115,39 +115,21 @@ impl NotificationService {
         db: &sea_orm::DatabaseConnection,
         tenant_id: uuid::Uuid,
     ) {
-        let mut payload =
-            match crate::queries::mqtt_software_states::load_software_states_for_tenant(
-                db, tenant_id,
-            )
-            .await
-            {
-                Ok(p) => p,
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        %tenant_id,
-                        "failed to load software states for MQTT push"
-                    );
-                    return;
-                }
-            };
-
-        match crate::queries::mqtt_software_states::load_host_package_host_states_for_tenant(
+        let payload = match crate::queries::mqtt_software_states::load_software_states_for_tenant(
             db, tenant_id,
         )
         .await
         {
-            Ok(host_states) => {
-                payload.host_package_hosts = host_states;
-            }
+            Ok(p) => p,
             Err(e) => {
                 tracing::warn!(
                     error = %e,
                     %tenant_id,
-                    "failed to load host package states for MQTT push; delivering without them"
+                    "failed to load software states for MQTT push"
                 );
+                return;
             }
-        }
+        };
 
         self.deliver_software_states(payload).await;
     }

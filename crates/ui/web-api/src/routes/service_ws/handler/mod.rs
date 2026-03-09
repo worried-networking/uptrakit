@@ -487,10 +487,10 @@ pub(crate) async fn handle_authenticated_loop(
                             }
 
                             // -------------------------------------------------
-                            // BatchHostPackageUpdateResult (requires UpdateHooks)
+                            // BatchUpdateResult (requires UpdateHooks)
                             // -------------------------------------------------
-                            ServiceMessage::BatchHostPackageUpdateResult(payload) if has_update_hooks => {
-                                if updates::handle_batch_host_package_update_result(state, service_id, payload, &linked_host_ids).await.is_break() {
+                            ServiceMessage::BatchUpdateResult(payload) if has_update_hooks => {
+                                if updates::handle_batch_update_result(state, service_id, payload, &linked_host_ids).await.is_break() {
                                     break;
                                 }
                             }
@@ -543,10 +543,10 @@ pub(crate) async fn handle_authenticated_loop(
                             }
 
                             // -------------------------------------------------
-                            // MqttTriggerHostPackageUpdate (requires MqttBridge)
+                            // MqttTriggerHostBatchUpdate (requires MqttBridge)
                             // -------------------------------------------------
-                            ServiceMessage::MqttTriggerHostPackageUpdate(payload) if is_mqtt => {
-                                if mqtt::handle_mqtt_trigger_host_package_update(sink, out_seq, state, &payload, mqtt_context.as_ref()).await.is_break() {
+                            ServiceMessage::MqttTriggerHostBatchUpdate(payload) if is_mqtt => {
+                                if mqtt::handle_mqtt_trigger_host_batch_update(sink, out_seq, state, &payload, mqtt_context.as_ref()).await.is_break() {
                                     break;
                                 }
                             }
