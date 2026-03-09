@@ -1141,6 +1141,26 @@ pub struct UpdateStdinDataPayload {
     pub signal: Option<i32>,
 }
 
+impl UpdateStdinDataPayload {
+    /// Create a new stdin data payload.
+    pub fn new(update_history_id: Uuid, data: String) -> Self {
+        Self {
+            update_history_id,
+            data,
+            signal: None,
+        }
+    }
+
+    /// Create a new signal payload.
+    pub fn with_signal(update_history_id: Uuid, signal: i32) -> Self {
+        Self {
+            update_history_id,
+            data: String::new(),
+            signal: Some(signal),
+        }
+    }
+}
+
 /// Agent → Controller: the update process appears to be waiting for stdin input.
 ///
 /// Sent when the agent detects sustained silence from the process (no output for

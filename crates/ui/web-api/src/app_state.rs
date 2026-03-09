@@ -130,6 +130,9 @@ pub struct AppState {
     /// with HTTP 400. Set to `false` via `--allow-dangerous-commands` CLI flag
     /// to downgrade to advisory-only warnings.
     pub reject_dangerous_commands: bool,
+    /// Registry of active interactive update sessions (single-writer enforcement).
+    #[cfg(feature = "interactive")]
+    pub interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -563,6 +566,8 @@ impl AppStateBuilder {
                 .extension_proxy
                 .unwrap_or_else(|| Arc::new(ExtensionProxy::new())),
             reject_dangerous_commands: self.reject_dangerous_commands,
+            #[cfg(feature = "interactive")]
+            interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })
     }
 }

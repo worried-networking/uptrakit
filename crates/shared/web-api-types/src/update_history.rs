@@ -128,3 +128,9 @@ pub struct UpdateCompletedSSE {
     pub status: String,
     pub error: Option<String>,
 }
+
+/// SSE `stdin_attention` event payload: the process is waiting for input.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StdinAttentionSSE {
+    pub hint: Option<String>,
+}

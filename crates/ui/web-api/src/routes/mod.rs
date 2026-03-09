@@ -12,6 +12,8 @@ pub mod extensions;
 pub mod health;
 pub mod host_tags;
 pub mod hosts;
+#[cfg(feature = "interactive")]
+pub mod interactive_ws;
 pub mod notifications;
 pub mod ocsp;
 #[cfg(feature = "oidc")]

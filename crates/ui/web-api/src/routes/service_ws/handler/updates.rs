@@ -1110,3 +1110,41 @@ fn build_plugin_assignment(
         config: merged_config,
     })
 }
+
+/// Handle a `StdinAttention` message from the agent.
+///
+/// Broadcasts a stdin attention event to all SSE subscribers of the update.
+#[tracing::instrument(skip_all, fields(%service_id, update_history_id = %payload.update_history_id))]
+pub async fn handle_stdin_attention(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    payload: &uptrakit_internal_wire::StdinAttentionPayload,
+    linked_host_ids: &HashSet<uuid::Uuid>,
+) -> LoopAction {
+    // Validate that this service owns the update
+    if let Err(e) = validate_update_ownership(
+        &state.db,
+        service_id,
+        payload.update_history_id,
+        linked_host_ids,
+    )
+    .await
+    {
+        tracing::warn!(
+            error = %e,
+            "StdinAttention ownership validation failed"
+        );
+        return LoopAction::Continue;
+    }
+
+    state
+        .update_output_broadcaster
+        .send_stdin_attention(payload.update_history_id, payload.hint.clone())
+        .await;
+
+    tracing::debug!(
+        hint = ?payload.hint,
+        "broadcast StdinAttention for update"
+    );
+    LoopAction::Continue
+}

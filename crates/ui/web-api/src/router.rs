@@ -752,6 +752,15 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(crate::routes::ocsp::ocsp_get),
         );
 
+    // Interactive update WebSocket endpoint (manual auth via query/header token).
+    #[cfg(feature = "interactive")]
+    {
+        router = router.route(
+            "/api/v1/update-history/{id}/interactive",
+            get(crate::routes::interactive_ws::interactive_ws),
+        );
+    }
+
     // Always serve the raw OpenAPI JSON at a stable URL.
     let api_for_json = api.clone();
     router = router.route(

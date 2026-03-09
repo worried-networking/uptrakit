@@ -29,6 +29,8 @@ pub mod service_connections;
 pub use uptrakit_web_api_auth::setting_key;
 pub mod settings;
 pub use uptrakit_web_api_auth::settings_store;
+#[cfg(feature = "interactive")]
+pub mod interactive_sessions;
 pub mod tenant_db;
 pub mod update_output_broadcaster;
 
@@ -225,6 +227,8 @@ mod tests {
             )),
             extension_proxy: Arc::new(crate::extension_proxy::ExtensionProxy::new()),
             reject_dangerous_commands: false,
+            #[cfg(feature = "interactive")]
+            interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })
     }
 
