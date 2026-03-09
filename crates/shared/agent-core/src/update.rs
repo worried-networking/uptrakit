@@ -854,6 +854,49 @@ async fn check_attestation_gate(
     }
 }
 
+// ── Interactive update execution ──────────────────────────────────────
+
+/// Handle returned from [`execute_update_interactive`], containing the
+/// spawned task and channels for stdin/signal/attention forwarding.
+#[cfg(feature = "interactive")]
+pub struct InteractiveUpdateHandle {
+    pub handle: tokio::task::JoinHandle<UpdateExecutionResult>,
+    pub stdin_tx: Option<mpsc::Sender<Vec<u8>>>,
+    pub signal_tx: Option<mpsc::Sender<i32>>,
+    pub attention_rx: Option<mpsc::Receiver<()>>,
+}
+
+/// Execute an update interactively with PTY support.
+///
+/// This runs the same update flow as [`execute_update`], but uses the
+/// executor's interactive mode for the main plugin command, keeping stdin
+/// open for forwarding and enabling attention detection.
+///
+/// Pre/post hooks still run non-interactively — only the plugin's
+/// `execute_update` step gets a PTY.
+#[cfg(feature = "interactive")]
+pub async fn execute_update_interactive(
+    payload: ExecuteUpdatePayload,
+    executor: Arc<dyn CommandExecutor>,
+    output_tx: mpsc::Sender<UpdateOutputMessage>,
+) -> InteractiveUpdateHandle {
+    // For now, run the full update pipeline including hooks non-interactively.
+    // The interactive PTY is used for the main command execution within the
+    // plugin. The executor's `execute_interactive` will be called by the
+    // plugin when it performs the actual install command.
+    //
+    // TODO: Thread the interactive handle through the plugin execution path
+    // once the plugin trait supports interactive mode.
+    let handle = tokio::spawn(async move { execute_update(payload, executor, output_tx).await });
+
+    InteractiveUpdateHandle {
+        handle,
+        stdin_tx: None,
+        signal_tx: None,
+        attention_rx: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

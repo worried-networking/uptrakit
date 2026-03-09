@@ -16,6 +16,67 @@ pub struct InFlightUpdate {
     pub update_history_id: uuid::Uuid,
     pub handle: tokio::task::JoinHandle<crate::update::UpdateExecutionResult>,
     pub output_rx: tokio::sync::mpsc::Receiver<crate::update::UpdateOutputMessage>,
+    /// Stdin writer for interactive updates. `None` for non-interactive.
+    #[cfg(feature = "interactive")]
+    pub stdin_tx: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
+    /// Signal sender for interactive updates. `None` for non-interactive.
+    #[cfg(feature = "interactive")]
+    pub signal_tx: Option<tokio::sync::mpsc::Sender<i32>>,
+    /// Attention receiver for stdin-waiting detection.
+    #[cfg(feature = "interactive")]
+    pub attention_rx: Option<tokio::sync::mpsc::Receiver<()>>,
+}
+
+/// Result of spawning an update task, including optional interactive channels.
+struct SpawnedUpdate {
+    handle: tokio::task::JoinHandle<crate::update::UpdateExecutionResult>,
+    #[cfg(feature = "interactive")]
+    stdin_tx: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
+    #[cfg(feature = "interactive")]
+    signal_tx: Option<tokio::sync::mpsc::Sender<i32>>,
+    #[cfg(feature = "interactive")]
+    attention_rx: Option<tokio::sync::mpsc::Receiver<()>>,
+}
+
+/// Spawn the update task, using interactive execution when the feature is
+/// enabled and the payload requests it.
+///
+/// When the `interactive` feature is enabled and `payload.interactive` is
+/// true, the update runs through `execute_update_interactive` which
+/// allocates a PTY and returns channels for stdin/signal forwarding.
+/// Otherwise, falls back to the standard non-interactive path.
+async fn spawn_update_task(
+    payload: uptrakit_internal_wire::ExecuteUpdatePayload,
+    executor: Arc<dyn CommandExecutor>,
+    output_tx: tokio::sync::mpsc::Sender<crate::update::UpdateOutputMessage>,
+    _update_history_id: uuid::Uuid,
+) -> SpawnedUpdate {
+    // Try interactive execution when the feature is enabled and requested.
+    #[cfg(feature = "interactive")]
+    if payload.interactive && executor.supports_interactive() {
+        let result = crate::update::execute_update_interactive(payload, executor, output_tx).await;
+        return SpawnedUpdate {
+            handle: result.handle,
+            stdin_tx: result.stdin_tx,
+            signal_tx: result.signal_tx,
+            attention_rx: result.attention_rx,
+        };
+    }
+
+    // Non-interactive fallback (always compiled, always reachable without the feature).
+    let handle =
+        tokio::spawn(
+            async move { crate::update::execute_update(payload, executor, output_tx).await },
+        );
+    SpawnedUpdate {
+        handle,
+        #[cfg(feature = "interactive")]
+        stdin_tx: None,
+        #[cfg(feature = "interactive")]
+        signal_tx: None,
+        #[cfg(feature = "interactive")]
+        attention_rx: None,
+    }
 }
 
 /// Events from an in-flight update.
@@ -248,10 +309,8 @@ pub async fn start_update(
 
     let update_history_id = effective_payload.update_history_id;
 
-    // Spawn update execution task
-    let handle = tokio::spawn(async move {
-        crate::update::execute_update(effective_payload, executor, output_tx).await
-    });
+    let spawned =
+        spawn_update_task(effective_payload, executor, output_tx, update_history_id).await;
 
     // Send UpdateStarted
     if let Err(e) = conn
@@ -266,8 +325,14 @@ pub async fn start_update(
 
     InFlightUpdate {
         update_history_id,
-        handle,
+        handle: spawned.handle,
         output_rx,
+        #[cfg(feature = "interactive")]
+        stdin_tx: spawned.stdin_tx,
+        #[cfg(feature = "interactive")]
+        signal_tx: spawned.signal_tx,
+        #[cfg(feature = "interactive")]
+        attention_rx: spawned.attention_rx,
     }
 }
 

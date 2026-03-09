@@ -9,6 +9,7 @@ publish = false
 
 [features]
 default = []
+interactive = ["uptrakit-command/interactive"]
 
 [dependencies]
 async-trait = { workspace = true }

@@ -9,7 +9,7 @@ version.workspace = true
 
 [features]
 default = []
-interactive = ["uptrakit-command/interactive"]
+interactive = ["uptrakit-command/interactive", "uptrakit-agent-core/interactive"]
 
 [dependencies]
 base64 = { workspace = true }
