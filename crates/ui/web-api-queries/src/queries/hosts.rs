@@ -5,7 +5,6 @@ use sea_orm::{
 use std::collections::HashMap;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{host, service, service_host};
-use uptrakit_web_api_types::host_packages::HostUpdateSummary;
 use uptrakit_web_api_types::host_tags::HostTagSummary;
 use uptrakit_web_api_types::hosts::{HostAgentSummary, HostResponse, UpdateHostRequest};
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
@@ -20,7 +19,6 @@ fn host_to_response(
     h: host::Model,
     agents: Vec<HostAgentSummary>,
     tags: Vec<HostTagSummary>,
-    update_summary: HostUpdateSummary,
 ) -> HostResponse {
     HostResponse {
         id: h.id,
@@ -36,7 +34,6 @@ fn host_to_response(
         updated_at: h.updated_at,
         agents,
         tags,
-        update_summary,
     }
 }
 
@@ -168,14 +165,9 @@ pub async fn list_hosts(
         }
     };
 
-    // Batch-load update summaries for all hosts on this page.
-    let update_summaries =
-        super::host_packages::compute_update_summaries_batch(tenant_db, &host_ids)
-            .await
-            .unwrap_or_default();
-
     // Batch-load tags for all hosts on this page.
     let host_tags_map = super::host_tags::load_host_tags_batch(tenant_db, &host_ids).await;
+
 
     let items: Vec<HostResponse> = hosts
         .into_iter()
@@ -206,9 +198,8 @@ pub async fn list_hosts(
                         .collect()
                 })
                 .unwrap_or_default();
-            let summary = update_summaries.get(&host_id).cloned().unwrap_or_default();
             let tags = host_tags_map.get(&host_id).cloned().unwrap_or_default();
-            host_to_response(h, agents, tags, summary)
+            host_to_response(h, agents, tags)
         })
         .collect();
 
@@ -232,10 +223,7 @@ pub async fn get_active_host(
     let agents = load_host_agents(tenant_db, id).await;
     let tags_map = super::host_tags::load_host_tags_batch(tenant_db, &[id]).await;
     let tags = tags_map.get(&id).cloned().unwrap_or_default();
-    let update_summary = super::host_packages::compute_update_summary(tenant_db, id)
-        .await
-        .unwrap_or_default();
-    Ok(Some(host_to_response(h, agents, tags, update_summary)))
+    Ok(Some(host_to_response(h, agents, tags)))
 }
 
 /// Update the host's friendly name. Returns `None` if not found.
@@ -264,15 +252,7 @@ pub async fn update_host(
     let agents = load_host_agents(tenant_db, id).await;
     let tags_map = super::host_tags::load_host_tags_batch(tenant_db, &[id]).await;
     let tags = tags_map.get(&id).cloned().unwrap_or_default();
-    let update_summary = super::host_packages::compute_update_summary(tenant_db, id)
-        .await
-        .unwrap_or_default();
-    Ok(Some(host_to_response(
-        updated,
-        agents,
-        tags,
-        update_summary,
-    )))
+    Ok(Some(host_to_response(updated, agents, tags)))
 }
 
 /// Soft-delete a host. Returns `true` if deactivated, `false` if not found.

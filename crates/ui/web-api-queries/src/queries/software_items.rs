@@ -89,8 +89,7 @@ fn build_list_response(
         id: item.id,
         name: item.name.clone(),
         plugins,
-        enabled: item.enabled,
-        discovery_state: item.discovery_state.clone(),
+        featured: item.featured,
         last_checked_at: item.last_checked_at,
         host_count,
         latest_version,
@@ -112,8 +111,7 @@ fn build_detail_response(
         id: item.id,
         name: item.name,
         plugins,
-        enabled: item.enabled,
-        discovery_state: item.discovery_state,
+        featured: item.featured,
         last_checked_at: item.last_checked_at,
         host_count,
         latest_version,
@@ -553,8 +551,7 @@ pub async fn create_software_item(
         id: Set(generate_uuid()),
         tenant_id: Set(tenant_db.tenant_id),
         name: Set(req.name),
-        enabled: Set(req.enabled),
-        discovery_state: Set(None),
+        featured: Set(req.featured),
         last_checked_at: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
@@ -582,8 +579,8 @@ pub async fn list_software_items(
         .filter(software_item::Column::DeactivatedAt.is_null())
         .order_by_asc(software_item::Column::Name);
 
-    if let Some(state) = &params.discovery_state {
-        base_query = base_query.filter(software_item::Column::DiscoveryState.eq(state.clone()));
+    if let Some(featured) = params.featured {
+        base_query = base_query.filter(software_item::Column::Featured.eq(featured));
     }
 
     let total = base_query
@@ -784,8 +781,8 @@ pub async fn update_software_item(
     if let Some(name) = req.name {
         model.name = Set(name);
     }
-    if let Some(enabled) = req.enabled {
-        model.enabled = Set(enabled);
+    if let Some(featured) = req.featured {
+        model.featured = Set(featured);
     }
     model.updated_at = Set(now);
 
@@ -833,7 +830,6 @@ pub async fn delete_software_item(tenant_db: &TenantDb, id: Uuid) -> Result<bool
     let now = OffsetDateTime::now_utc();
     let mut model: software_item::ActiveModel = item.into();
     model.deactivated_at = Set(Some(now));
-    model.enabled = Set(false);
     model.updated_at = Set(now);
     model.update(tenant_db.db()).await.context_to()?;
     Ok(true)
@@ -886,6 +882,8 @@ pub async fn assign_hosts(
                 host_id: Set(host_id),
                 software_item_id: Set(id),
                 qualifier: Set(None),
+                plugin_config_id: Set(None),
+                package_identifier: Set(None),
                 installed_version: Set(None),
                 installed_version_detected_at: Set(None),
                 latest_version: Set(None),
@@ -894,6 +892,7 @@ pub async fn assign_hosts(
                 last_updated_at: Set(None),
                 linked_at: Set(now),
                 update_category: Set("unknown".to_string()),
+                deactivated_at: Set(None),
             };
             link.insert(&txn).await.context_to()?;
             new_hsi_id
@@ -1178,14 +1177,10 @@ pub async fn load_host_assignment(
 // Batch operations
 // ---------------------------------------------------------------------------
 
-/// Approve multiple pending discovered software items.
-///
-/// Sets `discovery_state = Approved` and `enabled = true` for items in
-/// `Pending` discovery state. Items not found or not pending are reported
-/// as failed.
+/// Feature multiple software items (set `featured = true`).
 #[allow(clippy::type_complexity)]
 #[tracing::instrument(skip_all)]
-pub async fn batch_approve_software_items(
+pub async fn batch_feature_software_items(
     tenant_db: &TenantDb,
     ids: &[Uuid],
 ) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
@@ -1212,18 +1207,8 @@ pub async fn batch_approve_software_items(
     let now = OffsetDateTime::now_utc();
 
     for (id, item) in &found {
-        if item.discovery_state != Some(uptrakit_shared_types::SoftwareDiscoveryState::Pending) {
-            failed.push((
-                *id,
-                "software item is not in pending discovery state".to_string(),
-            ));
-            continue;
-        }
         let mut active: software_item::ActiveModel = item.clone().into();
-        active.discovery_state = Set(Some(
-            uptrakit_shared_types::SoftwareDiscoveryState::Approved,
-        ));
-        active.enabled = Set(true);
+        active.featured = Set(true);
         active.updated_at = Set(now);
         active.update(tenant_db.db()).await.context_to()?;
         succeeded.push(*id);
@@ -1264,7 +1249,6 @@ pub async fn batch_delete_software_items(
     for (id, item) in &found {
         let mut active: software_item::ActiveModel = item.clone().into();
         active.deactivated_at = Set(Some(now));
-        active.enabled = Set(false);
         active.updated_at = Set(now);
         active.update(tenant_db.db()).await.context_to()?;
         succeeded.push(*id);
@@ -1285,8 +1269,7 @@ mod tests {
             id: uuid::Uuid::now_v7(),
             tenant_id: uuid::Uuid::nil(),
             name: "Node.js".to_string(),
-            enabled: true,
-            discovery_state: None,
+            featured: true,
             last_checked_at: Some(now),
             created_at: now,
             updated_at: now,
@@ -1316,8 +1299,7 @@ mod tests {
             id: uuid::Uuid::now_v7(),
             tenant_id: uuid::Uuid::nil(),
             name: "Nginx".to_string(),
-            enabled: true,
-            discovery_state: None,
+            featured: true,
             last_checked_at: None,
             created_at: now,
             updated_at: now,
@@ -1351,8 +1333,7 @@ mod tests {
             id: uuid::Uuid::now_v7(),
             tenant_id: uuid::Uuid::nil(),
             name: "Redis".to_string(),
-            enabled: true,
-            discovery_state: None,
+            featured: true,
             last_checked_at: None,
             created_at: now,
             updated_at: now,
@@ -1412,8 +1393,7 @@ mod tests {
             id: uuid::Uuid::now_v7(),
             tenant_id: uuid::Uuid::nil(),
             name: "Nginx".to_string(),
-            enabled: false,
-            discovery_state: None,
+            featured: false,
             last_checked_at: None,
             created_at: now,
             updated_at: now,
@@ -1422,7 +1402,7 @@ mod tests {
 
         let resp = build_list_response(&item, vec![], 0, None, false);
 
-        assert!(!resp.enabled);
+        assert!(!resp.featured);
         assert!(resp.last_checked_at.is_none());
         assert_eq!(resp.host_count, 0);
         assert!(resp.plugins.is_empty());

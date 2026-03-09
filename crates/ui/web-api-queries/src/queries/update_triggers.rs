@@ -14,7 +14,7 @@
 
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, EntityTrait,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
     PaginatorTrait, QueryFilter, Set,
 };
 use time::OffsetDateTime;
@@ -22,8 +22,8 @@ use uptrakit_internal_wire::{
     AttestationStatus, ControllerMessage, PluginAssignment, ReleaseAsset, ReleaseInfo,
 };
 use uptrakit_shared_db::entity::{
-    host, host_package_update_history, host_software_item, host_software_item_plugin,
-    plugin_config, prelude::*, service, service_host, software_item, update_history,
+    host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
+    service_host, software_item, update_history,
 };
 use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
@@ -129,8 +129,10 @@ pub struct ValidatedUpdateTarget {
 
 /// Parameters for [`create_update_history_record`].
 pub struct CreateUpdateRecordParams<'a> {
+    pub tenant_id: Uuid,
     pub host_id: Uuid,
     pub item_id: Uuid,
+    pub host_software_item_id: Option<Uuid>,
     pub to_version: &'a str,
     /// The currently installed version at the time the update was triggered.
     ///
@@ -350,21 +352,6 @@ pub async fn validate_update_preconditions(
         bail!(TriggerUpdateError::HostUpdateInProgress);
     }
 
-    let pkg_active = HostPackageUpdateHistory::find()
-        .filter(host_package_update_history::Column::HostId.eq(host_id))
-        .filter(
-            Condition::any()
-                .add(host_package_update_history::Column::Status.eq("pending"))
-                .add(host_package_update_history::Column::Status.eq("in_progress")),
-        )
-        .count(db)
-        .await
-        .context_to()?;
-
-    if pkg_active > 0 {
-        bail!(TriggerUpdateError::HostUpdateInProgress);
-    }
-
     Ok(target)
 }
 
@@ -392,16 +379,18 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
     let update_history_id = generate_uuid();
     let record = update_history::ActiveModel {
         id: Set(update_history_id),
+        tenant_id: Set(params.tenant_id),
         host_id: Set(params.host_id),
         software_item_id: Set(params.item_id),
+        host_software_item_id: Set(params.host_software_item_id),
         from_version: Set(params.from_version.clone()),
-        to_version: Set(params.to_version.to_string()),
+        to_version: Set(Some(params.to_version.to_string())),
         status: Set(params.initial_status),
         output: Set(String::new()),
         output_bytes: Set(0),
         actor_type: Set(params.actor_type.as_str().to_string()),
         actor_id: Set(params.actor_id.to_string()),
-        started_at: Set(now),
+        started_at: Set(Some(now)),
         completed_at: Set(None),
         created_at: Set(now),
         update_category: Set(params.update_category.to_string()),
@@ -514,8 +503,10 @@ pub async fn trigger_update_for_host(
     let update_history_id = create_update_history_record(
         db,
         &CreateUpdateRecordParams {
+            tenant_id: params.tenant_id,
             host_id: params.host_id,
             item_id: params.item_id,
+            host_software_item_id: Some(target.hsi_link.id),
             to_version: &params.to_version,
             from_version: target.hsi_link.installed_version.clone(),
             actor_type: params.actor_type,
@@ -677,9 +668,8 @@ mod tests {
     };
     use time::OffsetDateTime;
     use uptrakit_shared_db::entity::{
-        host, host_package, host_package_update_history, host_software_item,
-        host_software_item_plugin, plugin_config, service, service_host, software_item, tenant,
-        update_history,
+        host, host_software_item, host_software_item_plugin, plugin_config, service, service_host,
+        software_item, tenant, update_history,
     };
     use uptrakit_shared_types::ServiceStatus;
     use uuid::Uuid;
@@ -725,8 +715,7 @@ mod tests {
             id: Set(item_id),
             tenant_id: Set(tenant_id),
             name: Set("test-app".to_string()),
-            enabled: Set(true),
-            discovery_state: Set(None),
+            featured: Set(true),
             last_checked_at: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
@@ -787,25 +776,6 @@ mod tests {
         .await
         .unwrap();
 
-        let hsi_id = Uuid::now_v7();
-        host_software_item::ActiveModel {
-            id: Set(hsi_id),
-            host_id: Set(host_id),
-            software_item_id: Set(item_id),
-            qualifier: Set(None),
-            installed_version: Set(Some("1.0.0".to_string())),
-            installed_version_detected_at: Set(None),
-            latest_version: Set(Some("1.1.0".to_string())),
-            latest_version_fetched_at: Set(None),
-            latest_release_metadata: Set(None),
-            last_updated_at: Set(None),
-            linked_at: Set(now),
-            update_category: Set("feature".to_string()),
-        }
-        .insert(db)
-        .await
-        .unwrap();
-
         plugin_config::ActiveModel {
             id: Set(plugin_config_id),
             tenant_id: Set(tenant_id),
@@ -815,6 +785,28 @@ mod tests {
             enabled: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        let hsi_id = Uuid::now_v7();
+        host_software_item::ActiveModel {
+            id: Set(hsi_id),
+            host_id: Set(host_id),
+            software_item_id: Set(item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(Some(plugin_config_id)),
+            package_identifier: Set(Some("test-pkg".to_string())),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            latest_version: Set(Some("1.1.0".to_string())),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("feature".to_string()),
             deactivated_at: Set(None),
         }
         .insert(db)
@@ -1005,16 +997,18 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         update_history::ActiveModel {
             id: Set(Uuid::now_v7()),
+            tenant_id: Set(f.tenant_id),
             host_id: Set(f.host_id),
             software_item_id: Set(f.item_id),
+            host_software_item_id: Set(None),
             from_version: Set(None),
-            to_version: Set("1.1.0".to_string()),
+            to_version: Set(Some("1.1.0".to_string())),
             status: Set(update_history::UpdateStatus::Pending),
             output: Set(String::new()),
             output_bytes: Set(0),
             actor_type: Set("user".to_string()),
             actor_id: Set(String::new()),
-            started_at: Set(now),
+            started_at: Set(Some(now)),
             completed_at: Set(None),
             created_at: Set(now),
             update_category: Set("feature".to_string()),
@@ -1044,8 +1038,7 @@ mod tests {
             id: Set(other_item_id),
             tenant_id: Set(f.tenant_id),
             name: Set("other-app".to_string()),
-            enabled: Set(true),
-            discovery_state: Set(None),
+            featured: Set(true),
             last_checked_at: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
@@ -1058,16 +1051,18 @@ mod tests {
         // Insert a Pending update_history row for the OTHER item on the same host.
         update_history::ActiveModel {
             id: Set(Uuid::now_v7()),
+            tenant_id: Set(f.tenant_id),
             host_id: Set(f.host_id),
             software_item_id: Set(other_item_id),
+            host_software_item_id: Set(None),
             from_version: Set(None),
-            to_version: Set("2.0.0".to_string()),
+            to_version: Set(Some("2.0.0".to_string())),
             status: Set(update_history::UpdateStatus::Pending),
             output: Set(String::new()),
             output_bytes: Set(0),
             actor_type: Set("user".to_string()),
             actor_id: Set(String::new()),
-            started_at: Set(now),
+            started_at: Set(Some(now)),
             completed_at: Set(None),
             created_at: Set(now),
             update_category: Set("feature".to_string()),
@@ -1078,69 +1073,6 @@ mod tests {
         .unwrap();
 
         // Triggering an update for f.item_id on the same host must be rejected.
-        let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
-        assert!(matches!(
-            result.unwrap_err().current_context(),
-            TriggerUpdateError::HostUpdateInProgress
-        ));
-    }
-
-    #[tokio::test]
-    async fn validate_preconditions_host_package_update_blocks_sw_item() {
-        // An active host-package batch update must block a software-item update.
-        let db = setup_db().await;
-        let f = insert_base_fixture(&db).await;
-        let now = OffsetDateTime::now_utc();
-
-        // Insert a host_package row (required by FK on host_package_update_history).
-        let pkg_id = Uuid::now_v7();
-        host_package::ActiveModel {
-            id: Set(pkg_id),
-            tenant_id: Set(f.tenant_id),
-            host_id: Set(f.host_id),
-            plugin_config_id: Set(f.plugin_config_id),
-            package_identifier: Set("curl".to_string()),
-            name: Set("curl".to_string()),
-            installed_version: Set(Some("7.0.0".to_string())),
-            installed_version_detected_at: Set(None),
-            latest_version: Set(Some("8.0.0".to_string())),
-            latest_version_fetched_at: Set(None),
-            latest_release_metadata: Set(None),
-            update_category: Set("security".to_string()),
-            enabled: Set(true),
-            last_checked_at: Set(None),
-            last_updated_at: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-            deactivated_at: Set(None),
-        }
-        .insert(&db)
-        .await
-        .unwrap();
-
-        // Insert a pending host_package_update_history row for the same host.
-        host_package_update_history::ActiveModel {
-            id: Set(Uuid::now_v7()),
-            tenant_id: Set(f.tenant_id),
-            host_id: Set(f.host_id),
-            host_package_id: Set(pkg_id),
-            from_version: Set(Some("7.0.0".to_string())),
-            to_version: Set(Some("8.0.0".to_string())),
-            status: Set("pending".to_string()),
-            output: Set(None),
-            output_bytes: Set(0),
-            actor_type: Set("mqtt".to_string()),
-            actor_id: Set(String::new()),
-            update_category: Set("security".to_string()),
-            started_at: Set(None),
-            completed_at: Set(None),
-            created_at: Set(now),
-            batch_id: Set(None),
-        }
-        .insert(&db)
-        .await
-        .unwrap();
-
         let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
         assert!(matches!(
             result.unwrap_err().current_context(),

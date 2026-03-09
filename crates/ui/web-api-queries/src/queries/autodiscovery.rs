@@ -2,7 +2,6 @@
 //!
 //! Covers:
 //! - Ignore rule management (create / list / delete)
-//! - Pending-item bulk-discard
 //! - Auto-creation of default plugin configs from discovery targets
 //! - Processing incoming `DiscoveryResults` payloads (creating pending software
 //!   items and upserting host-software-item links)
@@ -13,23 +12,18 @@
 //! synthesis logic lives here.
 
 use rootcause::prelude::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use std::collections::HashSet;
 use time::OffsetDateTime;
 use uptrakit_internal_wire::DiscoveryTarget;
 use uptrakit_internal_wire::{DiscoveryPluginResult, DiscoveryResultsPayload};
 use uptrakit_shared_db::entity::{
-    autodiscovery_ignore, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
+    host_software_item, host_software_item_plugin, plugin_config, prelude::*, software_ignore,
     software_item,
 };
 use uptrakit_shared_db::is_unique_constraint_violation;
 use uptrakit_shared_macros::impl_report_conversion;
-use uptrakit_shared_types::{SoftwareDiscoveryState, TrackingSystem};
-use uptrakit_web_api_types::autodiscovery::{
-    AutodiscoveryIgnoreResponse, DiscardDiscoveredResponse,
-};
+use uptrakit_web_api_types::autodiscovery::SoftwareIgnoreResponse;
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uuid::Uuid;
 
@@ -55,15 +49,17 @@ pub async fn create_or_ignore_ignore_rule(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
     name: &str,
+    host_id: Option<Uuid>,
 ) -> Result<bool> {
-    let record = autodiscovery_ignore::ActiveModel {
+    let record = software_ignore::ActiveModel {
         id: Set(Uuid::now_v7()),
         tenant_id: Set(tenant_id),
+        host_id: Set(host_id),
         name: Set(name.to_string()),
         created_at: Set(OffsetDateTime::now_utc()),
     };
 
-    match AutodiscoveryIgnore::insert(record).exec(db).await {
+    match SoftwareIgnore::insert(record).exec(db).await {
         Ok(_) => Ok(true),
         Err(e) if is_unique_constraint_violation(&e) => Ok(false),
         Err(e) => Err(report!(AutodiscoveryError::Db(e))),
@@ -76,15 +72,15 @@ pub async fn list_ignore_rules(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
     params: &PaginationParams,
-) -> Result<PaginatedResponse<AutodiscoveryIgnoreResponse>> {
+) -> Result<PaginatedResponse<SoftwareIgnoreResponse>> {
     use sea_orm::PaginatorTrait;
 
     let page = params.page.unwrap_or(1).max(1);
     let per_page = params.per_page.unwrap_or(20).clamp(1, 1000);
 
-    let paginator = AutodiscoveryIgnore::find()
-        .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
-        .order_by_desc(autodiscovery_ignore::Column::CreatedAt)
+    let paginator = SoftwareIgnore::find()
+        .filter(software_ignore::Column::TenantId.eq(tenant_id))
+        .order_by_desc(software_ignore::Column::CreatedAt)
         .paginate(db, per_page);
 
     let total = paginator.num_items().await.context_to()?;
@@ -92,9 +88,10 @@ pub async fn list_ignore_rules(
 
     let items = items_raw
         .into_iter()
-        .map(|r| AutodiscoveryIgnoreResponse {
+        .map(|r| SoftwareIgnoreResponse {
             id: r.id,
             name: r.name,
+            host_id: r.host_id,
             created_at: r.created_at,
         })
         .collect::<Vec<_>>();
@@ -120,9 +117,9 @@ pub async fn delete_ignore_rule(
     tenant_id: Uuid,
     id: Uuid,
 ) -> Result<bool> {
-    let result = AutodiscoveryIgnore::delete_many()
-        .filter(autodiscovery_ignore::Column::Id.eq(id))
-        .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
+    let result = SoftwareIgnore::delete_many()
+        .filter(software_ignore::Column::Id.eq(id))
+        .filter(software_ignore::Column::TenantId.eq(tenant_id))
         .exec(db)
         .await
         .context_to()?;
@@ -140,9 +137,9 @@ pub async fn batch_delete_ignore_rules(
     ids: &[Uuid],
 ) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
     // Load existing rules to determine which IDs are valid.
-    let rules = AutodiscoveryIgnore::find()
-        .filter(autodiscovery_ignore::Column::Id.is_in(ids.iter().copied()))
-        .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
+    let rules = SoftwareIgnore::find()
+        .filter(software_ignore::Column::Id.is_in(ids.iter().copied()))
+        .filter(software_ignore::Column::TenantId.eq(tenant_id))
         .all(db)
         .await
         .context_to()?;
@@ -160,9 +157,9 @@ pub async fn batch_delete_ignore_rules(
 
     // Delete all found rules in one query.
     if !found.is_empty() {
-        AutodiscoveryIgnore::delete_many()
-            .filter(autodiscovery_ignore::Column::Id.is_in(found.iter().copied()))
-            .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
+        SoftwareIgnore::delete_many()
+            .filter(software_ignore::Column::Id.is_in(found.iter().copied()))
+            .filter(software_ignore::Column::TenantId.eq(tenant_id))
             .exec(db)
             .await
             .context_to()?;
@@ -170,124 +167,6 @@ pub async fn batch_delete_ignore_rules(
     }
 
     Ok((succeeded, failed))
-}
-
-// ── Discard pending items ─────────────────────────────────────────────────────
-
-/// Soft-delete all `pending` software items for a tenant, optionally filtered by
-/// host or plugin config.
-///
-/// No ignore rules are created — deleted items can be re-discovered later.
-/// All `host_software_items` links for the discarded items are hard-deleted so that
-/// subsequent discovery runs treat those packages as new discoveries rather than
-/// silently refreshing the version on an orphaned link.
-#[tracing::instrument(skip_all, fields(%tenant_id))]
-pub async fn discard_pending_items(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
-    host_id_filter: Option<Uuid>,
-    plugin_config_id_filter: Option<Uuid>,
-) -> Result<DiscardDiscoveredResponse> {
-    let now = OffsetDateTime::now_utc();
-
-    // Gather candidate pending software item IDs for this tenant.
-    let mut id_query = SoftwareItem::find()
-        .select_only()
-        .column(software_item::Column::Id)
-        .filter(software_item::Column::TenantId.eq(tenant_id))
-        .filter(software_item::Column::DeactivatedAt.is_null())
-        .filter(software_item::Column::DiscoveryState.eq("pending"));
-
-    // If a plugin config filter is requested, restrict to items that have at
-    // least one host_software_item_plugin row with that plugin config ID.
-    let plugin_filtered_item_ids: Option<Vec<Uuid>> = if let Some(pc_id) = plugin_config_id_filter {
-        let linked: Vec<Uuid> = HostSoftwareItemPlugin::find()
-            .filter(host_software_item_plugin::Column::PluginConfigId.eq(pc_id))
-            .all(db)
-            .await
-            .context_to()?
-            .into_iter()
-            .map(|l| l.software_item_id)
-            .collect();
-
-        if linked.is_empty() {
-            return Ok(DiscardDiscoveredResponse { discarded_count: 0 });
-        }
-        Some(linked)
-    } else {
-        None
-    };
-
-    if let Some(ref pfids) = plugin_filtered_item_ids {
-        id_query = id_query.filter(software_item::Column::Id.is_in(pfids.clone()));
-    }
-
-    // If filtering by host, find items linked to that host.
-    let ids: Vec<Uuid> = if let Some(host_id) = host_id_filter {
-        let linked_item_ids: Vec<Uuid> = HostSoftwareItem::find()
-            .filter(host_software_item::Column::HostId.eq(host_id))
-            .all(db)
-            .await
-            .context_to()?
-            .into_iter()
-            .map(|l| l.software_item_id)
-            .collect();
-
-        if linked_item_ids.is_empty() {
-            return Ok(DiscardDiscoveredResponse { discarded_count: 0 });
-        }
-
-        id_query = id_query.filter(software_item::Column::Id.is_in(linked_item_ids));
-
-        id_query
-            .into_model::<IdRow>()
-            .all(db)
-            .await
-            .context_to()?
-            .into_iter()
-            .map(|r| r.id)
-            .collect()
-    } else {
-        id_query
-            .into_model::<IdRow>()
-            .all(db)
-            .await
-            .context_to()?
-            .into_iter()
-            .map(|r| r.id)
-            .collect()
-    };
-
-    if ids.is_empty() {
-        return Ok(DiscardDiscoveredResponse { discarded_count: 0 });
-    }
-
-    let count = ids.len() as u32;
-
-    // Remove host-software-item links for all discarded items.  Without this,
-    // the orphaned rows would cause subsequent discovery runs to find the link
-    // in Phase 1 and return early — silently refreshing the version on a
-    // deactivated item instead of surfacing a new pending entry.
-    HostSoftwareItem::delete_many()
-        .filter(host_software_item::Column::SoftwareItemId.is_in(ids.clone()))
-        .exec(db)
-        .await
-        .context_to()?;
-
-    // Soft-delete in bulk.
-    SoftwareItem::update_many()
-        .col_expr(
-            software_item::Column::DeactivatedAt,
-            sea_orm::sea_query::Expr::value(Some(now)),
-        )
-        .filter(software_item::Column::Id.is_in(ids))
-        .exec(db)
-        .await
-        .context_to()?;
-
-    Ok(DiscardDiscoveredResponse {
-        discarded_count: count,
-    })
 }
 
 // ── Auto-create default plugin configs ───────────────────────────────────────
@@ -440,10 +319,8 @@ pub async fn process_discovery_results(
 
 /// Process a single plugin's discovery results.
 ///
-/// Routes each item to the correct processing path based on its `tracking_system`
-/// field, `targets`, and the result's `plugin_config_id`. Items with
-/// `TrackingSystem::HostManaged` are routed to `host_packages`; targeted items
-/// go through the existing `software_items` flow.
+/// Routes each item to the correct processing path based on its `targets`
+/// and the result's `plugin_config_id`.
 async fn process_plugin_result(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -452,14 +329,6 @@ async fn process_plugin_result(
     result: &DiscoveryPluginResult,
     ignore_set: &HashSet<String>,
 ) -> Result<()> {
-    // Tenant-scoped DB handle used for host-package operations below.
-    let tenant_db = crate::tenant_db::TenantDb::new(db.clone(), tenant_id);
-
-    // Track all identifiers seen in this discovery snapshot for the HostManaged path.
-    // Used after the loop to deactivate packages that have disappeared from the host.
-    let mut host_managed_pc_id: Option<uuid::Uuid> = None;
-    let mut discovered_identifiers: HashSet<String> = HashSet::new();
-
     for item in &result.discoveries {
         // Check the tenant-wide name-based ignore list before any processing.
         if ignore_set.contains(&item.name) {
@@ -471,149 +340,25 @@ async fn process_plugin_result(
             continue;
         }
 
-        match item.tracking_system {
-            TrackingSystem::HostManaged => {
-                // Route to host_packages table.
-                //
-                // Determine the plugin config ID:
-                // - Config-ID mode (plugin already registered): use the pre-existing ID
-                //   directly from the result.
-                // - Discover-all mode (no pre-existing config, `plugin_config_id: None`):
-                //   use the first DiscoveryTarget to find-or-create the plugin config, then
-                //   use that ID. This handles the first-run case for Homebrew, APT, and npm
-                //   when no plugin config exists yet for the tenant.
-                let pc_id = if let Some(existing) = result.plugin_config_id {
-                    Some(existing)
-                } else if let Some(target) = item.targets.first() {
-                    let target_plugin_type = target.plugin_type.to_string();
-                    Some(
-                        find_or_create_default_plugin_config(
-                            db,
-                            tenant_id,
-                            &target_plugin_type,
-                            &target.plugin_config,
-                            &target.plugin_config_name,
-                        )
-                        .await?,
-                    )
-                } else {
-                    None
-                };
-
-                if let Some(plugin_config_id) = pc_id {
-                    let ignore_set = super::host_packages::load_host_package_ignore_set(
-                        &tenant_db,
-                        host_id,
-                        plugin_config_id,
-                    )
-                    .await
-                    .map_err(|e| {
-                        report!(AutodiscoveryError::Db(sea_orm::DbErr::Custom(
-                            e.to_string()
-                        )))
-                    })?;
-
-                    super::host_packages::find_or_create_host_package(
-                        super::host_packages::FindOrCreateHostPackageParams {
-                            db,
-                            tenant_id,
-                            host_id,
-                            plugin_config_id,
-                            package_identifier: &item.package_identifier,
-                            name: &item.name,
-                            installed_version: &item.installed_version,
-                            ignore_set: &ignore_set,
-                        },
-                    )
-                    .await
-                    .map_err(|e| {
-                        report!(AutodiscoveryError::Db(sea_orm::DbErr::Custom(
-                            e.to_string()
-                        )))
-                    })?;
-
-                    // Record this identifier as discovered for the disappearance check below.
-                    discovered_identifiers.insert(item.package_identifier.clone());
-                    host_managed_pc_id = Some(plugin_config_id);
-                } else {
-                    tracing::warn!(
-                        plugin_type = %result.plugin_type,
-                        package_identifier = %item.package_identifier,
-                        "host-managed item has no plugin_config_id and no targets; skipping"
-                    );
-                }
-            }
-            TrackingSystem::Targeted => {
-                // Existing targeted flow.
-                let item_info = DiscoveredItemInfo {
-                    package_identifier: &item.package_identifier,
-                    name: &item.name,
-                    installed_version: &item.installed_version,
-                    qualifier: item.qualifier.as_deref(),
-                    plugin_package_identifier: item.plugin_package_identifier.as_deref(),
-                };
-                if !item.targets.is_empty() {
-                    process_targets_discovery(
-                        db,
-                        tenant_id,
-                        host_id,
-                        &item_info,
-                        &item.targets,
-                        now,
-                    )
-                    .await?;
-                } else if let Some(existing_pc_id) = result.plugin_config_id {
-                    process_one_discovery(db, tenant_id, host_id, existing_pc_id, item_info, now)
-                        .await?;
-                } else {
-                    tracing::warn!(
-                        plugin_type = %result.plugin_type,
-                        package_identifier = %item.package_identifier,
-                        "discovery item has no targets and no plugin_config_id; skipping"
-                    );
-                }
-            }
-            _ => {
-                tracing::warn!(
-                    plugin_type = %result.plugin_type,
-                    package_identifier = %item.package_identifier,
-                    tracking_system = %item.tracking_system,
-                    "unknown tracking system variant; skipping"
-                );
-            }
+        let item_info = DiscoveredItemInfo {
+            package_identifier: &item.package_identifier,
+            name: &item.name,
+            installed_version: &item.installed_version,
+            qualifier: item.qualifier.as_deref(),
+            plugin_package_identifier: item.plugin_package_identifier.as_deref(),
+        };
+        if !item.targets.is_empty() {
+            process_targets_discovery(db, tenant_id, host_id, &item_info, &item.targets, now)
+                .await?;
+        } else if let Some(existing_pc_id) = result.plugin_config_id {
+            process_one_discovery(db, tenant_id, host_id, existing_pc_id, item_info, now).await?;
+        } else {
+            tracing::warn!(
+                plugin_type = %result.plugin_type,
+                package_identifier = %item.package_identifier,
+                "discovery item has no targets and no plugin_config_id; skipping"
+            );
         }
-    }
-
-    // After processing all HostManaged items for this plugin result, deactivate
-    // packages that were previously known but not seen in this discovery snapshot.
-    // Each DiscoveryPluginResult represents one complete snapshot for one plugin
-    // config on one host, so we can safely treat absence as "uninstalled".
-    if let Some(plugin_config_id) = host_managed_pc_id {
-        let ignore_set = super::host_packages::load_host_package_ignore_set(
-            &tenant_db,
-            host_id,
-            plugin_config_id,
-        )
-        .await
-        .map_err(|e| {
-            report!(AutodiscoveryError::Db(sea_orm::DbErr::Custom(
-                e.to_string()
-            )))
-        })?;
-
-        super::host_packages::deactivate_missing_host_packages(
-            &tenant_db,
-            host_id,
-            plugin_config_id,
-            &discovered_identifiers,
-            &ignore_set,
-        )
-        .await
-        .map_err(|e| {
-            report!(AutodiscoveryError::Db(sea_orm::DbErr::Custom(
-                e.to_string()
-            )))
-        })?;
     }
 
     Ok(())
@@ -730,8 +475,8 @@ async fn load_ignore_set(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
 ) -> Result<HashSet<String>> {
-    let rules = AutodiscoveryIgnore::find()
-        .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
+    let rules = SoftwareIgnore::find()
+        .filter(software_ignore::Column::TenantId.eq(tenant_id))
         .all(db)
         .await
         .context_to()?;
@@ -790,12 +535,10 @@ async fn find_or_create_software_item(
             .context_to()?;
 
         if let Some(linked_item) = linked_item {
-            // Only update installed_version for Pending (not yet reviewed) items.
-            // Approved and manual (None) items get their version from the
-            // DetectVersion scheduled task using the user's assigned plugin config.
-            let is_pending = linked_item.discovery_state == Some(SoftwareDiscoveryState::Pending);
-
-            if is_pending {
+            // Only update installed_version for non-featured (not yet approved) items.
+            // Featured items get their version from the DetectVersion scheduled
+            // task using the user's assigned plugin config.
+            if !linked_item.featured {
                 let mut hsi_query = HostSoftwareItem::find()
                     .filter(host_software_item::Column::HostId.eq(host_id))
                     .filter(
@@ -814,9 +557,9 @@ async fn find_or_create_software_item(
             } else {
                 tracing::debug!(
                     software_item_id = %linked_item.id,
-                    discovery_state = ?linked_item.discovery_state,
+                    featured = linked_item.featured,
                     %package_identifier,
-                    "skipping installed_version update for non-pending software item"
+                    "skipping installed_version update for featured software item"
                 );
             }
             return Ok(None);
@@ -884,8 +627,7 @@ async fn find_or_create_software_item(
             id: Set(new_id),
             tenant_id: Set(tenant_id),
             name: Set(name.to_string()),
-            enabled: Set(false),
-            discovery_state: Set(Some(SoftwareDiscoveryState::Pending)),
+            featured: Set(false),
             last_checked_at: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
@@ -932,6 +674,8 @@ async fn find_or_create_software_item(
         host_id: Set(host_id),
         software_item_id: Set(software_item_id),
         qualifier: Set(item.qualifier.map(|s| s.to_string())),
+        plugin_config_id: Set(Some(plugin_config_id)),
+        package_identifier: Set(Some(item.effective_plugin_pkg_id().to_string())),
         installed_version: Set(Some(installed_version.to_string())),
         installed_version_detected_at: Set(Some(now)),
         latest_version: Set(None),
@@ -940,6 +684,7 @@ async fn find_or_create_software_item(
         last_updated_at: Set(None),
         linked_at: Set(now),
         update_category: Set("unknown".to_string()),
+        deactivated_at: Set(None),
     };
     match HostSoftwareItem::insert(link).exec(db).await {
         Ok(_) => {}
@@ -1011,13 +756,6 @@ async fn process_one_discovery(
     Ok(())
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-#[derive(Debug, sea_orm::FromQueryResult)]
-struct IdRow {
-    id: Uuid,
-}
-
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
     use super::*;
@@ -1026,9 +764,7 @@ mod tests {
         DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, DiscoveryTarget,
         PluginRole, PluginType,
     };
-    use uptrakit_shared_db::entity::prelude::HostPackage;
-    use uptrakit_shared_db::entity::{host, host_package, plugin_config, tenant};
-    use uptrakit_shared_types::{SoftwareDiscoveryState, TrackingSystem};
+    use uptrakit_shared_db::entity::{host, plugin_config, tenant};
 
     async fn setup_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:");
@@ -1111,8 +847,7 @@ mod tests {
             id: Set(id),
             tenant_id: Set(tenant_id),
             name: Set(name.to_string()),
-            enabled: Set(false),
-            discovery_state: Set(Some(SoftwareDiscoveryState::Pending)),
+            featured: Set(false),
             last_checked_at: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
@@ -1138,6 +873,8 @@ mod tests {
             host_id: Set(host_id),
             software_item_id: Set(software_item_id),
             qualifier: Set(None),
+            plugin_config_id: Set(Some(plugin_config_id)),
+            package_identifier: Set(Some(package_identifier.to_string())),
             installed_version: Set(Some("1.0.0".to_string())),
             installed_version_detected_at: Set(Some(now)),
             latest_version: Set(None),
@@ -1146,6 +883,7 @@ mod tests {
             last_updated_at: Set(None),
             linked_at: Set(now),
             update_category: Set("unknown".to_string()),
+            deactivated_at: Set(None),
         };
         HostSoftwareItem::insert(link)
             .exec(db)
@@ -1219,7 +957,7 @@ mod tests {
                     execution_site: None,
                 }],
                 extra: None,
-                tracking_system: Default::default(),
+                featured: false,
                 qualifier: None,
                 plugin_package_identifier: None,
             }],
@@ -1249,7 +987,7 @@ mod tests {
                     execution_site: None,
                 }],
                 extra: None,
-                tracking_system: Default::default(),
+                featured: false,
                 qualifier: None,
                 plugin_package_identifier: None,
             }],
@@ -1267,7 +1005,7 @@ mod tests {
                 installed_version: "1.0.0".to_string(),
                 targets: vec![],
                 extra: None,
-                tracking_system: Default::default(),
+                featured: false,
                 qualifier: None,
                 plugin_package_identifier: None,
             }],
@@ -1322,7 +1060,7 @@ mod tests {
                     },
                 ],
                 extra: None,
-                tracking_system: Default::default(),
+                featured: false,
                 qualifier: None,
                 plugin_package_identifier: None,
             }],
@@ -1330,45 +1068,6 @@ mod tests {
     }
 
     // ── tests ─────────────────────────────────────────────────────────────────
-
-    /// `discard_pending_items` must remove the `host_software_items` rows for
-    /// every discarded software item.
-    #[tokio::test]
-    async fn discard_pending_items_removes_host_links() {
-        let db = setup_db().await;
-        let tenant_id = Uuid::now_v7();
-        let host_id = Uuid::now_v7();
-        let item_id = Uuid::now_v7();
-        let pc_id = Uuid::now_v7();
-
-        insert_tenant(&db, tenant_id).await;
-        insert_host(&db, host_id, tenant_id).await;
-        insert_plugin_config(&db, pc_id, tenant_id).await;
-        insert_software_item(&db, item_id, tenant_id, "git", None).await;
-        insert_host_link(&db, host_id, item_id, pc_id, "git").await;
-
-        let links_before = HostSoftwareItem::find()
-            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
-            .count(&db)
-            .await
-            .expect("count before");
-        assert_eq!(links_before, 1, "expected one host link before discard");
-
-        let result = discard_pending_items(&db, tenant_id, None, None)
-            .await
-            .expect("discard");
-        assert_eq!(result.discarded_count, 1);
-
-        let links_after = HostSoftwareItem::find()
-            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
-            .count(&db)
-            .await
-            .expect("count after");
-        assert_eq!(
-            links_after, 0,
-            "host link must be deleted when software item is discarded"
-        );
-    }
 
     /// When `find_or_create_software_item` encounters a host link pointing to a
     /// deactivated software item, it must delete the orphaned link and create a
@@ -1418,9 +1117,9 @@ mod tests {
             1,
             "expected exactly one new pending item"
         );
-        assert_eq!(
-            active_items[0].discovery_state,
-            Some(SoftwareDiscoveryState::Pending)
+        assert!(
+            !active_items[0].featured,
+            "new discovery items must not be featured"
         );
 
         let new_link_count = HostSoftwareItemPlugin::find()
@@ -1488,12 +1187,12 @@ mod tests {
         );
     }
 
-    /// When a software item has `discovery_state = Approved`, periodic
-    /// re-discovery must NOT overwrite `installed_version`. The proper
-    /// `DetectVersion` scheduled task handles version detection for
-    /// approved items using the user's assigned plugin config.
+    /// When a software item is featured (approved), periodic re-discovery
+    /// must NOT overwrite `installed_version`. The proper `DetectVersion`
+    /// scheduled task handles version detection for featured items using
+    /// the user's assigned plugin config.
     #[tokio::test]
-    async fn process_one_discovery_approved_item_skips_version_update() {
+    async fn process_one_discovery_featured_item_skips_version_update() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
@@ -1505,13 +1204,12 @@ mod tests {
         insert_host(&db, host_id, tenant_id).await;
         insert_plugin_config(&db, pc_id, tenant_id).await;
 
-        // Insert an Approved software item (user has reviewed it).
+        // Insert a featured software item (user has approved it).
         let model = software_item::ActiveModel {
             id: Set(item_id),
             tenant_id: Set(tenant_id),
             name: Set("wget".to_string()),
-            enabled: Set(true),
-            discovery_state: Set(Some(SoftwareDiscoveryState::Approved)),
+            featured: Set(true),
             last_checked_at: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
@@ -1520,7 +1218,7 @@ mod tests {
         SoftwareItem::insert(model)
             .exec(&db)
             .await
-            .expect("insert approved software_item");
+            .expect("insert featured software_item");
 
         insert_host_link(&db, host_id, item_id, pc_id, "wget").await;
 
@@ -1554,14 +1252,14 @@ mod tests {
         assert_eq!(
             link.installed_version.as_deref(),
             Some("1.0.0"),
-            "installed_version must NOT be overwritten for approved items"
+            "installed_version must NOT be overwritten for featured items"
         );
     }
 
-    /// When a software item has no `discovery_state` (manual item),
+    /// When a software item is featured (manually created and enabled),
     /// periodic re-discovery must NOT overwrite `installed_version`.
     #[tokio::test]
-    async fn process_one_discovery_manual_item_skips_version_update() {
+    async fn process_one_discovery_manual_featured_item_skips_version_update() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
@@ -1573,13 +1271,12 @@ mod tests {
         insert_host(&db, host_id, tenant_id).await;
         insert_plugin_config(&db, pc_id, tenant_id).await;
 
-        // Insert a manual software item (no discovery_state).
+        // Insert a manually created featured software item.
         let model = software_item::ActiveModel {
             id: Set(item_id),
             tenant_id: Set(tenant_id),
             name: Set("wget".to_string()),
-            enabled: Set(true),
-            discovery_state: Set(None),
+            featured: Set(true),
             last_checked_at: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
@@ -1588,7 +1285,7 @@ mod tests {
         SoftwareItem::insert(model)
             .exec(&db)
             .await
-            .expect("insert manual software_item");
+            .expect("insert featured software_item");
 
         insert_host_link(&db, host_id, item_id, pc_id, "wget").await;
 
@@ -1827,7 +1524,7 @@ mod tests {
                 installed_version: "1.21.4".to_string(),
                 targets: vec![],
                 extra: None,
-                tracking_system: Default::default(),
+                featured: false,
                 qualifier: None,
                 plugin_package_identifier: None,
             }],
@@ -1874,7 +1571,7 @@ mod tests {
             .expect("first process");
 
         // Add "Wget" to the tenant-wide name-based ignore list.
-        create_or_ignore_ignore_rule(&db, tenant_id, "Wget")
+        create_or_ignore_ignore_rule(&db, tenant_id, "Wget", None)
             .await
             .expect("create ignore rule");
 
@@ -2134,15 +1831,15 @@ mod tests {
         let tenant_id = Uuid::now_v7();
         insert_tenant(&db, tenant_id).await;
 
-        let inserted = create_or_ignore_ignore_rule(&db, tenant_id, "FreshRSS")
+        let inserted = create_or_ignore_ignore_rule(&db, tenant_id, "FreshRSS", None)
             .await
             .expect("should succeed");
 
         assert!(inserted, "first insert must return true");
 
-        let count = AutodiscoveryIgnore::find()
-            .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
-            .filter(autodiscovery_ignore::Column::Name.eq("FreshRSS"))
+        let count = SoftwareIgnore::find()
+            .filter(software_ignore::Column::TenantId.eq(tenant_id))
+            .filter(software_ignore::Column::Name.eq("FreshRSS"))
             .count(&db)
             .await
             .expect("count");
@@ -2155,12 +1852,12 @@ mod tests {
         let tenant_id = Uuid::now_v7();
         insert_tenant(&db, tenant_id).await;
 
-        let first = create_or_ignore_ignore_rule(&db, tenant_id, "FreshRSS")
+        let first = create_or_ignore_ignore_rule(&db, tenant_id, "FreshRSS", None)
             .await
             .expect("first call");
         assert!(first, "first call must return true (new row)");
 
-        let second = create_or_ignore_ignore_rule(&db, tenant_id, "FreshRSS")
+        let second = create_or_ignore_ignore_rule(&db, tenant_id, "FreshRSS", None)
             .await
             .expect("second call");
         assert!(
@@ -2169,25 +1866,25 @@ mod tests {
         );
 
         // Exactly one row must exist after both calls.
-        let count = AutodiscoveryIgnore::find()
-            .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
-            .filter(autodiscovery_ignore::Column::Name.eq("FreshRSS"))
+        let count = SoftwareIgnore::find()
+            .filter(software_ignore::Column::TenantId.eq(tenant_id))
+            .filter(software_ignore::Column::Name.eq("FreshRSS"))
             .count(&db)
             .await
             .expect("count");
         assert_eq!(count, 1, "duplicate insert must not create a second row");
     }
 
-    // ── HostManaged + target: discover-all first-run path ─────────────────────
+    // ── Target-based first-run path ────────────────────────────────────────────
 
-    /// When a `HostManaged` item arrives with `plugin_config_id: None` but
-    /// carries a `DiscoveryTarget`, the server must auto-create the plugin
-    /// config and create a `host_packages` row.
+    /// When an item arrives with `plugin_config_id: None` but carries a
+    /// `DiscoveryTarget`, the server must auto-create the plugin config and
+    /// create a `host_software_items` link row.
     ///
     /// This covers the first-run Homebrew / APT discovery path where no plugin
     /// config exists for the tenant yet.
     #[tokio::test]
-    async fn host_managed_with_target_auto_creates_config_and_host_package() {
+    async fn target_based_auto_creates_config_and_host_link() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
@@ -2215,7 +1912,7 @@ mod tests {
                         execution_site: None,
                     }],
                     extra: None,
-                    tracking_system: TrackingSystem::HostManaged,
+                    featured: false,
                     qualifier: None,
                     plugin_package_identifier: None,
                 }],
@@ -2240,25 +1937,28 @@ mod tests {
         );
         assert_eq!(configs[0].name, "Homebrew (Formulae)");
 
-        // host_package row must have been created.
-        let packages = HostPackage::find()
-            .filter(host_package::Column::HostId.eq(host_id))
-            .filter(host_package::Column::PackageIdentifier.eq("wget"))
+        // host_software_items link must have been created.
+        let hsi_links = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
             .all(&db)
             .await
-            .expect("query host packages");
-        assert_eq!(packages.len(), 1, "exactly one host_package row must exist");
+            .expect("query host software items");
         assert_eq!(
-            packages[0].installed_version.as_deref(),
+            hsi_links.len(),
+            1,
+            "exactly one host_software_items row must exist"
+        );
+        assert_eq!(
+            hsi_links[0].installed_version.as_deref(),
             Some("1.24.4"),
             "installed version must be recorded"
         );
     }
 
-    /// Repeated `HostManaged` discoveries with the same target are idempotent:
-    /// the plugin config is reused and the host_package version is updated in place.
+    /// Repeated discoveries with the same target are idempotent:
+    /// the plugin config is reused and the host_software_items version is updated in place.
     #[tokio::test]
-    async fn host_managed_with_target_idempotent_on_second_run() {
+    async fn target_based_idempotent_on_second_run() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
@@ -2288,7 +1988,7 @@ mod tests {
                             execution_site: None,
                         }],
                         extra: None,
-                        tracking_system: TrackingSystem::HostManaged,
+                        featured: false,
                         qualifier: None,
                         plugin_package_identifier: None,
                     }],
@@ -2315,20 +2015,19 @@ mod tests {
             .expect("count configs");
         assert_eq!(config_count, 1, "must not create duplicate plugin configs");
 
-        // Still exactly one host_package, but with the updated version.
-        let packages = HostPackage::find()
-            .filter(host_package::Column::HostId.eq(host_id))
-            .filter(host_package::Column::PackageIdentifier.eq("wget"))
+        // Still exactly one host_software_items link, but with the updated version.
+        let hsi_links = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
             .all(&db)
             .await
-            .expect("query host packages");
+            .expect("query host software items");
         assert_eq!(
-            packages.len(),
+            hsi_links.len(),
             1,
-            "must not create duplicate host_package rows"
+            "must not create duplicate host_software_items rows"
         );
         assert_eq!(
-            packages[0].installed_version.as_deref(),
+            hsi_links[0].installed_version.as_deref(),
             Some("1.24.5"),
             "installed version must be updated on second run"
         );
