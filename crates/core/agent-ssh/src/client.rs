@@ -403,17 +403,13 @@ pub(crate) async fn handle_execute_update_ssh(
                 update_id = %payload.update_history_id,
                 "no SSH host found for ExecuteUpdate host_machine_id"
             );
-            conn.send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
-                update_history_id: payload.update_history_id,
-                status: UpdateFinalStatus::Failed,
-                from_version: None,
-                to_version: None,
-                output: String::new(),
-                error: Some(format!(
+            conn.send_best_effort(make_ssh_update_error_response(
+                payload.update_history_id,
+                format!(
                     "SSH host with machine_id '{}' not found",
                     payload.host_machine_id
-                )),
-            }))
+                ),
+            ))
             .await;
             return;
         }
@@ -424,14 +420,10 @@ pub(crate) async fn handle_execute_update_ssh(
                 error = %e,
                 "DB error looking up SSH host for ExecuteUpdate"
             );
-            conn.send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
-                update_history_id: payload.update_history_id,
-                status: UpdateFinalStatus::Failed,
-                from_version: None,
-                to_version: None,
-                output: String::new(),
-                error: Some(format!("DB error: {e}")),
-            }))
+            conn.send_best_effort(make_ssh_update_error_response(
+                payload.update_history_id,
+                format!("DB error: {e}"),
+            ))
             .await;
             return;
         }
@@ -447,14 +439,10 @@ pub(crate) async fn handle_execute_update_ssh(
                 "failed to acquire SSH session for ExecuteUpdate"
             );
             pool.evict(host.id).await;
-            conn.send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
-                update_history_id: payload.update_history_id,
-                status: UpdateFinalStatus::Failed,
-                from_version: None,
-                to_version: None,
-                output: String::new(),
-                error: Some(format!("SSH connection failed: {e}")),
-            }))
+            conn.send_best_effort(make_ssh_update_error_response(
+                payload.update_history_id,
+                format!("SSH connection failed: {e}"),
+            ))
             .await;
             return;
         }
@@ -467,17 +455,13 @@ pub(crate) async fn handle_execute_update_ssh(
             update_id = %payload.update_history_id,
             "rejecting update: another update is already in progress for this host"
         );
-        conn.send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
-            update_history_id: payload.update_history_id,
-            status: UpdateFinalStatus::Failed,
-            from_version: None,
-            to_version: None,
-            output: String::new(),
-            error: Some(format!(
+        conn.send_best_effort(make_ssh_update_error_response(
+            payload.update_history_id,
+            format!(
                 "Another update is already in progress for host '{}'",
                 payload.host_machine_id
-            )),
-        }))
+            ),
+        ))
         .await;
         return;
     }
@@ -870,6 +854,25 @@ async fn run_execute_batch_update_ssh(
 pub(crate) use uptrakit_agent_core::{send_update_output, send_update_result};
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+/// Build a failed `UpdateResult` [`ServiceMessage`] for SSH error paths.
+///
+/// Used by `handle_execute_update_ssh` for the host-not-found, DB-error,
+/// SSH-connection-failed, and concurrent-update-rejected cases to ensure
+/// consistent error format across all failure modes.
+fn make_ssh_update_error_response(
+    update_history_id: uuid::Uuid,
+    error_message: String,
+) -> ServiceMessage {
+    ServiceMessage::UpdateResult(UpdateResultPayload {
+        update_history_id,
+        status: UpdateFinalStatus::Failed,
+        from_version: None,
+        to_version: None,
+        output: String::new(),
+        error: Some(error_message),
+    })
+}
 
 /// Build per-assignment error results for a failed `CheckVersions` message.
 fn error_results_for_check(payload: &CheckVersionsPayload, error: &str) -> Vec<VersionCheckResult> {
