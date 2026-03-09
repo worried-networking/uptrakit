@@ -414,9 +414,11 @@ export interface SoftwareItemResponse {
 }
 
 export interface SoftwareItemHostSummary {
+	id: string;
 	host_id: string;
 	hostname: string;
 	friendly_name: string;
+	qualifier?: string | null;
 	installed_version: string | null;
 	installed_version_detected_at: string | null;
 	latest_version?: string | null;

@@ -154,9 +154,16 @@ pub struct SoftwareItemDetailResponse {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SoftwareItemHostSummary {
+    /// Primary key of the `host_software_items` row — unique per link even when the same
+    /// host appears multiple times (e.g. two Docker containers from the same image).
+    pub id: Uuid,
     pub host_id: Uuid,
     pub hostname: String,
     pub friendly_name: String,
+    /// Disambiguates multiple links between the same host and software item
+    /// (e.g. different Docker container names sharing the same image).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier: Option<String>,
     /// Role-specific plugin assignments for this host-software pair.
     pub plugins: Vec<HostPluginRoleSummary>,
     pub installed_version: Option<String>,

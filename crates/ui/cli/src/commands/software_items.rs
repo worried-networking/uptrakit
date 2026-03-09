@@ -559,11 +559,15 @@ mod tests {
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
             hosts: vec![SoftwareItemHostSummary {
+                id: "f1f2f3f4-e1e2-d1d2-c1c2-b1b2b3b4b5b6"
+                    .parse::<Uuid>()
+                    .unwrap(),
                 host_id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
                     .parse::<Uuid>()
                     .unwrap(),
                 hostname: "server-1.local".to_string(),
                 friendly_name: "Production Server".to_string(),
+                qualifier: None,
                 plugins: vec![HostPluginRoleSummary {
                     role: PluginRole::DetectVersion,
                     plugin_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
@@ -614,11 +618,15 @@ mod tests {
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
             hosts: vec![SoftwareItemHostSummary {
+                id: "f1f2f3f4-e1e2-d1d2-c1c2-b1b2b3b4b5b6"
+                    .parse::<Uuid>()
+                    .unwrap(),
                 host_id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
                     .parse::<Uuid>()
                     .unwrap(),
                 hostname: "mac-1".to_string(),
                 friendly_name: "mac-1".to_string(),
+                qualifier: None,
                 plugins: vec![HostPluginRoleSummary {
                     role: PluginRole::DetectVersion,
                     plugin_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"

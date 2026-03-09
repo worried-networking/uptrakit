@@ -308,10 +308,15 @@ async fn load_item_hosts(
         }
     };
 
-    // Group plugin rows by host_id.
-    let mut plugins_by_host: HashMap<Uuid, Vec<&host_software_item_plugin::Model>> = HashMap::new();
+    // Group plugin rows by host_software_item_id so each link only sees its own plugins.
+    // Grouping by host_id would merge plugins from sibling links (e.g. two Docker container
+    // entries for the same image on the same host), causing duplicate `role` keys.
+    let mut plugins_by_link: HashMap<Uuid, Vec<&host_software_item_plugin::Model>> = HashMap::new();
     for row in &plugin_rows {
-        plugins_by_host.entry(row.host_id).or_default().push(row);
+        plugins_by_link
+            .entry(row.host_software_item_id)
+            .or_default()
+            .push(row);
     }
 
     links
@@ -319,8 +324,8 @@ async fn load_item_hosts(
         .filter_map(|link| {
             let host = hosts.get(&link.host_id)?;
 
-            let host_plugins: Vec<HostPluginRoleSummary> = plugins_by_host
-                .get(&link.host_id)
+            let host_plugins: Vec<HostPluginRoleSummary> = plugins_by_link
+                .get(&link.id)
                 .map(|rows| {
                     rows.iter()
                         .filter_map(|pr| {
@@ -345,9 +350,11 @@ async fn load_item_hosts(
             );
 
             Some(SoftwareItemHostSummary {
+                id: link.id,
                 host_id: host.id,
                 hostname: host.hostname.clone(),
                 friendly_name: host.friendly_name.clone(),
+                qualifier: link.qualifier.clone(),
                 plugins: host_plugins,
                 installed_version: link.installed_version,
                 installed_version_detected_at: link.installed_version_detected_at,
@@ -1352,9 +1359,11 @@ mod tests {
             deactivated_at: None,
         };
         let hosts = vec![SoftwareItemHostSummary {
+            id: uuid::Uuid::now_v7(),
             host_id: uuid::Uuid::now_v7(),
             hostname: "web-01".to_string(),
             friendly_name: "Web Server 1".to_string(),
+            qualifier: None,
             plugins: vec![HostPluginRoleSummary {
                 role: PluginRole::FetchReleases,
                 plugin_config_id: uuid::Uuid::now_v7(),

@@ -314,16 +314,19 @@
 							</td>
 						</tr>
 					{:else}
-						{#each item.hosts as host (host.host_id)}
+						{#each item.hosts as host (host.id)}
 							<tr>
 								<td>
 									<a href="/hosts/{host.host_id}" class="hover:underline font-medium">{host.hostname}</a>
 									{#if host.friendly_name && host.friendly_name !== host.hostname}
 										<span class="block text-xs text-surface-500">{host.friendly_name}</span>
 									{/if}
+									{#if host.qualifier}
+										<span class="block text-xs text-surface-500 font-mono">{host.qualifier}</span>
+									{/if}
 									{#if host.plugins.length > 0}
 										<div class="mt-1 space-y-0.5">
-											{#each host.plugins as p (p.role)}
+											{#each host.plugins as p (`${p.plugin_config_id}_${p.role}`)}
 												<div class="flex items-baseline gap-1 text-xs text-surface-500">
 													<span class="shrink-0 font-semibold">{ROLE_SHORT[p.role] ?? p.role}:</span>
 													<span class="truncate">{p.plugin_config_name}</span>
