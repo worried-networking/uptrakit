@@ -162,8 +162,10 @@ The rejection gate is in `crates/ui/web-api/src/routes/plugin_configs.rs`
 (`collect_dangerous_patterns`, `format_dangerous_pattern_rejection`).
 
 When disabled via `--allow-dangerous-commands`, detected patterns are still logged as
-`security_audit:` warnings. See
-[ATK-16](../hackme/16-rce-plugin-config-manipulation.md) for the threat model.
+`security_audit:` warnings. The underlying threat: an authenticated user with `manage_commands`
+permission can craft plugin configs (shell commands, Docker `post_pull_command`, or hook arrays)
+that execute arbitrary code on managed hosts. Mitigations include permission separation, dangerous
+pattern rejection, command length limits, and security audit logging.
 
 ## SSRF Protection
 

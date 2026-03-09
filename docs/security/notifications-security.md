@@ -139,7 +139,10 @@ webhook requests.
 | `crates/shared/notification-channels/src/webhook.rs` | `validate_config()` with URL and header validation |
 | `crates/core/controller/src/cli.rs` | `--allow-private-notification-urls` CLI flag |
 
-See also: [ATK-12: Webhook Notification SSRF](../hackme/12-webhook-notification-ssrf.md).
+The threat model: a user with `manage_notifications` permission can configure a webhook URL
+targeting internal services (cloud metadata endpoints, private IPs) to probe the internal network
+or exfiltrate operational data. Mitigations include `is_private_host()` URL validation,
+`SsrfSafeResolver` DNS rebinding protection, a security-header blocklist, and redirect blocking.
 
 ## Webhook HMAC Signing
 

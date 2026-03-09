@@ -90,7 +90,10 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `POST /api/v1/services/{id}/reject`: reject a pending service.
 - `DELETE /api/v1/services/{id}`: deactivate (soft-delete) a service.
 - `POST /api/v1/services/{target_id}/merge`: merge a source into a target.
-- `POST /api/v1/services/{id}/update-freeze`: enable or disable the update freeze on a connected service. Requires `manage_agents`. See [ATK-17](../hackme/17-rce-controller-to-agent.md).
+- `POST /api/v1/services/{id}/update-freeze`: enable or disable the update freeze on a connected
+  service. Requires `manage_agents`. The freeze file blocks `ExecuteUpdate` and
+  `ExecuteBatchHostPackageUpdate` messages on the agent side, providing an emergency stop against
+  RCE via a compromised controller without terminating the WebSocket connection.
 - `/api/v1/enrollment-tokens`: CRUD endpoints for enrollment tokens (create, list, get, revoke).
   See [Enrollment Tokens API](enrollment-tokens.md) for full details.
 - `/api/v1/software-items`: CRUD endpoints for software items. A software item is a named catalog
