@@ -1,69 +1,15 @@
 # Autodiscovery API Reference
 
-This document covers all API endpoints related to the autodiscovery feature: approving discovered
-software items, triggering discovery runs, bulk-discarding pending items, and managing ignore rules.
+This document covers all API endpoints related to the autodiscovery feature: triggering discovery
+runs and managing software ignore rules.
 
-For a user-facing explanation of how autodiscovery works and the typical review workflow,
+For a user-facing explanation of how autodiscovery works and the typical workflow,
 see [Autodiscovery (End-user Guide)](../end-user/autodiscovery.md).
 
-For the underlying data model, see [Software Item Entity](../architecture/software-item-entity.md).
-
-## Software Item Discovery State
-
-The `discovery_state` field on `SoftwareItemResponse` describes how the item was created
-and whether it has been reviewed.
-
-| Value | Meaning | `enabled` value |
-| --- | --- | --- |
-| `null` | Created manually by a user | `true` |
-| `"pending"` | Discovered by an agent, awaiting review | `false` |
-| `"approved"` | Discovered item approved by a user | `true` |
-
-`enabled` is always `false` while `discovery_state` is `"pending"`. Approving a pending item sets
-both `discovery_state` to `"approved"` and `enabled` to `true`, activating version tracking.
-
----
+For the underlying data model, see [Software Item Entity](../architecture/software-item-entity.md)
+and [Unified Software Tracking](../architecture/unified-software-tracking.md).
 
 ## Endpoints
-
-### `POST /api/v1/software-items/{id}/approve`
-
-Approve a pending discovered software item. Sets `discovery_state` to `"approved"` and `enabled`
-to `true`, activating version tracking for the item.
-
-**Permission:** `manage_software`
-
-**Path parameters:**
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Software item UUID |
-
-**Request body:** none
-
-**Response `200`:** `SoftwareItemResponse`
-
-```json
-{
-  "id": "019...",
-  "name": "git",
-  "plugin_types": ["homebrew"],
-  "enabled": true,
-  "discovery_state": "approved",
-  "host_count": 1,
-  "created_at": "2026-02-23T10:00:00Z",
-  "updated_at": "2026-02-23T10:05:00Z"
-}
-```
-
-**Error responses:**
-
-| Status | Condition |
-| --- | --- |
-| `404` | Software item not found or not active |
-| `409` | Item is not in `pending` state (already approved or manually created) |
-
----
 
 ### `POST /api/v1/hosts/{id}/discover`
 
@@ -94,48 +40,6 @@ returns results.
 | --- | --- | --- |
 | `plugins_queued` | integer | Number of plugin configs queued for discovery |
 | `message` | string | Human-readable confirmation |
-
-**Error responses:**
-
-| Status | Condition |
-| --- | --- |
-| `404` | Host not found or not active |
-
----
-
-### `DELETE /api/v1/hosts/{id}/discovered`
-
-Bulk-discard all pending discovered items for a host. Soft-deletes every software item with
-`discovery_state = "pending"` that is assigned to this host. No ignore rules are created,
-so discarded packages can be re-discovered in future runs.
-
-**Permission:** `manage_software`
-
-**Path parameters:**
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Host UUID |
-
-**Query parameters:**
-
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `plugin_config_id` | UUID | No | Limit discard to pending items from a specific plugin config |
-
-**Request body:** none
-
-**Response `200`:**
-
-```json
-{
-  "discarded_count": 14
-}
-```
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `discarded_count` | integer | Number of items soft-deleted |
 
 **Error responses:**
 
@@ -183,47 +87,13 @@ Returns an error if the plugin type does not support the `DiscoverLocalSoftware`
 
 ---
 
-### `DELETE /api/v1/plugin-configs/{id}/discovered`
+## Software Ignore Rules
 
-Bulk-discard all pending discovered items for a plugin config across all hosts. Soft-deletes
-every software item with `discovery_state = "pending"` linked to this plugin config. No ignore
-rules are created.
+### `GET /api/v1/software-ignores`
 
-**Permission:** `manage_software`
-
-**Path parameters:**
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Plugin config UUID |
-
-**Request body:** none
-
-**Response `200`:**
-
-```json
-{
-  "discarded_count": 7
-}
-```
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `discarded_count` | integer | Number of items soft-deleted |
-
-**Error responses:**
-
-| Status | Condition |
-| --- | --- |
-| `404` | Plugin config not found or not active |
-
----
-
-### `GET /api/v1/autodiscovery/ignores`
-
-List autodiscovery ignore rules for the current tenant. Ignore rules suppress software items
-by name from being created as pending items in future discovery runs. A single ignore rule
-covers all plugin configs and discovery targets for that name.
+List software ignore rules for the current tenant. Ignore rules suppress software items
+by name from being created in future discovery runs. Rules can be tenant-wide or
+host-specific.
 
 **Permission:** `view_software`
 
@@ -241,7 +111,10 @@ covers all plugin configs and discovery targets for that name.
   "items": [
     {
       "id": "019...",
+      "host_id": null,
+      "plugin_config_id": null,
       "name": "telnet",
+      "package_identifier": null,
       "created_at": "2026-02-23T10:00:00Z"
     }
   ],
@@ -257,24 +130,28 @@ covers all plugin configs and discovery targets for that name.
 | Field | Type | Description |
 | --- | --- | --- |
 | `id` | UUID | Ignore rule UUID |
-| `name` | string | Software item name suppressed from discovery (matches across all plugin configs) |
+| `host_id` | UUID or null | Host UUID for host-specific rules; `null` for tenant-wide rules |
+| `plugin_config_id` | UUID or null | Plugin config scope (host-specific rules) |
+| `name` | string or null | Software item name to suppress (tenant-wide rules) |
+| `package_identifier` | string or null | Package identifier to suppress (host-specific rules) |
 | `created_at` | ISO 8601 datetime | When the rule was created |
 
 ---
 
-### `POST /api/v1/autodiscovery/ignores`
+### `POST /api/v1/software-ignores`
 
-Create an ignore rule to permanently suppress a software item name from future discovery runs.
-This endpoint is idempotent: if a rule already exists for the given name, the existing rule is
-returned rather than creating a duplicate.
+Create an ignore rule to suppress a software item from future discovery runs. This endpoint is
+idempotent: if a matching rule already exists, the existing rule is returned rather than creating
+a duplicate.
 
-A single ignore rule by name covers all plugin configs and discovery targets. For example,
-ignoring `"telnet"` prevents it from being discovered by any plugin (Homebrew, APT, etc.)
-across all hosts.
+Two types of rules are supported:
+
+- **Tenant-wide** (no `host_id`): suppresses software by name across all hosts and plugins.
+- **Host-specific** (with `host_id`): suppresses a specific package on a specific host.
 
 **Permission:** `manage_software`
 
-**Request body:**
+**Request body (tenant-wide):**
 
 ```json
 {
@@ -282,32 +159,36 @@ across all hosts.
 }
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `name` | string | Yes | Software item name to suppress (must not be empty) |
-
-**Response `201`:** Ignore rule response (same shape as items returned by
-`GET /api/v1/autodiscovery/ignores`)
+**Request body (host-specific):**
 
 ```json
 {
-  "id": "019...",
-  "name": "telnet",
-  "created_at": "2026-02-23T10:00:00Z"
+  "host_id": "019...",
+  "plugin_config_id": "019...",
+  "package_identifier": "nginx"
 }
 ```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | string | Conditional | Software item name to suppress (required for tenant-wide rules) |
+| `host_id` | UUID | Conditional | Host UUID (required for host-specific rules) |
+| `plugin_config_id` | UUID | No | Plugin config scope |
+| `package_identifier` | string | No | Package identifier scope |
+
+**Response `201`:** Ignore rule response
 
 **Error responses:**
 
 | Status | Condition |
 | --- | --- |
-| `400` | `name` missing or empty |
+| `400` | Missing required fields for the rule type |
 
 ---
 
-### `DELETE /api/v1/autodiscovery/ignores/{id}`
+### `DELETE /api/v1/software-ignores/{id}`
 
-Delete an ignore rule. After deletion, the suppressed package can be re-discovered in future
+Delete an ignore rule. After deletion, the suppressed software can be re-discovered in future
 discovery runs.
 
 **Permission:** `manage_software`
@@ -336,7 +217,7 @@ The host assignment delete endpoint accepts an optional `ignore` query parameter
 `true`, the operation removes the host assignment **and** atomically creates an ignore rule for the
 software item's name.
 
-```http
+```text
 DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true
 ```
 
@@ -349,13 +230,13 @@ DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true
 The ignore rule is scoped to the software item's name and applies tenant-wide -- future discovery
 runs on any host will skip that name across all plugin configs and discovery targets.
 
-### Example: unassign a host and suppress the package from re-discovery
+### Example: unassign a host and suppress the software from re-discovery
 
-```http
+```text
 DELETE /api/v1/software-items/019.../hosts/019...?ignore=true
 ```
 
-This is the recommended workflow for packages you want to stop tracking **and** prevent from
+This is the recommended workflow for software you want to stop tracking **and** prevent from
 reappearing in future discovery runs. If you only want to unassign the host without suppressing
 rediscovery, omit the `?ignore=true` parameter.
 

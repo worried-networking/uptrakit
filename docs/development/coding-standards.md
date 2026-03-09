@@ -106,7 +106,6 @@ Enums currently annotated with `#[non_exhaustive]`:
 **`uptrakit-shared-types`:**
 
 - `PluginType`
-- `SoftwareDiscoveryState`
 - `MqttTransport`
 - `MqttClientConnectionStatus`
 - `OutputStreamType`
@@ -873,7 +872,7 @@ if let Err(e) = req.validate() {
 | `CreateApiTokenRequest` | `name` non-empty (after trim) |
 | `CreateEnrollmentTokenRequest` | `name` non-empty; `max_uses` if present must be > 0; `expires_in_seconds` if present must be > 0 |
 | `UpdateServiceRequest` | `ping_interval_seconds` if present must be 0 (sentinel: clear override) or ≥ 5 |
-| `CreateAutodiscoveryIgnoreRequest` | `package_identifier` non-empty (after trim) |
+| `CreateSoftwareIgnoreRequest` | `name` or `package_identifier` non-empty (after trim) depending on rule type |
 
 See also: the `update_hooks.rs` module provides a similar validation pattern (`HookValidationError`) for hook configuration types.
 
@@ -1349,7 +1348,7 @@ Entity::find().filter(Column::HostId.in_subquery(host_subquery))
 ### Scope pre-loaded sets tightly
 
 When pre-loading a lookup set to avoid per-item queries, scope it to the narrowest key available. For example,
-pre-load autodiscovery ignore rules per `(tenant_id, plugin_config_id)`, not per `tenant_id` alone — the
+pre-load software ignore rules per `(tenant_id, plugin_config_id)`, not per `tenant_id` alone — the
 per-config set is bounded to what a user has explicitly configured for that one plugin, while the per-tenant set
 can be unbounded.
 

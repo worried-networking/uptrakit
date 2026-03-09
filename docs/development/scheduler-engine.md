@@ -18,8 +18,8 @@ The engine provides:
   `FetchReleasesExecutor`, `DetectVersionExecutor`, `ServiceCertCheckExecutor`, `CrlRenewalExecutor`.
   Of these, `CrlRenewalExecutor` and `ServiceCertCheckExecutor` are **internal** tasks registered
   only by the embedded scheduler (they require in-process controller resources).
-- **Shared query helpers** — `queries.rs` contains `AgentAssignmentRow`, `HostPackageAssignmentRow`,
-  `merge_config`, `query_agent_assignment_rows`, and `query_host_package_assignment_rows`, shared
+- **Shared query helpers** — `queries.rs` contains `AgentAssignmentRow`,
+  `merge_config`, and `query_agent_assignment_rows`, shared
   by `FetchReleasesExecutor` and `DetectVersionExecutor`.
 
 The CA rotation check executor (`EmbeddedCaRotationCheckExecutor`) is **not** in the engine — it
@@ -43,8 +43,8 @@ crates/shared/scheduler-engine/src/
         mod.rs
         auth_cleanup.rs
         stale_lease_cleanup.rs
-        queries.rs          — Shared: AgentAssignmentRow, HostPackageAssignmentRow, merge_config,
-                              query_agent_assignment_rows, query_host_package_assignment_rows
+        queries.rs          — Shared: AgentAssignmentRow, merge_config,
+                              query_agent_assignment_rows
         fetch_releases.rs   — FetchReleasesExecutor (Phase A parallel + Phase B agent dispatch)
         detect_version.rs   — DetectVersionExecutor (agent-side installed-version detection)
         service_cert_check.rs
@@ -145,13 +145,13 @@ DB update loop runs sequentially: updates `host_software_items.latest_version`, 
 
 **Phase B — Agent-side dispatch:** Calls `query_agent_assignment_rows` with `roles = ["fetch_releases"]`,
 builds `VersionCheckAssignment` with only `fetch_releases` set, and sends `CheckVersions` messages
-to agents. Host packages are excluded (they only have `detect_version` assignments).
+to agents.
 
 ### DetectVersionExecutor
 
 Handles the `detect_version` task. Calls `query_agent_assignment_rows` with
-`roles = ["detect_version"]` for targeted software items and `query_host_package_assignment_rows`
-for host packages. Builds `VersionCheckAssignment` with only `detect_version` set and sends
+`roles = ["detect_version"]` for software items. Builds `VersionCheckAssignment` with only
+`detect_version` set and sends
 `CheckVersions` messages. Agent responses arrive asynchronously via the existing
 `VersionCheckResults` wire message handler.
 

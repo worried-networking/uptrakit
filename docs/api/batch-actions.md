@@ -44,10 +44,9 @@ fail. Callers must inspect both arrays to determine the outcome of each item.
 | --- | --- | --- |
 | `POST /api/v1/services/batch` | `approve`, `reject`, `deactivate` | `CanManageAgents` |
 | `POST /api/v1/system-services/batch` | `approve`, `reject`, `deactivate` | `CanManageSystemServices` |
-| `POST /api/v1/software-items/batch` | `approve`, `delete` | `CanManageSoftware` |
+| `POST /api/v1/software-items/batch` | `delete` | `CanManageSoftware` |
 | `POST /api/v1/hosts/batch` | `deactivate` | `CanManageHosts` |
-| `POST /api/v1/hosts/{host_id}/packages/batch` | `delete`, `enable`, `disable` | `CanManageSoftware` |
-| `POST /api/v1/autodiscovery/ignores/batch` | `delete` | `CanManageSoftware` |
+| `POST /api/v1/software-ignores/batch` | `delete` | `CanManageSoftware` |
 | `POST /api/v1/plugin-configs/batch` | `delete` | `CanManageSoftware` |
 | `POST /api/v1/host-tags/batch` | `delete` | `CanManageHosts` |
 
@@ -73,24 +72,15 @@ transactional patterns and trigger the same WebSocket and admin event broadcasts
 
 ### Software Items (`/api/v1/software-items/batch`)
 
-- **approve** -- Transitions discovered (pending) software items to approved status. Emits a
-  `SoftwareItemUpdated` event.
 - **delete** -- Removes software items. Emits a `SoftwareItemUpdated` event.
 
 ### Hosts (`/api/v1/hosts/batch`)
 
 - **deactivate** -- Deactivates host records. Emits a `HostDeleted` event.
 
-### Host Packages (`/api/v1/hosts/{host_id}/packages/batch`)
+### Software Ignores (`/api/v1/software-ignores/batch`)
 
-- **delete** -- Removes package records from the host.
-- **enable** / **disable** -- Toggles the monitoring state of packages on the host.
-
-All three actions emit a `HostPackagesChanged` event.
-
-### Autodiscovery Ignores (`/api/v1/autodiscovery/ignores/batch`)
-
-- **delete** -- Removes ignore rules from the autodiscovery configuration.
+- **delete** -- Removes ignore rules from the software ignore list.
 
 ### Plugin Configs (`/api/v1/plugin-configs/batch`)
 
@@ -166,8 +156,7 @@ extension action is invoked with an `ids` array in the params.
 | `crates/ui/web-api/src/routes/system_services.rs` | `batch_system_services` handler |
 | `crates/ui/web-api/src/routes/software_items.rs` | `batch_software_items` handler |
 | `crates/ui/web-api/src/routes/hosts.rs` | `batch_hosts` handler |
-| `crates/ui/web-api/src/routes/host_packages.rs` | `batch_host_packages` handler |
-| `crates/ui/web-api/src/routes/autodiscovery.rs` | `batch_autodiscovery_ignores` handler |
+| `crates/ui/web-api/src/routes/software_ignores.rs` | `batch_software_ignores` handler |
 | `crates/ui/web-api/src/routes/plugin_configs.rs` | `batch_plugin_configs` handler |
 | `crates/shared/extension-framework/src/lib.rs` | `ActionDef` with `batch_action` field |
 | `frontend/src/lib/types.ts` | `BatchActionRequest`, `BatchActionResponse` TypeScript types |

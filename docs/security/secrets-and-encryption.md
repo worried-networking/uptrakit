@@ -355,7 +355,7 @@ flag). See [NATS Deployment](../end-user/deployment/nats.md) and
 ### Plugin config encryption in NATS messages
 
 Plugin config fields in `CheckVersions`, `ExecuteUpdate`,
-`ExecuteBatchHostPackageUpdate`, and `DiscoverSoftware` messages are encrypted
+`ExecuteBatchUpdate`, and `DiscoverSoftware` messages are encrypted
 with AES-256-GCM before NATS publication. This is separate from TLS transport
 encryption — even with `nats-tls://`, configs are encrypted at the application
 layer so they are unreadable at rest in JetStream storage and to any NATS

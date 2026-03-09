@@ -92,15 +92,13 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `POST /api/v1/services/{target_id}/merge`: merge a source into a target.
 - `POST /api/v1/services/{id}/update-freeze`: enable or disable the update freeze on a connected
   service. Requires `manage_agents`. The freeze file blocks `ExecuteUpdate` and
-  `ExecuteBatchHostPackageUpdate` messages on the agent side, providing an emergency stop against
+  `ExecuteBatchUpdate` messages on the agent side, providing an emergency stop against
   RCE via a compromised controller without terminating the WebSocket connection.
 - `/api/v1/enrollment-tokens`: CRUD endpoints for enrollment tokens (create, list, get, revoke).
   See [Enrollment Tokens API](enrollment-tokens.md) for full details.
 - `/api/v1/software-items`: CRUD endpoints for software items. A software item is a named catalog
   entry; plugin configs and package identifiers live on role-specific plugin assignments
   (`host_software_item_plugins`), not on the item itself.
-- `POST /api/v1/software-items/{id}/approve`: approve a discovered (pending) software item.
-  Requires `manage_software`.
 - `POST /api/v1/software-items/{id}/hosts`: assign a software item to one or more hosts. Each host
   assignment carries a list of role-specific plugin assignments (`plugins: Vec<HostPluginRoleAssignment>`),
   where each role entry specifies the `role`, `plugin_config_id` (or inline `plugin_config`),
@@ -109,22 +107,20 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
   change the plugin config, package identifier, config override, or execution site. The request body
   includes `role` to identify which role to update. Requires `manage_software`.
 - `DELETE /api/v1/software-items/{id}/hosts/{host_id}[?ignore=true]`: remove a host assignment.
-  Pass `?ignore=true` to also create an autodiscovery ignore rule for the software item's
+  Pass `?ignore=true` to also create a software ignore rule for the software item's
   name. Requires `manage_software`.
 - `/api/v1/update-history`: read-only history with filters by host, software item, or status.
 - `POST /api/v1/hosts/{id}/discover`: trigger software discovery on a specific host. Requires `manage_software`.
-- `DELETE /api/v1/hosts/{id}/discovered[?plugin_config_id={uuid}]`: bulk-discard pending discovered items for a host. Requires `manage_software`.
 - `POST /api/v1/plugin-configs/{id}/discover`: trigger discovery for a specific plugin config. Requires `manage_software`.
-- `DELETE /api/v1/plugin-configs/{id}/discovered`: bulk-discard pending discovered items for a plugin config. Requires `manage_software`.
 
 `PluginConfigResponse` includes a `capabilities: Vec<String>` field listing the snake\_case capability strings
 declared by the plugin type (e.g. `["discover_local_software"]`). Clients should use this field to determine
-which actions are valid for a given config — for example, only showing **Discover** and **Discard** buttons
+which actions are valid for a given config — for example, only showing a **Discover** button
 when `"discover_local_software"` is present. Discovery-capable plugin types are `releases_docker`,
 `package_manager_homebrew`, `package_manager_apt`, and `discovery_proxmox_helper_scripts`; non-discovery types
 (`releases_github`, `generic_shell`) return an empty capabilities list for this field.
 
-- `/api/v1/autodiscovery/ignores`: CRUD for permanent suppression rules. See [docs/api/autodiscovery.md](autodiscovery.md) for full details.
+- `/api/v1/software-ignores`: CRUD for permanent suppression rules. See [Autodiscovery API](autodiscovery.md) for full details.
 - `/api/v1/discovery-allowlist`: tenant-wide list of plugin types permitted to run during host
   discovery. `GET` requires `view_software`; `POST`/`DELETE` require `manage_software`.
 - `/api/v1/hosts/{id}/discovery-allowlist`: per-host override of the tenant-wide allowlist.
@@ -433,10 +429,9 @@ actions are simple multi-ID operations that return per-item success/failure resu
 | `POST` | `/api/v1/services/batch` | `approve`, `reject`, `deactivate`, `delete` | `ManageAgents` |
 | `POST` | `/api/v1/system-services/batch` | `approve`, `reject`, `deactivate`, `delete` | `ManageSystemServices` |
 | `POST` | `/api/v1/hosts/batch` | `deactivate`, `delete` | `ManageHosts` |
-| `POST` | `/api/v1/hosts/{host_id}/packages/batch` | `delete`, `enable`, `disable` | `ManageSoftware` |
-| `POST` | `/api/v1/software-items/batch` | `approve`, `delete` | `ManageSoftware` |
+| `POST` | `/api/v1/software-items/batch` | `delete` | `ManageSoftware` |
 | `POST` | `/api/v1/plugin-configs/batch` | `delete` | `ManageSoftware` |
-| `POST` | `/api/v1/autodiscovery/ignores/batch` | `delete` | `ManageSoftware` |
+| `POST` | `/api/v1/software-ignores/batch` | `delete` | `ManageSoftware` |
 | `POST` | `/api/v1/host-tags/batch` | `delete` | `ManageHosts` |
 
 See [Batch Actions API](batch-actions.md) for full request/response schema and error handling.
@@ -463,44 +458,6 @@ Host tags provide user-defined labels for organizing hosts within a tenant. See
 | `crates/ui/web-api-queries/src/queries/host_tags.rs` | Query functions |
 | `crates/shared/web-api-types/src/host_tags.rs` | Request/response types |
 | `crates/shared/openapi-client/src/host_tags.rs` | Typed API client |
-
-## Host Package Endpoints
-
-Host packages represent per-host system-level packages tracked through the host packages subsystem.
-See [Host Packages API](host-packages.md) for the full endpoint reference with request/response
-examples.
-
-- `GET /api/v1/hosts/{host_id}/packages` — list packages with pagination and filters
-  (`?enabled=`, `?has_update=`, `?category=`, `?search=`). Requires `ViewSoftware`.
-- `GET /api/v1/hosts/{host_id}/packages/{id}` — single package detail with update history.
-  Requires `ViewSoftware`.
-- `PUT /api/v1/hosts/{host_id}/packages/{id}` — update (enable/disable). Requires
-  `ManageSoftware`.
-- `DELETE /api/v1/hosts/{host_id}/packages/{id}` — soft-delete (`?ignore=true` to also create
-  ignore rule). Requires `ManageSoftware`.
-- `POST /api/v1/hosts/{host_id}/packages/{id}/update` — trigger single package update. Requires
-  `ManageSoftware`.
-- `POST /api/v1/hosts/{host_id}/packages/{id}/promote` — promote a host package into a tracked
-  software item. Requires `ManageSoftware`. See [host-packages.md](host-packages.md#promote-a-host-package).
-- `POST /api/v1/hosts/{host_id}/packages/update-all` — trigger batch update for outdated
-  packages (`?category=security` for security-only). Requires `ManageSoftware`.
-- `POST /api/v1/hosts/{host_id}/packages/check-versions` — trigger version check. Requires
-  `ManageSoftware`.
-- `GET /api/v1/hosts/{host_id}/package-ignores` — list ignore rules. Requires `ViewSoftware`.
-- `POST /api/v1/hosts/{host_id}/package-ignores` — create ignore rule. Requires
-  `ManageSoftware`.
-- `DELETE /api/v1/hosts/{host_id}/package-ignores/{id}` — remove ignore rule. Requires
-  `ManageSoftware`.
-
-### Key files
-
-| File | Purpose |
-| --- | --- |
-| `crates/ui/web-api/src/routes/host_packages.rs` | Route handlers |
-| `crates/ui/web-api-queries/src/queries/host_packages.rs` | CRUD queries |
-| `crates/ui/web-api-queries/src/queries/host_package_ignores.rs` | Ignore list queries |
-| `crates/ui/web-api-queries/src/queries/host_package_triggers.rs` | Update trigger pipeline |
-| `crates/shared/web-api-types/src/host_packages.rs` | Request/response types |
 
 ## System Services Endpoints
 
@@ -644,7 +601,7 @@ Update history records each attempt and stores the full command output for audit
 | `failed` | Update failed (terminal). |
 
 Triggers return **HTTP 409** if another update (`pending` or `in_progress`) already exists for the target host,
-across both software-item updates and host-package batches.
+across all update types.
 
 ## Software Item Version Check Endpoints
 
@@ -709,7 +666,7 @@ Types are defined in `crates/shared/web-api-types/src/software_items.rs`:
 | Type | Fields |
 | --- | --- |
 | `TriggerVersionCheckResponse` | `agents_notified` (u32), `controller_checks_run` (u32, default `0`), `message` (String) |
-| `SoftwareItemResponse` | `id`, `name`, `plugins` (Vec&lt;String&gt; -- distinct plugin types), `enabled`, `discovery_state`, `last_checked_at`, `host_count`, `latest_version` (Option), `update_available`, `created_at`, `updated_at` |
+| `SoftwareItemResponse` | `id`, `name`, `plugins` (Vec&lt;String&gt; -- distinct plugin types), `enabled`, `featured`, `last_checked_at`, `host_count`, `latest_version` (Option), `update_available`, `created_at`, `updated_at` |
 | `SoftwareItemDetailResponse` | Extends `SoftwareItemResponse` with `hosts: Vec<SoftwareItemHostSummary>` |
 | `SoftwareItemHostSummary` | `host_id`, `hostname`, `friendly_name`, `plugins` (Vec&lt;HostPluginRoleSummary&gt;), `installed_version`, `installed_version_detected_at`, `latest_version` (Option), `latest_release_metadata` (Option), `update_available`, `last_updated_at`, `linked_at` |
 | `HostPluginRoleSummary` | `role` (PluginRole), `plugin_config_id`, `plugin_config_name`, `plugin_type`, `package_identifier`, `config_override` (Option), `execution_site` |
@@ -996,7 +953,7 @@ All paginated endpoints return a `PaginatedResponse<T>`:
 | `GET /api/v1/notifications/rules` | `ListRulesQuery` (includes `page`/`per_page`) | Filterable by `channel_id`, `event_type` |
 | `GET /api/v1/notifications/log` | `PaginationParams` | |
 | `GET /api/v1/update-batches` | `UpdateBatchListQuery` (includes `page`/`per_page`) | Filterable by `status` |
-| `GET /api/v1/hosts/{host_id}/packages` | `ListHostPackagesQuery` (includes `page`/`per_page`) | Filterable by `enabled`, `has_update`, `category`, `search` |
+| `GET /api/v1/software-ignores` | `PaginationParams` | |
 
 ### Endpoints NOT paginated (already bounded)
 

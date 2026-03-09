@@ -104,8 +104,8 @@ to carry a JSON payload.
 | `update_started` | `{"update_history_id":"<uuid>","host_id":"<uuid>","software_item_id":"<uuid>"}` | Update execution started |
 | `update_completed` | `{"update_history_id":"<uuid>","host_id":"<uuid>","software_item_id":"<uuid>","status":"<string>"}` | Update done |
 | `discovery_completed` | `{"host_id":"<uuid>"}` | Autodiscovery done for host |
-| `host_packages_changed` | `{"host_id":"<uuid>"}` | Host packages updated |
-| `batch_host_package_update_completed` | `{"host_id":"<uuid>"}` | Batch package update done |
+| `host_software_changed` | `{"host_id":"<uuid>"}` | Host software items updated |
+| `batch_update_completed` | `{"host_id":"<uuid>"}` | Batch update done |
 | `system_service_status_changed` | `{"id":"<uuid>","status":"<string>"}` | System service status changed |
 | `scheduler_task_completed` | `{"task_id":"<uuid>"}` | Scheduled task done |
 

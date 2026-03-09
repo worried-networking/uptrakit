@@ -142,8 +142,8 @@ The `POST /api/v1/services/batch` endpoint allows performing lifecycle operation
 reject, deactivate, delete) on multiple services in a single request. System services have
 a corresponding `POST /api/v1/system-services/batch` endpoint.
 
-Batch actions are also available for hosts, host packages, software items, plugin configs,
-and autodiscovery ignores. See [Batch Actions API](batch-actions.md) for the full reference
+Batch actions are also available for hosts, software items, plugin configs,
+and software ignores. See [Batch Actions API](batch-actions.md) for the full reference
 including request/response schema and supported actions per resource.
 
 ## Update Hooks

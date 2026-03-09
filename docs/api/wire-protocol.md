@@ -44,7 +44,7 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 ### Agent-specific (service -> controller)
 
 `report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`, `discovery_results`,
-`batch_host_package_update_result`
+`batch_update_result`
 
 ### SSH agent-specific (service -> controller)
 
@@ -59,7 +59,7 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 ### MQTT-specific (service -> controller)
 
 `register`, `release_tenants`, `mqtt_client_status`, `mqtt_trigger_update`,
-`mqtt_trigger_host_package_update`
+`mqtt_trigger_host_batch_update`
 
 ### Shared (controller -> service)
 
@@ -92,11 +92,11 @@ entirely (`LoopOutcome::Shutdown`), while `server_restarting` causes it to recon
 
 ### Agent-specific (controller -> service)
 
-`check_versions`, `execute_update`, `discover_software`, `execute_batch_host_package_update`,
+`check_versions`, `execute_update`, `discover_software`, `execute_batch_update`,
 `set_update_freeze`
 
 Both the regular agent and the SSH agent receive `check_versions`, `execute_update`, `discover_software`, and
-`execute_batch_host_package_update` messages.
+`execute_batch_update` messages.
 The `host_machine_id` field in each payload determines which host the operation targets
 (see [`host_machine_id` Field](#host_machine_id-field)).
 
@@ -361,7 +361,7 @@ See [docs/api/autodiscovery.md](autodiscovery.md) for the full autodiscovery wor
 
 Remotely enables or disables the agent-side execution freeze file
 (`<state-dir>/update-freeze`). When `enabled` is `true`, the agent creates the
-freeze file and stops processing `ExecuteUpdate`/`ExecuteBatchHostPackageUpdate`
+freeze file and stops processing `ExecuteUpdate`/`ExecuteBatchUpdate`
 messages. When `false`, the agent removes the file and resumes normal operation.
 
 ```json
@@ -491,8 +491,8 @@ deserialization failures (hard fail, connection close).
 | `MAX_VERSION_CHECK_ASSIGNMENTS` | 2,000 | `CheckVersionsPayload.assignments` |
 | `MAX_VERSION_CHECK_RESULTS` | 2,000 | `VersionCheckResultsPayload.results` |
 | `MAX_UPDATE_HOOKS` | 50 | `pre_update_hooks`, `post_update_hooks` |
-| `MAX_BATCH_UPDATES` | 500 | `ExecuteBatchHostPackageUpdatePayload.updates` |
-| `MAX_BATCH_UPDATE_RESULTS` | 500 | `BatchHostPackageUpdateResultPayload.results` |
+| `MAX_BATCH_UPDATES` | 500 | `ExecuteBatchUpdatePayload.updates` |
+| `MAX_BATCH_UPDATE_RESULTS` | 500 | `BatchUpdateResultPayload.results` |
 | `MAX_DISCOVERY_PLUGINS` | 50 | `DiscoverSoftwarePayload.plugins` |
 | `MAX_DISCOVERY_PLUGIN_RESULTS` | 50 | `DiscoveryResultsPayload.results` |
 | `MAX_DISCOVERIES_PER_PLUGIN` | 1,000 | `DiscoveryPluginResult.discoveries` |
@@ -529,7 +529,7 @@ is closed with `CloseReason::RateLimitExceeded`.
 ## Report Pagination
 
 When a service-to-controller report payload (`discovery_results`, `version_check_results`,
-`report_hosts`, `batch_host_package_update_result`) exceeds 768 KB
+`report_hosts`, `batch_update_result`) exceeds 768 KB
 (`PAGINATION_SIZE_THRESHOLD`), the sender automatically splits it across multiple WebSocket
 frames. Each frame carries pagination metadata in the envelope.
 
@@ -609,7 +609,7 @@ All limits are defined in `crates/shared/wire/src/limits.rs`.
 | `DiscoveryResultsPayload` | `results: Vec<DiscoveryPluginResult>` | `discovery_results` |
 | `VersionCheckResultsPayload` | `results: Vec<VersionCheckResult>` | `version_check_results` |
 | `ReportHostsPayload` | `hosts: Vec<HostInfo>` | `report_hosts` |
-| `BatchHostPackageUpdateResultPayload` | `results: Vec<BatchHostPackageUpdateResult>` | `batch_host_package_update_result` |
+| `BatchUpdateResultPayload` | `results: Vec<BatchUpdateResult>` | `batch_update_result` |
 
 ## Error Codes
 
@@ -869,7 +869,7 @@ credentials). MQTT services filter by `tenant_id`.
 - An agent sends `update_started` (status transitions to `in_progress`) — `update_in_progress` stays `true`
 - An update result (completed or failed) is received — clears `update_in_progress: false`
 - An MQTT service first connects and receives its tenant assignments
-- A host package batch update is triggered or completed
+- A batch update is triggered or completed
 
 ```json
 {
@@ -895,7 +895,7 @@ credentials). MQTT services filter by `tenant_id`.
       ]
     }
   ],
-  "host_package_hosts": [
+  "host_summaries": [
     {
       "host_id": "770e8400-e29b-41d4-a716-446655440003",
       "hostname": "my-host",
@@ -907,9 +907,9 @@ credentials). MQTT services filter by `tenant_id`.
 }
 ```
 
-Each item in `items` corresponds to one enabled, non-deactivated software item whose `discovery_state` is
-`null` or `"approved"`. Each `hosts` entry contains the version data for one host that tracks the software
-item. An empty string in `installed_version` or `latest_version` means the version is not yet known.
+Each item in `items` corresponds to one enabled, non-deactivated, featured software item. Each `hosts`
+entry contains the version data for one host that tracks the software item. An empty string in
+`installed_version` or `latest_version` means the version is not yet known.
 
 The `hosts` entries use the following fields:
 
@@ -928,20 +928,21 @@ The `hosts` entries use the following fields:
 `release_url` and `release_notes` are populated only when the plugin fetches release metadata (e.g. GitHub
 Releases). They are absent (`null` / omitted) for plugins that track only version numbers.
 
-### `host_package_hosts` field
+### `host_summaries` field
 
-The `host_package_hosts` field (defaults to `[]` when absent — older controllers omit it) carries one
-`MqttHostPackageHostState` entry per host that has at least one tracked host package for the tenant.
+The `host_summaries` field (defaults to `[]` when absent -- older controllers omit it) carries one
+`MqttHostSummaryState` entry per host that has at least one tracked non-featured software item for
+the tenant.
 
 | Field | Type | Description |
 | --- | --- | --- |
 | `host_id` | UUID | Host UUID |
 | `hostname` | String | Machine hostname |
 | `friendly_name` | String | User-defined display name for the host |
-| `pending_count` | u32 | Number of packages where both versions are known and differ |
-| `security_pending_count` | u32 | Number of packages with `update_category = "security"` where both versions are known and differ |
-| `total_count` | u32 | Total number of enabled, non-deactivated packages tracked for this host |
-| `update_in_progress` | bool | `true` while a `host_package_update_history` record is `pending` or `in_progress` for this host |
+| `pending_count` | u32 | Number of non-featured items where both versions are known and differ |
+| `security_pending_count` | u32 | Number of non-featured items with `update_category = "security"` where both versions are known and differ |
+| `total_count` | u32 | Total number of enabled, non-deactivated, non-featured items tracked for this host |
+| `update_in_progress` | bool | `true` while an `update_history` record is `pending` or `in_progress` for a batch on this host |
 
 The MQTT service publishes these to retained topics per host. For the **all-packages** entity:
 
@@ -1001,17 +1002,17 @@ The controller rejects the request with an `error` message (no WS close) in the 
 - The host has no approved agent linked.
 - An update with status `pending` or `in_progress` already exists for the same `(host_id, software_item_id)` pair.
 
-## `mqtt_trigger_host_package_update` Payload
+## `mqtt_trigger_host_batch_update` Payload
 
 Sent by the MQTT service to the controller when a Home Assistant user presses **Install** on a
-per-host packages or security updates entity. The controller finds all qualifying outdated host
-packages for the host and dispatches a single `execute_batch_host_package_update` to the agent.
+per-host summary or security updates entity. The controller finds all qualifying outdated
+non-featured software items for the host and dispatches a batch update to the agent.
 
 ```json
 {
   "protocol_version": 1,
   "seq": 3,
-  "type": "mqtt_trigger_host_package_update",
+  "type": "mqtt_trigger_host_batch_update",
   "tenant_id": "550e8400-e29b-41d4-a716-446655440001",
   "host_id": "770e8400-e29b-41d4-a716-446655440003",
   "mqtt_client_id": "880e8400-e29b-41d4-a716-446655440004",
@@ -1021,32 +1022,34 @@ packages for the host and dispatches a single `execute_batch_host_package_update
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `tenant_id` | UUID | — | Tenant scope — must match an assigned tenant for this MQTT service |
-| `host_id` | UUID | — | The host whose outdated packages should be updated |
-| `mqtt_client_id` | UUID | — | The MQTT client that received the Install command; stored as `actor_id` in `host_package_update_history` |
-| `security_only` | bool | `false` | When `true`, only packages with `update_category = "security"` are included in the batch. Set automatically by the MQTT service when the security updates entity is triggered. |
+| `tenant_id` | UUID | -- | Tenant scope -- must match an assigned tenant for this MQTT service |
+| `host_id` | UUID | -- | The host whose outdated non-featured items should be updated |
+| `mqtt_client_id` | UUID | -- | The MQTT client that received the Install command; stored as `actor_id` in `update_history` |
+| `security_only` | bool | `false` | When `true`, only items with `update_category = "security"` are included in the batch. Set automatically by the MQTT service when the security updates entity is triggered. |
 
 The controller:
 
 1. Validates that `tenant_id` is assigned to this MQTT service instance.
-2. Loads all enabled, non-deactivated host packages where `installed_version != latest_version` (both
-   must be known). When `security_only = true`, further filters to `update_category = "security"`.
+2. Loads all enabled, non-deactivated, non-featured software items where
+   `installed_version != latest_version` (both must be known). When `security_only = true`,
+   further filters to `update_category = "security"`.
 3. Guards against a concurrent batch already `pending` or `in_progress` for this host.
-4. Creates one `update_batch` and one `host_package_update_history` row per outdated package (both
-   inside a transaction).
-5. Groups packages by `plugin_config_id` and sends one `execute_batch_host_package_update` per group
-   to the agent.
-6. Immediately pushes a `software_states` message so MQTT/HA reflects `update_in_progress: true`.
+4. Creates one `update_batch` and one `update_history` row per outdated item (both inside a
+   transaction).
+5. Groups items by `plugin_config_id` and sends one `execute_batch_update` per group to the
+   agent.
+6. Immediately pushes a `software_states` message so MQTT/HA reflects
+   `update_in_progress: true`.
 
 The controller responds with an `error` message (no WS close) in the following cases:
 
 - `tenant_id` is not assigned to this MQTT service instance.
-- No qualifying outdated packages exist for the host (nothing to do).
+- No qualifying outdated items exist for the host (nothing to do).
 - A batch is already `pending` or `in_progress` for this host.
 - The host has no connected agent.
 
-The resulting `update_batch` record has `actor_type = "mqtt"`, `actor_id = <mqtt_client_id>`, and
-`batch_type = "host_package"`. Each `host_package_update_history` row gets the same actor attribution.
+The resulting `update_batch` record has `actor_type = "mqtt"`, `actor_id = <mqtt_client_id>`,
+and `batch_type = "host_update"`. Each `update_history` row gets the same actor attribution.
 
 ## Controller–Controller Messages (NATS only)
 
@@ -1094,30 +1097,30 @@ Consumed by controllers to trigger `ca_rotation_trigger.notify_one()`.
 }
 ```
 
-## Batch host package update messages
+## Batch update messages
 
-### `execute_batch_host_package_update` (controller -> agent)
+### `execute_batch_update` (controller -> agent)
 
 > **Security note:** When published to NATS JetStream, plugin config fields in
 > this message are AES-256-GCM encrypted using the shared master key. Receiving
 > controllers decrypt the configs before delivering to agents. See
-> [NATS Integration — Plugin Config Protection](../development/nats-integration.md#plugin-config-protection).
+> [NATS Integration -- Plugin Config Protection](../development/nats-integration.md#plugin-config-protection).
 
-Triggers a batch update for host packages grouped by plugin type. The agent calls
+Triggers a batch update for software items grouped by plugin type. The agent calls
 `plugin.execute_batch_update()` to execute a single bulk command (e.g., `apt-get upgrade`).
 
 ```json
 {
   "protocol_version": 1,
   "seq": 1,
-  "type": "execute_batch_host_package_update",
+  "type": "execute_batch_update",
   "host_machine_id": "abc-123",
   "batch_id": "550e8400-...",
   "plugin_type": "package_manager_apt",
   "plugin_config": { "...merged config..." },
   "updates": [
     {
-      "host_package_id": "uuid",
+      "host_software_item_id": "uuid",
       "update_history_id": "uuid",
       "package_identifier": "nginx",
       "to_version": "1.24.0",
@@ -1130,19 +1133,19 @@ Triggers a batch update for host packages grouped by plugin type. The agent call
 }
 ```
 
-### `batch_host_package_update_result` (agent -> controller)
+### `batch_update_result` (agent -> controller)
 
-Reports per-package outcomes after a batch update completes.
+Reports per-item outcomes after a batch update completes.
 
 ```json
 {
   "protocol_version": 1,
   "seq": 1,
-  "type": "batch_host_package_update_result",
+  "type": "batch_update_result",
   "batch_id": "550e8400-...",
   "results": [
     {
-      "host_package_id": "uuid",
+      "host_software_item_id": "uuid",
       "update_history_id": "uuid",
       "status": "completed",
       "output": "...command output...",
@@ -1153,7 +1156,8 @@ Reports per-package outcomes after a batch update completes.
 }
 ```
 
-See [Host Packages Architecture](../architecture/host-packages.md) for the full entity design.
+See [Unified Software Tracking](../architecture/unified-software-tracking.md) for the full
+data model.
 
 ## `report_plugin_config` / `report_plugin_config_response`
 

@@ -244,15 +244,16 @@ via `load_host_tags_batch()` when listing hosts.
 
 See [host tags architecture](host-tags.md) for the full entity design.
 
-## Host packages
+## Host software summary
 
-Hosts have a one-to-many relationship with `host_packages` — system-level packages tracked per-host by package
-manager plugins. The `HostResponse` includes an `update_summary` field with aggregate update counts:
+Hosts have a one-to-many relationship with `host_software_items` -- the junction table for all
+software items assigned to a host. The `HostResponse` includes an `update_summary` field with
+aggregate update counts for non-featured items:
 
-- `available_updates_count`: total host packages where `installed_version != latest_version`
+- `available_updates_count`: total non-featured items where `installed_version != latest_version`
 - `security_updates_count`: subset where `update_category = 'security'`
 
-See [host packages architecture](host-packages.md) for the full entity design.
+See [unified software tracking](unified-software-tracking.md) for the full data model.
 
 ## REST API
 
@@ -264,6 +265,4 @@ See [host packages architecture](host-packages.md) for the full entity design.
 | DELETE | `/api/v1/hosts/{id}` | ManageHosts | Soft-delete (set deactivated_at) |
 | PUT | `/api/v1/hosts/{id}/tags` | ManageHosts | Set (replace-all) tags on a host |
 
-See also [host packages API](../api/host-packages.md) for package management endpoints scoped under
-`/api/v1/hosts/{host_id}/packages`, and [host tags API](../api/host-tags.md) for tag management
-endpoints.
+See also [host tags API](../api/host-tags.md) for tag management endpoints.

@@ -82,7 +82,7 @@ credentials, tokens, private keys, or runtime secret material in any version/bui
 
 Both `uptrakit-agent` and `uptrakit-agent-ssh` check for a freeze file at
 `<state-dir>/update-freeze` before processing `ExecuteUpdate` or
-`ExecuteBatchHostPackageUpdate` messages. When the file exists, the message is
+`ExecuteBatchUpdate` messages. When the file exists, the message is
 silently dropped and a `tracing::warn!` is emitted. This is an emergency stop
 mechanism — not a per-command review gate.
 

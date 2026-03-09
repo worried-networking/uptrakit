@@ -287,8 +287,8 @@ not block successful items. No new database tables are required; batch operation
 columns (status updates, soft-deletes). Side effects (WebSocket notifications, admin events, CRL
 renewal) fire per succeeded item, same as the single-item endpoints.
 
-Covered resources: services, system services, software items, hosts, host packages, host tags,
-autodiscovery ignore rules, and plugin configs. Extensions can mark `ActionDef` as batch-capable
+Covered resources: services, system services, software items, hosts, host tags,
+software ignore rules, and plugin configs. Extensions can mark `ActionDef` as batch-capable
 via `batch_action: true`. See [docs/api/batch-actions.md](docs/api/batch-actions.md).
 
 The frontend provides multi-select checkboxes on all list pages with a shared `BatchActionBar`
@@ -306,19 +306,20 @@ summaries, batch-loaded to avoid N+1 queries.
 
 See [Host Tags Architecture](docs/architecture/host-tags.md) for the full entity design.
 
-## Host packages (system-level tracking)
+## Unified software tracking
 
-In addition to targeted software items (cross-host tracking), the system supports per-host package tracking for
-system-level package managers. Host packages are tracked in separate `host_packages`, `host_package_ignores`, and
-`host_package_update_history` tables. A `TrackingSystem` enum (`Targeted` | `HostManaged`) on `DiscoveredSoftware`
-routes discovery results to the appropriate system.
+All software -- from individually tracked applications to system-level packages -- is stored in the
+unified `software_items` table. A `featured` boolean flag controls visibility: featured items (Docker,
+PHS-discovered apps) appear individually in the main Software list, while non-featured items (APT,
+Homebrew, npm) appear as aggregated per-host package summaries. All discovered items are created
+immediately with `enabled: true` -- there is no pending state or approval workflow.
 
-Key differences from targeted software items: no cross-host deduplication, no approval step (created enabled
-immediately), single `plugin_config_id` per package (no role-based plugin assignments), and batch update support
-via `Plugin::execute_batch_update()`. The `HostResponse` includes an `HostUpdateSummary` with aggregate update
-counts.
+For featured items, role-based plugin assignments live in `host_software_item_plugins`. For non-featured
+items, `plugin_config_id` and `package_identifier` are stored directly on the `host_software_items`
+junction row. Batch updates are supported via `Plugin::execute_batch_update()`. The `HostResponse`
+includes a `HostUpdateSummary` with aggregate update counts.
 
-See [Host Packages Architecture](docs/architecture/host-packages.md) for the full entity design.
+See [Unified Software Tracking](docs/architecture/unified-software-tracking.md) for the full design.
 
 ## Update output streaming (SSE)
 

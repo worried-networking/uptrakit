@@ -10,17 +10,19 @@ Records are immutable — once created they are not modified or soft-deleted.
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | UUID PK | UUIDv7 |
+| `tenant_id` | UUID FK → `tenants.id` | NOT NULL; ON DELETE RESTRICT |
 | `host_id` | UUID FK → `hosts.id` | ON DELETE CASCADE |
 | `software_item_id` | UUID FK → `software_items.id` | ON DELETE CASCADE |
+| `host_software_item_id` | UUID FK → `host_software_items.id` | Nullable; ON DELETE SET NULL |
 | `from_version` | TEXT | Nullable; version before update |
-| `to_version` | TEXT | NOT NULL; target version |
+| `to_version` | TEXT | Nullable; target version (null for batch updates where the target is implicit) |
 | `status` | TEXT | String-backed enum: `queued`, `pending`, `in_progress`, `completed`, `failed` |
 | `output` | TEXT | NOT NULL; full command output |
 | `actor_type` | TEXT | NOT NULL; `"user"`, `"mqtt"`, `"scheduler"`, or `"legacy"` |
 | `actor_id` | TEXT | NOT NULL; user UUID, MQTT client UUID, or empty string |
 | `update_category` | TEXT | Nullable; update category (e.g. `security`, `bugfix`, `feature`, `unknown`) |
 | `batch_id` | UUID FK → `update_batches.id` | Nullable; ON DELETE SET NULL |
-| `started_at` | TIMESTAMP | |
+| `started_at` | TIMESTAMP | Nullable |
 | `completed_at` | TIMESTAMP | Nullable |
 | `created_at` | TIMESTAMP | |
 
@@ -39,6 +41,8 @@ Indexes: `idx_update_history_host_id`, `idx_update_history_software_item_id`,
 | `total_count` | INTEGER | Set at creation time |
 | `actor_type` | TEXT | `"user"` or `"mqtt"` |
 | `actor_id` | TEXT | User UUID or MQTT client ID |
+| `output` | TEXT | Nullable; aggregated batch output |
+| `output_bytes` | INTEGER | Nullable; byte count for streaming |
 | `created_at` | TIMESTAMP | |
 | `completed_at` | TIMESTAMP | Nullable |
 
@@ -71,15 +75,15 @@ covers exactly these two statuses.
 
 ## Per-host update locking
 
-At most one active (`Pending` or `InProgress`) software-item update may run on a host at any time.
-The same invariant is also cross-table: a `Pending`/`InProgress` row in `host_package_update_history`
-also blocks a new software-item update trigger, and vice versa.
+At most one active (`Pending` or `InProgress`) update may run on a host at any time.
+All update types (individual software item updates and batch updates) share the same
+`update_history` table and the same per-host lock.
 
 Enforcement layers:
 
-1. **Application check** — `validate_update_preconditions` counts active rows in both
-   `update_history` and `host_package_update_history` before inserting a new record. Returns
-   `TriggerUpdateError::HostUpdateInProgress` (HTTP 409) if either count is non-zero.
+1. **Application check** — `validate_update_preconditions` counts active rows in
+   `update_history` before inserting a new record. Returns
+   `TriggerUpdateError::HostUpdateInProgress` (HTTP 409) if the count is non-zero.
 2. **DB constraint** — the partial unique index `uix_update_history_host_active` on
    `(host_id) WHERE status IN ('pending', 'in_progress')` rejects a concurrent INSERT that
    races past the application check (multi-controller deployments).
@@ -97,14 +101,15 @@ When a batch contains multiple items for the same host:
 
 ## Tenant scoping
 
-No direct `tenant_id` column. Tenant scoping is implicit via `host_id` FK — the host table has `tenant_id`. The list
-endpoint loads all tenant host IDs and filters with `is_in()`. The get endpoint verifies the record's host belongs to
-the requesting tenant.
+The `tenant_id` column provides direct tenant scoping. The list endpoint filters by `tenant_id`
+directly. The get endpoint verifies the record's tenant matches the requesting tenant.
 
 ## Relationships
 
+- `UpdateHistory` belongs_to `Tenant` (many:1)
 - `UpdateHistory` belongs_to `Host` (many:1)
 - `UpdateHistory` belongs_to `SoftwareItem` (many:1)
+- `UpdateHistory` belongs_to `HostSoftwareItem` (many:1, optional)
 - `UpdateHistory` belongs_to `UpdateBatch` (many:1, optional)
 - `UpdateBatch` has_many `UpdateHistory`
 - `UpdateBatch` belongs_to `Tenant` (many:1)

@@ -52,12 +52,11 @@
 - **Owner/repo component validation.** Extracted `owner` and `repo` values pass
   through `is_valid_gh_component()` which rejects `/` and `..`. This prevents path
   traversal in API URLs.
-- **Discovery results require approval.** Discovered software items are created with
-  `discovery_state = "pending"` (or `"approved"` for auto-discovery with existing
-  configs). Items in `pending` state are visible but inactive until an admin reviews
-  and approves them.
+- **Discovery results are tracked immediately.** Discovered software items are created
+  with `enabled: true`. The `featured` flag controls visibility (featured items appear
+  individually; non-featured items appear in aggregated host summaries).
 - **Discovery allowlist/ignorelist.** Operators can configure discovery allowlists and
-  ignorelists to filter which discovered items are presented for approval.
+  ignorelists to filter which items are discovered and tracked.
 - **Plugin config validation.** Auto-created plugin configs pass through the target
   plugin's `validate()` method, which enforces `api_base_url` restrictions (HTTPS
   only, no private hosts for GitHub/GitLab/Forgejo).

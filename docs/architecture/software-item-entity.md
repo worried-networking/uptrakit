@@ -14,17 +14,23 @@ host to use different plugins for version detection, release fetching, and updat
 
 ## Database tables
 
-- **`software_items`**: `id` (UUID PK), `tenant_id`, `name`, `enabled` (default `true`), `discovery_state?`
-  (TEXT — `null` for manual items, `'pending'` for discovered-not-yet-reviewed, `'approved'` for reviewed
-  discovered items), `last_checked_at?`, `created_at`, `updated_at`, `deactivated_at?`
+- **`software_items`**: `id` (UUID PK), `tenant_id`, `name`, `enabled` (default `true`),
+  `featured` (BOOLEAN, default `true` — controls visibility: featured items appear individually
+  in the main Software list; non-featured items appear as aggregated per-host package summaries),
+  `last_checked_at?`, `created_at`, `updated_at`, `deactivated_at?`
   - Partial unique index: `uq_software_items_active_name ON (tenant_id, name) WHERE deactivated_at IS NULL`
     — prevents two active items with the same name in a tenant
   - Index: `idx_software_items_deactivated_at`
-- **`host_software_items`**: junction table with composite PK `(host_id, software_item_id)`,
-  `installed_version?`, `installed_version_detected_at?`, `latest_version?`,
-  `latest_version_fetched_at?`, `latest_release_metadata?` (JSON), `last_updated_at?`,
-  `linked_at`. FKs on `host_id` and `software_item_id` cascade on delete. Per-host version state
-  lives here; plugin coupling is in the separate `host_software_item_plugins` table.
+- **`host_software_items`**: junction table with `id` (UUID PK), `host_id`, `software_item_id`,
+  `plugin_config_id?` (UUID FK — for non-featured items, the plugin config used for version
+  detection and updates), `package_identifier?` (TEXT — for non-featured items, the
+  package-manager-specific identifier), `installed_version?`, `installed_version_detected_at?`,
+  `latest_version?`, `latest_version_fetched_at?`, `latest_release_metadata?` (JSON),
+  `last_updated_at?`, `update_category?` (TEXT), `linked_at`, `deactivated_at?` (TIMESTAMP —
+  soft-delete for packages that disappear from discovery). FKs on `host_id` and
+  `software_item_id` cascade on delete. Per-host version state lives here; for featured items,
+  plugin coupling is in the separate `host_software_item_plugins` table; for non-featured items,
+  `plugin_config_id` and `package_identifier` are stored directly on this row.
 - **`host_software_item_plugins`**: role-based plugin assignments. Each (host, software_item) pair
   can have one plugin per role. Columns: `id` (UUID PK), `host_id`, `software_item_id`,
   `plugin_config_id` (FK → `plugin_configs.id`, ON DELETE RESTRICT), `role` (TEXT —
@@ -35,9 +41,14 @@ host to use different plugins for version detection, release fetching, and updat
   ON DELETE CASCADE.
   - Unique index: `uq_hsip_host_item_role_ordinal ON (host_id, software_item_id, role, ordinal)`
     — one plugin per role per (host, software_item) pair
-- **`autodiscovery_ignores`**: `id` (UUID PK), `tenant_id` (FK → `tenants.id`, ON DELETE CASCADE),
-  `name` (TEXT), `created_at`
-  - Unique constraint: `(tenant_id, name)` — one rule per name per tenant
+- **`software_ignores`**: `id` (UUID PK), `tenant_id` (FK → `tenants.id`, ON DELETE CASCADE),
+  `host_id?` (UUID FK — nullable; `null` for tenant-wide rules, non-null for host-specific rules),
+  `plugin_config_id?` (UUID FK — nullable; scope for host-specific rules),
+  `name?` (TEXT — software item name for tenant-wide rules),
+  `package_identifier?` (TEXT — package identifier for host-specific rules),
+  `created_at`
+  - Unique constraint: `(tenant_id, name) WHERE host_id IS NULL` — one tenant-wide rule per name
+  - Unique constraint: `(tenant_id, host_id, plugin_config_id, package_identifier) WHERE host_id IS NOT NULL` — one host-specific rule per package
 
 ## Relationships
 
@@ -54,16 +65,18 @@ host to use different plugins for version detection, release fetching, and updat
 - Latest version and release metadata are stored per-host on `host_software_items` (not in a separate table),
   populated by the `fetch_releases` role plugin
 
-## `discovery_state` field
+## `featured` field
 
-| Value | `enabled` | Description |
-| ----- | --------- | ----------- |
-| `null` | any | Manually created item — always included in version checks (subject to `enabled` flag) |
-| `"pending"` | `false` | Discovered but not yet reviewed — excluded from version checks and update flows |
-| `"approved"` | `true` | Reviewed discovered item — included in version checks |
+The `featured` boolean flag controls how a software item is presented in the UI:
 
-Pending items are created automatically by the autodiscovery subsystem. See
-[docs/api/autodiscovery.md](../api/autodiscovery.md) for the discovery workflow and API endpoints.
+| Value | UI location | Typical plugins |
+| ----- | ----------- | --------------- |
+| `true` | Main Software list (individual entries) | Docker, Proxmox Helper Scripts, GitHub Releases |
+| `false` | Host detail page (aggregated package view) | APT, Homebrew, Mac App Store, npm |
+
+Plugins set the `featured` flag during discovery. Manually created items default to `featured = true`.
+All discovered items are tracked immediately with `enabled: true` -- there is no pending state or
+approval workflow. See [Autodiscovery](../end-user/autodiscovery.md) for the discovery workflow.
 
 ## Response type fields
 
@@ -75,7 +88,7 @@ Pending items are created automatically by the autodiscovery subsystem. See
 | `name` | `String` | Display name |
 | `plugins` | `Vec<String>` | Distinct plugin type identifiers across all active host assignments (for display in lists) |
 | `enabled` | `bool` | Whether version checks are active |
-| `discovery_state` | `Option<String>` | `null`, `"pending"`, or `"approved"` |
+| `featured` | `bool` | Whether the item appears individually in the Software list (`true`) or as part of aggregated host summaries (`false`) |
 | `last_checked_at` | `Option<OffsetDateTime>` | When the last successful version check completed; updated in batch after `VersionCheckResults` is received |
 | `host_count` | `u64` | Number of hosts currently assigned |
 | `latest_version` | `Option<String>` | Latest known version derived as the maximum across all hosts' per-host `latest_version` values. `null` when no host has a known latest version yet. |
@@ -131,11 +144,10 @@ Extends `SoftwareItemResponse` with:
 | Method | Path | Permission | Status | Description |
 | :----- | :---------------------------------------------------- | :------------- | :----- | :------------------------------------------------------------------ |
 | POST | `/api/v1/software-items` | ManageSoftware | 201 | Create a new software item (name + enabled only) |
-| GET | `/api/v1/software-items` | ViewSoftware | 200 | List active software items; supports `?discovery_state=pending\|approved` filter |
+| GET | `/api/v1/software-items` | ViewSoftware | 200 | List active software items; supports `?featured=true\|false` filter |
 | GET | `/api/v1/software-items/{id}` | ViewSoftware | 200 | Get software item with assigned hosts + per-host plugin info |
 | PUT | `/api/v1/software-items/{id}` | ManageSoftware | 200 | Update name and/or enabled flag |
 | DELETE | `/api/v1/software-items/{id}` | ManageSoftware | 204 | Soft-delete the software item |
-| POST | `/api/v1/software-items/{id}/approve` | ManageSoftware | 200 | Approve a pending discovered item (enables version tracking) |
 | POST | `/api/v1/software-items/{id}/hosts` | ManageSoftware | 200 | Assign to additional host(s); each assignment carries a list of role-specific plugin assignments |
 | PUT | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSoftware | 200 | Update a specific role assignment (plugin config, package identifier, config override, or execution site) for a host |
 | DELETE | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSoftware | 204 | Unassign from a host; add `?ignore=true` to also create an ignore rule |

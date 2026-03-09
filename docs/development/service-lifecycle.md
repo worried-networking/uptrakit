@@ -445,7 +445,7 @@ the identity state instead of requiring a live controller connection.
 ## Background tasks
 
 Long-running operations such as version checks (`CheckVersions`), software discovery
-(`DiscoverSoftware`), and batch package updates (`ExecuteBatchHostPackageUpdate`) must **not** run
+(`DiscoverSoftware`), and batch updates (`ExecuteBatchUpdate`) must **not** run
 inline inside `on_message`. Doing so blocks the event loop, prevents WebSocket reads, and causes
 the controller's 15-second write timeout to fire and drop the connection.
 

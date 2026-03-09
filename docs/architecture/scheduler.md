@@ -63,7 +63,7 @@ Tasks are categorised based on whether they require direct in-process access to 
 | `StaleLeaseCleanup` | External | Pure DB cleanup |
 | `FetchReleases` | External | HTTP + DB + agent dispatch |
 | `DetectVersion` | External | DB + agent dispatch |
-| `DiscoverHostPackages` | External | DB + agent dispatch (periodic host-package rediscovery) |
+| `DiscoverSoftware` | External | DB + agent dispatch (periodic software rediscovery) |
 
 The `ScheduledTaskType::is_internal()` method encodes this categorisation. The `Scheduler` struct
 holds an `external_scheduler_connected: Arc<AtomicBool>` flag that is set/cleared by the WebSocket
@@ -115,12 +115,12 @@ and [Scheduler Engine (Development)](../development/scheduler-engine.md) for eng
 | `service_cert_check` | 43 200 s (12 h) | 300 s | Proactive certificate renewal for services |
 | `crl_renewal` | 14 400 s (4 h) | 120 s | Trigger CRL rebuild on all controller instances |
 | `audit_log_cleanup` | 86 400 s (24 h) | 300 s | Delete audit log entries older than the retention period (disabled by default) |
-| `discover_host_packages` | 21 600 s (6 h) | 300 s | Periodically rediscover installed packages on all active hosts. Packages that disappear from the agent's report are automatically soft-deleted. |
+| `discover_software` | 21 600 s (6 h) | 300 s | Periodically rediscover installed software on all active hosts. Items that disappear from the agent's report are automatically soft-deleted. |
 
 All rows are seeded during migrations with `next_run_at = now`. The `detect_version` row is
 seeded by migration `m20260307_000001_split_version_check` (one per tenant), which also renames
-any existing `version_check` rows to `fetch_releases`. The `discover_host_packages` row is seeded
-by migration `m20260312_000002_discover_host_packages_task`.
+any existing `version_check` rows to `fetch_releases`. The `discover_software` row is seeded
+by migration `m20260312_000002_discover_software_task`.
 
 ## HA Claim Mechanism
 
@@ -196,7 +196,7 @@ crates/shared/scheduler-engine/src/
         queries.rs                  -- Shared agent-assignment query helpers (AgentAssignmentRow, merge_config, …)
         fetch_releases.rs           -- FetchReleasesExecutor (was version_check.rs)
         detect_version.rs           -- DetectVersionExecutor
-        discover_host_packages.rs   -- DiscoverHostPackagesExecutor
+        discover_software.rs   -- DiscoverSoftwareExecutor
         service_cert_check.rs
 ```
 
@@ -263,7 +263,7 @@ packages) and sends `CheckVersions` messages to agents that run package-index pl
 ### DetectVersionExecutor
 
 Handles the **detect_version** scheduled task. Queries `host_software_item_plugins` rows with
-`role = 'detect_version'` and host packages, groups by agent, and sends `CheckVersions` messages
+`role = 'detect_version'`, groups by agent, and sends `CheckVersions` messages
 with only `detect_version` set. Agent responses arrive asynchronously through the existing
 `VersionCheckResults` wire message handler.
 
@@ -277,9 +277,9 @@ releases every 6 hours but detect installed versions once daily.
 Queries `service_certificates` for non-revoked certificates approaching their renewal window (within 30 days of expiry) and sends `RequestCertRenewal`
 messages to the owning services via `NotificationService`.
 
-### DiscoverHostPackagesExecutor
+### DiscoverSoftwareExecutor
 
-Handles the **discover\_host\_packages** scheduled task. On each cycle:
+Handles the **discover_software** scheduled task. On each cycle:
 
 1. Queries all active, non-deactivated hosts that have a connected agent service
    (`host → service_host → service`, filtering enabled/non-deactivated rows).
@@ -293,12 +293,12 @@ Handles the **discover\_host\_packages** scheduled task. On each cycle:
    `notifier.send_to_service()`.
 
 Agent responses arrive via the existing `DiscoverSoftwareResult` wire message handler, which
-routes each `DiscoveryPluginResult` through `process_plugin_result()`. For `HostManaged` items,
-that handler now also calls `deactivate_missing_host_packages()` to soft-delete packages absent
+routes each `DiscoveryPluginResult` through `process_plugin_result()`. The handler also calls
+`deactivate_missing_items()` to soft-delete host-software junction rows for items absent
 from the latest discovery snapshot.
 
 Casks with `"auto_updates": true` are excluded by the Homebrew plugin before the result is
-sent, so they never appear in the host-packages list.
+sent, so they never appear in the software list.
 
 ## What Moved to the Scheduler vs. What Stayed
 
@@ -313,7 +313,7 @@ sent, so they never appear in the host-packages list.
 | Installed-version detection | Not implemented | `DetectVersionExecutor` |
 | Service cert renewal check | Not implemented | `ServiceCertCheckExecutor` |
 | CRL periodic renewal | 60-second poll loop in `CrlManager::run()` | `CrlRenewalExecutor` (default every 4 h) |
-| Periodic host-package rediscovery | Not implemented | `DiscoverHostPackagesExecutor` |
+| Periodic software rediscovery | Not implemented | `DiscoverSoftwareExecutor` |
 
 ### Stays as per-controller intervals (must run on every controller)
 

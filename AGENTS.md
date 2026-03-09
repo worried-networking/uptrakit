@@ -59,7 +59,7 @@ uptrakit/
 ├── crates/
 │   ├── core/
 │   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
-│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; parallel per-host version checks and updates over SSH (per-host concurrency guard + forwarder task + aggregate mpsc channel); host management CLI, SSH transport (russh), SshTarget parser, ~/.ssh/config resolution, remote host info collection & ReportHosts; SshStdioTunnel (bidirectional byte-stream over russh channel for Docker proxy); ExecuteBatchHostPackageUpdate handler with freeze check; UI extension `ssh-agent.hosts` (list-hosts, bootstrap, bootstrap-proxmox, list-pve-hosts, sync-host, remove-host, list-discovered-guests, bootstrap-proxmox-guest actions; primary_actions: bootstrap + bootstrap-proxmox + bootstrap-proxmox-guest; ECIES E2E encryption for sensitive params in bootstrap and sync-host; sync-host supports optional auth override via form (password/private_key, custom username) for connecting as a privileged user; bootstrap-proxmox-guest auto-detects PVE host from guest's proxmox_node and auto-fills hostname from guest metadata); ServiceExtensionProxy for invoking controller-side plugin actions (proxmox.hosts/list-all-unmatched, proxmox.hosts/match); PVE node auto-detection during bootstrap with cluster deduplication (check_pve_token_exists → PveTokenStatus) + tenant-scoped PVE credentials (uptrakit-{tenant_id}@pve) + ReportPluginConfig; ExtensionContext struct bundles handler state (db, state_dir, private_key_der, service_id, tenant_id, bg_tx, extension_proxy); remote_exec.rs (SshRemoteExecutor, PveGuestExecutor implementing RemoteExecutor); bootstrap_proxmox.rs (guest bootstrap via PVE exec); CLI commands (host sync, host bootstrap) load persisted tenant_id from service.json for PVE operations
+│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; parallel per-host version checks and updates over SSH (per-host concurrency guard + forwarder task + aggregate mpsc channel); host management CLI, SSH transport (russh), SshTarget parser, ~/.ssh/config resolution, remote host info collection & ReportHosts; SshStdioTunnel (bidirectional byte-stream over russh channel for Docker proxy); ExecuteBatchUpdate handler with freeze check; UI extension `ssh-agent.hosts` (list-hosts, bootstrap, bootstrap-proxmox, list-pve-hosts, sync-host, remove-host, list-discovered-guests, bootstrap-proxmox-guest actions; primary_actions: bootstrap + bootstrap-proxmox + bootstrap-proxmox-guest; ECIES E2E encryption for sensitive params in bootstrap and sync-host; sync-host supports optional auth override via form (password/private_key, custom username) for connecting as a privileged user; bootstrap-proxmox-guest auto-detects PVE host from guest's proxmox_node and auto-fills hostname from guest metadata); ServiceExtensionProxy for invoking controller-side plugin actions (proxmox.hosts/list-all-unmatched, proxmox.hosts/match); PVE node auto-detection during bootstrap with cluster deduplication (check_pve_token_exists → PveTokenStatus) + tenant-scoped PVE credentials (uptrakit-{tenant_id}@pve) + ReportPluginConfig; ExtensionContext struct bundles handler state (db, state_dir, private_key_der, service_id, tenant_id, bg_tx, extension_proxy); remote_exec.rs (SshRemoteExecutor, PveGuestExecutor implementing RemoteExecutor); bootstrap_proxmox.rs (guest bootstrap via PVE exec); CLI commands (host sync, host bootstrap) load persisted tenant_id from service.json for PVE operations
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server; migration runner delegates to `uptrakit_shared_db::migration`
 │   │   │   ├── src/db_migrate/         #   `db-migrate` subcommand: copies all data between DB backends; error.rs (DbMigrateError + Report<> Result), tables.rs (migrate_table<E>, copy_all, clean_all, verify_all for all 44 app tables), mod.rs (run() orchestrator)
 │   │   │   ├── src/scheduler/          #   (cfg: embedded-scheduler) Embedded scheduler using uptrakit-scheduler-engine
@@ -93,24 +93,24 @@ uptrakit/
 │   │   └── discovery/
 │   │       └── proxmox-helper-scripts/ # uptrakit-plugin-discovery-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/Codeberg/npm/APT upstream; emits ReleasesGithub+GenericShell targets for GitHub-managed items, ReleasesForgejo+GenericShell targets for Codeberg-managed items (api_base_url="https://codeberg.org"; uses Forgejo plugin since Codeberg runs Forgejo), PackageManagerNpm target for npm-managed items, PackageManagerApt target for APT-managed items)
 │   ├── shared/
-│   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, batch host package updates; spawn_background()/send_background_result() for non-blocking event loop; run_check_versions/run_discover_software/run_execute_batch_host_package_update (compute-only); handle_execute_update/handle_graceful_shutdown; start_update() for per-host parallel use by SSH agent; batch_check_versions() groups assignments by (PluginType, effective_config), calls batch_detect_installed_version in parallel, refreshes package index once per fetch group, then calls batch_fetch_releases in parallel
+│   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, batch updates; spawn_background()/send_background_result() for non-blocking event loop; run_check_versions/run_discover_software/run_execute_batch_update (compute-only); handle_execute_update/handle_graceful_shutdown; start_update() for per-host parallel use by SSH agent; batch_check_versions() groups assignments by (PluginType, effective_config), calls batch_detect_installed_version in parallel, refreshes package index once per fetch group, then calls batch_fetch_releases in parallel
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor; SudoAwareCommandExecutor (wraps any executor, prepends sudo based on SudoContext); SudoPolicy enum (auto/force_with/force_without); CommandSpec.privileged flag; StdioTunnel trait (bidirectional byte-stream tunnel for remote command I/O); RemoteExecutor trait + RemoteCommandResult (transport-agnostic remote command execution for SSH and PVE guest exec)
 │   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption with envelope encryption (KEK wraps DEKs); EncryptedString, init_master_key, DataKeyRing; ENC:v1/v2/v3 formats (v3 = current default with DEK + AAD); column AAD registry (register_column_aad); DEK wrap/unwrap; O(1) master key rotation support
-│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities (hosts, host_tags, host_tag_assignments, software_items, host_packages, host_package_ignores, host_package_update_history, etc.); `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`; `migration::helpers` module provides reusable SQLite table-recreation helpers (set_foreign_keys, check_crash_recovery, drop_original, rename_temp, is_sqlite)
+│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities (hosts, host_tags, host_tag_assignments, software_items, host_software_items, software_ignores, update_history, etc.); `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`; `migration::helpers` module provides reusable SQLite table-recreation helpers (set_foreign_keys, check_crash_recovery, drop_original, rename_temp, is_sqlite)
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── extension-framework/        # uptrakit-extension-framework            (lib)  — UI extension framework types: ExtensionManifest, ActionDef, FieldDef, FormDef, RowVisibleWhen, RowCondition, wire payloads; ActionDef supports `confirm_entity_field` for destructive action confirmation dialogs; standalone crate so plugins don't depend on uptrakit-internal-wire
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared macros (impl_report_conversion!)
-│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (PluginRole, PluginType, TrackingSystem, etc.); network::is_private_host()/is_private_ip() for SSRF validation; ssrf::SsrfSafeResolver (feature `http-ssrf`) for DNS rebinding protection; feature-gated: sea-orm, openapi, http-ssrf
+│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (PluginRole, PluginType, etc.); network::is_private_host()/is_private_ip() for SSRF validation; ssrf::SsrfSafeResolver (feature `http-ssrf`) for DNS rebinding protection; feature-gated: sea-orm, openapi, http-ssrf
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API + SSE streaming coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing; sse.rs provides lightweight SSE parser; update_output_stream.rs provides typed stream_update_output() method; device_auth_stream.rs provides SSE-first device auth; events_stream.rs provides typed admin event SSE client
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
-│   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, interval+jitter scheduling (interval.rs: compute_next_run_at), TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); tasks categorised as internal (CrlRenewal, CaRotationCheck, ServiceCertCheck — embedded scheduler only) vs external (AuthCleanup, StaleLeaseCleanup, FetchReleases, DetectVersion — deferrable to external scheduler); `external_scheduler_connected: Arc<AtomicBool>` flag skips external tasks when set; FetchReleasesExecutor Phase B sends fetch assignments for both host_software_items and host_packages so that latest_version is populated in both tables
+│   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, interval+jitter scheduling (interval.rs: compute_next_run_at), TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); tasks categorised as internal (CrlRenewal, CaRotationCheck, ServiceCertCheck — embedded scheduler only) vs external (AuthCleanup, StaleLeaseCleanup, FetchReleases, DetectVersion — deferrable to external scheduler); `external_scheduler_connected: Arc<AtomicBool>` flag skips external tasks when set; FetchReleasesExecutor Phase B sends fetch assignments for host_software_items so that latest_version is populated
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity (ServiceIdentityState: service_id + enrollment_secret + tenant_id in service.json), TLS, CA bootstrap, main helpers; default_resolve_shutdown(), init_tracing(); `decrypt_sensitive_params<T>()` generic ECIES sealed-box decryption for extension sensitive params
 │   │   ├── audit-log/                  # uptrakit-audit-log                      (lib)  — AuditLogBackend trait, AuditEntry, AuditFilter, AuditLogDispatcher; backends: NoopBackend, DatabaseBackend (cfg db), JournaldBackend (cfg journald), MultiplexBackend; fire-and-forget dispatcher pattern
 │   │   ├── update-hooks/               # uptrakit-update-hooks                  (lib)  — update hook resolution and config merge logic (extracted from web-api)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields; report pagination (`paginate.rs` Paginatable trait + `report_tracker.rs` ReportTracker); re-exports `uptrakit-extension-framework` as `extension` module
 │   └── ui/
-│       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, host-packages, host-tags, services, software-items, plugin-configs, autodiscovery, checks, updates, batch-updates, history, scheduler, settings); `update trigger --follow` and `history tail` use SSE streaming; `update batch-host/batch-item --follow` and `update-batches follow` use batch progress SSE; lib target exposes modules for integration tests
+│       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, host-tags, services, software-items, plugin-configs, software-ignores, checks, updates, batch-updates, history, scheduler, settings); `update trigger --follow` and `history tail` use SSE streaming; `update batch-host/batch-item --follow` and `update-batches follow` use batch progress SSE; lib target exposes modules for integration tests
 │       ├── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API layer; routes, middleware (security_headers, request_id, request_log, resolve_ip, rate_limit, resolve_proxy_headers, require_auth, audit_log, permission, tenant_context), AppState, router; /healthz (liveness) + /readyz (readiness: DB + CA checks); event_broadcaster.rs (per-tenant admin event SSE), device_flow_broadcaster.rs (device auth SSE); re-exports auth/queries from sibling crates; test_harness/ shared integration test fixtures (TestApp, TestClient, DB/HTTP helpers); integration_tests/ REST API + WebSocket integration tests (#[cfg(all(test, feature = "db-sqlite"))])
 │       ├── web-api-auth/               # uptrakit-web-api-auth                  (lib)  — authentication subsystem: auth module (JWT, sessions, OIDC, tokens, permissions), SettingKey, settings_store
 │       └── web-api-queries/            # uptrakit-web-api-queries               (lib)  — database query logic: all query modules, TenantDb, ServiceNotifier trait
@@ -280,10 +280,8 @@ These are non-negotiable design constraints. Do not violate them.
    declaring the `ControllerSideFetchReleases` capability (e.g. GitHub, Docker, npm) have their `fetch_releases`
    executed on the controller by default; local package-index plugins (Homebrew, APT) run agent-side via
    `RefreshPackageIndex` + `fetch_releases()` and report `latest_version` in `VersionCheckResult`. Per-host version
-   tracking (`installed_version`, `latest_version`) lives on `host_software_items` for targeted items and on
-   `host_packages` for auto-discovered packages. `FetchReleasesExecutor` Phase B also builds fetch assignments for
-   `host_packages` so that `host_packages.latest_version` is populated alongside `installed_version`. The old
-   centralised `available_versions` table has been removed. Keep this boundary clear.
+   tracking (`installed_version`, `latest_version`) lives on `host_software_items` for all items (both featured
+   and non-featured). The old centralised `available_versions` table has been removed. Keep this boundary clear.
 1. **No shell injection.** Any path that constructs or executes shell commands must validate inputs. Custom scripts are
    treated as untrusted input.
 1. **No secrets in logs.** Never log tokens, passwords, API keys, or other credentials. All secret fields in HTTP API
@@ -296,10 +294,8 @@ These are non-negotiable design constraints. Do not violate them.
    span created by the request-id middleware. Wire protocol envelopes carry `TraceContext` for distributed tracing.
    See [Tracing Conventions](docs/development/tracing.md).
 1. **No overlapping update actions per host.** At most one active (`Pending` or `InProgress`) update may run on a
-   host at any time, across ALL update types (software-item updates in `update_history` AND host-package batches in
-   `host_package_update_history`). This is enforced by:
-   - **Application-layer check** — `validate_update_preconditions` (REST/MQTT) and
-     `trigger_all_host_package_updates_for_host` (MQTT) each query both tables and return
+   host at any time. All update types share the single `update_history` table. This is enforced by:
+   - **Application-layer check** — `validate_update_preconditions` queries `update_history` and returns
      `TriggerUpdateError::HostUpdateInProgress` (HTTP 409) if any active row exists.
    - **DB-layer constraint** — a partial unique index `uix_update_history_host_active` on
      `update_history(host_id) WHERE status IN ('pending', 'in_progress')` prevents duplicate active rows
@@ -332,7 +328,7 @@ These are non-negotiable design constraints. Do not violate them.
    `crates/shared/wire/src/limits.rs`. Use `check_vec_len()`, `check_string_len()`, and `check_opt_string_len()`
    helpers. See [Wire Protocol — Payload Size Limits](docs/api/wire-protocol.md#payload-size-limits).
 1. **Large report payloads must use `send_auto_paginate()`.** When sending `DiscoveryResults`,
-   `VersionCheckResults`, `ReportHosts`, or `BatchHostPackageUpdateResult` from a service, always use
+   `VersionCheckResults`, `ReportHosts`, or `BatchUpdateResult` from a service, always use
    `conn.send_auto_paginate(msg)` instead of `conn.send(msg)`. This automatically splits payloads exceeding
    768 KB into pages. New paginatable types must implement the `Paginatable` trait in
    `crates/shared/wire/src/paginate.rs`. See [Wire Protocol — Report Pagination](docs/api/wire-protocol.md#report-pagination).
@@ -443,26 +439,24 @@ for user review. Key invariants:
 
 1. **Discovery is event-driven and periodic.** It triggers on new host registration, via explicit API calls
    (`POST /api/v1/hosts/{id}/discover`, `POST /api/v1/plugin-configs/{id}/discover`), and automatically
-   every 6 hours via the `discover_host_packages` scheduled task (`DiscoverHostPackagesExecutor`).
+   every 6 hours via the `discover_software` scheduled task (`DiscoverSoftwareExecutor`).
    The periodic task sends `DiscoverSoftware` to every active agent-backed host and soft-deletes
-   (`deactivated_at`) any host package absent from the latest discovery snapshot.
+   (`deactivated_at`) any `host_software_items` junction rows absent from the latest discovery snapshot.
 
-2. **`discovery_state` lifecycle:** `null` (manual, full tracking) → `pending` (discovered, `enabled = false`,
-   excluded from version checks) → `approved` (reviewed, `enabled = true`, included in version checks). Deleting a
-   `pending` item is a plain soft-delete; the item is re-discoverable unless an ignore rule exists.
+2. **No approval workflow.** All discovered items are created immediately with `enabled: true`. The
+   `featured` flag controls visibility: featured items appear individually in the Software list,
+   non-featured items appear as aggregated per-host summaries.
    **Invariant:** Periodic re-discovery (`find_or_create_software_item` Phase 1) only updates
-   `installed_version` on `host_software_item` rows for `Pending` items. Approved and manual (`None`)
-   items are skipped — their version detection is handled by the `DetectVersion` scheduled task using
-   the user's assigned plugin config.
+   `installed_version` on `host_software_item` rows for items that were originally created by
+   autodiscovery. Items with manually assigned plugin configs are skipped -- their version detection
+   is handled by the `DetectVersion` scheduled task using the user's assigned plugin config.
 
 3. **Ignore list is separate from deletion.** `DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true`
-   removes the host assignment and creates an `autodiscovery_ignore` row keyed on the software item's
+   removes the host assignment and creates a `software_ignores` row keyed on the software item's
    `(tenant_id, name)`. A single name-based ignore rule suppresses all future discoveries for that
    name across all plugin configs and targets. Without `?ignore=true`, unassigning is a plain delete
    with no ignore rule. Deleting a software item (`DELETE /api/v1/software-items/{id}`) never creates
-   ignore rules. Bulk-discard endpoints (`DELETE /api/v1/hosts/{id}/discovered`,
-   `DELETE /api/v1/plugin-configs/{id}/discovered`) also perform plain soft-deletes — no ignore rules
-   created.
+   ignore rules.
 
 4. **Plugin-driven discovery targets.** Discovery results use structured `DiscoveryTarget` values
    (`crates/shared/types/src/discovery_target.rs`) instead of opaque `extra` metadata. Each
@@ -655,14 +649,13 @@ for user review. Key invariants:
 | --- | --- |
 | `crates/shared/types/src/plugin_role.rs` | `PluginRole` enum (`DetectVersion`, `FetchReleases`, `ExecuteUpdate`, `Other`) |
 | `crates/shared/types/src/update_category.rs` | `UpdateCategory` enum (`Security`, `Bugfix`, `Feature`, `Unknown`) — classifies available updates |
-| `crates/shared/types/src/software_discovery_state.rs` | `SoftwareDiscoveryState` enum |
 | `crates/shared/types/src/discovered_software.rs` | `DiscoveredSoftware` type (with `targets: Vec<DiscoveryTarget>`) |
 | `crates/shared/types/src/discovery_target.rs` | `DiscoveryTarget` struct (plugin type, config, name, roles, overrides) |
 | `crates/shared/db/src/entity/host_software_item_plugin.rs` | SeaORM entity for role-based plugin assignments |
-| `crates/shared/db/src/entity/autodiscovery_ignore.rs` | SeaORM entity for ignore rules |
+| `crates/shared/db/src/entity/software_ignore.rs` | SeaORM entity for ignore rules |
 | `crates/shared/agent-core/src/client.rs` | `run_discover_software()` / `spawn_background()` agent-side discovery logic |
 | `crates/ui/web-api-queries/src/queries/autodiscovery.rs` | DB helpers + `process_discovery_results()` |
-| `crates/ui/web-api/src/routes/autodiscovery.rs` | Ignore list CRUD routes |
+| `crates/ui/web-api/src/routes/software_ignores.rs` | Ignore list CRUD routes |
 | `crates/ui/web-api/src/routes/service_ws/handler/discovery.rs` | `trigger_discovery_for_agent_host()` helper — applies allowlist before dispatching |
 | `crates/shared/db/src/entity/tenant_discovery_allowlist.rs` | SeaORM entity for tenant-wide discovery allowlist |
 | `crates/shared/db/src/entity/host_discovery_allowlist.rs` | SeaORM entity for per-host discovery allowlist |
@@ -678,7 +671,7 @@ for user review. Key invariants:
 
 The MQTT service can publish [Home Assistant MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery)
 topics for each tracked software item, creating `update` entities in HA — one per `(software_item, host)` pair.
-It also publishes **one per-host packages entity** summarising all auto-discovered host packages for that host.
+It also publishes **per-host summary entities** summarising all non-featured software items for that host.
 
 Key invariants:
 
@@ -689,7 +682,7 @@ Key invariants:
 2. **State push is controller-initiated.** The controller sends `SoftwareStates` (wire type
    `software_states`) to MQTT services whenever version data changes. Push triggers: version check
    completed, update triggered (REST/MQTT/scheduler), `update_started` received from agent, update
-   result received, host package batch triggered or completed. The `update_in_progress` field in each
+   result received, batch update triggered or completed. The `update_in_progress` field in each
    host entry reflects whether a `Pending` or `InProgress` update exists at query time. The MQTT
    service stores the states in memory and publishes state, `latest_version`, and `attributes` (JSON
    `in_progress` flag) retained topics to the broker for **all** connected clients, plus HA discovery
@@ -708,15 +701,15 @@ Key invariants:
    from the in-memory state cache and sends `ServiceMessage::MqttTriggerUpdate` to the controller. The
    controller validates the request and dispatches `execute_update` to the agent. On failure the
    controller sends `error` back (soft error — WebSocket is not closed).
-7. **Updates triggered via MQTT (host packages).** When a user presses Install in HA on the per-host
+7. **Updates triggered via MQTT (host batch).** When a user presses Install in HA on the per-host
    packages entity or the security updates entity, the MQTT service sends
-   `ServiceMessage::MqttTriggerHostPackageUpdate` to the controller (with `security_only = true` for
-   the security entity). The controller finds all qualifying outdated host packages, creates an
-   `update_batch`, and dispatches `execute_batch_host_package_update` to the agent. On completion
+   `ServiceMessage::MqttTriggerHostBatchUpdate` to the controller (with `security_only = true` for
+   the security entity). The controller finds all qualifying outdated non-featured items, creates an
+   `update_batch`, and dispatches `execute_batch_update` to the agent. On completion
    the controller pushes `software_states`
    again to reflect the updated `installed_version` values and `update_in_progress = false`.
 8. **Actor attribution.** Updates triggered via MQTT have `actor_type = "mqtt"` and
-   `actor_id = <mqtt_client_id>` in the `update_history` / `host_package_update_history` record.
+   `actor_id = <mqtt_client_id>` in the `update_history` record.
 
 #### MQTT topic scheme
 
@@ -748,8 +741,8 @@ All topics use the MQTT client's `topic_prefix` field. All host-scoped topics sh
 | `{prefix}/hosts/{host_id}/state` | ✓ | publish | `"unknown"` when updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/latest_version` | ✓ | publish | `"N available"` when updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/attributes` | ✓ | publish | JSON: `{"in_progress": bool, "pending_count": N}` |
-| `{prefix}/hosts/{host_id}/set` | — | subscribe | Receives `"install"` → triggers batch update (all packages) |
-| `{ha_prefix}/update/uptrakit/{t}_{h}_pkgs/config` | ✓ | publish | HA discovery config for host packages entity (disabled by default) |
+| `{prefix}/hosts/{host_id}/set` | — | subscribe | Receives `"install"` → triggers batch update (all non-featured items) |
+| `{ha_prefix}/update/uptrakit/{t}_{h}_pkgs/config` | ✓ | publish | HA discovery config for host summary entity (disabled by default) |
 | `{prefix}/hosts/{host_id}/security/state` | ✓ | publish | `"unknown"` when security updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/security/latest_version` | ✓ | publish | `"N available"` when security updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/security/attributes` | ✓ | publish | JSON: `{"in_progress": bool, "pending_count": N}` |
@@ -761,9 +754,9 @@ All entities for a given host share a single HA device: `uptrakit_host_{t}_{h}` 
 Software item entities: unique_id `uptrakit_{t}_{h}_{i}`, entity name = `{item_name}`,
 `default_entity_id` = `uptrakit_{fn_slug}_{item_slug}`.
 
-Host package entities: unique_id `uptrakit_{t}_{h}_pkgs`,
+Host summary entities: unique_id `uptrakit_{t}_{h}_pkgs`,
 entity name `"{friendly_name} packages"`, `default_entity_id` = `uptrakit_{fn_slug}_packages`.
-Both host package entities are **disabled by default** in HA (`"enabled_by_default": false`).
+Both host summary entities are **disabled by default** in HA (`"enabled_by_default": false`).
 
 Security update entities: unique_id `uptrakit_{t}_{h}_sec`,
 entity name `"{friendly_name} security updates"`,
@@ -773,15 +766,15 @@ entity name `"{friendly_name} security updates"`,
 
 | File | Purpose |
 | --- | --- |
-| `crates/core/mqtt/src/ha_discovery.rs` | Pure HA topic/config helpers for software items, host packages, and security entities; `parse_command_topic`, `parse_host_packages_command_topic`, `parse_host_security_command_topic` |
-| `crates/core/mqtt/src/tenant_manager.rs` | `TenantManager`: software state + host package state cache, `publish_host_package_states`, `resolve_update_trigger`, `resolve_host_package_update_trigger`, `resolve_host_security_update_trigger` |
+| `crates/core/mqtt/src/ha_discovery.rs` | Pure HA topic/config helpers for software items, host summaries, and security entities; `parse_command_topic`, `parse_host_summary_command_topic`, `parse_host_security_command_topic` |
+| `crates/core/mqtt/src/tenant_manager.rs` | `TenantManager`: software state + host summary state cache, `publish_host_summary_states`, `resolve_update_trigger`, `resolve_host_batch_update_trigger`, `resolve_host_security_update_trigger` |
 | `crates/core/mqtt/src/mqtt_client.rs` | `MqttServiceEvent` enum, `publish_retained`, `subscribe_topic`, HA status topic handling |
-| `crates/core/mqtt/src/main.rs` | `on_service_event` dispatch; `ControllerMessage::SoftwareStates` handler; `MqttTriggerHostPackageUpdate` dispatch |
-| `crates/ui/web-api-queries/src/queries/mqtt_software_states.rs` | Bulk query loading enabled software items + `load_host_package_host_states_for_tenant` |
-| `crates/ui/web-api/src/notification_service.rs` | `push_software_states_for_tenant` (local broadcast + optional NATS publish); merges host package states |
-| `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs` | `MqttTriggerUpdate` and `MqttTriggerHostPackageUpdate` handlers |
+| `crates/core/mqtt/src/main.rs` | `on_service_event` dispatch; `ControllerMessage::SoftwareStates` handler; `MqttTriggerHostBatchUpdate` dispatch |
+| `crates/ui/web-api-queries/src/queries/mqtt_software_states.rs` | Bulk query loading enabled software items + `load_host_summary_states_for_tenant` |
+| `crates/ui/web-api/src/notification_service.rs` | `push_software_states_for_tenant` (local broadcast + optional NATS publish); merges host summary states |
+| `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs` | `MqttTriggerUpdate` and `MqttTriggerHostBatchUpdate` handlers |
 | `crates/ui/web-api-queries/src/queries/update_triggers.rs` | `trigger_update_for_host` (refactored into `validate_update_preconditions`, `create_update_history_record`, `dispatch_update_to_agent` layers); shared by REST, MQTT, and batch handlers |
-| `crates/ui/web-api-queries/src/queries/update_batches.rs` | Batch update logic: `find_outdated_items_for_host`, `create_batch`, `dispatch_next_in_batch`, `trigger_all_host_package_updates_for_host` |
+| `crates/ui/web-api-queries/src/queries/update_batches.rs` | Batch update logic: `find_outdated_items_for_host`, `create_batch`, `dispatch_next_in_batch`, `trigger_all_host_batch_updates_for_host` |
 | `crates/ui/web-api/src/routes/update_batches.rs` | Batch update route handlers + SSE batch progress endpoint |
 | `crates/ui/web-api/src/batch_progress_broadcaster.rs` | `BatchProgressBroadcaster`: per-batch `broadcast` channels for SSE streaming |
 | `crates/shared/web-api-types/src/update_batches.rs` | Batch API types (`HostBatchUpdateRequest`, `ItemBatchUpdateRequest`, `BatchUpdateResponse`, etc.) |
@@ -789,8 +782,8 @@ entity name `"{friendly_name} security updates"`,
 | `crates/shared/openapi-client/src/update_batches.rs` | Typed HTTP client methods for batch endpoints |
 | `crates/shared/openapi-client/src/batch_progress_stream.rs` | SSE streaming client for batch progress events |
 | `crates/ui/cli/src/commands/batch_update.rs` | CLI batch update commands |
-| `docs/end-user/home-assistant-mqtt.md` | Full end-user setup guide including host package entities |
-| `docs/api/wire-protocol.md` | `software_states`, `mqtt_trigger_update`, and `mqtt_trigger_host_package_update` payload docs |
+| `docs/end-user/home-assistant-mqtt.md` | Full end-user setup guide including host summary entities |
+| `docs/api/wire-protocol.md` | `software_states`, `mqtt_trigger_update`, and `mqtt_trigger_host_batch_update` payload docs |
 | `crates/shared/wire/asyncapi.yaml` | AsyncAPI schemas for both new messages |
 
 ### Service ping interval
@@ -1011,7 +1004,7 @@ Extensions can mark `ActionDef` as batch-capable via `.batch()` (sets `batch_act
 agent marks `sync-host` and `remove-host` as batch-capable.
 
 The frontend adds multi-select checkboxes to all list pages (services, system-services, software,
-hosts, host-packages, plugin-configs, autodiscovery ignores) and extension DataTables. Selection
+hosts, plugin-configs, software ignores) and extension DataTables. Selection
 uses `SvelteSet<string>` (required by `svelte/prefer-svelte-reactivity` ESLint rule). A shared
 `BatchActionBar` appears when items are selected; `BatchResultDialog` shows partial-success
 results. See [docs/development/frontend-components.md](docs/development/frontend-components.md)
@@ -1024,17 +1017,15 @@ for component details.
 | `crates/shared/web-api-types/src/batch_actions.rs` | `BatchActionRequest`, `BatchActionResponse`, `BatchActionSuccess`, `BatchActionFailure`; `Validate` impl (max 100 IDs) |
 | `crates/ui/web-api-queries/src/queries/services.rs` | `batch_approve_services`, `batch_reject_services`, `batch_deactivate_services` |
 | `crates/ui/web-api-queries/src/queries/system_services.rs` | `batch_approve_system_services`, `batch_reject_system_services`, `batch_deactivate_system_services` |
-| `crates/ui/web-api-queries/src/queries/software_items.rs` | `batch_approve_software_items`, `batch_delete_software_items` |
+| `crates/ui/web-api-queries/src/queries/software_items.rs` | `batch_delete_software_items` |
 | `crates/ui/web-api-queries/src/queries/hosts.rs` | `batch_deactivate_hosts` |
-| `crates/ui/web-api-queries/src/queries/host_packages.rs` | `batch_deactivate_host_packages`, `batch_enable_host_packages`, `batch_disable_host_packages` |
-| `crates/ui/web-api-queries/src/queries/autodiscovery.rs` | `batch_delete_ignore_rules` |
+| `crates/ui/web-api-queries/src/queries/software_ignores.rs` | `batch_delete_ignore_rules` |
 | `crates/ui/web-api-queries/src/queries/plugin_configs.rs` | `batch_delete_plugin_configs` |
 | `crates/ui/web-api/src/routes/services.rs` | `batch_services` handler |
 | `crates/ui/web-api/src/routes/system_services.rs` | `batch_system_services` handler |
 | `crates/ui/web-api/src/routes/software_items.rs` | `batch_software_items` handler |
 | `crates/ui/web-api/src/routes/hosts.rs` | `batch_hosts` handler |
-| `crates/ui/web-api/src/routes/host_packages.rs` | `batch_host_packages` handler |
-| `crates/ui/web-api/src/routes/autodiscovery.rs` | `batch_autodiscovery_ignores` handler |
+| `crates/ui/web-api/src/routes/software_ignores.rs` | `batch_software_ignores` handler |
 | `crates/ui/web-api/src/routes/plugin_configs.rs` | `batch_plugin_configs` handler |
 | `crates/shared/openapi-client/src/paths.rs` | `BATCH` path constants for all resources |
 | `crates/shared/extension-framework/src/lib.rs` | `ActionDef.batch_action` field |

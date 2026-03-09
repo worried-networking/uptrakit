@@ -258,7 +258,7 @@ The `uptrakit_nats::config_protection` module provides two functions:
 | :--- | :--- |
 | `CheckVersions` | `assignments[].detect_version.config`, `assignments[].fetch_releases.config` |
 | `ExecuteUpdate` | `detect_version_plugin.config`, `execute_update_plugin.config` |
-| `ExecuteBatchHostPackageUpdate` | `plugin_config` |
+| `ExecuteBatchUpdate` | `plugin_config` |
 | `DiscoverSoftware` | `plugins[].config` |
 
 All other `ControllerMessage` variants pass through unchanged.

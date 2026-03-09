@@ -399,14 +399,14 @@ For usage details, see [Command Executor](../development/command-executor.md).
 
 ## Version Check and Update Execution
 
-The SSH agent handles `CheckVersions`, `DiscoverSoftware`, `ExecuteBatchHostPackageUpdate`, and `ExecuteUpdate`
+The SSH agent handles `CheckVersions`, `DiscoverSoftware`, `ExecuteBatchUpdate`, and `ExecuteUpdate`
 messages from the controller using the shared `uptrakit-agent-core` crate. The core crate provides
 compute-only `run_*` functions (return `ServiceMessage` without needing a connection) and the shared
 `spawn_background` / `send_background_result` helpers for running them as background tasks.
 
 ### Background Task Spawning
 
-Long-running operations (`CheckVersions`, `DiscoverSoftware`, `ExecuteBatchHostPackageUpdate`) are executed
+Long-running operations (`CheckVersions`, `DiscoverSoftware`, `ExecuteBatchUpdate`) are executed
 as background tokio tasks rather than inline in the `on_message` handler. This prevents a slow or stuck SSH
 operation from blocking the event loop, which would make the agent unresponsive to pings, signals, and other
 controller messages. Both the SSH agent and the local agent use the same pattern — see
@@ -664,7 +664,7 @@ crates/core/agent-ssh/
     │                    # entry point, master key init
     ├── cli.rs           # CLI args (Commands, HostCommands, CommonServiceArgs integration)
     ├── client.rs        # Authenticated loop; spawn_check_versions_ssh(), spawn_discover_software_ssh(),
-    │                    # spawn_execute_batch_host_package_update_ssh() (background-spawned),
+    │                    # spawn_execute_batch_update_ssh() (background-spawned),
     │                    # handle_execute_update_ssh() (per-host guard + forwarder task),
     │                    # SshInFlightUpdate struct, build_reload_host_infos(),
     │                    # report_hosts_after_config_change() — all wrap SshCommandExecutor with
@@ -719,7 +719,7 @@ Version check and update execution logic shared between `uptrakit-agent` and `up
 | `execute_update(payload, executor, output_tx)` | Executes an update using role-based plugin assignments and streams output lines |
 | `run_check_versions(payload, executor)` | Compute-only: runs version checks, returns `ServiceMessage::VersionCheckResults` |
 | `run_discover_software(payload, executor)` | Compute-only: runs discovery, returns `ServiceMessage::DiscoveryResults` |
-| `run_execute_batch_host_package_update(payload, executor)` | Compute-only: runs batch host package update, returns `ServiceMessage::BatchHostPackageUpdateResult` |
+| `run_execute_batch_update(payload, executor)` | Compute-only: runs batch update, returns `ServiceMessage::BatchUpdateResult` |
 | `spawn_background(bg_tx, future)` | Spawns a background task and sends its `ServiceMessage` result through the channel |
 | `send_background_result(conn, msg)` | Forwards a background result to the controller; returns `Some(Disconnected)` on failure |
 | `start_update(payload, executor, conn, ctx)` | Applies ctx overrides, spawns update task, sends `UpdateStarted`, returns `InFlightUpdate` |

@@ -71,7 +71,7 @@ Alternatively, the attacker targets the credential delivery path:
 - **NATS transport security.** The controller warns when NATS is configured with
   plaintext transport and recommends `nats-tls://` for production.
 - **NATS config encryption.** *(Implemented)* Plugin config fields in
-  `CheckVersions`, `ExecuteUpdate`, `ExecuteBatchHostPackageUpdate`, and
+  `CheckVersions`, `ExecuteUpdate`, `ExecuteBatchUpdate`, and
   `DiscoverSoftware` messages are encrypted with AES-256-GCM (via the shared
   master key) before NATS publication. Receiving controllers decrypt the configs
   before delivering to agents. Configs are unreadable to NATS subscribers that

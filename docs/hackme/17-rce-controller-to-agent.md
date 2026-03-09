@@ -39,7 +39,7 @@
 
 The same attack applies via:
 
-- **`ExecuteBatchHostPackageUpdate`** — carries the same `pre_update_hooks` and
+- **`ExecuteBatchUpdate`** — carries the same `pre_update_hooks` and
   `post_update_hooks` fields.
 - **`CheckVersions`** — does not carry hooks directly, but the `PluginAssignment`
   config JSON is passed to the plugin constructor. A malicious config for the
@@ -81,14 +81,14 @@ The same attack applies via:
 - **Agent-side execution freeze file.** *(Implemented)* Both the `uptrakit-agent`
   and `uptrakit-agent-ssh` binaries check for the presence of a freeze file at
   `<state-dir>/update-freeze` before processing any `ExecuteUpdate` or
-  `ExecuteBatchHostPackageUpdate` message. If the file exists the message is silently
+  `ExecuteBatchUpdate` message. If the file exists the message is silently
   dropped and the operation is logged. Creating this file (`touch
   <state-dir>/update-freeze`) allows an operator to halt update execution from the
   agent side, independently of and without modifying the controller, while the
   WebSocket connection and all other agent functionality remain active. The freeze
   applies immediately with no restart required.
 - **SSH agent batch update handler.** *(Implemented)* The SSH agent now explicitly
-  handles `ExecuteBatchHostPackageUpdate` messages with the same freeze file check
+  handles `ExecuteBatchUpdate` messages with the same freeze file check
   as `ExecuteUpdate`. Previously, batch update messages were silently dropped by the
   wildcard `_ =>` arm.
 - **Per-hook timeout.** *(Implemented)* Individual pre/post-update hooks have a

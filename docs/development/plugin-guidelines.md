@@ -670,66 +670,67 @@ software they can manage on the local system. Plugins that support this capabili
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `package_identifier` | `String` | Plugin-specific identifier (maps to `SoftwareItem.package_identifier` or `HostPackage.package_identifier`). |
+| `package_identifier` | `String` | Plugin-specific identifier (maps to `host_software_items.package_identifier`). |
 | `name` | `String` | Human-readable display name. |
 | `installed_version` | `String` | Currently installed version (required; plugins omit items with unknown versions). |
-| `tracking_system` | `TrackingSystem` | Determines routing: `Targeted` → software items table, `HostManaged` → host packages table. |
+| `featured` | `bool` | Controls visibility: `true` = individual entry in Software list, `false` = aggregated per-host summary. |
 | `targets` | `Vec<DiscoveryTarget>` | Structured targets for plugin config creation. Empty = use discovering plugin's config. |
 | `extra` | `Option<serde_json::Value>` | Informational metadata only (e.g. Docker container names). Not used for config synthesis. |
 
 The default implementation returns an empty list. Plugins that support discovery (e.g.,
 Proxmox Helper-Scripts) override this method to scan the local system.
 
-### Tracking system routing
+### Featured flag routing
 
-Every discovery plugin must set the `tracking_system` field on each `DiscoveredSoftware` item.
-This field determines how the controller processes the discovery result:
+Every discovery plugin must set the `featured` field on each `DiscoveredSoftware` item.
+This flag controls how the controller presents the discovered item in the UI:
 
-- **`TrackingSystem::Targeted`** — the item is routed to the `software_items` table. It follows
-  the standard pending/approval workflow with role-based plugin assignments. Use this for items
-  the user explicitly wants to track (Docker images, GitHub releases, PHS-discovered apps).
+- **`featured: true`** -- the item appears individually in the main Software list with
+  role-based plugin assignments (`host_software_item_plugins`). Use this for items the user
+  explicitly wants to track (Docker images, GitHub releases, PHS-discovered apps).
 
-- **`TrackingSystem::HostManaged`** — the item is routed to the `host_packages` table. It is
-  created immediately with `enabled: true` (no approval step). Use this for package managers that
-  discover large numbers of system packages (APT, Homebrew, npm in discover-all mode).
+- **`featured: false`** -- the item appears as part of aggregated per-host package summaries.
+  The `plugin_config_id` and `package_identifier` are stored directly on the
+  `host_software_items` junction row. Use this for package managers that discover large numbers
+  of system packages (APT, Homebrew, npm in discover-all mode).
+
+All discovered items are created immediately with `enabled: true` -- there is no pending state
+or approval workflow.
 
 ```rust
-use uptrakit_shared_types::TrackingSystem;
-
 DiscoveredSoftware {
     package_identifier: "nginx".to_string(),
     name: "nginx".to_string(),
     installed_version: "1.24.0".to_string(),
-    tracking_system: TrackingSystem::HostManaged,
+    featured: false,
     targets: vec![],
     extra: None,
 }
 ```
 
-**Current plugin routing:**
+**Current plugin featured assignment:**
 
-| Plugin | Mode | Tracking system |
+| Plugin | Mode | Featured |
 | :--- | :--- | :--- |
-| APT | discover-all | `HostManaged` |
-| Homebrew | discover-all (no pre-existing config) | `HostManaged` |
-| npm | discover-all | `HostManaged` |
-| Docker | all modes | `Targeted` |
-| Proxmox Helper Scripts | all modes | `Targeted` |
+| APT | discover-all | `false` |
+| Homebrew | discover-all (no pre-existing config) | `false` |
+| npm | discover-all | `false` |
+| Docker | all modes | `true` |
+| Proxmox Helper Scripts | all modes | `true` |
 
-The controller's `process_discovery_results()` inspects the `tracking_system` field and routes
-accordingly. For `HostManaged` items the controller resolves the plugin config ID first:
+The controller's `process_discovery_results()` uses the `featured` flag to determine the
+storage strategy. For non-featured items the controller resolves the plugin config ID:
 
 1. If `result.plugin_config_id` is `Some(_)` (pre-existing config), that ID is used directly.
 2. Otherwise, the controller reads `item.targets.first()` and calls
    `find_or_create_default_plugin_config()` to auto-create the config on the first run.
 3. If neither is present the item is skipped with a warning.
 
-Once the config ID is known, `find_or_create_host_package()` checks the host package ignore list
-and either updates an existing record or creates a new one. For `Targeted` items, the controller
-follows the `find_or_create_software_item()` path.
+Once the config ID is known, the controller checks the software ignore list and either updates
+an existing `host_software_items` record or creates a new one. For featured items, the controller
+follows the `find_or_create_software_item()` path with role-based plugin assignments.
 
-See [Autodiscovery — Tracking system routing](../end-user/autodiscovery.md#tracking-system-routing)
-for the end-user perspective.
+See [Autodiscovery](../end-user/autodiscovery.md) for the end-user perspective.
 
 ### Emitting `DiscoveryTarget` values
 
@@ -783,8 +784,8 @@ plugin-specific synthesis logic exists in the controller.
 ## Batch Updates
 
 The `Plugin` trait includes an optional `execute_batch_update()` method for plugins that can
-update multiple packages in a single system command. This is primarily used by host packages
-where a package manager might update dozens of packages at once.
+update multiple packages in a single system command. This is primarily used by non-featured
+software items where a package manager might update dozens of packages at once.
 
 ### Trait method
 
@@ -844,7 +845,7 @@ index refreshes per package.
 If your plugin does not benefit from batching (e.g., each update requires a unique download and
 install), the default sequential fallback is sufficient.
 
-See [Host Packages Architecture](../architecture/host-packages.md#batch-updates) for the full
+See [Unified Software Tracking](../architecture/unified-software-tracking.md) for the full
 batch update flow from controller to agent.
 
 ## Batch Version Check

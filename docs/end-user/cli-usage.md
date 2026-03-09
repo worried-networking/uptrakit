@@ -206,12 +206,6 @@ uptrakit hosts deactivate <HOST_ID>
 # Trigger autodiscovery on a specific host
 uptrakit hosts discover <HOST_ID>
 
-# Discard all pending discovered items for a host
-uptrakit hosts discard-discovered <HOST_ID>
-
-# Discard pending discovered items for a specific plugin config on a host
-uptrakit hosts discard-discovered <HOST_ID> --plugin-config <PLUGIN_CONFIG_ID>
-
 # List the discovery plugin allowlist for a specific host
 uptrakit hosts discovery-allowlist list <HOST_ID>
 
@@ -283,50 +277,27 @@ uptrakit host-tags batch delete <TAG_ID_1> <TAG_ID_2>
 See also: [Host Tags API](../api/host-tags.md),
 [Host Tags Architecture](../architecture/host-tags.md).
 
-## Host Packages
+## Software Ignores
 
-Manage system-level packages tracked per-host by package manager plugins.
+Manage ignore rules that suppress software from future discovery runs.
 
 ```sh
-# List all packages on a host (paginated)
-uptrakit host-packages list <HOST_ID>
-uptrakit host-packages list <HOST_ID> --page 1 --per-page 50
+# List all ignore rules
+uptrakit software-ignores list
 
-# Filter to packages with available updates
-uptrakit host-packages list <HOST_ID> --has-update true
+# Create a tenant-wide ignore rule (suppresses by name across all hosts)
+uptrakit software-ignores add --name telnet
 
-# Filter by update category
-uptrakit host-packages list <HOST_ID> --category security
+# Create a host-specific ignore rule
+uptrakit software-ignores add --host <HOST_ID> --plugin-config <PLUGIN_CONFIG_ID> --package nginx
 
-# Search by package name
-uptrakit host-packages list <HOST_ID> --search nginx
-
-# Show package detail with update history
-uptrakit host-packages show <HOST_ID> <PACKAGE_ID>
-
-# Enable/disable a package
-uptrakit host-packages enable <HOST_ID> <PACKAGE_ID>
-uptrakit host-packages disable <HOST_ID> <PACKAGE_ID>
-
-# Delete a package
-uptrakit host-packages delete <HOST_ID> <PACKAGE_ID>
-
-# Delete and create an ignore rule to prevent re-discovery
-uptrakit host-packages delete <HOST_ID> <PACKAGE_ID> --ignore
-
-# List ignore rules for a host
-uptrakit host-packages ignore list <HOST_ID>
-
-# Add an ignore rule
-uptrakit host-packages ignore add <HOST_ID> --plugin-config <PLUGIN_CONFIG_ID> --package nginx
-
-# Remove an ignore rule
-uptrakit host-packages ignore remove <HOST_ID> <IGNORE_ID>
+# Delete an ignore rule
+uptrakit software-ignores delete <IGNORE_ID>
 ```
 
-See also: [Host Packages Guide](host-packages.md),
-[Host Packages API](../api/host-packages.md),
-[Host Packages Architecture](../architecture/host-packages.md).
+See also: [Autodiscovery Guide](autodiscovery.md),
+[Autodiscovery API](../api/autodiscovery.md),
+[Unified Software Tracking](../architecture/unified-software-tracking.md).
 
 ## Software Items
 
@@ -352,9 +323,6 @@ uptrakit software-items update <ITEM_ID> --name "new-name" --enabled true
 # Delete a software item
 uptrakit software-items delete <ITEM_ID>
 
-# Approve a pending discovered software item for version tracking
-uptrakit software-items approve <ITEM_ID>
-
 # Assign a host to a software item
 uptrakit software-items assign <ITEM_ID> --host <HOST_ID>
 uptrakit software-items assign <ITEM_ID> --host <HOST_ID> --plugin-config <PLUGIN_CONFIG_ID>
@@ -363,7 +331,7 @@ uptrakit software-items assign <ITEM_ID> --host <HOST_ID> --plugin-config <PLUGI
 # Unassign a host from a software item
 uptrakit software-items unassign <ITEM_ID> --host <HOST_ID>
 
-# Unassign a host and create an autodiscovery ignore rule for this package
+# Unassign a host and create a software ignore rule for this package
 uptrakit software-items unassign <ITEM_ID> --host <HOST_ID> --ignore
 
 # Trigger an update to the latest known version on a specific host
@@ -421,31 +389,9 @@ uptrakit plugin-configs delete <PLUGIN_CONFIG_ID>
 # Trigger autodiscovery for a plugin config (discovery-capable plugins only)
 uptrakit plugin-configs discover <PLUGIN_CONFIG_ID>
 
-# Discard all pending discovered items for a plugin config
-uptrakit plugin-configs discard-discovered <PLUGIN_CONFIG_ID>
 ```
 
 See also: [Plugin Configurations](plugin-configs.md), [Autodiscovery](autodiscovery.md).
-
-## Autodiscovery
-
-Manage autodiscovery ignore rules. Ignore rules permanently suppress software items by name from
-appearing in future discovery results. A single ignore rule covers all plugin configs and
-discovery targets for that name. See [Autodiscovery](autodiscovery.md) for a full description of
-the discovery workflow.
-
-```sh
-# List all autodiscovery ignore rules
-uptrakit autodiscovery ignores list
-
-# Create an ignore rule by name (pre-suppress before discovery)
-uptrakit autodiscovery ignores create --name "FreshRSS"
-
-# Delete an ignore rule (re-enables future discovery of that name)
-uptrakit autodiscovery ignores delete <IGNORE_ID>
-```
-
-See also: [Autodiscovery](autodiscovery.md), [Plugin Configurations](plugin-configs.md).
 
 ## Discovery Allowlist
 
@@ -957,27 +903,9 @@ uptrakit system-services batch deactivate <UUID1> <UUID2>
 uptrakit hosts batch deactivate <UUID1> <UUID2>
 ```
 
-### Host packages
-
-Host package batch commands require the host UUID as the first positional argument:
-
-```sh
-# Delete multiple packages on a host
-uptrakit host-packages batch <HOST_UUID> delete <PKG_UUID1> <PKG_UUID2>
-
-# Enable multiple packages
-uptrakit host-packages batch <HOST_UUID> enable <PKG_UUID1> <PKG_UUID2>
-
-# Disable multiple packages
-uptrakit host-packages batch <HOST_UUID> disable <PKG_UUID1> <PKG_UUID2>
-```
-
 ### Software items
 
 ```sh
-# Approve multiple discovered software items
-uptrakit software-items batch approve <UUID1> <UUID2>
-
 # Delete multiple software items
 uptrakit software-items batch delete <UUID1> <UUID2>
 ```
@@ -994,10 +922,10 @@ uptrakit plugin-configs batch delete <UUID1> <UUID2>
 uptrakit host-tags batch delete <UUID1> <UUID2>
 ```
 
-### Autodiscovery ignores
+### Software ignores
 
 ```sh
-uptrakit autodiscovery ignores batch delete <UUID1> <UUID2>
+uptrakit software-ignores batch delete <UUID1> <UUID2>
 ```
 
 See also: [Batch Actions API](../api/batch-actions.md),

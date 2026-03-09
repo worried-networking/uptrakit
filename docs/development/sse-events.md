@@ -204,7 +204,7 @@ into a single callback invocation. The entity ID is extracted from `data.id`,
 `data.host_id`, or `data.task_id`, whichever is present.
 
 This prevents UI flicker when a burst of identical events arrives (for example,
-multiple `host_packages_changed` events for the same host during a batch
+multiple `host_software_changed` events for the same host during a batch
 operation).
 
 ### Safety-net fallback polling

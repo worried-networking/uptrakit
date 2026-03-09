@@ -458,7 +458,7 @@ automatically creates one. Auto-created configs are named:
 discovery anchor, the PHS plugin triggers creation of downstream `releases_github`, `generic_shell`, and
 `APT (auto)` configs during discovery (see
 [PHS configuration](#discovery_proxmox_helper_scripts-configuration-fields) for details). These synthesized
-configs are what appear as parent configs on your approved PHS software items.
+configs are what appear as parent configs on PHS-discovered software items.
 
 ### Triggering discovery
 
@@ -485,26 +485,10 @@ want to clear all pending items at once without reviewing them individually:
 
 **Web UI** — Go to **Settings → Plugin Configs**, open the context menu, and select **Discard Discovered**.
 
-**CLI:**
-
-```bash
-# Discard all pending discovered items for a plugin config
-uptrakit plugin-configs discard-discovered <PLUGIN_CONFIG_ID>
-
-# Discard all pending discovered items for a specific host
-uptrakit hosts discard-discovered <HOST_ID>
-
-# Discard pending items for a specific plugin config on a specific host
-uptrakit hosts discard-discovered <HOST_ID> --plugin-config <PLUGIN_CONFIG_ID>
-```
-
-Discard performs a soft-delete with no ignore rules created. Discarded packages can be
-re-discovered on the next discovery run.
-
-## Autodiscovery Ignore Rules
+## Software Ignore Rules
 
 An ignore rule permanently suppresses a software item by name from appearing in future discovery
-results. Ignore rules are keyed on the software item name at the tenant level. A single ignore
+results. Ignore rules can be tenant-wide (keyed on name) or host-specific. A single tenant-wide ignore
 rule covers all plugin configs and discovery targets for that name, across all hosts.
 
 ### Managing ignore rules in the Web UI
@@ -523,13 +507,13 @@ on a software item host assignment (on the **Software** page).
 
 ```bash
 # List all ignore rules
-uptrakit autodiscovery ignores list
+uptrakit software-ignores list
 
-# Create an ignore rule by name (pre-suppress before discovery)
-uptrakit autodiscovery ignores create --name "unwanted-package"
+# Create a tenant-wide ignore rule by name (pre-suppress before discovery)
+uptrakit software-ignores add --name "unwanted-package"
 
 # Delete an ignore rule (re-enables future discovery)
-uptrakit autodiscovery ignores delete <IGNORE_ID>
+uptrakit software-ignores delete <IGNORE_ID>
 ```
 
 You can also create an ignore rule when unassigning a host from a software item:

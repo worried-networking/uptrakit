@@ -187,15 +187,15 @@ ______________________________________________________________________
   settings, plugin configs, autodiscovery, notifications, audit logs, services, system services,
   enrollment tokens). Auth, rate limiting, OpenAPI/Swagger, WebSocket for real-time updates.
 - **CLI Tool** — Device auth login (RFC 8628-style), auth/token management, hosts, software-items,
-  check, update, history, services, system-services, scheduler, settings, host-packages,
-  notifications, autodiscovery ignores. Table/JSON/YAML output, filtering, interactive mode,
+  check, update, history, services, system-services, scheduler, settings, software-ignores,
+  notifications. Table/JSON/YAML output, filtering, interactive mode,
   config/credentials storage.
 - **MQTT/Home Assistant Integration** — Separate MQTT binary with multi-instance lease-based
   tenant distribution, HA `update` entity discovery, version sensors, update command handling,
   configurable topics, connection resilience, auth support (encrypted at rest). Unified service
   enrollment and management.
 - **Batch Actions (Group Operations)** — `POST /api/v1/{resource}/batch` endpoints for services,
-  system services, software items, hosts, host packages, autodiscovery ignores, and plugin configs.
+  system services, software items, hosts, software ignores, and plugin configs.
   Partial-success semantics (max 100 IDs). OpenAPI client methods and CLI `batch` subcommands for
   all resources. Extension framework `batch_action` flag on `ActionDef`.
 - **Host Tags** — Tenant-scoped tags for grouping and categorizing hosts. Full CRUD at
@@ -413,7 +413,7 @@ ______________________________________________________________________
 ### Update Batching & Orchestration
 
 Completed: batch update system (host-wide + item-wide), update category classification, batch
-progress tracking (SSE), batch notification events, host packages tracking system.
+progress tracking (SSE), batch notification events, unified software tracking.
 
 - [ ] Update dependencies
   - **Category**: Core / Orchestration | **Impact**: Medium | **Effort**: High
@@ -548,7 +548,7 @@ ______________________________________________________________________
   - **Category**: Security / Audit | **Impact**: High | **Effort**: Medium-High
   - Beyond raw HTTP request logging: log the semantic meaning of operations (settings changes with
     old/new values, user CRUD, OIDC provider management, enrollment token lifecycle, notification
-    channel/rule CRUD, service approval/rejection, software/plugin/host-package management, batch
+    channel/rule CRUD, service approval/rejection, software/plugin management, batch
     update initiation).
 - [ ] Public callback endpoint logging
   - **Category**: Security / Audit | **Impact**: Low-Medium | **Effort**: Low

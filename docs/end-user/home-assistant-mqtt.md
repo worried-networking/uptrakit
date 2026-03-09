@@ -6,9 +6,9 @@ item to the broker automatically. Home Assistant Discovery is an optional layer 
 `update` entities in Home Assistant — one per tracked software item per host — so you can view versions
 and trigger updates from the Home Assistant UI.
 
-Uptrakit also publishes a **per-host packages entity**: a single `update` entity per host summarising
-the overall state of all auto-discovered host packages (APT packages, Homebrew formulae, npm globals,
-etc.) on that host. See [Host Package Update Entities](#host-package-update-entities) below.
+Uptrakit also publishes **per-host summary entities**: a single `update` entity per host summarising
+the overall state of all non-featured software items (APT packages, Homebrew formulae, npm globals,
+etc.) on that host. See [Host Summary Update Entities](#host-summary-update-entities) below.
 
 ## MQTT State Topics (always active)
 
@@ -29,14 +29,14 @@ Additionally, Uptrakit publishes the following retained identity topics per host
 | `{prefix}/hosts/{host_id}/hostname` | ✓ | Raw hostname string (for MQTT explorer visibility) |
 | `{prefix}/hosts/{host_id}/friendly_name` | ✓ | User-defined display name (for MQTT explorer visibility) |
 
-For every **host** that has at least one tracked host package, Uptrakit also publishes:
+For every **host** that has at least one tracked non-featured software item, Uptrakit also publishes:
 
 | Topic | Retained | Purpose |
 | --- | :---: | --- |
 | `{prefix}/hosts/{host_id}/state` | ✓ | `"unknown"` when updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/latest_version` | ✓ | `"N available"` when updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/attributes` | ✓ | JSON: `{"in_progress": bool, "pending_count": N}` |
-| `{prefix}/hosts/{host_id}/set` | — | Command topic — publish `"install"` to update all outdated packages |
+| `{prefix}/hosts/{host_id}/set` | — | Command topic — publish `"install"` to update all outdated non-featured items |
 | `{prefix}/hosts/{host_id}/security/state` | ✓ | `"unknown"` when security updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/security/latest_version` | ✓ | `"N available"` when security updates pending, `"up-to-date"` otherwise |
 | `{prefix}/hosts/{host_id}/security/attributes` | ✓ | JSON: `{"in_progress": bool, "pending_count": N}` |
@@ -95,8 +95,7 @@ uptrakit settings mqtt update <id> --ha-discovery
 
 Uptrakit creates one Home Assistant `update` entity for every `(software item, host)` combination where:
 
-- The software item is **enabled** and not deactivated.
-- The software item's discovery state is `null` (manual) or `approved` (auto-discovered and reviewed).
+- The software item is **enabled**, **featured**, and not deactivated.
 - The host is **active** (not deactivated) and assigned to the software item.
 
 Each entity displays:
@@ -118,7 +117,7 @@ without leaving Home Assistant.
 For plugins that only track version numbers (e.g. apt, Homebrew, Docker Hub) the `release_url` and
 `release_summary` attributes are omitted from the discovery config.
 
-All entities for a given host — software items, host packages, and security updates — are grouped under
+All entities for a given host -- featured software items, host summaries, and security updates -- are grouped under
 a single HA device per host. The device is identified by
 `uptrakit_host_{tenant_id_hex}_{host_id_hex}` and named after the host's **friendly name** (the
 user-defined display name set on each host). This means all software items, packages, and security
@@ -153,33 +152,33 @@ the final result (completed or failed), Uptrakit publishes updated state topics 
 > **Note:** Uptrakit never triggers updates automatically. Update execution always requires an explicit
 > user action — from the web UI, CLI, or Home Assistant.
 
-## Host Package Update Entities
+## Host Summary Update Entities
 
 In addition to per-software-item entities, Uptrakit creates **two** Home Assistant `update` entities
-**per host** for host package tracking. Both represent auto-discovered packages (APT, Homebrew, npm,
-etc.) grouped at the host level.
+**per host** for non-featured software tracking. Both represent auto-discovered packages (APT,
+Homebrew, npm, etc.) grouped at the host level.
 
-> **Note:** Both host package entities are **disabled by default** in Home Assistant. You must
+> **Note:** Both host summary entities are **disabled by default** in Home Assistant. You must
 > explicitly enable them in **Settings > Devices & Services > Entities** before they appear in your
 > dashboard. This prevents noise for users who do not need package-level tracking in HA.
 
 ### All-packages entity (`{friendly_name} packages`)
 
-Tracks all outdated packages on the host regardless of category.
+Tracks all outdated non-featured items on the host regardless of category.
 
 ### Security updates entity (`{friendly_name} security updates`)
 
-Tracks only packages where `update_category = "security"`. Pressing **Install** on this entity
-applies only security updates, leaving other pending updates in place.
+Tracks only non-featured items where `update_category = "security"`. Pressing **Install** on this
+entity applies only security updates, leaving other pending updates in place.
 
 ### When Are the Entities Created
 
 Both entities are published when:
 
-- The host has at least one **enabled**, non-deactivated host package tracked.
+- The host has at least one **enabled**, non-deactivated, non-featured software item tracked.
 - The MQTT client is connected and has the host's tenant assigned.
 
-If a host has no tracked packages, no entities are published for it.
+If a host has no tracked non-featured items, no entities are published for it.
 
 ### What the Entities Show
 
@@ -199,34 +198,34 @@ Each entity exposes two attributes:
 | `pending_count` | integer | Number of qualifying packages with an available update |
 | `in_progress` | boolean | `true` while a batch update is pending or running |
 
-### Triggering a Host Package Update from Home Assistant
+### Triggering a Host Batch Update from Home Assistant
 
-When at least one package update is available, an **Install** button appears on the entity card.
+When at least one update is available, an **Install** button appears on the entity card.
 
 **All-packages entity:** Pressing **Install** sends an MQTT command to
-`{prefix}/hosts/{host_id}/set`. The controller finds all outdated host packages and dispatches a
-batch update.
+`{prefix}/hosts/{host_id}/set`. The controller finds all outdated non-featured items and
+dispatches a batch update.
 
 **Security entity:** Pressing **Install** sends an MQTT command to
-`{prefix}/hosts/{host_id}/security/set`. The controller filters the batch to only packages with
+`{prefix}/hosts/{host_id}/security/set`. The controller filters the batch to only items with
 `update_category = "security"`.
 
 In both cases, Uptrakit validates the request and, if accepted:
 
-1. Finds the qualifying outdated packages (all, or security-only).
-2. Creates a `host_package_update_history` record per package and a single `update_batch`.
-3. Sends an `execute_batch_host_package_update` command to the agent for each plugin group.
+1. Finds the qualifying outdated items (all, or security-only).
+2. Creates an `update_history` record per item and a single `update_batch`.
+3. Sends an `execute_batch_update` command to the agent for each plugin group.
 4. Immediately sets `in_progress: true` in the `attributes` topic so the HA spinner appears.
 
 Once the agent completes the update, Uptrakit updates installed versions and publishes fresh state
 topics, returning `in_progress: false` and recalculating `pending_count`.
 
-> **Note:** It is not possible to select individual packages via the HA Install button. Individual
-> package control is available via the Uptrakit web UI.
+> **Note:** It is not possible to select individual non-featured items via the HA Install button.
+> Individual item control is available via the Uptrakit web UI.
 
 ### Device and Entity Naming
 
-All entities (software items, packages, security) are grouped under a single HA device per host:
+All entities (featured software items, host summaries, security) are grouped under a single HA device per host:
 
 - **Device**: `identifiers: ["uptrakit_host_{tenant_hex}_{host_hex}"]`, `name: {friendly_name}`
 
@@ -255,7 +254,7 @@ re-sending. This follows the standard [HA MQTT birth/will pattern](https://www.h
 
 | Symptom | Cause |
 | --- | --- |
-| Item not visible in HA | Software item is `pending` (auto-discovered, not yet approved) |
+| Item not visible in HA | Software item is not featured (non-featured items appear in host summary entities) |
 | Item not visible in HA | Software item or host is deactivated |
 | Entity shows blank versions | Version check has not run yet since the MQTT client was configured |
 | Entity shows blank versions | No agent is connected for that host |
@@ -294,13 +293,12 @@ the `settings mqtt create` and `settings mqtt update` subcommands.
   with publish access to the broker. Ensure your broker uses authentication and access control to limit
   who can publish to Uptrakit command topics.
   - Software item command topics: `{prefix}/hosts/{host_id}/items/{item_id}/set`
-  - Host package command topics: `{prefix}/hosts/{host_id}/set`
+  - Host summary command topics: `{prefix}/hosts/{host_id}/set`
   - Host security command topics: `{prefix}/hosts/{host_id}/security/set`
 - Update requests received via MQTT are validated by the controller (same checks as REST API triggers):
   - Tenant scope verification (the MQTT client must be assigned the same tenant as the target resource).
   - Host assignment and agent approval checks.
-  - Duplicate update prevention (no two concurrent batches for the same host; no two concurrent updates
-    for the same `(host, software item)` pair).
+  - Duplicate update prevention (no two concurrent updates for the same host).
 
 ## Troubleshooting
 

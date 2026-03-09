@@ -63,9 +63,9 @@ Internally tagged with `"type"`. Four variants:
 | `context_menu_group` | `target_entity`, `group_label` | Action group in an entity context menu |
 | `table_columns` | `target_table`, `columns` | Extra columns added to an existing table |
 
-**`target_entity` values:** `"host"`, `"service"`, `"software_item"`, `"host_package"`.
+**`target_entity` values:** `"host"`, `"service"`, `"software_item"`.
 
-**`target_table` values:** `"hosts"`, `"services"`, `"software_items"`, `"host_packages"`.
+**`target_table` values:** `"hosts"`, `"services"`, `"software_items"`.
 
 ### `PanelPosition`
 
