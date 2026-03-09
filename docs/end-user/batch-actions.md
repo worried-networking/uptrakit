@@ -24,6 +24,7 @@ This is faster than using the context menu on each item individually.
 | Hosts | Deactivate | Manage Hosts |
 | Host Packages | Enable, Disable, Delete | Manage Software |
 | Plugin Configs | Delete | Manage Software |
+| Host Tags | Delete | Manage Hosts |
 | Ignore Rules | Delete | Manage Software |
 
 ### Context-dependent actions

@@ -49,6 +49,7 @@ fail. Callers must inspect both arrays to determine the outcome of each item.
 | `POST /api/v1/hosts/{host_id}/packages/batch` | `delete`, `enable`, `disable` | `CanManageSoftware` |
 | `POST /api/v1/autodiscovery/ignores/batch` | `delete` | `CanManageSoftware` |
 | `POST /api/v1/plugin-configs/batch` | `delete` | `CanManageSoftware` |
+| `POST /api/v1/host-tags/batch` | `delete` | `CanManageHosts` |
 
 All endpoints require a valid Bearer token. Permission extractors are declared on each route
 handler and reflected in the OpenAPI spec via `x-required-permission`.
@@ -94,6 +95,11 @@ All three actions emit a `HostPackagesChanged` event.
 ### Plugin Configs (`/api/v1/plugin-configs/batch`)
 
 - **delete** -- Removes plugin configuration entries.
+
+### Host Tags (`/api/v1/host-tags/batch`)
+
+- **delete** -- Soft-deletes tags and hard-deletes all host assignments within a transaction.
+  Emits `HostTagDeleted` admin event per succeeded item.
 
 ## Error Scenarios
 
