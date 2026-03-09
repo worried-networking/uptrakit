@@ -50,8 +50,7 @@ pub use crate::system_alerts::AlertSeverity;
 
 // ── Autodiscovery ────────────────────────────────────────────────────
 pub use crate::autodiscovery::{
-    AutodiscoveryIgnoreResponse, CreateAutodiscoveryIgnoreRequest, DiscardDiscoveredResponse,
-    TriggerDiscoveryResponse,
+    CreateSoftwareIgnoreRequest, SoftwareIgnoreResponse, TriggerDiscoveryResponse,
 };
 
 // ── SMTP Settings ────────────────────────────────────────────────────

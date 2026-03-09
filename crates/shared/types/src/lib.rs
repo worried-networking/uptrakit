@@ -17,10 +17,8 @@ mod plugin_types;
 mod secret_string;
 mod service_status;
 mod session_token_type;
-mod software_discovery_state;
 #[cfg(feature = "http-ssrf")]
 pub mod ssrf;
-mod tracking_system;
 mod update_category;
 mod update_status;
 
@@ -44,7 +42,5 @@ pub use plugin_types::{
 pub use secret_string::SecretString;
 pub use service_status::{ParseServiceStatusError, ServiceStatus};
 pub use session_token_type::{ParseSessionTokenTypeError, SessionTokenType};
-pub use software_discovery_state::{ParseSoftwareDiscoveryStateError, SoftwareDiscoveryState};
-pub use tracking_system::{ParseTrackingSystemError, TrackingSystem};
 pub use update_category::{ParseUpdateCategoryError, UpdateCategory};
 pub use update_status::{ParseUpdateStatusError, UpdateStatus};

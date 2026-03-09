@@ -6,18 +6,18 @@ use time::UtcDateTime;
 use super::capabilities::ErrorPayload;
 use super::extension;
 use super::payloads::{
-    ApprovedPayload, BatchHostPackageUpdateResultPayload, CaBundleUpdatedPayload,
-    CertificatePayload, CheckVersionsPayload, DisconnectingPayload, DiscoverSoftwarePayload,
-    DiscoveryResultsPayload, EnrollPayload, EnrolledPayload, ExecuteBatchHostPackageUpdatePayload,
-    ExecuteUpdatePayload, MqttClientCreatedPayload, MqttClientStatusPayload, MqttRegisterPayload,
-    MqttRegisteredPayload, MqttReleaseTenantsPayload, MqttSoftwareStatesPayload,
-    MqttTenantAssignmentsPayload, MqttTenantConfigUpdatedPayload, MqttTenantRevokedPayload,
-    MqttTriggerHostPackageUpdatePayload, MqttUpdateTriggerPayload, PingPayload, PongPayload,
-    RejectedPayload, ReportHostsPayload, ReportPluginConfigPayload,
-    ReportPluginConfigResponsePayload, RequestCaRotationPayload, RequestCertRenewalPayload,
-    RequestCrlRenewalPayload, ServerRestartingPayload, ServiceCredentialsPayload,
-    ServiceSettingsPayload, SetUpdateFreezePayload, TokenRevokedPayload, UpdateCapabilitiesPayload,
-    UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload, VersionCheckResultsPayload,
+    ApprovedPayload, BatchUpdateResultPayload, CaBundleUpdatedPayload, CertificatePayload,
+    CheckVersionsPayload, DisconnectingPayload, DiscoverSoftwarePayload, DiscoveryResultsPayload,
+    EnrollPayload, EnrolledPayload, ExecuteBatchUpdatePayload, ExecuteUpdatePayload,
+    MqttClientCreatedPayload, MqttClientStatusPayload, MqttRegisterPayload, MqttRegisteredPayload,
+    MqttReleaseTenantsPayload, MqttSoftwareStatesPayload, MqttTenantAssignmentsPayload,
+    MqttTenantConfigUpdatedPayload, MqttTenantRevokedPayload, MqttTriggerHostBatchUpdatePayload,
+    MqttUpdateTriggerPayload, PingPayload, PongPayload, RejectedPayload, ReportHostsPayload,
+    ReportPluginConfigPayload, ReportPluginConfigResponsePayload, RequestCaRotationPayload,
+    RequestCertRenewalPayload, RequestCrlRenewalPayload, ServerRestartingPayload,
+    ServiceCredentialsPayload, ServiceSettingsPayload, SetUpdateFreezePayload, TokenRevokedPayload,
+    UpdateCapabilitiesPayload, UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload,
+    VersionCheckResultsPayload,
 };
 use uptrakit_shared_types::HookShell;
 
@@ -131,18 +131,22 @@ pub enum ServiceMessage {
     UpdateStarted(UpdateStartedPayload),
     UpdateOutput(UpdateOutputPayload),
     UpdateResult(UpdateResultPayload),
-    BatchHostPackageUpdateResult(BatchHostPackageUpdateResultPayload),
+    #[serde(alias = "batch_host_package_update_result")]
+    BatchUpdateResult(BatchUpdateResultPayload),
     DiscoveryResults(DiscoveryResultsPayload),
     // -- MQTT-specific --
     Register(MqttRegisterPayload),
     ReleaseTenants(MqttReleaseTenantsPayload),
     MqttClientStatus(MqttClientStatusPayload),
     MqttTriggerUpdate(MqttUpdateTriggerPayload),
-    /// MQTT service → Controller: trigger a batch update of all outdated host packages on a host.
+    /// MQTT service → Controller: trigger a batch update of all outdated software items on a host.
     ///
-    /// Sent when a Home Assistant user presses "Install" on a host packages update entity.
-    #[serde(rename = "mqtt_trigger_host_package_update")]
-    MqttTriggerHostPackageUpdate(MqttTriggerHostPackageUpdatePayload),
+    /// Sent when a Home Assistant user presses "Install" on a host update entity.
+    #[serde(
+        rename = "mqtt_trigger_host_batch_update",
+        alias = "mqtt_trigger_host_package_update"
+    )]
+    MqttTriggerHostBatchUpdate(MqttTriggerHostBatchUpdatePayload),
     // -- Capability management --
     /// Service announces its current capability set to the controller.
     ///
@@ -231,7 +235,8 @@ pub enum ControllerMessage {
     // -- Agent-specific --
     CheckVersions(CheckVersionsPayload),
     ExecuteUpdate(Box<ExecuteUpdatePayload>),
-    ExecuteBatchHostPackageUpdate(Box<ExecuteBatchHostPackageUpdatePayload>),
+    #[serde(alias = "execute_batch_host_package_update")]
+    ExecuteBatchUpdate(Box<ExecuteBatchUpdatePayload>),
     DiscoverSoftware(DiscoverSoftwarePayload),
     SetUpdateFreeze(SetUpdateFreezePayload),
     // -- MQTT-specific --

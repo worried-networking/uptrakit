@@ -272,11 +272,15 @@ pub struct VersionCheckAssignment {
     /// Controller-side fetch_releases is handled by the scheduler, not sent to the agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fetch_releases: Option<PluginAssignment>,
-    /// Host package ID for routing results to the host_packages table.
-    /// When set, this assignment is for a host-managed package rather than
+    /// Host software item ID for routing results to the host_software_items table.
+    /// When set, this assignment is for a host-managed software item rather than
     /// a targeted software item.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host_package_id: Option<Uuid>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "host_package_id"
+    )]
+    pub host_software_item_id: Option<Uuid>,
 }
 
 /// Payload for version check results from the agent.
@@ -306,10 +310,14 @@ pub struct VersionCheckResult {
     /// Defaults to `Unknown` when the plugin cannot classify the update.
     #[serde(default)]
     pub update_category: UpdateCategory,
-    /// Host package ID for routing results to the host_packages table.
+    /// Host software item ID for routing results to the host_software_items table.
     /// Mirrors the value from the corresponding [`VersionCheckAssignment`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host_package_id: Option<Uuid>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "host_package_id"
+    )]
+    pub host_software_item_id: Option<Uuid>,
 }
 
 // --- Update execution messages ---
@@ -385,24 +393,24 @@ pub struct UpdateResultPayload {
     pub error: Option<String>,
 }
 
-// --- Batch host package update messages ---
+// --- Batch update messages ---
 
-/// Controller → Agent: execute a batch update of host packages.
+/// Controller → Agent: execute a batch update of software items.
 ///
-/// Groups multiple packages under a single plugin type so the agent can
+/// Groups multiple items under a single plugin type so the agent can
 /// run a single bulk command (e.g., `apt-get upgrade`, `brew upgrade`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecuteBatchHostPackageUpdatePayload {
+pub struct ExecuteBatchUpdatePayload {
     /// The machine_id of the host to run the update on.
     pub host_machine_id: String,
     /// Unique identifier for this batch operation.
     pub batch_id: Uuid,
-    /// Plugin type for all packages in this batch.
+    /// Plugin type for all items in this batch.
     pub plugin_type: PluginType,
     /// Merged plugin configuration.
     pub plugin_config: serde_json::Value,
-    /// Individual packages to update.
-    pub updates: Vec<BatchHostPackageUpdate>,
+    /// Individual items to update.
+    pub updates: Vec<BatchUpdateItem>,
     /// Pre-update hook commands to execute before the batch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pre_update_hooks: Vec<HookCommand>,
@@ -420,11 +428,12 @@ pub struct ExecuteBatchHostPackageUpdatePayload {
     pub timeout: std::time::Duration,
 }
 
-/// A single host package within a batch update request.
+/// A single software item within a batch update request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BatchHostPackageUpdate {
-    /// Host package entity ID.
-    pub host_package_id: Uuid,
+pub struct BatchUpdateItem {
+    /// Host software item entity ID.
+    #[serde(alias = "host_package_id")]
+    pub host_software_item_id: Uuid,
     /// Update history record ID (pre-created by the controller).
     pub update_history_id: Uuid,
     /// Plugin-specific package identifier (e.g., APT package name).
@@ -436,23 +445,24 @@ pub struct BatchHostPackageUpdate {
     pub release_info: Option<ReleaseInfo>,
 }
 
-/// Agent → Controller: result of a batch host package update.
+/// Agent → Controller: result of a batch update.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BatchHostPackageUpdateResultPayload {
+pub struct BatchUpdateResultPayload {
     /// Batch ID matching the request.
     pub batch_id: Uuid,
-    /// Per-package results.
-    pub results: Vec<BatchHostPackageUpdateResult>,
+    /// Per-item results.
+    pub results: Vec<BatchUpdateItemResult>,
 }
 
-/// Result of updating a single package within a batch operation.
+/// Result of updating a single item within a batch operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BatchHostPackageUpdateResult {
-    /// Host package entity ID.
-    pub host_package_id: Uuid,
+pub struct BatchUpdateItemResult {
+    /// Host software item entity ID.
+    #[serde(alias = "host_package_id")]
+    pub host_software_item_id: Uuid,
     /// Update history record ID.
     pub update_history_id: Uuid,
-    /// Final status of this package's update.
+    /// Final status of this item's update.
     pub status: UpdateFinalStatus,
     /// Accumulated output from the update.
     pub output: String,
@@ -469,7 +479,7 @@ pub struct BatchHostPackageUpdateResult {
 /// Controller → Agent: enable or disable the update freeze.
 ///
 /// When `enabled` is `true`, the agent creates its freeze file, which blocks
-/// `ExecuteUpdate` and `ExecuteBatchHostPackageUpdate` messages until the file
+/// `ExecuteUpdate` and `ExecuteBatchUpdate` messages until the file
 /// is removed (either via a subsequent `SetUpdateFreeze { enabled: false }`
 /// message, or manually on the host via `rm <freeze-file>`).
 ///
@@ -728,14 +738,14 @@ pub struct MqttSoftwareStatesPayload {
     pub tenant_id: Uuid,
     /// All active software items for the tenant with per-host version data.
     pub items: Vec<MqttSoftwareStateItem>,
-    /// Per-host aggregate state of tracked host packages.
+    /// Per-host aggregate summary of unpinned (unfeatured) software items.
     ///
-    /// Each entry summarises all enabled, non-deactivated host packages for
-    /// one host. Only hosts with at least one tracked package are included.
+    /// Each entry summarises all enabled, non-deactivated unfeatured items for
+    /// one host. Only hosts with at least one such item are included.
     /// Defaults to an empty list on deserialization for backward compatibility
-    /// with older MQTT services that do not know about host packages.
-    #[serde(default)]
-    pub host_package_hosts: Vec<MqttHostPackageHostState>,
+    /// with older MQTT services.
+    #[serde(default, alias = "host_package_hosts")]
+    pub host_summaries: Vec<MqttHostSummary>,
 }
 
 /// A single software item entry in [`MqttSoftwareStatesPayload`].
@@ -799,42 +809,42 @@ pub struct MqttUpdateTriggerPayload {
     pub mqtt_client_id: Uuid,
 }
 
-/// Per-host aggregate state of tracked host packages.
+/// Per-host aggregate summary of unpinned (unfeatured) software items.
 ///
-/// Included in [`MqttSoftwareStatesPayload`] to surface overall package update
+/// Included in [`MqttSoftwareStatesPayload`] to surface overall update
 /// status per host to Home Assistant via a single `update` entity per host.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttHostPackageHostState {
+pub struct MqttHostSummary {
     /// Host UUID.
     pub host_id: Uuid,
     /// Human-readable hostname.
     pub hostname: String,
     /// User-defined display name for the host.
     pub friendly_name: String,
-    /// Count of packages where `installed_version != latest_version` (both known).
+    /// Count of items where `installed_version != latest_version` (both known).
     pub pending_count: u32,
-    /// Count of packages where `update_category = "security"` AND versions differ.
+    /// Count of items where `update_category = "security"` AND versions differ.
     pub security_pending_count: u32,
-    /// Total count of enabled, non-deactivated packages for this host.
+    /// Total count of enabled, non-deactivated unfeatured items for this host.
     pub total_count: u32,
     /// Whether a batch update is currently pending or in progress for this host.
     pub update_in_progress: bool,
 }
 
-/// MQTT service → Controller: trigger a batch update of all outdated host packages on a host.
+/// MQTT service → Controller: trigger a batch update of all outdated software items on a host.
 ///
-/// Sent when a Home Assistant user presses "Install" on a host packages update
-/// entity. The controller resolves the latest versions for all outdated packages
-/// at trigger time and dispatches a `ExecuteBatchHostPackageUpdate` to the agent.
+/// Sent when a Home Assistant user presses "Install" on a host update
+/// entity. The controller resolves the latest versions for all outdated items
+/// at trigger time and dispatches a `ExecuteBatchUpdate` to the agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttTriggerHostPackageUpdatePayload {
+pub struct MqttTriggerHostBatchUpdatePayload {
     /// Tenant UUID (for validation).
     pub tenant_id: Uuid,
-    /// Host whose packages should be updated.
+    /// Host whose items should be updated.
     pub host_id: Uuid,
     /// MQTT client UUID that initiated the trigger (used as actor_id).
     pub mqtt_client_id: Uuid,
-    /// When `true`, only packages with `update_category = "security"` are updated.
+    /// When `true`, only items with `update_category = "security"` are updated.
     #[serde(default)]
     pub security_only: bool,
 }

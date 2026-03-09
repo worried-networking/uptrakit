@@ -9,8 +9,8 @@ pub const MAX_BATCH_SIZE: usize = 100;
 /// Request body for batch action endpoints.
 ///
 /// Each resource's batch endpoint (`POST /api/v1/{resource}/batch`) accepts
-/// this payload. The `action` string selects the operation (e.g. `"approve"`,
-/// `"delete"`) and `ids` lists the target entity UUIDs.
+/// this payload. The `action` string selects the operation (e.g. `"feature"`,
+/// `"unfeature"`, `"delete"`) and `ids` lists the target entity UUIDs.
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BatchActionRequest {

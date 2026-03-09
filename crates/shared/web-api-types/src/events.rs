@@ -54,10 +54,6 @@ pub enum AdminEvent {
     },
     /// Autodiscovery completed for a host.
     DiscoveryCompleted { host_id: Uuid },
-    /// Host packages changed (new packages discovered, versions updated, etc.).
-    HostPackagesChanged { host_id: Uuid },
-    /// A batch host package update completed.
-    BatchHostPackageUpdateCompleted { host_id: Uuid },
     /// A system service's status changed (approved, rejected, deactivated).
     SystemServiceStatusChanged { id: Uuid, status: String },
     /// A scheduled task completed execution.
@@ -89,8 +85,6 @@ impl AdminEvent {
             Self::UpdateStarted { .. } => "update_started",
             Self::UpdateCompleted { .. } => "update_completed",
             Self::DiscoveryCompleted { .. } => "discovery_completed",
-            Self::HostPackagesChanged { .. } => "host_packages_changed",
-            Self::BatchHostPackageUpdateCompleted { .. } => "batch_host_package_update_completed",
             Self::SystemServiceStatusChanged { .. } => "system_service_status_changed",
             Self::SchedulerTaskCompleted { .. } => "scheduler_task_completed",
             Self::HostTagCreated { .. } => "host_tag_created",
@@ -134,8 +128,6 @@ mod tests {
                 status: "completed".to_string(),
             },
             AdminEvent::DiscoveryCompleted { host_id: id },
-            AdminEvent::HostPackagesChanged { host_id: id },
-            AdminEvent::BatchHostPackageUpdateCompleted { host_id: id },
             AdminEvent::SystemServiceStatusChanged {
                 id,
                 status: "approved".to_string(),
@@ -212,14 +204,6 @@ mod tests {
             "discovery_completed"
         );
         assert_eq!(
-            AdminEvent::HostPackagesChanged { host_id: id }.event_name(),
-            "host_packages_changed"
-        );
-        assert_eq!(
-            AdminEvent::BatchHostPackageUpdateCompleted { host_id: id }.event_name(),
-            "batch_host_package_update_completed"
-        );
-        assert_eq!(
             AdminEvent::SystemServiceStatusChanged {
                 id,
                 status: String::new()
@@ -237,7 +221,7 @@ mod tests {
     fn event_name_count_matches_variant_count() {
         // If a new variant is added without updating event_name(), this
         // test will fail because all_variants() won't include it.
-        assert_eq!(all_variants().len(), 18);
+        assert_eq!(all_variants().len(), 16);
     }
 
     #[test]

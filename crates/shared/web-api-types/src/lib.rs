@@ -19,7 +19,6 @@ pub mod enrollment_tokens;
 pub mod error;
 pub mod events;
 pub mod extensions;
-pub mod host_packages;
 pub mod host_tags;
 pub mod hosts;
 pub mod masked_url;
@@ -59,9 +58,16 @@ pub mod validation;
 /// Default value for `enabled` fields in create-request types.
 ///
 /// Used as `#[serde(default = "crate::default_enabled")]` in
-/// [`plugin_configs::CreatePluginConfigRequest`] and
-/// [`software_items::CreateSoftwareItemRequest`].
+/// [`plugin_configs::CreatePluginConfigRequest`].
 pub fn default_enabled() -> bool {
+    true
+}
+
+/// Default value for the `featured` field in create-request types.
+///
+/// Used as `#[serde(default = "crate::default_featured")]` in
+/// [`software_items::CreateSoftwareItemRequest`].
+pub fn default_featured() -> bool {
     true
 }
 
@@ -261,36 +267,20 @@ mod tests {
     }
 
     #[test]
-    fn create_software_item_request_default_enabled() {
+    fn create_software_item_request_default_featured() {
         let json = serde_json::json!({ "name": "Node.js" });
         let req: CreateSoftwareItemRequest = serde_json::from_value(json).unwrap();
-        assert!(req.enabled);
+        assert!(req.featured);
     }
 
     #[test]
-    fn create_software_item_request_explicit_enabled_false() {
+    fn create_software_item_request_explicit_featured_false() {
         let json = serde_json::json!({
             "name": "Node.js",
-            "enabled": false
+            "featured": false
         });
         let req: CreateSoftwareItemRequest = serde_json::from_value(json).unwrap();
-        assert!(!req.enabled);
-    }
-
-    #[test]
-    fn create_software_item_request_inline_config_default_enabled() -> Result<(), serde_json::Error>
-    {
-        let json = serde_json::json!({
-            "name": "Node.js",
-            "plugin_config": {
-                "name": "GitHub Releases",
-                "plugin_type": "releases_github",
-                "config": {}
-            }
-        });
-        let req: CreateSoftwareItemRequest = serde_json::from_value(json)?;
-        assert!(req.enabled);
-        Ok(())
+        assert!(!req.featured);
     }
 
     #[test]
@@ -934,7 +924,7 @@ mod tests {
         use crate::validation::Validate;
         let req = CreateSoftwareItemRequest {
             name: "Node.js".to_string(),
-            enabled: true,
+            featured: true,
         };
         assert!(req.validate().is_ok());
     }
@@ -944,7 +934,7 @@ mod tests {
         use crate::validation::Validate;
         let req = CreateSoftwareItemRequest {
             name: "".to_string(),
-            enabled: true,
+            featured: true,
         };
         let err = req.validate().unwrap_err();
         assert_eq!(err.field, "name");

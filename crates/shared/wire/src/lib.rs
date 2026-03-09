@@ -28,7 +28,7 @@ pub use trace_context::{TraceContext, current_trace_context};
 pub use uptrakit_shared_types::{
     AttestationStatus, DiscoveredSoftware, DiscoveryTarget, HookShell, MqttClientConnectionStatus,
     MqttTransport, OutputStreamType, PluginRole, PluginType, ReleaseAsset, ReleaseInfo,
-    TrackingSystem, UpdateCategory,
+    UpdateCategory,
 };
 // Re-export `SecretString` for callers that need it for secret fields.
 pub use uptrakit_shared_types::SecretString;
@@ -256,7 +256,7 @@ mod tests {
             results: vec![
                 VersionCheckResult {
                     software_item_id: TEST_UUID_1,
-                    host_package_id: None,
+                    host_software_item_id: None,
                     installed_version: Some("1.2.3".to_string()),
                     latest_version: None,
                     error: None,
@@ -264,7 +264,7 @@ mod tests {
                 },
                 VersionCheckResult {
                     software_item_id: TEST_UUID_2,
-                    host_package_id: None,
+                    host_software_item_id: None,
                     installed_version: None,
                     latest_version: None,
                     error: Some("detection failed".to_string()),
@@ -288,7 +288,7 @@ mod tests {
         let msg = ServiceMessage::VersionCheckResults(VersionCheckResultsPayload {
             results: vec![VersionCheckResult {
                 software_item_id: TEST_UUID_1,
-                host_package_id: None,
+                host_software_item_id: None,
                 installed_version: Some("1.24.4".to_string()),
                 latest_version: Some("1.24.5".to_string()),
                 error: None,
@@ -758,7 +758,7 @@ mod tests {
                     config: serde_json::json!({}),
                 }),
                 fetch_releases: None,
-                host_package_id: None,
+                host_software_item_id: None,
             }],
         });
         let json = serde_json::to_string(&msg).unwrap();
@@ -1290,7 +1290,7 @@ mod tests {
                 config: serde_json::json!({}),
             }),
             fetch_releases: None,
-            host_package_id: None,
+            host_software_item_id: None,
         };
         let json = serde_json::to_string(&assignment).unwrap();
         assert!(json.contains(r#""plugin_type":"releases_docker""#));
@@ -1905,7 +1905,7 @@ mod tests {
             VersionCheckResultsPayload {
                 results: vec![VersionCheckResult {
                     software_item_id: TEST_UUID_1,
-                    host_package_id: None,
+                    host_software_item_id: None,
                     installed_version: Some("1.2.3".to_string()),
                     latest_version: Some("1.3.0".to_string()),
                     error: None,
@@ -2129,7 +2129,7 @@ mod tests {
                         config: serde_json::json!({}),
                     }),
                     fetch_releases: None,
-                    host_package_id: None,
+                    host_software_item_id: None,
                 }],
             }));
         spec.validate("checkVersionsPayload", &json);
@@ -2294,7 +2294,7 @@ mod tests {
                         installed_version: "1.21.4".to_string(),
                         targets: vec![],
                         extra: Some(serde_json::json!({"package_type": "formula"})),
-                        tracking_system: Default::default(),
+                        featured: false,
                         qualifier: None,
                         plugin_package_identifier: None,
                     }],
@@ -2365,7 +2365,7 @@ mod tests {
                         installed_version: "1.21.4".to_string(),
                         targets: vec![],
                         extra: None,
-                        tracking_system: Default::default(),
+                        featured: false,
                         qualifier: None,
                         plugin_package_identifier: None,
                     }],
@@ -2376,27 +2376,25 @@ mod tests {
     }
 
     #[test]
-    fn execute_batch_host_package_update_serialization_roundtrip() {
-        let msg = ControllerMessage::ExecuteBatchHostPackageUpdate(Box::new(
-            ExecuteBatchHostPackageUpdatePayload {
-                host_machine_id: "test-machine-id".to_string(),
-                batch_id: TEST_UUID_1,
-                plugin_type: PluginType::PackageManagerApt,
-                plugin_config: serde_json::json!({}),
-                updates: vec![BatchHostPackageUpdate {
-                    host_package_id: TEST_UUID_1,
-                    update_history_id: TEST_UUID_2,
-                    package_identifier: "nginx".to_string(),
-                    to_version: "1.24.0-2".to_string(),
-                    release_info: None,
-                }],
-                pre_update_hooks: vec![],
-                post_update_hooks: vec![],
-                timeout: std::time::Duration::from_secs(7200),
-            },
-        ));
+    fn execute_batch_update_serialization_roundtrip() {
+        let msg = ControllerMessage::ExecuteBatchUpdate(Box::new(ExecuteBatchUpdatePayload {
+            host_machine_id: "test-machine-id".to_string(),
+            batch_id: TEST_UUID_1,
+            plugin_type: PluginType::PackageManagerApt,
+            plugin_config: serde_json::json!({}),
+            updates: vec![BatchUpdateItem {
+                host_software_item_id: TEST_UUID_1,
+                update_history_id: TEST_UUID_2,
+                package_identifier: "nginx".to_string(),
+                to_version: "1.24.0-2".to_string(),
+                release_info: None,
+            }],
+            pre_update_hooks: vec![],
+            post_update_hooks: vec![],
+            timeout: std::time::Duration::from_secs(7200),
+        }));
         let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains(r#""type":"execute_batch_host_package_update"#));
+        assert!(json.contains(r#""type":"execute_batch_update"#));
         assert!(json.contains(r#""plugin_type":"package_manager_apt"#));
         assert!(json.contains(r#""package_identifier":"nginx"#));
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
@@ -2404,37 +2402,60 @@ mod tests {
     }
 
     #[test]
-    fn batch_host_package_update_result_serialization_roundtrip() {
-        let msg =
-            ServiceMessage::BatchHostPackageUpdateResult(BatchHostPackageUpdateResultPayload {
-                batch_id: TEST_UUID_1,
-                results: vec![BatchHostPackageUpdateResult {
-                    host_package_id: TEST_UUID_1,
-                    update_history_id: TEST_UUID_2,
-                    status: UpdateFinalStatus::Completed,
-                    output: "Unpacking nginx 1.24.0-2 ...\n".to_string(),
-                    installed_version: Some("1.24.0-2".to_string()),
-                    error: None,
-                }],
-            });
+    fn execute_batch_update_backward_compat_old_type_tag() {
+        // Old wire messages with the old type tag must still deserialize.
+        let json = r#"{"type":"execute_batch_host_package_update","host_machine_id":"test","batch_id":"550e8400-e29b-41d4-a716-446655440000","plugin_type":"package_manager_apt","plugin_config":{},"updates":[{"host_package_id":"550e8400-e29b-41d4-a716-446655440000","update_history_id":"550e8400-e29b-41d4-a716-446655440001","package_identifier":"nginx","to_version":"1.24.0-2"}],"timeout_seconds":7200}"#;
+        let msg: ControllerMessage = serde_json::from_str(json).unwrap();
+        if let ControllerMessage::ExecuteBatchUpdate(payload) = msg {
+            assert_eq!(payload.updates[0].host_software_item_id, TEST_UUID_1);
+        } else {
+            panic!("expected ExecuteBatchUpdate");
+        }
+    }
+
+    #[test]
+    fn batch_update_result_serialization_roundtrip() {
+        let msg = ServiceMessage::BatchUpdateResult(BatchUpdateResultPayload {
+            batch_id: TEST_UUID_1,
+            results: vec![BatchUpdateItemResult {
+                host_software_item_id: TEST_UUID_1,
+                update_history_id: TEST_UUID_2,
+                status: UpdateFinalStatus::Completed,
+                output: "Unpacking nginx 1.24.0-2 ...\n".to_string(),
+                installed_version: Some("1.24.0-2".to_string()),
+                error: None,
+            }],
+        });
         let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains(r#""type":"batch_host_package_update_result"#));
+        assert!(json.contains(r#""type":"batch_update_result"#));
         assert!(json.contains(r#""status":"completed"#));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
 
     #[test]
-    fn spec_conformance_execute_batch_host_package_update() {
+    fn batch_update_result_backward_compat_old_type_tag() {
+        // Old wire messages with the old type tag must still deserialize.
+        let json = r#"{"type":"batch_host_package_update_result","batch_id":"550e8400-e29b-41d4-a716-446655440000","results":[{"host_package_id":"550e8400-e29b-41d4-a716-446655440000","update_history_id":"550e8400-e29b-41d4-a716-446655440001","status":"completed","output":"done\n"}]}"#;
+        let msg: ServiceMessage = serde_json::from_str(json).unwrap();
+        if let ServiceMessage::BatchUpdateResult(payload) = msg {
+            assert_eq!(payload.results[0].host_software_item_id, TEST_UUID_1);
+        } else {
+            panic!("expected BatchUpdateResult");
+        }
+    }
+
+    #[test]
+    fn spec_conformance_execute_batch_update() {
         let spec = AsyncApiSpec::load();
-        let json = controller_envelope_json(ControllerMessage::ExecuteBatchHostPackageUpdate(
-            Box::new(ExecuteBatchHostPackageUpdatePayload {
+        let json = controller_envelope_json(ControllerMessage::ExecuteBatchUpdate(Box::new(
+            ExecuteBatchUpdatePayload {
                 host_machine_id: "test-machine-id".to_string(),
                 batch_id: TEST_UUID_1,
                 plugin_type: PluginType::PackageManagerApt,
                 plugin_config: serde_json::json!({}),
-                updates: vec![BatchHostPackageUpdate {
-                    host_package_id: TEST_UUID_1,
+                updates: vec![BatchUpdateItem {
+                    host_software_item_id: TEST_UUID_1,
                     update_history_id: TEST_UUID_2,
                     package_identifier: "nginx".to_string(),
                     to_version: "1.24.0-2".to_string(),
@@ -2443,19 +2464,19 @@ mod tests {
                 pre_update_hooks: vec![],
                 post_update_hooks: vec![],
                 timeout: std::time::Duration::from_secs(7200),
-            }),
-        ));
-        spec.validate("executeBatchHostPackageUpdatePayload", &json);
+            },
+        )));
+        spec.validate("executeBatchUpdatePayload", &json);
     }
 
     #[test]
-    fn spec_conformance_batch_host_package_update_result() {
+    fn spec_conformance_batch_update_result() {
         let spec = AsyncApiSpec::load();
-        let json = service_envelope_json(ServiceMessage::BatchHostPackageUpdateResult(
-            BatchHostPackageUpdateResultPayload {
+        let json = service_envelope_json(ServiceMessage::BatchUpdateResult(
+            BatchUpdateResultPayload {
                 batch_id: TEST_UUID_1,
-                results: vec![BatchHostPackageUpdateResult {
-                    host_package_id: TEST_UUID_1,
+                results: vec![BatchUpdateItemResult {
+                    host_software_item_id: TEST_UUID_1,
                     update_history_id: TEST_UUID_2,
                     status: UpdateFinalStatus::Completed,
                     output: "Unpacking nginx 1.24.0-2 ...\n".to_string(),
@@ -2464,16 +2485,16 @@ mod tests {
                 }],
             },
         ));
-        spec.validate("batchHostPackageUpdateResultPayload", &json);
+        spec.validate("batchUpdateResultPayload", &json);
     }
 
     // =========================================================================
-    // Host package MQTT types tests
+    // Host summary MQTT types tests
     // =========================================================================
 
     #[test]
-    fn mqtt_host_package_host_state_roundtrip() {
-        let state = MqttHostPackageHostState {
+    fn mqtt_host_summary_roundtrip() {
+        let state = MqttHostSummary {
             host_id: TEST_UUID_1,
             hostname: "myserver.local".to_string(),
             friendly_name: "My Server".to_string(),
@@ -2483,24 +2504,33 @@ mod tests {
             update_in_progress: false,
         };
         let json = serde_json::to_string(&state).unwrap();
-        let deserialized: MqttHostPackageHostState = serde_json::from_str(&json).unwrap();
+        let deserialized: MqttHostSummary = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, state);
     }
 
     #[test]
-    fn mqtt_software_states_payload_default_host_package_hosts() {
-        // Deserializing a payload without host_package_hosts should default to empty vec.
+    fn mqtt_software_states_payload_default_host_summaries() {
+        // Deserializing a payload without host_summaries should default to empty vec.
         let json = r#"{"tenant_id":"11111111-1111-1111-1111-111111111111","items":[]}"#;
         let payload: MqttSoftwareStatesPayload = serde_json::from_str(json).unwrap();
-        assert!(payload.host_package_hosts.is_empty());
+        assert!(payload.host_summaries.is_empty());
     }
 
     #[test]
-    fn mqtt_software_states_payload_with_host_package_hosts_roundtrip() {
+    fn mqtt_software_states_payload_backward_compat_host_package_hosts() {
+        // Old wire messages with "host_package_hosts" should deserialize via alias.
+        let json = r#"{"tenant_id":"11111111-1111-1111-1111-111111111111","items":[],"host_package_hosts":[{"host_id":"550e8400-e29b-41d4-a716-446655440001","hostname":"host1","pending_count":5,"security_pending_count":2,"total_count":100,"update_in_progress":true}]}"#;
+        let payload: MqttSoftwareStatesPayload = serde_json::from_str(json).unwrap();
+        assert_eq!(payload.host_summaries.len(), 1);
+        assert_eq!(payload.host_summaries[0].pending_count, 5);
+    }
+
+    #[test]
+    fn mqtt_software_states_payload_with_host_summaries_roundtrip() {
         let payload = MqttSoftwareStatesPayload {
             tenant_id: TEST_UUID_1,
             items: vec![],
-            host_package_hosts: vec![MqttHostPackageHostState {
+            host_summaries: vec![MqttHostSummary {
                 host_id: TEST_UUID_2,
                 hostname: "host1".to_string(),
                 friendly_name: "Host 1".to_string(),
@@ -2516,29 +2546,27 @@ mod tests {
     }
 
     #[test]
-    fn mqtt_trigger_host_package_update_roundtrip() {
-        let msg =
-            ServiceMessage::MqttTriggerHostPackageUpdate(MqttTriggerHostPackageUpdatePayload {
-                tenant_id: TEST_UUID_1,
-                host_id: TEST_UUID_2,
-                mqtt_client_id: TEST_UUID_3,
-                security_only: false,
-            });
+    fn mqtt_trigger_host_batch_update_roundtrip() {
+        let msg = ServiceMessage::MqttTriggerHostBatchUpdate(MqttTriggerHostBatchUpdatePayload {
+            tenant_id: TEST_UUID_1,
+            host_id: TEST_UUID_2,
+            mqtt_client_id: TEST_UUID_3,
+            security_only: false,
+        });
         let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains(r#""type":"mqtt_trigger_host_package_update""#));
+        assert!(json.contains(r#""type":"mqtt_trigger_host_batch_update""#));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
 
     #[test]
-    fn mqtt_trigger_host_package_update_security_only_roundtrip() {
-        let msg =
-            ServiceMessage::MqttTriggerHostPackageUpdate(MqttTriggerHostPackageUpdatePayload {
-                tenant_id: TEST_UUID_1,
-                host_id: TEST_UUID_2,
-                mqtt_client_id: TEST_UUID_3,
-                security_only: true,
-            });
+    fn mqtt_trigger_host_batch_update_security_only_roundtrip() {
+        let msg = ServiceMessage::MqttTriggerHostBatchUpdate(MqttTriggerHostBatchUpdatePayload {
+            tenant_id: TEST_UUID_1,
+            host_id: TEST_UUID_2,
+            mqtt_client_id: TEST_UUID_3,
+            security_only: true,
+        });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""security_only":true"#));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
@@ -2546,14 +2574,26 @@ mod tests {
     }
 
     #[test]
-    fn mqtt_trigger_host_package_update_security_only_defaults_false() {
-        // When `security_only` is absent in old wire messages, it should deserialize as false.
+    fn mqtt_trigger_host_batch_update_backward_compat_old_type_tag() {
+        // When old wire messages use the old type tag, they should still deserialize.
         let json = r#"{"protocol_version":1,"seq":1,"type":"mqtt_trigger_host_package_update","tenant_id":"11111111-1111-1111-1111-111111111111","host_id":"22222222-2222-2222-2222-222222222222","mqtt_client_id":"33333333-3333-3333-3333-333333333333"}"#;
         let msg: ServiceMessage = serde_json::from_str(json).unwrap();
-        if let ServiceMessage::MqttTriggerHostPackageUpdate(p) = msg {
+        if let ServiceMessage::MqttTriggerHostBatchUpdate(p) = msg {
             assert!(!p.security_only);
         } else {
-            panic!("expected MqttTriggerHostPackageUpdate");
+            panic!("expected MqttTriggerHostBatchUpdate");
+        }
+    }
+
+    #[test]
+    fn mqtt_trigger_host_batch_update_security_only_defaults_false() {
+        // When `security_only` is absent in wire messages, it should deserialize as false.
+        let json = r#"{"protocol_version":1,"seq":1,"type":"mqtt_trigger_host_batch_update","tenant_id":"11111111-1111-1111-1111-111111111111","host_id":"22222222-2222-2222-2222-222222222222","mqtt_client_id":"33333333-3333-3333-3333-333333333333"}"#;
+        let msg: ServiceMessage = serde_json::from_str(json).unwrap();
+        if let ServiceMessage::MqttTriggerHostBatchUpdate(p) = msg {
+            assert!(!p.security_only);
+        } else {
+            panic!("expected MqttTriggerHostBatchUpdate");
         }
     }
 

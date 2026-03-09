@@ -1267,23 +1267,23 @@ components:
 
     executeBatchHostPackageUpdate:
       name: execute_batch_host_package_update
-      title: Execute Batch Host Package Update Message
-      summary: Controller sends a batch of host packages to update in a single operation (agent-only)
+      title: Execute Batch Update Message
+      summary: Controller sends a batch of software items to update in a single operation (agent-only)
       description: |
         Plugin config fields are AES-256-GCM encrypted before NATS publication.
         Receiving controllers decrypt configs before agent delivery.
         See docs/development/nats-integration.md#plugin-config-protection.
       contentType: application/json
       payload:
-        $ref: "#/components/schemas/executeBatchHostPackageUpdatePayload"
+        $ref: "#/components/schemas/executeBatchUpdatePayload"
 
-    batchHostPackageUpdateResult:
-      name: batch_host_package_update_result
-      title: Batch Host Package Update Result Message
-      summary: Agent reports per-package results from a batch host package update
+    batchUpdateResult:
+      name: batch_update_result
+      title: Batch Update Result Message
+      summary: Agent reports per-item results from a batch update
       contentType: application/json
       payload:
-        $ref: "#/components/schemas/batchHostPackageUpdateResultPayload"
+        $ref: "#/components/schemas/batchUpdateResultPayload"
 
     setUpdateFreeze:
       name: set_update_freeze
@@ -1291,7 +1291,7 @@ components:
       summary: Controller toggles the update freeze on an agent
       description: |
         When `enabled` is `true`, the agent creates a local freeze file that
-        blocks all `ExecuteUpdate` and `ExecuteBatchHostPackageUpdate` messages.
+        blocks all `ExecuteUpdate` and `ExecuteBatchUpdate` messages.
         When `enabled` is `false`, the freeze file is removed. An optional
         `reason` field provides an audit trail.
 
@@ -3710,7 +3710,7 @@ components:
             When present, the receiver must buffer pages by `report_id` and process
             the full report only after all pages have arrived.
 
-    executeBatchHostPackageUpdatePayload:
+    executeBatchUpdatePayload:
       type: object
       required:
         - protocol_version
@@ -3737,7 +3737,7 @@ components:
           description: Monotonically increasing sequence number for replay protection
         type:
           type: string
-          const: execute_batch_host_package_update
+          const: execute_batch_update
           description: Message type discriminator
         host_machine_id:
           type: string
@@ -3753,7 +3753,7 @@ components:
           description: UUID identifying this batch update operation
         plugin_type:
           type: string
-          description: Plugin type for all packages in this batch
+          description: Plugin type for all items in this batch
           examples:
             - package_manager_apt
             - package_manager_homebrew
@@ -3761,12 +3761,12 @@ components:
             - package_manager_mas
         plugin_config:
           type: object
-          description: Plugin configuration shared by all packages in the batch
+          description: Plugin configuration shared by all items in the batch
         updates:
           type: array
           items:
-            $ref: "#/components/schemas/batchHostPackageUpdate"
-          description: List of host packages to update in a single operation
+            $ref: "#/components/schemas/batchUpdateItem"
+          description: List of software items to update in a single operation
         pre_update_hooks:
           type: array
           items:
@@ -3787,22 +3787,22 @@ components:
           examples:
             - 7200
 
-    batchHostPackageUpdate:
+    batchUpdateItem:
       type: object
       required:
-        - host_package_id
+        - host_software_item_id
         - update_history_id
         - package_identifier
         - to_version
       properties:
-        host_package_id:
+        host_software_item_id:
           type: string
           format: uuid
-          description: UUID of the host_package record
+          description: UUID of the host_software_item record
         update_history_id:
           type: string
           format: uuid
-          description: UUID of the host_package_update_history record
+          description: UUID of the update_history record
         package_identifier:
           type: string
           description: Package identifier (e.g., nginx, node)
@@ -3819,7 +3819,7 @@ components:
           $ref: "#/components/schemas/releaseInfo"
           description: Optional release information for the target version
 
-    batchHostPackageUpdateResultPayload:
+    batchUpdateResultPayload:
       type: object
       required:
         - protocol_version
@@ -3843,7 +3843,7 @@ components:
           description: Monotonically increasing sequence number for replay protection
         type:
           type: string
-          const: batch_host_package_update_result
+          const: batch_update_result
           description: Message type discriminator
         batch_id:
           type: string
@@ -3852,34 +3852,34 @@ components:
         results:
           type: array
           items:
-            $ref: "#/components/schemas/batchHostPackageUpdateResult"
-          description: Per-package update outcomes
+            $ref: "#/components/schemas/batchUpdateItemResult"
+          description: Per-item update outcomes
 
-    batchHostPackageUpdateResult:
+    batchUpdateItemResult:
       type: object
       required:
-        - host_package_id
+        - host_software_item_id
         - update_history_id
         - status
         - output
       properties:
-        host_package_id:
+        host_software_item_id:
           type: string
           format: uuid
-          description: UUID of the host_package record
+          description: UUID of the host_software_item record
         update_history_id:
           type: string
           format: uuid
-          description: UUID of the host_package_update_history record
+          description: UUID of the update_history record
         status:
           type: string
           enum:
             - completed
             - failed
-          description: Final outcome of the individual package update
+          description: Final outcome of the individual item update
         output:
           type: string
-          description: Combined stdout/stderr output for this package
+          description: Combined stdout/stderr output for this item
         installed_version:
           type: string
           description: |

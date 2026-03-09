@@ -1,4 +1,3 @@
-use crate::host_packages::HostUpdateSummary;
 use crate::host_tags::HostTagSummary;
 use crate::services::ServiceStatus;
 use serde::{Deserialize, Serialize};
@@ -40,9 +39,6 @@ pub struct HostResponse {
     /// Tags assigned to this host.
     #[serde(default)]
     pub tags: Vec<HostTagSummary>,
-    /// Aggregate host package update counts.
-    #[serde(default)]
-    pub update_summary: HostUpdateSummary,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -128,7 +124,6 @@ mod tests {
                 status: ServiceStatus::Approved,
             }],
             tags: vec![],
-            update_summary: HostUpdateSummary::default(),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: HostResponse =
@@ -162,7 +157,6 @@ mod tests {
             updated_at: datetime!(2025-01-01 0:00:00 UTC),
             agents: vec![],
             tags: vec![],
-            update_summary: HostUpdateSummary::default(),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: HostResponse =
@@ -191,7 +185,6 @@ mod tests {
             updated_at: datetime!(2025-01-01 0:00:00 UTC),
             agents: vec![],
             tags: vec![],
-            update_summary: HostUpdateSummary::default(),
         };
         let json_value =
             serde_json::to_value(&resp).expect("serialization to Value should succeed");
@@ -239,7 +232,6 @@ mod tests {
                 },
             ],
             tags: vec![],
-            update_summary: HostUpdateSummary::default(),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: HostResponse =

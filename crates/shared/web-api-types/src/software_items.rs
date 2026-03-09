@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use uptrakit_shared_types::{PluginRole, SoftwareDiscoveryState};
+use uptrakit_shared_types::PluginRole;
 use uuid::Uuid;
 
 use crate::pagination::PaginationParams;
@@ -17,17 +17,17 @@ fn default_execution_site() -> String {
 pub struct CreateSoftwareItemRequest {
     /// Display name (e.g. "1Password").
     pub name: String,
-    /// Whether version checking is active. Defaults to true.
-    #[serde(default = "crate::default_enabled")]
-    pub enabled: bool,
+    /// Whether this item is featured (shown prominently). Defaults to true for manual creation.
+    #[serde(default = "crate::default_featured")]
+    pub featured: bool,
 }
 
-/// Partial update for a software item. Only `name` and `enabled` are updatable.
+/// Partial update for a software item. Only `name` and `featured` are updatable.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateSoftwareItemRequest {
     pub name: Option<String>,
-    pub enabled: Option<bool>,
+    pub featured: Option<bool>,
 }
 
 /// Per-host plugin assignment used when assigning hosts to a software item.
@@ -97,10 +97,7 @@ pub struct SoftwareItemResponse {
     pub name: String,
     /// Distinct plugin type identifiers from all active host assignments (for display in lists).
     pub plugins: Vec<String>,
-    pub enabled: bool,
-    /// Discovery state for auto-discovered items. `None` means manually created.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub discovery_state: Option<SoftwareDiscoveryState>,
+    pub featured: bool,
     #[serde(with = "time::serde::rfc3339::option")]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
     pub last_checked_at: Option<OffsetDateTime>,
@@ -128,10 +125,7 @@ pub struct SoftwareItemDetailResponse {
     pub name: String,
     /// Distinct plugin type identifiers from all active host assignments.
     pub plugins: Vec<String>,
-    pub enabled: bool,
-    /// Discovery state for auto-discovered items. `None` means manually created.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub discovery_state: Option<SoftwareDiscoveryState>,
+    pub featured: bool,
     #[serde(with = "time::serde::rfc3339::option")]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
     pub last_checked_at: Option<OffsetDateTime>,
@@ -279,7 +273,7 @@ pub struct TriggerVersionCheckResponse {
 }
 
 /// Query parameters for listing software items, extending pagination with an optional
-/// discovery state filter.
+/// featured filter.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
 pub struct ListSoftwareItemsParams {
@@ -287,9 +281,8 @@ pub struct ListSoftwareItemsParams {
     pub page: Option<u64>,
     /// Items per page. Defaults to 20, max 1000.
     pub per_page: Option<u64>,
-    /// Filter by discovery state. Valid values: `"pending"`, `"approved"`.
-    /// Omit to return all items regardless of discovery state.
-    pub discovery_state: Option<SoftwareDiscoveryState>,
+    /// Filter by featured status. Omit to return all items.
+    pub featured: Option<bool>,
 }
 
 impl ListSoftwareItemsParams {
@@ -326,7 +319,7 @@ mod tests {
     fn valid_create_request() -> CreateSoftwareItemRequest {
         CreateSoftwareItemRequest {
             name: "1Password".to_string(),
-            enabled: true,
+            featured: true,
         }
     }
 
@@ -339,15 +332,15 @@ mod tests {
         let deserialized: CreateSoftwareItemRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deserialized.name, "1Password");
-        assert!(deserialized.enabled);
+        assert!(deserialized.featured);
     }
 
     #[test]
-    fn create_software_item_request_default_enabled_from_json() {
+    fn create_software_item_request_default_featured_from_json() {
         let json = serde_json::json!({ "name": "Test" });
         let req: CreateSoftwareItemRequest =
             serde_json::from_value(json).expect("deserialization should succeed");
-        assert!(req.enabled, "enabled should default to true");
+        assert!(req.featured, "featured should default to true");
     }
 
     // ── CreateSoftwareItemRequest validation ─────────────────────────
@@ -362,7 +355,7 @@ mod tests {
     fn validate_empty_name_fails() {
         let req = CreateSoftwareItemRequest {
             name: "".to_string(),
-            enabled: true,
+            featured: true,
         };
         let err = req
             .validate()
@@ -374,7 +367,7 @@ mod tests {
     fn validate_whitespace_only_name_fails() {
         let req = CreateSoftwareItemRequest {
             name: "   ".to_string(),
-            enabled: true,
+            featured: true,
         };
         let err = req
             .validate()
@@ -488,8 +481,7 @@ mod tests {
                 "package_manager_homebrew".to_string(),
                 "releases_github".to_string(),
             ],
-            enabled: true,
-            discovery_state: None,
+            featured: true,
             last_checked_at: Some(datetime!(2025-06-01 12:00:00 UTC)),
             host_count: 5,
             latest_version: Some("8.10.0".to_string()),
@@ -504,7 +496,7 @@ mod tests {
         assert_eq!(deserialized.name, "1Password");
         assert_eq!(deserialized.host_count, 5);
         assert_eq!(deserialized.plugins.len(), 2);
-        assert!(deserialized.enabled);
+        assert!(deserialized.featured);
         assert_eq!(deserialized.latest_version.as_deref(), Some("8.10.0"));
         assert!(deserialized.update_available);
     }
@@ -516,8 +508,7 @@ mod tests {
             id: sample_uuid(),
             name: "MyApp".to_string(),
             plugins: vec!["releases_github".to_string()],
-            enabled: true,
-            discovery_state: None,
+            featured: true,
             last_checked_at: None,
             host_count: 1,
             latest_version: None,
@@ -543,8 +534,7 @@ mod tests {
             id: sample_uuid(),
             name: "Test".to_string(),
             plugins: vec![],
-            enabled: false,
-            discovery_state: None,
+            featured: false,
             last_checked_at: None,
             host_count: 0,
             latest_version: None,
@@ -557,7 +547,7 @@ mod tests {
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert!(deserialized.plugins.is_empty());
         assert!(deserialized.last_checked_at.is_none());
-        assert!(!deserialized.enabled);
+        assert!(!deserialized.featured);
         assert!(!deserialized.update_available);
     }
 
@@ -689,5 +679,23 @@ mod tests {
     fn trigger_update_status_display() {
         assert_eq!(TriggerUpdateStatus::Pending.to_string(), "pending");
         assert_eq!(TriggerUpdateStatus::Queued.to_string(), "queued");
+    }
+
+    // ── ListSoftwareItemsParams ──────────────────────────────────────
+
+    #[test]
+    fn list_software_items_params_featured_filter() {
+        let json = serde_json::json!({ "featured": true });
+        let params: ListSoftwareItemsParams =
+            serde_json::from_value(json).expect("deserialization should succeed");
+        assert_eq!(params.featured, Some(true));
+    }
+
+    #[test]
+    fn list_software_items_params_no_filter() {
+        let params = ListSoftwareItemsParams::default();
+        assert!(params.featured.is_none());
+        assert!(params.page.is_none());
+        assert!(params.per_page.is_none());
     }
 }

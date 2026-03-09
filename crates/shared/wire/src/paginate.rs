@@ -22,7 +22,7 @@ use crate::envelope::ReportPagination;
 use crate::limits::PAGINATION_SIZE_THRESHOLD;
 use crate::messages::ServiceMessage;
 use crate::payloads::{
-    BatchHostPackageUpdateResultPayload, DiscoveryResultsPayload, ReportHostsPayload,
+    BatchUpdateResultPayload, DiscoveryResultsPayload, ReportHostsPayload,
     VersionCheckResultsPayload,
 };
 
@@ -100,8 +100,8 @@ impl Paginatable for ReportHostsPayload {
     }
 }
 
-impl Paginatable for BatchHostPackageUpdateResultPayload {
-    type Item = crate::payloads::BatchHostPackageUpdateResult;
+impl Paginatable for BatchUpdateResultPayload {
+    type Item = crate::payloads::BatchUpdateItemResult;
 
     fn items(&self) -> &[Self::Item] {
         &self.results
@@ -115,7 +115,7 @@ impl Paginatable for BatchHostPackageUpdateResultPayload {
     }
 
     fn into_message(self) -> ServiceMessage {
-        ServiceMessage::BatchHostPackageUpdateResult(self)
+        ServiceMessage::BatchUpdateResult(self)
     }
 }
 
@@ -220,7 +220,7 @@ mod tests {
     use uptrakit_shared_types::PluginType;
 
     fn make_discovery_result(name: &str) -> DiscoveryPluginResult {
-        use uptrakit_shared_types::{DiscoveredSoftware, TrackingSystem};
+        use uptrakit_shared_types::DiscoveredSoftware;
         DiscoveryPluginResult {
             plugin_config_id: Some(Uuid::new_v4()),
             plugin_type: PluginType::PackageManagerApt,
@@ -230,7 +230,7 @@ mod tests {
                 installed_version: "1.0.0".to_string(),
                 qualifier: None,
                 plugin_package_identifier: None,
-                tracking_system: TrackingSystem::HostManaged,
+                featured: false,
                 targets: Vec::new(),
                 extra: None,
             }],
@@ -306,7 +306,7 @@ mod tests {
                 installed_version: Some(format!("1.0.{i}")),
                 latest_version: Some(format!("2.0.{i}")),
                 error: None,
-                host_package_id: None,
+                host_software_item_id: None,
                 update_category: uptrakit_shared_types::UpdateCategory::Unknown,
             })
             .collect();

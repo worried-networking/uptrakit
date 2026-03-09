@@ -20,13 +20,13 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::UpdateStarted(p) => p.wire_validate(),
             ServiceMessage::UpdateOutput(p) => p.wire_validate(),
             ServiceMessage::UpdateResult(p) => p.wire_validate(),
-            ServiceMessage::BatchHostPackageUpdateResult(p) => p.wire_validate(),
+            ServiceMessage::BatchUpdateResult(p) => p.wire_validate(),
             ServiceMessage::DiscoveryResults(p) => p.wire_validate(),
             ServiceMessage::Register(p) => p.wire_validate(),
             ServiceMessage::ReleaseTenants(p) => p.wire_validate(),
             ServiceMessage::MqttClientStatus(_) => Ok(()),
             ServiceMessage::MqttTriggerUpdate(p) => p.wire_validate(),
-            ServiceMessage::MqttTriggerHostPackageUpdate(_) => Ok(()),
+            ServiceMessage::MqttTriggerHostBatchUpdate(_) => Ok(()),
             ServiceMessage::Disconnecting(p) => p.wire_validate(),
             ServiceMessage::UpdateCapabilities(p) => p.wire_validate(),
             ServiceMessage::ReportPluginConfig(p) => p.wire_validate(),
@@ -62,7 +62,7 @@ impl WireValidate for ControllerMessage {
             ControllerMessage::ServerRestarting(p) => p.wire_validate(),
             ControllerMessage::CheckVersions(p) => p.wire_validate(),
             ControllerMessage::ExecuteUpdate(p) => p.wire_validate(),
-            ControllerMessage::ExecuteBatchHostPackageUpdate(p) => p.wire_validate(),
+            ControllerMessage::ExecuteBatchUpdate(p) => p.wire_validate(),
             ControllerMessage::DiscoverSoftware(p) => p.wire_validate(),
             ControllerMessage::SetUpdateFreeze(p) => p.wire_validate(),
             ControllerMessage::Registered(_) => Ok(()),
@@ -211,7 +211,7 @@ impl WireValidate for UpdateResultPayload {
     }
 }
 
-impl WireValidate for BatchHostPackageUpdateResultPayload {
+impl WireValidate for BatchUpdateResultPayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_vec_len(&self.results, MAX_BATCH_UPDATE_RESULTS, "results")?;
         for result in &self.results {
@@ -221,7 +221,7 @@ impl WireValidate for BatchHostPackageUpdateResultPayload {
     }
 }
 
-impl WireValidate for BatchHostPackageUpdateResult {
+impl WireValidate for BatchUpdateItemResult {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.output, MAX_OUTPUT_STRING_LEN, "output")?;
         check_opt_string_len(
@@ -915,7 +915,7 @@ impl WireValidate for HookCommand {
     }
 }
 
-impl WireValidate for ExecuteBatchHostPackageUpdatePayload {
+impl WireValidate for ExecuteBatchUpdatePayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(
             &self.host_machine_id,
@@ -942,7 +942,7 @@ impl WireValidate for ExecuteBatchHostPackageUpdatePayload {
     }
 }
 
-impl WireValidate for BatchHostPackageUpdate {
+impl WireValidate for BatchUpdateItem {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(
             &self.package_identifier,
@@ -1015,14 +1015,14 @@ impl WireValidate for MqttSoftwareStatesPayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_vec_len(&self.items, MAX_SOFTWARE_STATE_ITEMS, "items")?;
         check_vec_len(
-            &self.host_package_hosts,
+            &self.host_summaries,
             MAX_HOST_PACKAGE_HOST_STATES,
-            "host_package_hosts",
+            "host_summaries",
         )?;
         for item in &self.items {
             item.wire_validate()?;
         }
-        for host_state in &self.host_package_hosts {
+        for host_state in &self.host_summaries {
             host_state.wire_validate()?;
         }
         Ok(())
@@ -1056,7 +1056,7 @@ impl WireValidate for MqttSoftwareStateHostEntry {
     }
 }
 
-impl WireValidate for MqttHostPackageHostState {
+impl WireValidate for MqttHostSummary {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.hostname, MAX_SHORT_STRING_LEN, "hostname")?;
         check_string_len(&self.friendly_name, MAX_SHORT_STRING_LEN, "friendly_name")?;
@@ -1132,7 +1132,7 @@ mod tests {
                 name: format!("item-{i}"),
                 detect_version: None,
                 fetch_releases: None,
-                host_package_id: None,
+                host_software_item_id: None,
             })
             .collect();
         let msg = ControllerMessage::CheckVersions(CheckVersionsPayload {
@@ -1333,7 +1333,7 @@ mod tests {
 
     #[test]
     fn batch_update_result_validates() {
-        let payload = BatchHostPackageUpdateResultPayload {
+        let payload = BatchUpdateResultPayload {
             batch_id: uuid::Uuid::nil(),
             results: vec![],
         };
@@ -1342,9 +1342,9 @@ mod tests {
 
     #[test]
     fn batch_update_result_too_many() {
-        let results: Vec<BatchHostPackageUpdateResult> = (0..MAX_BATCH_UPDATE_RESULTS + 1)
-            .map(|_| BatchHostPackageUpdateResult {
-                host_package_id: uuid::Uuid::nil(),
+        let results: Vec<BatchUpdateItemResult> = (0..MAX_BATCH_UPDATE_RESULTS + 1)
+            .map(|_| BatchUpdateItemResult {
+                host_software_item_id: uuid::Uuid::nil(),
                 update_history_id: uuid::Uuid::nil(),
                 status: UpdateFinalStatus::Completed,
                 output: String::new(),
@@ -1352,7 +1352,7 @@ mod tests {
                 error: None,
             })
             .collect();
-        let payload = BatchHostPackageUpdateResultPayload {
+        let payload = BatchUpdateResultPayload {
             batch_id: uuid::Uuid::nil(),
             results,
         };
