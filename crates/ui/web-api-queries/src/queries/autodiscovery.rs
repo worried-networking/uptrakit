@@ -782,30 +782,42 @@ async fn find_or_create_software_item(
         .context_to()?;
 
     if let Some(plugin_link) = existing_plugin_link {
-        let linked_item_active = SoftwareItem::find()
+        let linked_item = SoftwareItem::find()
             .filter(software_item::Column::Id.eq(plugin_link.software_item_id))
             .filter(software_item::Column::DeactivatedAt.is_null())
             .one(db)
             .await
-            .context_to()?
-            .is_some();
+            .context_to()?;
 
-        if linked_item_active {
-            // Refresh the installed version on the qualifier-specific host_software_item row.
-            let mut hsi_query = HostSoftwareItem::find()
-                .filter(host_software_item::Column::HostId.eq(host_id))
-                .filter(
-                    host_software_item::Column::SoftwareItemId.eq(plugin_link.software_item_id),
+        if let Some(linked_item) = linked_item {
+            // Only update installed_version for Pending (not yet reviewed) items.
+            // Approved and manual (None) items get their version from the
+            // DetectVersion scheduled task using the user's assigned plugin config.
+            let is_pending = linked_item.discovery_state == Some(SoftwareDiscoveryState::Pending);
+
+            if is_pending {
+                let mut hsi_query = HostSoftwareItem::find()
+                    .filter(host_software_item::Column::HostId.eq(host_id))
+                    .filter(
+                        host_software_item::Column::SoftwareItemId.eq(plugin_link.software_item_id),
+                    );
+                hsi_query = match item.qualifier {
+                    Some(q) => hsi_query.filter(host_software_item::Column::Qualifier.eq(q)),
+                    None => hsi_query.filter(host_software_item::Column::Qualifier.is_null()),
+                };
+                if let Some(hsi) = hsi_query.one(db).await.context_to()? {
+                    let mut active: host_software_item::ActiveModel = hsi.into();
+                    active.installed_version = Set(Some(installed_version.to_string()));
+                    active.installed_version_detected_at = Set(Some(now));
+                    active.update(db).await.context_to()?;
+                }
+            } else {
+                tracing::debug!(
+                    software_item_id = %linked_item.id,
+                    discovery_state = ?linked_item.discovery_state,
+                    %package_identifier,
+                    "skipping installed_version update for non-pending software item"
                 );
-            hsi_query = match item.qualifier {
-                Some(q) => hsi_query.filter(host_software_item::Column::Qualifier.eq(q)),
-                None => hsi_query.filter(host_software_item::Column::Qualifier.is_null()),
-            };
-            if let Some(hsi) = hsi_query.one(db).await.context_to()? {
-                let mut active: host_software_item::ActiveModel = hsi.into();
-                active.installed_version = Set(Some(installed_version.to_string()));
-                active.installed_version_detected_at = Set(Some(now));
-                active.update(db).await.context_to()?;
             }
             return Ok(None);
         }
@@ -1473,6 +1485,136 @@ mod tests {
             link.installed_version.as_deref(),
             Some("2.0.0"),
             "installed_version must be updated to the new value"
+        );
+    }
+
+    /// When a software item has `discovery_state = Approved`, periodic
+    /// re-discovery must NOT overwrite `installed_version`. The proper
+    /// `DetectVersion` scheduled task handles version detection for
+    /// approved items using the user's assigned plugin config.
+    #[tokio::test]
+    async fn process_one_discovery_approved_item_skips_version_update() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
+
+        // Insert an Approved software item (user has reviewed it).
+        let model = software_item::ActiveModel {
+            id: Set(item_id),
+            tenant_id: Set(tenant_id),
+            name: Set("wget".to_string()),
+            enabled: Set(true),
+            discovery_state: Set(Some(SoftwareDiscoveryState::Approved)),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        };
+        SoftwareItem::insert(model)
+            .exec(&db)
+            .await
+            .expect("insert approved software_item");
+
+        insert_host_link(&db, host_id, item_id, pc_id, "wget").await;
+
+        let args = DiscoveredItemInfo {
+            package_identifier: "wget",
+            name: "wget",
+            installed_version: "2.0.0",
+            qualifier: None,
+            plugin_package_identifier: None,
+        };
+
+        process_one_discovery(&db, tenant_id, host_id, pc_id, args, now)
+            .await
+            .expect("process_one_discovery");
+
+        let items = SoftwareItem::find()
+            .filter(software_item::Column::TenantId.eq(tenant_id))
+            .filter(software_item::Column::DeactivatedAt.is_null())
+            .all(&db)
+            .await
+            .expect("items");
+        assert_eq!(items.len(), 1, "no new item should be created");
+
+        let link = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+            .one(&db)
+            .await
+            .expect("link query")
+            .expect("link must exist");
+        assert_eq!(
+            link.installed_version.as_deref(),
+            Some("1.0.0"),
+            "installed_version must NOT be overwritten for approved items"
+        );
+    }
+
+    /// When a software item has no `discovery_state` (manual item),
+    /// periodic re-discovery must NOT overwrite `installed_version`.
+    #[tokio::test]
+    async fn process_one_discovery_manual_item_skips_version_update() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
+
+        // Insert a manual software item (no discovery_state).
+        let model = software_item::ActiveModel {
+            id: Set(item_id),
+            tenant_id: Set(tenant_id),
+            name: Set("wget".to_string()),
+            enabled: Set(true),
+            discovery_state: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        };
+        SoftwareItem::insert(model)
+            .exec(&db)
+            .await
+            .expect("insert manual software_item");
+
+        insert_host_link(&db, host_id, item_id, pc_id, "wget").await;
+
+        let args = DiscoveredItemInfo {
+            package_identifier: "wget",
+            name: "wget",
+            installed_version: "2.0.0",
+            qualifier: None,
+            plugin_package_identifier: None,
+        };
+
+        process_one_discovery(&db, tenant_id, host_id, pc_id, args, now)
+            .await
+            .expect("process_one_discovery");
+
+        let link = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+            .one(&db)
+            .await
+            .expect("link query")
+            .expect("link must exist");
+        assert_eq!(
+            link.installed_version.as_deref(),
+            Some("1.0.0"),
+            "installed_version must NOT be overwritten for manual items"
         );
     }
 
