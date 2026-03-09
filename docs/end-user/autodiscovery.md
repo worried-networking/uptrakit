@@ -265,6 +265,18 @@ Each cycle, the controller sends a fresh `DiscoverSoftware` message to every act
 host. The agent runs all applicable discovery plugins and reports back the current state of
 installed packages.
 
+### Version detection for approved items
+
+Periodic rediscovery does **not** overwrite the `installed_version` on approved or manually
+created software items. Only items still in the `pending` state have their version updated by
+the discovery plugin. Once you approve an item (or create one manually), version detection is
+handled exclusively by the **DetectVersion** scheduled task, which uses the plugin config you
+assigned to the `detect_version` role on that host.
+
+This means you can safely customize the version detection plugin (for example, change the shell
+command on a GitHub Releases config) without worrying that the next discovery cycle will overwrite
+your detected version with the discovery plugin's own result.
+
 ### Disappeared packages
 
 If a package that previously appeared in a discovery run is absent from a subsequent run, it is

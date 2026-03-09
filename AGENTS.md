@@ -444,6 +444,10 @@ for user review. Key invariants:
 2. **`discovery_state` lifecycle:** `null` (manual, full tracking) → `pending` (discovered, `enabled = false`,
    excluded from version checks) → `approved` (reviewed, `enabled = true`, included in version checks). Deleting a
    `pending` item is a plain soft-delete; the item is re-discoverable unless an ignore rule exists.
+   **Invariant:** Periodic re-discovery (`find_or_create_software_item` Phase 1) only updates
+   `installed_version` on `host_software_item` rows for `Pending` items. Approved and manual (`None`)
+   items are skipped — their version detection is handled by the `DetectVersion` scheduled task using
+   the user's assigned plugin config.
 
 3. **Ignore list is separate from deletion.** `DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true`
    removes the host assignment and creates an `autodiscovery_ignore` row keyed on the software item's
