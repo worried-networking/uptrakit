@@ -11,7 +11,7 @@ use axum::{
 };
 use serde::Deserialize;
 use std::sync::Arc;
-use uptrakit_notification_channels::DeliveryMessage;
+use uptrakit_notification_plugin_registry::DeliveryMessage;
 use uptrakit_web_api_types::pagination::PaginationParams;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
@@ -66,7 +66,7 @@ pub async fn create_channel(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    match notif_queries::create_channel(&tenant_db, &body, &state.channel_registry).await {
+    match notif_queries::create_channel(&tenant_db, &body, &*state.notification_ops).await {
         Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
         Err(report) => match report.current_context() {
             ChannelQueryError::UnsupportedType(t) => error_response(
@@ -108,7 +108,7 @@ pub async fn list_channels(
     CanViewNotifications(_user): CanViewNotifications,
     Query(params): Query<PaginationParams>,
 ) -> Response {
-    match notif_queries::list_channels(&tenant_db, &params, &state.channel_registry).await {
+    match notif_queries::list_channels(&tenant_db, &params, &*state.notification_ops).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
             tracing::error!(error = ?e, "failed to list notification channels");
@@ -141,7 +141,7 @@ pub async fn get_channel(
     CanViewNotifications(_user): CanViewNotifications,
     Path(channel_id): Path<Uuid>,
 ) -> Response {
-    match notif_queries::get_channel(&tenant_db, channel_id, &state.channel_registry).await {
+    match notif_queries::get_channel(&tenant_db, channel_id, &*state.notification_ops).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Channel not found"),
         Err(e) => {
@@ -182,7 +182,7 @@ pub async fn update_channel(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    match notif_queries::update_channel(&tenant_db, channel_id, &body, &state.channel_registry)
+    match notif_queries::update_channel(&tenant_db, channel_id, &body, &*state.notification_ops)
         .await
     {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
@@ -288,7 +288,7 @@ pub async fn test_channel(
         };
 
     // Look up channel implementation
-    let channel_impl = match state.channel_registry.get(&channel_model.channel_type) {
+    let channel_impl = match state.notification_ops.get(&channel_model.channel_type) {
         Some(c) => c,
         None => {
             return error_response(
@@ -299,6 +299,7 @@ pub async fn test_channel(
     };
 
     // For email channels, merge global SMTP settings into the per-channel config before delivery.
+    #[cfg(feature = "notifications-email")]
     let config_json = if channel_model.channel_type == "email" {
         let smtp = state.settings.smtp();
         if !smtp.is_configured() {
@@ -308,6 +309,15 @@ pub async fn test_channel(
             );
         }
         crate::notifications::dispatcher::merge_smtp_into_config_pub(&smtp, config_json)
+    } else {
+        config_json
+    };
+    #[cfg(not(feature = "notifications-email"))]
+    let config_json = if channel_model.channel_type == "email" {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "Email notifications are not enabled in this build.",
+        );
     } else {
         config_json
     };

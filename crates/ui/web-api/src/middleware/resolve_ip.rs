@@ -214,14 +214,17 @@ mod tests {
             uuid::Uuid::nil(),
         );
 
-        let channel_registry = Arc::new(
-            uptrakit_notification_channels::ChannelRegistry::new(Default::default())
-                .expect("channel registry for test"),
-        );
+        let notification_ops: Arc<dyn uptrakit_notification_plugin_registry::NotificationOps> =
+            Arc::new(
+                uptrakit_notification_plugin_registry::NotificationPluginRegistry::new(
+                    Default::default(),
+                )
+                .expect("notification plugin registry for test"),
+            );
 
         let notification_dispatcher = crate::notifications::dispatcher::NotificationDispatcher::new(
             db.clone(),
-            Arc::clone(&channel_registry),
+            Arc::clone(&notification_ops),
             "https://localhost".to_string(),
             settings.clone(),
         );
@@ -256,7 +259,7 @@ mod tests {
             rustls_config: rustls_cfg,
             crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
             ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
-            channel_registry,
+            notification_ops,
             controller_id: uuid::Uuid::nil(),
             notification_service,
             notification_dispatcher,

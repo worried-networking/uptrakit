@@ -310,21 +310,25 @@ async fn run(args: cli::Args) -> Result<()> {
         uptrakit_web_api::auth::token_denylist::TokenDenylist::new_with_db(db_conn.clone()),
     );
 
-    let channel_registry_config = uptrakit_notification_channels::ChannelRegistryConfig {
-        allow_private_urls: args.allow_private_notification_urls,
-    };
-    let channel_registry = Arc::new(
-        uptrakit_notification_channels::ChannelRegistry::new(channel_registry_config)
+    let notification_registry_config =
+        uptrakit_notification_plugin_registry::NotificationRegistryConfig {
+            allow_private_urls: args.allow_private_notification_urls,
+        };
+    let notification_ops: Arc<dyn uptrakit_notification_plugin_registry::NotificationOps> =
+        Arc::new(
+            uptrakit_notification_plugin_registry::NotificationPluginRegistry::new(
+                notification_registry_config,
+            )
             .context_transform(|_| {
-                AppError::Config("failed to build channel registry".to_string())
+                AppError::Config("failed to build notification plugin registry".to_string())
             })?,
-    );
+        );
 
     let callback_base_url = format!("https://{}", reconciled.https_addr);
     let notification_dispatcher =
         uptrakit_web_api::notifications::dispatcher::NotificationDispatcher::new(
             db_conn.clone(),
-            Arc::clone(&channel_registry),
+            Arc::clone(&notification_ops),
             callback_base_url,
             settings.clone(),
         );
@@ -456,7 +460,7 @@ async fn run(args: cli::Args) -> Result<()> {
         .controller_id(controller_id)
         .notification_service(notification_service)
         .notification_dispatcher(notification_dispatcher)
-        .channel_registry(channel_registry)
+        .notification_ops(notification_ops)
         .token_denylist(token_denylist)
         .credential_sources(credential_sources)
         .batch_progress_broadcaster(batch_progress_broadcaster)

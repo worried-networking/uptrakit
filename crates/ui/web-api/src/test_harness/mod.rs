@@ -170,14 +170,17 @@ pub async fn build_test_state(
         controller_id,
     );
 
-    let channel_registry = Arc::new(
-        uptrakit_notification_channels::ChannelRegistry::new(Default::default())
-            .expect("channel registry for test"),
-    );
+    let notification_ops: Arc<dyn uptrakit_notification_plugin_registry::NotificationOps> =
+        Arc::new(
+            uptrakit_notification_plugin_registry::NotificationPluginRegistry::new(
+                Default::default(),
+            )
+            .expect("notification plugin registry for test"),
+        );
 
     let notification_dispatcher = crate::notifications::dispatcher::NotificationDispatcher::new(
         db.clone(),
-        Arc::clone(&channel_registry),
+        Arc::clone(&notification_ops),
         "https://localhost".to_string(),
         settings.clone(),
     );
@@ -186,7 +189,7 @@ pub async fn build_test_state(
         ca_snapshot: ca_rx,
         ca_key_store,
         ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
-        channel_registry,
+        notification_ops,
         settings,
         cert_signer: Arc::new(NoopCertSigner),
         service_connections,

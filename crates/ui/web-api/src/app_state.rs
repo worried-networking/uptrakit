@@ -79,8 +79,9 @@ pub struct AppState {
     pub crl_pem_cache: Arc<tokio::sync::RwLock<String>>,
     /// Trigger for immediate CA rotation (fired by the rotate-ca API endpoint).
     pub ca_rotation_trigger: Arc<tokio::sync::Notify>,
-    /// Channel registry for notification channel lookups.
-    pub channel_registry: std::sync::Arc<uptrakit_notification_channels::ChannelRegistry>,
+    /// Notification plugin operations for channel lookups, config validation, and secret masking.
+    pub notification_ops:
+        std::sync::Arc<dyn uptrakit_notification_plugin_registry::NotificationOps>,
     /// UUID of the default (seeded) tenant. Used as fallback when no tenant header is present.
     pub default_tenant_id: uuid::Uuid,
     /// Unique identifier for this controller instance (used for cross-controller notification delivery).
@@ -170,7 +171,8 @@ pub struct AppStateBuilder {
     rustls_config: Option<axum_server::tls_rustls::RustlsConfig>,
     crl_pem_cache: Option<Arc<tokio::sync::RwLock<String>>>,
     ca_rotation_trigger: Option<Arc<tokio::sync::Notify>>,
-    channel_registry: Option<std::sync::Arc<uptrakit_notification_channels::ChannelRegistry>>,
+    notification_ops:
+        Option<std::sync::Arc<dyn uptrakit_notification_plugin_registry::NotificationOps>>,
     default_tenant_id: Option<uuid::Uuid>,
     controller_id: Option<uuid::Uuid>,
     notification_service: Option<NotificationService>,
@@ -216,7 +218,7 @@ impl AppStateBuilder {
             rustls_config: None,
             crl_pem_cache: None,
             ca_rotation_trigger: None,
-            channel_registry: None,
+            notification_ops: None,
             default_tenant_id: None,
             controller_id: None,
             notification_service: None,
@@ -333,11 +335,11 @@ impl AppStateBuilder {
         self
     }
 
-    pub fn channel_registry(
+    pub fn notification_ops(
         mut self,
-        v: std::sync::Arc<uptrakit_notification_channels::ChannelRegistry>,
+        v: std::sync::Arc<dyn uptrakit_notification_plugin_registry::NotificationOps>,
     ) -> Self {
-        self.channel_registry = Some(v);
+        self.notification_ops = Some(v);
         self
     }
 
@@ -518,9 +520,9 @@ impl AppStateBuilder {
             ca_rotation_trigger: self
                 .ca_rotation_trigger
                 .ok_or(AppStateBuildError("ca_rotation_trigger"))?,
-            channel_registry: self
-                .channel_registry
-                .ok_or(AppStateBuildError("channel_registry"))?,
+            notification_ops: self
+                .notification_ops
+                .ok_or(AppStateBuildError("notification_ops"))?,
             default_tenant_id: self
                 .default_tenant_id
                 .ok_or(AppStateBuildError("default_tenant_id"))?,

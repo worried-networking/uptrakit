@@ -12,8 +12,8 @@ default = ["oidc"]
 oidc = ["uptrakit-web-api-auth/oidc", "dep:openidconnect", "dep:reqwest"]
 swagger-ui = ["dep:utoipa-swagger-ui"]
 nats = ["dep:async-nats", "dep:uptrakit-nats"]
-notifications-telegram = ["uptrakit-notification-channels/telegram"]
-notifications-email = ["uptrakit-notification-channels/email"]
+notifications-telegram = ["uptrakit-notification-plugin-registry/telegram"]
+notifications-email = ["uptrakit-notification-plugin-registry/email"]
 notifications-all = ["notifications-telegram", "notifications-email"]
 db-all = ["db-sqlite", "db-postgres", "db-mysql"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-web-api-queries/db-sqlite"]
@@ -77,7 +77,7 @@ zeroize = { workspace = true }
 async-nats = { workspace = true, optional = true }
 uptrakit-nats = { workspace = true, optional = true }
 uptrakit-audit-log = { workspace = true, features = ["db"] }
-uptrakit-notification-channels = { workspace = true, features = ["webhook"] }
+uptrakit-notification-plugin-registry = { workspace = true, features = ["webhook"] }
 uptrakit-backoff = { workspace = true }
 uptrakit-web-api-auth = { workspace = true }
 uptrakit-web-api-queries = { workspace = true }

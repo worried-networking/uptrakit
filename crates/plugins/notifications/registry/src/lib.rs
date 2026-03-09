@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub use uptrakit_notification_plugin_core::{
-    DeliveryMessage, MessageAction, NotificationPlugin, NotificationPluginError,
+    DeliveryMessage, MessageAction, NotificationPlugin, NotificationPluginError, escape_html,
 };
 
 #[cfg(feature = "email")]

@@ -4,7 +4,7 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use uptrakit_notification_channels::ChannelRegistry;
+use uptrakit_notification_plugin_registry::NotificationOps;
 
 use super::events::NotificationEvent;
 
@@ -23,14 +23,14 @@ impl NotificationDispatcher {
     /// Create a new dispatcher and spawn the background processing loop.
     pub fn new(
         db: DatabaseConnection,
-        channel_registry: Arc<ChannelRegistry>,
+        notification_ops: Arc<dyn NotificationOps>,
         callback_base_url: String,
         settings: crate::settings::Settings,
     ) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         tokio::spawn(dispatch_loop(
             db,
-            channel_registry,
+            notification_ops,
             callback_base_url,
             settings,
             rx,
@@ -50,46 +50,20 @@ impl NotificationDispatcher {
     }
 }
 
-/// Merge global SMTP settings into a per-channel email config object.
-///
-/// The per-channel email config contains only `to_addresses`. This function
-/// adds the SMTP connection and auth fields from the live settings snapshot
-/// so that [`EmailChannel::deliver`](uptrakit_notification_channels::EmailChannel::deliver)
-/// receives the full merged config.
+/// Convert web-api's SmtpSettingsSnapshot to the email plugin's SmtpSettingsSnapshot
+/// and merge global SMTP settings into a per-channel email config object.
+#[cfg(feature = "notifications-email")]
 #[tracing::instrument(skip_all)]
 fn merge_smtp_into_config(
     smtp: &crate::settings::SmtpSettingsSnapshot,
-    mut config: serde_json::Value,
+    config: serde_json::Value,
 ) -> serde_json::Value {
-    let obj = config.as_object_mut().expect("config is always an object");
-    if let Some(ref host) = smtp.host {
-        obj.insert("smtp_host".to_string(), serde_json::json!(host));
-    }
-    obj.insert(
-        "smtp_port".to_string(),
-        serde_json::json!(smtp.port.unwrap_or(587)),
-    );
-    if let Some(ref username) = smtp.username {
-        obj.insert("smtp_username".to_string(), serde_json::json!(username));
-    }
-    if let Some(ref password) = smtp.password {
-        obj.insert("smtp_password".to_string(), serde_json::json!(password));
-    }
-    if let Some(ref from_address) = smtp.from_address {
-        obj.insert("from_address".to_string(), serde_json::json!(from_address));
-    }
-    if let Some(ref from_name) = smtp.from_name {
-        obj.insert("from_name".to_string(), serde_json::json!(from_name));
-    }
-    obj.insert(
-        "tls_mode".to_string(),
-        serde_json::json!(smtp.tls_mode.clone()),
-    );
-    config
+    let plugin_smtp = to_plugin_smtp_snapshot(smtp);
+    uptrakit_notification_plugin_registry::merge_smtp_into_config(&plugin_smtp, config)
 }
 
-/// Public (crate-visible) re-export of [`merge_smtp_into_config`] for use in route handlers
-/// (e.g. the `test_channel` endpoint) that need to perform the same SMTP merge logic.
+/// Public (crate-visible) re-export for use in route handlers (e.g. `test_channel`).
+#[cfg(feature = "notifications-email")]
 #[tracing::instrument(skip_all)]
 pub(crate) fn merge_smtp_into_config_pub(
     smtp: &crate::settings::SmtpSettingsSnapshot,
@@ -98,10 +72,26 @@ pub(crate) fn merge_smtp_into_config_pub(
     merge_smtp_into_config(smtp, config)
 }
 
+/// Convert web-api's SmtpSettingsSnapshot to the email plugin's version.
+#[cfg(feature = "notifications-email")]
+fn to_plugin_smtp_snapshot(
+    smtp: &crate::settings::SmtpSettingsSnapshot,
+) -> uptrakit_notification_plugin_registry::SmtpSettingsSnapshot {
+    uptrakit_notification_plugin_registry::SmtpSettingsSnapshot {
+        host: smtp.host.clone(),
+        port: smtp.port,
+        username: smtp.username.clone(),
+        password: smtp.password.clone(),
+        from_address: smtp.from_address.clone(),
+        from_name: smtp.from_name.clone(),
+        tls_mode: smtp.tls_mode.clone(),
+    }
+}
+
 #[tracing::instrument(skip_all)]
 async fn dispatch_loop(
     db: DatabaseConnection,
-    channel_registry: Arc<ChannelRegistry>,
+    notification_ops: Arc<dyn NotificationOps>,
     callback_base_url: String,
     settings: crate::settings::Settings,
     mut rx: mpsc::UnboundedReceiver<NotificationEvent>,
@@ -173,7 +163,7 @@ async fn dispatch_loop(
             };
 
             // Look up channel implementation
-            let channel_impl = match channel_registry.get(&channel_model.channel_type) {
+            let channel_impl = match notification_ops.get(&channel_model.channel_type) {
                 Some(c) => c,
                 None => {
                     tracing::warn!(
@@ -201,15 +191,30 @@ async fn dispatch_loop(
             // For email channels, merge the global SMTP settings into the
             // per-channel config (which only stores `to_addresses`).
             let config_json = if channel_model.channel_type == "email" {
-                let smtp = settings.smtp();
-                if !smtp.is_configured() {
+                #[cfg(feature = "notifications-email")]
+                {
+                    let smtp = settings.smtp();
+                    if !smtp.is_configured() {
+                        tracing::warn!(
+                            channel_id = %channel_model.id,
+                            "skipping email notification: SMTP settings not configured"
+                        );
+                        continue;
+                    }
+                    merge_smtp_into_config(&smtp, config_json)
+                }
+                #[cfg(not(feature = "notifications-email"))]
+                {
+                    // Email plugin not compiled in — the channel won't be in the
+                    // registry so delivery will be skipped below, but handle it
+                    // defensively.
+                    let _ = &settings;
                     tracing::warn!(
                         channel_id = %channel_model.id,
-                        "skipping email notification: SMTP settings not configured"
+                        "email notification requested but email plugin is not enabled"
                     );
                     continue;
                 }
-                merge_smtp_into_config(&smtp, config_json)
             } else {
                 config_json
             };
@@ -308,7 +313,7 @@ async fn dispatch_loop(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "notifications-email"))]
 mod tests {
     use super::*;
     use crate::settings::SmtpSettingsSnapshot;

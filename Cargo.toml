@@ -86,7 +86,6 @@ uptrakit-web-api-types = { path = "crates/shared/web-api-types" }
 uptrakit-nats = { path = "crates/shared/nats" }
 uptrakit-scheduler-engine = { path = "crates/shared/scheduler-engine" }
 uptrakit-service-sdk = { path = "crates/shared/service-sdk" }
-uptrakit-notification-channels = { path = "crates/shared/notification-channels", default-features = false }
 uptrakit-notification-plugin-core = { path = "crates/plugins/notifications/core" }
 uptrakit-notification-plugin-webhook = { path = "crates/plugins/notifications/webhook" }
 uptrakit-notification-plugin-telegram = { path = "crates/plugins/notifications/telegram" }

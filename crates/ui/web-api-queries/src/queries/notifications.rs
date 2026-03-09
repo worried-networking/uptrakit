@@ -22,7 +22,7 @@ use crate::tenant_db::TenantDb;
 pub async fn create_channel(
     tenant_db: &TenantDb,
     req: &uptrakit_web_api_types::notifications::CreateNotificationChannelRequest,
-    channel_registry: &uptrakit_notification_channels::ChannelRegistry,
+    channel_registry: &dyn uptrakit_notification_plugin_registry::NotificationOps,
 ) -> ChannelResult<NotificationChannelResponse> {
     // Validate config with channel implementation
     let channel_type_str = req.channel_type.as_str();
@@ -68,7 +68,7 @@ pub async fn create_channel(
 pub async fn list_channels(
     tenant_db: &TenantDb,
     params: &PaginationParams,
-    channel_registry: &uptrakit_notification_channels::ChannelRegistry,
+    channel_registry: &dyn uptrakit_notification_plugin_registry::NotificationOps,
 ) -> ChannelResult<PaginatedResponse<NotificationChannelResponse>> {
     let resolved = params.resolve();
     let total = tenant_db
@@ -101,7 +101,7 @@ pub async fn list_channels(
 pub async fn get_channel(
     tenant_db: &TenantDb,
     id: Uuid,
-    channel_registry: &uptrakit_notification_channels::ChannelRegistry,
+    channel_registry: &dyn uptrakit_notification_plugin_registry::NotificationOps,
 ) -> ChannelResult<Option<NotificationChannelResponse>> {
     let channel = tenant_db
         .find_by_id::<notification_channel::Entity, _>(id)
@@ -120,7 +120,7 @@ pub async fn update_channel(
     tenant_db: &TenantDb,
     id: Uuid,
     req: &uptrakit_web_api_types::notifications::UpdateNotificationChannelRequest,
-    channel_registry: &uptrakit_notification_channels::ChannelRegistry,
+    channel_registry: &dyn uptrakit_notification_plugin_registry::NotificationOps,
 ) -> ChannelResult<Option<NotificationChannelResponse>> {
     let existing = tenant_db
         .find_by_id::<notification_channel::Entity, _>(id)
@@ -445,7 +445,7 @@ fn channel_to_response(
 
 fn mask_channel_config(
     channel: &notification_channel::Model,
-    registry: &uptrakit_notification_channels::ChannelRegistry,
+    registry: &dyn uptrakit_notification_plugin_registry::NotificationOps,
 ) -> serde_json::Value {
     let config: serde_json::Value =
         serde_json::from_str(channel.config.expose_secret()).unwrap_or_default();
