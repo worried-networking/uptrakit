@@ -540,12 +540,12 @@ the copy queries), but for PostgreSQL and MySQL concurrent inserts into the sour
 migration will silently produce a partial copy. A `READ ONLY` transaction on the source
 connection (or a banner warning in the confirmation prompt) would make the risk explicit.
 
-**[MEDIUM]** `src/reencrypt.rs:46-315` -- Each per-table re-encryption helper loads all rows
+~~**[MEDIUM]** `src/reencrypt.rs:46-315` -- Each per-table re-encryption helper loads all rows
 with `find().all(db)` before iterating. For a large deployment with thousands of CA
 certificates, OIDC providers, or MQTT clients this is an unbounded in-memory load at startup.
 The pattern also holds the encrypted value in a `String` clone between the read and the update.
 A chunked iteration using `paginate(db, PAGE_SIZE).fetch_and_next()` would bound memory usage
-and reduce the window in which decrypted key material is alive in the heap.
+and reduce the window in which decrypted key material is alive in the heap.~~ *(Fixed: all 6 helpers now use `UPGRADE_CHUNK_SIZE = 100` offset/limit loops; memory use is bounded per chunk.)*
 
 **[LOW]** `src/db/config.rs:37-38` -- The default SQLite path is constructed as
 `data_dir.join("uptrakit.db")` with `?mode=rwc` (read-write-create). If `data_dir` does not

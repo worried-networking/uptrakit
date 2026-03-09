@@ -153,12 +153,9 @@ No extensibility issues found.
   emits targets for default config, no targets for custom config).
 - `src/docker_client.rs:614-653` -- Six tests cover `format_progress_line` with all combinations
   of present/absent id, status, and progress.
-- `src/error.rs:56-139` -- 11 tests cover all `DockerError` variants for `Display` correctness.
-  **Note (parallel review 2026-03-06):** These 10 tests that verify `#[error("...")]`
-  formatting are `thiserror` Display format tests and violate the project testing philosophy
-  documented in `docs/development/testing.md`. They test upstream crate behavior, not
-  application logic, and should be removed. See umbrella `plugins/CODEREVIEW.md` for full
-  cross-plugin finding.
+- ~~`src/error.rs:56-139` -- 11 tests cover all `DockerError` variants for `Display` correctness.
+  These were `thiserror` Display format tests that violated the project testing philosophy
+  documented in `docs/development/testing.md`.~~ *(Fixed: entire `mod tests` block removed from `src/error.rs`.)*
 - `src/registry.rs:151-155` -- Client creation test verifies `RegistryClient::new(None)` succeeds.
 - `src/api_types.rs:29-103` -- Seven tests cover `TokenResponse` deserialization (with `token`,
   `access_token` alias, no expiry, extra fields) and `RegistryErrorResponse` deserialization.

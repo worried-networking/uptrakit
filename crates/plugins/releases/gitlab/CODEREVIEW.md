@@ -45,11 +45,11 @@ has been fixed.
 
 ### Issues
 
-**[LOW]** `src/plugin.rs:143-147` -- `releases_url` appends `?per_page=100` as a hardcoded
+~~**[LOW]** `src/plugin.rs:143-147` -- `releases_url` appends `?per_page=100` as a hardcoded
 query parameter. GitLab supports pagination via `page` and `per_page`. Projects with more
 than 100 releases are silently truncated. A configurable `per_page` field on `GitLabConfig`
 (defaulting to 100) would allow users with large projects to increase this, matching the
-`DockerConfig` `page_size` pattern.
+`DockerConfig` `page_size` pattern.~~ *(Fixed: `parse_link_next` helper + `'pages` loop with `MAX_PAGES = 10` follow-through implemented.)*
 
 ## Security and Safety
 
@@ -166,9 +166,9 @@ No coding standards issues found.
 
 ### Issues
 
-**[LOW]** `src/plugin.rs:143-147` -- `per_page=100` is hardcoded. A configurable `per_page`
+~~**[LOW]** `src/plugin.rs:143-147` -- `per_page=100` is hardcoded. A configurable `per_page`
 field on `GitLabConfig` would allow users with projects exceeding 100 releases to retrieve
-all of them, mirroring the `DockerConfig.page_size` extensibility pattern.
+all of them, mirroring the `DockerConfig.page_size` extensibility pattern.~~ *(Fixed: pagination follow-through added; `per_page=100` now applies per-page with Link-header loop.)*
 
 ## Tests
 
@@ -206,11 +206,11 @@ only plugin creation test. There is no corresponding failure test (e.g., `new()`
 invalid `api_base_url` or an invalid regex pattern). Adding a failure test would verify
 that `new()` propagates `validate()` errors correctly.
 
-**[LOW]** `src/error.rs:46-64` -- 3 tests verify `#[error("...")]` Display formatting on
+~~**[LOW]** `src/error.rs:46-64` -- 3 tests verify `#[error("...")]` Display formatting on
 `GitLabError` variants. These are `thiserror` Display format tests that test upstream crate
 behavior, not application logic, violating the project testing philosophy documented in
 `docs/development/testing.md`. They should be removed. See umbrella `plugins/CODEREVIEW.md`
-for the full cross-plugin finding. (Confirmed by Tests parallel review, finding 2.1.)
+for the full cross-plugin finding. (Confirmed by Tests parallel review, finding 2.1.)~~ *(Fixed: entire `mod tests` block removed from `src/error.rs`.)*
 
 ## Consistency
 

@@ -42,12 +42,12 @@ have been fixed.
 
 ### Issues
 
-**[LOW]** `src/plugin.rs:149` -- `releases_url` appends `?limit=50` as a hardcoded query
+~~**[LOW]** `src/plugin.rs:149` -- `releases_url` appends `?limit=50` as a hardcoded query
 parameter. The Forgejo API supports pagination via `page` and `limit`. Repositories with
 more than 50 releases are silently truncated. Unlike the GitHub plugin (which has a
 `per_page=100` comment acknowledging the same gap), there is no comment here documenting the
 truncation. A configurable `page_limit` field on `ForgejoConfig` or at minimum a code comment
-noting the truncation would aid future maintainers.
+noting the truncation would aid future maintainers.~~ *(Fixed: `parse_link_next` helper + `'pages` loop with `MAX_PAGES = 10` follow-through implemented.)*
 
 ## Security and Safety
 
@@ -163,10 +163,10 @@ No coding standards issues found.
 
 ### Issues
 
-**[LOW]** `src/plugin.rs:149` -- The `limit=50` query parameter is not configurable. A
+~~**[LOW]** `src/plugin.rs:149` -- The `limit=50` query parameter is not configurable. A
 `page_limit: Option<u32>` field on `ForgejoConfig` (defaulting to 50) would allow users
 with large repositories to increase this without code changes, matching the `DockerConfig`
-pattern of a user-configurable `page_size`.
+pattern of a user-configurable `page_size`.~~ *(Fixed: pagination follow-through added; `limit=50` now applies per-page with Link-header loop.)*
 
 ## Tests
 
@@ -208,11 +208,11 @@ are correct -- `new()` is `async`. However, several tests such as `url_construct
 construct the plugin synchronously (since `new()` does no I/O). This is a minor style issue
 with no correctness impact.
 
-**[LOW]** `src/error.rs:46-64` -- 3 tests verify `#[error("...")]` Display formatting on
+~~**[LOW]** `src/error.rs:46-64` -- 3 tests verify `#[error("...")]` Display formatting on
 `ForgejoError` variants. These are `thiserror` Display format tests that test upstream crate
 behavior, not application logic, violating the project testing philosophy documented in
 `docs/development/testing.md`. They should be removed. See umbrella `plugins/CODEREVIEW.md`
-for the full cross-plugin finding. (Confirmed by Tests parallel review, finding 2.1.)
+for the full cross-plugin finding. (Confirmed by Tests parallel review, finding 2.1.)~~ *(Fixed: entire `mod tests` block removed from `src/error.rs`.)*
 
 ## Consistency
 

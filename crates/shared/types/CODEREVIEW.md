@@ -38,7 +38,7 @@ No architectural issues found.
 
 ### Issues
 
-**[LOW]** `src/masked_email.rs:26` -- `ZeroizeOnDrop` added to `MaskedEmail` is a
+~~**[LOW]** `src/masked_email.rs:26` -- `ZeroizeOnDrop` added to `MaskedEmail` is a
 category mismatch. `MaskedEmail` stores a plain email address (e.g.
 `user@example.com`) that is routinely serialised to JSON, stored in the database in
 cleartext, and displayed (masked) to operators in logs and API responses. It is not a
@@ -48,7 +48,7 @@ into thinking email addresses have the same secrecy requirements as credentials.
 `ZeroizeOnDrop` derive also has no measurable security effect here: any clones produced
 before the value is dropped (e.g. by `Clone`, iterator adaptors, or JSON serialisation
 intermediates) are not covered by the zeroization. Consider reverting and documenting
-why `MaskedEmail` differs from `SecretString`.
+why `MaskedEmail` differs from `SecretString`.~~ *(Fixed: `Zeroize` and `ZeroizeOnDrop` removed from `MaskedEmail` derive list.)*
 
 ## Code Quality
 
@@ -65,12 +65,12 @@ why `MaskedEmail` differs from `SecretString`.
 
 ### Issues
 
-**[LOW]** `src/masked_email.rs:26` -- No test verifies the zeroization behaviour introduced
+~~**[LOW]** `src/masked_email.rs:26` -- No test verifies the zeroization behaviour introduced
 in commit `5da34db`. `SecretString` has a comparable test gap, but there at least the type's
 secrecy justification is unambiguous. If `ZeroizeOnDrop` is retained on `MaskedEmail`, a
 test using a raw pointer read after drop (in a `#[test]` with `unsafe`) or a canary-value
 check would document the intent and catch future regressions (e.g. if the inner `String` is
-moved out before drop).
+moved out before drop).~~ *(Fixed: `ZeroizeOnDrop` removed; no zeroization test needed.)*
 
 ## High Availability
 

@@ -65,10 +65,10 @@ primary controller-side operation. No mock HTTP server test exercises: normal 20
 rate-limited, 404 not-found, or invalid JSON body. The rest of the codebase uses `MockApiServer`
 via `httpmock` for this pattern.
 
-**[LOW]** `src/plugin.rs:97` -- GitHub releases API hardcoded at `per_page=100`, no pagination
+~~**[LOW]** `src/plugin.rs:97` -- GitHub releases API hardcoded at `per_page=100`, no pagination
 follow-through. For repositories with 100+ releases the returned list is silently truncated.
 No `Link` header follow-through. The `DockerConfig` pattern of a configurable `page_size` shows
-the established solution.
+the established solution.~~ *(Fixed: `parse_link_next` helper + `'pages` loop with `MAX_PAGES = 10` follow-through implemented.)*
 
 ## High Availability
 
@@ -129,8 +129,8 @@ response with `x-ratelimit-remaining: 0`, 404 not-found, or invalid JSON body. T
 should follow suit. A mock returning a fixture JSON array would verify the asset filter
 path, the date-parse path, and the pre-release exclusion path end-to-end.
 
-**[LOW]** `src/error.rs:46-68` -- 3 tests verify `#[error("...")]` Display formatting on
+~~**[LOW]** `src/error.rs:46-68` -- 3 tests verify `#[error("...")]` Display formatting on
 `GitHubError` variants. These are `thiserror` Display format tests that test upstream crate
 behavior, not application logic, violating the project testing philosophy documented in
 `docs/development/testing.md`. They should be removed. See umbrella `plugins/CODEREVIEW.md`
-for the full cross-plugin finding. (Confirmed by Tests parallel review, finding 2.1.)
+for the full cross-plugin finding. (Confirmed by Tests parallel review, finding 2.1.)~~ *(Fixed: entire `mod tests` block removed from `src/error.rs`.)*

@@ -61,13 +61,13 @@ No security issues found.
 
 ### Issues
 
-**[MEDIUM]** `src/version_check.rs` -- Retry logic duplicated between `detect_installed`
+~~**[MEDIUM]** `src/version_check.rs` -- Retry logic duplicated between `detect_installed`
 (lines 421-481) and `fetch_latest` (lines 488-545). Both share nearly identical
 retry-with-backoff logic: plugin creation, backoff loop, transient error check, sleep, and
 final error formatting. The only differences are the plugin method called and the return type
 shape. A shared generic retry helper (e.g., `retry_with_backoff<T>(|| plugin_op(), ...)`)
 would eliminate approximately 50 lines of duplicated control flow.
-*(2026-03-06 parallel review -- code quality)*
+*(2026-03-06 parallel review -- code quality)*~~ *(Fixed: `run_with_retry` helper extracted; both `detect_installed` and `fetch_latest` now delegate to it via `Box::pin`.)*
 
 **[MEDIUM]** `src/version_check.rs:157-233,281-376` -- Batch group processing has structural
 duplication. The detect group processing and fetch group processing follow the same structural
