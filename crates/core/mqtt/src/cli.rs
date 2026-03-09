@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use clap::Parser;
 use uptrakit_service_sdk::cli::CommonServiceArgs;
 
@@ -13,9 +15,11 @@ pub struct Args {
     pub common: CommonServiceArgs,
 
     /// Maximum number of tenants this instance will manage.
-    /// 0 means unlimited.
-    #[arg(long, default_value = "0")]
-    pub max_tenants: u32,
+    ///
+    /// When omitted or set to `0`, no limit is enforced (unlimited tenants).
+    /// Set to a positive integer (e.g. `5`) to cap the number of tenants.
+    #[arg(long)]
+    pub max_tenants: Option<NonZeroU32>,
 }
 
 #[cfg(test)]
@@ -32,7 +36,7 @@ mod tests {
         assert!(!args.common.version);
         assert!(args.common.config_dir.is_none());
         assert!(args.common.state_dir.is_none());
-        assert_eq!(args.max_tenants, 0);
+        assert!(args.max_tenants.is_none());
         assert!(args.common.enrollment_token.is_none());
         assert!(args.common.friendly_name.is_none());
         assert!(!args.common.tofu);
@@ -69,7 +73,7 @@ mod tests {
             args.common.state_dir.as_ref().unwrap().to_str().unwrap(),
             "/opt/mqtt-state"
         );
-        assert_eq!(args.max_tenants, 5);
+        assert_eq!(args.max_tenants.map(|n| n.get()), Some(5u32));
         assert_eq!(
             args.common.enrollment_token.as_deref(),
             Some("secret-token-123")

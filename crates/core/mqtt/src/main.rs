@@ -238,7 +238,8 @@ async fn main() {
     let tenant_mgr = TenantManager::new(Some(event_tx));
 
     let mut handler = MqttHandler {
-        max_tenants: args.max_tenants,
+        // Convert Option<NonZeroU32> → u32 using 0 as the wire sentinel for "unlimited".
+        max_tenants: args.max_tenants.map_or(0, |n| n.get()),
         instance_id,
         tenant_mgr,
         event_rx,
