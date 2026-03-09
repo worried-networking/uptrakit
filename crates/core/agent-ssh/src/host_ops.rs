@@ -25,6 +25,11 @@ pub struct HostSnapshot {
 ///
 /// Used by `SshAgentHandler` to detect host-database changes without storing
 /// full [`Model`] values in memory between reload ticks.
+///
+/// # Tenant isolation
+///
+/// The SSH agent operates against a single-tenant local SQLite database — no
+/// tenant filter is required here by design.
 pub async fn list_host_snapshots(db: &DatabaseConnection) -> Result<Vec<HostSnapshot>> {
     let models = Entity::find()
         .order_by_asc(Column::Id)
@@ -131,6 +136,10 @@ pub async fn find_host(db: &DatabaseConnection, name_or_id: &str) -> Result<Opti
 }
 
 /// List all SSH hosts.
+///
+/// # Tenant isolation
+///
+/// Single-tenant local SQLite — no tenant filter required by design.
 pub async fn list_hosts(db: &DatabaseConnection) -> Result<Vec<Model>> {
     Entity::find().all(db).await.context_to::<Error>()
 }
