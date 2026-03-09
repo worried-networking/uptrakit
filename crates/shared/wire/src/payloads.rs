@@ -820,6 +820,7 @@ pub struct MqttHostSummary {
     /// Human-readable hostname.
     pub hostname: String,
     /// User-defined display name for the host.
+    #[serde(default)]
     pub friendly_name: String,
     /// Count of items where `installed_version != latest_version` (both known).
     pub pending_count: u32,
