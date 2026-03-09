@@ -40,6 +40,9 @@ if [[ -f "$wt_path/frontend/package.json" ]]; then
 
   echo ":: Running npm install..." >&2
   bash -lc "cd '$wt_path/frontend' && npm install" >&2
+
+  echo ":: Building frontend..." >&2
+  bash -lc "cd '$wt_path/frontend' && npm run build" >&2
 fi
 
 # Required: print the worktree path on stdout so Claude Code knows where it is.
