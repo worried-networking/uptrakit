@@ -15,7 +15,6 @@ pub mod error;
 pub mod events_stream;
 pub mod extensions;
 pub mod health;
-pub mod host_packages;
 pub mod host_tags;
 pub mod hosts;
 pub mod notifications;
@@ -360,6 +359,7 @@ impl UptrakitClient {
         self.handle_empty_response(resp).await
     }
 
+    #[allow(dead_code)]
     async fn delete_json<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let req = self.http.delete(&url).bearer_auth(self.token_or_err()?);
@@ -378,6 +378,7 @@ impl UptrakitClient {
         self.handle_empty_response(resp).await
     }
 
+    #[allow(dead_code)]
     async fn delete_with_query_json<T: DeserializeOwned>(
         &self,
         path: &str,

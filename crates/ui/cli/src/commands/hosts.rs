@@ -4,9 +4,7 @@ use crate::output::HumanOutput;
 use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
-use uptrakit_openapi_client::types::autodiscovery::{
-    DiscardDiscoveredResponse, TriggerDiscoveryResponse,
-};
+use uptrakit_openapi_client::types::autodiscovery::TriggerDiscoveryResponse;
 use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_openapi_client::types::hosts::{HostMessageResponse, HostResponse, UpdateHostRequest};
 use uptrakit_openapi_client::types::pagination::{PaginatedResponse, PaginationParams};
@@ -92,12 +90,6 @@ impl HumanOutput for TriggerDiscoveryResponse {
     }
 }
 
-impl HumanOutput for DiscardDiscoveredResponse {
-    fn to_human_string(&self) -> String {
-        format!("Discarded {} discovered item(s).\n", self.discarded_count)
-    }
-}
-
 // ── Params ───────────────────────────────────────────────────────────────────
 
 /// Parameters for listing hosts.
@@ -138,15 +130,6 @@ pub struct DeactivateParams<'a> {
 
 pub struct DiscoverParams<'a> {
     pub id: &'a Uuid,
-    pub server: Option<&'a str>,
-    pub token: Option<&'a str>,
-    pub insecure: bool,
-    pub request_timeout: Option<std::time::Duration>,
-}
-
-pub struct DiscardDiscoveredParams<'a> {
-    pub id: &'a Uuid,
-    pub plugin_config_id: Option<&'a Uuid>,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
     pub insecure: bool,
@@ -217,21 +200,6 @@ pub async fn discover(params: DiscoverParams<'_>) -> Result<TriggerDiscoveryResp
     client.discover_host(params.id).await.context_to()
 }
 
-pub async fn discard_discovered(
-    params: DiscardDiscoveredParams<'_>,
-) -> Result<DiscardDiscoveredResponse> {
-    let client = authenticated_client(
-        params.server,
-        params.token,
-        params.insecure,
-        params.request_timeout,
-    )?;
-    client
-        .discard_host_discovered(params.id, params.plugin_config_id)
-        .await
-        .context_to()
-}
-
 /// Perform a batch action on multiple hosts.
 pub async fn batch(
     action: &str,
@@ -255,9 +223,7 @@ pub async fn batch(
 mod tests {
     use super::*;
     use time::macros::datetime;
-    use uptrakit_openapi_client::types::autodiscovery::{
-        DiscardDiscoveredResponse, TriggerDiscoveryResponse,
-    };
+    use uptrakit_openapi_client::types::autodiscovery::TriggerDiscoveryResponse;
     use uptrakit_openapi_client::types::hosts::HostAgentSummary;
 
     fn sample_host() -> HostResponse {
@@ -277,7 +243,6 @@ mod tests {
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
             agents: vec![],
             tags: vec![],
-            update_summary: Default::default(),
         }
     }
 
@@ -350,12 +315,5 @@ mod tests {
         let s = resp.to_human_string();
         assert!(s.contains("Discovery queued"));
         assert!(s.contains("3"));
-    }
-
-    #[test]
-    fn discard_discovered_response_human_output() {
-        let resp = DiscardDiscoveredResponse { discarded_count: 5 };
-        let s = resp.to_human_string();
-        assert!(s.contains("5"));
     }
 }

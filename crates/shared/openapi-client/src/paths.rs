@@ -108,10 +108,6 @@ pub(crate) mod hosts {
     pub(crate) fn discover(id: &Uuid) -> String {
         format!("/api/v1/hosts/{id}/discover")
     }
-    /// `DELETE /api/v1/hosts/{id}/discovered`
-    pub(crate) fn discovered(id: &Uuid) -> String {
-        format!("/api/v1/hosts/{id}/discovered")
-    }
 }
 
 pub(crate) mod oidc_auth {
@@ -168,10 +164,6 @@ pub(crate) mod plugin_configs {
     /// `POST /api/v1/plugin-configs/{id}/discover`
     pub(crate) fn discover(id: &Uuid) -> String {
         format!("/api/v1/plugin-configs/{id}/discover")
-    }
-    /// `DELETE /api/v1/plugin-configs/{id}/discovered`
-    pub(crate) fn discovered(id: &Uuid) -> String {
-        format!("/api/v1/plugin-configs/{id}/discovered")
     }
 }
 
@@ -383,34 +375,6 @@ pub(crate) mod update_batches {
     /// `GET /api/v1/update-batches/{id}/stream`
     pub(crate) fn stream(id: &Uuid) -> String {
         format!("/api/v1/update-batches/{id}/stream")
-    }
-}
-
-pub(crate) mod host_packages {
-    use uuid::Uuid;
-    /// `GET /api/v1/hosts/{host_id}/packages`
-    pub(crate) fn base(host_id: &Uuid) -> String {
-        format!("/api/v1/hosts/{host_id}/packages")
-    }
-    /// `POST /api/v1/hosts/{host_id}/packages/batch`
-    pub(crate) fn batch(host_id: &Uuid) -> String {
-        format!("/api/v1/hosts/{host_id}/packages/batch")
-    }
-    /// `GET /api/v1/hosts/{host_id}/packages/{id}` · `PUT …` · `DELETE …`
-    pub(crate) fn by_id(host_id: &Uuid, id: &Uuid) -> String {
-        format!("/api/v1/hosts/{host_id}/packages/{id}")
-    }
-    /// `POST /api/v1/hosts/{host_id}/packages/{id}/promote`
-    pub(crate) fn promote(host_id: &Uuid, id: &Uuid) -> String {
-        format!("/api/v1/hosts/{host_id}/packages/{id}/promote")
-    }
-    /// `GET /api/v1/hosts/{host_id}/package-ignores` · `POST …`
-    pub(crate) fn ignores(host_id: &Uuid) -> String {
-        format!("/api/v1/hosts/{host_id}/package-ignores")
-    }
-    /// `DELETE /api/v1/hosts/{host_id}/package-ignores/{id}`
-    pub(crate) fn ignore_by_id(host_id: &Uuid, id: &Uuid) -> String {
-        format!("/api/v1/hosts/{host_id}/package-ignores/{id}")
     }
 }
 

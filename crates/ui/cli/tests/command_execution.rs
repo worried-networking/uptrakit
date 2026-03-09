@@ -42,7 +42,6 @@ fn sample_host() -> HostResponse {
         updated_at: datetime!(2025-01-01 00:00:00 UTC),
         agents: vec![],
         tags: vec![],
-        update_summary: Default::default(),
     }
 }
 
@@ -93,8 +92,7 @@ fn sample_software_item() -> SoftwareItemResponse {
         id: software_item_id(),
         name: "Node.js".to_string(),
         plugins: vec!["releases_github".to_string()],
-        enabled: true,
-        discovery_state: None,
+        featured: true,
         last_checked_at: None,
         host_count: 2,
         latest_version: None,

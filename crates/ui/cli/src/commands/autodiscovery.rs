@@ -7,17 +7,17 @@ use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::autodiscovery::ListIgnoresParams;
 use uptrakit_openapi_client::types::autodiscovery::{
-    AutodiscoveryIgnoreResponse, CreateAutodiscoveryIgnoreRequest,
+    CreateSoftwareIgnoreRequest, SoftwareIgnoreResponse,
 };
 use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 
 // ── Human output ────────────────────────────────────────────────────────────
 
-impl HumanOutput for PaginatedResponse<AutodiscoveryIgnoreResponse> {
+impl HumanOutput for PaginatedResponse<SoftwareIgnoreResponse> {
     fn to_human_string(&self) -> String {
         if self.items.is_empty() {
-            return "No autodiscovery ignore rules found.\n".to_string();
+            return "No software ignore rules found.\n".to_string();
         }
         let mut out = format!("{:<38} NAME\n", "ID");
         for r in &self.items {
@@ -31,7 +31,7 @@ impl HumanOutput for PaginatedResponse<AutodiscoveryIgnoreResponse> {
     }
 }
 
-impl HumanOutput for AutodiscoveryIgnoreResponse {
+impl HumanOutput for SoftwareIgnoreResponse {
     fn to_human_string(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!("ID:               {}\n", self.id));
@@ -77,7 +77,7 @@ pub struct IgnoresDeleteParams<'a> {
 
 pub async fn ignores_list(
     params: IgnoresListParams<'_>,
-) -> Result<PaginatedResponse<AutodiscoveryIgnoreResponse>> {
+) -> Result<PaginatedResponse<SoftwareIgnoreResponse>> {
     let client = authenticated_client(
         params.server,
         params.token,
@@ -89,22 +89,23 @@ pub async fn ignores_list(
         per_page: params.per_page,
     };
     client
-        .list_autodiscovery_ignores(&list_params)
+        .list_software_ignores(&list_params)
         .await
         .context_to()
 }
 
-pub async fn ignores_create(
-    params: IgnoresCreateParams<'_>,
-) -> Result<AutodiscoveryIgnoreResponse> {
+pub async fn ignores_create(params: IgnoresCreateParams<'_>) -> Result<SoftwareIgnoreResponse> {
     let client = authenticated_client(
         params.server,
         params.token,
         params.insecure,
         params.request_timeout,
     )?;
-    let req = CreateAutodiscoveryIgnoreRequest { name: params.name };
-    client.create_autodiscovery_ignore(&req).await.context_to()
+    let req = CreateSoftwareIgnoreRequest {
+        name: params.name,
+        host_id: None,
+    };
+    client.create_software_ignore(&req).await.context_to()
 }
 
 pub async fn ignores_delete(params: IgnoresDeleteParams<'_>) -> Result<DeletedOutput> {
@@ -115,15 +116,15 @@ pub async fn ignores_delete(params: IgnoresDeleteParams<'_>) -> Result<DeletedOu
         params.request_timeout,
     )?;
     client
-        .delete_autodiscovery_ignore(params.id)
+        .delete_software_ignore(params.id)
         .await
         .context_to()?;
     Ok(DeletedOutput {
-        message: format!("Autodiscovery ignore rule {} deleted.", params.id),
+        message: format!("Software ignore rule {} deleted.", params.id),
     })
 }
 
-/// Perform a batch action on multiple autodiscovery ignore rules.
+/// Perform a batch action on multiple software ignore rules.
 pub async fn batch(
     action: &str,
     ids: &[Uuid],
@@ -137,7 +138,7 @@ pub async fn batch(
         action: action.to_string(),
         ids: ids.to_vec(),
     };
-    client.batch_autodiscovery_ignores(&req).await.context_to()
+    client.batch_software_ignores(&req).await.context_to()
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -147,12 +148,13 @@ mod tests {
     use super::*;
     use time::macros::datetime;
 
-    fn sample_ignore() -> AutodiscoveryIgnoreResponse {
-        AutodiscoveryIgnoreResponse {
+    fn sample_ignore() -> SoftwareIgnoreResponse {
+        SoftwareIgnoreResponse {
             id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
                 .parse::<Uuid>()
                 .unwrap(),
             name: "FreshRSS".to_string(),
+            host_id: None,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
         }
     }
@@ -166,14 +168,14 @@ mod tests {
 
     #[test]
     fn paginated_ignores_empty() {
-        let resp: PaginatedResponse<AutodiscoveryIgnoreResponse> = PaginatedResponse {
+        let resp: PaginatedResponse<SoftwareIgnoreResponse> = PaginatedResponse {
             items: vec![],
             total: 0,
             page: 1,
             per_page: 20,
             total_pages: 0,
         };
-        assert!(resp.to_human_string().contains("No autodiscovery ignore"));
+        assert!(resp.to_human_string().contains("No software ignore"));
     }
 
     #[test]

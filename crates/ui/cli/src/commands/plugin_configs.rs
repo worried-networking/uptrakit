@@ -6,9 +6,7 @@ use rootcause::prelude::*;
 use serde_json::Value;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
-use uptrakit_openapi_client::types::autodiscovery::{
-    DiscardDiscoveredResponse, TriggerDiscoveryResponse,
-};
+use uptrakit_openapi_client::types::autodiscovery::TriggerDiscoveryResponse;
 use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_openapi_client::types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_openapi_client::types::plugin_configs::{
@@ -113,14 +111,6 @@ pub struct DiscoverParams<'a> {
     pub request_timeout: Option<std::time::Duration>,
 }
 
-pub struct DiscardDiscoveredParams<'a> {
-    pub id: &'a Uuid,
-    pub server: Option<&'a str>,
-    pub token: Option<&'a str>,
-    pub insecure: bool,
-    pub request_timeout: Option<std::time::Duration>,
-}
-
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<PluginConfigResponse>> {
@@ -202,21 +192,6 @@ pub async fn discover(params: DiscoverParams<'_>) -> Result<TriggerDiscoveryResp
         params.request_timeout,
     )?;
     client.discover_plugin_config(params.id).await.context_to()
-}
-
-pub async fn discard_discovered(
-    params: DiscardDiscoveredParams<'_>,
-) -> Result<DiscardDiscoveredResponse> {
-    let client = authenticated_client(
-        params.server,
-        params.token,
-        params.insecure,
-        params.request_timeout,
-    )?;
-    client
-        .discard_plugin_config_discovered(params.id)
-        .await
-        .context_to()
 }
 
 /// Perform a batch action on multiple plugin configs.

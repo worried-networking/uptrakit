@@ -22,8 +22,8 @@ impl HumanOutput for PaginatedResponse<SoftwareItemResponse> {
             return "No software items found.\n".to_string();
         }
         let mut out = format!(
-            "{:<38} {:<25} {:<30} {:<8} {:<7} UPDATE\n",
-            "ID", "NAME", "PLUGINS", "ENABLED", "HOSTS"
+            "{:<38} {:<25} {:<30} {:<10} {:<7} UPDATE\n",
+            "ID", "NAME", "PLUGINS", "FEATURED", "HOSTS"
         );
         for item in &self.items {
             let plugins_str = if item.plugins.is_empty() {
@@ -33,8 +33,8 @@ impl HumanOutput for PaginatedResponse<SoftwareItemResponse> {
             };
             let update = if item.update_available { "yes" } else { "-" };
             out.push_str(&format!(
-                "{:<38} {:<25} {:<30} {:<8} {:<7} {}\n",
-                item.id, item.name, plugins_str, item.enabled, item.host_count, update
+                "{:<38} {:<25} {:<30} {:<10} {:<7} {}\n",
+                item.id, item.name, plugins_str, item.featured, item.host_count, update
             ));
         }
         out.push_str(&format!(
@@ -56,7 +56,7 @@ impl HumanOutput for SoftwareItemDetailResponse {
             self.plugins.join(", ")
         };
         out.push_str(&format!("Plugins:         {}\n", plugins_str));
-        out.push_str(&format!("Enabled:         {}\n", self.enabled));
+        out.push_str(&format!("Featured:        {}\n", self.featured));
         if let Some(ref lv) = self.latest_version {
             out.push_str(&format!("Latest Version:  {}\n", lv));
         }
@@ -143,10 +143,7 @@ impl HumanOutput for SoftwareItemResponse {
             self.plugins.join(", ")
         };
         out.push_str(&format!("Plugins:         {}\n", plugins_str));
-        out.push_str(&format!("Enabled:         {}\n", self.enabled));
-        if let Some(ds) = &self.discovery_state {
-            out.push_str(&format!("Discovery State: {}\n", ds));
-        }
+        out.push_str(&format!("Featured:        {}\n", self.featured));
         if let Some(ref lv) = self.latest_version {
             out.push_str(&format!("Latest Version:  {}\n", lv));
         }
@@ -190,7 +187,7 @@ pub struct ShowParams<'a> {
 
 pub struct CreateParams<'a> {
     pub name: String,
-    pub enabled: Option<bool>,
+    pub featured: Option<bool>,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
     pub insecure: bool,
@@ -200,7 +197,7 @@ pub struct CreateParams<'a> {
 pub struct UpdateParams<'a> {
     pub id: &'a Uuid,
     pub name: Option<String>,
-    pub enabled: Option<bool>,
+    pub featured: Option<bool>,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
     pub insecure: bool,
@@ -267,7 +264,7 @@ pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<SoftwareIt
     let list_params = ListSoftwareItemsParams {
         page: params.page,
         per_page: params.per_page,
-        discovery_state: None,
+        featured: None,
     };
     client.list_software_items(&list_params).await.context_to()
 }
@@ -292,7 +289,7 @@ pub async fn create(params: CreateParams<'_>) -> Result<SoftwareItemResponse> {
     )?;
     let req = CreateSoftwareItemRequest {
         name: params.name,
-        enabled: params.enabled.unwrap_or(true),
+        featured: params.featured.unwrap_or(true),
     };
     client.create_software_item(&req).await.context_to()
 }
@@ -306,7 +303,7 @@ pub async fn update(params: UpdateParams<'_>) -> Result<SoftwareItemResponse> {
     )?;
     let req = UpdateSoftwareItemRequest {
         name: params.name,
-        enabled: params.enabled,
+        featured: params.featured,
     };
     client
         .update_software_item(params.id, &req)
@@ -473,8 +470,7 @@ mod tests {
                 .unwrap(),
             name: "Node.js".to_string(),
             plugins: vec!["releases_github".to_string()],
-            enabled: true,
-            discovery_state: None,
+            featured: true,
             last_checked_at: None,
             host_count: 2,
             latest_version: None,
@@ -491,8 +487,7 @@ mod tests {
                 .unwrap(),
             name: "Homebrew App".to_string(),
             plugins: vec!["package_manager_homebrew".to_string()],
-            enabled: true,
-            discovery_state: None,
+            featured: true,
             last_checked_at: None,
             host_count: 1,
             latest_version: Some("3.0.0".to_string()),
@@ -550,8 +545,7 @@ mod tests {
                 .unwrap(),
             name: "Node.js".to_string(),
             plugins: vec!["releases_github".to_string()],
-            enabled: true,
-            discovery_state: None,
+            featured: true,
             last_checked_at: None,
             host_count: 1,
             latest_version: Some("22.0.0".to_string()),
@@ -609,8 +603,7 @@ mod tests {
                 .unwrap(),
             name: "Curl".to_string(),
             plugins: vec!["package_manager_homebrew".to_string()],
-            enabled: true,
-            discovery_state: None,
+            featured: true,
             last_checked_at: None,
             host_count: 1,
             latest_version: Some("8.7.0".to_string()),
@@ -657,15 +650,13 @@ mod tests {
 
     #[test]
     fn software_item_response_human_output() {
-        use uptrakit_shared_types::SoftwareDiscoveryState;
         let item = SoftwareItemResponse {
             id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6"
                 .parse::<Uuid>()
                 .unwrap(),
             name: "My App".to_string(),
             plugins: vec!["package_manager_homebrew".to_string()],
-            enabled: true,
-            discovery_state: Some(SoftwareDiscoveryState::Approved),
+            featured: true,
             last_checked_at: None,
             host_count: 0,
             latest_version: Some("1.5.0".to_string()),
@@ -676,7 +667,7 @@ mod tests {
         let s = item.to_human_string();
         assert!(s.contains("My App"));
         assert!(s.contains("package_manager_homebrew"));
-        assert!(s.contains("approved"));
+        assert!(s.contains("true"), "featured should appear");
         assert!(s.contains("1.5.0"), "latest version should appear");
         assert!(s.contains("yes"), "update_available should show 'yes'");
     }
@@ -689,8 +680,7 @@ mod tests {
                 .unwrap(),
             name: "Up-to-date App".to_string(),
             plugins: vec![],
-            enabled: true,
-            discovery_state: None,
+            featured: true,
             last_checked_at: None,
             host_count: 1,
             latest_version: None,

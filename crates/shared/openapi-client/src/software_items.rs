@@ -169,11 +169,11 @@ mod tests {
     fn create_software_item_request_serialization() {
         let req = CreateSoftwareItemRequest {
             name: "Node.js".to_string(),
-            enabled: true,
+            featured: true,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["name"], "Node.js");
-        assert_eq!(json["enabled"], true);
+        assert_eq!(json["featured"], true);
         // plugin fields must NOT appear in the serialized form
         assert!(json.get("provider_config_id").is_none());
         assert!(json.get("package_identifier").is_none());
@@ -183,11 +183,11 @@ mod tests {
     fn update_software_item_request_serialization() {
         let req = UpdateSoftwareItemRequest {
             name: Some("Node.js LTS".to_string()),
-            enabled: Some(false),
+            featured: Some(false),
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["name"], "Node.js LTS");
-        assert_eq!(json["enabled"], false);
+        assert_eq!(json["featured"], false);
         // plugin fields must NOT appear
         assert!(json.get("package_identifier").is_none());
         assert!(json.get("config_override").is_none());

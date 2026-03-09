@@ -8,7 +8,6 @@ pub mod discovery_allowlist;
 pub mod enrollment_tokens;
 pub mod extensions;
 pub mod history;
-pub mod host_packages;
 pub mod host_tags;
 pub mod hosts;
 pub mod notifications;
