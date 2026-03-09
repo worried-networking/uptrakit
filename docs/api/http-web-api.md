@@ -106,8 +106,8 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
   change the plugin config, package identifier, config override, or execution site. The request body
   includes `role` to identify which role to update. Requires `manage_software`.
 - `DELETE /api/v1/software-items/{id}/hosts/{host_id}[?ignore=true]`: remove a host assignment.
-  Pass `?ignore=true` to also create an autodiscovery ignore rule for the assignment's
-  `(plugin_config_id, package_identifier)`. Requires `manage_software`.
+  Pass `?ignore=true` to also create an autodiscovery ignore rule for the software item's
+  name. Requires `manage_software`.
 - `/api/v1/update-history`: read-only history with filters by host, software item, or status.
 - `POST /api/v1/hosts/{id}/discover`: trigger software discovery on a specific host. Requires `manage_software`.
 - `DELETE /api/v1/hosts/{id}/discovered[?plugin_config_id={uuid}]`: bulk-discard pending discovered items for a host. Requires `manage_software`.

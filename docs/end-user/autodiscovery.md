@@ -164,31 +164,31 @@ you will never want to track.
 
 ## The Ignore List
 
-The ignore list lets you permanently suppress specific packages from appearing in future discovery
-runs. An ignore rule is keyed on a `(plugin_config, package_identifier)` pair — meaning it is
-scoped to the specific plugin and package name, and applies across all hosts.
+The ignore list lets you permanently suppress specific software items from appearing in future
+discovery runs. An ignore rule is keyed on the software item **name** at the tenant level — a
+single rule covers all plugin configs and targets for that name, across all hosts.
 
-Once an ignore rule exists, autodiscovery will skip that package entirely when it would otherwise
-create a pending item for it.
+Once an ignore rule exists, autodiscovery will skip any item matching that name entirely when it
+would otherwise create a pending item for it.
 
-### Adding a package to the ignore list
+### Adding a name to the ignore list
 
-You can add a package to the ignore list in two ways:
+You can add a name to the ignore list in two ways:
 
 **When removing a host assignment** — Use **Delete & Ignore** in the Web UI context menu on a host
 assignment, or pass `?ignore=true` when deleting a host assignment via the API
 (`DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true`). This removes the host
-assignment and simultaneously creates an ignore rule so the package will not be re-discovered
-on any host.
+assignment and simultaneously creates an ignore rule so the software item will not be
+re-discovered on any host.
 
-**Directly via the API** — Create an ignore rule for any `(plugin_config_id,
-package_identifier)` combination without needing to remove an existing assignment first. This is
-useful for pre-suppressing packages you know you will never want before they appear.
+**Directly via the API or CLI** — Create an ignore rule by name without needing to remove an
+existing assignment first. This is useful for pre-suppressing software you know you will never
+want before it appears.
 
 ### Removing an ignore rule
 
-Delete the ignore rule by its ID. After removal, the next discovery run for the relevant host and
-plugin will be able to create a pending item for that package again.
+Delete the ignore rule by its ID. After removal, the next discovery run will be able to create
+a pending item for that name again.
 
 See the [API reference](../api/autodiscovery.md#get-apiv1autodiscoveryignores) for managing
 ignore rules via the API.

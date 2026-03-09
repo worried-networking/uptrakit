@@ -221,8 +221,9 @@ rules are created.
 
 ### `GET /api/v1/autodiscovery/ignores`
 
-List autodiscovery ignore rules for the current tenant. Ignore rules suppress specific packages
-from being created as pending items in future discovery runs.
+List autodiscovery ignore rules for the current tenant. Ignore rules suppress software items
+by name from being created as pending items in future discovery runs. A single ignore rule
+covers all plugin configs and discovery targets for that name.
 
 **Permission:** `view_software`
 
@@ -232,7 +233,6 @@ from being created as pending items in future discovery runs.
 | --- | --- | --- | --- |
 | `page` | integer | `1` | Page number (1-indexed) |
 | `per_page` | integer | `20` | Items per page (max 1000) |
-| `plugin_config_id` | UUID | — | Filter results to a specific plugin config |
 
 **Response `200`:** Paginated list of ignore rules
 
@@ -241,10 +241,7 @@ from being created as pending items in future discovery runs.
   "items": [
     {
       "id": "019...",
-      "plugin_config_id": "019...",
-      "plugin_config_name": "Homebrew (Formulae)",
-      "plugin_type": "package_manager_homebrew",
-      "package_identifier": "telnet",
+      "name": "telnet",
       "created_at": "2026-02-23T10:00:00Z"
     }
   ],
@@ -260,19 +257,20 @@ from being created as pending items in future discovery runs.
 | Field | Type | Description |
 | --- | --- | --- |
 | `id` | UUID | Ignore rule UUID |
-| `plugin_config_id` | UUID | Plugin config this rule applies to |
-| `plugin_config_name` | string | Display name of the plugin config |
-| `plugin_type` | string | Plugin type (e.g. `"package_manager_homebrew"`, `"discovery_proxmox_helper_scripts"`) |
-| `package_identifier` | string | Package identifier suppressed from discovery |
+| `name` | string | Software item name suppressed from discovery (matches across all plugin configs) |
 | `created_at` | ISO 8601 datetime | When the rule was created |
 
 ---
 
 ### `POST /api/v1/autodiscovery/ignores`
 
-Create an ignore rule to permanently suppress a specific package from future discovery runs.
-This endpoint is idempotent: if a rule already exists for the `(plugin_config_id,
-package_identifier)` pair, the existing rule is returned rather than creating a duplicate.
+Create an ignore rule to permanently suppress a software item name from future discovery runs.
+This endpoint is idempotent: if a rule already exists for the given name, the existing rule is
+returned rather than creating a duplicate.
+
+A single ignore rule by name covers all plugin configs and discovery targets. For example,
+ignoring `"telnet"` prevents it from being discovered by any plugin (Homebrew, APT, etc.)
+across all hosts.
 
 **Permission:** `manage_software`
 
@@ -280,15 +278,13 @@ package_identifier)` pair, the existing rule is returned rather than creating a 
 
 ```json
 {
-  "plugin_config_id": "019...",
-  "package_identifier": "telnet"
+  "name": "telnet"
 }
 ```
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `plugin_config_id` | UUID | Yes | Plugin config to scope the rule to |
-| `package_identifier` | string | Yes | Package identifier to suppress (must not be empty) |
+| `name` | string | Yes | Software item name to suppress (must not be empty) |
 
 **Response `201`:** Ignore rule response (same shape as items returned by
 `GET /api/v1/autodiscovery/ignores`)
@@ -296,10 +292,7 @@ package_identifier)` pair, the existing rule is returned rather than creating a 
 ```json
 {
   "id": "019...",
-  "plugin_config_id": "019...",
-  "plugin_config_name": "Homebrew (Formulae)",
-  "plugin_type": "package_manager_homebrew",
-  "package_identifier": "telnet",
+  "name": "telnet",
   "created_at": "2026-02-23T10:00:00Z"
 }
 ```
@@ -308,8 +301,7 @@ package_identifier)` pair, the existing rule is returned rather than creating a 
 
 | Status | Condition |
 | --- | --- |
-| `400` | `plugin_config_id` or `package_identifier` missing or invalid |
-| `404` | Plugin config not found or not active |
+| `400` | `name` missing or empty |
 
 ---
 
@@ -342,7 +334,7 @@ discovery runs.
 
 The host assignment delete endpoint accepts an optional `ignore` query parameter. When set to
 `true`, the operation removes the host assignment **and** atomically creates an ignore rule for the
-`(plugin_config_id, package_identifier)` pair recorded on that specific host assignment.
+software item's name.
 
 ```http
 DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true
@@ -352,11 +344,10 @@ DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
-| `ignore` | boolean | `false` | When `true`, also create an ignore rule for this host assignment |
+| `ignore` | boolean | `false` | When `true`, also create an ignore rule for the software item's name |
 
-The ignore rule is scoped to the `(plugin_config_id, package_identifier)` from the role plugin
-assignments on the host-software pair being deleted, and applies tenant-wide -- future discovery runs
-on any host will skip that package for that plugin config.
+The ignore rule is scoped to the software item's name and applies tenant-wide -- future discovery
+runs on any host will skip that name across all plugin configs and discovery targets.
 
 ### Example: unassign a host and suppress the package from re-discovery
 

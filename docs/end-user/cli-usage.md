@@ -376,23 +376,19 @@ See also: [Plugin Configurations](plugin-configs.md), [Autodiscovery](autodiscov
 
 ## Autodiscovery
 
-Manage autodiscovery ignore rules. Ignore rules permanently suppress specific packages from
-appearing in future discovery results. See [Autodiscovery](autodiscovery.md) for a full
-description of the discovery workflow.
+Manage autodiscovery ignore rules. Ignore rules permanently suppress software items by name from
+appearing in future discovery results. A single ignore rule covers all plugin configs and
+discovery targets for that name. See [Autodiscovery](autodiscovery.md) for a full description of
+the discovery workflow.
 
 ```sh
 # List all autodiscovery ignore rules
 uptrakit autodiscovery ignores list
 
-# Show a specific ignore rule
-uptrakit autodiscovery ignores show <IGNORE_ID>
+# Create an ignore rule by name (pre-suppress before discovery)
+uptrakit autodiscovery ignores create --name "FreshRSS"
 
-# Create an ignore rule directly (pre-suppress a package before discovery)
-uptrakit autodiscovery ignores create \
-  --plugin-config <PLUGIN_CONFIG_ID> \
-  --package "unwanted-package"
-
-# Delete an ignore rule (re-enables future discovery of that package)
+# Delete an ignore rule (re-enables future discovery of that name)
 uptrakit autodiscovery ignores delete <IGNORE_ID>
 ```
 

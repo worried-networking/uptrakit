@@ -36,8 +36,8 @@ host to use different plugins for version detection, release fetching, and updat
   - Unique index: `uq_hsip_host_item_role_ordinal ON (host_id, software_item_id, role, ordinal)`
     — one plugin per role per (host, software_item) pair
 - **`autodiscovery_ignores`**: `id` (UUID PK), `tenant_id` (FK → `tenants.id`, ON DELETE CASCADE),
-  `plugin_config_id` (FK → `plugin_configs.id`, ON DELETE CASCADE), `package_identifier` (TEXT), `created_at`
-  - Unique constraint: `(tenant_id, plugin_config_id, package_identifier)` — one rule per package per plugin config
+  `name` (TEXT), `created_at`
+  - Unique constraint: `(tenant_id, name)` — one rule per name per tenant
 
 ## Relationships
 

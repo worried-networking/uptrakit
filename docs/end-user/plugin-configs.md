@@ -502,18 +502,18 @@ re-discovered on the next discovery run.
 
 ## Autodiscovery Ignore Rules
 
-An ignore rule permanently suppresses a specific package from appearing in future discovery
-results. Ignore rules are keyed on a `(plugin_config, package_identifier)` pair and apply
-across all hosts.
+An ignore rule permanently suppresses a software item by name from appearing in future discovery
+results. Ignore rules are keyed on the software item name at the tenant level. A single ignore
+rule covers all plugin configs and discovery targets for that name, across all hosts.
 
 ### Managing ignore rules in the Web UI
 
-Navigate to **Plugin Configs**, then select a plugin config to view its ignore rules. From
-there you can:
+Navigate to **Settings** or the **Autodiscovery** section to view ignore rules. From there you
+can:
 
-- View all ignore rules for the plugin config.
-- Add a new ignore rule by entering a package identifier.
-- Delete an existing ignore rule to re-enable future discovery of that package.
+- View all ignore rules.
+- Add a new ignore rule by entering a software item name.
+- Delete an existing ignore rule to re-enable future discovery of that name.
 
 You can also create an ignore rule implicitly by using **Delete & Ignore** in the context menu
 on a software item host assignment (on the **Software** page).
@@ -524,13 +524,8 @@ on a software item host assignment (on the **Software** page).
 # List all ignore rules
 uptrakit autodiscovery ignores list
 
-# Show a specific ignore rule
-uptrakit autodiscovery ignores show <IGNORE_ID>
-
-# Create an ignore rule to pre-suppress a package
-uptrakit autodiscovery ignores create \
-  --plugin-config <PLUGIN_CONFIG_ID> \
-  --package "unwanted-package"
+# Create an ignore rule by name (pre-suppress before discovery)
+uptrakit autodiscovery ignores create --name "unwanted-package"
 
 # Delete an ignore rule (re-enables future discovery)
 uptrakit autodiscovery ignores delete <IGNORE_ID>

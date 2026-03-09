@@ -441,11 +441,13 @@ for user review. Key invariants:
    `pending` item is a plain soft-delete; the item is re-discoverable unless an ignore rule exists.
 
 3. **Ignore list is separate from deletion.** `DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true`
-   removes the host assignment and creates an `autodiscovery_ignore` row keyed on the assignment's
-   `(plugin_config_id, package_identifier)`. Without `?ignore=true`, unassigning is a plain delete with no ignore
-   rule. Deleting a software item (`DELETE /api/v1/software-items/{id}`) never creates ignore rules. Bulk-discard
-   endpoints (`DELETE /api/v1/hosts/{id}/discovered`, `DELETE /api/v1/plugin-configs/{id}/discovered`) also
-   perform plain soft-deletes — no ignore rules created.
+   removes the host assignment and creates an `autodiscovery_ignore` row keyed on the software item's
+   `(tenant_id, name)`. A single name-based ignore rule suppresses all future discoveries for that
+   name across all plugin configs and targets. Without `?ignore=true`, unassigning is a plain delete
+   with no ignore rule. Deleting a software item (`DELETE /api/v1/software-items/{id}`) never creates
+   ignore rules. Bulk-discard endpoints (`DELETE /api/v1/hosts/{id}/discovered`,
+   `DELETE /api/v1/plugin-configs/{id}/discovered`) also perform plain soft-deletes — no ignore rules
+   created.
 
 4. **Plugin-driven discovery targets.** Discovery results use structured `DiscoveryTarget` values
    (`crates/shared/types/src/discovery_target.rs`) instead of opaque `extra` metadata. Each
