@@ -8,8 +8,7 @@ use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, DiscoveredSoftware,
     DiscoveryTarget, HostCompatibility, OutputStreamType, Plugin, PluginCapability, PluginError,
-    PluginRole, PluginType, ReleaseInfo, Result, TrackingSystem, UpdateOutputLine, UpstreamRelease,
-    Version,
+    PluginRole, PluginType, ReleaseInfo, Result, UpdateOutputLine, UpstreamRelease, Version,
 };
 
 use crate::config::MasConfig;
@@ -256,9 +255,9 @@ impl Plugin for MasPlugin {
                     installed_version,
                     targets: vec![target],
                     extra: None,
-                    tracking_system: TrackingSystem::HostManaged,
                     qualifier: None,
                     plugin_package_identifier: None,
+                    featured: false,
                 }
             })
             .collect();

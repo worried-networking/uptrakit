@@ -3,8 +3,7 @@ use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait,
 };
 use uptrakit_shared_db::entity::{
-    host, host_package, host_software_item_plugin, plugin_config, service, service_host,
-    software_item,
+    host, host_software_item_plugin, plugin_config, service, service_host, software_item,
 };
 use uuid::Uuid;
 
@@ -24,18 +23,6 @@ pub(crate) struct AgentAssignmentRow {
     pub(crate) config: serde_json::Value,
     pub(crate) config_override: Option<serde_json::Value>,
     pub(crate) execution_site: String,
-}
-
-/// Row returned from the host-packages assignment query.
-#[derive(Debug, sea_orm::FromQueryResult)]
-pub(crate) struct HostPackageAssignmentRow {
-    pub(crate) service_id: Uuid,
-    pub(crate) host_machine_id: String,
-    pub(crate) host_package_id: Uuid,
-    pub(crate) host_package_name: String,
-    pub(crate) plugin_type: String,
-    pub(crate) package_identifier: String,
-    pub(crate) config: serde_json::Value,
 }
 
 // ── Shared query helpers ──────────────────────────────────────────────────────
@@ -94,63 +81,11 @@ pub(crate) async fn query_agent_assignment_rows(
         .join(JoinType::InnerJoin, service_host::Relation::Service.def())
         .filter(host_software_item_plugin::Column::Role.is_in(role_strings))
         .filter(software_item::Column::TenantId.eq(tenant_id))
-        .filter(software_item::Column::Enabled.eq(true))
         .filter(software_item::Column::DeactivatedAt.is_null())
         .filter(plugin_config::Column::Enabled.eq(true))
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .filter(service::Column::DeactivatedAt.is_null())
-        .filter(
-            sea_orm::Condition::any()
-                .add(software_item::Column::DiscoveryState.is_null())
-                .add(software_item::Column::DiscoveryState.ne("pending")),
-        )
         .into_model::<AgentAssignmentRow>()
-        .all(db)
-        .await
-        .context_to::<SchedulerError>()?;
-
-    Ok(rows)
-}
-
-/// Query host packages that need agent-side version checks.
-///
-/// Joins `host_packages → host → service_host → service` and
-/// `host_packages → plugin_config` to find enabled, non-deactivated
-/// host packages with an active plugin config and a linked agent.
-pub(crate) async fn query_host_package_assignment_rows(
-    db: &DatabaseConnection,
-    tenant_id: Uuid,
-) -> crate::error::Result<Vec<HostPackageAssignmentRow>> {
-    let rows: Vec<HostPackageAssignmentRow> = host_package::Entity::find()
-        .select_only()
-        .column_as(service::Column::Id, "service_id")
-        .column_as(host::Column::MachineId, "host_machine_id")
-        .column_as(host_package::Column::Id, "host_package_id")
-        .column_as(host_package::Column::Name, "host_package_name")
-        .column_as(plugin_config::Column::PluginType, "plugin_type")
-        .column_as(
-            host_package::Column::PackageIdentifier,
-            "package_identifier",
-        )
-        .column_as(plugin_config::Column::Config, "config")
-        .join(JoinType::InnerJoin, host_package::Relation::Host.def())
-        .join(
-            JoinType::InnerJoin,
-            host_package::Relation::PluginConfig.def(),
-        )
-        .join(
-            JoinType::InnerJoin,
-            service_host::Relation::Host.def().rev(),
-        )
-        .join(JoinType::InnerJoin, service_host::Relation::Service.def())
-        .filter(host_package::Column::TenantId.eq(tenant_id))
-        .filter(host_package::Column::Enabled.eq(true))
-        .filter(host_package::Column::DeactivatedAt.is_null())
-        .filter(host::Column::DeactivatedAt.is_null())
-        .filter(plugin_config::Column::Enabled.eq(true))
-        .filter(plugin_config::Column::DeactivatedAt.is_null())
-        .filter(service::Column::DeactivatedAt.is_null())
-        .into_model::<HostPackageAssignmentRow>()
         .all(db)
         .await
         .context_to::<SchedulerError>()?;

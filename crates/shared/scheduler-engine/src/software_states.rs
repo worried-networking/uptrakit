@@ -1,12 +1,11 @@
 //! Query helper that loads software state data for MQTT `SoftwareStates` push messages.
 
-use sea_orm::{ColumnTrait, Condition, EntityTrait, FromQueryResult, QueryFilter, QuerySelect};
+use sea_orm::{ColumnTrait, EntityTrait, FromQueryResult, QueryFilter, QuerySelect};
 use std::collections::HashMap;
 use uptrakit_internal_wire::{
     MqttSoftwareStateHostEntry, MqttSoftwareStateItem, MqttSoftwareStatesPayload,
 };
 use uptrakit_shared_db::entity::{host, host_software_item, prelude::*, software_item};
-use uptrakit_shared_types::SoftwareDiscoveryState;
 use uuid::Uuid;
 
 /// Lightweight projection used to bulk-load host-software-item link data.
@@ -31,17 +30,10 @@ pub async fn load_software_states_for_tenant(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
 ) -> Result<MqttSoftwareStatesPayload, sea_orm::DbErr> {
-    // 1. Load all active, non-deactivated software items for the tenant that are
-    //    not in the Pending discovery state (i.e. NULL or Approved).
+    // 1. Load all active, non-deactivated software items for the tenant.
     let items = SoftwareItem::find()
         .filter(software_item::Column::TenantId.eq(tenant_id))
-        .filter(software_item::Column::Enabled.eq(true))
         .filter(software_item::Column::DeactivatedAt.is_null())
-        .filter(
-            Condition::any()
-                .add(software_item::Column::DiscoveryState.is_null())
-                .add(software_item::Column::DiscoveryState.eq(SoftwareDiscoveryState::Approved)),
-        )
         .all(db)
         .await?;
 
@@ -50,7 +42,7 @@ pub async fn load_software_states_for_tenant(
         return Ok(MqttSoftwareStatesPayload {
             tenant_id,
             items: vec![],
-            host_package_hosts: vec![],
+            host_summaries: vec![],
         });
     }
 
@@ -156,7 +148,7 @@ pub async fn load_software_states_for_tenant(
     Ok(MqttSoftwareStatesPayload {
         tenant_id,
         items: result_items,
-        host_package_hosts: vec![],
+        host_summaries: vec![],
     })
 }
 

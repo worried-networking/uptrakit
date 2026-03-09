@@ -110,13 +110,13 @@ pub(crate) fn spawn_discover_software(
     });
 }
 
-/// Spawn an `ExecuteBatchHostPackageUpdate` operation as a background task.
+/// Spawn an `ExecuteBatchUpdate` operation as a background task.
 ///
 /// The work runs on a separate tokio task so the event loop remains responsive
 /// for pings, signals, and other controller messages. The result is sent
 /// through `bg_tx` for forwarding to the controller.
-pub(crate) fn spawn_execute_batch_host_package_update(
-    payload: uptrakit_internal_wire::ExecuteBatchHostPackageUpdatePayload,
+pub(crate) fn spawn_execute_batch_update(
+    payload: uptrakit_internal_wire::ExecuteBatchUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
 ) {
@@ -126,10 +126,10 @@ pub(crate) fn spawn_execute_batch_host_package_update(
         host_machine_id = %host_machine_id,
         batch_id = %batch_id,
         update_count = payload.updates.len(),
-        "spawning background ExecuteBatchHostPackageUpdate task"
+        "spawning background ExecuteBatchUpdate task"
     );
     uptrakit_agent_core::spawn_background(bg_tx, async move {
-        let msg = uptrakit_agent_core::run_execute_batch_host_package_update(
+        let msg = uptrakit_agent_core::run_execute_batch_update(
             payload,
             executor,
             &ConnectionContext::default(),
@@ -138,7 +138,7 @@ pub(crate) fn spawn_execute_batch_host_package_update(
         tracing::debug!(
             host_machine_id = %host_machine_id,
             batch_id = %batch_id,
-            "background ExecuteBatchHostPackageUpdate task completed"
+            "background ExecuteBatchUpdate task completed"
         );
         msg
     });

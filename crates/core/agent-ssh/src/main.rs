@@ -112,7 +112,7 @@ struct SshAgentHandler {
     /// Path to the operator-controlled freeze file.
     ///
     /// When this file exists, the agent rejects all `ExecuteUpdate` and
-    /// `ExecuteBatchHostPackageUpdate` messages without executing them.
+    /// `ExecuteBatchUpdate` messages without executing them.
     /// Operators can create the file with `touch <path>` to halt update
     /// execution from the agent side, independent of the controller.
     ///
@@ -313,14 +313,14 @@ impl ServiceHandler for SshAgentHandler {
                 .await;
                 Ok(None)
             }
-            ControllerMessage::ExecuteBatchHostPackageUpdate(payload) => {
+            ControllerMessage::ExecuteBatchUpdate(payload) => {
                 if tokio::fs::try_exists(&self.freeze_file_path)
                     .await
                     .unwrap_or(false)
                 {
                     tracing::warn!(
                         freeze_file = %self.freeze_file_path.display(),
-                        "update execution is frozen; ignoring ExecuteBatchHostPackageUpdate message. \
+                        "update execution is frozen; ignoring ExecuteBatchUpdate message. \
                          Remove the freeze file to re-enable update execution."
                     );
                     return Ok(None);
@@ -332,18 +332,13 @@ impl ServiceHandler for SshAgentHandler {
                         host = %payload.host_machine_id,
                         cooldown_secs = UPDATE_COOLDOWN.as_secs(),
                         elapsed_ms = last.elapsed().as_millis() as u64,
-                        "security_audit: update rate limit exceeded; ignoring ExecuteBatchHostPackageUpdate"
+                        "security_audit: update rate limit exceeded; ignoring ExecuteBatchUpdate"
                     );
                     return Ok(None);
                 }
                 self.last_update_per_host
                     .insert(payload.host_machine_id.clone(), std::time::Instant::now());
-                client::spawn_execute_batch_host_package_update_ssh(
-                    *payload,
-                    db,
-                    &self.pool,
-                    &self.bg_tx,
-                );
+                client::spawn_execute_batch_update_ssh(*payload, db, &self.pool, &self.bg_tx);
                 Ok(None)
             }
             ControllerMessage::DiscoverSoftware(payload) => {

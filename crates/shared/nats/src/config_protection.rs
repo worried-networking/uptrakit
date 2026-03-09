@@ -1,7 +1,7 @@
 //! Encrypt/decrypt plugin config fields in [`ControllerMessage`]s for NATS transit.
 //!
 //! Plugin configs (`PluginAssignment.config`, `DiscoveryPluginAssignment.config`,
-//! `ExecuteBatchHostPackageUpdatePayload.plugin_config`) may contain sensitive
+//! `ExecuteBatchUpdatePayload.plugin_config`) may contain sensitive
 //! credentials (API tokens, registry passwords). These configs are encrypted
 //! before NATS publication and decrypted on receipt.
 //!
@@ -58,7 +58,7 @@ pub fn encrypt_message_configs(mut msg: ControllerMessage) -> ControllerMessage 
                 dv.config = encrypt_config(&dv.config);
             }
         }
-        ControllerMessage::ExecuteBatchHostPackageUpdate(payload) => {
+        ControllerMessage::ExecuteBatchUpdate(payload) => {
             payload.plugin_config = encrypt_config(&payload.plugin_config);
         }
         ControllerMessage::DiscoverSoftware(payload) => {
@@ -95,7 +95,7 @@ pub fn decrypt_message_configs(mut msg: ControllerMessage) -> ControllerMessage 
                 dv.config = decrypt_config(&dv.config);
             }
         }
-        ControllerMessage::ExecuteBatchHostPackageUpdate(payload) => {
+        ControllerMessage::ExecuteBatchUpdate(payload) => {
             payload.plugin_config = decrypt_config(&payload.plugin_config);
         }
         ControllerMessage::DiscoverSoftware(payload) => {
@@ -187,7 +187,7 @@ mod tests {
                     package_identifier: "pkg".to_string(),
                     config: original_config.clone(),
                 }),
-                host_package_id: None,
+                host_software_item_id: None,
             }],
         });
 
@@ -278,31 +278,29 @@ mod tests {
         init_test_crypto();
 
         let original_config = json!({"api_key": "key123"});
-        let msg = ControllerMessage::ExecuteBatchHostPackageUpdate(Box::new(
-            ExecuteBatchHostPackageUpdatePayload {
-                host_machine_id: "host-1".to_string(),
-                batch_id: uuid::Uuid::nil(),
-                plugin_type: PluginType::PackageManagerApt,
-                plugin_config: original_config.clone(),
-                updates: vec![],
-                pre_update_hooks: vec![],
-                post_update_hooks: vec![],
-                timeout: std::time::Duration::from_secs(300),
-            },
-        ));
+        let msg = ControllerMessage::ExecuteBatchUpdate(Box::new(ExecuteBatchUpdatePayload {
+            host_machine_id: "host-1".to_string(),
+            batch_id: uuid::Uuid::nil(),
+            plugin_type: PluginType::PackageManagerApt,
+            plugin_config: original_config.clone(),
+            updates: vec![],
+            pre_update_hooks: vec![],
+            post_update_hooks: vec![],
+            timeout: std::time::Duration::from_secs(300),
+        }));
 
         let encrypted = encrypt_message_configs(msg);
-        if let ControllerMessage::ExecuteBatchHostPackageUpdate(ref p) = encrypted {
+        if let ControllerMessage::ExecuteBatchUpdate(ref p) = encrypted {
             assert!(p.plugin_config.is_string());
         } else {
-            panic!("expected ExecuteBatchHostPackageUpdate variant");
+            panic!("expected ExecuteBatchUpdate variant");
         }
 
         let decrypted = decrypt_message_configs(encrypted);
-        if let ControllerMessage::ExecuteBatchHostPackageUpdate(ref p) = decrypted {
+        if let ControllerMessage::ExecuteBatchUpdate(ref p) = decrypted {
             assert_eq!(p.plugin_config, original_config);
         } else {
-            panic!("expected ExecuteBatchHostPackageUpdate variant");
+            panic!("expected ExecuteBatchUpdate variant");
         }
     }
 
@@ -363,7 +361,7 @@ mod tests {
                     config: plain_config.clone(),
                 }),
                 fetch_releases: None,
-                host_package_id: None,
+                host_software_item_id: None,
             }],
         });
 

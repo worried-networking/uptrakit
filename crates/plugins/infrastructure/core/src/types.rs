@@ -3,7 +3,7 @@ use time::OffsetDateTime;
 
 pub use uptrakit_shared_types::{
     AttestationStatus, DiscoveredSoftware, DiscoveryTarget, PluginCapability, PluginRole,
-    PluginType, ReleaseAsset, ReleaseInfo, TrackingSystem, UpdateCategory,
+    PluginType, ReleaseAsset, ReleaseInfo, UpdateCategory,
 };
 
 use crate::version::Version;
@@ -136,9 +136,9 @@ mod tests {
             installed_version: "2.53.0".to_string(),
             targets: vec![],
             extra: Some(serde_json::json!({"install_path": "/usr/local/bin/prometheus"})),
-            tracking_system: TrackingSystem::Targeted,
             qualifier: None,
             plugin_package_identifier: None,
+            featured: false,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         let deserialized: DiscoveredSoftware = serde_json::from_str(&json).expect("deserialize");
@@ -153,9 +153,9 @@ mod tests {
             installed_version: "10.0.0".to_string(),
             targets: vec![],
             extra: None,
-            tracking_system: TrackingSystem::Targeted,
             qualifier: None,
             plugin_package_identifier: None,
+            featured: false,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(!json.contains("extra"));

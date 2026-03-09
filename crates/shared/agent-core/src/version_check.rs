@@ -404,7 +404,7 @@ pub async fn batch_check_versions(
 
             VersionCheckResult {
                 software_item_id: assignment.software_item_id,
-                host_package_id: assignment.host_package_id,
+                host_software_item_id: assignment.host_software_item_id,
                 installed_version,
                 latest_version,
                 error,

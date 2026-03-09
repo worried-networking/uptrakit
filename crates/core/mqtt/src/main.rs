@@ -131,15 +131,15 @@ impl ServiceHandler for MqttHandler {
             }) => {
                 if let Some(payload) = self
                     .tenant_mgr
-                    .resolve_host_security_update_trigger(mqtt_client_id, &topic)
+                    .resolve_host_security_batch_update_trigger(mqtt_client_id, &topic)
                 {
-                    conn.send_best_effort(ServiceMessage::MqttTriggerHostPackageUpdate(payload))
+                    conn.send_best_effort(ServiceMessage::MqttTriggerHostBatchUpdate(payload))
                         .await;
                 } else if let Some(payload) = self
                     .tenant_mgr
-                    .resolve_host_package_update_trigger(mqtt_client_id, &topic)
+                    .resolve_host_batch_update_trigger(mqtt_client_id, &topic)
                 {
-                    conn.send_best_effort(ServiceMessage::MqttTriggerHostPackageUpdate(payload))
+                    conn.send_best_effort(ServiceMessage::MqttTriggerHostBatchUpdate(payload))
                         .await;
                 } else if let Some(payload) = self
                     .tenant_mgr

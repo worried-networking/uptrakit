@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::{
-    BatchHostPackageUpdateResult, BatchHostPackageUpdateResultPayload, DisconnectReason,
-    DisconnectingPayload, DiscoverSoftwarePayload, DiscoveryPluginResult, DiscoveryResultsPayload,
-    ExecuteBatchHostPackageUpdatePayload, ServiceMessage, UpdateFinalStatus, UpdateOutputPayload,
+    BatchUpdateItemResult, BatchUpdateResultPayload, DisconnectReason, DisconnectingPayload,
+    DiscoverSoftwarePayload, DiscoveryPluginResult, DiscoveryResultsPayload,
+    ExecuteBatchUpdatePayload, ServiceMessage, UpdateFinalStatus, UpdateOutputPayload,
     UpdateResultPayload, UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
 };
 use uptrakit_service_sdk::{ControllerConnection, LoopOutcome, Result};
@@ -318,14 +318,14 @@ pub async fn handle_execute_update(
     *in_flight_update = Some(start_update(payload, executor, conn, ctx).await);
 }
 
-/// Run a batch host package update and return the result as a [`ServiceMessage`].
+/// Run a batch update and return the result as a [`ServiceMessage`].
 ///
 /// Performs all update work and returns the result without sending it over the
 /// connection. Callers use [`spawn_background`] to run this in a background
 /// task and forward the returned message to the controller through a channel.
 #[tracing::instrument(skip_all, fields(batch_id = %payload.batch_id, plugin_type = %payload.plugin_type))]
-pub async fn run_execute_batch_host_package_update(
-    payload: ExecuteBatchHostPackageUpdatePayload,
+pub async fn run_execute_batch_update(
+    payload: ExecuteBatchUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
     ctx: &ConnectionContext,
 ) -> ServiceMessage {
@@ -334,31 +334,31 @@ pub async fn run_execute_batch_host_package_update(
         plugin_type = %payload.plugin_type,
         count = payload.updates.len(),
         host_machine_id = %payload.host_machine_id,
-        "received batch host package update request"
+        "received batch update request"
     );
 
-    let results = batch_host_package_update_inner(&payload, executor, ctx).await;
+    let results = batch_update_inner(&payload, executor, ctx).await;
 
-    ServiceMessage::BatchHostPackageUpdateResult(BatchHostPackageUpdateResultPayload {
+    ServiceMessage::BatchUpdateResult(BatchUpdateResultPayload {
         batch_id: payload.batch_id,
         results,
     })
 }
 
-/// Inner batch-update logic for [`run_execute_batch_host_package_update`].
-async fn batch_host_package_update_inner(
-    payload: &ExecuteBatchHostPackageUpdatePayload,
+/// Inner batch-update logic for [`run_execute_batch_update`].
+async fn batch_update_inner(
+    payload: &ExecuteBatchUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
     ctx: &ConnectionContext,
-) -> Vec<BatchHostPackageUpdateResult> {
-    // Build a correlation map: package_identifier → (host_package_id, update_history_id)
+) -> Vec<BatchUpdateItemResult> {
+    // Build a correlation map: package_identifier → (host_software_item_id, update_history_id)
     let correlation: std::collections::HashMap<String, (uuid::Uuid, uuid::Uuid)> = payload
         .updates
         .iter()
         .map(|u| {
             (
                 u.package_identifier.clone(),
-                (u.host_package_id, u.update_history_id),
+                (u.host_software_item_id, u.update_history_id),
             )
         })
         .collect();
@@ -439,12 +439,12 @@ async fn batch_host_package_update_inner(
             plugin_results
                 .into_iter()
                 .map(|r| {
-                    let (host_package_id, update_history_id) = correlation
+                    let (host_software_item_id, update_history_id) = correlation
                         .get(&r.package_identifier)
                         .copied()
                         .unwrap_or((uuid::Uuid::nil(), uuid::Uuid::nil()));
-                    BatchHostPackageUpdateResult {
-                        host_package_id,
+                    BatchUpdateItemResult {
+                        host_software_item_id,
                         update_history_id,
                         status: if r.success {
                             UpdateFinalStatus::Completed
@@ -467,8 +467,8 @@ async fn batch_host_package_update_inner(
             payload
                 .updates
                 .iter()
-                .map(|u| BatchHostPackageUpdateResult {
-                    host_package_id: u.host_package_id,
+                .map(|u| BatchUpdateItemResult {
+                    host_software_item_id: u.host_software_item_id,
                     update_history_id: u.update_history_id,
                     status: UpdateFinalStatus::Failed,
                     output: String::new(),
@@ -491,8 +491,8 @@ async fn batch_host_package_update_inner(
             payload
                 .updates
                 .iter()
-                .map(|u| BatchHostPackageUpdateResult {
-                    host_package_id: u.host_package_id,
+                .map(|u| BatchUpdateItemResult {
+                    host_software_item_id: u.host_software_item_id,
                     update_history_id: u.update_history_id,
                     status: UpdateFinalStatus::Failed,
                     output: String::new(),
@@ -670,8 +670,8 @@ mod tests {
 
     use uptrakit_command::NoopCommandExecutor;
     use uptrakit_internal_wire::{
-        BatchHostPackageUpdate, CheckVersionsPayload, ExecuteBatchHostPackageUpdatePayload,
-        ServiceMessage, UpdateFinalStatus,
+        BatchUpdateItem, CheckVersionsPayload, ExecuteBatchUpdatePayload, ServiceMessage,
+        UpdateFinalStatus,
     };
     use uptrakit_plugin_infrastructure_registry::PluginType;
     use uuid::Uuid;
@@ -689,16 +689,16 @@ mod tests {
     fn make_batch_payload(
         plugin_type: PluginType,
         timeout: std::time::Duration,
-    ) -> ExecuteBatchHostPackageUpdatePayload {
-        let host_package_id = Uuid::now_v7();
+    ) -> ExecuteBatchUpdatePayload {
+        let host_software_item_id = Uuid::now_v7();
         let update_history_id = Uuid::now_v7();
-        ExecuteBatchHostPackageUpdatePayload {
+        ExecuteBatchUpdatePayload {
             host_machine_id: "test-host".to_string(),
             batch_id: Uuid::now_v7(),
             plugin_type,
             plugin_config: serde_json::Value::Object(Default::default()),
-            updates: vec![BatchHostPackageUpdate {
-                host_package_id,
+            updates: vec![BatchUpdateItem {
+                host_software_item_id,
                 update_history_id,
                 package_identifier: "test-pkg".to_string(),
                 to_version: "1.0.0".to_string(),
@@ -716,8 +716,7 @@ mod tests {
             PluginType::Other("unknown-plugin-xyz".to_string()),
             std::time::Duration::from_secs(30),
         );
-        let results =
-            super::batch_host_package_update_inner(&payload, noop_executor(), &ctx()).await;
+        let results = super::batch_update_inner(&payload, noop_executor(), &ctx()).await;
 
         assert_eq!(results.len(), 1, "must return one result per package");
         assert_eq!(
@@ -735,8 +734,8 @@ mod tests {
             results[0].error
         );
         assert_eq!(
-            results[0].host_package_id,
-            payload.updates[0].host_package_id
+            results[0].host_software_item_id,
+            payload.updates[0].host_software_item_id
         );
         assert_eq!(
             results[0].update_history_id,
@@ -752,8 +751,7 @@ mod tests {
             PluginType::Other("unknown-plugin-xyz".to_string()),
             std::time::Duration::ZERO,
         );
-        let results =
-            super::batch_host_package_update_inner(&payload, noop_executor(), &ctx()).await;
+        let results = super::batch_update_inner(&payload, noop_executor(), &ctx()).await;
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, UpdateFinalStatus::Failed);

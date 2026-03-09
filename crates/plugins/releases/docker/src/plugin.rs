@@ -10,8 +10,8 @@ use uptrakit_plugin_infrastructure_core::command::{
 };
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, DiscoveredSoftware, OutputStreamType, Plugin,
-    PluginCapability, PluginError, PluginType, ReleaseInfo, TrackingSystem, UpdateOutputLine,
-    UpstreamRelease, Version,
+    PluginCapability, PluginError, PluginType, ReleaseInfo, UpdateOutputLine, UpstreamRelease,
+    Version,
 };
 
 /// Type-erased RAII handle kept alive alongside the Docker client.
@@ -577,9 +577,9 @@ impl Plugin for DockerPlugin {
                 installed_version: digest,
                 targets,
                 extra: Some(json!({ "container": container_name })),
-                tracking_system: TrackingSystem::Targeted,
                 qualifier: Some(container_name.clone()),
                 plugin_package_identifier: Some(plugin_pkg_id),
+                featured: true,
             });
         }
 

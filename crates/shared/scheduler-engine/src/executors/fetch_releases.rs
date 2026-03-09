@@ -23,9 +23,7 @@ use uptrakit_shared_db::entity::{
 use uptrakit_shared_types::PluginType;
 use uuid::Uuid;
 
-use super::queries::{
-    merge_config, query_agent_assignment_rows, query_host_package_assignment_rows,
-};
+use super::queries::{merge_config, query_agent_assignment_rows};
 use crate::error::SchedulerError;
 use crate::executor::TaskExecutor;
 use crate::notifier::SchedulerNotifier;
@@ -472,15 +470,9 @@ impl FetchReleasesExecutor {
             .filter(host_software_item_plugin::Column::Role.eq("fetch_releases"))
             .filter(host_software_item_plugin::Column::ExecutionSite.ne("agent"))
             .filter(software_item::Column::TenantId.eq(tenant_id))
-            .filter(software_item::Column::Enabled.eq(true))
             .filter(software_item::Column::DeactivatedAt.is_null())
             .filter(plugin_config::Column::Enabled.eq(true))
             .filter(plugin_config::Column::DeactivatedAt.is_null())
-            .filter(
-                sea_orm::Condition::any()
-                    .add(software_item::Column::DiscoveryState.is_null())
-                    .add(software_item::Column::DiscoveryState.ne("pending")),
-            )
             .into_model::<ControllerFetchRow>()
             .all(&self.db)
             .await
@@ -492,30 +484,24 @@ impl FetchReleasesExecutor {
     // ── Phase B ──────────────────────────────────────────────────────────
 
     /// Build and send `CheckVersions` messages to agents containing only
-    /// `fetch_releases` assignments. Covers two sources:
+    /// `fetch_releases` assignments.
     ///
-    /// - Targeted software items with a `role = 'fetch_releases'` plugin
-    ///   assignment (APT, Homebrew, npm, and other agent-side release-index
-    ///   plugins that are not [`PluginCapability::ControllerSideFetchReleases`]).
-    /// - Auto-discovered host packages (`host_packages` table) whose plugin
-    ///   config supports agent-side release fetching. These assignments carry
-    ///   `host_package_id` so the controller handler routes results to the
-    ///   `host_packages.latest_version` column.
+    /// Targeted software items with a `role = 'fetch_releases'` plugin
+    /// assignment (APT, Homebrew, npm, and other agent-side release-index
+    /// plugins that are not [`PluginCapability::ControllerSideFetchReleases`]).
     async fn send_agent_fetch_release_assignments(
         &self,
         tenant_id: Uuid,
     ) -> crate::error::Result<()> {
         let rows = query_agent_assignment_rows(&self.db, tenant_id, &["fetch_releases"]).await?;
-        let hp_rows = query_host_package_assignment_rows(&self.db, tenant_id).await?;
 
         tracing::debug!(
             %tenant_id,
             software_item_rows = rows.len(),
-            host_package_rows = hp_rows.len(),
             "agent-side fetch_releases: queried assignment rows"
         );
 
-        if rows.is_empty() && hp_rows.is_empty() {
+        if rows.is_empty() {
             tracing::debug!(%tenant_id, "no agent-side fetch_releases items");
             return Ok(());
         }
@@ -568,49 +554,8 @@ impl FetchReleasesExecutor {
                         name: row.software_item_name.clone(),
                         detect_version: None,
                         fetch_releases: None,
-                        host_package_id: None,
+                        host_software_item_id: None,
                     });
-
-            item.fetch_releases = Some(assignment);
-        }
-
-        // Host packages — use the same plugin config for fetch_releases so that
-        // `host_packages.latest_version` is populated alongside `installed_version`.
-        for row in hp_rows {
-            let plugin_type = PluginType::from_str(&row.plugin_type).map_err(|_| {
-                report!(SchedulerError::Execution(format!(
-                    "unknown plugin type: {}",
-                    row.plugin_type
-                )))
-            })?;
-
-            // Skip any plugin that declares controller-side capability; host
-            // package plugins (APT, Homebrew, npm) are always agent-side.
-            if PluginRegistry::capabilities_for(plugin_type.clone())
-                .contains(&PluginCapability::ControllerSideFetchReleases)
-            {
-                continue;
-            }
-
-            let assignment = PluginAssignment {
-                plugin_type,
-                package_identifier: row.package_identifier,
-                config: row.config,
-            };
-
-            let agent_key = (row.service_id, row.host_machine_id.clone());
-            let items = by_agent_host.entry(agent_key).or_default();
-            // Use host_package_id as the map key (guaranteed unique per host package).
-            let item = items
-                .entry(row.host_package_id)
-                .or_insert_with(|| VersionCheckAssignment {
-                    // Wire-compat: software_item_id reused; handler routes via host_package_id.
-                    software_item_id: row.host_package_id,
-                    name: row.host_package_name.clone(),
-                    detect_version: None,
-                    fetch_releases: None,
-                    host_package_id: Some(row.host_package_id),
-                });
 
             item.fetch_releases = Some(assignment);
         }

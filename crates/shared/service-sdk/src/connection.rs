@@ -275,7 +275,7 @@ impl ControllerConnection {
     /// types when they exceed the wire size threshold.
     ///
     /// Paginatable variants (`DiscoveryResults`, `VersionCheckResults`,
-    /// `ReportHosts`, `BatchHostPackageUpdateResult`) are split into pages
+    /// `ReportHosts`, `BatchUpdateResult`) are split into pages
     /// transparently. All other variants are sent as a single message.
     ///
     /// This is the recommended method for sending report-style messages.
@@ -284,9 +284,7 @@ impl ControllerConnection {
             ServiceMessage::DiscoveryResults(payload) => self.send_paginated(payload).await,
             ServiceMessage::VersionCheckResults(payload) => self.send_paginated(payload).await,
             ServiceMessage::ReportHosts(payload) => self.send_paginated(payload).await,
-            ServiceMessage::BatchHostPackageUpdateResult(payload) => {
-                self.send_paginated(payload).await
-            }
+            ServiceMessage::BatchUpdateResult(payload) => self.send_paginated(payload).await,
             other => self.send(other).await,
         }
     }

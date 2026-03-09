@@ -11,8 +11,7 @@ use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchUpdateItem, BatchUpdateResult, DiscoveredSoftware,
     HostCompatibility, OutputStreamType, Plugin, PluginCapability, PluginError, PluginType,
-    ReleaseInfo, Result, SudoCommandEntry, TrackingSystem, UpdateOutputLine, UpstreamRelease,
-    Version,
+    ReleaseInfo, Result, SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
 };
 use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
@@ -594,9 +593,9 @@ impl Plugin for NpmPlugin {
                 installed_version: version,
                 targets: vec![],
                 extra: None,
-                tracking_system: TrackingSystem::HostManaged,
                 qualifier: None,
                 plugin_package_identifier: None,
+                featured: false,
             })
             .collect();
 

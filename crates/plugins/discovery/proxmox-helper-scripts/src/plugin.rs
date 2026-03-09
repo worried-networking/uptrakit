@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
     DiscoveredSoftware, DiscoveryTarget, HostCompatibility, Plugin, PluginCapability, PluginRole,
-    PluginType, SudoCommandEntry, SudoHelperScript, TrackingSystem,
+    PluginType, SudoCommandEntry, SudoHelperScript,
 };
 use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
@@ -477,9 +477,9 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                         Self::phs_shell_target(analysis.version_file_basename.as_deref()),
                     ],
                     extra: None,
-                    tracking_system: TrackingSystem::Targeted,
                     qualifier: None,
                     plugin_package_identifier: None,
+                    featured: true,
                 });
             } else if let (Some(owner), Some(repo)) =
                 (&analysis.codeberg_owner, &analysis.codeberg_repo)
@@ -513,9 +513,9 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                         Self::phs_shell_target(analysis.version_file_basename.as_deref()),
                     ],
                     extra: None,
-                    tracking_system: TrackingSystem::Targeted,
                     qualifier: None,
                     plugin_package_identifier: None,
+                    featured: true,
                 });
             } else if let Some(ref npm_pkg) = analysis.npm_package {
                 // npm-managed: verify installed via `npm list -g`.
@@ -538,9 +538,9 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     installed_version,
                     targets: vec![Self::npm_target(npm_pkg)],
                     extra: None,
-                    tracking_system: TrackingSystem::Targeted,
                     qualifier: None,
                     plugin_package_identifier: None,
+                    featured: true,
                 });
             } else if let Some(ref apt_pkg) = analysis.apt_package {
                 // APT direct: verify installed via dpkg-query.
@@ -563,9 +563,9 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     installed_version,
                     targets: vec![Self::apt_target()],
                     extra: None,
-                    tracking_system: TrackingSystem::Targeted,
                     qualifier: None,
                     plugin_package_identifier: None,
+                    featured: true,
                 });
             } else {
                 // Neither — try install-script fallback.
@@ -601,9 +601,9 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                         installed_version,
                         targets: vec![Self::npm_target(&npm_pkg)],
                         extra: None,
-                        tracking_system: TrackingSystem::Targeted,
                         qualifier: None,
                         plugin_package_identifier: None,
+                        featured: true,
                     });
                     continue;
                 }
@@ -636,9 +636,9 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                         installed_version,
                         targets: vec![Self::apt_target()],
                         extra: None,
-                        tracking_system: TrackingSystem::Targeted,
                         qualifier: None,
                         plugin_package_identifier: None,
+                        featured: true,
                     });
                     found_any = true;
                 }

@@ -8,7 +8,7 @@ use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType,
     Plugin, PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result,
-    TrackingSystem, UpdateOutputLine, UpstreamRelease, Version,
+    UpdateOutputLine, UpstreamRelease, Version,
 };
 
 use crate::config::{HomebrewConfig, HomebrewPackageType};
@@ -196,9 +196,9 @@ impl HomebrewPlugin {
                     installed_version,
                     targets,
                     extra: None,
-                    tracking_system: TrackingSystem::HostManaged,
                     qualifier: None,
                     plugin_package_identifier: None,
+                    featured: false,
                 });
             }
         }
@@ -283,9 +283,9 @@ impl HomebrewPlugin {
                     installed_version,
                     targets,
                     extra: None,
-                    tracking_system: TrackingSystem::HostManaged,
                     qualifier: None,
                     plugin_package_identifier: None,
+                    featured: false,
                 });
             }
         }

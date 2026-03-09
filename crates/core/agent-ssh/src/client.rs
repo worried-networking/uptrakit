@@ -7,10 +7,10 @@ use uptrakit_agent_core::ConnectionContext;
 use uptrakit_command::{CommandExecutor, CommandSpec, SudoAwareCommandExecutor};
 
 use uptrakit_internal_wire::{
-    BatchHostPackageUpdateResult, BatchHostPackageUpdateResultPayload, Capability,
-    CheckVersionsPayload, DiscoverSoftwarePayload, DiscoveryPluginResult, DiscoveryResultsPayload,
-    ExecuteBatchHostPackageUpdatePayload, ExecuteUpdatePayload, HostInfo, ReportHostsPayload,
-    ServiceMessage, UpdateCategory, UpdateFinalStatus, UpdateResultPayload, VersionCheckResult,
+    BatchUpdateItemResult, BatchUpdateResultPayload, Capability, CheckVersionsPayload,
+    DiscoverSoftwarePayload, DiscoveryPluginResult, DiscoveryResultsPayload,
+    ExecuteBatchUpdatePayload, ExecuteUpdatePayload, HostInfo, ReportHostsPayload, ServiceMessage,
+    UpdateCategory, UpdateFinalStatus, UpdateResultPayload, VersionCheckResult,
     VersionCheckResultsPayload,
 };
 use uptrakit_service_sdk::ControllerConnection;
@@ -736,9 +736,9 @@ async fn run_discover_software_ssh(
     uptrakit_agent_core::run_discover_software(payload, executor, &ctx).await
 }
 
-/// Spawn an `ExecuteBatchHostPackageUpdate` operation as a background task.
-pub(crate) fn spawn_execute_batch_host_package_update_ssh(
-    payload: ExecuteBatchHostPackageUpdatePayload,
+/// Spawn an `ExecuteBatchUpdate` operation as a background task.
+pub(crate) fn spawn_execute_batch_update_ssh(
+    payload: ExecuteBatchUpdatePayload,
     db: &sea_orm::DatabaseConnection,
     pool: &SshConnectionPool,
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
@@ -748,21 +748,21 @@ pub(crate) fn spawn_execute_batch_host_package_update_ssh(
         host_machine_id = %host_machine_id,
         batch_id = %payload.batch_id,
         update_count = payload.updates.len(),
-        "spawning background ExecuteBatchHostPackageUpdate task for SSH host"
+        "spawning background ExecuteBatchUpdate task for SSH host"
     );
     let db = db.clone();
     let pool = pool.clone();
     uptrakit_agent_core::spawn_background(bg_tx, async move {
-        let msg = run_execute_batch_host_package_update_ssh(payload, &db, &pool).await;
-        tracing::debug!(host_machine_id = %host_machine_id, "background ExecuteBatchHostPackageUpdate task completed");
+        let msg = run_execute_batch_update_ssh(payload, &db, &pool).await;
+        tracing::debug!(host_machine_id = %host_machine_id, "background ExecuteBatchUpdate task completed");
         msg
     });
 }
 
-/// Run `ExecuteBatchHostPackageUpdate` for an SSH host, returning the result
+/// Run `ExecuteBatchUpdate` for an SSH host, returning the result
 /// as a [`ServiceMessage`].
-async fn run_execute_batch_host_package_update_ssh(
-    payload: ExecuteBatchHostPackageUpdatePayload,
+async fn run_execute_batch_update_ssh(
+    payload: ExecuteBatchUpdatePayload,
     db: &sea_orm::DatabaseConnection,
     pool: &SshConnectionPool,
 ) -> ServiceMessage {
@@ -772,13 +772,13 @@ async fn run_execute_batch_host_package_update_ssh(
             tracing::warn!(
                 host_machine_id = %payload.host_machine_id,
                 batch_id = %payload.batch_id,
-                "no SSH host found for ExecuteBatchHostPackageUpdate host_machine_id"
+                "no SSH host found for ExecuteBatchUpdate host_machine_id"
             );
-            let results: Vec<BatchHostPackageUpdateResult> = payload
+            let results: Vec<BatchUpdateItemResult> = payload
                 .updates
                 .iter()
-                .map(|u| BatchHostPackageUpdateResult {
-                    host_package_id: u.host_package_id,
+                .map(|u| BatchUpdateItemResult {
+                    host_software_item_id: u.host_software_item_id,
                     update_history_id: u.update_history_id,
                     status: UpdateFinalStatus::Failed,
                     output: String::new(),
@@ -789,25 +789,23 @@ async fn run_execute_batch_host_package_update_ssh(
                     )),
                 })
                 .collect();
-            return ServiceMessage::BatchHostPackageUpdateResult(
-                BatchHostPackageUpdateResultPayload {
-                    batch_id: payload.batch_id,
-                    results,
-                },
-            );
+            return ServiceMessage::BatchUpdateResult(BatchUpdateResultPayload {
+                batch_id: payload.batch_id,
+                results,
+            });
         }
         Err(e) => {
             tracing::error!(
                 host_machine_id = %payload.host_machine_id,
                 batch_id = %payload.batch_id,
                 error = %e,
-                "DB error looking up SSH host for ExecuteBatchHostPackageUpdate"
+                "DB error looking up SSH host for ExecuteBatchUpdate"
             );
-            let results: Vec<BatchHostPackageUpdateResult> = payload
+            let results: Vec<BatchUpdateItemResult> = payload
                 .updates
                 .iter()
-                .map(|u| BatchHostPackageUpdateResult {
-                    host_package_id: u.host_package_id,
+                .map(|u| BatchUpdateItemResult {
+                    host_software_item_id: u.host_software_item_id,
                     update_history_id: u.update_history_id,
                     status: UpdateFinalStatus::Failed,
                     output: String::new(),
@@ -815,12 +813,10 @@ async fn run_execute_batch_host_package_update_ssh(
                     error: Some(format!("DB error: {e}")),
                 })
                 .collect();
-            return ServiceMessage::BatchHostPackageUpdateResult(
-                BatchHostPackageUpdateResultPayload {
-                    batch_id: payload.batch_id,
-                    results,
-                },
-            );
+            return ServiceMessage::BatchUpdateResult(BatchUpdateResultPayload {
+                batch_id: payload.batch_id,
+                results,
+            });
         }
     };
 
@@ -831,14 +827,14 @@ async fn run_execute_batch_host_package_update_ssh(
                 host_name = %host.name,
                 batch_id = %payload.batch_id,
                 error = %e,
-                "failed to acquire SSH session for ExecuteBatchHostPackageUpdate"
+                "failed to acquire SSH session for ExecuteBatchUpdate"
             );
             pool.evict(host.id).await;
-            let results: Vec<BatchHostPackageUpdateResult> = payload
+            let results: Vec<BatchUpdateItemResult> = payload
                 .updates
                 .iter()
-                .map(|u| BatchHostPackageUpdateResult {
-                    host_package_id: u.host_package_id,
+                .map(|u| BatchUpdateItemResult {
+                    host_software_item_id: u.host_software_item_id,
                     update_history_id: u.update_history_id,
                     status: UpdateFinalStatus::Failed,
                     output: String::new(),
@@ -846,12 +842,10 @@ async fn run_execute_batch_host_package_update_ssh(
                     error: Some(format!("SSH connection failed: {e}")),
                 })
                 .collect();
-            return ServiceMessage::BatchHostPackageUpdateResult(
-                BatchHostPackageUpdateResultPayload {
-                    batch_id: payload.batch_id,
-                    results,
-                },
-            );
+            return ServiceMessage::BatchUpdateResult(BatchUpdateResultPayload {
+                batch_id: payload.batch_id,
+                results,
+            });
         }
     };
 
@@ -866,9 +860,9 @@ async fn run_execute_batch_host_package_update_ssh(
         host_name = %host.name,
         hostname = %host.hostname,
         batch_id = %payload.batch_id,
-        "running batch host package update on SSH host"
+        "running batch update on SSH host"
     );
-    uptrakit_agent_core::run_execute_batch_host_package_update(payload, executor, &ctx).await
+    uptrakit_agent_core::run_execute_batch_update(payload, executor, &ctx).await
 }
 
 // ── Shared re-exports ─────────────────────────────────────────────────────────
@@ -884,7 +878,7 @@ fn error_results_for_check(payload: &CheckVersionsPayload, error: &str) -> Vec<V
         .iter()
         .map(|a| VersionCheckResult {
             software_item_id: a.software_item_id,
-            host_package_id: a.host_package_id,
+            host_software_item_id: a.host_software_item_id,
             installed_version: None,
             latest_version: None,
             error: Some(error.to_string()),

@@ -27,7 +27,7 @@ pub struct TenantManager {
     event_tx: Option<mpsc::Sender<MqttServiceEvent>>,
     software_states: HashMap<Uuid, Vec<uptrakit_internal_wire::MqttSoftwareStateItem>>,
     /// Cached per-host package states, keyed by tenant_id.
-    host_package_states: HashMap<Uuid, Vec<uptrakit_internal_wire::MqttHostPackageHostState>>,
+    host_summary_states: HashMap<Uuid, Vec<uptrakit_internal_wire::MqttHostSummary>>,
 }
 
 impl TenantManager {
@@ -36,7 +36,7 @@ impl TenantManager {
             clients: HashMap::new(),
             event_tx,
             software_states: HashMap::new(),
-            host_package_states: HashMap::new(),
+            host_summary_states: HashMap::new(),
         }
     }
 
@@ -113,8 +113,8 @@ impl TenantManager {
     ) {
         self.software_states
             .insert(payload.tenant_id, payload.items.clone());
-        self.host_package_states
-            .insert(payload.tenant_id, payload.host_package_hosts.clone());
+        self.host_summary_states
+            .insert(payload.tenant_id, payload.host_summaries.clone());
 
         // Collect client IDs for this tenant (all of them, not just HA-enabled).
         let client_ids: Vec<uuid::Uuid> = self
@@ -127,7 +127,7 @@ impl TenantManager {
         for client_id in client_ids {
             self.publish_software_states(client_id, &payload.items)
                 .await;
-            self.publish_host_package_states(client_id, &payload.host_package_hosts)
+            self.publish_host_summary_states(client_id, &payload.host_summaries)
                 .await;
         }
     }
@@ -145,8 +145,8 @@ impl TenantManager {
         if let Some(items) = self.software_states.get(&tenant_id).cloned() {
             self.publish_software_states(*mqtt_client_id, &items).await;
         }
-        if let Some(host_states) = self.host_package_states.get(&tenant_id).cloned() {
-            self.publish_host_package_states(*mqtt_client_id, &host_states)
+        if let Some(host_states) = self.host_summary_states.get(&tenant_id).cloned() {
+            self.publish_host_summary_states(*mqtt_client_id, &host_states)
                 .await;
         }
     }
@@ -170,8 +170,8 @@ impl TenantManager {
         if let Some(items) = self.software_states.get(&tenant_id).cloned() {
             self.publish_ha_configs_only(*mqtt_client_id, &items).await;
         }
-        if let Some(host_states) = self.host_package_states.get(&tenant_id).cloned() {
-            self.publish_host_package_ha_configs_only(*mqtt_client_id, &host_states)
+        if let Some(host_states) = self.host_summary_states.get(&tenant_id).cloned() {
+            self.publish_host_summary_ha_configs_only(*mqtt_client_id, &host_states)
                 .await;
         }
     }
@@ -204,50 +204,46 @@ impl TenantManager {
     }
 
     /// Given an inbound MQTT command topic, resolve it to an
-    /// [`MqttTriggerHostPackageUpdatePayload`](uptrakit_internal_wire::MqttTriggerHostPackageUpdatePayload).
+    /// [`MqttTriggerHostBatchUpdatePayload`](uptrakit_internal_wire::MqttTriggerHostBatchUpdatePayload).
     ///
     /// Returns `None` if the topic doesn't match the host-packages command
     /// pattern `{prefix}/hosts/{host_id}/set`.
-    pub fn resolve_host_package_update_trigger(
+    pub fn resolve_host_batch_update_trigger(
         &self,
         mqtt_client_id: uuid::Uuid,
         topic: &str,
-    ) -> Option<uptrakit_internal_wire::MqttTriggerHostPackageUpdatePayload> {
+    ) -> Option<uptrakit_internal_wire::MqttTriggerHostBatchUpdatePayload> {
         let state = self.clients.get(&mqtt_client_id)?;
         let host_id =
             crate::ha_discovery::parse_host_packages_command_topic(&state.topic_prefix, topic)?;
-        Some(
-            uptrakit_internal_wire::MqttTriggerHostPackageUpdatePayload {
-                tenant_id: state.tenant_id,
-                host_id,
-                mqtt_client_id,
-                security_only: false,
-            },
-        )
+        Some(uptrakit_internal_wire::MqttTriggerHostBatchUpdatePayload {
+            tenant_id: state.tenant_id,
+            host_id,
+            mqtt_client_id,
+            security_only: false,
+        })
     }
 
     /// Given an inbound MQTT security-entity command topic, resolve it to an
-    /// [`MqttTriggerHostPackageUpdatePayload`](uptrakit_internal_wire::MqttTriggerHostPackageUpdatePayload)
+    /// [`MqttTriggerHostBatchUpdatePayload`](uptrakit_internal_wire::MqttTriggerHostBatchUpdatePayload)
     /// with `security_only = true`.
     ///
     /// Returns `None` if the topic doesn't match the security command
     /// pattern `{prefix}/hosts/{host_id}/security/set`.
-    pub fn resolve_host_security_update_trigger(
+    pub fn resolve_host_security_batch_update_trigger(
         &self,
         mqtt_client_id: uuid::Uuid,
         topic: &str,
-    ) -> Option<uptrakit_internal_wire::MqttTriggerHostPackageUpdatePayload> {
+    ) -> Option<uptrakit_internal_wire::MqttTriggerHostBatchUpdatePayload> {
         let state = self.clients.get(&mqtt_client_id)?;
         let host_id =
             crate::ha_discovery::parse_host_security_command_topic(&state.topic_prefix, topic)?;
-        Some(
-            uptrakit_internal_wire::MqttTriggerHostPackageUpdatePayload {
-                tenant_id: state.tenant_id,
-                host_id,
-                mqtt_client_id,
-                security_only: true,
-            },
-        )
+        Some(uptrakit_internal_wire::MqttTriggerHostBatchUpdatePayload {
+            tenant_id: state.tenant_id,
+            host_id,
+            mqtt_client_id,
+            security_only: true,
+        })
     }
 
     /// Start or update an MQTT client.
@@ -555,10 +551,10 @@ impl TenantManager {
     /// - Subscribes to `{prefix}/hosts/{host_id}/set`
     /// - If `ha_discovery`: publishes HA discovery config (retained)
     #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
-    async fn publish_host_package_states(
+    async fn publish_host_summary_states(
         &self,
         mqtt_client_id: uuid::Uuid,
-        host_states: &[uptrakit_internal_wire::MqttHostPackageHostState],
+        host_states: &[uptrakit_internal_wire::MqttHostSummary],
     ) {
         let Some(state) = self.clients.get(&mqtt_client_id) else {
             return;
@@ -768,10 +764,10 @@ impl TenantManager {
     /// and do not need re-sending. Only the discovery config topics need to be
     /// republished so that HA re-registers the `update` entities.
     #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
-    async fn publish_host_package_ha_configs_only(
+    async fn publish_host_summary_ha_configs_only(
         &self,
         mqtt_client_id: uuid::Uuid,
-        host_states: &[uptrakit_internal_wire::MqttHostPackageHostState],
+        host_states: &[uptrakit_internal_wire::MqttHostSummary],
     ) {
         let Some(state) = self.clients.get(&mqtt_client_id) else {
             return;
@@ -1173,7 +1169,7 @@ mod tests {
                 name: "nginx".to_string(),
                 hosts: vec![],
             }],
-            host_package_hosts: vec![],
+            host_summaries: vec![],
         };
 
         // No connected clients — but the cache must still be updated.
@@ -1216,7 +1212,7 @@ mod tests {
                 name: "nginx".to_string(),
                 hosts: vec![],
             }],
-            host_package_hosts: vec![],
+            host_summaries: vec![],
         };
         manager.update_software_states(first).await;
 
@@ -1234,7 +1230,7 @@ mod tests {
                     hosts: vec![],
                 },
             ],
-            host_package_hosts: vec![],
+            host_summaries: vec![],
         };
         manager.update_software_states(second).await;
 
