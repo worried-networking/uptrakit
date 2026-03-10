@@ -124,6 +124,7 @@ Both fields are independently optional, but at least one must be set.
 | --- | --- | --- |
 | `version_command` | Conditionally | Shell command run on the agent to detect the installed version. The first non-empty trimmed line of stdout is used as the version string. If absent, `detect_version` is not supported. Supports `{package_identifier}` placeholder (shell-escaped). |
 | `update_command` | Conditionally | Shell command run on the agent to execute an update. If absent, `execute_update` is not supported. Supports `{version}`, `{tag}`, and `{package_identifier}` placeholders (all shell-escaped). `{tag}` falls back to `{version}` when no release metadata is available. |
+| `prefer_interactive` | No | Boolean (default `false`). When `true`, the controller requests a PTY-backed interactive session for the update command. This makes `/dev/tty` available inside the update script, enabling interactive prompts (e.g. low-storage warnings in Proxmox Helper Scripts `/usr/bin/update`). Set automatically for PHS-discovered items. |
 
 **Placeholder reference:**
 

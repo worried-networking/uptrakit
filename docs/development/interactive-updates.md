@@ -47,6 +47,23 @@ Frontend (xterm.js)  <--WebSocket-->  Controller  <--WebSocket-->  Agent  <--PTY
        | output                       | relay                      | stdout/stderr
 ```
 
+### Automatic Interactive Dispatch
+
+The controller automatically sets `interactive: true` in `ExecuteUpdatePayload` when
+the execute-update plugin config contains `"prefer_interactive": true`. This is currently
+set for all **Proxmox Helper Scripts** Shell targets, so PHS updates always run with a
+PTY by default — without requiring any manual configuration or API flag.
+
+The check lives in `dispatch_update_to_agent()` in `uptrakit-web-api-queries`:
+
+```rust
+let interactive = params.interactive
+    || config_prefers_interactive(&execute_update_plugin.plugin_type, &execute_update_plugin.config);
+```
+
+Any `GenericShell` config with `"prefer_interactive": true` (or a future plugin type
+that uses the same field) will trigger interactive dispatch automatically.
+
 ### Local Agent PTY Flow
 
 1. `openpty()` allocates a PTY pair (master/slave) via `rustix`.
@@ -80,6 +97,26 @@ The attention detector is a heuristic timer:
 - The agent sends a `StdinAttention` message to the controller.
 - The controller broadcasts a `stdin_attention` event via SSE and the interactive
   WebSocket, and dispatches a notification (if rules are configured).
+
+### `ForwardingInteractiveExecutor` Pattern
+
+`execute_update_interactive()` in `uptrakit-agent-core` uses a `ForwardingInteractiveExecutor`
+wrapper to promote the plugin's first `execute()` call to `execute_interactive()` without
+changing the `Plugin` trait:
+
+1. `execute_update_interactive` creates a `oneshot` channel and wraps the real executor in
+   `ForwardingInteractiveExecutor`.
+2. The full `execute_update` pipeline (pre-hooks → plugin → post-hooks) runs as a spawned task
+   using the wrapper.
+3. When the plugin calls `executor.execute()` for the update command, the wrapper intercepts it,
+   calls `executor.execute_interactive()`, and sends the resulting channels
+   (`stdin_tx`, `signal_tx`, `attention_rx`) via the oneshot.
+4. The outer `execute_update_interactive` awaits the oneshot and returns an
+   `InteractiveUpdateHandle` with real channels.
+
+If the inner executor doesn't support interactive mode, the wrapper drops the oneshot sender
+(unblocking the outer function with `None` channels) and falls back to non-interactive `execute()`.
+Pre/post hooks and version detection always use the non-intercepted paths.
 
 ## Key Types
 
