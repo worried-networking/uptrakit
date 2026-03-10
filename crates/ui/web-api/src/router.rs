@@ -314,6 +314,20 @@ use crate::AppState;
 )]
 struct ApiDoc;
 
+/// Zeroconf OpenAPI paths and schemas.
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        crate::routes::settings_zeroconf::get_zeroconf_settings,
+        crate::routes::settings_zeroconf::update_zeroconf_settings,
+    ),
+    components(schemas(
+        crate::routes::settings_zeroconf::ZeroconfSettingsResponse,
+        crate::routes::settings_zeroconf::UpdateZeroconfSettingsRequest,
+    ))
+)]
+struct ZeroconfApiDoc;
+
 /// NATS-specific OpenAPI paths and schemas, merged conditionally.
 #[cfg(feature = "nats")]
 #[derive(OpenApi)]
@@ -640,6 +654,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             axum::routing::post(crate::routes::extensions::invoke_action),
         );
 
+    // Zeroconf settings
+    let auth_routes = auth_routes.routes(routes!(
+        crate::routes::settings_zeroconf::get_zeroconf_settings,
+        crate::routes::settings_zeroconf::update_zeroconf_settings
+    ));
+
     // NATS settings
     #[cfg(feature = "nats")]
     let auth_routes = auth_routes.routes(routes!(
@@ -689,7 +709,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ));
 
     // All OpenAPI routes merged into a single router so the spec is complete
-    let openapi = ApiDoc::openapi();
+    let openapi = {
+        let mut openapi = ApiDoc::openapi();
+        openapi.merge(ZeroconfApiDoc::openapi());
+        openapi
+    };
 
     #[cfg(feature = "nats")]
     let openapi = {

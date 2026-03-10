@@ -36,6 +36,7 @@ pub mod settings_mqtt;
 pub mod settings_nats;
 pub mod settings_network;
 pub mod settings_smtp;
+pub mod settings_zeroconf;
 pub mod software_items;
 pub mod system_alerts;
 pub mod system_enrollment_tokens;
