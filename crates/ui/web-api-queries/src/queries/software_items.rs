@@ -5,7 +5,7 @@ use sea_orm::{
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
-use uptrakit_plugin_infrastructure_registry::PluginRegistry;
+use uptrakit_plugin_infrastructure_core::PluginOps;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, software_item,
 };
@@ -395,6 +395,7 @@ enum ConfigOverrideError {
 /// Validate `config_override` by merging it with the base plugin config and running
 /// plugin-specific validation. The merged document must satisfy the plugin's schema.
 fn validate_config_override(
+    ops: &dyn PluginOps,
     plugin_type: &str,
     base_config: &serde_json::Value,
     override_config: &serde_json::Value,
@@ -409,7 +410,7 @@ fn validate_config_override(
         return Err(ConfigOverrideError::NotAnObject);
     }
 
-    PluginRegistry::validate_config_str(plugin_type, &merged)
+    ops.validate_config_str(plugin_type, &merged)
         .map_err(|e| ConfigOverrideError::PluginValidation(e.to_string()))
 }
 
@@ -441,6 +442,7 @@ fn validate_execution_site(execution_site: &str, role: &PluginRole) -> Result<()
 /// Resolve plugin config from either an existing ID or an inline create request,
 /// within a transaction. Returns `(plugin_config_id, plugin_config::Model)`.
 async fn resolve_plugin_config_txn(
+    ops: &dyn PluginOps,
     txn: &sea_orm::DatabaseTransaction,
     tenant_id: Uuid,
     assignment: &HostPluginRoleAssignment,
@@ -464,9 +466,7 @@ async fn resolve_plugin_config_txn(
                     "name must not be empty".to_string(),
                 ));
             }
-            if let Err(e) =
-                PluginRegistry::validate_config_str(inline.plugin_type.as_str(), &inline.config)
-            {
+            if let Err(e) = ops.validate_config_str(inline.plugin_type.as_str(), &inline.config) {
                 bail!(SoftwareItemQueryError::InvalidInlinePluginConfig(
                     e.to_string()
                 ));
@@ -498,20 +498,18 @@ async fn resolve_plugin_config_txn(
 
 /// Validate plugin config, package identifier, and config_override for a host assignment.
 fn validate_assignment(
+    ops: &dyn PluginOps,
     config: &plugin_config::Model,
     package_identifier: &str,
     config_override: Option<&serde_json::Value>,
 ) -> Result<()> {
-    if let Ok(pt) = config
-        .plugin_type
-        .parse::<uptrakit_plugin_infrastructure_registry::PluginType>()
-        && let Err(e) = PluginRegistry::validate_package_identifier(pt, package_identifier)
-    {
+    if let Err(e) = ops.validate_package_identifier_str(&config.plugin_type, package_identifier) {
         bail!(SoftwareItemQueryError::InvalidPackageIdentifier(e));
     }
 
     if let Some(override_val) = config_override {
-        if let Err(e) = validate_config_override(&config.plugin_type, &config.config, override_val)
+        if let Err(e) =
+            validate_config_override(ops, &config.plugin_type, &config.config, override_val)
         {
             bail!(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
         }
@@ -840,6 +838,7 @@ pub async fn delete_software_item(tenant_db: &TenantDb, id: Uuid) -> Result<bool
 /// or a host is not found.
 #[tracing::instrument(skip_all, fields(%id))]
 pub async fn assign_hosts(
+    ops: &dyn PluginOps,
     tenant_db: &TenantDb,
     id: Uuid,
     req: AssignHostsRequest,
@@ -907,9 +906,10 @@ pub async fn assign_hosts(
             validate_execution_site(execution_site, role)?;
 
             let (plugin_config_id, config) =
-                resolve_plugin_config_txn(&txn, tenant_db.tenant_id, role_assignment).await?;
+                resolve_plugin_config_txn(ops, &txn, tenant_db.tenant_id, role_assignment).await?;
 
             validate_assignment(
+                ops,
                 &config,
                 &role_assignment.package_identifier,
                 role_assignment.config_override.as_ref(),
@@ -992,6 +992,7 @@ pub async fn assign_hosts(
 /// Update a single role assignment for an existing host-software-item pair.
 #[tracing::instrument(skip_all, fields(%id, %host_id))]
 pub async fn update_host_assignment(
+    ops: &dyn PluginOps,
     tenant_db: &TenantDb,
     id: Uuid,
     host_id: Uuid,
@@ -1057,9 +1058,10 @@ pub async fn update_host_assignment(
     let txn = tenant_db.db().begin().await.context_to()?;
 
     let (plugin_config_id, config) =
-        resolve_plugin_config_txn(&txn, tenant_db.tenant_id, &synthetic).await?;
+        resolve_plugin_config_txn(ops, &txn, tenant_db.tenant_id, &synthetic).await?;
 
     validate_assignment(
+        ops,
         &config,
         &synthetic.package_identifier,
         synthetic.config_override.as_ref(),
@@ -1409,92 +1411,119 @@ mod tests {
         assert!(!resp.update_available);
     }
 
+    /// Mock [`PluginOps`] for config-override tests.
+    ///
+    /// Rejects configs containing `"api_base_url"` with an `"http://"` value
+    /// (mimics the real GitHub plugin's HTTPS-only check). Accepts everything
+    /// else.
+    struct MockPluginOps;
+
+    impl PluginOps for MockPluginOps {
+        fn validate_config_str(
+            &self,
+            _plugin_type: &str,
+            config: &serde_json::Value,
+        ) -> uptrakit_plugin_infrastructure_core::plugin_ops::Result<()> {
+            if let Some(url) = config.get("api_base_url").and_then(|v| v.as_str())
+                && url.starts_with("http://")
+            {
+                return Err(rootcause::report!(
+                    uptrakit_plugin_infrastructure_core::PluginOpsError::ConfigValidation(
+                        "api_base_url must use HTTPS".to_string()
+                    )
+                ));
+            }
+            Ok(())
+        }
+
+        fn mask_config_secrets_str(
+            &self,
+            _plugin_type: &str,
+            config: &serde_json::Value,
+        ) -> serde_json::Value {
+            config.clone()
+        }
+
+        fn restore_config_secrets_str(
+            &self,
+            _plugin_type: &str,
+            _incoming: &mut serde_json::Value,
+            _existing: &serde_json::Value,
+        ) {
+        }
+
+        fn known_plugin_types(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginType> {
+            vec![]
+        }
+
+        fn discovery_plugins(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginType> {
+            vec![]
+        }
+
+        fn validate_package_identifier_str(
+            &self,
+            _plugin_type: &str,
+            _value: &str,
+        ) -> std::result::Result<(), String> {
+            Ok(())
+        }
+
+        fn capabilities_for_str(
+            &self,
+            _plugin_type: &str,
+        ) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+            vec![]
+        }
+
+        fn sample_config_for_str(&self, _plugin_type: &str) -> serde_json::Value {
+            serde_json::Value::Object(serde_json::Map::new())
+        }
+
+        fn config_form_schema_str(
+            &self,
+            _plugin_type: &str,
+        ) -> Option<Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>> {
+            None
+        }
+    }
+
     #[test]
     fn validate_config_override_valid_merge() {
+        let ops = MockPluginOps;
         let base = serde_json::json!({});
         let override_val = serde_json::json!({
             "tag_strip_prefix": "release-"
         });
 
-        let result = validate_config_override("releases_github", &base, &override_val);
+        let result = validate_config_override(&ops, "releases_github", &base, &override_val);
         assert!(result.is_ok());
     }
 
     #[test]
     fn validate_config_override_invalid_merge() {
+        let ops = MockPluginOps;
         let base = serde_json::json!({});
         // Override that introduces an invalid api_base_url (http, not https).
         let override_val = serde_json::json!({
             "api_base_url": "http://api.github.com"
         });
 
-        let result = validate_config_override("releases_github", &base, &override_val);
+        let result = validate_config_override(&ops, "releases_github", &base, &override_val);
         assert!(result.is_err());
     }
 
     #[test]
     fn validate_config_override_non_object_rejected() {
+        let ops = MockPluginOps;
         let base = serde_json::json!({});
         let override_val = serde_json::json!("not an object");
 
-        let result = validate_config_override("releases_github", &base, &override_val);
+        let result = validate_config_override(&ops, "releases_github", &base, &override_val);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
             ConfigOverrideError::NotAnObject
         ));
-    }
-
-    #[test]
-    fn validate_homebrew_package_identifier_accepts_valid() {
-        use uptrakit_plugin_infrastructure_registry::PluginType;
-        let cases = [
-            "wget",
-            "node@18",
-            "homebrew/cask/firefox",
-            "custom-tap/tool",
-            "pkg.name",
-            "pkg_name",
-            "pkg+name",
-        ];
-
-        for case in cases {
-            assert!(
-                PluginRegistry::validate_package_identifier(
-                    PluginType::PackageManagerHomebrew,
-                    case
-                )
-                .is_ok(),
-                "expected valid: {case}"
-            );
-        }
-    }
-
-    #[test]
-    fn validate_homebrew_package_identifier_rejects_invalid() {
-        use uptrakit_plugin_infrastructure_registry::PluginType;
-        let cases = [
-            "",
-            " ",
-            " leading",
-            "trailing ",
-            "has space",
-            "tap//pkg",
-            "tap/../pkg",
-            "tap/./pkg",
-            "pkg$",
-        ];
-
-        for case in cases {
-            assert!(
-                PluginRegistry::validate_package_identifier(
-                    PluginType::PackageManagerHomebrew,
-                    case
-                )
-                .is_err(),
-                "expected invalid: {case}"
-            );
-        }
     }
 
     #[test]

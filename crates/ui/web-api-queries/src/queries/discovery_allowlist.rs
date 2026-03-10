@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
-use uptrakit_plugin_infrastructure_registry::{PluginCapability, PluginOps};
+use uptrakit_plugin_infrastructure_core::{PluginCapability, PluginOps};
 use uptrakit_shared_db::entity::{host_discovery_allowlist, tenant_discovery_allowlist};
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_shared_types::PluginType;
@@ -357,7 +357,7 @@ pub async fn load_host_allowlist_set(db: &DatabaseConnection, host_id: Uuid) -> 
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_plugin_infrastructure_registry::{PluginCapability, PluginOps};
+    use uptrakit_plugin_infrastructure_core::{PluginCapability, PluginOps};
     use uptrakit_shared_types::PluginType;
 
     use super::*;
@@ -385,7 +385,7 @@ mod tests {
             &self,
             _plugin_type: &str,
             _config: &serde_json::Value,
-        ) -> uptrakit_plugin_infrastructure_registry::Result<()> {
+        ) -> uptrakit_plugin_infrastructure_core::plugin_ops::Result<()> {
             Ok(())
         }
 
@@ -441,7 +441,7 @@ mod tests {
         fn config_form_schema_str(
             &self,
             _plugin_type: &str,
-        ) -> Option<Vec<uptrakit_internal_wire::extension::FieldDef>> {
+        ) -> Option<Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>> {
             None
         }
     }

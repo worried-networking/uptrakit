@@ -7299,7 +7299,7 @@ dependencies = [
  "uptrakit-crypto",
  "uptrakit-internal-wire",
  "uptrakit-notification-plugin-registry",
- "uptrakit-plugin-infrastructure-registry",
+ "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",

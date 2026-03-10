@@ -33,7 +33,7 @@ uptrakit-command = { workspace = true }
 uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-notification-plugin-registry = { workspace = true, features = ["webhook"] }
-uptrakit-plugin-infrastructure-registry = { workspace = true }
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
 uptrakit-shared-db = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true, features = ["openapi"] }

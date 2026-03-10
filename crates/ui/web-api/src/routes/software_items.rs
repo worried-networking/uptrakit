@@ -498,6 +498,7 @@ pub async fn approve_software_item(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn assign_hosts(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
     Path(item_id): Path<Uuid>,
@@ -510,7 +511,7 @@ pub async fn assign_hosts(
         );
     }
 
-    match item_queries::assign_hosts(&tenant_db, item_id, req).await {
+    match item_queries::assign_hosts(state.plugin_ops.as_ref(), &tenant_db, item_id, req).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => query_error_to_response(e),
     }
@@ -618,12 +619,21 @@ pub async fn unassign_host(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_host_assignment(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
     Path((item_id, host_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateHostAssignmentRequest>,
 ) -> Response {
-    match item_queries::update_host_assignment(&tenant_db, item_id, host_id, req).await {
+    match item_queries::update_host_assignment(
+        state.plugin_ops.as_ref(),
+        &tenant_db,
+        item_id,
+        host_id,
+        req,
+    )
+    .await
+    {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => query_error_to_response(e),
     }

@@ -10,6 +10,7 @@ publish = false
 [features]
 default = []
 agent-infra = ["dep:sea-orm", "dep:sea-orm-migration", "dep:uuid"]
+plugin-ops = ["dep:sea-orm", "dep:uuid"]
 
 [dependencies]
 serde = { workspace = true }

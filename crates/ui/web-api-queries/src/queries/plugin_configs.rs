@@ -5,7 +5,7 @@ use sea_orm::{
 };
 use thiserror::Error;
 use time::OffsetDateTime;
-use uptrakit_plugin_infrastructure_registry::PluginOps;
+use uptrakit_plugin_infrastructure_core::PluginOps;
 use uptrakit_shared_db::entity::plugin_config;
 use uptrakit_shared_db::is_unique_constraint_violation;
 use uptrakit_shared_macros::impl_report_conversion;
@@ -53,18 +53,17 @@ fn plugin_config_to_response(
     ops: &dyn PluginOps,
     m: plugin_config::Model,
 ) -> Option<PluginConfigResponse> {
-    let plugin_type: uptrakit_plugin_infrastructure_registry::PluginType =
-        match m.plugin_type.parse() {
-            Ok(pt) => pt,
-            Err(_) => {
-                tracing::error!(
-                    id = %m.id,
-                    plugin_type = %m.plugin_type,
-                    "plugin config has invalid plugin_type in database, skipping"
-                );
-                return None;
-            }
-        };
+    let plugin_type: uptrakit_plugin_infrastructure_core::PluginType = match m.plugin_type.parse() {
+        Ok(pt) => pt,
+        Err(_) => {
+            tracing::error!(
+                id = %m.id,
+                plugin_type = %m.plugin_type,
+                "plugin config has invalid plugin_type in database, skipping"
+            );
+            return None;
+        }
+    };
     let config = ops.mask_config_secrets_str(plugin_type.as_str(), &m.config);
     let capabilities: Vec<String> = ops
         .capabilities_for_str(plugin_type.as_str())

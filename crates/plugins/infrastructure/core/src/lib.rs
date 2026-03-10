@@ -6,6 +6,8 @@ pub mod batch_update;
 pub mod command;
 pub mod error;
 pub mod form_schema;
+#[cfg(feature = "plugin-ops")]
+pub mod plugin_ops;
 pub mod secrets;
 pub mod serde_helpers;
 pub mod traits;
@@ -27,6 +29,9 @@ pub use types::{
     PluginType, ReleaseAsset, ReleaseInfo, UpdateCategory, UpstreamRelease,
 };
 pub use version::Version;
+
+#[cfg(feature = "plugin-ops")]
+pub use plugin_ops::{ExtensionActionContext, PluginOps, PluginOpsError};
 
 // Re-export command crate types (keeps existing imports working for plugin crates)
 pub use uptrakit_command::UpdateOutputLine;
