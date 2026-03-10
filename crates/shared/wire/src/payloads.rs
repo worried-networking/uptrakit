@@ -374,6 +374,11 @@ pub struct UpdateStartedPayload {
     pub update_history_id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from_version: Option<String>,
+    /// Whether a PTY was actually allocated for this update.
+    /// `false` for non-interactive updates or when PTY allocation failed.
+    /// Old agents that do not send this field will deserialize as `false`.
+    #[serde(default)]
+    pub interactive: bool,
 }
 
 /// Agent -> Controller: Streaming output line.

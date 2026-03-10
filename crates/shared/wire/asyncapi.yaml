@@ -2755,6 +2755,13 @@ components:
           description: Currently installed version (detected by agent)
           examples:
             - v18.0.0
+        interactive:
+          type: boolean
+          default: false
+          description: |
+            Whether a PTY was actually allocated for this update.
+            `false` for non-interactive updates or when PTY allocation failed.
+            Old agents that do not send this field will be treated as `false`.
 
     updateOutputPayload:
       type: object

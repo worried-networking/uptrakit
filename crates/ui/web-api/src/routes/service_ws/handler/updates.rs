@@ -394,7 +394,6 @@ pub(super) async fn handle_update_started(
     let record_batch_id = record.batch_id;
     let record_host_id = record.host_id;
     let record_software_item_id = record.software_item_id;
-    let record_interactive = record.interactive;
     let record_tenant_id = record.tenant_id;
     let mut active: update_history::ActiveModel = record.into();
     active.status = Set(update_history::UpdateStatus::InProgress);
@@ -404,6 +403,7 @@ pub(super) async fn handle_update_started(
     }
     active.output = Set(String::new());
     active.output_bytes = Set(0);
+    active.interactive = Set(payload.interactive);
     if let Err(e) = active.update(state.db()).await {
         tracing::warn!(
             error = %e,
@@ -449,7 +449,7 @@ pub(super) async fn handle_update_started(
                 update_history_id: payload.update_history_id,
                 host_id: record_host_id,
                 software_item_id: record_software_item_id,
-                interactive: record_interactive,
+                interactive: payload.interactive,
             },
         )
         .await;

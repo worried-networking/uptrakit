@@ -315,11 +315,19 @@ pub async fn start_update(
     let spawned =
         spawn_update_task(effective_payload, executor, output_tx, update_history_id).await;
 
+    // Confirmed PTY allocation: stdin_tx is Some only when execute_update_interactive
+    // successfully allocated a PTY and delivered channels via the oneshot.
+    #[cfg(feature = "interactive")]
+    let confirmed_interactive = spawned.stdin_tx.is_some();
+    #[cfg(not(feature = "interactive"))]
+    let confirmed_interactive = false;
+
     // Send UpdateStarted
     if let Err(e) = conn
         .send(ServiceMessage::UpdateStarted(UpdateStartedPayload {
             update_history_id,
             from_version: None,
+            interactive: confirmed_interactive,
         }))
         .await
     {

@@ -329,10 +329,12 @@ mod tests {
         let msg = ServiceMessage::UpdateStarted(UpdateStartedPayload {
             update_history_id: TEST_UUID_1,
             from_version: Some("1.0.0".to_string()),
+            interactive: true,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"update_started"#));
         assert!(json.contains(r#""from_version":"1.0.0"#));
+        assert!(json.contains(r#""interactive":true"#));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -342,11 +344,24 @@ mod tests {
         let msg = ServiceMessage::UpdateStarted(UpdateStartedPayload {
             update_history_id: TEST_UUID_1,
             from_version: None,
+            interactive: false,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(!json.contains("from_version"));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn update_started_interactive_defaults_false_on_missing_field() {
+        // Old agents that do not send the `interactive` field must deserialize as false.
+        let json = r#"{"type":"update_started","protocol_version":1,"seq":1,"update_history_id":"550e8400-e29b-41d4-a716-446655440000"}"#;
+        let msg: ServiceMessage = serde_json::from_str(json).unwrap();
+        if let ServiceMessage::UpdateStarted(payload) = msg {
+            assert!(!payload.interactive);
+        } else {
+            panic!("expected UpdateStarted");
+        }
     }
 
     #[test]
@@ -1925,6 +1940,7 @@ mod tests {
         let json = service_envelope_json(ServiceMessage::UpdateStarted(UpdateStartedPayload {
             update_history_id: TEST_UUID_1,
             from_version: Some("1.0.0".to_string()),
+            interactive: false,
         }));
         spec.validate("updateStartedPayload", &json);
     }
