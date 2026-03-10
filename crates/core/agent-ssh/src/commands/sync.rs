@@ -243,7 +243,7 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
                 match resolve_command_path(&executor, &entry.command).await? {
                     Some(path) => {
                         tracing::debug!(command = %entry.command, path = %path, "resolved command path");
-                        let command_path = match entry.args_suffix {
+                        let command_path = match &entry.args_suffix {
                             Some(suffix) => format!("{path} {suffix}"),
                             None => path,
                         };
@@ -530,7 +530,7 @@ pub async fn run_for_extension(
                 .await
                 .map_err(|e| format!("failed to resolve command path: {e}"))?
             {
-                let command_path = match entry.args_suffix {
+                let command_path = match &entry.args_suffix {
                     Some(suffix) => format!("{path} {suffix}"),
                     None => path,
                 };

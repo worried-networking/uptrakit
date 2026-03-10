@@ -399,7 +399,7 @@ pub async fn run_proxmox_bootstrap(
             } else if let Some(path) =
                 resolve_command_path(guest_executor.as_ref(), &entry.command).await?
             {
-                let command_path = match entry.args_suffix {
+                let command_path = match &entry.args_suffix {
                     Some(suffix) => format!("{path} {suffix}"),
                     None => path,
                 };

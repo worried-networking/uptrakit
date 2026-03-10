@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use async_trait::async_trait;
 use rootcause::prelude::*;
 use tokio::sync::mpsc;
@@ -121,7 +123,7 @@ pub struct SudoCommandEntry {
     /// Use this to restrict the allowed subcommands/arguments without needing a
     /// helper script. The suffix is appended verbatim after a space separator.
     /// When `None`, the sudoers entry permits any arguments.
-    pub args_suffix: Option<&'static str>,
+    pub args_suffix: Option<Cow<'static, str>>,
     /// When `true`, the sudoers entry is generated with the `SETENV:` tag, which
     /// allows the agent to pass inline `NAME=VALUE` env var assignments before
     /// the program name (e.g. `sudo DEBIAN_FRONTEND=noninteractive apt-get …`).

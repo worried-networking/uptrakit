@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -289,14 +290,14 @@ impl Plugin for ApkPlugin {
                 command: "apk".into(),
                 explanation: "Package index refresh requires root privileges".into(),
                 helper_script: None,
-                args_suffix: Some("update"),
+                args_suffix: Some(Cow::Borrowed("update")),
                 needs_setenv: false,
             },
             SudoCommandEntry {
                 command: "apk".into(),
                 explanation: "Package installation requires root privileges".into(),
                 helper_script: None,
-                args_suffix: Some("add *"),
+                args_suffix: Some(Cow::Borrowed("add *")),
                 needs_setenv: false,
             },
         ]

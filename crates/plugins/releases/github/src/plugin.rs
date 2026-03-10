@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -840,14 +841,14 @@ impl Plugin for GitHubPlugin {
                 command: "systemctl".to_string(),
                 explanation: "Stop services before GitHub release asset installation".to_string(),
                 helper_script: None,
-                args_suffix: Some("stop *"),
+                args_suffix: Some(Cow::Borrowed("stop *")),
                 needs_setenv: false,
             },
             SudoCommandEntry {
                 command: "systemctl".to_string(),
                 explanation: "Start services after GitHub release asset installation".to_string(),
                 helper_script: None,
-                args_suffix: Some("start *"),
+                args_suffix: Some(Cow::Borrowed("start *")),
                 needs_setenv: false,
             },
         ]
@@ -1395,9 +1396,9 @@ mod tests {
         assert_eq!(cmds.len(), 3);
         assert_eq!(cmds[0].command, "install");
         assert_eq!(cmds[1].command, "systemctl");
-        assert_eq!(cmds[1].args_suffix, Some("stop *"));
+        assert_eq!(cmds[1].args_suffix.as_deref(), Some("stop *"));
         assert_eq!(cmds[2].command, "systemctl");
-        assert_eq!(cmds[2].args_suffix, Some("start *"));
+        assert_eq!(cmds[2].args_suffix.as_deref(), Some("start *"));
     }
 
     #[tokio::test]

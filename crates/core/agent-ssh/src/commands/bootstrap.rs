@@ -420,7 +420,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
                 match resolve_command_path(&executor, &entry.command).await? {
                     Some(path) => {
                         tracing::debug!(command = %entry.command, path = %path, "resolved command path");
-                        let command_path = match entry.args_suffix {
+                        let command_path = match &entry.args_suffix {
                             Some(suffix) => format!("{path} {suffix}"),
                             None => path,
                         };
