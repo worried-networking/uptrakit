@@ -187,6 +187,30 @@ impl DockerPlugin {
         Self::init(config, executor, docker_client, None)
     }
 
+    /// Returns `true` when `labels` passes the configured include/exclude filters.
+    ///
+    /// - `include_labels`: ALL specified labels must be present with matching values.
+    /// - `exclude_labels`: if ANY specified label matches, the container is excluded.
+    /// - Empty maps mean no filter (all containers pass).
+    fn container_passes_label_filter(
+        &self,
+        labels: &std::collections::HashMap<String, String>,
+    ) -> bool {
+        // Include filter: every required label must be present with the right value.
+        for (key, value) in &self.config.include_labels {
+            if labels.get(key).map(|v| v.as_str()) != Some(value.as_str()) {
+                return false;
+            }
+        }
+        // Exclude filter: reject if any excluded label matches.
+        for (key, value) in &self.config.exclude_labels {
+            if labels.get(key).map(|v| v.as_str()) == Some(value.as_str()) {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Probe the executor for the available container runtime and, when running
     /// over an SSH stdio tunnel, restart the proxy with the detected command.
     ///
@@ -426,10 +450,13 @@ impl Plugin for DockerPlugin {
         let containers_before: Vec<_> = if let Some(ref target) = ir.container_name {
             all_containers
                 .into_iter()
-                .filter(|c| c.name == *target)
+                .filter(|c| c.name == *target && self.container_passes_label_filter(&c.labels))
                 .collect()
         } else {
             all_containers
+                .into_iter()
+                .filter(|c| self.container_passes_label_filter(&c.labels))
+                .collect()
         };
 
         send_output(
@@ -610,6 +637,11 @@ impl Plugin for DockerPlugin {
                 None => continue,
             };
             if container_name.is_empty() {
+                continue;
+            }
+
+            // Apply label filter when labels are populated (may be empty from list_containers).
+            if !self.container_passes_label_filter(&container.labels) {
                 continue;
             }
 
@@ -1756,6 +1788,92 @@ mod tests {
                 .as_deref(),
             Some("sha256:def456")
         );
+    }
+
+    // ── Label filter ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn discover_software_include_label_filter_skips_non_matching() {
+        let mock = Arc::new(MockDockerClient {
+            inspect_result: Some("sha256:abc123".to_string()),
+            containers: vec![
+                LocalContainerInfo {
+                    image: "nginx:latest".to_string(),
+                    names: vec!["managed-nginx".to_string()],
+                    labels: [("com.example.managed".to_string(), "true".to_string())]
+                        .into_iter()
+                        .collect(),
+                },
+                LocalContainerInfo {
+                    image: "nginx:latest".to_string(),
+                    names: vec!["unmanaged-nginx".to_string()],
+                    labels: Default::default(),
+                },
+            ],
+            ..Default::default()
+        });
+        let mut config = DockerConfig::default();
+        config
+            .include_labels
+            .insert("com.example.managed".to_string(), "true".to_string());
+        let plugin = DockerPlugin::new_for_test(config, test_executor(), mock).unwrap();
+        let discoveries = plugin.discover_software().await.unwrap();
+        assert_eq!(discoveries.len(), 1);
+        assert_eq!(discoveries[0].qualifier.as_deref(), Some("managed-nginx"));
+    }
+
+    #[tokio::test]
+    async fn discover_software_exclude_label_filter_skips_excluded() {
+        let mock = Arc::new(MockDockerClient {
+            inspect_result: Some("sha256:abc123".to_string()),
+            containers: vec![
+                LocalContainerInfo {
+                    image: "nginx:latest".to_string(),
+                    names: vec!["prod-nginx".to_string()],
+                    labels: Default::default(),
+                },
+                LocalContainerInfo {
+                    image: "nginx:latest".to_string(),
+                    names: vec!["dev-nginx".to_string()],
+                    labels: [("env".to_string(), "dev".to_string())]
+                        .into_iter()
+                        .collect(),
+                },
+            ],
+            ..Default::default()
+        });
+        let mut config = DockerConfig::default();
+        config
+            .exclude_labels
+            .insert("env".to_string(), "dev".to_string());
+        let plugin = DockerPlugin::new_for_test(config, test_executor(), mock).unwrap();
+        let discoveries = plugin.discover_software().await.unwrap();
+        assert_eq!(discoveries.len(), 1);
+        assert_eq!(discoveries[0].qualifier.as_deref(), Some("prod-nginx"));
+    }
+
+    #[tokio::test]
+    async fn discover_software_no_label_filter_includes_all() {
+        let mock = Arc::new(MockDockerClient {
+            inspect_result: Some("sha256:abc123".to_string()),
+            containers: vec![
+                LocalContainerInfo {
+                    image: "nginx:latest".to_string(),
+                    names: vec!["a".to_string()],
+                    labels: Default::default(),
+                },
+                LocalContainerInfo {
+                    image: "nginx:latest".to_string(),
+                    names: vec!["b".to_string()],
+                    labels: [("x".to_string(), "y".to_string())].into_iter().collect(),
+                },
+            ],
+            ..Default::default()
+        });
+        let plugin =
+            DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+        let discoveries = plugin.discover_software().await.unwrap();
+        assert_eq!(discoveries.len(), 2);
     }
 
     // ── ContainerRuntime detection ────────────────────────────────────────────

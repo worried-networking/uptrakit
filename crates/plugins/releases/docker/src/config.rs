@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
 use uptrakit_plugin_infrastructure_core::{SecretMasking, SecretString};
@@ -123,6 +125,19 @@ pub struct DockerConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_pull_command: Option<String>,
 
+    /// Include only containers that have ALL of these labels with matching values.
+    ///
+    /// An empty map (the default) means no filter — all containers are included.
+    /// Keys must be non-empty and ≤ 253 characters; values must be ≤ 4 096 characters.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub include_labels: HashMap<String, String>,
+
+    /// Exclude containers that have ANY of these labels with matching values.
+    ///
+    /// An empty map (the default) means no filter. Applied after `include_labels`.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub exclude_labels: HashMap<String, String>,
+
     /// TLS configuration for encrypted TCP connections to a remote Docker daemon.
     ///
     /// Only used when `docker_host` starts with `tcp://` or `http://`.
@@ -212,6 +227,29 @@ impl DockerConfig {
             }
         }
 
+        for (map_name, map) in [
+            ("include_labels", &self.include_labels),
+            ("exclude_labels", &self.exclude_labels),
+        ] {
+            for (key, value) in map {
+                if key.is_empty() {
+                    bail!(DockerError::Configuration(format!(
+                        "{map_name}: label key must not be empty"
+                    )));
+                }
+                if key.len() > 253 {
+                    bail!(DockerError::Configuration(format!(
+                        "{map_name}: label key '{key}' exceeds maximum length of 253 characters"
+                    )));
+                }
+                if value.len() > 4096 {
+                    bail!(DockerError::Configuration(format!(
+                        "{map_name}: value for label '{key}' exceeds maximum length of 4096 characters"
+                    )));
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -243,6 +281,8 @@ impl DockerConfig {
             && self.post_pull_command.is_none()
             && self.container_runtime == ContainerRuntime::Auto
             && self.tls.is_none()
+            && self.include_labels.is_empty()
+            && self.exclude_labels.is_empty()
     }
 }
 
@@ -711,6 +751,68 @@ mod tests {
         let deserialized: DockerConfig = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized.tracked_tag, config.tracked_tag);
         assert_eq!(deserialized.post_pull_command, config.post_pull_command);
+    }
+
+    // ── Label filter validation ──────────────────────────────────────────────
+
+    #[test]
+    fn validation_rejects_empty_label_key() {
+        let mut config = DockerConfig::default();
+        config
+            .include_labels
+            .insert(String::new(), "val".to_string());
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("must not be empty")
+        );
+    }
+
+    #[test]
+    fn validation_rejects_label_key_over_253() {
+        let mut config = DockerConfig::default();
+        config
+            .include_labels
+            .insert("x".repeat(254), "val".to_string());
+        assert!(config.validate().unwrap_err().to_string().contains("253"));
+    }
+
+    #[test]
+    fn validation_rejects_label_value_over_4096() {
+        let mut config = DockerConfig::default();
+        config
+            .include_labels
+            .insert("key".to_string(), "v".repeat(4097));
+        assert!(config.validate().unwrap_err().to_string().contains("4096"));
+    }
+
+    #[test]
+    fn validation_passes_valid_labels() {
+        let mut config = DockerConfig::default();
+        config
+            .include_labels
+            .insert("com.example.managed".to_string(), "true".to_string());
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn is_discover_all_mode_false_when_include_labels_set() {
+        let mut config = DockerConfig::default();
+        config
+            .include_labels
+            .insert("app".to_string(), "myapp".to_string());
+        assert!(!config.is_discover_all_mode());
+    }
+
+    #[test]
+    fn is_discover_all_mode_false_when_exclude_labels_set() {
+        let mut config = DockerConfig::default();
+        config
+            .exclude_labels
+            .insert("env".to_string(), "dev".to_string());
+        assert!(!config.is_discover_all_mode());
     }
 
     // ── DockerTlsConfig validation ───────────────────────────────────────────
