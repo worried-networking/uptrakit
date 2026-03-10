@@ -8,6 +8,13 @@ use uptrakit_notification_plugin_registry::NotificationOps;
 
 use super::events::NotificationEvent;
 
+/// Bounded capacity for the notification dispatcher channel.
+///
+/// Limits memory consumption under bulk update completions that generate many
+/// simultaneous notification events. When the channel is full, events are
+/// dropped and a warning is logged (fire-and-forget semantics).
+const NOTIFICATION_DISPATCHER_CAPACITY: usize = 4096;
+
 /// Fire-and-forget notification dispatcher.
 ///
 /// Event producers call `dispatch()` to enqueue events. The background
@@ -16,7 +23,7 @@ use super::events::NotificationEvent;
 /// surface to event producers.
 #[derive(Clone)]
 pub struct NotificationDispatcher {
-    tx: mpsc::UnboundedSender<NotificationEvent>,
+    tx: mpsc::Sender<NotificationEvent>,
 }
 
 impl NotificationDispatcher {
@@ -27,7 +34,7 @@ impl NotificationDispatcher {
         callback_base_url: String,
         settings: crate::settings::Settings,
     ) -> Self {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(NOTIFICATION_DISPATCHER_CAPACITY);
         tokio::spawn(dispatch_loop(
             db,
             notification_ops,
@@ -41,11 +48,20 @@ impl NotificationDispatcher {
     /// Enqueue a notification event for background processing.
     ///
     /// This never blocks and never fails from the caller's perspective.
+    /// If the channel is full, the event is dropped and a warning is logged.
     /// If the channel is closed (dispatcher shut down), the event is silently dropped.
     #[tracing::instrument(skip_all)]
     pub fn dispatch(&self, event: NotificationEvent) {
-        if let Err(e) = self.tx.send(event) {
-            tracing::warn!(error = %e, "notification dispatcher channel closed, dropping event");
+        match self.tx.try_send(event) {
+            Ok(()) => {}
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                tracing::warn!(
+                    "notification dispatcher channel full (capacity: {NOTIFICATION_DISPATCHER_CAPACITY}), dropping event"
+                );
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                tracing::warn!("notification dispatcher channel closed, dropping event");
+            }
         }
     }
 }
@@ -94,7 +110,7 @@ async fn dispatch_loop(
     notification_ops: Arc<dyn NotificationOps>,
     callback_base_url: String,
     settings: crate::settings::Settings,
-    mut rx: mpsc::UnboundedReceiver<NotificationEvent>,
+    mut rx: mpsc::Receiver<NotificationEvent>,
 ) {
     use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
     use time::OffsetDateTime;
