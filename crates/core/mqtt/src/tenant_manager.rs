@@ -408,6 +408,16 @@ impl TenantManager {
         let topic_prefix = &state.topic_prefix;
         let ha_prefix = &state.ha_discovery_prefix;
 
+        // Build a host_id → metadata lookup for enriching HA discovery configs.
+        let meta_map: std::collections::HashMap<
+            uuid::Uuid,
+            &uptrakit_internal_wire::MqttHostMetadata,
+        > = self
+            .host_metadata
+            .get(&tenant_id)
+            .map(|v| v.iter().map(|m| (m.host_id, m)).collect())
+            .unwrap_or_default();
+
         // Track which hosts we've already published hostname/friendly_name for.
         let mut published_hosts = std::collections::HashSet::new();
 
@@ -508,6 +518,12 @@ impl TenantManager {
                         host.host_id,
                     );
                     let config_topic = crate::ha_discovery::discovery_config_topic(ha_prefix, &uid);
+                    let meta = meta_map.get(&host.host_id);
+                    let os_info = crate::ha_discovery::HostOsInfo {
+                        os_type: meta.and_then(|m| m.os_type.as_deref()),
+                        os_version: meta.and_then(|m| m.os_version.as_deref()),
+                        architecture: meta.and_then(|m| m.architecture.as_deref()),
+                    };
                     let config_json = crate::ha_discovery::build_discovery_config(
                         topic_prefix,
                         tenant_id,
@@ -519,6 +535,7 @@ impl TenantManager {
                             url: host.release_url.as_deref(),
                             notes: host.release_notes.as_deref(),
                         },
+                        os_info,
                     );
                     let config_bytes = config_json.to_string().into_bytes();
                     if let Err(e) = state
@@ -601,11 +618,27 @@ impl TenantManager {
         let topic_prefix = &state.topic_prefix;
         let ha_prefix = &state.ha_discovery_prefix;
 
+        // Build a host_id → metadata lookup for enriching HA discovery configs.
+        let meta_map: std::collections::HashMap<
+            uuid::Uuid,
+            &uptrakit_internal_wire::MqttHostMetadata,
+        > = self
+            .host_metadata
+            .get(&tenant_id)
+            .map(|v| v.iter().map(|m| (m.host_id, m)).collect())
+            .unwrap_or_default();
+
         for item in items {
             for host in &item.hosts {
                 let uid =
                     crate::ha_discovery::unique_id(tenant_id, item.software_item_id, host.host_id);
                 let config_topic = crate::ha_discovery::discovery_config_topic(ha_prefix, &uid);
+                let meta = meta_map.get(&host.host_id);
+                let os_info = crate::ha_discovery::HostOsInfo {
+                    os_type: meta.and_then(|m| m.os_type.as_deref()),
+                    os_version: meta.and_then(|m| m.os_version.as_deref()),
+                    architecture: meta.and_then(|m| m.architecture.as_deref()),
+                };
                 let config_json = crate::ha_discovery::build_discovery_config(
                     topic_prefix,
                     tenant_id,
@@ -617,6 +650,7 @@ impl TenantManager {
                         url: host.release_url.as_deref(),
                         notes: host.release_notes.as_deref(),
                     },
+                    os_info,
                 );
                 let config_bytes = config_json.to_string().into_bytes();
                 if let Err(e) = state
@@ -655,6 +689,16 @@ impl TenantManager {
         let tenant_id = state.tenant_id;
         let topic_prefix = &state.topic_prefix;
         let ha_prefix = &state.ha_discovery_prefix;
+
+        // Build a host_id → metadata lookup for enriching HA discovery configs.
+        let meta_map: std::collections::HashMap<
+            uuid::Uuid,
+            &uptrakit_internal_wire::MqttHostMetadata,
+        > = self
+            .host_metadata
+            .get(&tenant_id)
+            .map(|v| v.iter().map(|m| (m.host_id, m)).collect())
+            .unwrap_or_default();
 
         for hs in host_states {
             // Publish per-host identity topics (hostname, friendly_name).
@@ -734,11 +778,18 @@ impl TenantManager {
                 let config_topic = crate::ha_discovery::host_packages_discovery_config_topic(
                     ha_prefix, tenant_id, hs.host_id,
                 );
+                let meta = meta_map.get(&hs.host_id);
+                let os_info = crate::ha_discovery::HostOsInfo {
+                    os_type: meta.and_then(|m| m.os_type.as_deref()),
+                    os_version: meta.and_then(|m| m.os_version.as_deref()),
+                    architecture: meta.and_then(|m| m.architecture.as_deref()),
+                };
                 let config_json = crate::ha_discovery::build_host_packages_discovery_config(
                     topic_prefix,
                     tenant_id,
                     hs.host_id,
                     display_name(&hs.friendly_name, &hs.hostname),
+                    os_info,
                 );
                 let config_bytes = config_json.to_string().into_bytes();
                 if let Err(e) = state
@@ -828,11 +879,18 @@ impl TenantManager {
                 let sec_config_topic = crate::ha_discovery::host_security_discovery_config_topic(
                     ha_prefix, tenant_id, hs.host_id,
                 );
+                let meta = meta_map.get(&hs.host_id);
+                let os_info = crate::ha_discovery::HostOsInfo {
+                    os_type: meta.and_then(|m| m.os_type.as_deref()),
+                    os_version: meta.and_then(|m| m.os_version.as_deref()),
+                    architecture: meta.and_then(|m| m.architecture.as_deref()),
+                };
                 let sec_config_json = crate::ha_discovery::build_host_security_discovery_config(
                     topic_prefix,
                     tenant_id,
                     hs.host_id,
                     display_name(&hs.friendly_name, &hs.hostname),
+                    os_info,
                 );
                 let sec_config_bytes = sec_config_json.to_string().into_bytes();
                 if let Err(e) = state
@@ -875,16 +933,33 @@ impl TenantManager {
         let topic_prefix = &state.topic_prefix;
         let ha_prefix = &state.ha_discovery_prefix;
 
+        // Build a host_id → metadata lookup for enriching HA discovery configs.
+        let meta_map: std::collections::HashMap<
+            uuid::Uuid,
+            &uptrakit_internal_wire::MqttHostMetadata,
+        > = self
+            .host_metadata
+            .get(&tenant_id)
+            .map(|v| v.iter().map(|m| (m.host_id, m)).collect())
+            .unwrap_or_default();
+
         for hs in host_states {
             // Packages entity config.
             let config_topic = crate::ha_discovery::host_packages_discovery_config_topic(
                 ha_prefix, tenant_id, hs.host_id,
             );
+            let meta = meta_map.get(&hs.host_id);
+            let os_info = crate::ha_discovery::HostOsInfo {
+                os_type: meta.and_then(|m| m.os_type.as_deref()),
+                os_version: meta.and_then(|m| m.os_version.as_deref()),
+                architecture: meta.and_then(|m| m.architecture.as_deref()),
+            };
             let config_json = crate::ha_discovery::build_host_packages_discovery_config(
                 topic_prefix,
                 tenant_id,
                 hs.host_id,
                 display_name(&hs.friendly_name, &hs.hostname),
+                os_info,
             );
             let config_bytes = config_json.to_string().into_bytes();
             if let Err(e) = state
@@ -904,11 +979,18 @@ impl TenantManager {
             let sec_config_topic = crate::ha_discovery::host_security_discovery_config_topic(
                 ha_prefix, tenant_id, hs.host_id,
             );
+            let meta = meta_map.get(&hs.host_id);
+            let os_info = crate::ha_discovery::HostOsInfo {
+                os_type: meta.and_then(|m| m.os_type.as_deref()),
+                os_version: meta.and_then(|m| m.os_version.as_deref()),
+                architecture: meta.and_then(|m| m.architecture.as_deref()),
+            };
             let sec_config_json = crate::ha_discovery::build_host_security_discovery_config(
                 topic_prefix,
                 tenant_id,
                 hs.host_id,
                 display_name(&hs.friendly_name, &hs.hostname),
+                os_info,
             );
             let sec_config_bytes = sec_config_json.to_string().into_bytes();
             if let Err(e) = state
@@ -1017,9 +1099,11 @@ impl TenantManager {
                     tenant_id,
                     host.host_id,
                     display_name(&host.friendly_name, &host.hostname),
-                    host.os_type.as_deref(),
-                    host.os_version.as_deref(),
-                    host.architecture.as_deref(),
+                    crate::ha_discovery::HostOsInfo {
+                        os_type: host.os_type.as_deref(),
+                        os_version: host.os_version.as_deref(),
+                        architecture: host.architecture.as_deref(),
+                    },
                 );
                 let config_bytes = config_json.to_string().into_bytes();
                 if let Err(e) = state
@@ -1126,9 +1210,11 @@ impl TenantManager {
         let friendly_name: &str = metadata_entry
             .map(|h| display_name(h.friendly_name.as_str(), h.hostname.as_str()))
             .unwrap_or(host_id_str.as_str());
-        let os_type = metadata_entry.and_then(|h| h.os_type.as_deref());
-        let os_version = metadata_entry.and_then(|h| h.os_version.as_deref());
-        let architecture = metadata_entry.and_then(|h| h.architecture.as_deref());
+        let os_info = crate::ha_discovery::HostOsInfo {
+            os_type: metadata_entry.and_then(|h| h.os_type.as_deref()),
+            os_version: metadata_entry.and_then(|h| h.os_version.as_deref()),
+            architecture: metadata_entry.and_then(|h| h.architecture.as_deref()),
+        };
 
         let config_topic = crate::ha_discovery::host_connectivity_discovery_config_topic(
             ha_prefix, tenant_id, host_id,
@@ -1138,9 +1224,7 @@ impl TenantManager {
             tenant_id,
             host_id,
             friendly_name,
-            os_type,
-            os_version,
-            architecture,
+            os_info,
         );
         let config_bytes = config_json.to_string().into_bytes();
         if let Err(e) = state
