@@ -96,11 +96,6 @@ Main functionality that delivers the core value proposition.
 
 ### Pending
 
-- [ ] yum/dnf and pacman plugins
-  - **Category**: Plugins | **Impact**: Medium | **Effort**: Medium
-  - Add package-manager plugins for Red Hat / Fedora (yum/dnf) and Arch Linux (pacman). Follow the
-    existing APT plugin pattern: `detect_installed_version`, `fetch_releases`,
-    `execute_update`, `DetectHostCompatibility`.
 - [ ] Version caching with TTL
   - **Category**: Core / Performance | **Impact**: Medium | **Effort**: Low-Medium
   - Cache `fetch_releases` responses with a configurable TTL to reduce API calls and speed up
@@ -327,22 +322,88 @@ guide, plugin system architecture docs.
 
 ### Additional Plugins
 
+#### Package Manager Plugins
+
+Ranked by potential audience coverage and likeliness of using uptrakit for update tracking.
+
+- [ ] DNF plugin (Fedora, RHEL, Rocky Linux, AlmaLinux)
+  - **Category**: Plugins | **Impact**: High | **Effort**: Medium
+  - Package manager plugin for Red Hat-family Linux — the dominant distribution family in
+    enterprise environments. Detect via `dnf list installed`, fetch via `dnf check-update` after
+    `dnf makecache` (`RefreshPackageIndex`), update via `sudo dnf upgrade -y`. Batch-capable
+    (space-separated package lists). `PostUpdateHook` checks `needs-restarting -r` or
+    `/var/run/reboot-required`. Discovery via `dnf list installed`. DetectHostCompatibility:
+    `which dnf`.
+- [ ] Pacman plugin (Arch Linux, Manjaro, EndeavourOS)
+  - **Category**: Plugins | **Impact**: High | **Effort**: Medium
+  - Package manager plugin for Arch-family rolling-release Linux. Rolling releases mean constant
+    version churn — a strong use case for uptrakit tracking. Detect via `pacman -Qi`, fetch via
+    `pacman -Si` after `sudo pacman -Sy` (`RefreshPackageIndex`), update via
+    `sudo pacman -S --noconfirm`. Discovery via `pacman -Qe` (explicitly installed packages).
+    DetectHostCompatibility: `which pacman`.
+- [ ] APK plugin (Alpine Linux)
+  - **Category**: Plugins | **Impact**: High | **Effort**: Low-Medium
+  - Package manager plugin for Alpine Linux, pervasive in LXC containers on Proxmox hosts — high
+    synergy with the existing Proxmox infrastructure plugin. Detect via `apk list -I`, fetch via
+    `apk list -u` after `sudo apk update` (`RefreshPackageIndex`), update via
+    `sudo apk add <pkg>=<version>`. Batch-capable (space-separated names). Discovery via
+    `apk info -v`. DetectHostCompatibility: `which apk`.
+- [ ] pip plugin (Python packages)
+  - **Category**: Plugins | **Impact**: Medium-High | **Effort**: Medium
+  - Tracks Python tools installed globally or in `~/.local/bin` (`certbot`, `ansible`, `awscli`,
+    etc.) — extremely common on self-hosted servers. `ControllerSideFetchReleases` via PyPI JSON
+    API (`pypi.org/pypi/<pkg>/json`), no auth required. Detect via `pip show`, batch detect via
+    `pip list --format=json` (filter in memory). Discovery via `pip list --not-required`.
+    DetectHostCompatibility: `which pip` or `which pip3`.
+- [ ] pkg plugin (FreeBSD)
+  - **Category**: Plugins | **Impact**: Medium | **Effort**: Medium
+  - FreeBSD package manager. FreeBSD powers dedicated self-hosted appliances (TrueNAS CORE,
+    OPNsense-derived setups). Detect via `pkg info`, fetch via `pkg rquery '%v'` after
+    `sudo pkg update` (`RefreshPackageIndex`), update via `sudo pkg install -y`. Discovery via
+    `pkg query '%n %v' -a`. DetectHostCompatibility: `which pkg` combined with `pkg -N`
+    (bootstrapped check).
+- [ ] Snap plugin
+  - **Category**: Plugins | **Impact**: Medium | **Effort**: Medium
+  - Snap packages on Ubuntu servers. Most useful when snap auto-update is disabled or for auditing
+    the installed channel/version. Channel-based versioning (stable, candidate, beta, edge) —
+    exact version pinning is unsupported by snap design; updates refresh to the latest on the
+    tracked channel via `sudo snap refresh <snap>`. Detect via `snap list`, batch detect from a
+    single `snap list` call (filter in memory). Discovery via `snap list`. DetectHostCompatibility:
+    `which snap`.
+- [ ] Flatpak plugin
+  - **Category**: Plugins | **Impact**: Medium | **Effort**: Medium
+  - Flatpak apps on managed Linux desktops and kiosk systems. App IDs use reverse-DNS notation
+    (`com.example.App`) — validate identifiers accordingly. Detect via
+    `flatpak info --show-metadata`, fetch via `flatpak remote-info`. Batch detect from a single
+    `flatpak list --app` call (filter in memory). Discovery via `flatpak list --app`.
+    DetectHostCompatibility: `which flatpak`.
+- [ ] gem plugin (Ruby gems)
+  - **Category**: Plugins | **Impact**: Medium | **Effort**: Medium
+  - System Ruby gems for self-hosted apps (Redmine, Mastodon, Jekyll). `ControllerSideFetchReleases`
+    via RubyGems.org REST API (`rubygems.org/api/v1/gems/<name>.json`), mirroring the npm plugin
+    pattern. Detect via `gem list`, update via `sudo gem install <name>:<version>`. Batch detect
+    from a single `gem list --local` call (filter in memory). DetectHostCompatibility: `which gem`.
+- [ ] Zypper plugin (openSUSE, SUSE Enterprise)
+  - **Category**: Plugins | **Impact**: Medium | **Effort**: Medium
+  - Package manager for openSUSE Leap/Tumbleweed and SUSE Linux Enterprise. SUSE environments have
+    strong patch-compliance culture that aligns with uptrakit's value proposition. Detect via
+    `zypper info`, fetch via `zypper -n list-updates` after `sudo zypper refresh`
+    (`RefreshPackageIndex`), update via `sudo zypper install -y`. Discovery via
+    `zypper -n search -i`. DetectHostCompatibility: `which zypper`.
+- [ ] cargo-install plugin (Rust binaries)
+  - **Category**: Plugins | **Impact**: Low-Medium | **Effort**: Medium
+  - Tracks binaries installed via `cargo install` (`bat`, `ripgrep`, `fd`, `bottom`, etc.). Reads
+    `~/.cargo/.crates2.json` for installed package metadata — no external command needed for
+    detection. `ControllerSideFetchReleases` via crates.io REST API; must include the required
+    `User-Agent` header per crates.io policy. Update via
+    `cargo install <name> --version <ver> --locked`. DetectHostCompatibility: `which cargo`.
+
+#### Other Plugins
+
 - [ ] Custom script plugin
   - **Category**: Plugins | **Impact**: High | **Effort**: Medium
   - "Run arbitrary commands" plugin type with user-defined scripts for version detection, checking,
     and update execution. Needs script definition format, output parsing, and sandboxing.
-- [ ] pip/PyPI plugin
-  - **Category**: Plugins | **Impact**: Medium | **Effort**: Medium
-  - Python package manager plugin using `pip list --outdated` and PyPI JSON API.
-- [ ] Cargo/Rust plugin
-  - **Category**: Plugins | **Impact**: Low | **Effort**: Medium
-  - Track Rust toolchain and `cargo install`-ed binaries via crates.io API.
-- [ ] Flatpak plugin
-  - **Category**: Plugins | **Impact**: Medium | **Effort**: Medium
-  - Flatpak app tracking and updates via `flatpak list` / `flatpak update`.
-- [ ] Snap plugin
-  - **Category**: Plugins | **Impact**: Medium | **Effort**: Medium
-  - Snap package tracking via `snap list` / `snap refresh`.
 - [ ] AppImage plugin
   - **Category**: Plugins | **Impact**: Low | **Effort**: Medium-High
   - AppImage version tracking. No standard package manager; needs custom detection and update
