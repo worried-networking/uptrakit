@@ -866,34 +866,150 @@ pub struct InteractiveUpdateHandle {
     pub attention_rx: Option<mpsc::Receiver<()>>,
 }
 
+/// Tuple type for channels delivered from [`ForwardingInteractiveExecutor`]
+/// to [`execute_update_interactive`] via oneshot.
+#[cfg(feature = "interactive")]
+type InteractiveChannels = (mpsc::Sender<Vec<u8>>, mpsc::Sender<i32>, mpsc::Receiver<()>);
+
+/// A [`CommandExecutor`] wrapper that intercepts the first `execute()` call
+/// and promotes it to `execute_interactive()`.
+///
+/// This allows the generic update pipeline (which calls `plugin.execute_update`
+/// → `executor.execute()`) to transparently use a PTY without requiring any
+/// changes to the `Plugin` trait.
+///
+/// On the first `execute()` call:
+/// - Calls the inner executor's `execute_interactive()`.
+/// - Sends the interactive channels (`stdin_tx`, `signal_tx`, `attention_rx`)
+///   to the waiting [`execute_update_interactive`] function via a oneshot.
+/// - Drives the PTY to completion and returns the resulting `CommandOutput`.
+///
+/// If `execute_interactive()` fails (executor doesn't support it or setup
+/// errors), drops the oneshot sender and falls back to non-interactive
+/// `execute()`. Subsequent `execute()` calls always pass through to the
+/// inner executor.
+#[cfg(feature = "interactive")]
+struct ForwardingInteractiveExecutor {
+    inner: Arc<dyn CommandExecutor>,
+    channels_tx: parking_lot::Mutex<Option<tokio::sync::oneshot::Sender<InteractiveChannels>>>,
+}
+
+#[cfg(feature = "interactive")]
+#[async_trait::async_trait]
+impl CommandExecutor for ForwardingInteractiveExecutor {
+    async fn execute(
+        &self,
+        spec: &uptrakit_command::CommandSpec,
+        output_tx: &mpsc::Sender<uptrakit_command::UpdateOutputLine>,
+    ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+        // Take the sender on the first execute() call to attempt interactive
+        // promotion. Subsequent calls pass through directly.
+        let maybe_tx = self.channels_tx.lock().take();
+        if let Some(tx) = maybe_tx {
+            match self.inner.execute_interactive(spec, output_tx).await {
+                Ok(handle) => {
+                    // Deliver channels to execute_update_interactive.
+                    // Ignore send errors — the receiver may have been dropped if
+                    // the outer function timed out (shouldn't happen in practice).
+                    let _ = tx.send((handle.stdin_tx, handle.signal_tx, handle.attention_rx));
+                    // Drive the PTY process to completion.
+                    handle.completion.await.map_err(|e| {
+                        rootcause::report!(uptrakit_command::CommandError::UnsupportedOperation(
+                            format!("interactive task panicked: {e}")
+                        ))
+                    })?
+                }
+                Err(e) => {
+                    // Interactive not supported or setup failed — drop tx to
+                    // unblock execute_update_interactive with None channels,
+                    // then fall back to non-interactive execution.
+                    drop(tx);
+                    tracing::warn!(
+                        error = %e,
+                        "interactive execution unavailable, falling back to non-interactive"
+                    );
+                    self.inner.execute(spec, output_tx).await
+                }
+            }
+        } else {
+            self.inner.execute(spec, output_tx).await
+        }
+    }
+
+    async fn execute_quiet(
+        &self,
+        spec: &uptrakit_command::CommandSpec,
+    ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+        self.inner.execute_quiet(spec).await
+    }
+
+    fn supports_interactive(&self) -> bool {
+        self.inner.supports_interactive()
+    }
+
+    async fn execute_interactive(
+        &self,
+        spec: &uptrakit_command::CommandSpec,
+        output_tx: &mpsc::Sender<uptrakit_command::UpdateOutputLine>,
+    ) -> uptrakit_command::Result<uptrakit_command::InteractiveHandle> {
+        self.inner.execute_interactive(spec, output_tx).await
+    }
+}
+
 /// Execute an update interactively with PTY support.
 ///
-/// This runs the same update flow as [`execute_update`], but uses the
-/// executor's interactive mode for the main plugin command, keeping stdin
-/// open for forwarding and enabling attention detection.
+/// Runs the same update pipeline as [`execute_update`] but wraps the executor
+/// in a [`ForwardingInteractiveExecutor`] so that the plugin's first
+/// `execute()` call is promoted to `execute_interactive()`. This allocates a
+/// real PTY for the update command, making `/dev/tty` available and keeping
+/// stdin open for forwarding — without any changes to the `Plugin` trait.
 ///
-/// Pre/post hooks still run non-interactively — only the plugin's
-/// `execute_update` step gets a PTY.
+/// Pre/post hooks and version detection still run non-interactively via the
+/// inner executor's `execute()` / `execute_quiet()` paths. Only the plugin's
+/// primary `execute_update` call gets the PTY.
+///
+/// Returns an [`InteractiveUpdateHandle`] whose `stdin_tx`, `signal_tx`, and
+/// `attention_rx` are `Some(...)` when the executor supports interactive mode
+/// and the update reaches the plugin execution step. If the executor falls back
+/// to non-interactive (e.g. SSH executor without PTY support, or the update
+/// fails before reaching the plugin step), all three fields are `None` and the
+/// update still runs to completion via `handle`.
 #[cfg(feature = "interactive")]
 pub async fn execute_update_interactive(
     payload: ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
     output_tx: mpsc::Sender<UpdateOutputMessage>,
 ) -> InteractiveUpdateHandle {
-    // For now, run the full update pipeline including hooks non-interactively.
-    // The interactive PTY is used for the main command execution within the
-    // plugin. The executor's `execute_interactive` will be called by the
-    // plugin when it performs the actual install command.
-    //
-    // TODO: Thread the interactive handle through the plugin execution path
-    // once the plugin trait supports interactive mode.
-    let handle = tokio::spawn(async move { execute_update(payload, executor, output_tx).await });
+    let (channels_tx, channels_rx) = tokio::sync::oneshot::channel::<InteractiveChannels>();
 
-    InteractiveUpdateHandle {
-        handle,
-        stdin_tx: None,
-        signal_tx: None,
-        attention_rx: None,
+    let forwarding = Arc::new(ForwardingInteractiveExecutor {
+        inner: executor,
+        channels_tx: parking_lot::Mutex::new(Some(channels_tx)),
+    });
+
+    let handle = tokio::spawn(async move { execute_update(payload, forwarding, output_tx).await });
+
+    // Await delivery of the interactive channels from
+    // ForwardingInteractiveExecutor::execute(). This resolves when the plugin's
+    // first execute() call is intercepted and promoted to interactive mode.
+    //
+    // If the oneshot sender is dropped before sending (the update fails before
+    // reaching the plugin's execute step, or the executor falls back to
+    // non-interactive), channels_rx returns Err and we return None channels —
+    // the update still runs to completion via `handle`.
+    match channels_rx.await {
+        Ok((stdin_tx, signal_tx, attention_rx)) => InteractiveUpdateHandle {
+            handle,
+            stdin_tx: Some(stdin_tx),
+            signal_tx: Some(signal_tx),
+            attention_rx: Some(attention_rx),
+        },
+        Err(_) => InteractiveUpdateHandle {
+            handle,
+            stdin_tx: None,
+            signal_tx: None,
+            attention_rx: None,
+        },
     }
 }
 
