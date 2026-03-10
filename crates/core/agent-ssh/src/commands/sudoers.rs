@@ -328,4 +328,82 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn generate_sudoers_args_suffix_in_command_path() {
+        // The command_path field already includes the args_suffix (appended
+        // by bootstrap/sync). This test verifies the suffix is rendered verbatim.
+        let content = SudoersContent::SpecificCommands(vec![ResolvedSudoCommand {
+            command_path: "/usr/bin/apt-get update *".to_string(),
+            explanation: "Package index refresh requires root privileges".to_string(),
+            needs_setenv: true,
+        }]);
+        let text = generate_sudoers_content("alice", &content);
+
+        assert!(
+            text.contains("bob ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get update *")
+                || text.contains("alice ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get update *"),
+            "expected full sudoers line with args suffix: {text}"
+        );
+        assert!(text.contains("/usr/bin/apt-get update *"));
+    }
+
+    #[test]
+    fn generate_sudoers_multiple_entries_same_binary() {
+        // Multiple entries for the same binary (e.g. apt-get update * and
+        // apt-get install *) each generate their own sudoers line.
+        let content = SudoersContent::SpecificCommands(vec![
+            ResolvedSudoCommand {
+                command_path: "/usr/bin/apt-get update *".to_string(),
+                explanation: "Package index refresh requires root".to_string(),
+                needs_setenv: true,
+            },
+            ResolvedSudoCommand {
+                command_path: "/usr/bin/apt-get install *".to_string(),
+                explanation: "Package installation requires root".to_string(),
+                needs_setenv: true,
+            },
+            ResolvedSudoCommand {
+                command_path: "/usr/bin/apt-get -o Dir::Etc::Preferences=/tmp/uptrakit-apt-batch.pref upgrade *"
+                    .to_string(),
+                explanation: "Batch upgrade requires root".to_string(),
+                needs_setenv: true,
+            },
+        ]);
+        let text = generate_sudoers_content("uptrakit", &content);
+
+        assert!(text.contains("uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get update *"));
+        assert!(text.contains("uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get install *"));
+        assert!(text.contains(
+            "uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get -o Dir::Etc::Preferences=/tmp/uptrakit-apt-batch.pref upgrade *"
+        ));
+        // Should have 3 sudoers lines (one per entry)
+        let entry_count = text
+            .lines()
+            .filter(|l| l.starts_with("uptrakit ALL="))
+            .count();
+        assert_eq!(entry_count, 3, "expected 3 sudoers entries:\n{text}");
+    }
+
+    #[test]
+    fn generate_sudoers_setenv_absent_on_restricted_entries() {
+        // Restricted entries without needs_setenv must not have SETENV:.
+        let content = SudoersContent::SpecificCommands(vec![
+            ResolvedSudoCommand {
+                command_path: "/usr/bin/pacman -Sy".to_string(),
+                explanation: "Pacman sync".to_string(),
+                needs_setenv: false,
+            },
+            ResolvedSudoCommand {
+                command_path: "/usr/bin/pacman -S --noconfirm *".to_string(),
+                explanation: "Pacman install".to_string(),
+                needs_setenv: false,
+            },
+        ]);
+        let text = generate_sudoers_content("deploy", &content);
+
+        assert!(text.contains("deploy ALL=(root) NOPASSWD: /usr/bin/pacman -Sy"));
+        assert!(text.contains("deploy ALL=(root) NOPASSWD: /usr/bin/pacman -S --noconfirm *"));
+        assert!(!text.contains("SETENV:"));
+    }
 }
