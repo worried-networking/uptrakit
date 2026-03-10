@@ -19,6 +19,7 @@ use uptrakit_plugin_package_manager_mas::{MasConfig, MasPlugin};
 use uptrakit_plugin_package_manager_npm::{NpmConfig, NpmPlugin};
 use uptrakit_plugin_package_manager_pacman::{PacmanConfig, PacmanPlugin};
 use uptrakit_plugin_package_manager_pkg::{PkgConfig, PkgPlugin};
+use uptrakit_plugin_package_manager_snap::{SnapConfig, SnapPlugin};
 use uptrakit_plugin_releases_docker::{DockerConfig, DockerPlugin};
 use uptrakit_plugin_releases_forgejo::{ForgejoConfig, ForgejoPlugin};
 use uptrakit_plugin_releases_github::{GitHubConfig, GitHubPlugin};
@@ -506,6 +507,7 @@ register_plugins! {
     PackageManagerPacman          => { config: PacmanConfig,               plugin: PacmanPlugin },
     PackageManagerPkg             => { config: PkgConfig,                  plugin: PkgPlugin },
     PackageManagerApk             => { config: ApkConfig,                  plugin: ApkPlugin },
+    PackageManagerSnap            => { config: SnapConfig,                 plugin: SnapPlugin },
     GenericShell                  => { config: ShellConfig,                plugin: ShellPlugin },
     InfrastructureProxmox         => {
         config: ProxmoxConfig,
@@ -1517,6 +1519,115 @@ mod tests {
         assert!(
             types.contains(&PluginType::PackageManagerMas),
             "Mac App Store plugin should be in discovery_plugins()"
+        );
+    }
+
+    // ── Snap plugin tests ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn create_plugin_snap() {
+        let config = serde_json::json!({});
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::PackageManagerSnap, &config, test_executor())
+                .await;
+        assert!(plugin.is_ok());
+    }
+
+    #[tokio::test]
+    async fn create_plugin_snap_with_channel() {
+        let config = serde_json::json!({"channel": "latest/stable"});
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::PackageManagerSnap, &config, test_executor())
+                .await;
+        assert!(plugin.is_ok());
+    }
+
+    #[test]
+    fn validate_snap_config() {
+        let config = serde_json::json!({});
+        assert!(PluginRegistry::validate_config(PluginType::PackageManagerSnap, &config).is_ok());
+    }
+
+    #[test]
+    fn validate_snap_config_invalid_channel_fails() {
+        let config = serde_json::json!({"channel": "latest/nightly"});
+        assert!(PluginRegistry::validate_config(PluginType::PackageManagerSnap, &config).is_err());
+    }
+
+    #[tokio::test]
+    async fn snap_plugin_capabilities() {
+        let config = serde_json::json!({});
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::PackageManagerSnap, &config, test_executor())
+                .await
+                .unwrap();
+        assert!(plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
+        ));
+        assert!(plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility
+        ));
+        // Snap does not need RefreshPackageIndex — snapd manages its own cache.
+        assert!(!plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::RefreshPackageIndex
+        ));
+    }
+
+    #[test]
+    fn mask_config_secrets_snap_is_noop() {
+        let config = serde_json::json!({"channel": "latest/stable"});
+        let masked = PluginRegistry::mask_config_secrets(PluginType::PackageManagerSnap, &config);
+        assert_eq!(masked, config);
+    }
+
+    #[test]
+    fn validate_package_identifier_snap_valid() {
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::PackageManagerSnap, "vlc")
+                .is_ok()
+        );
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::PackageManagerSnap,
+                "hello-world"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_package_identifier_snap_hyphen_start_fails() {
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::PackageManagerSnap, "-invalid")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn validate_package_identifier_snap_uppercase_fails() {
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::PackageManagerSnap, "VLC")
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn snap_has_sudo_command_entry() {
+        let entries = PluginRegistry::all_required_sudo_commands().await;
+        let snap_entry = entries
+            .iter()
+            .find(|(pt, _)| *pt == PluginType::PackageManagerSnap)
+            .expect("Snap should have sudo command entries");
+        assert!(!snap_entry.1.is_empty());
+        assert_eq!(snap_entry.1[0].command, "snap");
+    }
+
+    #[test]
+    fn discovery_plugins_includes_snap() {
+        let types = PluginRegistry::discovery_plugins();
+        assert!(
+            types.contains(&PluginType::PackageManagerSnap),
+            "Snap plugin should be in discovery_plugins()"
         );
     }
 }

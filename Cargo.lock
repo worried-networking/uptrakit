@@ -6931,6 +6931,7 @@ dependencies = [
  "uptrakit-plugin-package-manager-npm",
  "uptrakit-plugin-package-manager-pacman",
  "uptrakit-plugin-package-manager-pkg",
+ "uptrakit-plugin-package-manager-snap",
  "uptrakit-plugin-releases-docker",
  "uptrakit-plugin-releases-forgejo",
  "uptrakit-plugin-releases-github",
