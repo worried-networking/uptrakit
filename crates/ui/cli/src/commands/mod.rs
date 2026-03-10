@@ -20,3 +20,4 @@ pub mod system_enrollment_tokens;
 pub mod system_services;
 pub mod tail;
 pub mod update;
+pub mod users;

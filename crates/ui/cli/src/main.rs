@@ -161,6 +161,21 @@ enum Commands {
         #[command(subcommand)]
         command: ExtensionsCommands,
     },
+    /// Manage users, roles, and access presets
+    Users {
+        #[command(subcommand)]
+        command: UsersCommands,
+    },
+    /// Manage roles and their permissions
+    Roles {
+        #[command(subcommand)]
+        command: RolesCommands,
+    },
+    /// List access presets
+    AccessPresets {
+        #[command(subcommand)]
+        command: AccessPresetsCommands,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -789,6 +804,59 @@ enum ExtensionsCommands {
     /// Dynamic extension subcommand (e.g., `extensions ssh-agent.hosts list-hosts`)
     #[command(external_subcommand)]
     Dynamic(Vec<OsString>),
+}
+
+#[derive(Debug, Subcommand)]
+enum UsersCommands {
+    /// List all users with their roles
+    List,
+    /// Show user details including roles and permissions
+    Show {
+        /// User UUID
+        id: Uuid,
+    },
+    /// Replace a user's roles
+    SetRoles {
+        /// User UUID
+        id: Uuid,
+        /// Role UUIDs to assign (replaces all existing roles)
+        #[arg(required = true)]
+        role_ids: Vec<Uuid>,
+    },
+    /// Activate a user
+    Activate {
+        /// User UUID
+        id: Uuid,
+    },
+    /// Deactivate a user
+    Deactivate {
+        /// User UUID
+        id: Uuid,
+    },
+    /// Apply an access preset to a user
+    ApplyPreset {
+        /// User UUID
+        id: Uuid,
+        /// Preset name to apply
+        preset: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RolesCommands {
+    /// List all roles with their permissions
+    List,
+    /// Show role details including permissions
+    Show {
+        /// Role UUID
+        id: Uuid,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AccessPresetsCommands {
+    /// List all access presets
+    List,
 }
 
 #[derive(Debug, Subcommand)]
@@ -3677,6 +3745,112 @@ async fn run(cli: Cli) -> error::Result<()> {
                 output::print_output(format, &resp)?;
             }
         },
+        Commands::Users { command } => match command {
+            UsersCommands::List => {
+                let resp = commands::users::list(
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            UsersCommands::Show { id } => {
+                let resp = commands::users::show(
+                    &id,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            UsersCommands::SetRoles { id, role_ids } => {
+                let resp = commands::users::set_roles(
+                    &id,
+                    &role_ids,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            UsersCommands::Activate { id } => {
+                let resp = commands::users::set_active(
+                    &id,
+                    true,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            UsersCommands::Deactivate { id } => {
+                let resp = commands::users::set_active(
+                    &id,
+                    false,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            UsersCommands::ApplyPreset { id, preset } => {
+                let resp = commands::users::apply_preset(
+                    &id,
+                    &preset,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+        },
+        Commands::Roles { command } => match command {
+            RolesCommands::List => {
+                let resp = commands::users::list_roles(
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            RolesCommands::Show { id } => {
+                let resp = commands::users::show_role(
+                    &id,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+        },
+        Commands::AccessPresets { command } => match command {
+            AccessPresetsCommands::List => {
+                let resp = commands::users::list_presets(
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+        },
     }
     Ok(())
 }
@@ -5610,5 +5784,132 @@ mod tests {
     fn global_timeout_defaults_to_none() {
         let args = Cli::try_parse_from(["uptrakit", "hosts", "list"]).expect("should parse");
         assert!(args.timeout.is_none());
+    }
+
+    // ── Users commands ────────────────────────────────────────────────
+
+    #[test]
+    fn users_list_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "users", "list"]).expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::Users {
+                command: UsersCommands::List
+            })
+        ));
+    }
+
+    #[test]
+    fn users_show_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "users", "show", SVC_UUID]).expect("should parse");
+        match args.command {
+            Some(Commands::Users {
+                command: UsersCommands::Show { id },
+            }) => assert_eq!(id, uuid(SVC_UUID)),
+            _ => panic!("expected Users Show"),
+        }
+    }
+
+    #[test]
+    fn users_set_roles_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "users",
+            "set-roles",
+            SVC_UUID,
+            HOST_UUID,
+            ITEM_UUID,
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::Users {
+                command: UsersCommands::SetRoles { id, role_ids },
+            }) => {
+                assert_eq!(id, uuid(SVC_UUID));
+                assert_eq!(role_ids.len(), 2);
+                assert_eq!(role_ids[0], uuid(HOST_UUID));
+                assert_eq!(role_ids[1], uuid(ITEM_UUID));
+            }
+            _ => panic!("expected Users SetRoles"),
+        }
+    }
+
+    #[test]
+    fn users_activate_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "users", "activate", SVC_UUID]).expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::Users {
+                command: UsersCommands::Activate { .. }
+            })
+        ));
+    }
+
+    #[test]
+    fn users_deactivate_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "users", "deactivate", SVC_UUID])
+            .expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::Users {
+                command: UsersCommands::Deactivate { .. }
+            })
+        ));
+    }
+
+    #[test]
+    fn users_apply_preset_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "users", "apply-preset", SVC_UUID, "admin"])
+            .expect("should parse");
+        match args.command {
+            Some(Commands::Users {
+                command: UsersCommands::ApplyPreset { id, preset },
+            }) => {
+                assert_eq!(id, uuid(SVC_UUID));
+                assert_eq!(preset, "admin");
+            }
+            _ => panic!("expected Users ApplyPreset"),
+        }
+    }
+
+    // ── Roles commands ────────────────────────────────────────────────
+
+    #[test]
+    fn roles_list_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "roles", "list"]).expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::Roles {
+                command: RolesCommands::List
+            })
+        ));
+    }
+
+    #[test]
+    fn roles_show_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "roles", "show", SVC_UUID]).expect("should parse");
+        match args.command {
+            Some(Commands::Roles {
+                command: RolesCommands::Show { id },
+            }) => assert_eq!(id, uuid(SVC_UUID)),
+            _ => panic!("expected Roles Show"),
+        }
+    }
+
+    // ── Access Presets commands ────────────────────────────────────────
+
+    #[test]
+    fn access_presets_list_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "access-presets", "list"]).expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::AccessPresets {
+                command: AccessPresetsCommands::List
+            })
+        ));
     }
 }
