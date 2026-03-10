@@ -1,9 +1,9 @@
 //! Query helper that loads software state data for MQTT `SoftwareStates` push messages.
 
 use sea_orm::{ColumnTrait, EntityTrait, FromQueryResult, QueryFilter, QuerySelect};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uptrakit_internal_wire::{
-    MqttSoftwareStateHostEntry, MqttSoftwareStateItem, MqttSoftwareStatesPayload,
+    MqttHostSummary, MqttSoftwareStateHostEntry, MqttSoftwareStateItem, MqttSoftwareStatesPayload,
 };
 use uptrakit_shared_db::entity::{host, host_software_item, prelude::*, software_item};
 use uuid::Uuid;
@@ -16,9 +16,15 @@ struct HostSoftwareItemRow {
     installed_version: Option<String>,
     latest_version: Option<String>,
     latest_release_metadata: Option<serde_json::Value>,
+    update_category: String,
 }
 
 /// Load all software state data for a tenant and assemble a [`MqttSoftwareStatesPayload`].
+///
+/// Only **featured** software items are included as individual MQTT entities in
+/// `payload.items`. Non-featured items are aggregated into per-host summaries in
+/// `payload.host_summaries`. This mirrors the logic in
+/// `uptrakit-web-api-queries::queries::mqtt_software_states`.
 ///
 /// This function executes three bulk queries (no N+1) and is safe to call on
 /// every version-check result or update completion event.
@@ -50,6 +56,7 @@ pub async fn load_software_states_for_tenant(
     let item_ids: Vec<Uuid> = items.iter().map(|i| i.id).collect();
 
     // 3. Bulk-load host_software_item rows (including per-host latest_version) for all items.
+    //    Filter out deactivated rows to match the web-api-queries behavior.
     let hsi_rows: Vec<HostSoftwareItemRow> = HostSoftwareItem::find()
         .select_only()
         .column(host_software_item::Column::HostId)
@@ -57,14 +64,16 @@ pub async fn load_software_states_for_tenant(
         .column(host_software_item::Column::InstalledVersion)
         .column(host_software_item::Column::LatestVersion)
         .column(host_software_item::Column::LatestReleaseMetadata)
+        .column(host_software_item::Column::UpdateCategory)
         .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
+        .filter(host_software_item::Column::DeactivatedAt.is_null())
         .into_model::<HostSoftwareItemRow>()
         .all(db)
         .await?;
 
     // Collect distinct host_ids referenced in hsi_rows.
     let host_ids: Vec<Uuid> = {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = HashSet::new();
         hsi_rows
             .iter()
             .filter(|r| seen.insert(r.host_id))
@@ -86,6 +95,10 @@ pub async fn load_software_states_for_tenant(
             .collect()
     };
 
+    // Build a set of featured item IDs for distinguishing featured vs unfeatured.
+    let featured_item_ids: HashSet<Uuid> =
+        items.iter().filter(|i| i.featured).map(|i| i.id).collect();
+
     // Index hsi rows by software_item_id for O(1) lookup during assembly.
     let mut hsi_by_item: HashMap<Uuid, Vec<&HostSoftwareItemRow>> = HashMap::new();
     for row in &hsi_rows {
@@ -95,10 +108,15 @@ pub async fn load_software_states_for_tenant(
             .push(row);
     }
 
-    // 5. Assemble the payload.
+    // 5. Assemble the featured items payload (individual MQTT entities).
     let mut result_items: Vec<MqttSoftwareStateItem> = Vec::with_capacity(items.len());
 
     for item in &items {
+        // Only featured items get individual MQTT entities.
+        if !item.featured {
+            continue;
+        }
+
         let host_entries: Vec<MqttSoftwareStateHostEntry> = hsi_by_item
             .get(&item.id)
             .map(|links| {
@@ -152,10 +170,61 @@ pub async fn load_software_states_for_tenant(
         });
     }
 
+    // 6. Build per-host summaries for unfeatured items.
+    //    Group all unfeatured hsi_rows by host_id and compute aggregates.
+    let mut unfeatured_by_host: HashMap<Uuid, Vec<&HostSoftwareItemRow>> = HashMap::new();
+    for row in &hsi_rows {
+        if !featured_item_ids.contains(&row.software_item_id) {
+            unfeatured_by_host.entry(row.host_id).or_default().push(row);
+        }
+    }
+
+    let mut host_summaries: Vec<MqttHostSummary> = Vec::with_capacity(unfeatured_by_host.len());
+    for (host_id, rows) in unfeatured_by_host {
+        let Some(host) = active_hosts.get(&host_id) else {
+            continue;
+        };
+
+        let is_outdated = |r: &&&HostSoftwareItemRow| {
+            matches!(
+                (&r.installed_version, &r.latest_version),
+                (Some(installed), Some(latest)) if installed != latest
+            )
+        };
+        let total_count = rows.len() as u32;
+        let pending_count = rows.iter().filter(is_outdated).count() as u32;
+        let security_pending_count = rows
+            .iter()
+            .filter(|r| is_outdated(r) && r.update_category == "security")
+            .count() as u32;
+        let bugfix_count = rows
+            .iter()
+            .filter(|r| is_outdated(r) && r.update_category == "bugfix")
+            .count() as u32;
+        let feature_count = rows
+            .iter()
+            .filter(|r| is_outdated(r) && r.update_category == "feature")
+            .count() as u32;
+
+        host_summaries.push(MqttHostSummary {
+            host_id,
+            hostname: host.hostname.clone(),
+            friendly_name: host.friendly_name.clone(),
+            pending_count,
+            security_pending_count,
+            total_count,
+            // The scheduler-engine does not have access to update_history;
+            // updates are never triggered from this path, so this is always false.
+            update_in_progress: false,
+            bugfix_count,
+            feature_count,
+        });
+    }
+
     Ok(MqttSoftwareStatesPayload {
         tenant_id,
         items: result_items,
-        host_summaries: vec![],
+        host_summaries,
         hosts: vec![],
     })
 }
