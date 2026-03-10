@@ -69,6 +69,11 @@ is **skipped** in favour of those mechanisms.
   "tracked_tag": "latest",
   "auth": null,
   "docker_host": null,
+  "container_runtime": "auto",
+  "tls": null,
+  "include_labels": {},
+  "exclude_labels": {},
+  "use_system_credentials": false,
   "compose_restart": null,
   "post_pull_command": null
 }
@@ -79,6 +84,11 @@ is **skipped** in favour of those mechanisms.
 | `tracked_tag` | String \| `null` | No | tag from `package_identifier` | Override the tag to track (e.g. `"stable"`) |
 | `auth` | `DockerAuth` \| `null` | No | `null` | Registry authentication credentials |
 | `docker_host` | String \| `null` | No | `null` | Docker daemon endpoint override (see [Remote Docker via SSH](#remote-docker-via-ssh)) |
+| `container_runtime` | `"auto"` \| `"docker"` \| `"podman"` | No | `"auto"` | Runtime for SSH `dial-stdio` tunnelling; `auto` probes Docker then Podman |
+| `tls` | `DockerTlsConfig` \| `null` | No | `null` | TLS certificates for encrypted TCP daemon connections |
+| `include_labels` | `{String: String}` | No | `{}` | Include only containers with ALL specified labels |
+| `exclude_labels` | `{String: String}` | No | `{}` | Exclude containers matching ANY specified label |
+| `use_system_credentials` | Boolean | No | `false` | Read registry credentials from `~/.docker/config.json` |
 | `compose_restart` | `ComposeRestartConfig` \| `null` | No | `null` | Run `docker compose up` after pulling instead of auto-recreating containers |
 | `post_pull_command` | String \| `null` | No | `null` | Custom shell command to run after pulling (disables auto-recreate) |
 
@@ -95,6 +105,91 @@ An empty config object `{}` is valid. No field is required.
 ```
 
 Credentials are masked in API responses (`"***"` replaces the secret value).
+
+### container_runtime
+
+Controls which binary is invoked for `dial-stdio` SSH tunnelling. Only relevant when using the
+SSH agent (`uptrakit-agent-ssh`) with the automatic proxy — local connections use sockets
+directly and are unaffected.
+
+| Value | Behaviour |
+| --- | --- |
+| `"auto"` (default) | Probe remote host: try `docker` first, then `podman` |
+| `"docker"` | Always use `docker system dial-stdio` |
+| `"podman"` | Always use `podman system dial-stdio` |
+
+Podman 4.1 and later provide `podman system dial-stdio` as a Docker-compatible alternative.
+Use `"podman"` on hosts running RHEL 8/9, Fedora, Alma Linux, Rocky Linux, or any host where
+Podman is the primary container runtime and the `docker` alias is not present.
+
+### DockerTlsConfig
+
+TLS certificate paths for encrypted TCP connections. Only used when `docker_host` starts with
+`tcp://` or `http://`.
+
+```json
+{
+  "tls": {
+    "ca_cert_path": "/etc/docker/ca.pem",
+    "client_cert_path": "/etc/docker/cert.pem",
+    "client_key_path": "/etc/docker/key.pem"
+  }
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `ca_cert_path` | String \| `null` | No | CA certificate to verify the daemon |
+| `client_cert_path` | String \| `null` | No | Client certificate for mutual TLS |
+| `client_key_path` | String \| `null` | No | Client private key for mutual TLS |
+
+Paths must not contain `..` segments. When `tls` is set the plugin uses
+`bollard::Docker::connect_with_ssl()` instead of plain HTTP.
+
+### include_labels / exclude_labels
+
+Filter which containers the plugin discovers and manages based on Docker labels.
+
+```json
+{
+  "include_labels": { "com.example.managed": "true" },
+  "exclude_labels": { "env": "dev" }
+}
+```
+
+- **`include_labels`**: Only containers that have **all** listed labels with exact matching
+  values are included. Empty map = no filter (all containers pass).
+- **`exclude_labels`**: Containers that have **any** of the listed labels with exact matching
+  values are excluded. Applied after `include_labels`. Empty map = no filter.
+
+Filters apply in `discover_software()`, `detect_installed_version()`, and `execute_update()`.
+
+Label key constraints: non-empty, ≤ 253 characters. Label value constraint: ≤ 4 096 characters.
+
+### use_system_credentials
+
+When `true`, the plugin reads registry credentials from the Docker credential store on the
+host where it executes.
+
+```json
+{ "use_system_credentials": true }
+```
+
+**Resolution order** (explicit `auth` always wins):
+
+1. `auth` field in this config — used as-is if set.
+2. `~/.docker/config.json` on the execution host:
+   - `credHelpers.<registry>` → invokes `docker-credential-{helper} get` (local or via SSH).
+   - `auths.<registry>` → base64-decoded `username:password`.
+3. Unauthenticated — if nothing is found, the pull proceeds without credentials.
+
+For SSH agents the config file is read from the **remote host** via
+`cat ~/.docker/config.json` over the existing SSH session. This means credentials already
+configured on the managed host (e.g. from a previous `docker login`) are reused automatically.
+
+Credential helper names are validated to only contain `[a-zA-Z0-9_-]` characters to prevent
+command injection. Helpers time out after 5 seconds. Resolved credentials are cached for the
+lifetime of the plugin instance (one per registry).
 
 ### ComposeRestartConfig
 
@@ -195,13 +290,38 @@ same host are updated atomically.
 
 When `agent-ssh` connects to a remote host, it automatically tunnels Docker API traffic over the
 existing SSH session. The plugin starts a local Unix socket proxy that runs
-`docker system dial-stdio` on the remote host, then connects bollard to that proxy socket.
-You do not need to set `docker_host` manually; the tunnel is established automatically when
-the executor supports stdio tunnels and no explicit `docker_host` is configured.
+`docker system dial-stdio` (or `podman system dial-stdio` on Podman hosts) on the remote host,
+then connects bollard to that proxy socket. You do not need to set `docker_host` manually;
+the tunnel is established automatically when the executor supports stdio tunnels and no explicit
+`docker_host` is configured.
 
 This approach avoids spawning a second SSH connection (which can fail on hosts without the system
 `ssh` binary, such as Flatcar Container Linux) and reuses the authenticated russh session that is
 already established.
+
+### Podman hosts
+
+On hosts running Podman instead of Docker (common on RHEL 8/9, Fedora, Alma Linux, Rocky Linux,
+CentOS Stream), the default `Auto` runtime detection probes for `docker` first, then `podman`.
+When only Podman is found, the proxy automatically uses `podman system dial-stdio`.
+
+Set `container_runtime: "podman"` to skip detection and always use Podman:
+
+```json
+{ "container_runtime": "podman" }
+```
+
+### Rootless Docker and Podman
+
+For **local connections** (non-SSH), the plugin probes well-known socket paths in priority order
+when no explicit `docker_host` is set:
+
+1. `/var/run/docker.sock` (rootful Docker)
+2. `/run/user/{euid}/docker.sock` (rootless Docker)
+3. `/run/user/{euid}/podman/podman.sock` (rootless Podman)
+4. `/run/podman/podman.sock` (rootful Podman)
+
+The first accessible socket is used. Set `docker_host` to override this probing.
 
 To manually override the Docker daemon endpoint, set `docker_host` in the plugin config:
 
@@ -216,9 +336,10 @@ Supported endpoint formats:
 
 | Format | Description |
 | --- | --- |
-| (omitted) | Auto-tunnel via `docker system dial-stdio` when SSH, otherwise platform default |
+| (omitted) | Auto-tunnel via `dial-stdio` when SSH; probe sockets locally on Unix |
 | `unix:///path/to/docker.sock` | Unix socket at a custom path |
 | `http://host:2375` | Unencrypted HTTP |
+| `tcp://host:2376` + `tls` | Encrypted TCP (TLS) |
 
 ## Example Configurations
 
@@ -242,6 +363,51 @@ Package identifier: `nginx`
 ```
 
 Package identifier: `ghcr.io/myorg/myapp`
+
+### Podman host via SSH
+
+```json
+{
+  "container_runtime": "podman"
+}
+```
+
+Explicitly use `podman system dial-stdio` for the SSH tunnel. Useful when the managed host
+has Podman but no `docker` alias in `PATH`.
+
+### Remote Docker with TLS
+
+```json
+{
+  "docker_host": "tcp://docker-host:2376",
+  "tls": {
+    "ca_cert_path": "/etc/docker/ca.pem",
+    "client_cert_path": "/etc/docker/cert.pem",
+    "client_key_path": "/etc/docker/key.pem"
+  }
+}
+```
+
+### Discover only labelled containers
+
+```json
+{
+  "include_labels": { "com.example.managed": "true" }
+}
+```
+
+Only containers carrying the label `com.example.managed=true` are discovered and updated.
+
+### Use existing Docker login credentials
+
+```json
+{
+  "use_system_credentials": true
+}
+```
+
+Reads credentials from `~/.docker/config.json` on the host where the plugin runs (remote for
+SSH agents, local for local agents). Explicit `auth` takes priority if both are set.
 
 ### Track an image and restart via Docker Compose
 
