@@ -805,7 +805,7 @@ Published immediately on agent connect/disconnect via `ControllerMessage::HostCo
 | `crates/ui/web-api-queries/src/queries/mqtt_software_states.rs` | Bulk query loading enabled software items + host summaries (from `host_software_item`) + `build_host_metadata` (OS info, tags, agent info) |
 | `crates/ui/web-api/src/notification_service.rs` | `push_software_states_for_tenant` (local broadcast + optional NATS publish); `send_connectivity_update` (wraps `HostConnectivityUpdated`, local broadcast + NATS) |
 | `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs` | `MqttTriggerUpdate` and `MqttTriggerHostBatchUpdate` handlers |
-| `crates/ui/web-api-queries/src/queries/update_triggers.rs` | `trigger_update_for_host` (refactored into `validate_update_preconditions`, `create_update_history_record`, `dispatch_update_to_agent` layers); shared by REST, MQTT, and batch handlers |
+| `crates/ui/web-api-queries/src/queries/update_triggers.rs` | `trigger_update_for_host` (refactored into `validate_update_preconditions`, `create_update_history_record`, `dispatch_update_to_agent` layers); shared by REST, MQTT, and batch handlers; resolves `interactive` flag (caller + `config_prefers_interactive`) before `create_update_history_record` so the column is persisted accurately |
 | `crates/ui/web-api-queries/src/queries/update_batches.rs` | Batch update logic: `find_outdated_items_for_host`, `create_batch`, `dispatch_next_in_batch`, `trigger_all_host_batch_updates_for_host` |
 | `crates/ui/web-api/src/routes/update_batches.rs` | Batch update route handlers + SSE batch progress endpoint |
 | `crates/ui/web-api/src/batch_progress_broadcaster.rs` | `BatchProgressBroadcaster`: per-batch `broadcast` channels for SSE streaming |
