@@ -11,7 +11,7 @@ same plugin config.
 
 ## Plugin Types
 
-Uptrakit ships with fourteen built-in plugin types:
+Uptrakit ships with fifteen built-in plugin types:
 
 | Plugin type | Description | Autodiscovery |
 | --- | --- | --- |
@@ -29,6 +29,7 @@ Uptrakit ships with fourteen built-in plugin types:
 | `package_manager_pacman` | Tracks Arch Linux packages managed by Pacman. Installed versions are resolved locally by the agent using `pacman -Q`; latest versions are fetched from repositories using `pacman -Si`. Requires `sudo` access for updates and database sync. | Yes |
 | `package_manager_pkg` | Tracks packages managed by the BSD `pkg` tool (FreeBSD, TrueNAS SCALE, OPNsense, pfSense, DragonFly BSD). Installed and available versions are resolved locally by the agent. Requires `sudo` access for updates and index refresh. | Yes |
 | `package_manager_apk` | Tracks Alpine Linux packages managed by APK. Installed and latest versions are resolved locally by the agent using `apk`. Requires `sudo` access for updates and index refresh. | Yes |
+| `package_manager_snap` | Tracks Snap packages managed by `snapd` on Linux. Agent-side only. Discovers installed snaps, resolves upstream versions via `snap info`, and executes updates via `snap refresh`. Requires `sudo` access for updates. | Yes |
 
 ### `releases_github` configuration fields
 
@@ -346,6 +347,31 @@ and emits one `DiscoveryTarget` per package pointing to a shared `"APK"` config.
 - `apk add *` — for installing packages
 
 See [APK Plugin](plugins/apk.md) for full details.
+
+### `package_manager_snap` configuration fields
+
+The Snap plugin tracks packages installed via `snapd`. Version detection and updates run on the
+agent host; no controller-side network access is required.
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `channel` | No | Snap channel to track (e.g. `latest/stable`, `1.0/stable`, `edge`). Defaults to `latest/stable`. |
+
+**Package identifier format:** The Snap package name (e.g. `vlc`, `code`, `firefox`).
+Snap names are lowercase alphanumeric with hyphens, 2–40 characters, and must not start or end
+with a hyphen.
+
+**Discovery behaviour:** When the Snap plugin discovers installed packages, it emits one
+`DiscoveryTarget` per user-installed snap pointing to a shared plugin config named `"Snap"` with
+an empty config (`{}`). Infrastructure and base snaps (`core*`, `snapd`, `bare`) are excluded
+from discovery automatically.
+
+**Updates are channel-based.** `snap refresh <name>` tracks the configured channel rather than
+installing a specific version string. The target version shown in Uptrakit is informational;
+snap automatically installs the latest revision on the channel.
+
+**Requires `sudo`.** Snap refresh requires root. Uptrakit configures passwordless sudo for the
+`snap` command via `uptrakit-agent bootstrap`. See [Snap Plugin](snap-plugin.md) for full details.
 
 ## Role-Based Host Assignments
 
