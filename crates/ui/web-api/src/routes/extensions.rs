@@ -90,8 +90,8 @@ pub async fn list_extension_providers(
         ExtensionOwner::NotFound => {
             error_response_with_code(StatusCode::NOT_FOUND, "Extension not found", "not_found")
         }
-        ExtensionOwner::Plugin => {
-            // Plugin-backed extensions have no service providers.
+        ExtensionOwner::Plugin | ExtensionOwner::Notification => {
+            // Plugin-backed and notification extensions have no service providers.
             (StatusCode::OK, Json(Vec::<ExtensionProviderInfo>::new())).into_response()
         }
         ExtensionOwner::Service { providers } => {
@@ -190,6 +190,21 @@ pub async fn invoke_action(
                     error_response_with_code(StatusCode::UNPROCESSABLE_ENTITY, msg, "action_failed")
                 }
             };
+        }
+        ExtensionOwner::Notification => {
+            tracing::debug!(
+                extension_id = %extension_id,
+                action_id = %action_id,
+                "dispatching to notification extension handler"
+            );
+            return crate::routes::notification_extensions::handle(
+                &state,
+                &tenant_ctx,
+                &extension_id,
+                &action_id,
+                body.params.clone(),
+            )
+            .await;
         }
         ExtensionOwner::Service { .. } => {
             tracing::debug!(

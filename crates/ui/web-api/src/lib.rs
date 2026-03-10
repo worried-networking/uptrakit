@@ -224,6 +224,8 @@ mod tests {
             extension_registry: Arc::new(crate::extension_registry::ExtensionRegistry::new(
                 vec![],
                 vec![],
+                vec![],
+                vec![],
             )),
             extension_proxy: Arc::new(crate::extension_proxy::ExtensionProxy::new()),
             reject_dangerous_commands: false,
