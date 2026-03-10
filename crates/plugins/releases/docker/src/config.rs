@@ -57,6 +57,21 @@ pub struct ComposeRestartConfig {
     pub working_dir: Option<String>,
 }
 
+/// TLS certificate configuration for encrypted TCP connections to a remote
+/// Docker daemon (`tcp://` with `--tlsverify`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DockerTlsConfig {
+    /// Path to the CA certificate used to verify the daemon's certificate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca_cert_path: Option<String>,
+    /// Path to the client certificate for mutual TLS authentication.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_cert_path: Option<String>,
+    /// Path to the client private key for mutual TLS authentication.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key_path: Option<String>,
+}
+
 /// Configuration for the Docker plugin.
 ///
 /// The `package_identifier` on each software item (a Docker image reference
@@ -107,6 +122,13 @@ pub struct DockerConfig {
     /// automatically recreates all containers that use this image.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_pull_command: Option<String>,
+
+    /// TLS configuration for encrypted TCP connections to a remote Docker daemon.
+    ///
+    /// Only used when `docker_host` starts with `tcp://` or `http://`.
+    /// When set, the plugin connects using `bollard::Docker::connect_with_ssl()`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls: Option<DockerTlsConfig>,
 
     /// Container runtime to use for SSH stdio tunnelling.
     ///
@@ -169,6 +191,27 @@ impl DockerConfig {
             ));
         }
 
+        if let Some(ref tls) = self.tls {
+            for (field, path) in [
+                ("tls.ca_cert_path", tls.ca_cert_path.as_deref()),
+                ("tls.client_cert_path", tls.client_cert_path.as_deref()),
+                ("tls.client_key_path", tls.client_key_path.as_deref()),
+            ] {
+                if let Some(p) = path {
+                    if p.is_empty() {
+                        bail!(DockerError::Configuration(format!(
+                            "{field} must not be empty when set"
+                        )));
+                    }
+                    if p.split('/').any(|seg| seg == "..") {
+                        bail!(DockerError::Configuration(format!(
+                            "{field} must not contain '..' path segments"
+                        )));
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -199,6 +242,7 @@ impl DockerConfig {
             && self.compose_restart.is_none()
             && self.post_pull_command.is_none()
             && self.container_runtime == ContainerRuntime::Auto
+            && self.tls.is_none()
     }
 }
 
@@ -667,6 +711,64 @@ mod tests {
         let deserialized: DockerConfig = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized.tracked_tag, config.tracked_tag);
         assert_eq!(deserialized.post_pull_command, config.post_pull_command);
+    }
+
+    // ── DockerTlsConfig validation ───────────────────────────────────────────
+
+    #[test]
+    fn validation_rejects_tls_ca_cert_with_dotdot() {
+        let config = DockerConfig {
+            docker_host: Some("tcp://host:2376".to_string()),
+            tls: Some(DockerTlsConfig {
+                ca_cert_path: Some("../etc/ca.pem".to_string()),
+                client_cert_path: None,
+                client_key_path: None,
+            }),
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("ca_cert_path"));
+    }
+
+    #[test]
+    fn validation_rejects_empty_tls_path() {
+        let config = DockerConfig {
+            tls: Some(DockerTlsConfig {
+                ca_cert_path: Some(String::new()),
+                client_cert_path: None,
+                client_key_path: None,
+            }),
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("ca_cert_path"));
+    }
+
+    #[test]
+    fn validation_passes_valid_tls_config() {
+        let config = DockerConfig {
+            docker_host: Some("tcp://host:2376".to_string()),
+            tls: Some(DockerTlsConfig {
+                ca_cert_path: Some("/etc/docker/ca.pem".to_string()),
+                client_cert_path: Some("/etc/docker/cert.pem".to_string()),
+                client_key_path: Some("/etc/docker/key.pem".to_string()),
+            }),
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn is_discover_all_mode_false_when_tls_set() {
+        let config = DockerConfig {
+            tls: Some(DockerTlsConfig {
+                ca_cert_path: Some("/etc/ca.pem".to_string()),
+                client_cert_path: None,
+                client_key_path: None,
+            }),
+            ..Default::default()
+        };
+        assert!(!config.is_discover_all_mode());
     }
 
     // ── ContainerRuntime ──────────────────────────────────────────────────────

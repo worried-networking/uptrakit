@@ -230,12 +230,20 @@ impl BollardDockerClient {
     /// - `Some("tcp://host:port")` → plain HTTP connection.
     /// - `Some("ssh://user@host[:port]")` → SSH tunnel (**requires the `ssh`
     ///   Cargo feature**).
-    pub(crate) fn new(docker_host: Option<&str>, ssh_key_path: Option<&str>) -> Result<Self> {
-        let docker = Self::connect(docker_host, ssh_key_path)?;
+    pub(crate) fn new(
+        docker_host: Option<&str>,
+        ssh_key_path: Option<&str>,
+        tls: Option<&crate::config::DockerTlsConfig>,
+    ) -> Result<Self> {
+        let docker = Self::connect(docker_host, ssh_key_path, tls)?;
         Ok(Self { docker })
     }
 
-    fn connect(docker_host: Option<&str>, ssh_key_path: Option<&str>) -> Result<bollard::Docker> {
+    fn connect(
+        docker_host: Option<&str>,
+        ssh_key_path: Option<&str>,
+        tls: Option<&crate::config::DockerTlsConfig>,
+    ) -> Result<bollard::Docker> {
         use bollard::API_DEFAULT_VERSION;
         // Use a shorter timeout in test builds so that tests that probe the
         // local Docker daemon do not block for 2 minutes when the daemon is
@@ -288,6 +296,21 @@ impl BollardDockerClient {
                         "SSH Docker connections require the 'ssh' Cargo feature to be enabled"
                             .to_string()
                     ));
+                }
+                // Use TLS when configured for TCP connections.
+                if h.starts_with("tcp://") || h.starts_with("http://") {
+                    if let Some(tls_cfg) = tls {
+                        use std::path::Path;
+                        return bollard::Docker::connect_with_ssl(
+                            h,
+                            Path::new(tls_cfg.client_key_path.as_deref().unwrap_or("")),
+                            Path::new(tls_cfg.client_cert_path.as_deref().unwrap_or("")),
+                            Path::new(tls_cfg.ca_cert_path.as_deref().unwrap_or("")),
+                            TIMEOUT,
+                            API_DEFAULT_VERSION,
+                        )
+                        .context_to::<DockerError>();
+                    }
                 }
                 bollard::Docker::connect_with_http(h, TIMEOUT, API_DEFAULT_VERSION)
                     .context_to::<DockerError>()

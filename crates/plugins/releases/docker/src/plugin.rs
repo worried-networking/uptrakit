@@ -110,7 +110,7 @@ impl DockerPlugin {
                 proxy_socket = %uri,
                 "Docker socket proxy started; connecting bollard via proxy"
             );
-            let client = Arc::new(BollardDockerClient::new(Some(&uri), None)?);
+            let client = Arc::new(BollardDockerClient::new(Some(&uri), None, None)?);
             let handle: Box<dyn std::any::Any + Send + Sync> = Box::new(proxy);
             return Ok((client, Some(handle)));
         }
@@ -118,6 +118,7 @@ impl DockerPlugin {
         let client = Arc::new(BollardDockerClient::new(
             config.docker_host.as_deref(),
             config.ssh_key_path.as_deref(),
+            config.tls.as_ref(),
         )?);
         Ok((client, None))
     }
@@ -247,8 +248,8 @@ impl DockerPlugin {
                         ))
                     })?;
             let uri = proxy.socket_uri();
-            let new_client =
-                Arc::new(BollardDockerClient::new(Some(&uri), None)?) as Arc<dyn DockerClient>;
+            let new_client = Arc::new(BollardDockerClient::new(Some(&uri), None, None)?)
+                as Arc<dyn DockerClient>;
             let handle: Box<dyn std::any::Any + Send + Sync> = Box::new(proxy);
 
             *self.docker_client.lock() = new_client;
