@@ -26,6 +26,7 @@ Uptrakit ships with eleven built-in plugin types:
 | `package_manager_dnf` | Tracks RPM packages managed by DNF on Fedora/RHEL/Rocky/AlmaLinux and other RPM-based distributions. Installed and latest versions are resolved locally by the agent using `rpm` and `dnf`. Requires `sudo` access for updates and index refresh. | Yes |
 | `package_manager_npm` | Tracks globally installed npm packages. Fetches upstream versions from the npm registry (controller-side). Discovers globally installed packages and executes updates via `npm install -g`. Requires `sudo` access for updates. | Yes |
 | `package_manager_mas` | Tracks Mac App Store apps via the `mas` CLI tool. Agent-side only. Discovers installed apps and checks for updates via `mas list` and `mas outdated`. No `sudo` required. Requires `brew install mas`. | Yes |
+| `package_manager_pacman` | Tracks Arch Linux packages managed by Pacman. Installed versions are resolved locally by the agent using `pacman -Q`; latest versions are fetched from repositories using `pacman -Si`. Requires `sudo` access for updates and database sync. | Yes |
 
 ### `releases_github` configuration fields
 
@@ -253,6 +254,48 @@ Installed and upstream versions are resolved entirely on the agent via `mas list
 `mas outdated`. No controller-side network access is required. Updates run via `mas upgrade <id>`
 and do **not** require `sudo`.
 
+### `package_manager_pacman` configuration fields
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `discovery_filter` | No | `all` (default) or `explicit`. Controls which packages are surfaced during autodiscovery. `all` surfaces every installed package (`pacman -Q`); `explicit` surfaces only packages explicitly installed by the user (`pacman -Qe`). |
+
+Uptrakit auto-creates a config named `"Pacman"` when the first agent with Pacman support
+connects and no matching plugin config exists.
+
+**Package identifier format:** The lowercase Arch Linux package name
+(e.g., `nginx`, `git`, `python`, `lib32-glibc`). Valid characters are
+`[a-z0-9@._+-]`; must start with `[a-z0-9]`; maximum 128 characters.
+
+Examples:
+
+- `nginx`
+- `python`
+- `lib32-glibc`
+- `python3.11`
+
+**Version format:** Pacman versions use the format `<version>-<pkgrel>` (e.g., `1.26.3-1`).
+Epoch-prefixed versions (`2:1.0-1`) are also supported. The full version string including the
+package release (`-1`) is stored for tracking.
+
+> **Note:** Pacman does not support installing a pinned version from its standard repositories.
+> The update command always installs the latest available version from the configured
+> repositories. The `to_version` field is validated but only the package name is passed to
+> `pacman -S --noconfirm`.
+
+**Sudo requirements:** The `pacman` binary requires root privileges for database sync and
+package installation. Add the following to your `sudoers` configuration on each agent host:
+
+```sudoers
+agent_user ALL=(ALL) NOPASSWD: /usr/bin/pacman
+```
+
+Unlike APT, Pacman does not require `SETENV` in sudoers (no environment variables need to be
+preserved).
+
+For full details and `sudoers` configuration requirements, see
+[Pacman Plugin](plugins/pacman.md).
+
 ## Role-Based Host Assignments
 
 When a software item is assigned to a host, Uptrakit creates up to three **plugin assignments** —
@@ -453,7 +496,8 @@ uptrakit plugin-configs delete <PLUGIN_CONFIG_ID>
 ## Autodiscovery
 
 The `releases_docker`, `package_manager_homebrew`, `discovery_proxmox_helper_scripts`,
-`package_manager_apt`, `package_manager_dnf`, and `package_manager_npm` plugin types support **autodiscovery**: the
+`package_manager_apt`, `package_manager_dnf`, `package_manager_npm`, and
+`package_manager_pacman` plugin types support **autodiscovery**: the
 agent queries the local runtime (Docker daemon or package manager) and reports installed
 packages back to the controller, which creates pending software items for your review.
 
@@ -467,6 +511,7 @@ automatically creates one. Auto-created configs are named:
 - `APT`
 - `DNF`
 - `npm`
+- `Pacman`
 
 **PHS auto-created configs:** In addition to the `"Proxmox Helper Scripts"` config used as a
 discovery anchor, the PHS plugin triggers creation of downstream `releases_github`, `generic_shell`, and
