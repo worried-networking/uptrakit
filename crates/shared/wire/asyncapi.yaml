@@ -2343,6 +2343,7 @@ components:
             - package_manager_mas
             - package_manager_pkg
             - package_manager_apk
+            - package_manager_snap
         package_identifier:
           type: string
           description: Package identifier for this role's plugin
@@ -3849,6 +3850,7 @@ components:
             - package_manager_mas
             - package_manager_pkg
             - package_manager_apk
+            - package_manager_snap
         plugin_config:
           type: object
           description: Config JSON for find-or-create of the target plugin config
@@ -3910,6 +3912,7 @@ components:
             - package_manager_mas
             - package_manager_pkg
             - package_manager_apk
+            - package_manager_snap
         config:
           type: object
           description: Plugin-specific configuration ({} for default assignments)
@@ -3976,6 +3979,7 @@ components:
             - package_manager_mas
             - package_manager_pkg
             - package_manager_apk
+            - package_manager_snap
         discoveries:
           type: array
           description: Discovered software items (absent or empty on error)
@@ -4082,6 +4086,7 @@ components:
             - package_manager_mas
             - package_manager_pkg
             - package_manager_apk
+            - package_manager_snap
         plugin_config:
           type: object
           description: Plugin configuration shared by all items in the batch
