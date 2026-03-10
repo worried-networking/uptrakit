@@ -95,4 +95,38 @@ pub trait NotificationPlugin: Send + Sync {
     /// Return a copy of the config with secrets replaced by `"***"`.
     #[must_use]
     fn mask_config_secrets(&self, config: &serde_json::Value) -> serde_json::Value;
+
+    /// Restore secrets from `stored` into `incoming` wherever `incoming`
+    /// contains the sentinel `"***"` placeholder.
+    ///
+    /// Called by the dispatcher before saving an updated channel config.
+    /// When the user leaves a secret field unchanged, the API sends back
+    /// the masked value `"***"` rather than the real secret. This method
+    /// replaces those sentinels with the corresponding values from `stored`.
+    ///
+    /// The default implementation walks the top-level keys of `incoming` and
+    /// replaces any `"***"` string values with the corresponding value from
+    /// `stored`. Plugins that store secrets in nested objects must override
+    /// this method.
+    #[must_use]
+    fn restore_config_secrets(
+        &self,
+        incoming: &serde_json::Value,
+        stored: &serde_json::Value,
+    ) -> serde_json::Value {
+        let Some(incoming_obj) = incoming.as_object() else {
+            return incoming.clone();
+        };
+        let stored_obj = stored.as_object();
+
+        let mut result = incoming_obj.clone();
+        for (key, value) in &mut result {
+            if value.as_str() == Some("***")
+                && let Some(stored_value) = stored_obj.and_then(|o| o.get(key.as_str()))
+            {
+                *value = stored_value.clone();
+            }
+        }
+        serde_json::Value::Object(result)
+    }
 }

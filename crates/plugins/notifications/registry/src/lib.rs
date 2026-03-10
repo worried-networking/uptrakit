@@ -119,6 +119,17 @@ pub trait NotificationOps: Send + Sync + 'static {
         channel_type: &str,
         config: &serde_json::Value,
     ) -> serde_json::Value;
+
+    /// Restore secrets from `stored` into `incoming` wherever `incoming`
+    /// contains `"***"` placeholders.
+    ///
+    /// Returns `incoming` unchanged if the channel type is not recognized.
+    fn restore_config_secrets(
+        &self,
+        channel_type: &str,
+        incoming: &serde_json::Value,
+        stored: &serde_json::Value,
+    ) -> serde_json::Value;
 }
 
 impl NotificationOps for NotificationPluginRegistry {
@@ -159,6 +170,24 @@ impl NotificationOps for NotificationPluginRegistry {
                     "unknown channel type for secret masking — returning empty object"
                 );
                 serde_json::json!({})
+            }
+        }
+    }
+
+    fn restore_config_secrets(
+        &self,
+        channel_type: &str,
+        incoming: &serde_json::Value,
+        stored: &serde_json::Value,
+    ) -> serde_json::Value {
+        match self.get(channel_type) {
+            Some(plugin) => plugin.restore_config_secrets(incoming, stored),
+            None => {
+                tracing::warn!(
+                    channel_type,
+                    "unknown channel type for secret restore — returning incoming unchanged"
+                );
+                incoming.clone()
             }
         }
     }
