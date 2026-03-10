@@ -287,7 +287,10 @@ async fn resolve_connection(
         });
     }
 
-    // When zeroconf feature is compiled in, run discovery
+    // When zeroconf feature is compiled in, run discovery and return.
+    // Uses explicit `return` so that the unconditional fallback below is
+    // never reached when the feature is enabled — avoiding #[cfg(not(...))]
+    // on a code block (which violates the additive-only feature-flag rule).
     #[cfg(feature = "zeroconf")]
     {
         if args.clear_discovery_cache {
@@ -297,7 +300,7 @@ async fn resolve_connection(
 
         let result = crate::discovery::discover(state_dir).await?;
 
-        match result {
+        return match result {
             crate::discovery::DiscoveryResult::Cached(cache)
             | crate::discovery::DiscoveryResult::Discovered(cache) => {
                 let parsed: url::Url = cache
@@ -333,11 +336,14 @@ async fn resolve_connection(
                  Use --url to specify the controller address explicitly."
                     .to_string())
             }
-        }
+        };
     }
 
-    // When zeroconf is not compiled in, --url is required
-    #[cfg(not(feature = "zeroconf"))]
+    // Reached only when the zeroconf feature is absent (the block above is
+    // compiled out and the compiler eliminates the dead path). Without
+    // discovery, --url is required. The allow suppresses the unreachable-code
+    // lint when zeroconf is compiled in.
+    #[allow(unreachable_code)]
     Err("--url is required when zeroconf is not available".to_string())
 }
 
