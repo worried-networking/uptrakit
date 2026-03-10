@@ -7,7 +7,7 @@
 use crate::AppState;
 use crate::SettingKey;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageSettings, CanViewSettings};
+use crate::middleware::permission::{CanManageNotifications, CanViewSettings};
 use crate::settings::SmtpSettingsSnapshot;
 use crate::settings_store::upsert_setting;
 use axum::{
@@ -67,13 +67,13 @@ pub async fn get_smtp_settings(
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
-    extensions(("x-required-permission" = json!("manage_settings"))),
+    extensions(("x-required-permission" = json!("manage_notifications"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_smtp_settings(
     State(state): State<Arc<AppState>>,
-    CanManageSettings(_user): CanManageSettings,
+    CanManageNotifications(_user): CanManageNotifications,
     Json(req): Json<UpdateSmtpSettingsRequest>,
 ) -> Response {
     if let Err(e) = req.validate() {

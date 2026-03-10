@@ -1,6 +1,8 @@
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageHosts, CanManageSoftware, CanViewHosts};
+use crate::middleware::permission::{
+    CanDeactivateHosts, CanTriggerChecks, CanUpdateHosts, CanViewHosts,
+};
 use crate::queries::hosts as host_queries;
 use crate::routes::service_ws::trigger_discovery_for_agent_host;
 use crate::tenant_db::TenantDb;
@@ -108,14 +110,14 @@ pub async fn get_host(
         (status = 404, description = "Host not found")
     ),
     tag = "Hosts",
-    extensions(("x-required-permission" = json!("manage_hosts"))),
+    extensions(("x-required-permission" = json!("update_hosts"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_host(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageHosts(_user): CanManageHosts,
+    CanUpdateHosts(_user): CanUpdateHosts,
     Path(host_id): Path<Uuid>,
     Json(body): Json<UpdateHostRequest>,
 ) -> Response {
@@ -149,14 +151,14 @@ pub async fn update_host(
         (status = 404, description = "Host not found")
     ),
     tag = "Hosts",
-    extensions(("x-required-permission" = json!("manage_hosts"))),
+    extensions(("x-required-permission" = json!("deactivate_hosts"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn deactivate_host(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageHosts(_user): CanManageHosts,
+    CanDeactivateHosts(_user): CanDeactivateHosts,
     Path(host_id): Path<Uuid>,
 ) -> Response {
     match host_queries::deactivate_host(&tenant_db, host_id).await {
@@ -184,7 +186,7 @@ pub async fn deactivate_host(
     post,
     path = "/api/v1/hosts/{id}/discover",
     params(("id" = Uuid, Path, description = "Host UUID")),
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("trigger_checks"))),
     responses(
         (status = 200, description = "Discovery triggered", body = TriggerDiscoveryResponse),
         (status = 404, description = "Host not found")
@@ -196,7 +198,7 @@ pub async fn deactivate_host(
 pub async fn discover_host(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanTriggerChecks(_user): CanTriggerChecks,
     Path(host_id): Path<Uuid>,
 ) -> Response {
     // Verify host belongs to tenant.
@@ -267,14 +269,14 @@ pub async fn discover_host(
         (status = 403, description = "Not authorized")
     ),
     tag = "Hosts",
-    extensions(("x-required-permission" = json!("manage_hosts"))),
+    extensions(("x-required-permission" = json!("deactivate_hosts"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_hosts(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageHosts(_user): CanManageHosts,
+    CanDeactivateHosts(_user): CanDeactivateHosts,
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
     if let Err(e) = body.validate() {

@@ -6,7 +6,7 @@
 //! - `DELETE /api/v1/autodiscovery/ignores/{id}` — remove rule
 
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
+use crate::middleware::permission::{CanManageIgnores, CanViewSoftware};
 use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -70,7 +70,7 @@ pub async fn list_autodiscovery_ignores(
     post,
     path = "/api/v1/autodiscovery/ignores",
     request_body = CreateSoftwareIgnoreRequest,
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("manage_ignores"))),
     responses(
         (status = 201, description = "Ignore rule created", body = SoftwareIgnoreResponse),
         (status = 200, description = "Ignore rule already exists", body = SoftwareIgnoreResponse),
@@ -82,7 +82,7 @@ pub async fn list_autodiscovery_ignores(
 #[tracing::instrument(skip_all)]
 pub async fn create_autodiscovery_ignore(
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanManageIgnores(_user): CanManageIgnores,
     Json(req): Json<CreateSoftwareIgnoreRequest>,
 ) -> Response {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -158,7 +158,7 @@ pub async fn create_autodiscovery_ignore(
     delete,
     path = "/api/v1/autodiscovery/ignores/{id}",
     params(("id" = Uuid, Path, description = "Ignore rule UUID")),
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("manage_ignores"))),
     responses(
         (status = 204, description = "Ignore rule deleted"),
         (status = 404, description = "Ignore rule not found")
@@ -169,7 +169,7 @@ pub async fn create_autodiscovery_ignore(
 #[tracing::instrument(skip_all)]
 pub async fn delete_autodiscovery_ignore(
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanManageIgnores(_user): CanManageIgnores,
     Path(rule_id): Path<Uuid>,
 ) -> Response {
     match autodiscovery_queries::delete_ignore_rule(tenant_db.db(), tenant_db.tenant_id, rule_id)
@@ -199,13 +199,13 @@ pub async fn delete_autodiscovery_ignore(
         (status = 403, description = "Not authorized")
     ),
     tag = "Autodiscovery",
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("manage_ignores"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_autodiscovery_ignores(
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanManageIgnores(_user): CanManageIgnores,
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
     if let Err(e) = body.validate() {

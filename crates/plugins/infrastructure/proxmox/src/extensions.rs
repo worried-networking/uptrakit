@@ -37,7 +37,7 @@ pub fn extension_actions() -> Vec<ActionDef> {
 
 fn add_config_action() -> ActionDef {
     ActionDef::new("add-config", "Add Configuration")
-        .with_permission(Permission::ManageHosts)
+        .with_permission(Permission::UpdateHosts)
         .with_ui(ActionUi::Form(FormDef::new(vec![
             FieldDef::new("name", "Configuration Name")
                 .required()
@@ -107,18 +107,18 @@ fn match_action() -> ActionDef {
                     label_field: "friendly_name".to_string(),
                 }),
         ])))
-        .with_permission(Permission::ManageHosts)
+        .with_permission(Permission::UpdateHosts)
 }
 
 fn approve_match_action() -> ActionDef {
     ActionDef::new("approve-match", "Approve Match")
-        .with_permission(Permission::ManageHosts)
+        .with_permission(Permission::UpdateHosts)
         .with_row_visible_when("suggested_host_id", RowCondition::Present)
 }
 
 fn unmatch_action() -> ActionDef {
     ActionDef::new("unmatch", "Remove Match")
-        .with_permission(Permission::ManageHosts)
+        .with_permission(Permission::UpdateHosts)
         .destructive()
         .with_confirm_entity_field("proxmox_name")
         .with_row_visible_when("matched_host", RowCondition::Present)
@@ -126,19 +126,19 @@ fn unmatch_action() -> ActionDef {
 
 fn discover_action() -> ActionDef {
     ActionDef::new("discover", "Discover")
-        .with_permission(Permission::ManageHosts)
+        .with_permission(Permission::UpdateHosts)
         .with_timeout(120)
 }
 
 fn test_connection_action() -> ActionDef {
     ActionDef::new("test-connection", "Test Connection")
-        .with_permission(Permission::ManageHosts)
+        .with_permission(Permission::UpdateHosts)
         .with_timeout(30)
 }
 
 fn list_all_unmatched_action() -> ActionDef {
     ActionDef::new("list-all-unmatched", "List All Unmatched Guests")
-        .with_permission(Permission::ManageHosts)
+        .with_permission(Permission::UpdateHosts)
         .with_timeout(10)
 }
 
@@ -187,7 +187,7 @@ fn hosts_page_manifest() -> ExtensionManifest {
             )),
         },
     )
-    .with_permission(Permission::ManageHosts)
+    .with_permission(Permission::UpdateHosts)
 }
 
 /// Panel extension: Proxmox host info on host detail page.

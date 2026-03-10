@@ -1,6 +1,6 @@
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageHosts, CanViewHosts};
+use crate::middleware::permission::{CanUpdateHosts, CanViewHosts};
 use crate::queries::host_tags as tag_queries;
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -104,14 +104,14 @@ pub async fn get_host_tag(
         (status = 409, description = "Tag with this name already exists")
     ),
     tag = "Host Tags",
-    extensions(("x-required-permission" = json!("manage_hosts"))),
+    extensions(("x-required-permission" = json!("update_hosts"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_host_tag(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageHosts(_user): CanManageHosts,
+    CanUpdateHosts(_user): CanUpdateHosts,
     Json(body): Json<CreateHostTagRequest>,
 ) -> Response {
     if let Err(e) = body.validate() {
@@ -158,14 +158,14 @@ pub async fn create_host_tag(
         (status = 409, description = "Tag with this name already exists")
     ),
     tag = "Host Tags",
-    extensions(("x-required-permission" = json!("manage_hosts"))),
+    extensions(("x-required-permission" = json!("update_hosts"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_host_tag(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageHosts(_user): CanManageHosts,
+    CanUpdateHosts(_user): CanUpdateHosts,
     Path(tag_id): Path<Uuid>,
     Json(body): Json<UpdateHostTagRequest>,
 ) -> Response {
@@ -211,14 +211,14 @@ pub async fn update_host_tag(
         (status = 404, description = "Host tag not found")
     ),
     tag = "Host Tags",
-    extensions(("x-required-permission" = json!("manage_hosts"))),
+    extensions(("x-required-permission" = json!("update_hosts"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_host_tag(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageHosts(_user): CanManageHosts,
+    CanUpdateHosts(_user): CanUpdateHosts,
     Path(tag_id): Path<Uuid>,
 ) -> Response {
     match tag_queries::delete_host_tag(&tenant_db, tag_id).await {
@@ -254,14 +254,14 @@ pub async fn delete_host_tag(
         (status = 403, description = "Not authorized")
     ),
     tag = "Host Tags",
-    extensions(("x-required-permission" = json!("manage_hosts"))),
+    extensions(("x-required-permission" = json!("update_hosts"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_host_tags(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageHosts(_user): CanManageHosts,
+    CanUpdateHosts(_user): CanUpdateHosts,
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
     if let Err(e) = body.validate() {
@@ -321,14 +321,14 @@ pub async fn batch_host_tags(
         (status = 404, description = "Host not found")
     ),
     tag = "Host Tags",
-    extensions(("x-required-permission" = json!("manage_hosts"))),
+    extensions(("x-required-permission" = json!("update_hosts"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn set_host_tags(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageHosts(_user): CanManageHosts,
+    CanUpdateHosts(_user): CanUpdateHosts,
     Path(host_id): Path<Uuid>,
     Json(body): Json<SetHostTagsRequest>,
 ) -> Response {

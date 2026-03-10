@@ -111,7 +111,7 @@ mod tests {
     fn test_create_and_decode_access_token() {
         let manager = test_manager();
         let user_id = uuid::Uuid::now_v7();
-        let permissions = vec![Permission::ViewSettings, Permission::ManageAgents];
+        let permissions = vec![Permission::ViewSettings, Permission::UpdateServices];
 
         let token = manager
             .create_access_token(user_id, &permissions, "password", None)
@@ -121,7 +121,7 @@ mod tests {
         assert_eq!(claims.sub, user_id.to_string());
         assert_eq!(
             claims.permissions,
-            vec![Permission::ViewSettings, Permission::ManageAgents]
+            vec![Permission::ViewSettings, Permission::UpdateServices]
         );
         assert_eq!(claims.auth_method, "password");
         assert!(claims.oidc_provider_id.is_none());
@@ -132,7 +132,7 @@ mod tests {
         let manager = test_manager();
         let user_id = uuid::Uuid::now_v7();
         let provider_id = uuid::Uuid::now_v7();
-        let permissions = vec![Permission::ViewAgents];
+        let permissions = vec![Permission::ViewServices];
 
         let token = manager
             .create_access_token(user_id, &permissions, "oidc", Some(provider_id))

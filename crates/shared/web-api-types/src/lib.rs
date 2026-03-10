@@ -101,9 +101,12 @@ mod tests {
     #[test]
     fn permission_as_str_values() {
         assert_eq!(Permission::ViewSettings.as_str(), "view_settings");
-        assert_eq!(Permission::ManageSettings.as_str(), "manage_settings");
-        assert_eq!(Permission::ViewAgents.as_str(), "view_agents");
-        assert_eq!(Permission::ManageAgents.as_str(), "manage_agents");
+        assert_eq!(
+            Permission::ManageAuthSettings.as_str(),
+            "manage_auth_settings"
+        );
+        assert_eq!(Permission::ViewServices.as_str(), "view_services");
+        assert_eq!(Permission::UpdateServices.as_str(), "update_services");
         assert_eq!(
             Permission::ManageGlobalSettings.as_str(),
             "manage_global_settings"
@@ -117,16 +120,16 @@ mod tests {
             Some(Permission::ViewSettings)
         );
         assert_eq!(
-            "manage_settings".parse::<Permission>().ok(),
-            Some(Permission::ManageSettings)
+            "manage_auth_settings".parse::<Permission>().ok(),
+            Some(Permission::ManageAuthSettings)
         );
         assert_eq!(
-            "view_agents".parse::<Permission>().ok(),
-            Some(Permission::ViewAgents)
+            "view_services".parse::<Permission>().ok(),
+            Some(Permission::ViewServices)
         );
         assert_eq!(
-            "manage_agents".parse::<Permission>().ok(),
-            Some(Permission::ManageAgents)
+            "update_services".parse::<Permission>().ok(),
+            Some(Permission::UpdateServices)
         );
         assert_eq!(
             "manage_global_settings".parse::<Permission>().ok(),
@@ -150,7 +153,7 @@ mod tests {
 
     #[test]
     fn permission_iter_covers_all_variants() {
-        assert_eq!(Permission::iter().count(), 16);
+        assert_eq!(Permission::iter().count(), 33);
     }
 
     #[test]
@@ -388,9 +391,9 @@ mod tests {
             last_name: "User".to_string(),
             permissions: vec![
                 Permission::ViewSettings,
-                Permission::ManageSettings,
-                Permission::ViewAgents,
-                Permission::ManageAgents,
+                Permission::ManageAuthSettings,
+                Permission::ViewServices,
+                Permission::UpdateServices,
                 Permission::ManageGlobalSettings,
             ],
         };
@@ -403,9 +406,9 @@ mod tests {
         assert_eq!(deserialized.last_name, "User");
         assert_eq!(deserialized.permissions.len(), 5);
         assert_eq!(deserialized.permissions[0], Permission::ViewSettings);
-        assert_eq!(deserialized.permissions[1], Permission::ManageSettings);
-        assert_eq!(deserialized.permissions[2], Permission::ViewAgents);
-        assert_eq!(deserialized.permissions[3], Permission::ManageAgents);
+        assert_eq!(deserialized.permissions[1], Permission::ManageAuthSettings);
+        assert_eq!(deserialized.permissions[2], Permission::ViewServices);
+        assert_eq!(deserialized.permissions[3], Permission::UpdateServices);
         assert_eq!(
             deserialized.permissions[4],
             Permission::ManageGlobalSettings
@@ -441,7 +444,7 @@ mod tests {
                 email: "admin@example.com".to_string(),
                 first_name: "Admin".to_string(),
                 last_name: "User".to_string(),
-                permissions: vec![Permission::ViewSettings, Permission::ManageAgents],
+                permissions: vec![Permission::ViewSettings, Permission::UpdateServices],
             },
         };
         let json = serde_json::to_string(&auth).unwrap();
@@ -461,7 +464,7 @@ mod tests {
         assert_eq!(deserialized.user.email, "admin@example.com");
         assert_eq!(deserialized.user.permissions.len(), 2);
         assert_eq!(deserialized.user.permissions[0], Permission::ViewSettings);
-        assert_eq!(deserialized.user.permissions[1], Permission::ManageAgents);
+        assert_eq!(deserialized.user.permissions[1], Permission::UpdateServices);
     }
 
     // ── 6. UpdateStatus enum round-trip ─────────────────────────────────

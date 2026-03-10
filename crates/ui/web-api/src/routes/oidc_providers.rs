@@ -1,6 +1,6 @@
 use crate::auth::token::generate_uuid;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageSettings, CanViewSettings};
+use crate::middleware::permission::{CanManageAuthSettings, CanViewSettings};
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -44,7 +44,7 @@ fn oidc_provider_response_from(m: oidc_provider::Model) -> OidcProviderResponse 
     post,
     path = "/api/v1/settings/oidc-providers",
     request_body = CreateOidcProviderRequest,
-    extensions(("x-required-permission" = json!("manage_settings"))),
+    extensions(("x-required-permission" = json!("manage_auth_settings"))),
     responses(
         (status = 201, description = "Provider created", body = OidcProviderResponse),
         (status = 400, description = "Invalid input"),
@@ -56,7 +56,7 @@ fn oidc_provider_response_from(m: oidc_provider::Model) -> OidcProviderResponse 
 #[tracing::instrument(skip_all)]
 pub async fn create_provider(
     tenant_db: TenantDb,
-    CanManageSettings(_user): CanManageSettings,
+    CanManageAuthSettings(_user): CanManageAuthSettings,
     Json(req): Json<CreateOidcProviderRequest>,
 ) -> Response {
     if let Err(e) = req.validate() {
@@ -189,7 +189,7 @@ pub async fn get_provider(
     path = "/api/v1/settings/oidc-providers/{id}",
     params(("id" = Uuid, Path, description = "Provider ID")),
     request_body = UpdateOidcProviderRequest,
-    extensions(("x-required-permission" = json!("manage_settings"))),
+    extensions(("x-required-permission" = json!("manage_auth_settings"))),
     responses(
         (status = 200, description = "Provider updated", body = OidcProviderResponse),
         (status = 404, description = "Provider not found")
@@ -201,7 +201,7 @@ pub async fn get_provider(
 pub async fn update_provider(
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
-    CanManageSettings(_user): CanManageSettings,
+    CanManageAuthSettings(_user): CanManageAuthSettings,
     Json(req): Json<UpdateOidcProviderRequest>,
 ) -> Response {
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
@@ -284,7 +284,7 @@ pub async fn update_provider(
     delete,
     path = "/api/v1/settings/oidc-providers/{id}",
     params(("id" = Uuid, Path, description = "Provider ID")),
-    extensions(("x-required-permission" = json!("manage_settings"))),
+    extensions(("x-required-permission" = json!("manage_auth_settings"))),
     responses(
         (status = 204, description = "Provider deleted"),
         (status = 404, description = "Provider not found"),
@@ -297,7 +297,7 @@ pub async fn update_provider(
 pub async fn delete_provider(
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
-    CanManageSettings(user): CanManageSettings,
+    CanManageAuthSettings(user): CanManageAuthSettings,
 ) -> Response {
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(p) => p,
@@ -337,7 +337,7 @@ pub async fn delete_provider(
     post,
     path = "/api/v1/settings/oidc-providers/{id}/activate",
     params(("id" = Uuid, Path, description = "Provider ID")),
-    extensions(("x-required-permission" = json!("manage_settings"))),
+    extensions(("x-required-permission" = json!("manage_auth_settings"))),
     responses(
         (status = 200, description = "Provider activated", body = OidcProviderResponse),
         (status = 404, description = "Provider not found"),
@@ -350,7 +350,7 @@ pub async fn delete_provider(
 pub async fn activate_provider(
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
-    CanManageSettings(_user): CanManageSettings,
+    CanManageAuthSettings(_user): CanManageAuthSettings,
 ) -> Response {
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(p) => p,
@@ -404,7 +404,7 @@ pub async fn activate_provider(
     post,
     path = "/api/v1/settings/oidc-providers/{id}/deactivate",
     params(("id" = Uuid, Path, description = "Provider ID")),
-    extensions(("x-required-permission" = json!("manage_settings"))),
+    extensions(("x-required-permission" = json!("manage_auth_settings"))),
     responses(
         (status = 200, description = "Provider deactivated", body = OidcProviderResponse),
         (status = 404, description = "Provider not found"),
@@ -417,7 +417,7 @@ pub async fn activate_provider(
 pub async fn deactivate_provider(
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
-    CanManageSettings(user): CanManageSettings,
+    CanManageAuthSettings(user): CanManageAuthSettings,
 ) -> Response {
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(p) => p,

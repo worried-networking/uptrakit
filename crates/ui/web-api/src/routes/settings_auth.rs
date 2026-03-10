@@ -1,7 +1,7 @@
 use crate::AppState;
 use crate::auth::AuthMethod;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageSettings, CanViewSettings};
+use crate::middleware::permission::{CanManageAuthSettings, CanViewSettings};
 #[cfg(feature = "oidc")]
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -56,13 +56,13 @@ pub async fn get_authentication_settings(
         (status = 409, description = "Safety check failed")
     ),
     tag = "Settings",
-    extensions(("x-required-permission" = json!("manage_settings"))),
+    extensions(("x-required-permission" = json!("manage_auth_settings"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_authentication_settings(
     State(state): State<Arc<AppState>>,
-    CanManageSettings(user): CanManageSettings,
+    CanManageAuthSettings(user): CanManageAuthSettings,
     #[cfg(feature = "oidc")] tenant_db: TenantDb,
     Json(req): Json<UpdateAuthenticationSettingsRequest>,
 ) -> Response {

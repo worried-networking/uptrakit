@@ -40,7 +40,7 @@ pub struct ExtensionManifest {
     pub priority: i32,
     /// Where this extension appears in the UI.
     pub placement: ExtensionPlacement,
-    /// Permission required to see and use this extension (e.g., `Permission::ManageHosts`).
+    /// Permission required to see and use this extension (e.g., `Permission::UpdateHosts`).
     ///
     /// Empty string means no permission required beyond authentication.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -992,7 +992,7 @@ mod tests {
                 nav_section: "management".to_string(),
                 icon: Some("server".to_string()),
             },
-            required_permission: Permission::ManageHosts.into(),
+            required_permission: Permission::UpdateHosts.into(),
             targeting: ExtensionTargeting::Targeted,
             ui: ExtensionUi::DataTable {
                 columns: vec![TableColumn {
@@ -1209,7 +1209,7 @@ mod tests {
             actions: vec![
                 ActionDef::new("list-hosts", "List Hosts"),
                 ActionDef::new("bootstrap", "Bootstrap Host")
-                    .with_permission(Permission::ManageHosts)
+                    .with_permission(Permission::UpdateHosts)
                     .with_timeout(120),
             ],
         };
@@ -1270,7 +1270,7 @@ mod tests {
     #[test]
     fn destructive_action_serialization() {
         let action = ActionDef::new("delete-all", "Delete All")
-            .with_permission(Permission::ManageHosts)
+            .with_permission(Permission::UpdateHosts)
             .destructive();
 
         let json = serde_json::to_string(&action).expect("serialize should succeed");

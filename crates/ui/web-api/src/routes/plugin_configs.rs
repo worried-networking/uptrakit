@@ -1,6 +1,6 @@
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageCommands, CanManageSoftware, CanViewSoftware};
+use crate::middleware::permission::{CanManageCommands, CanTriggerChecks, CanViewSoftware};
 use crate::queries::plugin_configs::{self as pc_queries, PluginConfigError};
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -349,7 +349,7 @@ pub async fn update_plugin_config(
     delete,
     path = "/api/v1/plugin-configs/{id}",
     params(("id" = Uuid, Path, description = "Plugin config ID")),
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("manage_commands"))),
     responses(
         (status = 204, description = "Plugin config deleted"),
         (status = 404, description = "Plugin config not found")
@@ -361,7 +361,7 @@ pub async fn update_plugin_config(
 pub async fn delete_plugin_config(
     tenant_db: TenantDb,
     Path(config_id): Path<Uuid>,
-    CanManageSoftware(user): CanManageSoftware,
+    CanManageCommands(user): CanManageCommands,
 ) -> Response {
     match pc_queries::delete_plugin_config(&tenant_db, config_id).await {
         Ok(true) => {
@@ -391,7 +391,7 @@ pub async fn delete_plugin_config(
     post,
     path = "/api/v1/plugin-configs/{id}/discover",
     params(("id" = Uuid, Path, description = "Plugin config UUID")),
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("trigger_checks"))),
     responses(
         (status = 200, description = "Discovery triggered", body = TriggerDiscoveryResponse),
         (status = 400, description = "Plugin type does not support discovery"),
@@ -404,7 +404,7 @@ pub async fn delete_plugin_config(
 pub async fn discover_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanTriggerChecks(_user): CanTriggerChecks,
     Path(config_id): Path<Uuid>,
 ) -> Response {
     // Load the plugin config and verify it belongs to the tenant.
@@ -712,13 +712,13 @@ fn detect_command_fields(config: &serde_json::Value) -> Vec<&'static str> {
         (status = 403, description = "Not authorized")
     ),
     tag = "Plugin Configs",
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("manage_commands"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_plugin_configs(
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanManageCommands(_user): CanManageCommands,
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
     if let Err(e) = body.validate() {

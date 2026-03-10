@@ -367,7 +367,7 @@ mod tests {
         let state = test_state(db).await;
 
         let user_id = generate_uuid();
-        let permissions = vec![Permission::ViewAgents];
+        let permissions = vec![Permission::ViewServices];
 
         // Create a JWT access token
         let jwt_token = state

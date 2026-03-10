@@ -17,7 +17,7 @@ use crate::auth::device_flow::{DeviceFlowError, DeviceFlowStatus};
 use crate::auth::token::hash_token;
 use crate::device_flow_broadcaster::DeviceFlowEvent;
 use crate::error_response::error_response;
-use crate::middleware::permission::CanViewAgents;
+use crate::middleware::permission::CanViewServices;
 
 pub use uptrakit_web_api_types::device_auth::{
     DeviceAuthApproveRequest, DeviceAuthApproveResponse, DeviceAuthPollRequest,
@@ -195,13 +195,13 @@ pub async fn device_auth_poll(
         (status = 409, description = "Already authorized")
     ),
     tag = "Authentication",
-    extensions(("x-required-permission" = json!("view_agents"))),
+    extensions(("x-required-permission" = json!("view_services"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn device_auth_approve(
     State(state): State<Arc<AppState>>,
-    CanViewAgents(auth_user): CanViewAgents,
+    CanViewServices(auth_user): CanViewServices,
     Json(req): Json<DeviceAuthApproveRequest>,
 ) -> Response {
     let normalized = req.user_code.replace('-', "").to_uppercase();

@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
+use crate::middleware::permission::{CanUpdateSoftware, CanViewSoftware};
 use crate::queries::discovery_allowlist as allowlist_queries;
 use crate::tenant_db::TenantDb;
 use uptrakit_shared_db::entity::{host, prelude::*};
@@ -72,7 +72,7 @@ pub async fn list_tenant_discovery_allowlist(
     post,
     path = "/api/v1/discovery-allowlist",
     request_body = CreateDiscoveryAllowlistEntryRequest,
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 201, description = "Entry created (or existing entry returned)", body = TenantDiscoveryAllowlistEntry),
         (status = 400, description = "Invalid or non-discovery plugin type"),
@@ -86,7 +86,7 @@ pub async fn list_tenant_discovery_allowlist(
 pub async fn add_tenant_discovery_allowlist_entry(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanUpdateSoftware(_user): CanUpdateSoftware,
     Json(req): Json<CreateDiscoveryAllowlistEntryRequest>,
 ) -> Response {
     match allowlist_queries::add_tenant_allowlist_entry(
@@ -118,7 +118,7 @@ pub async fn add_tenant_discovery_allowlist_entry(
     delete,
     path = "/api/v1/discovery-allowlist/{id}",
     params(("id" = Uuid, Path, description = "Allowlist entry UUID")),
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 204, description = "Entry removed"),
         (status = 401, description = "Not authenticated"),
@@ -131,7 +131,7 @@ pub async fn add_tenant_discovery_allowlist_entry(
 #[tracing::instrument(skip_all)]
 pub async fn remove_tenant_discovery_allowlist_entry(
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanUpdateSoftware(_user): CanUpdateSoftware,
     Path(entry_id): Path<Uuid>,
 ) -> Response {
     match allowlist_queries::remove_tenant_allowlist_entry(
@@ -212,7 +212,7 @@ pub async fn list_host_discovery_allowlist(
     path = "/api/v1/hosts/{id}/discovery-allowlist",
     params(("id" = Uuid, Path, description = "Host UUID")),
     request_body = CreateDiscoveryAllowlistEntryRequest,
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 201, description = "Entry created (or existing entry returned)", body = HostDiscoveryAllowlistEntry),
         (status = 400, description = "Invalid or non-discovery plugin type"),
@@ -227,7 +227,7 @@ pub async fn list_host_discovery_allowlist(
 pub async fn add_host_discovery_allowlist_entry(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanUpdateSoftware(_user): CanUpdateSoftware,
     Path(host_id): Path<Uuid>,
     Json(req): Json<CreateDiscoveryAllowlistEntryRequest>,
 ) -> Response {
@@ -280,7 +280,7 @@ pub async fn add_host_discovery_allowlist_entry(
         ("id" = Uuid, Path, description = "Host UUID"),
         ("entry_id" = Uuid, Path, description = "Allowlist entry UUID")
     ),
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 204, description = "Entry removed"),
         (status = 401, description = "Not authenticated"),
@@ -293,7 +293,7 @@ pub async fn add_host_discovery_allowlist_entry(
 #[tracing::instrument(skip_all)]
 pub async fn remove_host_discovery_allowlist_entry(
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanUpdateSoftware(_user): CanUpdateSoftware,
     Path((host_id, entry_id)): Path<(Uuid, Uuid)>,
 ) -> Response {
     match allowlist_queries::remove_host_allowlist_entry(

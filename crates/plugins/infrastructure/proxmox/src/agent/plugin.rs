@@ -65,10 +65,10 @@ impl AgentInfraPlugin for ProxmoxAgentPlugin {
     fn extension_actions(&self) -> Vec<ActionDef> {
         vec![
             ActionDef::new("list-pve-hosts", "List PVE Hosts")
-                .with_permission(uptrakit_shared_types::Permission::ManageHosts)
+                .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
                 .with_timeout(10),
             ActionDef::new("list-discovered-guests", "List Discovered Guests")
-                .with_permission(uptrakit_shared_types::Permission::ManageHosts)
+                .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
                 .with_timeout(15),
             bootstrap_proxmox_action(),
             bootstrap_proxmox_guest_action(),
@@ -539,7 +539,7 @@ async fn reconcile_pve_config(
 
 fn bootstrap_proxmox_action() -> ActionDef {
     ActionDef::new("bootstrap-proxmox", "Bootstrap via Proxmox")
-        .with_permission(uptrakit_shared_types::Permission::ManageHosts)
+        .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
         .with_timeout(120)
         .with_ui(ActionUi::Form(FormDef::new(vec![
             FieldDef::new("pve_host_id", "PVE Host")
@@ -582,7 +582,7 @@ fn bootstrap_proxmox_action() -> ActionDef {
 
 fn bootstrap_proxmox_guest_action() -> ActionDef {
     ActionDef::new("bootstrap-proxmox-guest", "Bootstrap Discovered Guest")
-        .with_permission(uptrakit_shared_types::Permission::ManageHosts)
+        .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
         .with_timeout(300)
         .with_ui(ActionUi::Form(FormDef::new(vec![
             FieldDef::new("discovered_guests", "Discovered Guests")

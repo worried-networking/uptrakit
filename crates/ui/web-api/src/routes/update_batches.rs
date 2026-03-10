@@ -32,7 +32,7 @@ use futures_util::StreamExt as _;
 use crate::AppState;
 use crate::batch_progress_broadcaster::BatchProgressEvent;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
+use crate::middleware::permission::{CanTriggerUpdates, CanViewSoftware};
 use crate::queries::{
     update_batches as batch_queries,
     update_triggers::TriggerUpdateError,
@@ -59,7 +59,7 @@ pub use uptrakit_web_api_types::update_batches::{
     path = "/api/v1/hosts/{host_id}/batch-update",
     params(("host_id" = Uuid, Path, description = "Host UUID")),
     request_body = HostBatchUpdateRequest,
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("trigger_updates"))),
     responses(
         (status = 200, description = "Batch update triggered", body = BatchUpdateResponse),
         (status = 400, description = "Invalid input"),
@@ -72,7 +72,7 @@ pub use uptrakit_web_api_types::update_batches::{
 pub async fn trigger_host_batch_update(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageSoftware(user): CanManageSoftware,
+    CanTriggerUpdates(user): CanTriggerUpdates,
     Path(host_id): Path<Uuid>,
     Json(req): Json<HostBatchUpdateRequest>,
 ) -> Response {
@@ -138,7 +138,7 @@ pub async fn trigger_host_batch_update(
     path = "/api/v1/software-items/{id}/batch-update",
     params(("id" = Uuid, Path, description = "Software item UUID")),
     request_body = ItemBatchUpdateRequest,
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("trigger_updates"))),
     responses(
         (status = 200, description = "Batch update triggered", body = BatchUpdateResponse),
         (status = 400, description = "Invalid input"),
@@ -151,7 +151,7 @@ pub async fn trigger_host_batch_update(
 pub async fn trigger_item_batch_update(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageSoftware(user): CanManageSoftware,
+    CanTriggerUpdates(user): CanTriggerUpdates,
     Path(item_id): Path<Uuid>,
     Json(req): Json<ItemBatchUpdateRequest>,
 ) -> Response {
@@ -633,7 +633,7 @@ mod tests {
     async fn trigger_host_batch_update_not_found_returns_404() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["manage_software"]).await;
+        seed_permissions_for_owner(&app.db, &["trigger_updates"]).await;
         let token = register_and_get_token(&client).await;
 
         let host_id = uuid::Uuid::now_v7();
@@ -650,7 +650,7 @@ mod tests {
     async fn trigger_item_batch_update_not_found_returns_404() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["manage_software"]).await;
+        seed_permissions_for_owner(&app.db, &["trigger_updates"]).await;
         let token = register_and_get_token(&client).await;
 
         let item_id = uuid::Uuid::now_v7();

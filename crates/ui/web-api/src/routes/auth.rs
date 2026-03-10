@@ -135,7 +135,8 @@ pub async fn register(
             }
         };
 
-    if !is_first_user && let Err(e) = assign_user_role(&txn, state.default_tenant_id, user_id).await
+    if !is_first_user
+        && let Err(e) = assign_viewer_role(&txn, state.default_tenant_id, user_id).await
     {
         tracing::error!("Failed to assign user role: {e:?}");
     }
@@ -617,7 +618,7 @@ mod tests {
         let auth_user = AuthenticatedUser {
             user_id,
             auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ViewAgents],
+            permissions: vec![Permission::ViewServices],
         };
 
         let req = Request::builder()
@@ -663,7 +664,7 @@ mod tests {
         let auth_user = AuthenticatedUser {
             user_id: User::find().one(&db).await.unwrap().unwrap().id,
             auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ViewAgents],
+            permissions: vec![Permission::ViewServices],
         };
 
         let req = Request::builder()
@@ -840,8 +841,8 @@ pub async fn refresh(State(state): State<Arc<AppState>>, req: axum::extract::Req
 
 /// Atomically handle first-user registration within a transaction.
 ///
-/// Counts users, and if `count <= threshold`, assigns the owner role and
-/// completes initial setup (closes registration, clears token).
+/// Counts users, and if `count <= threshold`, assigns all roles (owner preset)
+/// and completes initial setup (closes registration, clears token).
 /// Returns `Ok(true)` if this was the first user.
 pub async fn handle_first_user_setup(
     txn: &impl ConnectionTrait,
@@ -855,7 +856,7 @@ pub async fn handle_first_user_setup(
         return Ok(false);
     }
 
-    assign_owner_role(txn, tenant_id, user_id).await?;
+    assign_owner_roles(txn, tenant_id, user_id).await?;
 
     let mut reg = settings.registration();
     reg.complete_initial_setup(txn, tenant_id).await?;
@@ -866,55 +867,61 @@ pub async fn handle_first_user_setup(
 
 // Helper functions
 
-pub async fn assign_owner_role(
+pub async fn assign_owner_roles(
     db: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
     user_id: uuid::Uuid,
 ) -> crate::auth::Result<()> {
-    let owner_role = Role::find()
-        .filter(role::Column::Name.eq("owner"))
-        .one(db)
-        .await
-        .context_to()?
-        .ok_or_else(|| report!(AuthError::Internal("owner role not found".to_string())))?;
-
     let now = OffsetDateTime::now_utc();
+    let all_roles = [
+        "viewer",
+        "operator",
+        "service_manager",
+        "software_manager",
+        "host_manager",
+        "settings_manager",
+        "command_manager",
+        "system_administrator",
+    ];
+    for role_name in all_roles {
+        let role_entity = Role::find()
+            .filter(role::Column::Name.eq(role_name))
+            .one(db)
+            .await
+            .context_to()?
+            .ok_or_else(|| report!(AuthError::Internal(format!("{role_name} role not found"))))?;
 
-    let user_role_model = user_role::ActiveModel {
-        tenant_id: Set(tenant_id),
-        user_id: Set(user_id),
-        role_id: Set(owner_role.id),
-        assigned_at: Set(now),
-    };
-
-    user_role_model.insert(db).await.context_to()?;
-
+        let user_role_model = user_role::ActiveModel {
+            tenant_id: Set(tenant_id),
+            user_id: Set(user_id),
+            role_id: Set(role_entity.id),
+            assigned_at: Set(now),
+        };
+        user_role_model.insert(db).await.context_to()?;
+    }
     Ok(())
 }
 
-pub async fn assign_user_role(
+pub async fn assign_viewer_role(
     db: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
     user_id: uuid::Uuid,
 ) -> crate::auth::Result<()> {
-    let user_role_entity = Role::find()
-        .filter(role::Column::Name.eq("user"))
+    let viewer_role = Role::find()
+        .filter(role::Column::Name.eq("viewer"))
         .one(db)
         .await
         .context_to()?
-        .ok_or_else(|| report!(AuthError::Internal("user role not found".to_string())))?;
+        .ok_or_else(|| report!(AuthError::Internal("viewer role not found".to_string())))?;
 
     let now = OffsetDateTime::now_utc();
-
     let user_role_model = user_role::ActiveModel {
         tenant_id: Set(tenant_id),
         user_id: Set(user_id),
-        role_id: Set(user_role_entity.id),
+        role_id: Set(viewer_role.id),
         assigned_at: Set(now),
     };
-
     user_role_model.insert(db).await.context_to()?;
-
     Ok(())
 }
 

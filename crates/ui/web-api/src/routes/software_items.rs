@@ -1,6 +1,9 @@
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
+use crate::middleware::permission::{
+    CanCreateSoftware, CanDeleteSoftware, CanTriggerChecks, CanTriggerUpdates, CanUpdateSoftware,
+    CanViewSoftware,
+};
 use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::plugin_configs::find_raw_active_config;
 use crate::queries::software_items::{self as item_queries, SoftwareItemQueryError};
@@ -248,7 +251,7 @@ async fn run_controller_fetch_jobs(
     post,
     path = "/api/v1/software-items",
     request_body = CreateSoftwareItemRequest,
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("create_software"))),
     responses(
         (status = 201, description = "Software item created", body = SoftwareItemResponse),
         (status = 400, description = "Invalid input"),
@@ -261,7 +264,7 @@ async fn run_controller_fetch_jobs(
 pub async fn create_software_item(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanCreateSoftware(_user): CanCreateSoftware,
     Json(req): Json<CreateSoftwareItemRequest>,
 ) -> Response {
     if let Err(e) = req.validate() {
@@ -348,7 +351,7 @@ pub async fn get_software_item(
     path = "/api/v1/software-items/{id}",
     params(("id" = Uuid, Path, description = "Software item UUID")),
     request_body = UpdateSoftwareItemRequest,
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 200, description = "Software item updated", body = SoftwareItemResponse),
         (status = 404, description = "Software item not found"),
@@ -361,7 +364,7 @@ pub async fn get_software_item(
 pub async fn update_software_item(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanUpdateSoftware(_user): CanUpdateSoftware,
     Path(item_id): Path<Uuid>,
     Json(req): Json<UpdateSoftwareItemRequest>,
 ) -> Response {
@@ -387,7 +390,7 @@ pub async fn update_software_item(
     params(
         ("id" = Uuid, Path, description = "Software item UUID"),
     ),
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("delete_software"))),
     responses(
         (status = 204, description = "Software item deleted"),
         (status = 404, description = "Software item not found")
@@ -398,7 +401,7 @@ pub async fn update_software_item(
 #[tracing::instrument(skip_all)]
 pub async fn delete_software_item(
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanDeleteSoftware(_user): CanDeleteSoftware,
     Path(item_id): Path<Uuid>,
 ) -> Response {
     match item_queries::delete_software_item(&tenant_db, item_id).await {
@@ -419,7 +422,7 @@ pub async fn delete_software_item(
     post,
     path = "/api/v1/software-items/{id}/approve",
     params(("id" = Uuid, Path, description = "Software item UUID")),
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 200, description = "Software item approved", body = SoftwareItemResponse),
         (status = 404, description = "Software item not found"),
@@ -431,7 +434,7 @@ pub async fn delete_software_item(
 #[tracing::instrument(skip_all)]
 pub async fn approve_software_item(
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanUpdateSoftware(_user): CanUpdateSoftware,
     Path(item_id): Path<Uuid>,
 ) -> Response {
     let item = match software_item::Entity::find_by_id(item_id)
@@ -487,7 +490,7 @@ pub async fn approve_software_item(
     path = "/api/v1/software-items/{id}/hosts",
     params(("id" = Uuid, Path, description = "Software item UUID")),
     request_body = AssignHostsRequest,
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 200, description = "Hosts assigned", body = SoftwareItemDetailResponse),
         (status = 400, description = "Invalid input"),
@@ -500,7 +503,7 @@ pub async fn approve_software_item(
 pub async fn assign_hosts(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanUpdateSoftware(_user): CanUpdateSoftware,
     Path(item_id): Path<Uuid>,
     Json(req): Json<AssignHostsRequest>,
 ) -> Response {
@@ -536,7 +539,7 @@ pub struct DeleteHostAssignmentParams {
         ("host_id" = Uuid, Path, description = "Host UUID"),
         ("ignore" = Option<bool>, Query, description = "If true, permanently suppress items with this name from future autodiscovery runs")
     ),
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 204, description = "Host unassigned"),
         (status = 404, description = "Software item or host assignment not found")
@@ -547,7 +550,7 @@ pub struct DeleteHostAssignmentParams {
 #[tracing::instrument(skip_all)]
 pub async fn unassign_host(
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanUpdateSoftware(_user): CanUpdateSoftware,
     Path((item_id, host_id)): Path<(Uuid, Uuid)>,
     Query(params): Query<DeleteHostAssignmentParams>,
 ) -> Response {
@@ -607,7 +610,7 @@ pub async fn unassign_host(
         ("host_id" = Uuid, Path, description = "Host UUID")
     ),
     request_body = UpdateHostAssignmentRequest,
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 200, description = "Host assignment updated", body = SoftwareItemDetailResponse),
         (status = 400, description = "Invalid input"),
@@ -621,7 +624,7 @@ pub async fn unassign_host(
 pub async fn update_host_assignment(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanUpdateSoftware(_user): CanUpdateSoftware,
     Path((item_id, host_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateHostAssignmentRequest>,
 ) -> Response {
@@ -648,7 +651,7 @@ pub async fn update_host_assignment(
         ("host_id" = Uuid, Path, description = "Host UUID")
     ),
     request_body = TriggerUpdateRequest,
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("trigger_updates"))),
     responses(
         (status = 200, description = "Update triggered", body = TriggerUpdateResponse),
         (status = 400, description = "Invalid input or validation failed"),
@@ -662,7 +665,7 @@ pub async fn update_host_assignment(
 pub async fn trigger_update(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageSoftware(user): CanManageSoftware,
+    CanTriggerUpdates(user): CanTriggerUpdates,
     Path((item_id, host_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<TriggerUpdateRequest>,
 ) -> Response {
@@ -778,7 +781,7 @@ pub async fn trigger_update(
     post,
     path = "/api/v1/software-items/{id}/check-versions",
     params(("id" = Uuid, Path, description = "Software item UUID")),
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("trigger_checks"))),
     responses(
         (status = 200, description = "Version check triggered", body = TriggerVersionCheckResponse),
         (status = 400, description = "Invalid input"),
@@ -791,7 +794,7 @@ pub async fn trigger_update(
 pub async fn check_versions(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanTriggerChecks(_user): CanTriggerChecks,
     Path(item_id): Path<Uuid>,
 ) -> Response {
     // Verify software item exists and is active
@@ -1066,7 +1069,7 @@ pub async fn check_versions(
         ("id" = Uuid, Path, description = "Software item UUID"),
         ("host_id" = Uuid, Path, description = "Host UUID")
     ),
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("trigger_checks"))),
     responses(
         (status = 200, description = "Version check triggered", body = TriggerVersionCheckResponse),
         (status = 400, description = "Invalid input"),
@@ -1079,7 +1082,7 @@ pub async fn check_versions(
 pub async fn check_versions_host(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanTriggerChecks(_user): CanTriggerChecks,
     Path((item_id, host_id)): Path<(Uuid, Uuid)>,
 ) -> Response {
     // Verify software item exists and is active
@@ -1283,14 +1286,14 @@ pub async fn check_versions_host(
         (status = 403, description = "Not authorized")
     ),
     tag = "Software Items",
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("delete_software"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_software_items(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanDeleteSoftware(_user): CanDeleteSoftware,
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
     if let Err(e) = body.validate() {

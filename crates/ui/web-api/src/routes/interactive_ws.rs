@@ -98,8 +98,8 @@ pub async fn interactive_ws(
         }
     };
 
-    // 3. Check ManageSoftware permission.
-    if !auth_user.has_permission(Permission::ManageSoftware) {
+    // 3. Check TriggerUpdates permission.
+    if !auth_user.has_permission(Permission::TriggerUpdates) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 

@@ -1,7 +1,7 @@
 use crate::AppState;
 use crate::SettingKey;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageSettings, CanViewSettings};
+use crate::middleware::permission::{CanManageAgentCerts, CanViewSettings};
 use crate::settings_store::{delete_setting, upsert_setting};
 use axum::{
     Json,
@@ -58,13 +58,13 @@ pub async fn get_agent_certificate_settings(
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
-    extensions(("x-required-permission" = json!("manage_settings"))),
+    extensions(("x-required-permission" = json!("manage_agent_certs"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_agent_certificate_settings(
     State(state): State<Arc<AppState>>,
-    CanManageSettings(_user): CanManageSettings,
+    CanManageAgentCerts(_user): CanManageAgentCerts,
     Json(req): Json<UpdateAgentCertificateSettingsRequest>,
 ) -> Response {
     if let Some(hours) = req.lifetime_hours {

@@ -67,7 +67,7 @@ pub fn build_manifest(infra_primary_actions: &[String]) -> ExtensionManifest {
             default_per_page: Some(50),
         },
     )
-    .with_permission(Permission::ManageHosts)
+    .with_permission(Permission::UpdateHosts)
     .with_targeting(ExtensionTargeting::Targeted)
 }
 
@@ -93,7 +93,7 @@ pub fn build_register_payload(
 pub fn build_actions(infra_registry: &AgentInfraRegistry) -> Vec<ActionDef> {
     let mut actions = vec![
         ActionDef::new("remove-host", "Remove Host")
-            .with_permission(Permission::ManageHosts)
+            .with_permission(Permission::UpdateHosts)
             .destructive()
             .with_confirm_entity_field("name")
             .with_timeout(30)
@@ -108,7 +108,7 @@ pub fn build_actions(infra_registry: &AgentInfraRegistry) -> Vec<ActionDef> {
 /// Build the sync-host action definition with optional auth override form.
 fn sync_host_action() -> ActionDef {
     ActionDef::new("sync-host", "Sync Host")
-        .with_permission(Permission::ManageHosts)
+        .with_permission(Permission::UpdateHosts)
         .with_timeout(120)
         .with_ui(ActionUi::Form(FormDef::new(vec![
             FieldDef::new("auth_method", "Auth Method")
@@ -149,7 +149,7 @@ fn sync_host_action() -> ActionDef {
 /// Build the bootstrap host action definition with its form UI.
 fn bootstrap_action() -> ActionDef {
     ActionDef::new("bootstrap", "Bootstrap Host")
-        .with_permission(Permission::ManageHosts)
+        .with_permission(Permission::UpdateHosts)
         .with_timeout(120)
         .with_ui(ActionUi::Form(FormDef::new(vec![
             FieldDef::new("target", "SSH Target")

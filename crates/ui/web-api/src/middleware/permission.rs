@@ -29,7 +29,7 @@ use crate::middleware::require_auth::AuthenticatedUser;
 /// ) -> Response { … }
 ///
 /// pub async fn trigger_update(
-///     CanManageSoftware(user): CanManageSoftware,  // user.user_id needed
+///     CanTriggerUpdates(user): CanTriggerUpdates,  // user.user_id needed
 /// ) -> Response { … }
 /// ```
 macro_rules! permission_extractor {
@@ -89,41 +89,92 @@ macro_rules! permission_extractor {
 // ---------------------------------------------------------------------------
 
 permission_extractor! {
+    // -- Settings ----------------------------------------------------------
     /// Extractor that requires [`Permission::ViewSettings`].
     CanViewSettings => Permission::ViewSettings,
-    /// Extractor that requires [`Permission::ManageSettings`].
-    CanManageSettings => Permission::ManageSettings,
-    /// Extractor that requires [`Permission::ViewAgents`].
-    CanViewAgents => Permission::ViewAgents,
-    /// Extractor that requires [`Permission::ManageAgents`].
-    CanManageAgents => Permission::ManageAgents,
     /// Extractor that requires [`Permission::ManageGlobalSettings`].
     CanManageGlobalSettings => Permission::ManageGlobalSettings,
+    /// Extractor that requires [`Permission::ManageAuthSettings`].
+    CanManageAuthSettings => Permission::ManageAuthSettings,
+    /// Extractor that requires [`Permission::ManageEnrollmentTokens`].
+    CanManageEnrollmentTokens => Permission::ManageEnrollmentTokens,
+    /// Extractor that requires [`Permission::ManageAgentCerts`].
+    CanManageAgentCerts => Permission::ManageAgentCerts,
+
+    // -- Services (formerly Agents) ----------------------------------------
+    /// Extractor that requires [`Permission::ViewServices`].
+    CanViewServices => Permission::ViewServices,
+    /// Extractor that requires [`Permission::ApproveServices`].
+    CanApproveServices => Permission::ApproveServices,
+    /// Extractor that requires [`Permission::RejectServices`].
+    CanRejectServices => Permission::RejectServices,
+    /// Extractor that requires [`Permission::RemoveServices`].
+    CanRemoveServices => Permission::RemoveServices,
+    /// Extractor that requires [`Permission::UpdateServices`].
+    CanUpdateServices => Permission::UpdateServices,
+
+    // -- Software ----------------------------------------------------------
     /// Extractor that requires [`Permission::ViewSoftware`].
     CanViewSoftware => Permission::ViewSoftware,
-    /// Extractor that requires [`Permission::ManageSoftware`].
-    CanManageSoftware => Permission::ManageSoftware,
+    /// Extractor that requires [`Permission::CreateSoftware`].
+    CanCreateSoftware => Permission::CreateSoftware,
+    /// Extractor that requires [`Permission::UpdateSoftware`].
+    CanUpdateSoftware => Permission::UpdateSoftware,
+    /// Extractor that requires [`Permission::DeleteSoftware`].
+    CanDeleteSoftware => Permission::DeleteSoftware,
+    /// Extractor that requires [`Permission::TriggerChecks`].
+    CanTriggerChecks => Permission::TriggerChecks,
+    /// Extractor that requires [`Permission::TriggerUpdates`].
+    CanTriggerUpdates => Permission::TriggerUpdates,
+    /// Extractor that requires [`Permission::ManageScheduler`].
+    CanManageScheduler => Permission::ManageScheduler,
+
+    // -- Commands ----------------------------------------------------------
     /// Extractor that requires [`Permission::ManageCommands`].
     ///
     /// Grants ability to modify command-bearing plugin config fields. Treat
     /// this as equivalent to root access on all managed hosts.
     CanManageCommands => Permission::ManageCommands,
+
+    // -- Hosts -------------------------------------------------------------
     /// Extractor that requires [`Permission::ViewHosts`].
     CanViewHosts => Permission::ViewHosts,
-    /// Extractor that requires [`Permission::ManageHosts`].
-    CanManageHosts => Permission::ManageHosts,
+    /// Extractor that requires [`Permission::UpdateHosts`].
+    CanUpdateHosts => Permission::UpdateHosts,
+    /// Extractor that requires [`Permission::DeactivateHosts`].
+    CanDeactivateHosts => Permission::DeactivateHosts,
+
+    // -- Notifications -----------------------------------------------------
     /// Extractor that requires [`Permission::ViewNotifications`].
     CanViewNotifications => Permission::ViewNotifications,
     /// Extractor that requires [`Permission::ManageNotifications`].
     CanManageNotifications => Permission::ManageNotifications,
+
+    // -- System services ---------------------------------------------------
     /// Extractor that requires [`Permission::ViewSystemServices`].
     CanViewSystemServices => Permission::ViewSystemServices,
-    /// Extractor that requires [`Permission::ManageSystemServices`].
-    CanManageSystemServices => Permission::ManageSystemServices,
+    /// Extractor that requires [`Permission::ApproveSystemServices`].
+    CanApproveSystemServices => Permission::ApproveSystemServices,
+    /// Extractor that requires [`Permission::RejectSystemServices`].
+    CanRejectSystemServices => Permission::RejectSystemServices,
+    /// Extractor that requires [`Permission::RemoveSystemServices`].
+    CanRemoveSystemServices => Permission::RemoveSystemServices,
+    /// Extractor that requires [`Permission::UpdateSystemServices`].
+    CanUpdateSystemServices => Permission::UpdateSystemServices,
+
+    // -- Audit -------------------------------------------------------------
     /// Extractor that requires [`Permission::ViewAuditLogs`].
     CanViewAuditLogs => Permission::ViewAuditLogs,
     /// Extractor that requires [`Permission::ViewSystemAuditLogs`].
     CanViewSystemAuditLogs => Permission::ViewSystemAuditLogs,
+
+    // -- Users -------------------------------------------------------------
+    /// Extractor that requires [`Permission::ManageUsers`].
+    CanManageUsers => Permission::ManageUsers,
+
+    // -- Ignores -----------------------------------------------------------
+    /// Extractor that requires [`Permission::ManageIgnores`].
+    CanManageIgnores => Permission::ManageIgnores,
 }
 
 // ---------------------------------------------------------------------------
@@ -173,9 +224,9 @@ mod tests {
 
     #[tokio::test]
     async fn wrong_permission_returns_403() {
-        // User only has ViewHosts, but extractor requires ManageHosts
+        // User only has ViewHosts, but extractor requires UpdateHosts
         let mut parts = parts_with_user(vec![Permission::ViewHosts]);
-        let result = CanManageHosts::from_request_parts(&mut parts, &()).await;
+        let result = CanUpdateHosts::from_request_parts(&mut parts, &()).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().status(), 403);
     }
@@ -191,9 +242,9 @@ mod tests {
     #[tokio::test]
     async fn multiple_permissions_one_matches() {
         let mut parts = parts_with_user(vec![
-            Permission::ManageSoftware,
+            Permission::CreateSoftware,
             Permission::ViewHosts,
-            Permission::ViewAgents,
+            Permission::ViewServices,
         ]);
         let result = CanViewHosts::from_request_parts(&mut parts, &()).await;
         assert!(result.is_ok());
@@ -222,7 +273,7 @@ mod tests {
             permissions: vec![], // no permissions
         };
         // new() skips the permission check — intended for direct handler tests
-        let extractor = CanManageAgents::new(user.clone());
+        let extractor = CanApproveServices::new(user.clone());
         assert_eq!(extractor.0.user_id, user.user_id);
     }
 }

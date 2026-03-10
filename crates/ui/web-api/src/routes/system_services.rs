@@ -1,6 +1,11 @@
 use crate::AppState;
+use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageSystemServices, CanViewSystemServices};
+use crate::middleware::permission::{
+    CanApproveSystemServices, CanRejectSystemServices, CanRemoveSystemServices,
+    CanUpdateSystemServices, CanViewSystemServices,
+};
+use crate::middleware::require_auth::AuthenticatedUser;
 use crate::queries::system_services::{self as ss_queries, SystemServiceQueryError};
 use axum::{
     Json,
@@ -111,13 +116,13 @@ pub async fn get_system_service(
         (status = 404, description = "System service not found")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("manage_system_services"))),
+    extensions(("x-required-permission" = json!("update_system_services"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_system_service(
     State(state): State<Arc<AppState>>,
-    CanManageSystemServices(_user): CanManageSystemServices,
+    CanUpdateSystemServices(_user): CanUpdateSystemServices,
     Path(service_id): Path<Uuid>,
     Json(body): Json<UpdateSystemServiceRequest>,
 ) -> Response {
@@ -157,13 +162,13 @@ pub async fn update_system_service(
         (status = 404, description = "System service not found")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("manage_system_services"))),
+    extensions(("x-required-permission" = json!("approve_system_services"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn approve_system_service(
     State(state): State<Arc<AppState>>,
-    CanManageSystemServices(_user): CanManageSystemServices,
+    CanApproveSystemServices(_user): CanApproveSystemServices,
     Path(service_id): Path<Uuid>,
 ) -> Response {
     let resp = match ss_queries::approve_system_service(state.db(), service_id).await {
@@ -224,13 +229,13 @@ pub async fn approve_system_service(
         (status = 404, description = "System service not found")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("manage_system_services"))),
+    extensions(("x-required-permission" = json!("reject_system_services"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn reject_system_service(
     State(state): State<Arc<AppState>>,
-    CanManageSystemServices(_user): CanManageSystemServices,
+    CanRejectSystemServices(_user): CanRejectSystemServices,
     Path(service_id): Path<Uuid>,
 ) -> Response {
     let resp = match ss_queries::reject_system_service(state.db(), service_id).await {
@@ -296,13 +301,13 @@ pub async fn reject_system_service(
         (status = 404, description = "System service not found")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("manage_system_services"))),
+    extensions(("x-required-permission" = json!("remove_system_services"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn deactivate_system_service(
     State(state): State<Arc<AppState>>,
-    CanManageSystemServices(_user): CanManageSystemServices,
+    CanRemoveSystemServices(_user): CanRemoveSystemServices,
     Path(service_id): Path<Uuid>,
 ) -> Response {
     match ss_queries::deactivate_system_service(state.db(), service_id).await {
@@ -350,17 +355,27 @@ pub async fn deactivate_system_service(
         (status = 403, description = "Not authorized")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("manage_system_services"))),
+    extensions(("x-required-permission" = json!("approve_system_services, reject_system_services, or remove_system_services"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_system_services(
     State(state): State<Arc<AppState>>,
-    CanManageSystemServices(_user): CanManageSystemServices,
+    axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
     if let Err(e) = body.validate() {
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    }
+
+    let required = match body.action.as_str() {
+        "approve" => Permission::ApproveSystemServices,
+        "reject" => Permission::RejectSystemServices,
+        "deactivate" => Permission::RemoveSystemServices,
+        _ => return error_response(StatusCode::BAD_REQUEST, "Unknown batch action"),
+    };
+    if !auth_user.has_permission(required) {
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let (succeeded_ids, failed) = match body.action.as_str() {

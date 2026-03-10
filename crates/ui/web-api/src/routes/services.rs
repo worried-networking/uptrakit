@@ -1,6 +1,10 @@
 use crate::AppState;
+use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageAgents, CanViewAgents};
+use crate::middleware::permission::{
+    CanApproveServices, CanRejectServices, CanRemoveServices, CanUpdateServices, CanViewServices,
+};
+use crate::middleware::require_auth::AuthenticatedUser;
 use crate::queries::services::{self as svc_queries, ServiceQueryError};
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -47,13 +51,13 @@ pub use uptrakit_web_api_types::services::{
         (status = 403, description = "Not authorized")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("view_agents"))),
+    extensions(("x-required-permission" = json!("view_services"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_services(
     tenant_db: TenantDb,
-    CanViewAgents(_user): CanViewAgents,
+    CanViewServices(_user): CanViewServices,
     Query(query): Query<ListServicesQuery>,
 ) -> Response {
     match svc_queries::list_services(&tenant_db, &query).await {
@@ -79,13 +83,13 @@ pub async fn list_services(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("view_agents"))),
+    extensions(("x-required-permission" = json!("view_services"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_service(
     tenant_db: TenantDb,
-    CanViewAgents(_user): CanViewAgents,
+    CanViewServices(_user): CanViewServices,
     Path(service_id): Path<Uuid>,
 ) -> Response {
     match svc_queries::get_active_service(&tenant_db, service_id).await {
@@ -114,13 +118,13 @@ pub async fn get_service(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("manage_agents"))),
+    extensions(("x-required-permission" = json!("update_services"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_service(
     tenant_db: TenantDb,
-    CanManageAgents(_user): CanManageAgents,
+    CanUpdateServices(_user): CanUpdateServices,
     Path(service_id): Path<Uuid>,
     Json(body): Json<UpdateServiceRequest>,
 ) -> Response {
@@ -159,14 +163,14 @@ pub async fn update_service(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("manage_agents"))),
+    extensions(("x-required-permission" = json!("approve_services"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn approve_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageAgents(_user): CanManageAgents,
+    CanApproveServices(_user): CanApproveServices,
     Path(service_id): Path<Uuid>,
 ) -> Response {
     let resp = match svc_queries::approve_service(&tenant_db, service_id).await {
@@ -248,14 +252,14 @@ pub async fn approve_service(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("manage_agents"))),
+    extensions(("x-required-permission" = json!("reject_services"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn reject_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageAgents(_user): CanManageAgents,
+    CanRejectServices(_user): CanRejectServices,
     Path(service_id): Path<Uuid>,
 ) -> Response {
     let resp = match svc_queries::reject_service(&tenant_db, service_id).await {
@@ -323,14 +327,14 @@ pub async fn reject_service(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("manage_agents"))),
+    extensions(("x-required-permission" = json!("remove_services"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn deactivate_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageAgents(_user): CanManageAgents,
+    CanRemoveServices(_user): CanRemoveServices,
     Path(service_id): Path<Uuid>,
 ) -> Response {
     match svc_queries::deactivate_service(&tenant_db, service_id, state.default_tenant_id).await {
@@ -391,14 +395,14 @@ pub async fn deactivate_service(
         (status = 409, description = "Service not connected")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("manage_agents"))),
+    extensions(("x-required-permission" = json!("update_services"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn set_update_freeze(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageAgents(_user): CanManageAgents,
+    CanUpdateServices(_user): CanUpdateServices,
     Path(service_id): Path<Uuid>,
     Json(body): Json<SetUpdateFreezeRequest>,
 ) -> Response {
@@ -466,14 +470,14 @@ pub async fn set_update_freeze(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("manage_agents"))),
+    extensions(("x-required-permission" = json!("update_services"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn merge_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageAgents(_user): CanManageAgents,
+    CanUpdateServices(_user): CanUpdateServices,
     Path(target_uuid): Path<Uuid>,
     Json(body): Json<MergeAgentRequest>,
 ) -> Response {
@@ -561,18 +565,28 @@ pub async fn merge_service(
         (status = 403, description = "Not authorized")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("manage_agents"))),
+    extensions(("x-required-permission" = json!("approve_services, reject_services, or remove_services"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_services(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageAgents(_user): CanManageAgents,
+    axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
     if let Err(e) = body.validate() {
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    }
+
+    let required = match body.action.as_str() {
+        "approve" => Permission::ApproveServices,
+        "reject" => Permission::RejectServices,
+        "deactivate" => Permission::RemoveServices,
+        _ => return error_response(StatusCode::BAD_REQUEST, "Unknown batch action"),
+    };
+    if !auth_user.has_permission(required) {
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let (succeeded_ids, failed) = match body.action.as_str() {
@@ -704,7 +718,7 @@ mod tests {
     use crate::auth::permissions::Permission;
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
-    use crate::middleware::permission::CanManageAgents;
+    use crate::middleware::permission::CanUpdateServices;
     use crate::middleware::require_auth::AuthenticatedUser;
     use crate::settings::Settings;
     use crate::tenant_db::TenantDb;
@@ -983,14 +997,14 @@ mod tests {
         let auth_user = AuthenticatedUser {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ManageAgents],
+            permissions: vec![Permission::UpdateServices],
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
         let response = merge_service(
             State(Arc::clone(&state)),
             tenant_db,
-            CanManageAgents::new(auth_user),
+            CanUpdateServices::new(auth_user),
             Path(target.id),
             Json(MergeAgentRequest {
                 source_id: source.id,
@@ -1024,14 +1038,14 @@ mod tests {
         let auth_user = AuthenticatedUser {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
-            permissions: vec![Permission::ManageAgents],
+            permissions: vec![Permission::UpdateServices],
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
         let response = merge_service(
             State(Arc::clone(&state)),
             tenant_db,
-            CanManageAgents::new(auth_user),
+            CanUpdateServices::new(auth_user),
             Path(target.id),
             Json(MergeAgentRequest {
                 source_id: source.id,

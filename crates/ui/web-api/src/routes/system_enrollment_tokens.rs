@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::auth::{password, token};
 use crate::error_response::error_response;
-use crate::middleware::permission::CanManageSystemServices;
+use crate::middleware::permission::CanManageGlobalSettings;
 use crate::queries::system_enrollment_tokens as set_queries;
 use uptrakit_web_api_types::validation::Validate;
 
@@ -34,13 +34,13 @@ pub use uptrakit_web_api_types::system_enrollment_tokens::{
         (status = 403, description = "Not authorized")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("manage_system_services"))),
+    extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_system_enrollment_token(
     State(state): State<Arc<AppState>>,
-    CanManageSystemServices(user): CanManageSystemServices,
+    CanManageGlobalSettings(user): CanManageGlobalSettings,
     Json(body): Json<CreateSystemEnrollmentTokenRequest>,
 ) -> Response {
     if let Err(e) = body.validate() {
@@ -118,13 +118,13 @@ pub async fn create_system_enrollment_token(
         (status = 403, description = "Not authorized")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("manage_system_services"))),
+    extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_system_enrollment_tokens(
     State(state): State<Arc<AppState>>,
-    CanManageSystemServices(_user): CanManageSystemServices,
+    CanManageGlobalSettings(_user): CanManageGlobalSettings,
     Query(query): Query<ListSystemEnrollmentTokensQuery>,
 ) -> Response {
     match set_queries::list_system_enrollment_tokens(state.db(), &query.pagination()).await {
@@ -150,13 +150,13 @@ pub async fn list_system_enrollment_tokens(
         (status = 404, description = "System enrollment token not found")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("manage_system_services"))),
+    extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_system_enrollment_token(
     State(state): State<Arc<AppState>>,
-    CanManageSystemServices(_user): CanManageSystemServices,
+    CanManageGlobalSettings(_user): CanManageGlobalSettings,
     Path(token_id): Path<Uuid>,
 ) -> Response {
     match set_queries::get_system_enrollment_token(state.db(), token_id).await {
@@ -183,13 +183,13 @@ pub async fn get_system_enrollment_token(
         (status = 404, description = "System enrollment token not found")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("manage_system_services"))),
+    extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn revoke_system_enrollment_token(
     State(state): State<Arc<AppState>>,
-    CanManageSystemServices(_user): CanManageSystemServices,
+    CanManageGlobalSettings(_user): CanManageGlobalSettings,
     Path(token_id): Path<Uuid>,
 ) -> Response {
     match set_queries::revoke_system_enrollment_token(state.db(), token_id).await {

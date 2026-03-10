@@ -7,7 +7,7 @@ use uuid::Uuid;
 use uptrakit_web_api_types::validation::Validate;
 
 use crate::error_response::error_response;
-use crate::middleware::permission::CanManageSoftware;
+use crate::middleware::permission::CanManageScheduler;
 use crate::queries::scheduled_tasks::{self as sched_queries, ScheduledTaskError};
 use crate::tenant_db::TenantDb;
 
@@ -24,13 +24,13 @@ pub use uptrakit_web_api_types::scheduler::{
         (status = 200, description = "Scheduled tasks", body = Vec<ScheduledTaskResponse>),
         (status = 403, description = "Not authorized")
     ),
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("manage_scheduler"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_scheduled_tasks(
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanManageScheduler(_user): CanManageScheduler,
 ) -> Response {
     match sched_queries::list_scheduled_tasks(&tenant_db).await {
         Ok(tasks) => Json(tasks).into_response(),
@@ -54,13 +54,13 @@ pub async fn list_scheduled_tasks(
         (status = 404, description = "Task not found"),
         (status = 403, description = "Not authorized")
     ),
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("manage_scheduler"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_scheduled_task(
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanManageScheduler(_user): CanManageScheduler,
     Path(task_id): Path<Uuid>,
 ) -> Response {
     match sched_queries::get_scheduled_task(&tenant_db, task_id).await {
@@ -88,13 +88,13 @@ pub async fn get_scheduled_task(
         (status = 404, description = "Task not found"),
         (status = 403, description = "Not authorized")
     ),
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("manage_scheduler"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_scheduled_task(
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanManageScheduler(_user): CanManageScheduler,
     Path(task_id): Path<Uuid>,
     Json(req): Json<UpdateScheduledTaskRequest>,
 ) -> Response {
@@ -130,13 +130,13 @@ pub async fn update_scheduled_task(
         (status = 404, description = "Task not found"),
         (status = 403, description = "Not authorized")
     ),
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("manage_scheduler"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn trigger_scheduled_task(
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanManageScheduler(_user): CanManageScheduler,
     Path(task_id): Path<Uuid>,
 ) -> Response {
     match sched_queries::trigger_scheduled_task(&tenant_db, task_id).await {

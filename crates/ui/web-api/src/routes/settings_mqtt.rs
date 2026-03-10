@@ -1,6 +1,6 @@
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageGlobalSettings, CanManageSettings, CanViewSettings};
+use crate::middleware::permission::{CanManageGlobalSettings, CanViewSettings};
 use crate::mqtt_client_store;
 use crate::mqtt_lease_coordinator::{LeaseOutcome, MQTT_LEASE_STALE_AFTER, MqttLeaseCoordinator};
 use crate::tenant_db::TenantDb;
@@ -147,7 +147,7 @@ pub async fn list_mqtt_settings(
     post,
     path = "/api/v1/settings/mqtt",
     request_body = CreateMqttClientRequest,
-    extensions(("x-required-permission" = json!("manage_settings"))),
+    extensions(("x-required-permission" = json!("manage_global_settings"))),
     responses(
         (status = 201, description = "MQTT client created", body = MqttClientResponse),
         (status = 400, description = "Invalid values"),
@@ -161,7 +161,7 @@ pub async fn list_mqtt_settings(
 #[tracing::instrument(skip_all)]
 pub async fn create_mqtt_settings(
     State(state): State<Arc<AppState>>,
-    CanManageSettings(_user): CanManageSettings,
+    CanManageGlobalSettings(_user): CanManageGlobalSettings,
     tenant_db: TenantDb,
     Json(req): Json<CreateMqttClientRequest>,
 ) -> Response {
@@ -428,7 +428,7 @@ pub async fn get_mqtt_settings(
         ("id" = Uuid, Path, description = "MQTT client ID")
     ),
     request_body = UpdateMqttClientRequest,
-    extensions(("x-required-permission" = json!("manage_settings"))),
+    extensions(("x-required-permission" = json!("manage_global_settings"))),
     responses(
         (status = 200, description = "Settings updated", body = MqttClientResponse),
         (status = 400, description = "Invalid values"),
@@ -442,7 +442,7 @@ pub async fn get_mqtt_settings(
 #[tracing::instrument(skip_all)]
 pub async fn update_mqtt_settings(
     State(state): State<Arc<AppState>>,
-    CanManageSettings(_user): CanManageSettings,
+    CanManageGlobalSettings(_user): CanManageGlobalSettings,
     tenant_db: TenantDb,
     Path(mqtt_client_id): Path<Uuid>,
     Json(req): Json<UpdateMqttClientRequest>,
@@ -604,7 +604,7 @@ pub async fn update_mqtt_settings(
     params(
         ("id" = Uuid, Path, description = "MQTT client ID")
     ),
-    extensions(("x-required-permission" = json!("manage_settings"))),
+    extensions(("x-required-permission" = json!("manage_global_settings"))),
     responses(
         (status = 204, description = "MQTT client deleted"),
         (status = 401, description = "Not authenticated"),
@@ -617,7 +617,7 @@ pub async fn update_mqtt_settings(
 #[tracing::instrument(skip_all)]
 pub async fn delete_mqtt_settings(
     State(state): State<Arc<AppState>>,
-    CanManageSettings(_user): CanManageSettings,
+    CanManageGlobalSettings(_user): CanManageGlobalSettings,
     tenant_db: TenantDb,
     Path(mqtt_client_id): Path<Uuid>,
 ) -> Response {

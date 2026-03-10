@@ -1,7 +1,7 @@
 use crate::AppState;
 use crate::auth::registration::RegistrationMode;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageSettings, CanViewSettings};
+use crate::middleware::permission::{CanManageAuthSettings, CanViewSettings};
 use axum::{
     Json,
     extract::State,
@@ -53,13 +53,13 @@ pub async fn get_registration_settings(
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
-    extensions(("x-required-permission" = json!("manage_settings"))),
+    extensions(("x-required-permission" = json!("manage_auth_settings"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_registration_settings(
     State(state): State<Arc<AppState>>,
-    CanManageSettings(_user): CanManageSettings,
+    CanManageAuthSettings(_user): CanManageAuthSettings,
     Json(req): Json<UpdateRegistrationSettingsRequest>,
 ) -> Response {
     // Validate: invite mode requires a token

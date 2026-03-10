@@ -457,11 +457,11 @@ pub async fn oidc_callback(
                     .exec(&txn)
                     .await;
 
-                // Assign owner role
+                // Assign all roles (owner preset)
                 if let Err(e) =
-                    super::auth::assign_owner_role(&txn, state.default_tenant_id, user_id).await
+                    super::auth::assign_owner_roles(&txn, state.default_tenant_id, user_id).await
                 {
-                    tracing::error!("Failed to assign owner role to first OIDC user: {e:?}");
+                    tracing::error!("Failed to assign owner roles to first OIDC user: {e:?}");
                 }
 
                 // Complete initial setup (close registration, remove token)
@@ -784,10 +784,11 @@ pub async fn oidc_complete_registration(
     };
 
     if is_first_user {
-        tracing::info!("first user registered via OIDC complete-registration, assigned owner role");
+        tracing::info!("first user registered via OIDC complete-registration, assigned all roles");
     } else {
-        // Assign default user role
-        if let Err(e) = super::auth::assign_user_role(&txn, state.default_tenant_id, user_id).await
+        // Assign default viewer role
+        if let Err(e) =
+            super::auth::assign_viewer_role(&txn, state.default_tenant_id, user_id).await
         {
             tracing::error!("Failed to assign default role during OIDC registration: {e:?}");
         }

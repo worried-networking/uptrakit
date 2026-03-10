@@ -6,7 +6,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 
 use crate::AppState;
-use crate::middleware::permission::CanViewAgents;
+use crate::middleware::permission::CanViewServices;
 use crate::middleware::tenant_context::TenantContext;
 
 /// SSE stream for real-time admin events.
@@ -23,7 +23,7 @@ use crate::middleware::tenant_context::TenantContext;
 #[tracing::instrument(skip_all)]
 pub async fn stream_events(
     State(state): State<Arc<AppState>>,
-    CanViewAgents(_auth_user): CanViewAgents,
+    CanViewServices(_auth_user): CanViewServices,
     tenant: TenantContext,
 ) -> Response {
     let tenant_id = tenant.tenant_id;

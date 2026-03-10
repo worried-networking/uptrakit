@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::auth::{password, token};
 use crate::error_response::error_response;
-use crate::middleware::permission::CanManageAgents;
+use crate::middleware::permission::CanManageEnrollmentTokens;
 use crate::queries::enrollment_tokens as et_queries;
 use crate::tenant_db::TenantDb;
 use uptrakit_web_api_types::validation::Validate;
@@ -31,13 +31,13 @@ pub use uptrakit_web_api_types::pagination::PaginatedResponse;
         (status = 403, description = "Not authorized")
     ),
     tag = "Enrollment Tokens",
-    extensions(("x-required-permission" = json!("manage_agents"))),
+    extensions(("x-required-permission" = json!("manage_enrollment_tokens"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_enrollment_token(
     tenant_db: TenantDb,
-    CanManageAgents(user): CanManageAgents,
+    CanManageEnrollmentTokens(user): CanManageEnrollmentTokens,
     Json(body): Json<CreateEnrollmentTokenRequest>,
 ) -> Response {
     if let Err(e) = body.validate() {
@@ -122,13 +122,13 @@ pub async fn create_enrollment_token(
         (status = 403, description = "Not authorized")
     ),
     tag = "Enrollment Tokens",
-    extensions(("x-required-permission" = json!("manage_agents"))),
+    extensions(("x-required-permission" = json!("manage_enrollment_tokens"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_enrollment_tokens(
     tenant_db: TenantDb,
-    CanManageAgents(_user): CanManageAgents,
+    CanManageEnrollmentTokens(_user): CanManageEnrollmentTokens,
     Query(query): Query<ListEnrollmentTokensQuery>,
 ) -> Response {
     match et_queries::list_enrollment_tokens(&tenant_db, &query.pagination()).await {
@@ -154,13 +154,13 @@ pub async fn list_enrollment_tokens(
         (status = 404, description = "Enrollment token not found")
     ),
     tag = "Enrollment Tokens",
-    extensions(("x-required-permission" = json!("manage_agents"))),
+    extensions(("x-required-permission" = json!("manage_enrollment_tokens"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_enrollment_token(
     tenant_db: TenantDb,
-    CanManageAgents(_user): CanManageAgents,
+    CanManageEnrollmentTokens(_user): CanManageEnrollmentTokens,
     Path(token_id): Path<Uuid>,
 ) -> Response {
     match et_queries::get_enrollment_token(&tenant_db, token_id).await {
@@ -187,13 +187,13 @@ pub async fn get_enrollment_token(
         (status = 404, description = "Enrollment token not found")
     ),
     tag = "Enrollment Tokens",
-    extensions(("x-required-permission" = json!("manage_agents"))),
+    extensions(("x-required-permission" = json!("manage_enrollment_tokens"))),
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn revoke_enrollment_token(
     tenant_db: TenantDb,
-    CanManageAgents(_user): CanManageAgents,
+    CanManageEnrollmentTokens(_user): CanManageEnrollmentTokens,
     Path(token_id): Path<Uuid>,
 ) -> Response {
     match et_queries::revoke_enrollment_token(&tenant_db, token_id).await {
