@@ -81,7 +81,12 @@ const PHS_INSTALL_CMD: &str = "sudo PHS_SILENT=1 TERM=xterm /usr/bin/update";
 ///    - Codeberg-managed → two `DiscoveryTarget`s: one `ReleasesForgejo`
 ///      (FetchReleases only, `api_base_url = "https://codeberg.org"`) and
 ///      one `Shell` (DetectVersion + ExecuteUpdate using PHS conventions).
-///    - APT-managed → one `DiscoveryTarget` with `Apt` plugin type.
+///    - npm-managed → two `DiscoveryTarget`s: one `PackageManagerNpm`
+///      (DetectVersion + FetchReleases) and one `Shell` (ExecuteUpdate only,
+///      using the PHS `/usr/bin/update` script).
+///    - APT-managed → two `DiscoveryTarget`s: one `PackageManagerApt`
+///      (DetectVersion + FetchReleases) and one `Shell` (ExecuteUpdate only,
+///      using the PHS `/usr/bin/update` script).
 ///
 /// The controller processes targets generically without any PHS-specific logic.
 pub struct ProxmoxHelperScriptsPlugin {
@@ -266,16 +271,16 @@ impl ProxmoxHelperScriptsPlugin {
     }
 
     /// Build a `DiscoveryTarget` for an npm-managed PHS app.
+    ///
+    /// Covers `DetectVersion` and `FetchReleases` only — updates are always
+    /// performed via the PHS `/usr/bin/update` script (see
+    /// [`phs_update_only_target`](Self::phs_update_only_target)).
     fn npm_target(package: &str) -> DiscoveryTarget {
         DiscoveryTarget {
             plugin_type: PluginType::PackageManagerNpm,
             plugin_config: serde_json::json!({}),
             plugin_config_name: "NPM (auto)".to_string(),
-            roles: vec![
-                PluginRole::DetectVersion,
-                PluginRole::FetchReleases,
-                PluginRole::ExecuteUpdate,
-            ],
+            roles: vec![PluginRole::DetectVersion, PluginRole::FetchReleases],
             package_identifier: Some(package.to_string()),
             config_override: None,
             execution_site: None,
@@ -323,16 +328,43 @@ impl ProxmoxHelperScriptsPlugin {
     }
 
     /// Build a `DiscoveryTarget` for an APT-managed PHS app.
+    ///
+    /// Covers `DetectVersion` and `FetchReleases` only — updates are always
+    /// performed via the PHS `/usr/bin/update` script (see
+    /// [`phs_update_only_target`](Self::phs_update_only_target)).
     fn apt_target() -> DiscoveryTarget {
         DiscoveryTarget {
             plugin_type: PluginType::PackageManagerApt,
             plugin_config: serde_json::json!({}),
             plugin_config_name: "APT (auto)".to_string(),
-            roles: vec![
-                PluginRole::DetectVersion,
-                PluginRole::FetchReleases,
-                PluginRole::ExecuteUpdate,
-            ],
+            roles: vec![PluginRole::DetectVersion, PluginRole::FetchReleases],
+            package_identifier: None,
+            config_override: None,
+            execution_site: None,
+        }
+    }
+
+    /// Build a `DiscoveryTarget` for the PHS update-only Shell role.
+    ///
+    /// This target carries **only** `ExecuteUpdate` and uses the same PHS Shell
+    /// config as [`phs_shell_target`](Self::phs_shell_target) (both
+    /// `version_command` and `update_command` are present so the controller's
+    /// find-or-create deduplicates against the config used by GitHub/Codeberg
+    /// items). The `package_identifier` is always `None` — the software item's
+    /// own identifier (the container slug or package name) is used at runtime.
+    ///
+    /// This is emitted alongside npm/APT targets so that all PHS-discovered
+    /// items use `/usr/bin/update` for updates, regardless of their upstream
+    /// package manager.
+    fn phs_update_only_target() -> DiscoveryTarget {
+        DiscoveryTarget {
+            plugin_type: PluginType::GenericShell,
+            plugin_config: serde_json::json!({
+                "version_command": PHS_DETECT_VERSION_CMD,
+                "update_command": PHS_INSTALL_CMD,
+            }),
+            plugin_config_name: "PHS Shell".to_string(),
+            roles: vec![PluginRole::ExecuteUpdate],
             package_identifier: None,
             config_override: None,
             execution_site: None,
@@ -536,7 +568,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     package_identifier: npm_pkg.clone(),
                     name: display_name,
                     installed_version,
-                    targets: vec![Self::npm_target(npm_pkg)],
+                    targets: vec![Self::npm_target(npm_pkg), Self::phs_update_only_target()],
                     extra: None,
                     qualifier: None,
                     plugin_package_identifier: None,
@@ -561,7 +593,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     package_identifier: apt_pkg.clone(),
                     name: display_name,
                     installed_version,
-                    targets: vec![Self::apt_target()],
+                    targets: vec![Self::apt_target(), Self::phs_update_only_target()],
                     extra: None,
                     qualifier: None,
                     plugin_package_identifier: None,
@@ -599,7 +631,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                         package_identifier: npm_pkg.clone(),
                         name: display_name,
                         installed_version,
-                        targets: vec![Self::npm_target(&npm_pkg)],
+                        targets: vec![Self::npm_target(&npm_pkg), Self::phs_update_only_target()],
                         extra: None,
                         qualifier: None,
                         plugin_package_identifier: None,
@@ -634,7 +666,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                         package_identifier: candidate.clone(),
                         name: display_name.clone(),
                         installed_version,
-                        targets: vec![Self::apt_target()],
+                        targets: vec![Self::apt_target(), Self::phs_update_only_target()],
                         extra: None,
                         qualifier: None,
                         plugin_package_identifier: None,
@@ -907,7 +939,11 @@ mod tests {
         let target = ProxmoxHelperScriptsPlugin::apt_target();
         assert_eq!(target.plugin_type, PluginType::PackageManagerApt);
         assert_eq!(target.plugin_config_name, "APT (auto)");
-        assert_eq!(target.roles.len(), 3);
+        // DetectVersion + FetchReleases only — ExecuteUpdate is handled by phs_update_only_target.
+        assert_eq!(target.roles.len(), 2);
+        assert!(target.roles.contains(&PluginRole::DetectVersion));
+        assert!(target.roles.contains(&PluginRole::FetchReleases));
+        assert!(!target.roles.contains(&PluginRole::ExecuteUpdate));
         assert_eq!(target.plugin_config, serde_json::json!({}));
         assert!(target.package_identifier.is_none());
     }
@@ -917,13 +953,33 @@ mod tests {
         let target = ProxmoxHelperScriptsPlugin::npm_target("n8n");
         assert_eq!(target.plugin_type, PluginType::PackageManagerNpm);
         assert_eq!(target.plugin_config_name, "NPM (auto)");
-        assert_eq!(target.roles.len(), 3);
+        // DetectVersion + FetchReleases only — ExecuteUpdate is handled by phs_update_only_target.
+        assert_eq!(target.roles.len(), 2);
         assert!(target.roles.contains(&PluginRole::DetectVersion));
         assert!(target.roles.contains(&PluginRole::FetchReleases));
-        assert!(target.roles.contains(&PluginRole::ExecuteUpdate));
+        assert!(!target.roles.contains(&PluginRole::ExecuteUpdate));
         assert_eq!(target.plugin_config, serde_json::json!({}));
         // The npm package name is carried as the package_identifier override.
         assert_eq!(target.package_identifier.as_deref(), Some("n8n"));
+    }
+
+    #[test]
+    fn phs_update_only_target_structure() {
+        let target = ProxmoxHelperScriptsPlugin::phs_update_only_target();
+        assert_eq!(target.plugin_type, PluginType::GenericShell);
+        assert_eq!(target.plugin_config_name, "PHS Shell");
+        // ExecuteUpdate only — version detection and release fetching are handled
+        // by the npm/APT target.
+        assert_eq!(target.roles.len(), 1);
+        assert_eq!(target.roles[0], PluginRole::ExecuteUpdate);
+        // Config matches phs_shell_target so the controller deduplicates.
+        assert_eq!(
+            target.plugin_config["version_command"],
+            PHS_DETECT_VERSION_CMD
+        );
+        assert_eq!(target.plugin_config["update_command"], PHS_INSTALL_CMD);
+        // No package_identifier override — uses the software item's own identifier.
+        assert!(target.package_identifier.is_none());
     }
 
     #[test]
