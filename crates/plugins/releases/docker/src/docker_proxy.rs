@@ -1,10 +1,10 @@
 //! Unix-socket proxy for tunnelling the Docker API over a stdio tunnel.
 //!
 //! [`DockerSocketProxy`] accepts local Unix-socket connections and bridges
-//! each one to `docker system dial-stdio` running on the remote host via
-//! [`CommandExecutor::open_stdio_tunnel`]. Bollard then connects to this
-//! local socket using its existing `unix://` codepath, avoiding a second SSH
-//! connection.
+//! each one to a runtime's `system dial-stdio` command running on the remote
+//! host via [`CommandExecutor::open_stdio_tunnel`]. Bollard then connects to
+//! this local socket using its existing `unix://` codepath, avoiding a second
+//! SSH connection.
 //!
 //! This module is only compiled on Unix with the `daemon` feature enabled.
 
@@ -21,7 +21,7 @@ use crate::error::{DockerError, Result};
 static SOCKET_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A local Unix socket proxy that bridges each accepted connection to
-/// `docker system dial-stdio` on the remote host.
+/// a container runtime's `system dial-stdio` command on the remote host.
 ///
 /// The proxy is started by [`DockerSocketProxy::start`] and runs until
 /// dropped (the listener task is aborted and the socket file removed).
@@ -35,9 +35,12 @@ impl DockerSocketProxy {
     ///
     /// Binds a Unix socket at a unique path under `/tmp/uptrakit/` and spawns
     /// a background task that accepts connections. Each accepted connection
-    /// opens a new stdio tunnel to `docker system dial-stdio` and copies
+    /// opens a new stdio tunnel to the `dial_stdio_cmd` command and copies
     /// bytes bidirectionally.
-    pub(crate) async fn start(executor: Arc<dyn CommandExecutor>) -> Result<Self> {
+    pub(crate) async fn start(
+        executor: Arc<dyn CommandExecutor>,
+        dial_stdio_cmd: &str,
+    ) -> Result<Self> {
         let counter = SOCKET_COUNTER.fetch_add(1, Ordering::Relaxed);
         let socket_dir = std::env::temp_dir().join("uptrakit");
 
@@ -65,12 +68,14 @@ impl DockerSocketProxy {
 
         tracing::debug!(
             path = %socket_path.display(),
+            cmd = %dial_stdio_cmd,
             "Docker proxy socket listening"
         );
 
         let path_for_task = socket_path.clone();
+        let dial_cmd = dial_stdio_cmd.to_string();
         let listener_handle = tokio::spawn(async move {
-            Self::accept_loop(listener, executor, &path_for_task).await;
+            Self::accept_loop(listener, executor, &path_for_task, dial_cmd).await;
         });
 
         Ok(Self {
@@ -90,6 +95,7 @@ impl DockerSocketProxy {
         listener: UnixListener,
         executor: Arc<dyn CommandExecutor>,
         socket_path: &Path,
+        dial_stdio_cmd: String,
     ) {
         loop {
             let (stream, _addr) = match listener.accept().await {
@@ -105,8 +111,9 @@ impl DockerSocketProxy {
             };
 
             let executor = Arc::clone(&executor);
+            let cmd = dial_stdio_cmd.clone();
             tokio::spawn(async move {
-                match executor.open_stdio_tunnel("docker system dial-stdio").await {
+                match executor.open_stdio_tunnel(&cmd).await {
                     Ok(tunnel) => {
                         let (mut stream_read, mut stream_write) = tokio::io::split(stream);
                         let (mut tunnel_read, mut tunnel_write) = tokio::io::split(tunnel);

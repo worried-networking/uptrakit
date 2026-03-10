@@ -7,6 +7,27 @@ use crate::error::{DockerError, Result};
 /// Sentinel value used to indicate a masked secret in API responses.
 const SECRET_MASK: &str = "***";
 
+/// Selects the container runtime used for `dial-stdio` tunnelling over SSH.
+///
+/// Only relevant when the plugin is used via an SSH executor that supports
+/// stdio tunnels (e.g. `agent-ssh`). For local connections bollard connects
+/// to a socket directly without invoking a runtime CLI.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ContainerRuntime {
+    /// Probe the remote host for Docker, then Podman; use whichever responds first.
+    #[default]
+    Auto,
+    /// Always invoke `docker system dial-stdio`.
+    Docker,
+    /// Always invoke `podman system dial-stdio`.
+    Podman,
+}
+
+fn is_auto_runtime(r: &ContainerRuntime) -> bool {
+    *r == ContainerRuntime::Auto
+}
+
 /// Authentication configuration for Docker registries.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -86,6 +107,14 @@ pub struct DockerConfig {
     /// automatically recreates all containers that use this image.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_pull_command: Option<String>,
+
+    /// Container runtime to use for SSH stdio tunnelling.
+    ///
+    /// In `Auto` mode (the default) the agent probes the remote host for Docker
+    /// first, then Podman, and uses whichever is found. Set explicitly to
+    /// `"docker"` or `"podman"` to skip auto-detection.
+    #[serde(default, skip_serializing_if = "is_auto_runtime")]
+    pub container_runtime: ContainerRuntime,
 }
 
 impl DockerConfig {
@@ -169,6 +198,7 @@ impl DockerConfig {
             && self.tracked_tag.is_none()
             && self.compose_restart.is_none()
             && self.post_pull_command.is_none()
+            && self.container_runtime == ContainerRuntime::Auto
     }
 }
 
@@ -179,6 +209,14 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for DockerConfig {
             FieldDef::new("docker_host", "Docker Host")
                 .with_placeholder("unix:///var/run/docker.sock")
                 .with_help_text("Docker daemon endpoint override (tcp://, unix://, or ssh://)"),
+            FieldDef::new("container_runtime", "Container Runtime")
+                .with_type(FieldType::Select)
+                .with_options(vec![
+                    SelectOption::new("auto", "Auto-detect"),
+                    SelectOption::new("docker", "Docker"),
+                    SelectOption::new("podman", "Podman"),
+                ])
+                .with_help_text("Container runtime for SSH dial-stdio tunnelling (auto = probe Docker then Podman)"),
             FieldDef::new("ssh_key_path", "SSH Key Path")
                 .with_help_text("Path to SSH private key (only for ssh:// docker hosts)"),
             FieldDef::new("auth._type", "Registry Auth")
@@ -629,6 +667,47 @@ mod tests {
         let deserialized: DockerConfig = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized.tracked_tag, config.tracked_tag);
         assert_eq!(deserialized.post_pull_command, config.post_pull_command);
+    }
+
+    // ── ContainerRuntime ──────────────────────────────────────────────────────
+
+    #[test]
+    fn is_discover_all_mode_false_when_container_runtime_set() {
+        let config = DockerConfig {
+            container_runtime: ContainerRuntime::Docker,
+            ..Default::default()
+        };
+        assert!(!config.is_discover_all_mode());
+    }
+
+    #[test]
+    fn container_runtime_default_is_auto() {
+        assert_eq!(
+            DockerConfig::default().container_runtime,
+            ContainerRuntime::Auto
+        );
+    }
+
+    #[test]
+    fn container_runtime_serialization_roundtrip() {
+        let config = DockerConfig {
+            container_runtime: ContainerRuntime::Podman,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        assert!(json.contains(r#""container_runtime":"podman""#));
+        let de: DockerConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(de.container_runtime, ContainerRuntime::Podman);
+    }
+
+    #[test]
+    fn container_runtime_omitted_when_auto() {
+        let config = DockerConfig::default();
+        let json = serde_json::to_string(&config).expect("serialize");
+        assert!(
+            !json.contains("container_runtime"),
+            "auto should be omitted: {json}"
+        );
     }
 
     #[test]

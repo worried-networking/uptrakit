@@ -39,6 +39,8 @@ pub struct LocalContainerInfo {
     pub image: String,
     /// Container names (leading `'/'` stripped).
     pub names: Vec<String>,
+    /// Container labels (key-value pairs).
+    pub labels: std::collections::HashMap<String, String>,
 }
 
 /// A container that uses a specific image, with its current run state.
@@ -162,6 +164,53 @@ impl DockerClient for NoopDockerClient {
 
 // ── Production implementation (daemon feature) ──────────────────────────────
 
+/// Probe well-known Docker/Podman Unix socket paths and return the first
+/// accessible one, in priority order:
+/// 1. `/var/run/docker.sock` (rootful Docker)
+/// 2. `/run/user/{euid}/docker.sock` (rootless Docker)
+/// 3. `/run/user/{euid}/podman/podman.sock` (rootless Podman)
+/// 4. `/run/podman/podman.sock` (rootful Podman)
+///
+/// Returns `None` when no socket is found (falls back to
+/// `bollard::Docker::connect_with_defaults`).
+#[cfg(all(unix, feature = "daemon"))]
+#[cfg_attr(test, allow(dead_code))]
+fn probe_local_socket_path() -> Option<String> {
+    use std::os::unix::fs::FileTypeExt;
+
+    // Determine the effective UID for user-scoped socket paths.
+    // On Linux this is readable from /proc/self/status; on other Unix
+    // systems we skip the user-scoped paths rather than add a libc dep.
+    #[cfg(target_os = "linux")]
+    let euid: Option<String> = std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("Uid:"))
+                .and_then(|l| l.split_whitespace().nth(2)) // effective uid
+                .map(|s| s.to_string())
+        });
+    #[cfg(not(target_os = "linux"))]
+    let euid: Option<String> = None;
+
+    let mut candidates = vec!["/var/run/docker.sock".to_string()];
+    if let Some(ref uid) = euid {
+        candidates.push(format!("/run/user/{uid}/docker.sock"));
+        candidates.push(format!("/run/user/{uid}/podman/podman.sock"));
+    }
+    candidates.push("/run/podman/podman.sock".to_string());
+
+    for path in &candidates {
+        if let Ok(meta) = std::fs::metadata(path) {
+            if meta.file_type().is_socket() {
+                tracing::debug!(socket = %path, "selected local Docker/Podman socket");
+                return Some(path.clone());
+            }
+        }
+    }
+    None
+}
+
 #[cfg(feature = "daemon")]
 /// Docker client backed by the bollard library.
 ///
@@ -197,7 +246,18 @@ impl BollardDockerClient {
         const TIMEOUT: u64 = 5;
 
         match docker_host {
-            None => bollard::Docker::connect_with_defaults().context_to::<DockerError>(),
+            None => {
+                #[cfg(all(unix, not(test)))]
+                if let Some(socket_path) = probe_local_socket_path() {
+                    return bollard::Docker::connect_with_socket(
+                        &socket_path,
+                        TIMEOUT,
+                        API_DEFAULT_VERSION,
+                    )
+                    .context_to::<DockerError>();
+                }
+                bollard::Docker::connect_with_defaults().context_to::<DockerError>()
+            }
 
             Some(h) if h.starts_with("unix://") => {
                 let path = &h["unix://".len()..];
@@ -328,6 +388,7 @@ impl DockerClient for BollardDockerClient {
                     .into_iter()
                     .map(|n| n.trim_start_matches('/').to_string())
                     .collect(),
+                labels: c.labels.unwrap_or_default(),
             })
             .collect();
 

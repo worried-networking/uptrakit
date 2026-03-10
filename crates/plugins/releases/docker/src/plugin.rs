@@ -17,13 +17,15 @@ use uptrakit_plugin_infrastructure_core::{
 /// Type-erased RAII handle kept alive alongside the Docker client.
 type OpaqueHandle = Option<Box<dyn std::any::Any + Send + Sync>>;
 
-use crate::config::DockerConfig;
+use crate::config::{ContainerRuntime, DockerConfig};
 #[cfg(feature = "daemon")]
 use crate::docker_client::BollardDockerClient;
 use crate::docker_client::{DockerClient, NoopDockerClient};
 use crate::error::Result;
 use crate::image_ref::ImageRef;
 use crate::registry::RegistryClient;
+#[cfg(feature = "daemon")]
+use std::time::Duration;
 #[cfg(feature = "daemon")]
 use uptrakit_plugin_infrastructure_core::HostCompatibility;
 
@@ -37,7 +39,7 @@ use uptrakit_plugin_infrastructure_core::HostCompatibility;
 pub struct DockerPlugin {
     config: DockerConfig,
     registry_client: RegistryClient,
-    docker_client: Arc<dyn DockerClient>,
+    docker_client: parking_lot::Mutex<Arc<dyn DockerClient>>,
     executor: Arc<dyn CommandExecutor>,
     /// RAII handle for the Docker socket proxy (Unix-only, daemon feature).
     ///
@@ -45,7 +47,9 @@ pub struct DockerPlugin {
     /// is configured, a [`crate::docker_proxy::DockerSocketProxy`] is started
     /// and stored here. The proxy is stopped and the socket removed when the
     /// plugin is dropped.
-    _proxy_handle: OpaqueHandle,
+    proxy_handle: parking_lot::Mutex<OpaqueHandle>,
+    /// Container runtime detected during `detect_host_compatibility` (Auto mode).
+    detected_runtime: parking_lot::Mutex<Option<ContainerRuntime>>,
 }
 
 impl DockerPlugin {
@@ -93,7 +97,14 @@ impl DockerPlugin {
         // russh session.
         #[cfg(unix)]
         if executor.supports_stdio_tunnel() && config.docker_host.is_none() {
-            let proxy = crate::docker_proxy::DockerSocketProxy::start(Arc::clone(executor)).await?;
+            let dial_cmd = match config.container_runtime {
+                ContainerRuntime::Docker => "docker system dial-stdio",
+                ContainerRuntime::Podman => "podman system dial-stdio",
+                ContainerRuntime::Auto => "docker system dial-stdio", // overridden after detection
+            };
+            let proxy =
+                crate::docker_proxy::DockerSocketProxy::start(Arc::clone(executor), dial_cmd)
+                    .await?;
             let uri = proxy.socket_uri();
             tracing::info!(
                 proxy_socket = %uri,
@@ -111,6 +122,24 @@ impl DockerPlugin {
         Ok((client, None))
     }
 
+    /// Returns the `dial-stdio` command string for the configured/detected runtime.
+    ///
+    /// Explicit `Docker`/`Podman` config always wins. In `Auto` mode the
+    /// previously detected runtime is used (defaulting to `docker` if
+    /// detection has not yet run).
+    #[cfg(feature = "daemon")]
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn effective_dial_stdio_command(&self) -> &'static str {
+        match self.config.container_runtime {
+            ContainerRuntime::Docker => "docker system dial-stdio",
+            ContainerRuntime::Podman => "podman system dial-stdio",
+            ContainerRuntime::Auto => match *self.detected_runtime.lock() {
+                Some(ContainerRuntime::Podman) => "podman system dial-stdio",
+                _ => "docker system dial-stdio",
+            },
+        }
+    }
+
     /// Internal constructor that accepts any [`DockerClient`] implementation.
     fn init(
         config: DockerConfig,
@@ -125,9 +154,10 @@ impl DockerPlugin {
         Ok(Self {
             config,
             registry_client,
-            docker_client,
+            docker_client: parking_lot::Mutex::new(docker_client),
             executor,
-            _proxy_handle: proxy_handle,
+            proxy_handle: parking_lot::Mutex::new(proxy_handle),
+            detected_runtime: parking_lot::Mutex::new(None),
         })
     }
 
@@ -155,6 +185,78 @@ impl DockerPlugin {
     ) -> Result<Self> {
         Self::init(config, executor, docker_client, None)
     }
+
+    /// Probe the executor for the available container runtime and, when running
+    /// over an SSH stdio tunnel, restart the proxy with the detected command.
+    ///
+    /// Returns `Some(runtime)` when a runtime is found, `None` when neither
+    /// Docker nor Podman is available, or an `Err` on unexpected failure.
+    #[cfg(feature = "daemon")]
+    async fn detect_and_apply_runtime(&self) -> crate::error::Result<Option<ContainerRuntime>> {
+        const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+        // Helper: run a shell command via the executor and return true if exit 0.
+        let probe = |cmd: &'static str| {
+            let executor = Arc::clone(&self.executor);
+            async move {
+                tokio::time::timeout(
+                    PROBE_TIMEOUT,
+                    executor.execute_quiet(&CommandSpec::shell(cmd)),
+                )
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+                .map(|o| o.exit_code == 0)
+                .unwrap_or(false)
+            }
+        };
+
+        let runtime = if probe("command -v docker >/dev/null 2>&1").await {
+            tracing::debug!("detected Docker runtime");
+            ContainerRuntime::Docker
+        } else if probe("command -v podman >/dev/null 2>&1").await {
+            tracing::debug!("detected Podman runtime");
+            ContainerRuntime::Podman
+        } else {
+            return Ok(None);
+        };
+
+        // When the executor supports stdio tunnels and no explicit docker_host
+        // is configured, restart the proxy with the detected runtime's command
+        // so all subsequent bollard calls use the correct binary.
+        #[cfg(unix)]
+        if self.executor.supports_stdio_tunnel() && self.config.docker_host.is_none() {
+            let dial_cmd = match runtime {
+                ContainerRuntime::Docker => "docker system dial-stdio",
+                ContainerRuntime::Podman => "podman system dial-stdio",
+                ContainerRuntime::Auto => "docker system dial-stdio",
+            };
+
+            tracing::info!(
+                runtime = ?runtime,
+                cmd = %dial_cmd,
+                "restarting Docker socket proxy with detected runtime"
+            );
+
+            let proxy =
+                crate::docker_proxy::DockerSocketProxy::start(Arc::clone(&self.executor), dial_cmd)
+                    .await
+                    .map_err(|e| {
+                        rootcause::report!(crate::error::DockerError::DaemonConnection(
+                            e.to_string()
+                        ))
+                    })?;
+            let uri = proxy.socket_uri();
+            let new_client =
+                Arc::new(BollardDockerClient::new(Some(&uri), None)?) as Arc<dyn DockerClient>;
+            let handle: Box<dyn std::any::Any + Send + Sync> = Box::new(proxy);
+
+            *self.docker_client.lock() = new_client;
+            *self.proxy_handle.lock() = Some(handle);
+        }
+
+        Ok(Some(runtime))
+    }
 }
 
 #[async_trait]
@@ -172,18 +274,29 @@ impl Plugin for DockerPlugin {
     async fn detect_host_compatibility(
         &self,
     ) -> uptrakit_plugin_infrastructure_core::Result<HostCompatibility> {
-        // Ping the Docker daemon directly rather than checking for the CLI binary.
-        // This validates that the daemon is actually running and reachable (including
-        // over SSH tunnels for remote hosts), not just that the docker binary exists.
-        //
-        // Apply a short timeout so that a frozen or unresponsive daemon (e.g.
-        // Docker Desktop restarting) does not block host-compatibility probing
-        // indefinitely. The bollard `connect_with_defaults()` path carries no
-        // explicit request timeout, so without this guard a single slow daemon
-        // stalls the entire sudoers-generation step for the duration of the OS
-        // socket/HTTP timeout (potentially minutes).
-        const COMPAT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-        match tokio::time::timeout(COMPAT_PROBE_TIMEOUT, self.docker_client.ping()).await {
+        // When container_runtime is Auto, probe the executor to discover which
+        // runtime (Docker or Podman) is available. For SSH executors that support
+        // stdio tunnels we also restart the proxy with the correct command so
+        // all subsequent daemon operations use the right runtime.
+        if self.config.container_runtime == ContainerRuntime::Auto {
+            match self.detect_and_apply_runtime().await {
+                Ok(Some(rt)) => {
+                    *self.detected_runtime.lock() = Some(rt);
+                }
+                Ok(None) => {
+                    return Ok(HostCompatibility::Incompatible(
+                        "no container runtime (Docker or Podman) found on this host".to_string(),
+                    ));
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "runtime detection failed; proceeding with current client");
+                }
+            }
+        }
+
+        const COMPAT_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+        let client = Arc::clone(&*self.docker_client.lock());
+        match tokio::time::timeout(COMPAT_PROBE_TIMEOUT, client.ping()).await {
             Ok(Ok(())) => Ok(HostCompatibility::Compatible),
             Ok(Err(e)) => Ok(HostCompatibility::Incompatible(format!(
                 "Docker daemon not accessible: {e}"
@@ -250,7 +363,8 @@ impl Plugin for DockerPlugin {
         let tag = self.config.resolved_tracked_tag(&ir.tag);
         let full_ref = format!("{}:{tag}", ir.image);
 
-        match self.docker_client.inspect_image(&full_ref).await {
+        let client = Arc::clone(&*self.docker_client.lock());
+        match client.inspect_image(&full_ref).await {
             Ok(Some(digest_info)) => {
                 tracing::debug!(
                     digest = %digest_info.digest,
@@ -295,8 +409,8 @@ impl Plugin for DockerPlugin {
         // Without a qualifier all containers using this image are managed, which
         // preserves behaviour for items created before per-container tracking was
         // introduced.
-        let all_containers = self
-            .docker_client
+        let client = Arc::clone(&*self.docker_client.lock());
+        let all_containers = client
             .list_containers_for_image(&full_ref)
             .await
             .unwrap_or_else(|e| {
@@ -326,8 +440,8 @@ impl Plugin for DockerPlugin {
         output.push_str(&format!("Pulling Docker image {image}:{tag}\n"));
 
         tracing::debug!(image = %image, tag = %tag, "pulling Docker image");
-        let pull_output = self
-            .docker_client
+        let client = Arc::clone(&*self.docker_client.lock());
+        let pull_output = client
             .pull_image(image, tag, self.config.auth.as_ref(), output_tx)
             .await
             .context_transform(|e| PluginError::InstallFailed(e.to_string()))?;
@@ -384,7 +498,8 @@ impl Plugin for DockerPlugin {
         // Run post_pull_command if configured.
         if let Some(ref cmd_str) = self.config.post_pull_command {
             // Try to get local digest for {digest} substitution.
-            let digest = match self.docker_client.inspect_image(&full_ref).await {
+            let client = Arc::clone(&*self.docker_client.lock());
+            let digest = match client.inspect_image(&full_ref).await {
                 Ok(Some(d)) => d.digest,
                 _ => String::new(),
             };
@@ -433,7 +548,8 @@ impl Plugin for DockerPlugin {
                 output.push_str(&line);
                 output.push('\n');
 
-                self.docker_client
+                let client = Arc::clone(&*self.docker_client.lock());
+                client
                     .recreate_container(&container.name, container.is_running)
                     .await
                     .context_transform(|e| PluginError::InstallFailed(e.to_string()))?;
@@ -450,13 +566,10 @@ impl Plugin for DockerPlugin {
         use std::collections::HashMap;
         use uptrakit_plugin_infrastructure_core::{DiscoveryTarget, PluginRole};
 
-        let containers = self
-            .docker_client
-            .list_containers(true)
-            .await
-            .map_err(|e| {
-                uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(e.to_string())
-            })?;
+        let client = Arc::clone(&*self.docker_client.lock());
+        let containers = client.list_containers(true).await.map_err(|e| {
+            uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(e.to_string())
+        })?;
 
         // When the plugin was invoked without a pre-existing plugin config
         // (config is all-defaults / `{}`), emit a DiscoveryTarget so the
@@ -508,7 +621,8 @@ impl Plugin for DockerPlugin {
                     None => continue,
                 },
                 std::collections::hash_map::Entry::Vacant(e) => {
-                    let outcome = match self.docker_client.inspect_image(&ir.full_ref).await {
+                    let client = Arc::clone(&*self.docker_client.lock());
+                    let outcome = match client.inspect_image(&ir.full_ref).await {
                         Ok(Some(d)) => {
                             tracing::debug!(
                                 image = %ir.full_ref,
@@ -617,7 +731,8 @@ impl Plugin for DockerPlugin {
                 continue;
             }
 
-            let outcome = match self.docker_client.inspect_image(&resolved).await {
+            let client = Arc::clone(&*self.docker_client.lock());
+            let outcome = match client.inspect_image(&resolved).await {
                 Ok(Some(d)) => Ok(Some(d.digest)),
                 Ok(None) => Ok(None),
                 Err(e) => Err(e.to_string()),
@@ -712,6 +827,53 @@ mod tests {
         Arc::new(MockCommandExecutor)
     }
 
+    /// A mock executor that simulates runtime detection probes.
+    ///
+    /// `probe_results` is a list of exit codes returned in order for each
+    /// call to `execute_quiet`. Index 0 = first call (docker check),
+    /// index 1 = second call (podman check), etc.
+    struct DetectionMockExecutor {
+        probe_results: Vec<i32>,
+        call_count: std::sync::atomic::AtomicUsize,
+    }
+
+    impl DetectionMockExecutor {
+        fn new(results: Vec<i32>) -> Self {
+            Self {
+                probe_results: results,
+                call_count: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl CommandExecutor for DetectionMockExecutor {
+        async fn execute(
+            &self,
+            _spec: &CommandSpec,
+            _output_tx: &mpsc::Sender<UpdateOutputLine>,
+        ) -> uptrakit_command::Result<uptrakit_plugin_infrastructure_core::CommandOutput> {
+            Ok(uptrakit_plugin_infrastructure_core::CommandOutput {
+                output: String::new(),
+                exit_code: 0,
+            })
+        }
+
+        async fn execute_quiet(
+            &self,
+            _spec: &CommandSpec,
+        ) -> uptrakit_command::Result<uptrakit_plugin_infrastructure_core::CommandOutput> {
+            let idx = self
+                .call_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let exit_code = self.probe_results.get(idx).copied().unwrap_or(1);
+            Ok(uptrakit_plugin_infrastructure_core::CommandOutput {
+                output: String::new(),
+                exit_code,
+            })
+        }
+    }
+
     fn default_mock_client() -> Arc<dyn DockerClient> {
         Arc::new(MockDockerClient::default())
     }
@@ -760,8 +922,9 @@ mod tests {
     #[tokio::test]
     async fn detect_host_compatibility_compatible_when_daemon_reachable() {
         let mock = Arc::new(MockDockerClient::default());
-        let plugin =
-            DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+        // Use DetectionMockExecutor that returns 0 so docker is found during Auto probe.
+        let executor = Arc::new(DetectionMockExecutor::new(vec![0]));
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), executor, mock).unwrap();
         let result = plugin.detect_host_compatibility().await.expect("ok");
         assert_eq!(result, HostCompatibility::Compatible);
     }
@@ -772,8 +935,9 @@ mod tests {
             ping_should_fail: true,
             ..Default::default()
         });
-        let plugin =
-            DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+        // Use DetectionMockExecutor that returns 0 so docker is found during Auto probe.
+        let executor = Arc::new(DetectionMockExecutor::new(vec![0]));
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), executor, mock).unwrap();
         let result = plugin.detect_host_compatibility().await.expect("ok");
         match result {
             HostCompatibility::Incompatible(msg) => {
@@ -793,8 +957,10 @@ mod tests {
             ping_should_hang: true,
             ..Default::default()
         });
-        let plugin =
-            DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+        // Use DetectionMockExecutor that returns exit 0 for the docker probe so
+        // runtime detection succeeds, then the daemon ping hangs and must time out.
+        let executor = Arc::new(DetectionMockExecutor::new(vec![0]));
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), executor, mock).unwrap();
         // Spawn so we can advance virtual time while the probe is in flight.
         let check = tokio::spawn(async move { plugin.detect_host_compatibility().await });
         tokio::task::yield_now().await;
@@ -1127,10 +1293,12 @@ mod tests {
                 LocalContainerInfo {
                     image: "nginx:latest".to_string(),
                     names: vec!["web-server".to_string()],
+                    labels: Default::default(),
                 },
                 LocalContainerInfo {
                     image: "nginx:latest".to_string(),
                     names: vec!["api-proxy".to_string()],
+                    labels: Default::default(),
                 },
             ],
             ..Default::default()
@@ -1175,6 +1343,7 @@ mod tests {
             containers: vec![LocalContainerInfo {
                 image: "nginx:latest".to_string(),
                 names: vec!["my-nginx".to_string()],
+                labels: Default::default(),
             }],
             ..Default::default()
         });
@@ -1205,6 +1374,7 @@ mod tests {
                 // BollardDockerClient strips the leading '/' before returning
                 // LocalContainerInfo, but the mock may supply pre-stripped names.
                 names: vec!["my-nginx".to_string()],
+                labels: Default::default(),
             }],
             ..Default::default()
         });
@@ -1228,6 +1398,7 @@ mod tests {
             containers: vec![LocalContainerInfo {
                 image: "sha256:deadbeef".to_string(),
                 names: vec!["bare-sha-container".to_string()],
+                labels: Default::default(),
             }],
             ..Default::default()
         });
@@ -1244,6 +1415,7 @@ mod tests {
             containers: vec![LocalContainerInfo {
                 image: "my-local-image:dev".to_string(),
                 names: vec!["local-container".to_string()],
+                labels: Default::default(),
             }],
             ..Default::default()
         });
@@ -1267,6 +1439,7 @@ mod tests {
             containers: vec![LocalContainerInfo {
                 image: "nginx:latest".to_string(),
                 names: vec!["my-nginx".to_string()],
+                labels: Default::default(),
             }],
             ..Default::default()
         });
@@ -1293,6 +1466,7 @@ mod tests {
             containers: vec![LocalContainerInfo {
                 image: "nginx:latest".to_string(),
                 names: vec!["my-nginx".to_string()],
+                labels: Default::default(),
             }],
             ..Default::default()
         });
@@ -1580,6 +1754,106 @@ mod tests {
                 .map(|v| v.to_string())
                 .as_deref(),
             Some("sha256:def456")
+        );
+    }
+
+    // ── ContainerRuntime detection ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn detect_host_compat_auto_selects_docker_when_available() {
+        // probe_results[0] = docker check returns 0 (found)
+        let executor = Arc::new(DetectionMockExecutor::new(vec![0]));
+        let mock = Arc::new(MockDockerClient::default());
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), executor, mock).unwrap();
+        let result = plugin.detect_host_compatibility().await.expect("ok");
+        assert_eq!(result, HostCompatibility::Compatible);
+        assert_eq!(
+            *plugin.detected_runtime.lock(),
+            Some(ContainerRuntime::Docker)
+        );
+        assert_eq!(
+            plugin.effective_dial_stdio_command(),
+            "docker system dial-stdio"
+        );
+    }
+
+    #[tokio::test]
+    async fn detect_host_compat_auto_selects_podman_when_only_podman_found() {
+        // probe_results[0] = docker returns 1 (not found), [1] = podman returns 0
+        let executor = Arc::new(DetectionMockExecutor::new(vec![1, 0]));
+        let mock = Arc::new(MockDockerClient::default());
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), executor, mock).unwrap();
+        let result = plugin.detect_host_compatibility().await.expect("ok");
+        assert_eq!(result, HostCompatibility::Compatible);
+        assert_eq!(
+            *plugin.detected_runtime.lock(),
+            Some(ContainerRuntime::Podman)
+        );
+        assert_eq!(
+            plugin.effective_dial_stdio_command(),
+            "podman system dial-stdio"
+        );
+    }
+
+    #[tokio::test]
+    async fn detect_host_compat_auto_incompatible_when_neither_found() {
+        // Both docker and podman checks fail
+        let executor = Arc::new(DetectionMockExecutor::new(vec![1, 1]));
+        let mock = Arc::new(MockDockerClient::default());
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), executor, mock).unwrap();
+        let result = plugin.detect_host_compatibility().await.expect("ok");
+        match result {
+            HostCompatibility::Incompatible(msg) => {
+                assert!(
+                    msg.contains("container runtime"),
+                    "message should mention container runtime: {msg}"
+                );
+            }
+            HostCompatibility::Compatible => panic!("expected Incompatible"),
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn effective_dial_stdio_command_docker_explicit() {
+        let config = DockerConfig {
+            container_runtime: ContainerRuntime::Docker,
+            ..Default::default()
+        };
+        let plugin =
+            DockerPlugin::new_for_test(config, test_executor(), default_mock_client()).unwrap();
+        assert_eq!(
+            plugin.effective_dial_stdio_command(),
+            "docker system dial-stdio"
+        );
+    }
+
+    #[test]
+    fn effective_dial_stdio_command_podman_explicit() {
+        let config = DockerConfig {
+            container_runtime: ContainerRuntime::Podman,
+            ..Default::default()
+        };
+        let plugin =
+            DockerPlugin::new_for_test(config, test_executor(), default_mock_client()).unwrap();
+        assert_eq!(
+            plugin.effective_dial_stdio_command(),
+            "podman system dial-stdio"
+        );
+    }
+
+    #[test]
+    fn effective_dial_stdio_command_auto_defaults_to_docker() {
+        let plugin = DockerPlugin::new_for_test(
+            DockerConfig::default(),
+            test_executor(),
+            default_mock_client(),
+        )
+        .unwrap();
+        // No detection run yet: defaults to docker
+        assert_eq!(
+            plugin.effective_dial_stdio_command(),
+            "docker system dial-stdio"
         );
     }
 }
