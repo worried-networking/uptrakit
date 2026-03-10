@@ -779,15 +779,15 @@ All topics use the MQTT client's `topic_prefix` field. All host-scoped topics sh
 All entities for a given host share a single HA device: `uptrakit_host_{t}_{h}` (name = `friendly_name`).
 
 Software item entities: unique_id `uptrakit_{t}_{h}_{i}`, entity name = `{item_name}`,
-`default_entity_id` = `uptrakit_{fn_slug}_{item_slug}`.
+`default_entity_id` = `update.uptrakit_{fn_slug}_{item_slug}`.
 
 Host summary entities: unique_id `uptrakit_{t}_{h}_pkgs`,
-entity name `"{friendly_name} packages"`, `default_entity_id` = `uptrakit_{fn_slug}_packages`.
+entity name `"{friendly_name} packages"`, `default_entity_id` = `update.uptrakit_{fn_slug}_packages`.
 Both host summary entities are **disabled by default** in HA (`"enabled_by_default": false`).
 
 Security update entities: unique_id `uptrakit_{t}_{h}_sec`,
 entity name `"{friendly_name} security updates"`,
-`default_entity_id` = `uptrakit_{fn_slug}_security_updates`. Install triggers a `security_only = true` batch.
+`default_entity_id` = `update.uptrakit_{fn_slug}_security_updates`. Install triggers a `security_only = true` batch.
 
 Connectivity sensor: unique_id `uptrakit_{t}_{h}_conn`, entity name `"{friendly_name} agent"`,
 platform `binary_sensor`, `device_class = "connectivity"`. **Enabled by default** in HA.

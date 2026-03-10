@@ -187,7 +187,7 @@ connectivity entities for a host appear together under one device in Home Assist
 
 Each software item entity is named after the software item (e.g. "nginx"). Entity IDs are assigned on
 first registration using a stable `default_entity_id` in the form
-`uptrakit_{friendly_name_slug}_{item_slug}`, where slugs are lowercase with non-alphanumeric characters
+`update.uptrakit_{friendly_name_slug}_{item_slug}`, where slugs are lowercase with non-alphanumeric characters
 replaced by underscores. For example, software item "uptrakit pangolin" on a host with friendly name
 "pangolin.uk.home.yantsen.su" gets the entity ID
 `update.uptrakit_pangolin_uk_home_yantsen_su_uptrakit_pangolin`.

@@ -308,8 +308,8 @@ fn build_device_block(
 /// (identified by `uptrakit_host_{tenant_id}_{host_id}`), named after the
 /// host's `friendly_name`. The entity itself is named after the software item.
 /// An explicit `default_entity_id` in the form
-/// `uptrakit_{friendly_name_slug}_{item_slug}` is included so that HA uses a
-/// stable, human-readable entity ID on first registration.
+/// `update.uptrakit_{friendly_name_slug}_{item_slug}` is included so that HA
+/// uses a stable, human-readable entity ID on first registration.
 ///
 /// Returns a [`serde_json::Value`] that should be serialized with `to_string()`
 /// and published (retained) on `discovery_config_topic(...)`.
@@ -353,14 +353,18 @@ pub fn build_discovery_config(
     os_info: HostOsInfo<'_>,
 ) -> serde_json::Value {
     let uid = unique_id(tenant_id, item_id, host_id);
-    let object_id = format!("uptrakit_{}_{}", slugify(friendly_name), slugify(item_name));
+    let default_entity_id = format!(
+        "update.uptrakit_{}_{}",
+        slugify(friendly_name),
+        slugify(item_name)
+    );
 
     let mut config = serde_json::json!({
         "platform": "mqtt",
         "unique_id": uid,
         "name": item_name,
         "title": format!("Software Update ({})", item_name),
-        "default_entity_id": object_id,
+        "default_entity_id": default_entity_id,
         "state_topic": state_topic(topic_prefix, item_id, host_id),
         "latest_version_topic": latest_version_topic(topic_prefix, item_id, host_id),
         "command_topic": command_topic(topic_prefix, item_id, host_id),
@@ -793,14 +797,14 @@ pub fn build_host_packages_discovery_config(
     os_info: HostOsInfo<'_>,
 ) -> serde_json::Value {
     let uid = host_packages_unique_id(tenant_id, host_id);
-    let object_id = format!("uptrakit_{}_packages", slugify(friendly_name));
+    let default_entity_id = format!("update.uptrakit_{}_packages", slugify(friendly_name));
 
     serde_json::json!({
         "platform": "mqtt",
         "unique_id": uid,
         "name": null,
         "title": "Packages Update",
-        "default_entity_id": object_id,
+        "default_entity_id": default_entity_id,
         "enabled_by_default": false,
         "state_topic": host_packages_state_topic(topic_prefix, host_id),
         "latest_version_topic": host_packages_latest_version_topic(topic_prefix, host_id),
@@ -1018,14 +1022,17 @@ pub fn build_host_security_discovery_config(
     os_info: HostOsInfo<'_>,
 ) -> serde_json::Value {
     let uid = host_security_unique_id(tenant_id, host_id);
-    let object_id = format!("uptrakit_{}_security_updates", slugify(friendly_name));
+    let default_entity_id = format!(
+        "update.uptrakit_{}_security_updates",
+        slugify(friendly_name)
+    );
 
     serde_json::json!({
         "platform": "mqtt",
         "unique_id": uid,
         "name": null,
         "title": "Security Updates",
-        "default_entity_id": object_id,
+        "default_entity_id": default_entity_id,
         "enabled_by_default": false,
         "state_topic": host_security_state_topic(topic_prefix, host_id),
         "latest_version_topic": host_security_latest_version_topic(topic_prefix, host_id),
@@ -1269,13 +1276,13 @@ pub fn build_host_connectivity_discovery_config(
     os_info: HostOsInfo<'_>,
 ) -> serde_json::Value {
     let uid = host_connectivity_unique_id(tenant_id, host_id);
-    let object_id = format!("uptrakit_{}_agent", slugify(friendly_name));
+    let default_entity_id = format!("binary_sensor.uptrakit_{}_agent", slugify(friendly_name));
 
     serde_json::json!({
         "platform": "mqtt",
         "unique_id": uid,
         "name": format!("{friendly_name} agent"),
-        "default_entity_id": object_id,
+        "default_entity_id": default_entity_id,
         "device_class": "connectivity",
         "enabled_by_default": true,
         "state_topic": host_connectivity_state_topic(topic_prefix, host_id),
@@ -1872,7 +1879,7 @@ mod tests {
         );
         assert_eq!(
             v["default_entity_id"],
-            "uptrakit_pangolin_uk_home_yantsen_su_uptrakit_pangolin"
+            "update.uptrakit_pangolin_uk_home_yantsen_su_uptrakit_pangolin"
         );
     }
 
@@ -1888,7 +1895,7 @@ mod tests {
             ReleaseInfo::default(),
             HostOsInfo::default(),
         );
-        assert_eq!(v["default_entity_id"], "uptrakit_server1_myapp");
+        assert_eq!(v["default_entity_id"], "update.uptrakit_server1_myapp");
     }
 
     #[test]
@@ -2391,7 +2398,7 @@ mod tests {
             "My Server",
             HostOsInfo::default(),
         );
-        assert_eq!(v["default_entity_id"], "uptrakit_my_server_packages");
+        assert_eq!(v["default_entity_id"], "update.uptrakit_my_server_packages");
     }
 
     #[test]
@@ -2687,7 +2694,7 @@ mod tests {
         );
         assert_eq!(
             v["default_entity_id"],
-            "uptrakit_my_server_security_updates"
+            "update.uptrakit_my_server_security_updates"
         );
     }
 
@@ -2995,7 +3002,10 @@ mod tests {
             "My Server",
             HostOsInfo::default(),
         );
-        assert_eq!(v["default_entity_id"], "uptrakit_my_server_agent");
+        assert_eq!(
+            v["default_entity_id"],
+            "binary_sensor.uptrakit_my_server_agent"
+        );
     }
 
     #[test]
