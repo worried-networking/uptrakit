@@ -540,6 +540,13 @@ pub(crate) async fn handle_execute_update_ssh(
                 biased;
                 Some(msg) = output_rx.recv() => {
                     if tx.send((host_id.clone(), UpdateEvent::Output(msg))).await.is_err() {
+                        // The aggregate channel receiver has gone away.  We must
+                        // still await the update handle (so the task is not
+                        // orphaned) and attempt to send Completed, even though it
+                        // will likely also fail — this avoids leaving the DB in
+                        // `in_progress` if the event loop is merely slow to start.
+                        let result = handle.await;
+                        let _ = tx.send((host_id, UpdateEvent::Completed(result))).await;
                         break;
                     }
                 }

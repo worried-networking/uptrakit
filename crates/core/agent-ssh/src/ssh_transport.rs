@@ -380,6 +380,7 @@ impl SshSession {
         let mut accumulated_output = String::new();
         let mut truncated = false;
         let mut exit_code: Option<u32> = None;
+        let mut eof_received = false;
         let mut last_output_time = tokio::time::Instant::now();
         let mut attention_sent = false;
 
@@ -412,11 +413,21 @@ impl SshSession {
                                     accumulated_output.push_str(&text);
                                 }
                             }
-                            uptrakit_command::send_output(
-                                output_tx,
-                                &text,
-                                OutputStreamType::Stdout,
-                            ).await;
+                            // Non-blocking send: we must not await here, because a full
+                            // output buffer would prevent the loop from processing
+                            // ExitStatus / Eof channel messages and stall completion
+                            // detection indefinitely.
+                            if output_tx
+                                .try_send(uptrakit_command::UpdateOutputLine {
+                                    text,
+                                    stream: OutputStreamType::Stdout,
+                                })
+                                .is_err()
+                            {
+                                tracing::debug!(
+                                    "SSH output channel full; dropping stdout chunk"
+                                );
+                            }
                         }
                         Some(ChannelMsg::ExtendedData { ref data, ext: 1 }) => {
                             last_output_time = tokio::time::Instant::now();
@@ -430,16 +441,34 @@ impl SshSession {
                                     accumulated_output.push_str(&text);
                                 }
                             }
-                            uptrakit_command::send_output(
-                                output_tx,
-                                &text,
-                                OutputStreamType::Stderr,
-                            ).await;
+                            if output_tx
+                                .try_send(uptrakit_command::UpdateOutputLine {
+                                    text,
+                                    stream: OutputStreamType::Stderr,
+                                })
+                                .is_err()
+                            {
+                                tracing::debug!(
+                                    "SSH output channel full; dropping stderr chunk"
+                                );
+                            }
                         }
                         Some(ChannelMsg::ExitStatus { exit_status }) => {
                             exit_code = Some(exit_status);
+                            // If EOF already arrived before ExitStatus (common on
+                            // OpenSSH PTY sessions), we can stop now.
+                            if eof_received {
+                                break;
+                            }
                         }
-                        Some(ChannelMsg::Eof | ChannelMsg::Close) => break,
+                        Some(ChannelMsg::Eof | ChannelMsg::Close) => {
+                            eof_received = true;
+                            // Keep looping to allow a racing ExitStatus to arrive,
+                            // unless the exit code is already known.
+                            if exit_code.is_some() {
+                                break;
+                            }
+                        }
                         Some(_) => {}
                         None => break,
                     }
@@ -478,7 +507,11 @@ impl SshSession {
             }
         }
 
-        let code = exit_code.unwrap_or(u32::MAX);
+        // When the remote side closed the channel cleanly (Eof/Close) without
+        // sending an ExitStatus — which happens on some PTY sessions over OpenSSH
+        // (e.g. Proxmox VE) due to a race between Eof and ExitStatus — treat
+        // the exit code as 0 (success) rather than u32::MAX → -1 (failure).
+        let code = exit_code.unwrap_or(if eof_received { 0 } else { u32::MAX });
         let code_i32 = i32::try_from(code).unwrap_or(-1);
 
         if code_i32 != 0 {
