@@ -1,8 +1,8 @@
 # Embedded Frontend
 
 The `embed-frontend` Cargo feature compiles the SvelteKit build output into the
-controller binary, producing a single self-contained executable. This is opt-in
-and does not affect default builds.
+controller binary, producing a single self-contained executable. This feature is
+**enabled by default** — the default controller build includes the embedded frontend.
 
 ## How it works
 
@@ -20,10 +20,10 @@ not exist. Build the frontend first:
 cd frontend && npm ci && npm run build
 ```
 
-Then build the controller with the feature:
+Then build the controller (the feature is enabled by default):
 
 ```bash
-cargo build -p uptrakit-controller --features embed-frontend
+cargo build -p uptrakit-controller
 ```
 
 ### Behavior changes

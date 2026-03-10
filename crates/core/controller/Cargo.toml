@@ -8,7 +8,7 @@ repository.workspace = true
 version.workspace = true
 
 [features]
-default = ["db-sqlite", "oidc", "zeroconf", "interactive"]
+default = ["db-sqlite", "oidc", "zeroconf", "interactive", "notifications-all", "embedded-scheduler", "embed-frontend"]
 embedded-scheduler = ["dep:uptrakit-scheduler-engine"]
 zeroconf = ["dep:mdns-sd"]
 oidc = ["uptrakit-web-api/oidc", "uptrakit-scheduler-engine?/oidc"]
@@ -21,7 +21,7 @@ interactive = ["uptrakit-web-api/interactive"]
 nats = ["uptrakit-web-api/nats"]
 notifications-telegram = ["uptrakit-web-api/notifications-telegram"]
 notifications-email = ["uptrakit-web-api/notifications-email"]
-notifications-all = ["uptrakit-web-api/notifications-all"]
+notifications-all = ["notifications-telegram", "notifications-email", "uptrakit-web-api/notifications-all"]
 embed-frontend = ["dep:rust-embed"]
 journald = ["uptrakit-audit-log/journald", "dep:tracing-journald"]
 

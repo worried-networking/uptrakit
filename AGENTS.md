@@ -165,10 +165,13 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 | `db-mysql` | No | MySQL backend |
 | `db-all` | No | All database backends |
 | `oidc` | Yes | OpenID Connect authentication support. Disabling removes the `openidconnect` crate and all OIDC routes/stores, significantly reducing compile-time dependencies. Propagates to `uptrakit-web-api/oidc`. |
-| `embedded-scheduler` | No | Embeds the scheduler engine in the controller process. Defers external tasks when an external scheduler connects; internal tasks (CRL renewal, CA rotation, service cert check) always run. Adds `uptrakit-scheduler-engine` dependency. |
+| `embedded-scheduler` | Yes | Embeds the scheduler engine in the controller process. Defers external tasks when an external scheduler connects; internal tasks (CRL renewal, CA rotation, service cert check) always run. Adds `uptrakit-scheduler-engine` dependency. |
 | `nats` | No | Enables NATS JetStream transport for cross-controller messaging. Propagates to `uptrakit-web-api/nats`. |
 | `swagger-ui` | No | Swagger UI at `/swagger-ui` |
-| `embed-frontend` | No | Embeds the SvelteKit frontend build into the binary via `rust-embed`. Requires `frontend/build/` to exist at compile time. Removes the `--static-dir` CLI argument. See [Embedded Frontend](docs/development/embedded-frontend.md). |
+| `embed-frontend` | Yes | Embeds the SvelteKit frontend build into the binary via `rust-embed`. Requires `frontend/build/` to exist at compile time. Removes the `--static-dir` CLI argument. See [Embedded Frontend](docs/development/embedded-frontend.md). |
+| `notifications-all` | Yes | Enables all optional notification plugins (Telegram, email). Expands to `notifications-telegram` + `notifications-email` + `uptrakit-web-api/notifications-all`. |
+| `notifications-telegram` | No | Telegram notification plugin (enabled transitively via `notifications-all`). Propagates to `uptrakit-web-api/notifications-telegram`. |
+| `notifications-email` | No | Email notification plugin via SMTP (enabled transitively via `notifications-all`). Propagates to `uptrakit-web-api/notifications-email`. |
 | `interactive` | Yes | Interactive (PTY-based) update sessions with stdin forwarding. Propagates to `uptrakit-web-api/interactive`. Adds the interactive WebSocket endpoint and `InteractiveSessionRegistry`. See [Interactive Updates](docs/development/interactive-updates.md). |
 | `zeroconf` | Yes | mDNS/DNS-SD zero-configuration advertising. Enables the `--zeroconf` CLI flag and the advertiser module. Uses the `mdns-sd` crate. See [Zeroconf Discovery](docs/development/zeroconf-discovery.md). |
 

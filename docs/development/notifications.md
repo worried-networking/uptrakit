@@ -42,7 +42,8 @@ This separation means adding a new notification plugin never requires changes to
 | `email` | `notification-plugin-registry` | no | Email plugin (SMTP via mail-send, async TLS) |
 | `notifications-telegram` | `web-api`, `controller` | no | Propagated feature flag enabling Telegram |
 | `notifications-email` | `web-api`, `controller` | no | Propagated feature flag enabling email |
-| `notifications-all` | `web-api`, `controller` | no | Enables all optional notification plugins |
+| `notifications-all` | `web-api` | no | Enables all optional notification plugins |
+| `notifications-all` | `controller` | **yes** | Enables all optional notification plugins (default since `notifications-all` is in `default`) |
 
 Feature flags are additive and chain through the dependency graph:
 
