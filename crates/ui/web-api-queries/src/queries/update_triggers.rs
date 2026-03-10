@@ -410,8 +410,34 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
 // Layer 3: Dispatch to agent
 // ---------------------------------------------------------------------------
 
+/// Returns `true` when the execute-update plugin config opts into interactive
+/// PTY mode via the `"prefer_interactive": true` field.
+///
+/// Currently only meaningful for `GenericShell` configs (where the field is
+/// defined on `ShellConfig`), but the check is intentionally kept generic —
+/// any plugin type that stores `"prefer_interactive": true` in its JSON config
+/// will trigger interactive dispatch.
+fn config_prefers_interactive(
+    plugin_type: &uptrakit_internal_wire::PluginType,
+    config: &serde_json::Value,
+) -> bool {
+    matches!(
+        plugin_type,
+        uptrakit_internal_wire::PluginType::GenericShell
+    ) && config
+        .get("prefer_interactive")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
 /// Builds the `ExecuteUpdate` payload from the validated target and sends it
 /// to the agent via `NotificationService`.
+///
+/// The `interactive` flag in the payload is set to `true` when either:
+/// - The caller explicitly requests it via [`DispatchUpdateParams::interactive`], or
+/// - The execute-update plugin config carries `"prefer_interactive": true`
+///   (set automatically for Proxmox Helper Scripts targets so that the PHS
+///   `/usr/bin/update` script can read from `/dev/tty` during updates).
 ///
 /// Returns `true` if the agent was locally connected at dispatch time.
 #[tracing::instrument(skip_all)]
@@ -441,6 +467,14 @@ pub async fn dispatch_update_to_agent(
         target.fetch_releases_config.as_ref(),
     );
 
+    // Auto-enable interactive mode when the plugin config opts in, regardless
+    // of whether the caller explicitly requested it.
+    let interactive = params.interactive
+        || config_prefers_interactive(
+            &execute_update_plugin.plugin_type,
+            &execute_update_plugin.config,
+        );
+
     let execute_payload = uptrakit_internal_wire::ExecuteUpdatePayload {
         host_machine_id: target.host.machine_id.clone(),
         update_history_id: params.update_history_id,
@@ -453,7 +487,7 @@ pub async fn dispatch_update_to_agent(
         post_update_hooks: resolved_hooks.post_update_hooks,
         release_info: enriched_release_info,
         timeout: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT,
-        interactive: params.interactive,
+        interactive,
     };
 
     let msg = ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
