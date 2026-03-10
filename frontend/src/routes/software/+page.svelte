@@ -44,7 +44,7 @@
 	let assignItem: { id: string; name: string } | null = $state(null);
 	let submitting: boolean = $state(false);
 	let checkingVersionsId: string | null = $state(null);
-	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'all');
+	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'featured');
 
 	const tabExtensions = $derived(getTabExtensions('software'));
 	const isItemsTab = $derived(activeTab === 'all' || activeTab === 'featured' || activeTab === 'unfeatured');
@@ -185,6 +185,16 @@
 		closeMenu();
 		editItem = { id: item.id, name: item.name, featured: item.featured };
 		editForm = { name: item.name, featured: item.featured };
+	}
+
+	async function toggleFeatured(item: SoftwareItemResponse) {
+		try {
+			await updateSoftwareItem(item.id, { featured: !item.featured });
+			items = items.map((i) => (i.id === item.id ? { ...i, featured: !i.featured } : i));
+			showSuccess(`"${item.name}" ${item.featured ? 'unfeatured' : 'featured'}.`);
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to update item');
+		}
 	}
 
 	async function executeEdit() {
@@ -428,7 +438,6 @@
 							{/if}
 							<th>Name</th>
 							<th>Plugins</th>
-							<th>Status</th>
 							<th>Hosts</th>
 							<th>Last Checked</th>
 							{#if canManage}
@@ -439,7 +448,7 @@
 					<tbody>
 						{#if loading}
 							<tr>
-								<td colspan={canManage ? 8 : 5} class="py-6 text-center">Loading...</td>
+								<td colspan={canManage ? 7 : 4} class="py-6 text-center">Loading...</td>
 							</tr>
 						{:else}
 							{#each items as item (item.id)}
@@ -456,29 +465,44 @@
 										</td>
 									{/if}
 									<td>
-										<a href="/software/{item.id}" class="hover:underline font-medium">{item.name}</a>
-									</td>
-									<td class="text-sm text-surface-500">
-										{item.plugins.map((p) => pluginTypeNames.get(p) ?? p).join(', ') || '\u2014'}
-									</td>
-									<td>
-										{#if item.featured}
-											<span class="badge preset-filled-success-500">Featured</span>
+										{#if canManage}
+											<button
+												class="mr-1 cursor-pointer text-lg leading-none transition-opacity hover:opacity-70"
+												class:text-warning-500={item.featured}
+												class:text-surface-400={!item.featured}
+												title={item.featured ? 'Unfeature' : 'Feature'}
+												onclick={(e) => {
+													e.stopPropagation();
+													toggleFeatured(item);
+												}}
+												aria-label="{item.featured ? 'Unfeature' : 'Feature'} {item.name}"
+											>
+												{item.featured ? '★' : '☆'}
+											</button>
 										{:else}
-											<span class="badge preset-tonal">Unfeatured</span>
+											<span class="mr-1 {item.featured ? 'text-warning-500' : 'text-surface-400'}"
+												>{item.featured ? '★' : '☆'}</span
+											>
 										{/if}
+										<a href="/software/{item.id}" class="hover:underline font-medium">{item.name}</a>
 										{#if item.update_available}
 											{#if canManage}
 												<button
-													class="badge preset-filled-warning-500 cursor-pointer hover:opacity-80"
-													onclick={() => openUpdateModal(item)}
+													class="ml-1 badge preset-filled-warning-500 cursor-pointer hover:opacity-80"
+													onclick={(e) => {
+														e.stopPropagation();
+														openUpdateModal(item);
+													}}
 												>
 													Update Available
 												</button>
 											{:else}
-												<span class="badge preset-filled-warning-500">Update Available</span>
+												<span class="ml-1 badge preset-filled-warning-500">Update Available</span>
 											{/if}
 										{/if}
+									</td>
+									<td class="text-sm text-surface-500">
+										{item.plugins.map((p) => pluginTypeNames.get(p) ?? p).join(', ') || '\u2014'}
 									</td>
 									<td>{item.host_count}</td>
 									<td>
@@ -508,7 +532,7 @@
 								</tr>
 							{:else}
 								<tr>
-									<td colspan={canManage ? 8 : 5} class="py-8 text-center">
+									<td colspan={canManage ? 7 : 4} class="py-8 text-center">
 										{#if activeTab === 'featured'}
 											<p class="text-lg font-medium">No featured software</p>
 											<p class="mt-1 text-sm text-surface-500">
@@ -575,6 +599,19 @@
 				{@const item = items.find((i) => i.id === openMenuId)}
 				{#if item}
 					<ContextMenu top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
+						<li>
+							<button
+								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+								role="menuitem"
+								tabindex="-1"
+								onclick={() => {
+									toggleFeatured(item);
+									closeMenu();
+								}}
+							>
+								{item.featured ? 'Unfeature' : 'Feature'}
+							</button>
+						</li>
 						<li>
 							<button
 								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"

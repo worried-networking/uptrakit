@@ -168,6 +168,17 @@
 		editItem = true;
 	}
 
+	async function toggleFeatured() {
+		if (!item) return;
+		try {
+			await updateSoftwareItem(item.id, { featured: !item.featured });
+			item = { ...item, featured: !item.featured };
+			showSuccess(`"${item.name}" ${item.featured ? 'featured' : 'unfeatured'}.`);
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to update item');
+		}
+	}
+
 	async function executeEdit() {
 		if (!item || editSubmitting) return;
 		editSubmitting = true;
@@ -430,10 +441,21 @@
 			<div>
 				<h1 class="h1">{item.name}</h1>
 				<div class="mt-2 flex flex-wrap items-center gap-2">
-					{#if item.featured}
-						<span class="badge preset-filled-success-500">Featured</span>
+					{#if canManage}
+						<button
+							class="cursor-pointer text-xl leading-none transition-opacity hover:opacity-70"
+							class:text-warning-500={item.featured}
+							class:text-surface-400={!item.featured}
+							title={item.featured ? 'Unfeature' : 'Feature'}
+							onclick={toggleFeatured}
+							aria-label="{item.featured ? 'Unfeature' : 'Feature'} {item.name}"
+						>
+							{item.featured ? '★' : '☆'}
+						</button>
 					{:else}
-						<span class="badge preset-tonal">Unfeatured</span>
+						<span class="text-xl {item.featured ? 'text-warning-500' : 'text-surface-400'}"
+							>{item.featured ? '★' : '☆'}</span
+						>
 					{/if}
 					{#if item.update_available}
 						<span class="badge preset-filled-warning-500">Update Available</span>
