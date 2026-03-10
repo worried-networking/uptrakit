@@ -576,7 +576,7 @@ for user review. Key invariants:
    becomes `/usr/bin/systemctl stop *` in the sudoers file — positional matching prevents other subcommands.
 
    **Helper scripts:** When a simple sudoers command would be too broad (e.g. granting `cat` would allow
-   reading any file), use `SudoCommandEntry::helper_script: Some(SudoHelperScript { install_path, content })`.
+   reading any file), use `SudoCommandEntry::new(command, explanation).with_helper_script(SudoHelperScript::new(install_path, content))`.
    Bootstrap installs the script at `install_path` with mode `0755` and uses that path as the sudoers command; the
    script itself validates arguments to enforce the least-privilege contract that sudoers wildcards cannot safely
    express (`*` matches `/` in sudoers).
@@ -1262,16 +1262,18 @@ All crates writing sensitive files (private keys, certificates, CA bundles) **mu
 The controller includes a channel-agnostic notification subsystem. Event producers emit `NotificationEvent` values
 (internal, never exposed to channels). A fire-and-forget `NotificationDispatcher` matches events against
 tenant-scoped rules, builds a `DeliveryMessage`, and hands it to the appropriate channel for delivery.
+The dispatcher uses a **bounded** `mpsc::channel(DISPATCHER_CHANNEL_CAPACITY)` (capacity 4096); events that
+overflow are dropped with a `tracing::warn!` rather than causing unbounded heap growth.
 
 ### Key crates and modules
 
 | Crate/module | Purpose |
 | --- | --- |
-| `crates/plugins/notifications/core/` | `NotificationPlugin` trait, `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()` |
+| `crates/plugins/notifications/core/` | `NotificationPlugin` trait (with `restore_config_secrets` default method), `DeliveryMessage` (`#[non_exhaustive]`, `::new()`), `MessageAction` (`#[non_exhaustive]`, `::new()`), `NotificationPluginError`, `escape_html()` |
 | `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing) |
 | `crates/plugins/notifications/telegram/` | Telegram plugin with inline keyboard |
 | `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`) |
-| `crates/plugins/notifications/registry/` | `NotificationPluginRegistry`, `NotificationOps` trait, `NotificationRegistryConfig`; re-exports core types |
+| `crates/plugins/notifications/registry/` | `NotificationPluginRegistry`, `NotificationOps` trait (includes `restore_config_secrets`), `NotificationRegistryConfig`; re-exports core types |
 | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, `NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus` enums |
 | `crates/ui/web-api/src/notifications/` | Internal `NotificationEvent`, `NotificationDispatcher`, `message_builder` |
 | `crates/ui/web-api/src/routes/notifications.rs` | REST API route handlers (channels, rules, log, telegram callback) |
