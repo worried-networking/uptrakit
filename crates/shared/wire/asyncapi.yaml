@@ -2342,6 +2342,7 @@ components:
             - package_manager_npm
             - package_manager_mas
             - package_manager_pkg
+            - package_manager_apk
         package_identifier:
           type: string
           description: Package identifier for this role's plugin
@@ -3847,6 +3848,7 @@ components:
             - package_manager_npm
             - package_manager_mas
             - package_manager_pkg
+            - package_manager_apk
         plugin_config:
           type: object
           description: Config JSON for find-or-create of the target plugin config
@@ -3907,6 +3909,7 @@ components:
             - package_manager_npm
             - package_manager_mas
             - package_manager_pkg
+            - package_manager_apk
         config:
           type: object
           description: Plugin-specific configuration ({} for default assignments)
@@ -3972,6 +3975,7 @@ components:
             - package_manager_npm
             - package_manager_mas
             - package_manager_pkg
+            - package_manager_apk
         discoveries:
           type: array
           description: Discovered software items (absent or empty on error)
@@ -4077,6 +4081,7 @@ components:
             - package_manager_npm
             - package_manager_mas
             - package_manager_pkg
+            - package_manager_apk
         plugin_config:
           type: object
           description: Plugin configuration shared by all items in the batch
