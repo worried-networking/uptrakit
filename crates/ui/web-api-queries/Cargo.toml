@@ -36,9 +36,9 @@ uptrakit-notification-plugin-registry = { workspace = true, features = ["webhook
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
 uptrakit-shared-db = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
-uptrakit-shared-types = { workspace = true, features = ["openapi"] }
+uptrakit-shared-types = { workspace = true }
 uptrakit-update-hooks = { workspace = true }
-uptrakit-web-api-types = { workspace = true, features = ["openapi"] }
+uptrakit-web-api-types = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
