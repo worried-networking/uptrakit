@@ -9,12 +9,13 @@ trigger messages). A delivery **log** tracks the history of every notification s
 ### Channels
 
 A channel is a delivery endpoint. Each channel has a type and a type-specific configuration.
-Uptrakit currently supports two channel types:
+Uptrakit currently supports three channel types:
 
 | Type | Description |
 | --- | --- |
 | `webhook` | Sends a JSON POST request to the configured URL. Optionally signs the payload with HMAC-SHA256. |
 | `telegram` | Sends a message to a Telegram chat via the Bot API. Supports inline keyboard buttons for actionable notifications. |
+| `email` | Sends email notifications via SMTP. Global SMTP settings are shared across all email channels; each channel configures only recipient addresses. |
 
 Channels can be enabled or disabled independently. A disabled channel suppresses all deliveries
 without deleting the channel or its rules.
@@ -45,6 +46,47 @@ the update on the controller without requiring you to open the CLI or web UI.
 
 For webhook channels, action metadata (label, callback URL, and token) is included in the JSON
 payload so your automation tooling can act on it.
+
+## Web UI
+
+The Settings page in the web UI provides built-in tabs for managing notification channels,
+rules, and viewing the delivery log. Channel management tabs appear automatically based on
+which notification plugins are enabled.
+
+### Channel management tabs
+
+Each enabled notification plugin adds a tab to the Settings page:
+
+- **Webhook Channels** — create, edit, test, and delete webhook endpoints
+- **Telegram Channels** — manage Telegram bot channels
+- **Email Channels** — manage email recipient lists and configure SMTP settings
+
+These tabs use the extension framework and render dynamically. Channel creation and editing
+open form modals with fields appropriate to the channel type. Sensitive fields (bot tokens,
+webhook secrets, SMTP passwords) are masked with `***` and preserved on edit unless explicitly
+changed.
+
+### SMTP configuration
+
+The Email Channels tab includes a **Configure SMTP** button that opens a form pre-populated
+with the current SMTP settings. Changes are saved with patch semantics: only fields you modify
+are updated, and empty fields are left unchanged.
+
+### Notification Rules tab
+
+The **Notification Rules** tab lets you create rules that bind event types to channels.
+Each rule specifies a channel and an event type, with optional scope filters for host ID,
+software item ID, or plugin type. Rules can be enabled or disabled independently.
+
+### Notification Log tab
+
+The **Notification Log** tab displays a read-only table of all delivery attempts with their
+status (delivered, failed, or pending), timestamps, and error messages for failed deliveries.
+
+### Permissions
+
+The notification tabs are visible only to users with the `view_notifications` permission.
+Creating, editing, and deleting channels and rules requires `manage_notifications`.
 
 ## Setting Up a Webhook Channel
 

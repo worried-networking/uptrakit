@@ -230,10 +230,11 @@ ______________________________________________________________________
   - **Category**: UI / Security | **Impact**: Medium-High | **Effort**: Medium
   - Backend user management API is complete. Frontend page for managing users, roles, and presets
     is pending.
-- [ ] Notification configuration UI
+- [x] Notification configuration UI
   - **Category**: UI | **Impact**: Medium-High | **Effort**: Medium
-  - Frontend page for managing notification plugins and rules. The backend REST API is already
-    complete; this is purely frontend work.
+  - Per-transport channel management tabs via extension framework (webhook, telegram, email).
+    Built-in notification rules and delivery log tabs. SMTP configuration via extension
+    pre-load action.
 - [ ] Batch update UI
   - **Category**: UI | **Impact**: Medium | **Effort**: Medium
   - Visual interface for creating and monitoring host-wide and item-wide batch updates. SSE

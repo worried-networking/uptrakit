@@ -1273,7 +1273,9 @@ overflow are dropped with a `tracing::warn!` rather than causing unbounded heap 
 | `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing) |
 | `crates/plugins/notifications/telegram/` | Telegram plugin with inline keyboard |
 | `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`) |
-| `crates/plugins/notifications/registry/` | `NotificationPluginRegistry`, `NotificationOps` trait (includes `restore_config_secrets`), `NotificationRegistryConfig`; re-exports core types |
+| `crates/plugins/notifications/registry/` | `NotificationPluginRegistry`, `NotificationOps` trait (includes `restore_config_secrets`, `extension_manifests`, `extension_actions`), `NotificationRegistryConfig`; re-exports core types |
+| `crates/plugins/notifications/registry/src/extensions/` | Per-transport `ExtensionManifest` and `ActionDef` definitions (webhook, telegram, email); only crate with transport-specific UI knowledge |
+| `crates/ui/web-api/src/routes/notification_extensions.rs` | Generic extension data action handler (channel listing with config flattening) + SMTP settings handler |
 | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, `NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus` enums |
 | `crates/ui/web-api/src/notifications/` | Internal `NotificationEvent`, `NotificationDispatcher`, `message_builder` |
 | `crates/ui/web-api/src/routes/notifications.rs` | REST API route handlers (channels, rules, log, telegram callback) |

@@ -548,6 +548,78 @@ The same merge logic is applied in the `test_channel` route handler
 | `crates/ui/web-api/src/notifications/message_builder.rs` | Event-to-`DeliveryMessage` translation |
 | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers, `ChannelQueryError`, `RuleQueryError` |
 | `crates/ui/web-api/src/routes/notifications.rs` | REST route handlers, Telegram callback |
+| `crates/ui/web-api/src/routes/notification_extensions.rs` | Generic extension data action handler + SMTP settings |
+| `crates/ui/web-api/src/extension_registry.rs` | Extension registry with `Notification` owner variant |
+| `crates/plugins/notifications/registry/src/extensions/` | Per-transport extension manifests and action definitions |
+
+## Extension framework integration
+
+The notification settings UI uses the extension framework to render per-transport channel management
+tabs without any transport-specific knowledge in the frontend or web API route handlers.
+
+### Architecture
+
+Only `notification-plugin-registry` knows about specific transports. It defines `ExtensionManifest`
+and `ActionDef` entries for each enabled plugin through the `extensions/` module:
+
+```text
+notification-plugin-registry/src/extensions/
+├── mod.rs        # feature-gated sub-modules
+├── webhook.rs    # ExtensionManifest + ActionDefs for webhook channels
+├── telegram.rs   # ExtensionManifest + ActionDefs for Telegram channels
+└── email.rs      # ExtensionManifest + ActionDefs for email channels + SMTP
+```
+
+### Extension IDs
+
+Extension IDs follow the convention `notifications.<channel_type>`:
+
+| Extension ID | Label | Sort order |
+| --- | --- | --- |
+| `notifications.webhook` | Webhook Channels | 500 |
+| `notifications.telegram` | Telegram Channels | 501 |
+| `notifications.email` | Email Channels | 502 |
+
+### `ExtensionOwner::Notification`
+
+The `ExtensionRegistry` supports a `Notification` owner variant alongside `Plugin` and `Service`.
+Notification-owned extensions are stored separately and dispatched to
+`notification_extensions::handle()` in `routes/notification_extensions.rs`.
+
+### Generic config flattening
+
+The `list` data action in `notification_extensions.rs` queries channels by type, decrypts config,
+masks secrets via `mask_config_secrets()`, and flattens all top-level config keys into the row
+object. The extension manifest's `DataTable` column definitions reference these flattened keys.
+The handler has zero transport-specific knowledge.
+
+### SMTP settings via extensions
+
+The email extension defines two extra actions for SMTP management:
+
+- `get_smtp` — data-only action returning current SMTP settings as flat JSON
+- `save_smtp` — receives flat params via extension invoke, performs patch-semantic updates
+
+The `configure_smtp` action uses `FormDef.pre_load_action = "get_smtp"` so the frontend
+pre-populates the form with current SMTP values on open.
+
+### `FormDef.pre_load_action`
+
+A new extension framework field. When set on a form, the frontend invokes this action when
+the form modal opens and uses the response to populate field values. This avoids separate
+REST endpoints for read-before-edit flows.
+
+### `SchemaForm` pre-population
+
+The `SchemaForm` component now pre-populates all field types from row data (not just hidden
+fields), enabling the edit-channel flow where masked secrets and current values appear in the
+form. The `preLoadAction` prop triggers an extension action invoke on form open.
+
+### Built-in components
+
+Notification rules and delivery log are **not** extension-powered — they are built-in Svelte
+components (`NotificationRulesSettings.svelte`, `NotificationLogView.svelte`) with direct REST
+API calls, following the same pattern as MQTT and OIDC settings.
 
 ## Cross-references
 

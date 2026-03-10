@@ -238,6 +238,19 @@ Channel configuration is stored encrypted (`EncryptedString`) in the `notificati
 are masked in API responses. Delivery history is recorded in the `notification_log` table with status tracking
 (`pending` → `delivered` | `failed`).
 
+### UI extension integration
+
+The registry crate also provides `ExtensionManifest` and `ActionDef` entries for each enabled
+plugin (under `registry/src/extensions/`). These are registered as `ExtensionOwner::Notification`
+in the `ExtensionRegistry` at startup, producing per-transport channel management tabs in the
+Settings page. The web API handles notification extension actions generically via
+`notification_extensions::handle()` — it flattens channel config into table rows without any
+transport-specific knowledge. SMTP settings are managed through extension actions (`get_smtp`,
+`save_smtp`) with patch semantics.
+
+Notification rules and delivery log are built-in Svelte components (not extensions) with direct
+REST API calls.
+
 See [Notifications Development](docs/development/notifications.md), [Notifications API](docs/api/notifications.md),
 and [Notifications Security](docs/security/notifications-security.md).
 
