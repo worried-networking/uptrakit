@@ -59,6 +59,11 @@ export function connectInteractiveSession(updateHistoryId: string, callbacks: In
 
 	const ws = new WebSocket(url);
 
+	// True once the server has sent a `completed` message. Used to suppress
+	// spurious `onerror` events that browsers fire when the server drops the
+	// connection after a successful completion (no explicit close frame).
+	let sessionCompleted = false;
+
 	ws.onopen = () => {
 		callbacks.onStateChange?.('connected');
 	};
@@ -79,6 +84,7 @@ export function connectInteractiveSession(updateHistoryId: string, callbacks: In
 			const line = msg as unknown as OutputLineEvent;
 			callbacks.onOutput?.(line);
 		} else if (type === 'completed') {
+			sessionCompleted = true;
 			const completed = msg as unknown as CompletedEvent;
 			callbacks.onCompleted?.(completed);
 			callbacks.onStateChange?.('completed');
@@ -92,6 +98,13 @@ export function connectInteractiveSession(updateHistoryId: string, callbacks: In
 	};
 
 	ws.onerror = () => {
+		if (sessionCompleted) {
+			// The session ended normally — `onerror` fires when the server closes
+			// the connection without an explicit close frame after sending
+			// `completed`. Treat it as a clean disconnection.
+			callbacks.onStateChange?.('disconnected');
+			return;
+		}
 		callbacks.onStateChange?.('error');
 		callbacks.onError?.('WebSocket connection error');
 	};

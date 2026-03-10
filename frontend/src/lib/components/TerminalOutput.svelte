@@ -148,7 +148,11 @@
 
 	/** Write data to the terminal (for streaming mode). */
 	export function write(data: string) {
-		terminal?.write(data);
+		// Interactive mode uses convertEol:false because PTY output already carries
+		// \r\n. Synthesized system/error messages from the agent use plain \n, which
+		// causes incorrect indentation in raw PTY mode. Normalize bare \n to \r\n
+		// without touching \r\n pairs (lookbehind ensures no double-conversion).
+		terminal?.write(data.replace(/(?<!\r)\n/g, '\r\n'));
 	}
 
 	/** Clear the terminal. */
