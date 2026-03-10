@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::SecretMasking;
-
-use crate::error::{Result, ShellError};
+use uptrakit_plugin_infrastructure_core::{PluginError, SecretMasking};
 
 /// Configuration for the Shell plugin.
 ///
@@ -69,9 +67,9 @@ impl ShellConfig {
     /// Fails when **both** `version_command` and `update_command` are `None`
     /// — a no-op config is invalid. Either field set alone is valid.
     /// Also validates that command strings do not exceed the maximum length.
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> uptrakit_plugin_infrastructure_core::Result<()> {
         if self.version_command.is_none() && self.update_command.is_none() {
-            rootcause::bail!(ShellError::Configuration(
+            rootcause::bail!(PluginError::Configuration(
                 "at least one of version_command or update_command must be set".to_string()
             ));
         }
@@ -81,7 +79,7 @@ impl ShellConfig {
                 "version_command",
             )
         {
-            rootcause::bail!(ShellError::Configuration(e));
+            rootcause::bail!(PluginError::Configuration(e));
         }
         if let Some(ref cmd) = self.update_command
             && let Err(e) = uptrakit_shared_types::command_validation::validate_command_length(
@@ -89,7 +87,7 @@ impl ShellConfig {
                 "update_command",
             )
         {
-            rootcause::bail!(ShellError::Configuration(e));
+            rootcause::bail!(PluginError::Configuration(e));
         }
         Ok(())
     }

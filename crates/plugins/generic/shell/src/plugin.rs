@@ -11,7 +11,6 @@ use uptrakit_plugin_infrastructure_core::{
 };
 
 use crate::config::ShellConfig;
-use crate::error::Result as ShellResult;
 
 /// Shell plugin implementation.
 ///
@@ -34,7 +33,10 @@ impl ShellPlugin {
     ///
     /// The executor is stored but config validation is the caller's
     /// responsibility (the registry calls `validate()` before constructing).
-    pub async fn new(config: ShellConfig, executor: Arc<dyn CommandExecutor>) -> ShellResult<Self> {
+    pub async fn new(
+        config: ShellConfig,
+        executor: Arc<dyn CommandExecutor>,
+    ) -> uptrakit_plugin_infrastructure_core::Result<Self> {
         Ok(Self { config, executor })
     }
 }
