@@ -6428,7 +6428,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-journald",
- "tracing-subscriber",
  "uptrakit-shared-db",
  "uuid",
 ]

@@ -24,7 +24,6 @@ sea-orm = { workspace = true, optional = true }
 uptrakit-shared-db = { workspace = true, optional = true }
 futures-util = { workspace = true, features = ["alloc"] }
 tracing-journald = { workspace = true, optional = true }
-tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
