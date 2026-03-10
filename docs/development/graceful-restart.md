@@ -61,6 +61,9 @@ in each service. See [Service Lifecycle](service-lifecycle.md) for the full reco
 | Controller WS handler `sink.send()` | 15 s | `WS_WRITE_TIMEOUT` | `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` |
 | Controller `broadcast_server_restarting_scattered` | 5 s | `BROADCAST_SEND_TIMEOUT` | `crates/ui/web-api/src/service_connections.rs` |
 | Service SDK `conn.send()` | 30 s | `SEND_TIMEOUT` | `crates/shared/service-sdk/src/connection.rs` |
+| MQTT `publish_retained()` / `subscribe_topic()` | 5 s | `OPERATION_TIMEOUT` | `crates/core/mqtt/src/mqtt_client.rs` |
+| MQTT `shutdown()` offline publish + disconnect | 5 s | `OPERATION_TIMEOUT` | `crates/core/mqtt/src/mqtt_client.rs` |
+| MQTT event loop shutdown | 5 s | `SHUTDOWN_TIMEOUT` | `crates/core/mqtt/src/mqtt_client.rs` |
 
 Without these timeouts, a cascading deadlock can occur: if a service stops reading its WebSocket (e.g. because
 its event loop is blocked by a long-running operation), the controller's `sink.send()` blocks when the TCP

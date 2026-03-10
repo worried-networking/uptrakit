@@ -84,29 +84,53 @@ pub struct MqttHandle {
 
 impl MqttHandle {
     /// Publish a retained message.
+    ///
+    /// Returns an error if the operation does not complete within
+    /// [`OPERATION_TIMEOUT`], which typically means the broker connection is
+    /// down and the internal request channel is full.
     pub async fn publish_retained(&self, topic: &str, payload: impl Into<Vec<u8>>) -> Result<()> {
-        self.client
-            .publish(topic, QoS::AtLeastOnce, true, payload.into())
-            .await
-            .context_to::<MqttError>()
+        let payload = payload.into();
+        match tokio::time::timeout(
+            OPERATION_TIMEOUT,
+            self.client.publish(topic, QoS::AtLeastOnce, true, payload),
+        )
+        .await
+        {
+            Ok(result) => result.context_to::<MqttError>(),
+            Err(_) => bail!(MqttError::OperationTimeout),
+        }
     }
 
     /// Subscribe to a topic with QoS `AtLeastOnce`.
+    ///
+    /// Returns an error if the operation does not complete within
+    /// [`OPERATION_TIMEOUT`].
     pub async fn subscribe_topic(&self, topic: &str) -> Result<()> {
-        self.client
-            .subscribe(topic, QoS::AtLeastOnce)
-            .await
-            .context_to::<MqttError>()
+        match tokio::time::timeout(
+            OPERATION_TIMEOUT,
+            self.client.subscribe(topic, QoS::AtLeastOnce),
+        )
+        .await
+        {
+            Ok(result) => result.context_to::<MqttError>(),
+            Err(_) => bail!(MqttError::OperationTimeout),
+        }
     }
 
     /// Publish a retained `offline` message, disconnect, and wait for the
     /// event-loop task to finish.
     pub async fn shutdown(self) {
-        let _ = self
-            .client
-            .publish(&self.topic, QoS::AtLeastOnce, true, "offline")
-            .await;
-        let _ = self.client.disconnect().await;
+        // Use a timeout for the offline publish and disconnect so that
+        // shutdown is not blocked indefinitely when the broker connection is
+        // already down and the request channel is full.
+        let _ = tokio::time::timeout(OPERATION_TIMEOUT, async {
+            let _ = self
+                .client
+                .publish(&self.topic, QoS::AtLeastOnce, true, "offline")
+                .await;
+            let _ = self.client.disconnect().await;
+        })
+        .await;
         let outcome = shutdown_task(self.shutdown_token, self.task).await;
         match outcome {
             ShutdownOutcome::Completed => {}
@@ -127,12 +151,24 @@ enum ShutdownOutcome {
     JoinError,
 }
 
+/// Timeout for individual publish/subscribe operations.
+///
+/// When the MQTT broker connection is down, the internal request channel fills
+/// up and `AsyncClient::publish()` blocks indefinitely.  This timeout ensures
+/// the service event loop is never blocked for more than a few seconds, keeping
+/// signal handling (Ctrl+C / SIGTERM) and ping/pong responsive.
+const OPERATION_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Errors returned by [`start`].
 #[derive(Debug, Error)]
 pub enum MqttError {
     /// Wraps [`rumqttc::ClientError`].
     #[error("MQTT client error: {0}")]
     Client(#[from] rumqttc::ClientError),
+    /// A publish or subscribe operation timed out — the broker connection is
+    /// likely down and the internal request channel is full.
+    #[error("MQTT operation timed out — broker connection may be down")]
+    OperationTimeout,
 }
 
 pub type Result<T> = std::result::Result<T, Report<MqttError>>;

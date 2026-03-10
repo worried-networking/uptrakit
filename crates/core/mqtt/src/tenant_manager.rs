@@ -9,6 +9,27 @@ use crate::mqtt_client::{MqttConfig, MqttHandle, MqttServiceEvent};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::MqttClientConnectionStatus;
 
+/// Abort the current publish batch on first error.
+///
+/// When a publish or subscribe operation fails (typically due to a broker
+/// connection timeout), there is no point continuing with the remaining
+/// operations in the batch — the data will be automatically republished
+/// on the next `SoftwareStates` push or broker reconnect.  Aborting early
+/// prevents the service event loop from being blocked for
+/// `N × OPERATION_TIMEOUT` seconds, keeping signal handling responsive.
+macro_rules! publish_or_abort {
+    ($expr:expr, $client_id:expr, $what:expr) => {
+        if let Err(e) = $expr {
+            tracing::warn!(
+                error = %e,
+                mqtt_client_id = %$client_id,
+                concat!("failed to ", $what, "; aborting remaining publishes for this client"),
+            );
+            return;
+        }
+    };
+}
+
 /// Tracks the cached state for an MQTT client.
 struct ClientState {
     handle: MqttHandle,
@@ -446,13 +467,11 @@ impl TenantManager {
                     .unwrap_or("")
                     .as_bytes()
                     .to_vec();
-                if let Err(e) = state.handle.publish_retained(&st, installed).await {
-                    tracing::warn!(
-                        error = ?e,
-                        %mqtt_client_id,
-                        "failed to publish state topic"
-                    );
-                }
+                publish_or_abort!(
+                    state.handle.publish_retained(&st, installed).await,
+                    mqtt_client_id,
+                    "publish state topic"
+                );
 
                 // Always: publish latest version.
                 let lt = crate::ha_discovery::latest_version_topic(
@@ -466,13 +485,11 @@ impl TenantManager {
                     .unwrap_or("")
                     .as_bytes()
                     .to_vec();
-                if let Err(e) = state.handle.publish_retained(&lt, latest).await {
-                    tracing::warn!(
-                        error = ?e,
-                        %mqtt_client_id,
-                        "failed to publish latest version topic"
-                    );
-                }
+                publish_or_abort!(
+                    state.handle.publish_retained(&lt, latest).await,
+                    mqtt_client_id,
+                    "publish latest version topic"
+                );
 
                 // Always: subscribe to command topic.
                 let ct = crate::ha_discovery::command_topic(
@@ -480,13 +497,11 @@ impl TenantManager {
                     item.software_item_id,
                     host.host_id,
                 );
-                if let Err(e) = state.handle.subscribe_topic(&ct).await {
-                    tracing::warn!(
-                        error = ?e,
-                        %mqtt_client_id,
-                        "failed to subscribe to command topic"
-                    );
-                }
+                publish_or_abort!(
+                    state.handle.subscribe_topic(&ct).await,
+                    mqtt_client_id,
+                    "subscribe to command topic"
+                );
 
                 // Always: publish JSON attributes.
                 let at = crate::ha_discovery::json_attributes_topic(
@@ -502,13 +517,11 @@ impl TenantManager {
                 )
                 .to_string()
                 .into_bytes();
-                if let Err(e) = state.handle.publish_retained(&at, attributes_bytes).await {
-                    tracing::warn!(
-                        error = ?e,
-                        %mqtt_client_id,
-                        "failed to publish JSON attributes topic"
-                    );
-                }
+                publish_or_abort!(
+                    state.handle.publish_retained(&at, attributes_bytes).await,
+                    mqtt_client_id,
+                    "publish JSON attributes topic"
+                );
 
                 // HA-only: publish HA discovery config so HA creates an update entity.
                 if state.ha_discovery {
@@ -538,17 +551,14 @@ impl TenantManager {
                         os_info,
                     );
                     let config_bytes = config_json.to_string().into_bytes();
-                    if let Err(e) = state
-                        .handle
-                        .publish_retained(&config_topic, config_bytes)
-                        .await
-                    {
-                        tracing::warn!(
-                            error = ?e,
-                            %mqtt_client_id,
-                            "failed to publish HA discovery config"
-                        );
-                    }
+                    publish_or_abort!(
+                        state
+                            .handle
+                            .publish_retained(&config_topic, config_bytes)
+                            .await,
+                        mqtt_client_id,
+                        "publish HA discovery config"
+                    );
                 }
             }
         }
@@ -566,32 +576,27 @@ impl TenantManager {
         friendly_name: &str,
     ) {
         let topic_prefix = &client_state.topic_prefix;
+        let mqtt_client_id = "host_identity";
 
         let hn_topic = crate::ha_discovery::hostname_topic(topic_prefix, host_id);
-        if let Err(e) = client_state
-            .handle
-            .publish_retained(&hn_topic, hostname.as_bytes().to_vec())
-            .await
-        {
-            tracing::warn!(
-                error = ?e,
-                host_id = %host_id,
-                "failed to publish hostname topic"
-            );
-        }
+        publish_or_abort!(
+            client_state
+                .handle
+                .publish_retained(&hn_topic, hostname.as_bytes().to_vec())
+                .await,
+            mqtt_client_id,
+            "publish hostname topic"
+        );
 
         let fn_topic = crate::ha_discovery::friendly_name_topic(topic_prefix, host_id);
-        if let Err(e) = client_state
-            .handle
-            .publish_retained(&fn_topic, friendly_name.as_bytes().to_vec())
-            .await
-        {
-            tracing::warn!(
-                error = ?e,
-                host_id = %host_id,
-                "failed to publish friendly_name topic"
-            );
-        }
+        publish_or_abort!(
+            client_state
+                .handle
+                .publish_retained(&fn_topic, friendly_name.as_bytes().to_vec())
+                .await,
+            mqtt_client_id,
+            "publish friendly_name topic"
+        );
     }
 
     /// Republish only the Home Assistant discovery config topics for an
@@ -653,17 +658,14 @@ impl TenantManager {
                     os_info,
                 );
                 let config_bytes = config_json.to_string().into_bytes();
-                if let Err(e) = state
-                    .handle
-                    .publish_retained(&config_topic, config_bytes)
-                    .await
-                {
-                    tracing::warn!(
-                        error = ?e,
-                        %mqtt_client_id,
-                        "failed to publish HA discovery config"
-                    );
-                }
+                publish_or_abort!(
+                    state
+                        .handle
+                        .publish_retained(&config_topic, config_bytes)
+                        .await,
+                    mqtt_client_id,
+                    "publish HA discovery config"
+                );
             }
         }
     }
@@ -710,36 +712,28 @@ impl TenantManager {
 
             // Publish state topic.
             let st = crate::ha_discovery::host_packages_state_topic(topic_prefix, hs.host_id);
-            if let Err(e) = state
-                .handle
-                .publish_retained(&st, installed_str.into_bytes())
-                .await
-            {
-                tracing::warn!(
-                    error = ?e,
-                    %mqtt_client_id,
-                    host_id = %hs.host_id,
-                    "failed to publish host package state topic"
-                );
-            }
+            publish_or_abort!(
+                state
+                    .handle
+                    .publish_retained(&st, installed_str.into_bytes())
+                    .await,
+                mqtt_client_id,
+                "publish host package state topic"
+            );
 
             // Publish latest_version topic.
             let lt =
                 crate::ha_discovery::host_packages_latest_version_topic(topic_prefix, hs.host_id);
             let latest_str =
                 crate::ha_discovery::host_packages_latest_version_string(hs.pending_count);
-            if let Err(e) = state
-                .handle
-                .publish_retained(&lt, latest_str.into_bytes())
-                .await
-            {
-                tracing::warn!(
-                    error = ?e,
-                    %mqtt_client_id,
-                    host_id = %hs.host_id,
-                    "failed to publish host package latest_version topic"
-                );
-            }
+            publish_or_abort!(
+                state
+                    .handle
+                    .publish_retained(&lt, latest_str.into_bytes())
+                    .await,
+                mqtt_client_id,
+                "publish host package latest_version topic"
+            );
 
             // Publish JSON attributes.
             let at =
@@ -753,25 +747,19 @@ impl TenantManager {
             )
             .to_string()
             .into_bytes();
-            if let Err(e) = state.handle.publish_retained(&at, attributes_bytes).await {
-                tracing::warn!(
-                    error = ?e,
-                    %mqtt_client_id,
-                    host_id = %hs.host_id,
-                    "failed to publish host package attributes topic"
-                );
-            }
+            publish_or_abort!(
+                state.handle.publish_retained(&at, attributes_bytes).await,
+                mqtt_client_id,
+                "publish host package attributes topic"
+            );
 
             // Subscribe to command topic.
             let ct = crate::ha_discovery::host_packages_command_topic(topic_prefix, hs.host_id);
-            if let Err(e) = state.handle.subscribe_topic(&ct).await {
-                tracing::warn!(
-                    error = ?e,
-                    %mqtt_client_id,
-                    host_id = %hs.host_id,
-                    "failed to subscribe to host package command topic"
-                );
-            }
+            publish_or_abort!(
+                state.handle.subscribe_topic(&ct).await,
+                mqtt_client_id,
+                "subscribe to host package command topic"
+            );
 
             // HA-only: publish HA discovery config for packages entity.
             if state.ha_discovery {
@@ -792,54 +780,42 @@ impl TenantManager {
                     os_info,
                 );
                 let config_bytes = config_json.to_string().into_bytes();
-                if let Err(e) = state
-                    .handle
-                    .publish_retained(&config_topic, config_bytes)
-                    .await
-                {
-                    tracing::warn!(
-                        error = ?e,
-                        %mqtt_client_id,
-                        host_id = %hs.host_id,
-                        "failed to publish host package HA discovery config"
-                    );
-                }
+                publish_or_abort!(
+                    state
+                        .handle
+                        .publish_retained(&config_topic, config_bytes)
+                        .await,
+                    mqtt_client_id,
+                    "publish host package HA discovery config"
+                );
             }
 
             // Always: publish security entity state topic.
             let sec_state_str =
                 crate::ha_discovery::host_security_state_string(hs.security_pending_count);
             let sec_st = crate::ha_discovery::host_security_state_topic(topic_prefix, hs.host_id);
-            if let Err(e) = state
-                .handle
-                .publish_retained(&sec_st, sec_state_str.into_bytes())
-                .await
-            {
-                tracing::warn!(
-                    error = ?e,
-                    %mqtt_client_id,
-                    host_id = %hs.host_id,
-                    "failed to publish host security state topic"
-                );
-            }
+            publish_or_abort!(
+                state
+                    .handle
+                    .publish_retained(&sec_st, sec_state_str.into_bytes())
+                    .await,
+                mqtt_client_id,
+                "publish host security state topic"
+            );
 
             // Always: publish security entity latest_version topic.
             let sec_lt =
                 crate::ha_discovery::host_security_latest_version_topic(topic_prefix, hs.host_id);
             let sec_latest_str =
                 crate::ha_discovery::host_security_latest_version_string(hs.security_pending_count);
-            if let Err(e) = state
-                .handle
-                .publish_retained(&sec_lt, sec_latest_str.into_bytes())
-                .await
-            {
-                tracing::warn!(
-                    error = ?e,
-                    %mqtt_client_id,
-                    host_id = %hs.host_id,
-                    "failed to publish host security latest_version topic"
-                );
-            }
+            publish_or_abort!(
+                state
+                    .handle
+                    .publish_retained(&sec_lt, sec_latest_str.into_bytes())
+                    .await,
+                mqtt_client_id,
+                "publish host security latest_version topic"
+            );
 
             // Always: publish security entity JSON attributes.
             let sec_at =
@@ -850,29 +826,22 @@ impl TenantManager {
             )
             .to_string()
             .into_bytes();
-            if let Err(e) = state
-                .handle
-                .publish_retained(&sec_at, sec_attributes_bytes)
-                .await
-            {
-                tracing::warn!(
-                    error = ?e,
-                    %mqtt_client_id,
-                    host_id = %hs.host_id,
-                    "failed to publish host security attributes topic"
-                );
-            }
+            publish_or_abort!(
+                state
+                    .handle
+                    .publish_retained(&sec_at, sec_attributes_bytes)
+                    .await,
+                mqtt_client_id,
+                "publish host security attributes topic"
+            );
 
             // Always: subscribe to security command topic.
             let sec_ct = crate::ha_discovery::host_security_command_topic(topic_prefix, hs.host_id);
-            if let Err(e) = state.handle.subscribe_topic(&sec_ct).await {
-                tracing::warn!(
-                    error = ?e,
-                    %mqtt_client_id,
-                    host_id = %hs.host_id,
-                    "failed to subscribe to host security command topic"
-                );
-            }
+            publish_or_abort!(
+                state.handle.subscribe_topic(&sec_ct).await,
+                mqtt_client_id,
+                "subscribe to host security command topic"
+            );
 
             // HA-only: publish HA discovery config for security entity.
             if state.ha_discovery {
@@ -893,18 +862,14 @@ impl TenantManager {
                     os_info,
                 );
                 let sec_config_bytes = sec_config_json.to_string().into_bytes();
-                if let Err(e) = state
-                    .handle
-                    .publish_retained(&sec_config_topic, sec_config_bytes)
-                    .await
-                {
-                    tracing::warn!(
-                        error = ?e,
-                        %mqtt_client_id,
-                        host_id = %hs.host_id,
-                        "failed to publish host security HA discovery config"
-                    );
-                }
+                publish_or_abort!(
+                    state
+                        .handle
+                        .publish_retained(&sec_config_topic, sec_config_bytes)
+                        .await,
+                    mqtt_client_id,
+                    "publish host security HA discovery config"
+                );
             }
         }
     }
@@ -962,18 +927,14 @@ impl TenantManager {
                 os_info,
             );
             let config_bytes = config_json.to_string().into_bytes();
-            if let Err(e) = state
-                .handle
-                .publish_retained(&config_topic, config_bytes)
-                .await
-            {
-                tracing::warn!(
-                    error = ?e,
-                    %mqtt_client_id,
-                    host_id = %hs.host_id,
-                    "failed to publish host package HA discovery config"
-                );
-            }
+            publish_or_abort!(
+                state
+                    .handle
+                    .publish_retained(&config_topic, config_bytes)
+                    .await,
+                mqtt_client_id,
+                "publish host package HA discovery config"
+            );
 
             // Security entity config.
             let sec_config_topic = crate::ha_discovery::host_security_discovery_config_topic(
@@ -993,18 +954,14 @@ impl TenantManager {
                 os_info,
             );
             let sec_config_bytes = sec_config_json.to_string().into_bytes();
-            if let Err(e) = state
-                .handle
-                .publish_retained(&sec_config_topic, sec_config_bytes)
-                .await
-            {
-                tracing::warn!(
-                    error = ?e,
-                    %mqtt_client_id,
-                    host_id = %hs.host_id,
-                    "failed to publish host security HA discovery config"
-                );
-            }
+            publish_or_abort!(
+                state
+                    .handle
+                    .publish_retained(&sec_config_topic, sec_config_bytes)
+                    .await,
+                mqtt_client_id,
+                "publish host security HA discovery config"
+            );
         }
     }
 
@@ -1043,28 +1000,22 @@ impl TenantManager {
             )
             .to_string()
             .into_bytes();
-            if let Err(e) = state.handle.publish_retained(&info_topic, info_bytes).await {
-                tracing::warn!(
-                    error = ?e,
-                    %mqtt_client_id,
-                    host_id = %host.host_id,
-                    "failed to publish host info topic"
-                );
-            }
+            publish_or_abort!(
+                state.handle.publish_retained(&info_topic, info_bytes).await,
+                mqtt_client_id,
+                "publish host info topic"
+            );
 
             // Tags topic.
             let tags_topic = crate::ha_discovery::host_tags_topic(topic_prefix, host.host_id);
             let tags_bytes = serde_json::to_string(&host.tags)
                 .unwrap_or_else(|_| "[]".to_string())
                 .into_bytes();
-            if let Err(e) = state.handle.publish_retained(&tags_topic, tags_bytes).await {
-                tracing::warn!(
-                    error = ?e,
-                    %mqtt_client_id,
-                    host_id = %host.host_id,
-                    "failed to publish host tags topic"
-                );
-            }
+            publish_or_abort!(
+                state.handle.publish_retained(&tags_topic, tags_bytes).await,
+                mqtt_client_id,
+                "publish host tags topic"
+            );
 
             // Agent topic.
             let agent_topic = crate::ha_discovery::host_agent_topic(topic_prefix, host.host_id);
@@ -1074,18 +1025,14 @@ impl TenantManager {
             )
             .to_string()
             .into_bytes();
-            if let Err(e) = state
-                .handle
-                .publish_retained(&agent_topic, agent_bytes)
-                .await
-            {
-                tracing::warn!(
-                    error = ?e,
-                    %mqtt_client_id,
-                    host_id = %host.host_id,
-                    "failed to publish host agent topic"
-                );
-            }
+            publish_or_abort!(
+                state
+                    .handle
+                    .publish_retained(&agent_topic, agent_bytes)
+                    .await,
+                mqtt_client_id,
+                "publish host agent topic"
+            );
 
             // HA-only: publish connectivity binary_sensor discovery config.
             if state.ha_discovery {
@@ -1106,18 +1053,14 @@ impl TenantManager {
                     },
                 );
                 let config_bytes = config_json.to_string().into_bytes();
-                if let Err(e) = state
-                    .handle
-                    .publish_retained(&config_topic, config_bytes)
-                    .await
-                {
-                    tracing::warn!(
-                        error = ?e,
-                        %mqtt_client_id,
-                        host_id = %host.host_id,
-                        "failed to publish host connectivity HA discovery config"
-                    );
-                }
+                publish_or_abort!(
+                    state
+                        .handle
+                        .publish_retained(&config_topic, config_bytes)
+                        .await,
+                    mqtt_client_id,
+                    "publish host connectivity HA discovery config"
+                );
             }
         }
     }
@@ -1146,18 +1089,14 @@ impl TenantManager {
         // State topic: "online" or "offline".
         let state_payload = if conn.online { "online" } else { "offline" };
         let state_topic = crate::ha_discovery::host_connectivity_state_topic(topic_prefix, host_id);
-        if let Err(e) = state
-            .handle
-            .publish_retained(&state_topic, state_payload.as_bytes().to_vec())
-            .await
-        {
-            tracing::warn!(
-                error = ?e,
-                %mqtt_client_id,
-                %host_id,
-                "failed to publish connectivity state topic"
-            );
-        }
+        publish_or_abort!(
+            state
+                .handle
+                .publish_retained(&state_topic, state_payload.as_bytes().to_vec())
+                .await,
+            mqtt_client_id,
+            "publish connectivity state topic"
+        );
 
         // Attributes topic.
         let attr_topic =
@@ -1168,14 +1107,11 @@ impl TenantManager {
         )
         .to_string()
         .into_bytes();
-        if let Err(e) = state.handle.publish_retained(&attr_topic, attr_bytes).await {
-            tracing::warn!(
-                error = ?e,
-                %mqtt_client_id,
-                %host_id,
-                "failed to publish connectivity attributes topic"
-            );
-        }
+        publish_or_abort!(
+            state.handle.publish_retained(&attr_topic, attr_bytes).await,
+            mqtt_client_id,
+            "publish connectivity attributes topic"
+        );
     }
 
     /// Publish only the HA connectivity `binary_sensor` discovery config for a
@@ -1227,18 +1163,14 @@ impl TenantManager {
             os_info,
         );
         let config_bytes = config_json.to_string().into_bytes();
-        if let Err(e) = state
-            .handle
-            .publish_retained(&config_topic, config_bytes)
-            .await
-        {
-            tracing::warn!(
-                error = ?e,
-                %mqtt_client_id,
-                %host_id,
-                "failed to publish connectivity HA discovery config"
-            );
-        }
+        publish_or_abort!(
+            state
+                .handle
+                .publish_retained(&config_topic, config_bytes)
+                .await,
+            mqtt_client_id,
+            "publish connectivity HA discovery config"
+        );
     }
 
     fn report_status(&self, mqtt_client_id: Uuid, status: MqttClientConnectionStatus) {
