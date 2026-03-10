@@ -14,7 +14,7 @@ reqwest = { workspace = true }
 rootcause = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
-uptrakit-notification-plugin-core = { path = "../core" }
+uptrakit-notification-plugin-core = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

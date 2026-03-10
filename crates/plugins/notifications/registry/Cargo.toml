@@ -20,10 +20,10 @@ async-trait = { workspace = true }
 rootcause = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
-uptrakit-notification-plugin-core = { path = "../core" }
-uptrakit-notification-plugin-webhook = { path = "../webhook", optional = true }
-uptrakit-notification-plugin-telegram = { path = "../telegram", optional = true }
-uptrakit-notification-plugin-email = { path = "../email", optional = true }
+uptrakit-notification-plugin-core = { workspace = true }
+uptrakit-notification-plugin-webhook = { workspace = true, optional = true }
+uptrakit-notification-plugin-telegram = { workspace = true, optional = true }
+uptrakit-notification-plugin-email = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
