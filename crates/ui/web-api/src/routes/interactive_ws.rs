@@ -13,9 +13,9 @@ use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, RelationTrait};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, RelationTrait};
 use uptrakit_internal_wire::{ControllerMessage, UpdateStdinDataPayload};
-use uptrakit_shared_db::entity::{host, service_host, update_history};
+use uptrakit_shared_db::entity::{host, service_host, update_history, update_output_line};
 use uptrakit_web_api_types::update_history::{
     OutputLineSSE, StdinAttentionSSE, UpdateCompletedSSE,
 };
@@ -220,6 +220,47 @@ async fn handle_interactive_session(
         }
     };
 
+    // Replay existing output lines from the DB so the client sees output that
+    // arrived before this WebSocket connected. The subscription was created
+    // above *before* this query so that no lines are lost: any line that
+    // arrives between the query and the main loop is buffered in the
+    // broadcast receiver. Lines already covered by the DB replay are skipped
+    // in the main loop via the `seq < replay_count` guard.
+    let replay_count = match update_output_line::Entity::find()
+        .filter(update_output_line::Column::UpdateHistoryId.eq(update_history_id))
+        .order_by_asc(update_output_line::Column::CreatedAt)
+        .order_by_asc(update_output_line::Column::Id)
+        .all(&state.db)
+        .await
+    {
+        Ok(lines) => {
+            let count = lines.len() as u64;
+            for (seq, line) in lines.into_iter().enumerate() {
+                let payload = ServerMessage::Output(OutputLineSSE {
+                    id: line.id,
+                    text: line.output,
+                    stream: line.stream.to_string(),
+                    timestamp: line.created_at,
+                    seq: seq as u64,
+                });
+                if let Ok(json) = serde_json::to_string(&payload)
+                    && sink.send(Message::Text(json.into())).await.is_err()
+                {
+                    // Client disconnected during replay.
+                    state
+                        .interactive_sessions
+                        .release(update_history_id, user.user_id);
+                    return;
+                }
+            }
+            count
+        }
+        Err(e) => {
+            tracing::warn!(%update_history_id, "failed to load output lines for replay: {e}");
+            0
+        }
+    };
+
     let shutdown_token = state.shutdown_token.clone();
 
     loop {
@@ -259,6 +300,10 @@ async fn handle_interactive_session(
             ev = broadcast_rx.recv() => {
                 match ev {
                     Ok(BroadcastEvent::Line { id, text, stream, timestamp, seq }) => {
+                        // Skip lines already sent via DB replay.
+                        if seq < replay_count {
+                            continue;
+                        }
                         let payload = ServerMessage::Output(OutputLineSSE {
                             id,
                             text,

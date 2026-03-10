@@ -84,7 +84,11 @@
 
 		terminal = new Terminal({
 			disableStdin: onInput === undefined,
-			convertEol: true,
+			// convertEol only for static (non-PTY) output: stored output uses plain
+			// \n endings, but PTY output already carries \r\n so no conversion is
+			// needed — enabling it in interactive mode causes a double-newline on
+			// every echoed character.
+			convertEol: onInput === undefined,
 			scrollback: 10000,
 			fontSize: 13,
 			fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
