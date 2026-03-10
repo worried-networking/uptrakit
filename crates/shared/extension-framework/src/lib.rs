@@ -607,12 +607,27 @@ impl WizardStep {
 pub struct FormDef {
     /// Ordered list of form fields.
     pub fields: Vec<FieldDef>,
+    /// Action ID to invoke when the form opens, to pre-populate field values.
+    ///
+    /// The action response is a flat JSON object whose keys map to field keys.
+    /// Values are used as initial field values (overriding `default_value`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_load_action: Option<String>,
 }
 
 impl FormDef {
     /// Create a new form definition.
     pub fn new(fields: Vec<FieldDef>) -> Self {
-        Self { fields }
+        Self {
+            fields,
+            pre_load_action: None,
+        }
+    }
+
+    /// Set the action ID to invoke when the form opens for pre-population.
+    pub fn with_pre_load_action(mut self, action_id: impl Into<String>) -> Self {
+        self.pre_load_action = Some(action_id.into());
+        self
     }
 }
 

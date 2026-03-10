@@ -857,6 +857,8 @@ export interface FieldDef {
 
 export interface FormDef {
 	fields: FieldDef[];
+	/** Action ID to invoke when the form opens, to pre-populate field values from the response. */
+	pre_load_action?: string;
 }
 
 export interface WizardStep {
@@ -866,7 +868,9 @@ export interface WizardStep {
 	submit_action?: string;
 }
 
-export type ActionUi = { type: 'form'; fields: FieldDef[] } | { type: 'wizard'; steps: WizardStep[] };
+export type ActionUi =
+	| { type: 'form'; fields: FieldDef[]; pre_load_action?: string }
+	| { type: 'wizard'; steps: WizardStep[] };
 
 /** Describes a direct REST API call as the submit target for an action form. */
 export interface ApiSubmitDef {
