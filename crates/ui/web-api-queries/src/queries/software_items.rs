@@ -575,7 +575,12 @@ pub async fn list_software_items(
     let mut base_query = SoftwareItem::find()
         .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(software_item::Column::DeactivatedAt.is_null())
-        .order_by_asc(software_item::Column::Name);
+        .order_by(
+            sea_orm::sea_query::Func::lower(sea_orm::sea_query::Expr::col(
+                software_item::Column::Name,
+            )),
+            sea_orm::sea_query::Order::Asc,
+        );
 
     if let Some(featured) = params.featured {
         base_query = base_query.filter(software_item::Column::Featured.eq(featured));
