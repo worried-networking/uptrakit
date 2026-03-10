@@ -172,7 +172,7 @@ Recommendation: add `.dns_resolver(Arc::new(SsrfSafeResolver::new()))` to `Teleg
 
 #### Maintainability
 
-**[HIGH] M1 — Notification plugin crates use `path` instead of workspace dependency for `uptrakit-notification-plugin-core`**
+~~**[HIGH] M1 — Notification plugin crates use `path` instead of workspace dependency for `uptrakit-notification-plugin-core`**
 
 All four notification plugin crates reference the core notification crate via relative `path`:
 
@@ -185,7 +185,7 @@ All four notification plugin crates reference the core notification crate via re
 
 The workspace root already declares this crate. Bypassing the workspace declaration breaks single-point version control and requires manual version bumps across four files when the core crate changes.
 
-Recommendation: change all four references to `uptrakit-notification-plugin-core = { workspace = true }`.
+Recommendation: change all four references to `uptrakit-notification-plugin-core = { workspace = true }`.~~ *(Fixed: all four `Cargo.toml` files updated to use `workspace = true`.)*
 
 #### Positive findings
 
@@ -235,11 +235,11 @@ Recommendation: change the return type to `crate::error::Result<()>` (trivial, s
 
 Recommendation: replace with `let Some(first) = value.chars().next() else { return Err(...) }`.
 
-**[MEDIUM] R4 — `uptrakit-plugin-apt` (`config.rs:99-101`) and `uptrakit-plugin-homebrew` — fieldless enums missing `Copy`**
+~~**[MEDIUM] R4 — `uptrakit-plugin-apt` (`config.rs:99-101`) and `uptrakit-plugin-homebrew` — fieldless enums missing `Copy`**
 
 `AptDiscoveryFilter` and `HomebrewPackageType` are fieldless enums that do not derive `Copy`. This forces `.clone()` at use sites where `Copy` semantics would be more natural.
 
-Recommendation: add `Copy` to both derive lists.
+Recommendation: add `Copy` to both derive lists.~~ *(Fixed: `Copy` added to both `AptDiscoveryFilter` and `HomebrewPackageType`; `.clone()` calls removed.)*
 
 #### Positive findings
 
@@ -283,11 +283,12 @@ Recommendation: extend `register_plugins!` to accumulate `extension_manifests()`
 
 #### Coding Standards
 
-**[LOW] CS2 — `uptrakit-plugin-generic-shell` (`error.rs`) — `ShellError` is a dead type**
+~~**[LOW] CS2 — `uptrakit-plugin-generic-shell` (`error.rs`) — `ShellError` is a dead type**
 
 `ShellError` is declared but never bridged to `PluginError` via `impl_report_conversion!`. Production code at `plugin.rs:64,88,114` manually constructs `report!(PluginError::...)`. `ShellError` appears only as the declared return type of `ShellPlugin::new()` and is never actually constructed in any error path.
 
-Recommendation: either add `impl_report_conversion!(ShellError, PluginError)` and use `ShellError` consistently in `plugin.rs` (matching the pattern of all other plugins), or remove `ShellError` entirely and use `PluginError` directly in the function signatures.
+Recommendation: either add `impl_report_conversion!(ShellError, PluginError)` and use `ShellError` consistently in `plugin.rs` (matching the pattern of all other plugins), or remove `ShellError` entirely and use `PluginError` directly in the function signatures.~~ *(Fixed: `error.rs` deleted entirely; `ShellPlugin::new()` and `validate()` now return
+`uptrakit_plugin_infrastructure_core::Result<_>` directly.)*
 
 ---
 
@@ -366,20 +367,24 @@ Recommendation: replace with a match or `if let` that returns an error for non-o
 
 #### Issues
 
-**[MEDIUM]** `notifications/core/src/traits.rs:11-24` -- `DeliveryMessage` is a public struct
+~~**[MEDIUM]** `notifications/core/src/traits.rs:11-24` -- `DeliveryMessage` is a public struct
 used across crate boundaries but does not carry `#[non_exhaustive]`. Adding a new field (e.g.,
 `priority`, `thread_id`) would be a breaking change for any code that constructs the struct
-with positional syntax.
+with positional syntax.~~ *(Fixed: `#[non_exhaustive]` added; `DeliveryMessage::new()`
+constructor added.)*
 
-**[MEDIUM]** `notifications/core/src/traits.rs:27-36` -- `MessageAction` is similarly missing
+~~**[MEDIUM]** `notifications/core/src/traits.rs:27-36` -- `MessageAction` is similarly missing
 `#[non_exhaustive]`. Adding fields like `style` or `confirmation_required` would break
-external constructors.
+external constructors.~~ *(Fixed: `#[non_exhaustive]` added; `MessageAction::new()`
+constructor added.)*
 
-**[MEDIUM]** `notifications/registry/src/lib.rs:102-122` -- `NotificationOps` trait defines
+~~**[MEDIUM]** `notifications/registry/src/lib.rs:102-122` -- `NotificationOps` trait defines
 `mask_config_secrets` but has no corresponding `restore_config_secrets` method. The
 infrastructure `PluginOps` trait provides both mask and restore operations. Without restore,
 notification channel config updates that include masked sentinel values cannot recover the
-original secrets, requiring the user to re-enter secrets on every config edit.
+original secrets, requiring the user to re-enter secrets on every config edit.~~ *(Fixed:
+`restore_config_secrets` default method added to `NotificationPlugin` trait; method added to
+`NotificationOps` trait and `NotificationPluginRegistry` impl.)*
 
 **[LOW]** `notifications/registry/src/lib.rs:54-78` -- Channel type strings (`"webhook"`,
 `"telegram"`, `"email"`) are repeated as string literals at registration sites and in each

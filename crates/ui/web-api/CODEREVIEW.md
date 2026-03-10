@@ -308,7 +308,7 @@ does NOT write to the outbox.
 
 ### Issues
 
-**[CRITICAL]** `src/notifications/dispatcher.rs:30` -- `NotificationDispatcher::new()` creates
+~~**[CRITICAL]** `src/notifications/dispatcher.rs:30` -- `NotificationDispatcher::new()` creates
 a `mpsc::unbounded_channel()`. Under sustained high event volume or cascading failures (e.g.,
 a bulk update completion burst when many agents reconnect simultaneously), the sender-side
 queue grows without any bound, risking OOM. The `notification_service.rs` watch channel
@@ -316,7 +316,9 @@ already provides the correct bounded-snapshot pattern; the dispatcher should fol
 discipline. Fix: replace with `mpsc::channel(N)` where `N` is a named capacity constant
 (e.g., `const DISPATCHER_CHANNEL_CAPACITY: usize = 4096`). On `try_send` failure emit
 `tracing::warn!(dropped = true, ...)` and discard the message so backpressure is observable
-in logs rather than silently absorbed into heap.
+in logs rather than silently absorbed into heap.~~ *(Fixed: replaced with
+`mpsc::channel(DISPATCHER_CHANNEL_CAPACITY)` where `DISPATCHER_CHANNEL_CAPACITY = 4096`;
+`try_send` with `tracing::warn!` on overflow.)*
 
 ~~**[MEDIUM]** `src/nats_transport.rs:162-164` -- Fixed 1-second NATS retry without jitter or
 backoff.~~

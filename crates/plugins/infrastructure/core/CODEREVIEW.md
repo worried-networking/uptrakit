@@ -199,28 +199,40 @@ and maintainability.
 
 #### Issues
 
-**[MEDIUM]** `src/types.rs:12-43` -- `UpstreamRelease` is a public struct used across crate
+~~**[MEDIUM]** `src/types.rs:12-43` -- `UpstreamRelease` is a public struct used across crate
 boundaries but does not carry `#[non_exhaustive]`. Adding new fields (e.g., `signature`,
 `changelog_url`) would be a breaking change for any code that constructs the struct with
 positional syntax. All current construction sites use named fields, but external crates are
-not protected.
+not protected.~~ *(Fixed: `#[non_exhaustive]` added; `UpstreamRelease::new(version, tag,
+is_prerelease, release_url)` constructor added.)*
 
-**[MEDIUM]** `src/agent_infra.rs:35-55` -- `GuestBootstrapParams` is a public struct missing
+~~**[MEDIUM]** `src/agent_infra.rs:35-55` -- `GuestBootstrapParams` is a public struct missing
 `#[non_exhaustive]`. Similarly, `GuestBootstrapResult` (line 58-62), `PluginConfigReport`
 (line 162-170), `BootstrapInfraResult` (line 173-182), `InfraResolvedSudo` (line 188-196),
 `SyncInfraResult` (line 199-205), and `InfraPluginContext` (line 141-157) are all public
 structs used across crate boundaries without `#[non_exhaustive]`. Adding fields to any of
-these would break external constructors.
+these would break external constructors.~~ *(Fixed: `#[non_exhaustive]` added to
+`GuestBootstrapParams` and `GuestBootstrapResult` with `new()` constructors. The remaining
+structs listed (`PluginConfigReport`, `BootstrapInfraResult`, `InfraResolvedSudo`,
+`SyncInfraResult`, `InfraPluginContext`) are tracked as a follow-up.)*
 
-**[LOW]** `src/batch_detect.rs:10-14` -- `BatchDetectItem` and `BatchDetectResult` (line
+~~**[LOW]** `src/batch_detect.rs:10-14` -- `BatchDetectItem` and `BatchDetectResult` (line
 18-33) are public structs missing `#[non_exhaustive]`. Similarly, `BatchFetchItem`
 (`batch_fetch.rs:10-14`) and `BatchFetchResult` (line 17-29), `BatchUpdateItem`
-(`batch_update.rs:9-18`) and `BatchUpdateResult` (line 21-30) are all missing the annotation.
+(`batch_update.rs:9-18`) and `BatchUpdateResult` (line 21-30) are all missing the annotation.~~ *(Fixed:
+`#[non_exhaustive]` added to all six types; constructors added: `BatchDetectItem::new`,
+`BatchDetectResult::{found,not_found,error}`, `BatchFetchItem::new`,
+`BatchFetchResult::{found,empty,error}`, `BatchUpdateItem::new`,
+`BatchUpdateResult::{new,success,failure}`.)*
 
-**[LOW]** `src/traits.rs:29-46` -- `UpdateHookContext` and `PreUpdateHookResult` are public
+~~**[LOW]** `src/traits.rs:29-46` -- `UpdateHookContext` and `PreUpdateHookResult` are public
 structs missing `#[non_exhaustive]`. Adding fields like `from_version` to `UpdateHookContext`
-or `warnings` to `PreUpdateHookResult` would break external constructors.
+or `warnings` to `PreUpdateHookResult` would break external constructors.~~ *(Fixed:
+`#[non_exhaustive]` added to both; `UpdateHookContext::new()` and `PreUpdateHookResult::new()`
+constructors added.)*
 
-**[LOW]** `src/traits.rs:68-75` -- `SudoHelperScript` is a public struct missing
+~~**[LOW]** `src/traits.rs:68-75` -- `SudoHelperScript` is a public struct missing
 `#[non_exhaustive]`. Similarly, `SudoCommandEntry` (line 101-133) is missing the annotation.
-Both are constructed by plugins across crate boundaries.
+Both are constructed by plugins across crate boundaries.~~ *(Fixed: `#[non_exhaustive]` added
+to both; `SudoCommandEntry::new(command, explanation)` builder with `.with_args_suffix()`,
+`.with_setenv()`, `.with_helper_script()` methods added.)*

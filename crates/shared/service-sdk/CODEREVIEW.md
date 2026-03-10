@@ -515,9 +515,11 @@ The annotation suppresses a warning for a parameter that is used only in certain
 configurations. Consider using `_` prefix on the parameter name instead, which is the idiomatic
 Rust convention for conditionally-used parameters.
 
-**[MEDIUM]** `src/lifecycle.rs` or `src/lib.rs` -- `cfg(not(feature = "zeroconf"))` guard on a
+~~**[MEDIUM]** `src/lifecycle.rs` or `src/lib.rs` -- `cfg(not(feature = "zeroconf"))` guard on a
 code path violates the feature-flag convention. Features should be additive: `cfg(feature = "X")`
 enables code, `cfg(not(feature = "X"))` disables it. Using `not(feature)` means the default
 (feature absent) includes the code, and enabling the feature removes it. This inverted logic
 is error-prone. Recommendation: rename the feature or restructure so that the presence of the
-feature enables the zeroconf code path rather than the absence enabling the fallback.
+feature enables the zeroconf code path rather than the absence enabling the fallback.~~ *(Fixed:
+`#[cfg(not(feature = "zeroconf"))]` block replaced with unconditional fallback; the
+`#[cfg(feature = "zeroconf")]` block now uses an explicit `return` so features remain additive.)*

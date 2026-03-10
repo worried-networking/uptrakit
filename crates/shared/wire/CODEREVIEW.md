@@ -325,13 +325,13 @@ extract `version` and `seq` by key lookup on the `Value`, then deserialize the `
 
 ### Code and Logic Consistency
 
-**[MEDIUM]** `src/messages.rs:82-108` — `UpdateFinalStatus` and `DisconnectReason` use standard
+~~**[MEDIUM]** `src/messages.rs:82-108` — `UpdateFinalStatus` and `DisconnectReason` use standard
 `serde` derive with no `Other(String)` catch-all. An unknown variant received from a newer
 sender causes a hard deserialization error. `#[non_exhaustive]` prevents Rust match
 exhaustiveness gaps but provides no protection against wire deserialization failures. These enums
 are sent between controller and agent over the wire and will lose `Copy` when the catch-all is
 added. Recommendation: apply the `Other(String)` + infallible custom `Deserialize` pattern
-already used by `EnrollmentStatus` and `ErrorCode` in `src/lib.rs`.
+already used by `EnrollmentStatus` and `ErrorCode` in `src/lib.rs`.~~ *(Fixed: see D8 entry.)*
 
 ### Extensibility
 
@@ -404,27 +404,32 @@ fallible path or document why the `expect` is unreachable.
 
 #### Issues
 
-**[HIGH]** `src/messages.rs` -- `UpdateFinalStatus` and `DisconnectReason` are missing the
+~~**[HIGH]** `src/messages.rs` -- `UpdateFinalStatus` and `DisconnectReason` are missing the
 `Other(String)` catch-all variant. Both enums are sent between controller and agent over the wire
 and use standard `serde` derive. An unknown variant from a newer sender causes a hard
 deserialization error, breaking WebSocket connections during rolling upgrades. `#[non_exhaustive]`
 prevents Rust match exhaustiveness gaps but provides no protection against wire deserialization
 failures. Recommendation: apply the `Other(String)` + infallible custom `Deserialize` pattern
-used by `EnrollmentStatus` and `ErrorCode`. This will lose `Copy` on both types.
+used by `EnrollmentStatus` and `ErrorCode`. This will lose `Copy` on both types.~~ *(Fixed:
+`Other(String)` added to both `UpdateFinalStatus` and `DisconnectReason` with infallible custom
+`Deserialize`. Both types lose `Copy` and `Eq` as expected.)*
 
-**[MEDIUM]** `src/messages.rs` or `src/payloads.rs` -- `HookCommand` enum is missing the
+~~**[MEDIUM]** `src/messages.rs` or `src/payloads.rs` -- `HookCommand` enum is missing the
 `Other(String)` catch-all. `HookCommand` is sent from the controller to agents as part of
 `ExecuteUpdatePayload`. If the controller adds a new hook command type (beyond `Exec` and
 `Shell`), older agents will fail to deserialize the update payload entirely, causing the update
-to fail. Recommendation: add `Other(String)` with infallible `Deserialize`.
+to fail. Recommendation: add `Other(String)` with infallible `Deserialize`.~~ *(Fixed:
+`HookCommand::Other { raw: serde_json::Value }` added with infallible custom `Deserialize` and
+wildcard arm in `wire_validate_impls.rs`.)*
 
 ### Dimension: Idiomatic Rust (D10)
 
 #### Issues
 
-**[MEDIUM]** `src/messages.rs` -- `UpdateFinalStatus` missing `Other(String)` catch-all.
+~~**[MEDIUM]** `src/messages.rs` -- `UpdateFinalStatus` missing `Other(String)` catch-all.
 *Cross-reference with D8 above.* The enum is used in `UpdateCompletePayload` which crosses the
-wire. Without a catch-all, adding new final status values requires coordinated deployment.
+wire. Without a catch-all, adding new final status values requires coordinated deployment.~~ *(Fixed:
+see D8 entry above.)*
 
 #### Strengths
 
