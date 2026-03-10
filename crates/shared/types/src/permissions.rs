@@ -107,6 +107,12 @@ pub enum Permission {
 }
 
 impl Permission {
+    /// Returns all permission variants.
+    pub fn all() -> Vec<Self> {
+        use strum::IntoEnumIterator;
+        Self::iter().collect()
+    }
+
     /// Returns the canonical `snake_case` string representation.
     pub fn as_str(&self) -> &'static str {
         match self {

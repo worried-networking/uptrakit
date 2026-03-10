@@ -1,3 +1,4 @@
+mod access_preset;
 mod batch_status;
 pub mod command_validation;
 mod device_auth_status;
@@ -22,6 +23,7 @@ pub mod ssrf;
 mod update_category;
 mod update_status;
 
+pub use access_preset::{AccessPreset, ParseAccessPresetError};
 pub use batch_status::{BatchStatus, ParseBatchStatusError};
 pub use device_auth_status::{DeviceAuthStatus, ParseDeviceAuthStatusError};
 pub use discovered_software::DiscoveredSoftware;
