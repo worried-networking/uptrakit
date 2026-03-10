@@ -2,6 +2,8 @@ pub mod ca;
 pub mod cert_handler;
 pub mod cli;
 pub mod connection;
+#[cfg(feature = "zeroconf")]
+pub mod discovery;
 pub mod error;
 pub mod event_loop;
 pub mod extension_proxy;

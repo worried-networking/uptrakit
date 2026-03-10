@@ -64,6 +64,11 @@ pub struct CommonServiceArgs {
     #[arg(long)]
     pub force_enroll: bool,
 
+    /// Clear the cached discovery result and re-discover the controller.
+    #[cfg(feature = "zeroconf")]
+    #[arg(long)]
+    pub clear_discovery_cache: bool,
+
     /// Increase log verbosity (-v for own-crate debug, -vv for uptrakit=debug, -vvv for uptrakit=trace).
     /// Use RUST_LOG to enable logging for other crates (e.g. `RUST_LOG=tokio=info`).
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]

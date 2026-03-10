@@ -252,6 +252,95 @@ pub fn default_resolve_shutdown(
     }
 }
 
+/// Connection parameters resolved from either CLI args or mDNS discovery.
+struct ResolvedConnection {
+    host: String,
+    port: u16,
+    base_url: String,
+    pki_addr: Option<String>,
+    /// When discovery provides a CA fingerprint, it is passed through to
+    /// `bootstrap_ca()` as the TOFU fingerprint for automatic verification.
+    discovery_tofu_fingerprint: Option<String>,
+    /// Whether TOFU mode should be implicitly enabled (discovery provides
+    /// the CA fingerprint, so we trust-on-first-use with fingerprint pinning).
+    discovery_tofu: bool,
+}
+
+/// Resolve the controller connection from CLI args or mDNS discovery.
+#[allow(unused_variables)]
+async fn resolve_connection(
+    args: &CommonServiceArgs,
+    state_dir: &std::path::Path,
+) -> std::result::Result<ResolvedConnection, String> {
+    // If --url is provided, use it directly (no discovery)
+    if args.url.is_some() {
+        let (host, port) = args.parsed_url()?;
+        let base_url = args.base_url().to_string();
+        let pki_addr = args.pki_addr().map(String::from);
+        return Ok(ResolvedConnection {
+            host,
+            port,
+            base_url,
+            pki_addr,
+            discovery_tofu_fingerprint: None,
+            discovery_tofu: false,
+        });
+    }
+
+    // When zeroconf feature is compiled in, run discovery
+    #[cfg(feature = "zeroconf")]
+    {
+        if args.clear_discovery_cache {
+            tracing::info!("clearing discovery cache");
+            crate::discovery::clear_cache(state_dir)?;
+        }
+
+        let result = crate::discovery::discover(state_dir).await?;
+
+        match result {
+            crate::discovery::DiscoveryResult::Cached(cache)
+            | crate::discovery::DiscoveryResult::Discovered(cache) => {
+                let parsed: url::Url = cache
+                    .url
+                    .parse()
+                    .map_err(|e| format!("invalid discovered URL: {e}"))?;
+                if parsed.scheme() != "https" {
+                    return Err(format!(
+                        "discovered URL scheme must be https, got: {}",
+                        parsed.scheme()
+                    ));
+                }
+                let host = parsed
+                    .host_str()
+                    .ok_or("discovered URL must contain a host")?
+                    .to_string();
+                let port = parsed.port().unwrap_or(443);
+                let base_url = cache.url.trim_end_matches('/').to_string();
+                let pki_addr = cache.pki_addr;
+                let discovery_tofu_fingerprint = cache.ca_fingerprint;
+                let discovery_tofu = discovery_tofu_fingerprint.is_some();
+                Ok(ResolvedConnection {
+                    host,
+                    port,
+                    base_url,
+                    pki_addr,
+                    discovery_tofu_fingerprint,
+                    discovery_tofu,
+                })
+            }
+            crate::discovery::DiscoveryResult::NotFound => {
+                Err("no controller found via mDNS discovery. \
+                 Use --url to specify the controller address explicitly."
+                    .to_string())
+            }
+        }
+    }
+
+    // When zeroconf is not compiled in, --url is required
+    #[cfg(not(feature = "zeroconf"))]
+    Err("--url is required when zeroconf is not available".to_string())
+}
+
 /// Run the full service lifecycle: directory setup → identity load →
 /// CA bootstrap → enrollment → authenticated loop with reconnect.
 ///
@@ -263,14 +352,7 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
 ) -> Result<()> {
     tracing::info!("starting {}", H::SERVICE_LABEL);
 
-    // Parse URL early.
-    let (host, port) = args
-        .parsed_url()
-        .map_err(|s| report!(EnrollmentError::Protocol(ProtocolError::Init(s))))?;
-    let base_url = args.base_url();
-    let pki_addr = args.pki_addr();
-
-    // Resolve application directories.
+    // Resolve application directories first (needed for discovery cache).
     let app_dirs = args.resolve_dirs(H::DIR_NAME).map_err(|e| {
         report!(EnrollmentError::Protocol(ProtocolError::Init(
             e.to_string()
@@ -284,6 +366,19 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
     tracing::info!("config directory: {}", app_dirs.config_dir().display());
     tracing::info!("state directory: {}", app_dirs.state_dir().display());
 
+    // Resolve controller connection (from --url or mDNS discovery).
+    let conn = resolve_connection(args, app_dirs.state_dir())
+        .await
+        .map_err(|s| report!(EnrollmentError::Protocol(ProtocolError::Init(s))))?;
+
+    let host = conn.host;
+    let port = conn.port;
+    let base_url_owned = conn.base_url;
+    let pki_addr_owned = conn.pki_addr;
+
+    let base_url: &str = &base_url_owned;
+    let pki_addr: Option<&str> = pki_addr_owned.as_deref();
+
     // Create and load identity state.
     let mut identity = ServiceIdentityState::new(app_dirs.config_dir(), app_dirs.state_dir());
     identity.load().await?;
@@ -295,11 +390,17 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
     }
 
     // CA bootstrap: cached → --ca-cert file → --pki-addr → --tofu TOFU → system trust.
+    // When discovery provided a CA fingerprint, implicitly enable TOFU with that fingerprint.
+    let effective_tofu = args.tofu || conn.discovery_tofu;
+    let effective_tofu_fingerprint = args
+        .tofu_fingerprint
+        .as_deref()
+        .or(conn.discovery_tofu_fingerprint.as_deref());
     let ca_pem = crate::ca::bootstrap_ca(
         &mut identity,
         base_url,
-        args.tofu,
-        args.tofu_fingerprint.as_deref(),
+        effective_tofu,
+        effective_tofu_fingerprint,
         args.ca_cert.as_deref(),
         pki_addr,
     )

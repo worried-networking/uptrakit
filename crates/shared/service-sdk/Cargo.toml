@@ -6,6 +6,10 @@ authors.workspace = true
 repository.workspace = true
 version.workspace = true
 
+[features]
+default = ["zeroconf"]
+zeroconf = ["dep:mdns-sd"]
+
 [dependencies]
 async-trait = { workspace = true }
 clap = { workspace = true }
@@ -38,6 +42,7 @@ uptrakit-crypto = { workspace = true }
 uptrakit-directories = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-shared-types = { workspace = true }
+mdns-sd = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
