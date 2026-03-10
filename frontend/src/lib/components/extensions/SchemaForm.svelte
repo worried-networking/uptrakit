@@ -10,7 +10,8 @@
 		loading = false,
 		extensionId,
 		serviceId,
-		extraParams = {}
+		extraParams = {},
+		preLoadAction
 	}: {
 		fields: FieldDef[];
 		onsubmit: (values: Record<string, unknown>) => Promise<void>;
@@ -19,6 +20,7 @@
 		extensionId?: string;
 		serviceId?: string;
 		extraParams?: Record<string, unknown>;
+		preLoadAction?: string;
 	} = $props();
 
 	let values: Record<string, string> = $state({});
@@ -33,6 +35,8 @@
 	// svelte/prefer-svelte-reactivity lint rule while keeping this non-reactive.
 	const initiatedKeys: Record<string, true> = {};
 
+	let preLoading: boolean = $state(false);
+
 	$effect(() => {
 		const initial: Record<string, string> = {};
 		const initialMulti: Record<string, string[]> = {};
@@ -40,7 +44,7 @@
 		for (const f of fields) {
 			if (f.field_type === 'multi_select') {
 				initialMulti[f.key] = [];
-			} else if (f.field_type === 'hidden' && rowData && rowData[f.key] != null) {
+			} else if (rowData && rowData[f.key] != null) {
 				initial[f.key] = String(rowData[f.key]);
 			} else {
 				initial[f.key] = f.default_value ?? '';
@@ -48,6 +52,26 @@
 		}
 		values = initial;
 		multiValues = initialMulti;
+
+		// Pre-load action: invoke an extension action on form open to populate field values.
+		if (preLoadAction && extensionId) {
+			preLoading = true;
+			invokeExtensionAction(extensionId, preLoadAction, {}, serviceId)
+				.then((data) => {
+					const obj = data as Record<string, unknown>;
+					for (const f of fields) {
+						if (obj[f.key] != null) {
+							values[f.key] = String(obj[f.key]);
+						}
+					}
+				})
+				.catch((e) => {
+					showError(e instanceof Error ? e.message : 'Failed to load form data');
+				})
+				.finally(() => {
+					preLoading = false;
+				});
+		}
 	});
 
 	$effect(() => {
@@ -274,7 +298,13 @@
 		{/if}
 	{/each}
 
-	<button type="submit" class="btn preset-filled-primary-500" disabled={loading}>
-		{loading ? 'Processing...' : submitLabel}
+	<button type="submit" class="btn preset-filled-primary-500" disabled={loading || preLoading}>
+		{#if preLoading}
+			Loading...
+		{:else if loading}
+			Processing...
+		{:else}
+			{submitLabel}
+		{/if}
 	</button>
 </form>

@@ -141,7 +141,15 @@
 			showModal = false;
 		}}
 	>
-		<SchemaForm fields={action.ui.fields} onsubmit={invoke} {loading} {extensionId} {serviceId} {extraParams} />
+		<SchemaForm
+			fields={action.ui.fields}
+			onsubmit={invoke}
+			{loading}
+			{extensionId}
+			{serviceId}
+			{extraParams}
+			preLoadAction={action.ui.pre_load_action}
+		/>
 	</Modal>
 {/if}
 
