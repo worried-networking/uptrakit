@@ -11,7 +11,7 @@ same plugin config.
 
 ## Plugin Types
 
-Uptrakit ships with ten built-in plugin types:
+Uptrakit ships with eleven built-in plugin types:
 
 | Plugin type | Description | Autodiscovery |
 | --- | --- | --- |
@@ -23,6 +23,7 @@ Uptrakit ships with ten built-in plugin types:
 | `package_manager_homebrew` | Tracks Homebrew formulae and casks. Installed version is read from the local Homebrew installation on the agent host. | Yes |
 | `discovery_proxmox_helper_scripts` | Discovery-only. Scans the container's update script, fetches each CT script, and synthesizes downstream plugin configs automatically. Does not perform version detection or updates directly. | Yes |
 | `package_manager_apt` | Tracks Debian/Ubuntu packages managed by APT. Installed and latest versions are resolved locally by the agent using `dpkg` and `apt-cache`. Requires `sudo` access for updates and index refresh. | Yes |
+| `package_manager_dnf` | Tracks RPM packages managed by DNF on Fedora/RHEL/Rocky/AlmaLinux and other RPM-based distributions. Installed and latest versions are resolved locally by the agent using `rpm` and `dnf`. Requires `sudo` access for updates and index refresh. | Yes |
 | `package_manager_npm` | Tracks globally installed npm packages. Fetches upstream versions from the npm registry (controller-side). Discovers globally installed packages and executes updates via `npm install -g`. Requires `sudo` access for updates. | Yes |
 | `package_manager_mas` | Tracks Mac App Store apps via the `mas` CLI tool. Agent-side only. Discovers installed apps and checks for updates via `mas list` and `mas outdated`. No `sudo` required. Requires `brew install mas`. | Yes |
 
@@ -187,6 +188,18 @@ connects and no matching plugin config exists.
 
 For full details and `sudoers` configuration requirements, see
 [APT Plugin](plugins/apt.md).
+
+### `package_manager_dnf` configuration fields
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `discovery_filter` | No | `all` (default) or `user_installed`. Controls which packages are surfaced during autodiscovery. `all` surfaces every installed RPM package; `user_installed` surfaces only packages explicitly installed by the user (`dnf repoquery --userinstalled`). |
+
+Uptrakit auto-creates a config named `"DNF"` when the first agent with DNF support
+connects and no matching plugin config exists.
+
+For full details and `sudoers` configuration requirements, see
+[DNF Plugin](plugins/dnf.md).
 
 ### `package_manager_npm` configuration fields
 
@@ -440,7 +453,7 @@ uptrakit plugin-configs delete <PLUGIN_CONFIG_ID>
 ## Autodiscovery
 
 The `releases_docker`, `package_manager_homebrew`, `discovery_proxmox_helper_scripts`,
-`package_manager_apt`, and `package_manager_npm` plugin types support **autodiscovery**: the
+`package_manager_apt`, `package_manager_dnf`, and `package_manager_npm` plugin types support **autodiscovery**: the
 agent queries the local runtime (Docker daemon or package manager) and reports installed
 packages back to the controller, which creates pending software items for your review.
 
@@ -452,6 +465,7 @@ automatically creates one. Auto-created configs are named:
 - `Homebrew (Casks)`
 - `Proxmox Helper Scripts`
 - `APT`
+- `DNF`
 - `npm`
 
 **PHS auto-created configs:** In addition to the `"Proxmox Helper Scripts"` config used as a
