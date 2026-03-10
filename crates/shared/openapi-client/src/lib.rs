@@ -3,6 +3,7 @@ pub mod mock;
 
 pub(crate) mod paths;
 
+pub mod access_presets;
 pub mod api_tokens;
 pub mod audit_logs;
 pub mod auth;
@@ -20,8 +21,10 @@ pub mod hosts;
 pub mod notifications;
 pub mod oidc_auth;
 pub mod oidc_providers;
+pub mod permissions;
 pub mod pki;
 pub mod plugin_configs;
+pub mod roles;
 pub mod scheduler;
 pub mod services;
 pub mod settings;
@@ -36,6 +39,7 @@ pub mod system_services;
 pub mod update_batches;
 pub mod update_history;
 pub mod update_output_stream;
+pub mod users;
 
 pub use error::{ClientError, Result};
 

@@ -396,6 +396,48 @@ pub(crate) mod extensions {
     }
 }
 
+pub(crate) mod users {
+    use uuid::Uuid;
+    /// `GET /api/v1/users`
+    pub(crate) const BASE: &str = "/api/v1/users";
+    /// `GET /api/v1/users/{id}`
+    pub(crate) fn by_id(id: &Uuid) -> String {
+        format!("/api/v1/users/{id}")
+    }
+    /// `PUT /api/v1/users/{id}/roles`
+    pub(crate) fn roles(id: &Uuid) -> String {
+        format!("/api/v1/users/{id}/roles")
+    }
+    /// `PUT /api/v1/users/{id}/active`
+    pub(crate) fn active(id: &Uuid) -> String {
+        format!("/api/v1/users/{id}/active")
+    }
+    /// `POST /api/v1/users/{id}/apply-preset`
+    pub(crate) fn apply_preset(id: &Uuid) -> String {
+        format!("/api/v1/users/{id}/apply-preset")
+    }
+}
+
+pub(crate) mod permissions {
+    /// `GET /api/v1/permissions`
+    pub(crate) const BASE: &str = "/api/v1/permissions";
+}
+
+pub(crate) mod roles {
+    use uuid::Uuid;
+    /// `GET /api/v1/roles`
+    pub(crate) const BASE: &str = "/api/v1/roles";
+    /// `GET /api/v1/roles/{id}`
+    pub(crate) fn by_id(id: &Uuid) -> String {
+        format!("/api/v1/roles/{id}")
+    }
+}
+
+pub(crate) mod access_presets {
+    /// `GET /api/v1/access-presets`
+    pub(crate) const BASE: &str = "/api/v1/access-presets";
+}
+
 pub(crate) mod audit_logs {
     /// `GET /api/v1/audit-logs`
     pub(crate) const BASE: &str = "/api/v1/audit-logs";
