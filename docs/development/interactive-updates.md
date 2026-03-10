@@ -9,7 +9,9 @@ For security considerations, see [Interactive Updates Security](../security/inte
 ## Feature Gate Strategy
 
 The entire interactive updates subsystem is gated behind the `interactive` Cargo feature.
-This keeps the default binary lean and avoids pulling in PTY dependencies unless opted in.
+This feature is **enabled by default** in all binary crates (`uptrakit-agent`,
+`uptrakit-agent-ssh`, `uptrakit-controller`) so standard builds include interactive
+update support out of the box. Library crates keep it opt-in.
 
 ### Feature Propagation Chain
 
@@ -17,10 +19,10 @@ This keeps the default binary lean and avoids pulling in PTY dependencies unless
 | --- | --- | --- |
 | `uptrakit-command` | `interactive` | PTY support via `rustix`, `InteractiveHandle`, `execute_interactive()` |
 | `uptrakit-agent-core` | `interactive` | Interactive update execution path, stdin forwarding |
-| `uptrakit-agent` | `interactive` | `UpdateStdinData` handler, attention polling |
-| `uptrakit-agent-ssh` | `interactive` | SSH PTY request, `UpdateStdinData` handler |
+| `uptrakit-agent` | `interactive` (default) | `UpdateStdinData` handler, attention polling, `InteractiveUpdates` capability |
+| `uptrakit-agent-ssh` | `interactive` (default) | SSH PTY request, `UpdateStdinData` handler, `InteractiveUpdates` capability |
 | `uptrakit-web-api` | `interactive` | Interactive WS endpoint, `InteractiveSessionRegistry` |
-| `uptrakit-controller` | `interactive` | Propagates to `web-api/interactive` |
+| `uptrakit-controller` | `interactive` (default) | Propagates to `web-api/interactive` |
 
 ### Wire Types Are Unconditional
 
@@ -134,15 +136,16 @@ in the web-api crate:
 
 To test the full interactive flow end-to-end:
 
-1. Build with `--features interactive`.
-2. Start the controller and an agent (both with `interactive` feature).
+1. Build the controller and agent with default features (interactive is included).
+2. Start the controller and an agent.
 3. Trigger an interactive update via the CLI or API.
 4. Connect via the WebSocket endpoint and verify stdin forwarding.
 
 ## Capability Advertisement
 
-Agents compiled with `interactive` include `Capability::InteractiveUpdates` in their
-capability set at enrollment. The controller checks this before:
+Agents compiled with the `interactive` feature (enabled by default in all binary crates)
+include `Capability::InteractiveUpdates` in their capability set at enrollment.
+The controller checks this before:
 
 1. Sending `UpdateStdinData` to an agent.
 2. Setting `interactive: true` on `ExecuteUpdatePayload`.

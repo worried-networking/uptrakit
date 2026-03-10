@@ -17,9 +17,8 @@ and recommended approach.
 
 ## Prerequisites
 
-- The agent (or SSH agent) must be compiled with the `interactive` feature enabled.
-- The agent must advertise the `InteractiveUpdates` capability. You can verify this
-  in the service detail view.
+- The agent (or SSH agent) must advertise the `InteractiveUpdates` capability. Standard
+  builds include this by default. You can verify the capability in the service detail view.
 - The admin must have the `ManageSoftware` permission (stdin forwarding is equivalent
   to code execution on the target host).
 

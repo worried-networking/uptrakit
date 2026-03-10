@@ -5,13 +5,13 @@
 # Build args:
 #   PACKAGE  — Cargo package name  (e.g. uptrakit-controller)
 #   BINARY   — Output binary name  (e.g. uptrakit-controller)
-#   FEATURES — Cargo feature flags (e.g. embed-frontend,db-all,oidc)
+#   FEATURES — Cargo feature flags (e.g. embed-frontend,db-all,oidc,interactive)
 #
 # Usage:
 #   docker build -f docker/Dockerfile \
 #     --build-arg PACKAGE=uptrakit-controller \
 #     --build-arg BINARY=uptrakit-controller \
-#     --build-arg FEATURES=embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all \
+#     --build-arg FEATURES=embed-frontend,db-all,oidc,interactive,embedded-scheduler,nats,notifications-all \
 #     -t uptrakit-controller .
 
 # ---------------------------------------------------------------------------

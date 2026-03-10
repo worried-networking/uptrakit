@@ -166,7 +166,7 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 | `nats` | No | Enables NATS JetStream transport for cross-controller messaging. Propagates to `uptrakit-web-api/nats`. |
 | `swagger-ui` | No | Swagger UI at `/swagger-ui` |
 | `embed-frontend` | No | Embeds the SvelteKit frontend build into the binary via `rust-embed`. Requires `frontend/build/` to exist at compile time. Removes the `--static-dir` CLI argument. See [Embedded Frontend](docs/development/embedded-frontend.md). |
-| `interactive` | No | Interactive (PTY-based) update sessions with stdin forwarding. Propagates to `uptrakit-web-api/interactive`. Adds the interactive WebSocket endpoint and `InteractiveSessionRegistry`. See [Interactive Updates](docs/development/interactive-updates.md). |
+| `interactive` | Yes | Interactive (PTY-based) update sessions with stdin forwarding. Propagates to `uptrakit-web-api/interactive`. Adds the interactive WebSocket endpoint and `InteractiveSessionRegistry`. See [Interactive Updates](docs/development/interactive-updates.md). |
 | `zeroconf` | Yes | mDNS/DNS-SD zero-configuration advertising. Enables the `--zeroconf` CLI flag and the advertiser module. Uses the `mdns-sd` crate. See [Zeroconf Discovery](docs/development/zeroconf-discovery.md). |
 
 ### Web-API feature flags
@@ -860,10 +860,10 @@ Each service declares a `BTreeSet<Capability>` at enrollment time. The set is pe
 | `NatsAccess` | `nats_access` | -- | -- | -- | yes | yes |
 | `MasterKeyAccess` | `master_key_access` | -- | -- | -- | yes | yes |
 | `CaManagement` | `ca_management` | -- | -- | -- | -- | yes |
-| `InteractiveUpdates` | `interactive_updates` | yes* | yes* | -- | -- | yes |
+| `InteractiveUpdates` | `interactive_updates` | yes | yes | -- | -- | yes |
 | `Other(String)` | *(unknown)* | -- | -- | -- | -- | -- |
 
-\* Only when compiled with the `interactive` Cargo feature.
+The `interactive` Cargo feature is now a default feature on all three binary crates (agent, agent-ssh, controller).
 
 `Other(String)` is a forward-compat catch-all received from newer peers; it never participates in intersection
 (`Capability::is_known()` returns `false` for it).
