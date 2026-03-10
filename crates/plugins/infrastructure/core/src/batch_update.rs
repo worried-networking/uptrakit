@@ -6,6 +6,7 @@ use crate::types::ReleaseInfo;
 ///
 /// Represents one package to update within a batch operation (e.g., one
 /// of 50 APT packages to upgrade in a single `apt-get upgrade` command).
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BatchUpdateItem {
     /// Plugin-specific identifier for the package (e.g., APT package name).
@@ -17,7 +18,23 @@ pub struct BatchUpdateItem {
     pub release_info: Option<ReleaseInfo>,
 }
 
+impl BatchUpdateItem {
+    /// Create a new [`BatchUpdateItem`].
+    pub fn new(
+        package_identifier: impl Into<String>,
+        to_version: impl Into<String>,
+        release_info: Option<ReleaseInfo>,
+    ) -> Self {
+        Self {
+            package_identifier: package_identifier.into(),
+            to_version: to_version.into(),
+            release_info,
+        }
+    }
+}
+
 /// Result of updating a single package within a batch operation.
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BatchUpdateResult {
     /// Plugin-specific identifier for the package.
@@ -27,6 +44,31 @@ pub struct BatchUpdateResult {
     /// Output from the update operation (may be shared across all packages
     /// in the batch if the package manager uses a single command).
     pub output: String,
+}
+
+impl BatchUpdateResult {
+    /// Create a new [`BatchUpdateResult`].
+    pub fn new(
+        package_identifier: impl Into<String>,
+        success: bool,
+        output: impl Into<String>,
+    ) -> Self {
+        Self {
+            package_identifier: package_identifier.into(),
+            success,
+            output: output.into(),
+        }
+    }
+
+    /// Create a successful update result.
+    pub fn success(package_identifier: impl Into<String>, output: impl Into<String>) -> Self {
+        Self::new(package_identifier, true, output)
+    }
+
+    /// Create a failed update result.
+    pub fn failure(package_identifier: impl Into<String>, output: impl Into<String>) -> Self {
+        Self::new(package_identifier, false, output)
+    }
 }
 
 #[cfg(test)]

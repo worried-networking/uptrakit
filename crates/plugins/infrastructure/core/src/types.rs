@@ -9,6 +9,7 @@ pub use uptrakit_shared_types::{
 use crate::version::Version;
 
 /// Metadata for an upstream software release.
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UpstreamRelease {
     /// Parsed version (with optional semver).
@@ -40,6 +41,32 @@ pub struct UpstreamRelease {
     /// `ExecuteUpdatePayload.release_info.attestation_status` at trigger time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attestation_status: Option<AttestationStatus>,
+}
+
+impl UpstreamRelease {
+    /// Create a new [`UpstreamRelease`] with required fields.
+    ///
+    /// Optional fields (`release_notes`, `published_at`, `assets`, `category`,
+    /// `attestation_status`) are set to their defaults and can be set via the
+    /// public fields after construction.
+    pub fn new(
+        version: Version,
+        tag: impl Into<String>,
+        is_prerelease: bool,
+        release_url: impl Into<String>,
+    ) -> Self {
+        Self {
+            version,
+            tag: tag.into(),
+            is_prerelease,
+            release_url: release_url.into(),
+            release_notes: None,
+            published_at: None,
+            assets: Vec::new(),
+            category: None,
+            attestation_status: None,
+        }
+    }
 }
 
 #[cfg(test)]

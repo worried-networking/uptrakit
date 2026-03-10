@@ -414,28 +414,22 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
 
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
         vec![
-            SudoCommandEntry {
-                command: "uptrakit-phs-version".into(),
-                explanation: "Reads /root/.<slug> for PHS version detection; the helper script \
-                    validates the slug argument to prevent path traversal"
-                    .into(),
-                helper_script: Some(SudoHelperScript {
-                    install_path: PHS_VERSION_HELPER_PATH,
-                    content: PHS_VERSION_HELPER_CONTENT,
-                }),
-                args_suffix: None,
-                needs_setenv: false,
-            },
-            SudoCommandEntry {
-                command: "update".into(),
-                explanation: "Runs /usr/bin/update with PHS_SILENT=1 and TERM=xterm for \
+            SudoCommandEntry::new(
+                "uptrakit-phs-version",
+                "Reads /root/.<slug> for PHS version detection; the helper script \
+                    validates the slug argument to prevent path traversal",
+            )
+            .with_helper_script(SudoHelperScript::new(
+                PHS_VERSION_HELPER_PATH,
+                PHS_VERSION_HELPER_CONTENT,
+            )),
+            SudoCommandEntry::new(
+                "update",
+                "Runs /usr/bin/update with PHS_SILENT=1 and TERM=xterm for \
                     PHS container updates over a PTY; SETENV: is required so the agent \
-                    can pass the env vars inline in the sudo call"
-                    .into(),
-                helper_script: None,
-                args_suffix: None,
-                needs_setenv: true,
-            },
+                    can pass the env vars inline in the sudo call",
+            )
+            .with_setenv(),
         ]
     }
 

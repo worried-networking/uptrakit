@@ -398,16 +398,10 @@ impl Plugin for DockerPlugin {
             .context_to()?;
 
         let release_url = ir.web_url(&digest);
-        let release = UpstreamRelease {
-            version: Version::new(&digest),
-            tag: tag.to_string(),
-            is_prerelease: false,
-            release_url,
-            release_notes: None,
-            published_at: None,
-            assets: vec![],
-            category: None,
-            attestation_status: None,
+        let release = {
+            let mut r = UpstreamRelease::new(Version::new(&digest), tag.to_string(), false, "");
+            r.release_url = release_url;
+            r
         };
 
         tracing::debug!(
@@ -828,11 +822,10 @@ impl Plugin for DockerPlugin {
             let ir: ImageRef = match item.package_identifier.parse::<ImageRef>() {
                 Ok(r) => r,
                 Err(e) => {
-                    results.push(BatchDetectResult {
-                        package_identifier: item.package_identifier.clone(),
-                        installed_version: None,
-                        error: Some(e.to_string()),
-                    });
+                    results.push(BatchDetectResult::error(
+                        item.package_identifier.clone(),
+                        e.to_string(),
+                    ));
                     continue;
                 }
             };
@@ -841,25 +834,21 @@ impl Plugin for DockerPlugin {
 
             match cache.get(&resolved) {
                 Some(Ok(Some(digest))) => {
-                    results.push(BatchDetectResult {
-                        package_identifier: item.package_identifier.clone(),
-                        installed_version: Some(Version::new(digest)),
-                        error: None,
-                    });
+                    results.push(BatchDetectResult::found(
+                        item.package_identifier.clone(),
+                        Version::new(digest),
+                    ));
                 }
                 Some(Ok(None)) | None => {
-                    results.push(BatchDetectResult {
-                        package_identifier: item.package_identifier.clone(),
-                        installed_version: None,
-                        error: None,
-                    });
+                    results.push(BatchDetectResult::not_found(
+                        item.package_identifier.clone(),
+                    ));
                 }
                 Some(Err(e)) => {
-                    results.push(BatchDetectResult {
-                        package_identifier: item.package_identifier.clone(),
-                        installed_version: None,
-                        error: Some(e.clone()),
-                    });
+                    results.push(BatchDetectResult::error(
+                        item.package_identifier.clone(),
+                        e.clone(),
+                    ));
                 }
             }
         }
@@ -1755,15 +1744,9 @@ mod tests {
 
         // Three items all using the same image via container-qualified identifiers.
         let items = vec![
-            BatchDetectItem {
-                package_identifier: "nginx:latest#web-server".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "nginx:latest#api-proxy".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "nginx:latest#worker".to_string(),
-            },
+            BatchDetectItem::new("nginx:latest#web-server".to_string()),
+            BatchDetectItem::new("nginx:latest#api-proxy".to_string()),
+            BatchDetectItem::new("nginx:latest#worker".to_string()),
         ];
 
         let results = plugin
@@ -1801,9 +1784,7 @@ mod tests {
         let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
             .expect("valid config");
 
-        let items = vec![BatchDetectItem {
-            package_identifier: "nginx:latest#web-server".to_string(),
-        }];
+        let items = vec![BatchDetectItem::new("nginx:latest#web-server".to_string())];
         let results = plugin
             .batch_detect_installed_version(&items)
             .await
@@ -1822,9 +1803,7 @@ mod tests {
         let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
             .expect("valid config");
 
-        let items = vec![BatchDetectItem {
-            package_identifier: "nginx".to_string(),
-        }];
+        let items = vec![BatchDetectItem::new("nginx".to_string())];
         let results = plugin
             .batch_detect_installed_version(&items)
             .await

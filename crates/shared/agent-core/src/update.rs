@@ -342,11 +342,11 @@ async fn execute_plugin_update(
         .await
         .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
 
-    let hook_ctx = UpdateHookContext {
-        package_identifier: eu.package_identifier.clone(),
-        to_version: payload.to_version.clone(),
-        release_info: payload.release_info.clone(),
-    };
+    let hook_ctx = UpdateHookContext::new(
+        eu.package_identifier.clone(),
+        payload.to_version.clone(),
+        payload.release_info.clone(),
+    );
 
     // Bridge plugin output (UpdateOutputLine) -> agent output (UpdateOutputMessage)
     let make_bridge = |output_tx: &mpsc::Sender<UpdateOutputMessage>| {

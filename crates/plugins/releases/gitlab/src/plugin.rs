@@ -204,16 +204,18 @@ impl GitLabPlugin {
 
         // GitLab uses `released_at` as the canonical release URL via the web UI.
         // Construct the release URL from the project path and tag.
-        Some(UpstreamRelease {
-            version,
-            tag: gl_release.tag_name.clone(),
-            is_prerelease: gl_release.upcoming_release,
-            release_url: String::new(), // filled in fetch_releases from package_identifier
-            release_notes: gl_release.description.clone(),
-            published_at,
-            assets,
-            category: None,
-            attestation_status: None,
+        // release_url is filled in by fetch_releases from package_identifier.
+        Some({
+            let mut r = UpstreamRelease::new(
+                version,
+                gl_release.tag_name.clone(),
+                gl_release.upcoming_release,
+                "",
+            );
+            r.release_notes = gl_release.description.clone();
+            r.published_at = published_at;
+            r.assets = assets;
+            r
         })
     }
 

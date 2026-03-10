@@ -301,16 +301,15 @@ impl NpmPlugin {
                         .ok()
                 });
 
-            releases.push(UpstreamRelease {
-                version: Version::new(latest_version),
-                tag: latest_version.to_string(),
-                is_prerelease: false,
-                release_url: npm_release_url(package_identifier, latest_version),
-                release_notes: None,
-                published_at,
-                assets: vec![],
-                category: None,
-                attestation_status: None,
+            releases.push({
+                let mut r = UpstreamRelease::new(
+                    Version::new(latest_version),
+                    latest_version.to_string(),
+                    false,
+                    npm_release_url(package_identifier, latest_version),
+                );
+                r.published_at = published_at;
+                r
             });
         }
 
@@ -342,16 +341,15 @@ impl NpmPlugin {
                             .ok()
                     });
 
-                releases.push(UpstreamRelease {
-                    version: Version::new(version),
-                    tag: version.to_string(),
-                    is_prerelease: true,
-                    release_url: npm_release_url(package_identifier, version),
-                    release_notes: None,
-                    published_at,
-                    assets: vec![],
-                    category: None,
-                    attestation_status: None,
+                releases.push({
+                    let mut r = UpstreamRelease::new(
+                        Version::new(version),
+                        version.to_string(),
+                        true,
+                        npm_release_url(package_identifier, version),
+                    );
+                    r.published_at = published_at;
+                    r
                 });
             }
         }
@@ -371,15 +369,12 @@ impl Plugin for NpmPlugin {
     }
 
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        vec![SudoCommandEntry {
-            command: "npm".into(),
-            explanation: "Global npm package installation requires root".into(),
-            helper_script: None,
-            // `install -g *` covers both `npm install -g PKG@VER` and
-            // batch `npm install -g PKG1@VER1 PKG2@VER2 ...`.
-            args_suffix: Some(Cow::Borrowed("install -g *")),
-            needs_setenv: false,
-        }]
+        // `install -g *` covers both `npm install -g PKG@VER` and
+        // batch `npm install -g PKG1@VER1 PKG2@VER2 ...`.
+        vec![
+            SudoCommandEntry::new("npm", "Global npm package installation requires root")
+                .with_args_suffix(Cow::Borrowed("install -g *")),
+        ]
     }
 
     #[tracing::instrument(skip_all)]
@@ -608,10 +603,8 @@ impl Plugin for NpmPlugin {
         let success = cmd_output.exit_code == 0;
         let results = items
             .iter()
-            .map(|item| BatchUpdateResult {
-                package_identifier: item.package_identifier.clone(),
-                success,
-                output: output.clone(),
+            .map(|item| {
+                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
             })
             .collect();
 
@@ -727,10 +720,12 @@ impl Plugin for NpmPlugin {
 
         let results = items
             .iter()
-            .map(|item| BatchDetectResult {
-                package_identifier: item.package_identifier.clone(),
-                installed_version: all_packages.get(&item.package_identifier).map(Version::new),
-                error: None,
+            .map(|item| {
+                BatchDetectResult::new(
+                    item.package_identifier.clone(),
+                    all_packages.get(&item.package_identifier).map(Version::new),
+                    None,
+                )
             })
             .collect();
 
@@ -1194,12 +1189,8 @@ mod tests {
         .await
         .expect("create");
         let items = vec![
-            BatchDetectItem {
-                package_identifier: "n8n".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "pm2".to_string(),
-            },
+            BatchDetectItem::new("n8n".to_string()),
+            BatchDetectItem::new("pm2".to_string()),
         ];
         let results = plugin
             .batch_detect_installed_version(&items)
@@ -1231,12 +1222,8 @@ mod tests {
         .await
         .expect("create");
         let items = vec![
-            BatchDetectItem {
-                package_identifier: "n8n".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "missing".to_string(),
-            },
+            BatchDetectItem::new("n8n".to_string()),
+            BatchDetectItem::new("missing".to_string()),
         ];
         let results = plugin
             .batch_detect_installed_version(&items)
@@ -1267,12 +1254,8 @@ mod tests {
         .await
         .expect("create");
         let items = vec![
-            BatchDetectItem {
-                package_identifier: "n8n".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "pm2".to_string(),
-            },
+            BatchDetectItem::new("n8n".to_string()),
+            BatchDetectItem::new("pm2".to_string()),
         ];
         let results = plugin
             .batch_detect_installed_version(&items)
@@ -1291,12 +1274,8 @@ mod tests {
             .await
             .expect("create");
         let items = vec![
-            BatchDetectItem {
-                package_identifier: "valid".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "Invalid Package!".to_string(),
-            },
+            BatchDetectItem::new("valid".to_string()),
+            BatchDetectItem::new("Invalid Package!".to_string()),
         ];
         let result = plugin.batch_detect_installed_version(&items).await;
         assert!(result.is_err());

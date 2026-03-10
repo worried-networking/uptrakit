@@ -164,20 +164,10 @@ impl Plugin for PkgPlugin {
 
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
         vec![
-            SudoCommandEntry {
-                command: "pkg".into(),
-                explanation: "Package index refresh requires root privileges".into(),
-                helper_script: None,
-                args_suffix: Some(Cow::Borrowed("update *")),
-                needs_setenv: false,
-            },
-            SudoCommandEntry {
-                command: "pkg".into(),
-                explanation: "Package installation requires root privileges".into(),
-                helper_script: None,
-                args_suffix: Some(Cow::Borrowed("install -y *")),
-                needs_setenv: false,
-            },
+            SudoCommandEntry::new("pkg", "Package index refresh requires root privileges")
+                .with_args_suffix(Cow::Borrowed("update *")),
+            SudoCommandEntry::new("pkg", "Package installation requires root privileges")
+                .with_args_suffix(Cow::Borrowed("install -y *")),
         ]
     }
 
@@ -350,16 +340,10 @@ impl Plugin for PkgPlugin {
 
         tracing::debug!(version = %version, "BSD pkg upstream version resolved");
 
-        Ok(vec![UpstreamRelease {
-            version: Version::new(&version),
-            tag: version,
-            is_prerelease: false,
-            release_url: String::new(),
-            release_notes: None,
-            published_at: None,
-            assets: vec![],
-            category: Some(UpdateCategory::Unknown),
-            attestation_status: None,
+        Ok(vec![{
+            let mut r = UpstreamRelease::new(Version::new(&version), version, false, "");
+            r.category = Some(UpdateCategory::Unknown);
+            r
         }])
     }
 
@@ -453,10 +437,8 @@ impl Plugin for PkgPlugin {
                 let error_str = format!("pkg query failed: {e}");
                 return Ok(items
                     .iter()
-                    .map(|item| BatchDetectResult {
-                        package_identifier: item.package_identifier.clone(),
-                        installed_version: None,
-                        error: Some(error_str.clone()),
+                    .map(|item| {
+                        BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
                     })
                     .collect());
             }
@@ -469,11 +451,7 @@ impl Plugin for PkgPlugin {
             .iter()
             .map(|item| {
                 let installed_version = pkg_map.get(&item.package_identifier).map(Version::new);
-                BatchDetectResult {
-                    package_identifier: item.package_identifier.clone(),
-                    installed_version,
-                    error: None,
-                }
+                BatchDetectResult::new(item.package_identifier.clone(), installed_version, None)
             })
             .collect();
 
@@ -536,28 +514,18 @@ impl Plugin for PkgPlugin {
             .iter()
             .map(|item| {
                 let Some(version) = parsed.get(&item.package_identifier) else {
-                    return BatchFetchResult {
-                        package_identifier: item.package_identifier.clone(),
-                        releases: vec![],
-                        error: None,
-                    };
+                    return BatchFetchResult::empty(item.package_identifier.clone());
                 };
 
-                BatchFetchResult {
-                    package_identifier: item.package_identifier.clone(),
-                    releases: vec![UpstreamRelease {
-                        version: Version::new(version),
-                        tag: version.clone(),
-                        is_prerelease: false,
-                        release_url: String::new(),
-                        release_notes: None,
-                        published_at: None,
-                        assets: vec![],
-                        category: Some(UpdateCategory::Unknown),
-                        attestation_status: None,
+                BatchFetchResult::found(
+                    item.package_identifier.clone(),
+                    vec![{
+                        let mut r =
+                            UpstreamRelease::new(Version::new(version), version.clone(), false, "");
+                        r.category = Some(UpdateCategory::Unknown);
+                        r
                     }],
-                    error: None,
-                }
+                )
             })
             .collect();
 
@@ -630,10 +598,8 @@ impl Plugin for PkgPlugin {
         let success = cmd_output.exit_code == 0;
         let results = items
             .iter()
-            .map(|item| BatchUpdateResult {
-                package_identifier: item.package_identifier.clone(),
-                success,
-                output: output.clone(),
+            .map(|item| {
+                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
             })
             .collect();
 

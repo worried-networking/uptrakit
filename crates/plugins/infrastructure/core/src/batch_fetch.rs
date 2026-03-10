@@ -7,13 +7,24 @@ use crate::types::UpstreamRelease;
 /// Represents one package whose upstream releases should be fetched within a
 /// batch operation (e.g., one of 50 APT packages queried via a single
 /// `apt-cache madison` invocation).
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BatchFetchItem {
     /// Plugin-specific identifier for the package (e.g., APT package name).
     pub package_identifier: String,
 }
 
+impl BatchFetchItem {
+    /// Create a new [`BatchFetchItem`] for the given package identifier.
+    pub fn new(package_identifier: impl Into<String>) -> Self {
+        Self {
+            package_identifier: package_identifier.into(),
+        }
+    }
+}
+
 /// Result of fetching releases for a single package within a batch operation.
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BatchFetchResult {
     /// Plugin-specific identifier for the package.
@@ -26,6 +37,35 @@ pub struct BatchFetchResult {
     /// `None` indicates success (even if `releases` is also empty).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+impl BatchFetchResult {
+    /// Create a successful fetch result with the given releases.
+    pub fn found(package_identifier: impl Into<String>, releases: Vec<UpstreamRelease>) -> Self {
+        Self {
+            package_identifier: package_identifier.into(),
+            releases,
+            error: None,
+        }
+    }
+
+    /// Create a result indicating no releases were found.
+    pub fn empty(package_identifier: impl Into<String>) -> Self {
+        Self {
+            package_identifier: package_identifier.into(),
+            releases: vec![],
+            error: None,
+        }
+    }
+
+    /// Create a result indicating an error occurred during the fetch.
+    pub fn error(package_identifier: impl Into<String>, error: impl Into<String>) -> Self {
+        Self {
+            package_identifier: package_identifier.into(),
+            releases: vec![],
+            error: Some(error.into()),
+        }
+    }
 }
 
 #[cfg(test)]

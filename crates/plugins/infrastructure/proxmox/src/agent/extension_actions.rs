@@ -143,17 +143,17 @@ async fn handle_bootstrap_proxmox(
     let remove_stale_keys = param_bool(params, "remove_stale_keys");
     let host_id = uuid::Uuid::now_v7();
 
-    let bootstrap_params = GuestBootstrapParams {
-        gateway_host_id: pve_host_id,
-        guest_id: vmid,
-        guest_type: guest_type_str.to_string(),
+    let bootstrap_params = GuestBootstrapParams::new(
+        pve_host_id,
+        vmid,
+        guest_type_str,
         name,
         target_username,
         allow_all,
         remove_stale_keys,
         host_id,
-        service_id: ctx.service_id,
-    };
+        ctx.service_id,
+    );
 
     match ctx.guest_bootstrap.bootstrap_guest(bootstrap_params).await {
         Ok(result) => {
@@ -381,17 +381,17 @@ async fn handle_bootstrap_proxmox_guest(
         tasks.push((
             guest_id.clone(),
             name.clone(),
-            GuestBootstrapParams {
-                gateway_host_id: pve_host_id,
-                guest_id: vmid,
-                guest_type: guest_type_str.to_string(),
+            GuestBootstrapParams::new(
+                pve_host_id,
+                vmid,
+                guest_type_str,
                 name,
-                target_username: target_username.clone(),
+                target_username.clone(),
                 allow_all,
                 remove_stale_keys,
                 host_id,
-                service_id: ctx.service_id,
-            },
+                ctx.service_id,
+            ),
         ));
     }
 
@@ -495,24 +495,19 @@ async fn handle_bootstrap_proxmox_guest(
         let host_id = uuid::Uuid::now_v7();
         task_params.push((
             guest_id.clone(),
-            name,
-            GuestBootstrapParams {
-                gateway_host_id: pve_host_id,
-                guest_id: vmid,
-                guest_type: guest_type_str.to_string(),
-                name: String::new(), // Filled below
-                target_username: target_username.clone(),
+            name.clone(),
+            GuestBootstrapParams::new(
+                pve_host_id,
+                vmid,
+                guest_type_str,
+                name,
+                target_username.clone(),
                 allow_all,
                 remove_stale_keys,
                 host_id,
-                service_id: ctx.service_id,
-            },
+                ctx.service_id,
+            ),
         ));
-    }
-
-    // Fix names in params.
-    for (_, name, params) in &mut task_params {
-        params.name.clone_from(name);
     }
 
     // Run with bounded concurrency via semaphore.

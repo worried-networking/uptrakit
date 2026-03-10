@@ -285,38 +285,28 @@ impl Plugin for AptPlugin {
 
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
         vec![
-            SudoCommandEntry {
-                command: "apt-get".into(),
-                explanation: "Package index refresh requires root privileges".into(),
-                helper_script: None,
+            SudoCommandEntry::new("apt-get", "Package index refresh requires root privileges")
                 // Restrict to `apt-get update` only (with optional flags).
-                args_suffix: Some(Cow::Borrowed("update *")),
-                needs_setenv: true,
-            },
-            SudoCommandEntry {
-                command: "apt-get".into(),
-                explanation: "Package installation requires root privileges".into(),
-                helper_script: None,
+                .with_args_suffix(Cow::Borrowed("update *"))
+                .with_setenv(),
+            SudoCommandEntry::new("apt-get", "Package installation requires root privileges")
                 // Restrict to `apt-get install` only; covers single and batch installs.
-                args_suffix: Some(Cow::Borrowed("install *")),
-                needs_setenv: true,
-            },
-            SudoCommandEntry {
-                command: "apt-get".into(),
-                explanation: "Batch package upgrade (pinned versions) requires root privileges"
-                    .into(),
-                helper_script: None,
-                // Lock in the exact -o Dir::Etc::Preferences= invocation that
-                // execute_batch_update uses. The path is intentionally hardcoded on
-                // both sides; see APT_BATCH_PREF_FILE. Using `apt-get upgrade` (not
-                // `install`) preserves the apt manual/auto install mark — packages
-                // auto-installed as dependencies keep their `auto` mark, allowing
-                // `apt autoremove` to clean them up correctly.
-                args_suffix: Some(Cow::Owned(format!(
-                    "-o Dir::Etc::Preferences={APT_BATCH_PREF_FILE} upgrade *"
-                ))),
-                needs_setenv: true,
-            },
+                .with_args_suffix(Cow::Borrowed("install *"))
+                .with_setenv(),
+            SudoCommandEntry::new(
+                "apt-get",
+                "Batch package upgrade (pinned versions) requires root privileges",
+            )
+            // Lock in the exact -o Dir::Etc::Preferences= invocation that
+            // execute_batch_update uses. The path is intentionally hardcoded on
+            // both sides; see APT_BATCH_PREF_FILE. Using `apt-get upgrade` (not
+            // `install`) preserves the apt manual/auto install mark — packages
+            // auto-installed as dependencies keep their `auto` mark, allowing
+            // `apt autoremove` to clean them up correctly.
+            .with_args_suffix(Cow::Owned(format!(
+                "-o Dir::Etc::Preferences={APT_BATCH_PREF_FILE} upgrade *"
+            )))
+            .with_setenv(),
         ]
     }
 
@@ -533,16 +523,11 @@ impl Plugin for AptPlugin {
             source = %entry.source,
             "APT upstream version resolved"
         );
-        Ok(vec![UpstreamRelease {
-            version: Version::new(&entry.version),
-            tag: entry.version,
-            is_prerelease: false,
-            release_url: String::new(),
-            release_notes: None,
-            published_at: None,
-            assets: vec![],
-            category,
-            attestation_status: None,
+        Ok(vec![{
+            let mut release =
+                UpstreamRelease::new(Version::new(&entry.version), entry.version, false, "");
+            release.category = category;
+            release
         }])
     }
 
@@ -714,10 +699,8 @@ impl Plugin for AptPlugin {
         let success = cmd_output.exit_code == 0;
         let results = items
             .iter()
-            .map(|item| BatchUpdateResult {
-                package_identifier: item.package_identifier.clone(),
-                success,
-                output: output.clone(),
+            .map(|item| {
+                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
             })
             .collect();
 
@@ -775,10 +758,8 @@ impl Plugin for AptPlugin {
                 let error_str = format!("dpkg-query failed: {e}");
                 return Ok(items
                     .iter()
-                    .map(|item| BatchDetectResult {
-                        package_identifier: item.package_identifier.clone(),
-                        installed_version: None,
-                        error: Some(error_str.clone()),
+                    .map(|item| {
+                        BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
                     })
                     .collect());
             }
@@ -792,11 +773,7 @@ impl Plugin for AptPlugin {
             .iter()
             .map(|item| {
                 let installed_version = dpkg_map.get(&item.package_identifier).map(Version::new);
-                BatchDetectResult {
-                    package_identifier: item.package_identifier.clone(),
-                    installed_version,
-                    error: None,
-                }
+                BatchDetectResult::new(item.package_identifier.clone(), installed_version, None)
             })
             .collect();
 
@@ -859,11 +836,7 @@ impl Plugin for AptPlugin {
             .map(|item| {
                 let Some(entry) = parsed.get(&item.package_identifier) else {
                     // Package not found in any configured repository.
-                    return BatchFetchResult {
-                        package_identifier: item.package_identifier.clone(),
-                        releases: vec![],
-                        error: None,
-                    };
+                    return BatchFetchResult::empty(item.package_identifier.clone());
                 };
 
                 let category = if Self::is_security_source(&entry.source) {
@@ -872,21 +845,17 @@ impl Plugin for AptPlugin {
                     None
                 };
 
-                BatchFetchResult {
-                    package_identifier: item.package_identifier.clone(),
-                    releases: vec![UpstreamRelease {
-                        version: Version::new(&entry.version),
-                        tag: entry.version.clone(),
-                        is_prerelease: false,
-                        release_url: String::new(),
-                        release_notes: None,
-                        published_at: None,
-                        assets: vec![],
-                        category,
-                        attestation_status: None,
-                    }],
-                    error: None,
-                }
+                let release = {
+                    let mut r = UpstreamRelease::new(
+                        Version::new(&entry.version),
+                        entry.version.clone(),
+                        false,
+                        "",
+                    );
+                    r.category = category;
+                    r
+                };
+                BatchFetchResult::found(item.package_identifier.clone(), vec![release])
             })
             .collect();
 
@@ -1310,11 +1279,7 @@ mod tests {
         )
         .await
         .expect("create");
-        let ctx = UpdateHookContext {
-            package_identifier: "nginx".to_string(),
-            to_version: "1.24.0".to_string(),
-            release_info: None,
-        };
+        let ctx = UpdateHookContext::new("nginx".to_string(), "1.24.0".to_string(), None);
         let (tx, mut rx) = mpsc::channel(10);
         plugin.post_update_hook(&ctx, &tx).await.expect("ok");
         drop(tx);
@@ -1337,11 +1302,7 @@ mod tests {
         )
         .await
         .expect("create");
-        let ctx = UpdateHookContext {
-            package_identifier: "nginx".to_string(),
-            to_version: "1.24.0".to_string(),
-            release_info: None,
-        };
+        let ctx = UpdateHookContext::new("nginx".to_string(), "1.24.0".to_string(), None);
         let (tx, mut rx) = mpsc::channel(10);
         plugin.post_update_hook(&ctx, &tx).await.expect("ok");
         drop(tx);
@@ -1414,11 +1375,7 @@ mod tests {
         )
         .await
         .expect("create");
-        let ctx = UpdateHookContext {
-            package_identifier: "pkg".to_string(),
-            to_version: "1.0".to_string(),
-            release_info: None,
-        };
+        let ctx = UpdateHookContext::new("pkg".to_string(), "1.0".to_string(), None);
         let (tx, _rx) = mpsc::channel(10);
         let result = plugin.post_update_hook(&ctx, &tx).await;
         assert!(result.is_ok());
@@ -1563,12 +1520,8 @@ mod tests {
             .expect("create");
 
         let items = vec![
-            BatchDetectItem {
-                package_identifier: "nginx".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "python3".to_string(),
-            },
+            BatchDetectItem::new("nginx".to_string()),
+            BatchDetectItem::new("python3".to_string()),
         ];
         let results = plugin
             .batch_detect_installed_version(&items)
@@ -1606,12 +1559,8 @@ mod tests {
             .expect("create");
 
         let items = vec![
-            BatchDetectItem {
-                package_identifier: "nginx".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "curl".to_string(),
-            },
+            BatchDetectItem::new("nginx".to_string()),
+            BatchDetectItem::new("curl".to_string()),
         ];
         let results = plugin
             .batch_detect_installed_version(&items)
@@ -1644,9 +1593,7 @@ mod tests {
         let plugin = AptPlugin::new(AptConfig::default(), test_executor())
             .await
             .expect("create");
-        let items = vec![BatchDetectItem {
-            package_identifier: "INVALID_UPPERCASE".to_string(),
-        }];
+        let items = vec![BatchDetectItem::new("INVALID_UPPERCASE".to_string())];
         let result = plugin.batch_detect_installed_version(&items).await;
         assert!(result.is_err());
     }
@@ -1667,15 +1614,9 @@ mod tests {
             .expect("create");
 
         let items = vec![
-            BatchFetchItem {
-                package_identifier: "nginx".to_string(),
-            },
-            BatchFetchItem {
-                package_identifier: "openssl".to_string(),
-            },
-            BatchFetchItem {
-                package_identifier: "curl".to_string(),
-            },
+            BatchFetchItem::new("nginx".to_string()),
+            BatchFetchItem::new("openssl".to_string()),
+            BatchFetchItem::new("curl".to_string()),
         ];
         let results = plugin.batch_fetch_releases(&items).await.expect("ok");
 
@@ -1720,9 +1661,7 @@ mod tests {
         let plugin = AptPlugin::new(AptConfig::default(), test_executor())
             .await
             .expect("create");
-        let items = vec![BatchFetchItem {
-            package_identifier: "INVALID".to_string(),
-        }];
+        let items = vec![BatchFetchItem::new("INVALID".to_string())];
         let result = plugin.batch_fetch_releases(&items).await;
         assert!(result.is_err());
     }

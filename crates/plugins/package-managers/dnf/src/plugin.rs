@@ -255,13 +255,10 @@ impl Plugin for DnfPlugin {
     }
 
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        vec![SudoCommandEntry {
-            command: "dnf".into(),
-            explanation: "Package installation and index refresh require root privileges".into(),
-            helper_script: None,
-            args_suffix: None,
-            needs_setenv: false,
-        }]
+        vec![SudoCommandEntry::new(
+            "dnf",
+            "Package installation and index refresh require root privileges",
+        )]
     }
 
     #[tracing::instrument(skip_all)]
@@ -477,16 +474,15 @@ impl Plugin for DnfPlugin {
                     repo = %entry.repo,
                     "DNF upstream version resolved"
                 );
-                Ok(vec![UpstreamRelease {
-                    version: Version::new(&entry.version),
-                    tag: entry.version,
-                    is_prerelease: false,
-                    release_url: String::new(),
-                    release_notes: None,
-                    published_at: None,
-                    assets: vec![],
-                    category,
-                    attestation_status: None,
+                Ok(vec![{
+                    let mut r = UpstreamRelease::new(
+                        Version::new(&entry.version),
+                        entry.version,
+                        false,
+                        "",
+                    );
+                    r.category = category;
+                    r
                 }])
             }
             code => bail!(PluginError::CommandFailed(code)),
@@ -608,10 +604,8 @@ impl Plugin for DnfPlugin {
         let success = cmd_output.exit_code == 0;
         let results = items
             .iter()
-            .map(|item| BatchUpdateResult {
-                package_identifier: item.package_identifier.clone(),
-                success,
-                output: output.clone(),
+            .map(|item| {
+                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
             })
             .collect();
 
@@ -668,10 +662,8 @@ impl Plugin for DnfPlugin {
                 let error_str = format!("rpm -qa failed: {e}");
                 return Ok(items
                     .iter()
-                    .map(|item| BatchDetectResult {
-                        package_identifier: item.package_identifier.clone(),
-                        installed_version: None,
-                        error: Some(error_str.clone()),
+                    .map(|item| {
+                        BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
                     })
                     .collect());
             }
@@ -684,11 +676,7 @@ impl Plugin for DnfPlugin {
             .iter()
             .map(|item| {
                 let installed_version = rpm_map.get(&item.package_identifier).map(Version::new);
-                BatchDetectResult {
-                    package_identifier: item.package_identifier.clone(),
-                    installed_version,
-                    error: None,
-                }
+                BatchDetectResult::new(item.package_identifier.clone(), installed_version, None)
             })
             .collect();
 
@@ -746,11 +734,7 @@ impl Plugin for DnfPlugin {
                 // All packages up to date — return empty releases for each.
                 let results = items
                     .iter()
-                    .map(|item| BatchFetchResult {
-                        package_identifier: item.package_identifier.clone(),
-                        releases: vec![],
-                        error: None,
-                    })
+                    .map(|item| BatchFetchResult::empty(item.package_identifier.clone()))
                     .collect();
                 return Ok(results);
             }
@@ -766,11 +750,7 @@ impl Plugin for DnfPlugin {
             .iter()
             .map(|item| {
                 let Some(entry) = parsed.get(&item.package_identifier) else {
-                    return BatchFetchResult {
-                        package_identifier: item.package_identifier.clone(),
-                        releases: vec![],
-                        error: None,
-                    };
+                    return BatchFetchResult::empty(item.package_identifier.clone());
                 };
 
                 let category = if entry.repo.to_ascii_lowercase().contains("security") {
@@ -779,21 +759,19 @@ impl Plugin for DnfPlugin {
                     None
                 };
 
-                BatchFetchResult {
-                    package_identifier: item.package_identifier.clone(),
-                    releases: vec![UpstreamRelease {
-                        version: Version::new(&entry.version),
-                        tag: entry.version.clone(),
-                        is_prerelease: false,
-                        release_url: String::new(),
-                        release_notes: None,
-                        published_at: None,
-                        assets: vec![],
-                        category,
-                        attestation_status: None,
+                BatchFetchResult::found(
+                    item.package_identifier.clone(),
+                    vec![{
+                        let mut r = UpstreamRelease::new(
+                            Version::new(&entry.version),
+                            entry.version.clone(),
+                            false,
+                            "",
+                        );
+                        r.category = category;
+                        r
                     }],
-                    error: None,
-                }
+                )
             })
             .collect();
 
@@ -1235,12 +1213,8 @@ mod tests {
             .await
             .unwrap();
         let items = vec![
-            BatchDetectItem {
-                package_identifier: "nginx".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "curl".to_string(),
-            },
+            BatchDetectItem::new("nginx".to_string()),
+            BatchDetectItem::new("curl".to_string()),
         ];
         let results = plugin.batch_detect_installed_version(&items).await.unwrap();
         assert_eq!(results.len(), 2);
@@ -1268,9 +1242,7 @@ mod tests {
         let plugin = DnfPlugin::new(DnfConfig::default(), executor)
             .await
             .unwrap();
-        let items = vec![BatchFetchItem {
-            package_identifier: "nginx".to_string(),
-        }];
+        let items = vec![BatchFetchItem::new("nginx".to_string())];
         let results = plugin.batch_fetch_releases(&items).await.unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].releases.is_empty());
@@ -1311,9 +1283,7 @@ mod tests {
         let plugin = DnfPlugin::new(DnfConfig::default(), executor)
             .await
             .unwrap();
-        let items = vec![BatchFetchItem {
-            package_identifier: "nginx".to_string(),
-        }];
+        let items = vec![BatchFetchItem::new("nginx".to_string())];
         let results = plugin.batch_fetch_releases(&items).await.unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].releases.len(), 1);

@@ -286,20 +286,10 @@ impl Plugin for ApkPlugin {
 
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
         vec![
-            SudoCommandEntry {
-                command: "apk".into(),
-                explanation: "Package index refresh requires root privileges".into(),
-                helper_script: None,
-                args_suffix: Some(Cow::Borrowed("update")),
-                needs_setenv: false,
-            },
-            SudoCommandEntry {
-                command: "apk".into(),
-                explanation: "Package installation requires root privileges".into(),
-                helper_script: None,
-                args_suffix: Some(Cow::Borrowed("add *")),
-                needs_setenv: false,
-            },
+            SudoCommandEntry::new("apk", "Package index refresh requires root privileges")
+                .with_args_suffix(Cow::Borrowed("update")),
+            SudoCommandEntry::new("apk", "Package installation requires root privileges")
+                .with_args_suffix(Cow::Borrowed("add *")),
         ]
     }
 
@@ -539,16 +529,15 @@ impl Plugin for ApkPlugin {
             "APK upstream version resolved"
         );
 
-        Ok(vec![UpstreamRelease {
-            version: Version::new(latest_version),
-            tag: latest_version.clone(),
-            is_prerelease: false,
-            release_url,
-            release_notes: None,
-            published_at: None,
-            assets: vec![],
-            category: None,
-            attestation_status: None,
+        Ok(vec![{
+            let mut r = UpstreamRelease::new(
+                Version::new(latest_version),
+                latest_version.clone(),
+                false,
+                "",
+            );
+            r.release_url = release_url;
+            r
         }])
     }
 
@@ -637,11 +626,7 @@ impl Plugin for ApkPlugin {
             .iter()
             .map(|item| {
                 let installed_version = version_map.get(&item.package_identifier).map(Version::new);
-                BatchDetectResult {
-                    package_identifier: item.package_identifier.clone(),
-                    installed_version,
-                    error: None,
-                }
+                BatchDetectResult::new(item.package_identifier.clone(), installed_version, None)
             })
             .collect();
 
@@ -698,27 +683,23 @@ impl Plugin for ApkPlugin {
                     Some(latest_version) => {
                         let release_url =
                             format!("https://pkgs.alpinelinux.org/packages?name={id}");
-                        BatchFetchResult {
-                            package_identifier: id.clone(),
-                            releases: vec![UpstreamRelease {
-                                version: Version::new(latest_version),
-                                tag: latest_version.clone(),
-                                is_prerelease: false,
-                                release_url,
-                                release_notes: None,
-                                published_at: None,
-                                assets: vec![],
-                                category: None,
-                                attestation_status: None,
+                        BatchFetchResult::found(
+                            id.clone(),
+                            vec![{
+                                let mut r = UpstreamRelease::new(
+                                    Version::new(latest_version),
+                                    latest_version.clone(),
+                                    false,
+                                    "",
+                                );
+                                r.release_url = release_url;
+                                r
                             }],
-                            error: None,
-                        }
+                        )
                     }
-                    None => BatchFetchResult {
-                        package_identifier: id.clone(),
-                        releases: vec![],
-                        error: Some(format!("package not installed: {id}")),
-                    },
+                    None => {
+                        BatchFetchResult::error(id.clone(), format!("package not installed: {id}"))
+                    }
                 }
             })
             .collect();
@@ -770,10 +751,8 @@ impl Plugin for ApkPlugin {
 
         let results = items
             .iter()
-            .map(|item| BatchUpdateResult {
-                package_identifier: item.package_identifier.clone(),
-                success,
-                output: output.clone(),
+            .map(|item| {
+                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
             })
             .collect();
 
@@ -1236,12 +1215,8 @@ openssl>=3.0
     async fn batch_detect_installed_versions() {
         let plugin = make_plugin_all(SAMPLE_LIST, SAMPLE_INFO, SAMPLE_VERSION);
         let items = vec![
-            BatchDetectItem {
-                package_identifier: "busybox".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "openssl".to_string(),
-            },
+            BatchDetectItem::new("busybox".to_string()),
+            BatchDetectItem::new("openssl".to_string()),
         ];
         let results = plugin
             .batch_detect_installed_version(&items)
@@ -1263,9 +1238,7 @@ openssl>=3.0
     #[tokio::test]
     async fn batch_detect_unknown_package_returns_none() {
         let plugin = make_plugin_all(SAMPLE_LIST, "", SAMPLE_VERSION);
-        let items = vec![BatchDetectItem {
-            package_identifier: "curl".to_string(),
-        }];
+        let items = vec![BatchDetectItem::new("curl".to_string())];
         let results = plugin
             .batch_detect_installed_version(&items)
             .await
@@ -1280,9 +1253,7 @@ openssl>=3.0
     #[tokio::test]
     async fn batch_fetch_releases_up_to_date() {
         let plugin = make_plugin_all(SAMPLE_LIST, SAMPLE_INFO, SAMPLE_VERSION);
-        let items = vec![BatchFetchItem {
-            package_identifier: "busybox".to_string(),
-        }];
+        let items = vec![BatchFetchItem::new("busybox".to_string())];
         let results = plugin
             .batch_fetch_releases(&items)
             .await
@@ -1300,9 +1271,7 @@ openssl>=3.0
     #[tokio::test]
     async fn batch_fetch_releases_upgrade_available() {
         let plugin = make_plugin_all(SAMPLE_LIST, SAMPLE_INFO, SAMPLE_VERSION);
-        let items = vec![BatchFetchItem {
-            package_identifier: "openssl".to_string(),
-        }];
+        let items = vec![BatchFetchItem::new("openssl".to_string())];
         let results = plugin
             .batch_fetch_releases(&items)
             .await
@@ -1316,9 +1285,7 @@ openssl>=3.0
     #[tokio::test]
     async fn batch_fetch_releases_missing_package_returns_error() {
         let plugin = make_plugin_all(SAMPLE_LIST, SAMPLE_INFO, SAMPLE_VERSION);
-        let items = vec![BatchFetchItem {
-            package_identifier: "curl".to_string(),
-        }];
+        let items = vec![BatchFetchItem::new("curl".to_string())];
         let results = plugin
             .batch_fetch_releases(&items)
             .await

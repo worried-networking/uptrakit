@@ -212,16 +212,17 @@ impl GitHubPlugin {
             })
             .collect();
 
-        Some(UpstreamRelease {
-            version,
-            tag: gh_release.tag_name.clone(),
-            is_prerelease: gh_release.prerelease,
-            release_url: gh_release.html_url.clone(),
-            release_notes: gh_release.body.clone(),
-            published_at,
-            assets,
-            category: None,
-            attestation_status: None,
+        Some({
+            let mut r = UpstreamRelease::new(
+                version,
+                gh_release.tag_name.clone(),
+                gh_release.prerelease,
+                gh_release.html_url.clone(),
+            );
+            r.release_notes = gh_release.body.clone();
+            r.published_at = published_at;
+            r.assets = assets;
+            r
         })
     }
 
@@ -829,28 +830,20 @@ impl Plugin for GitHubPlugin {
         // `systemctl stop/start *` — restricted to two safe subcommands so
         //   the agent can manage service lifecycle without blanket systemctl.
         vec![
-            SudoCommandEntry {
-                command: "install".to_string(),
-                explanation: "Install downloaded GitHub release assets to the target path"
-                    .to_string(),
-                helper_script: None,
-                args_suffix: None,
-                needs_setenv: false,
-            },
-            SudoCommandEntry {
-                command: "systemctl".to_string(),
-                explanation: "Stop services before GitHub release asset installation".to_string(),
-                helper_script: None,
-                args_suffix: Some(Cow::Borrowed("stop *")),
-                needs_setenv: false,
-            },
-            SudoCommandEntry {
-                command: "systemctl".to_string(),
-                explanation: "Start services after GitHub release asset installation".to_string(),
-                helper_script: None,
-                args_suffix: Some(Cow::Borrowed("start *")),
-                needs_setenv: false,
-            },
+            SudoCommandEntry::new(
+                "install",
+                "Install downloaded GitHub release assets to the target path",
+            ),
+            SudoCommandEntry::new(
+                "systemctl",
+                "Stop services before GitHub release asset installation",
+            )
+            .with_args_suffix(Cow::Borrowed("stop *")),
+            SudoCommandEntry::new(
+                "systemctl",
+                "Start services after GitHub release asset installation",
+            )
+            .with_args_suffix(Cow::Borrowed("start *")),
         ]
     }
 }

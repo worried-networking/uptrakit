@@ -28,6 +28,7 @@ pub enum HostCompatibility {
 }
 
 /// Contextual data passed to plugin lifecycle hooks.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct UpdateHookContext {
     /// The package identifier being updated.
@@ -38,13 +39,47 @@ pub struct UpdateHookContext {
     pub release_info: Option<ReleaseInfo>,
 }
 
+impl UpdateHookContext {
+    /// Create a new [`UpdateHookContext`].
+    pub fn new(
+        package_identifier: impl Into<String>,
+        to_version: impl Into<String>,
+        release_info: Option<ReleaseInfo>,
+    ) -> Self {
+        Self {
+            package_identifier: package_identifier.into(),
+            to_version: to_version.into(),
+            release_info,
+        }
+    }
+}
+
 /// Result of a pre-update hook.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct PreUpdateHookResult {
     /// Whether the update should proceed.
     pub should_proceed: bool,
     /// Reason for aborting if `should_proceed` is false.
     pub abort_reason: Option<String>,
+}
+
+impl PreUpdateHookResult {
+    /// Create a result that allows the update to proceed.
+    pub fn proceed() -> Self {
+        Self {
+            should_proceed: true,
+            abort_reason: None,
+        }
+    }
+
+    /// Create a result that aborts the update with the given reason.
+    pub fn abort(reason: impl Into<String>) -> Self {
+        Self {
+            should_proceed: false,
+            abort_reason: Some(reason.into()),
+        }
+    }
 }
 
 /// A helper script installed by the bootstrap process on the managed host.
@@ -67,6 +102,7 @@ pub struct PreUpdateHookResult {
 /// - `content` must be a complete, self-contained shell script that validates
 ///   its arguments and exits non-zero on invalid input.
 /// - The script is installed with mode `0755` and owned by root.
+#[non_exhaustive]
 pub struct SudoHelperScript {
     /// Absolute path where the script is installed on the managed host.
     ///
@@ -74,6 +110,16 @@ pub struct SudoHelperScript {
     pub install_path: &'static str,
     /// Complete shell script content installed verbatim at `install_path`.
     pub content: &'static str,
+}
+
+impl SudoHelperScript {
+    /// Create a new [`SudoHelperScript`].
+    pub fn new(install_path: &'static str, content: &'static str) -> Self {
+        Self {
+            install_path,
+            content,
+        }
+    }
 }
 
 /// Describes a single command that a plugin needs to run with passwordless sudo.
@@ -100,6 +146,7 @@ pub struct SudoHelperScript {
 ///
 /// In both cases `explanation` is shown as a comment in the generated sudoers
 /// file and in CLI output for human reviewers.
+#[non_exhaustive]
 pub struct SudoCommandEntry {
     /// Bare command name (e.g. `"apt-get"`) or a short display identifier for
     /// helper scripts.
@@ -132,6 +179,43 @@ pub struct SudoCommandEntry {
     /// [`CommandSpec::with_env`] in combination with `.privileged()`.
     /// Defaults to `false` for commands that don't need env var forwarding.
     pub needs_setenv: bool,
+}
+
+impl SudoCommandEntry {
+    /// Create a new [`SudoCommandEntry`] with the given command and explanation.
+    ///
+    /// Optional fields (`helper_script`, `args_suffix`, `needs_setenv`) default
+    /// to `None`/`false` and can be set via the builder methods or public fields.
+    pub fn new(command: impl Into<String>, explanation: impl Into<String>) -> Self {
+        Self {
+            command: command.into(),
+            explanation: explanation.into(),
+            helper_script: None,
+            args_suffix: None,
+            needs_setenv: false,
+        }
+    }
+
+    /// Set the argument suffix (builder method).
+    #[must_use]
+    pub fn with_args_suffix(mut self, suffix: impl Into<Cow<'static, str>>) -> Self {
+        self.args_suffix = Some(suffix.into());
+        self
+    }
+
+    /// Enable `SETENV:` in the sudoers entry (builder method).
+    #[must_use]
+    pub fn with_setenv(mut self) -> Self {
+        self.needs_setenv = true;
+        self
+    }
+
+    /// Set the helper script (builder method).
+    #[must_use]
+    pub fn with_helper_script(mut self, script: SudoHelperScript) -> Self {
+        self.helper_script = Some(script);
+        self
+    }
 }
 
 /// A unified plugin trait for both remote and local operations.

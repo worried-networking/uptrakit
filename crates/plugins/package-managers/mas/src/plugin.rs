@@ -309,16 +309,11 @@ impl Plugin for MasPlugin {
 
         let release_url = format!("https://apps.apple.com/app/id{package_identifier}");
 
-        let releases = vec![UpstreamRelease {
-            version: Version::new(&latest_version),
-            tag: latest_version,
-            is_prerelease: false,
-            release_url,
-            release_notes: None,
-            published_at: None,
-            assets: vec![],
-            category: None,
-            attestation_status: None,
+        let releases = vec![{
+            let mut r =
+                UpstreamRelease::new(Version::new(&latest_version), latest_version, false, "");
+            r.release_url = release_url;
+            r
         }];
 
         tracing::debug!(
@@ -390,11 +385,7 @@ impl Plugin for MasPlugin {
                 let installed_version = installed_map
                     .get(&item.package_identifier)
                     .map(Version::new);
-                BatchDetectResult {
-                    package_identifier: item.package_identifier.clone(),
-                    installed_version,
-                    error: None,
-                }
+                BatchDetectResult::new(item.package_identifier.clone(), installed_version, None)
             })
             .collect();
 
@@ -437,27 +428,16 @@ impl Plugin for MasPlugin {
                 match latest_version {
                     Some(v) => {
                         let release_url = format!("https://apps.apple.com/app/id{id}");
-                        BatchFetchResult {
-                            package_identifier: id.clone(),
-                            releases: vec![UpstreamRelease {
-                                version: Version::new(&v),
-                                tag: v,
-                                is_prerelease: false,
-                                release_url,
-                                release_notes: None,
-                                published_at: None,
-                                assets: vec![],
-                                category: None,
-                                attestation_status: None,
+                        BatchFetchResult::found(
+                            id.clone(),
+                            vec![{
+                                let mut r = UpstreamRelease::new(Version::new(&v), v, false, "");
+                                r.release_url = release_url;
+                                r
                             }],
-                            error: None,
-                        }
+                        )
                     }
-                    None => BatchFetchResult {
-                        package_identifier: id.clone(),
-                        releases: vec![],
-                        error: Some(format!("package not found: {id}")),
-                    },
+                    None => BatchFetchResult::error(id.clone(), format!("package not found: {id}")),
                 }
             })
             .collect();
@@ -706,12 +686,8 @@ mod tests {
     async fn batch_detect_returns_correct_versions() {
         let plugin = make_plugin(SAMPLE_LIST, "");
         let items = vec![
-            BatchDetectItem {
-                package_identifier: "497799835".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "1147396723".to_string(),
-            },
+            BatchDetectItem::new("497799835".to_string()),
+            BatchDetectItem::new("1147396723".to_string()),
         ];
         let results = plugin
             .batch_detect_installed_version(&items)
@@ -733,9 +709,7 @@ mod tests {
     #[tokio::test]
     async fn batch_detect_returns_none_for_unknown_id() {
         let plugin = make_plugin(SAMPLE_LIST, "");
-        let items = vec![BatchDetectItem {
-            package_identifier: "999999999".to_string(),
-        }];
+        let items = vec![BatchDetectItem::new("999999999".to_string())];
         let results = plugin
             .batch_detect_installed_version(&items)
             .await
@@ -761,9 +735,7 @@ mod tests {
     async fn batch_fetch_outdated_path() {
         // Xcode is outdated: installed 15.4, latest 16.0
         let plugin = make_plugin(SAMPLE_LIST, SAMPLE_OUTDATED);
-        let items = vec![BatchFetchItem {
-            package_identifier: "497799835".to_string(),
-        }];
+        let items = vec![BatchFetchItem::new("497799835".to_string())];
         let results = plugin
             .batch_fetch_releases(&items)
             .await
@@ -782,9 +754,7 @@ mod tests {
     async fn batch_fetch_up_to_date_path() {
         // WhatsApp is not in the outdated list — latest == installed
         let plugin = make_plugin(SAMPLE_LIST, SAMPLE_OUTDATED);
-        let items = vec![BatchFetchItem {
-            package_identifier: "1147396723".to_string(),
-        }];
+        let items = vec![BatchFetchItem::new("1147396723".to_string())];
         let results = plugin
             .batch_fetch_releases(&items)
             .await
@@ -798,9 +768,7 @@ mod tests {
     #[tokio::test]
     async fn batch_fetch_unknown_id_returns_error() {
         let plugin = make_plugin(SAMPLE_LIST, "");
-        let items = vec![BatchFetchItem {
-            package_identifier: "999999999".to_string(),
-        }];
+        let items = vec![BatchFetchItem::new("999999999".to_string())];
         let results = plugin
             .batch_fetch_releases(&items)
             .await

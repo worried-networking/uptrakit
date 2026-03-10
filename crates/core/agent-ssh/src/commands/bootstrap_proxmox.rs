@@ -112,11 +112,11 @@ impl GuestBootstrapExecutor for AgentGuestBootstrapExecutor {
 
         run_proxmox_bootstrap(&self.state_dir, proxmox_params)
             .await
-            .map(
-                |r| uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapResult {
-                    guest_ip: r.guest_ip,
-                },
-            )
+            .map(|r| {
+                uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapResult::new(
+                    r.guest_ip,
+                )
+            })
             .map_err(|e| e.to_string())
     }
 }

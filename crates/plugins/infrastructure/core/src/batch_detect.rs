@@ -7,14 +7,25 @@ use crate::version::Version;
 /// Represents one package whose installed version should be detected within a
 /// batch operation (e.g., one of 50 APT packages queried via a single
 /// `dpkg-query` invocation).
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BatchDetectItem {
     /// Plugin-specific identifier for the package (e.g., APT package name).
     pub package_identifier: String,
 }
 
+impl BatchDetectItem {
+    /// Create a new [`BatchDetectItem`] for the given package identifier.
+    pub fn new(package_identifier: impl Into<String>) -> Self {
+        Self {
+            package_identifier: package_identifier.into(),
+        }
+    }
+}
+
 /// Result of detecting the installed version of a single package within a batch
 /// operation.
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BatchDetectResult {
     /// Plugin-specific identifier for the package.
@@ -30,6 +41,48 @@ pub struct BatchDetectResult {
     /// `None` indicates success (even if `installed_version` is also `None`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+impl BatchDetectResult {
+    /// Create a new [`BatchDetectResult`] with explicit fields.
+    pub fn new(
+        package_identifier: impl Into<String>,
+        installed_version: Option<Version>,
+        error: Option<String>,
+    ) -> Self {
+        Self {
+            package_identifier: package_identifier.into(),
+            installed_version,
+            error,
+        }
+    }
+
+    /// Create a successful detect result with the given installed version.
+    pub fn found(package_identifier: impl Into<String>, version: Version) -> Self {
+        Self {
+            package_identifier: package_identifier.into(),
+            installed_version: Some(version),
+            error: None,
+        }
+    }
+
+    /// Create a result indicating the package is not installed.
+    pub fn not_found(package_identifier: impl Into<String>) -> Self {
+        Self {
+            package_identifier: package_identifier.into(),
+            installed_version: None,
+            error: None,
+        }
+    }
+
+    /// Create a result indicating an error occurred during detection.
+    pub fn error(package_identifier: impl Into<String>, error: impl Into<String>) -> Self {
+        Self {
+            package_identifier: package_identifier.into(),
+            installed_version: None,
+            error: Some(error.into()),
+        }
+    }
 }
 
 #[cfg(test)]

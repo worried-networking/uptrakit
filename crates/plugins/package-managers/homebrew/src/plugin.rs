@@ -526,16 +526,10 @@ impl Plugin for HomebrewPlugin {
                 .unwrap_or("")
         };
 
-        let releases = vec![UpstreamRelease {
-            version: Version::new(&version_str),
-            tag: version_str,
-            is_prerelease: false,
-            release_url: homepage.to_string(),
-            release_notes: None,
-            published_at: None,
-            assets: vec![],
-            category: None,
-            attestation_status: None,
+        let releases = vec![{
+            let mut r = UpstreamRelease::new(Version::new(&version_str), version_str, false, "");
+            r.release_url = homepage.to_string();
+            r
         }];
         tracing::debug!(count = releases.len(), "Homebrew releases fetched");
         Ok(releases)
@@ -625,10 +619,8 @@ impl Plugin for HomebrewPlugin {
         let success = cmd_output.exit_code == 0;
         let results = items
             .iter()
-            .map(|item| BatchUpdateResult {
-                package_identifier: item.package_identifier.clone(),
-                success,
-                output: output.clone(),
+            .map(|item| {
+                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
             })
             .collect();
 
@@ -685,10 +677,8 @@ impl Plugin for HomebrewPlugin {
             let error_str = format!("brew info exited with code {}", cmd_output.exit_code);
             return Ok(items
                 .iter()
-                .map(|item| BatchDetectResult {
-                    package_identifier: item.package_identifier.clone(),
-                    installed_version: None,
-                    error: Some(error_str.clone()),
+                .map(|item| {
+                    BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
                 })
                 .collect());
         }
@@ -706,11 +696,7 @@ impl Plugin for HomebrewPlugin {
                 let installed_version =
                     Self::parse_installed_version(&json, &item.package_identifier, is_cask)
                         .map(|v| Version::new(&v));
-                BatchDetectResult {
-                    package_identifier: item.package_identifier.clone(),
-                    installed_version,
-                    error: None,
-                }
+                BatchDetectResult::new(item.package_identifier.clone(), installed_version, None)
             })
             .collect();
 
@@ -766,10 +752,8 @@ impl Plugin for HomebrewPlugin {
             let error_str = format!("brew info exited with code {}", cmd_output.exit_code);
             return Ok(items
                 .iter()
-                .map(|item| BatchFetchResult {
-                    package_identifier: item.package_identifier.clone(),
-                    releases: vec![],
-                    error: Some(error_str.clone()),
+                .map(|item| {
+                    BatchFetchResult::error(item.package_identifier.clone(), error_str.clone())
                 })
                 .collect());
         }
@@ -787,11 +771,7 @@ impl Plugin for HomebrewPlugin {
                 let Some(version_str) =
                     Self::parse_latest_version(&json, &item.package_identifier, is_cask)
                 else {
-                    return BatchFetchResult {
-                        package_identifier: item.package_identifier.clone(),
-                        releases: vec![],
-                        error: None,
-                    };
+                    return BatchFetchResult::empty(item.package_identifier.clone());
                 };
 
                 let homepage = if is_cask {
@@ -800,21 +780,19 @@ impl Plugin for HomebrewPlugin {
                     Self::find_formula_homepage(&json, &item.package_identifier)
                 };
 
-                BatchFetchResult {
-                    package_identifier: item.package_identifier.clone(),
-                    releases: vec![UpstreamRelease {
-                        version: Version::new(&version_str),
-                        tag: version_str,
-                        is_prerelease: false,
-                        release_url: homepage,
-                        release_notes: None,
-                        published_at: None,
-                        assets: vec![],
-                        category: None,
-                        attestation_status: None,
+                BatchFetchResult::found(
+                    item.package_identifier.clone(),
+                    vec![{
+                        let mut r = UpstreamRelease::new(
+                            Version::new(&version_str),
+                            version_str,
+                            false,
+                            "",
+                        );
+                        r.release_url = homepage;
+                        r
                     }],
-                    error: None,
-                }
+                )
             })
             .collect();
 
@@ -1451,15 +1429,9 @@ mod tests {
         .expect("create");
 
         let items = vec![
-            BatchDetectItem {
-                package_identifier: "wget".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "jq".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "curl".to_string(),
-            },
+            BatchDetectItem::new("wget".to_string()),
+            BatchDetectItem::new("jq".to_string()),
+            BatchDetectItem::new("curl".to_string()),
         ];
         let results = plugin
             .batch_detect_installed_version(&items)
@@ -1504,12 +1476,8 @@ mod tests {
         .expect("create");
 
         let items = vec![
-            BatchDetectItem {
-                package_identifier: "firefox".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "google-chrome".to_string(),
-            },
+            BatchDetectItem::new("firefox".to_string()),
+            BatchDetectItem::new("google-chrome".to_string()),
         ];
         let results = plugin
             .batch_detect_installed_version(&items)
@@ -1561,15 +1529,9 @@ mod tests {
         .expect("create");
 
         let items = vec![
-            BatchFetchItem {
-                package_identifier: "wget".to_string(),
-            },
-            BatchFetchItem {
-                package_identifier: "jq".to_string(),
-            },
-            BatchFetchItem {
-                package_identifier: "curl".to_string(),
-            },
+            BatchFetchItem::new("wget".to_string()),
+            BatchFetchItem::new("jq".to_string()),
+            BatchFetchItem::new("curl".to_string()),
         ];
         let results = plugin.batch_fetch_releases(&items).await.expect("ok");
 
@@ -1614,12 +1576,8 @@ mod tests {
         .expect("create");
 
         let items = vec![
-            BatchFetchItem {
-                package_identifier: "firefox".to_string(),
-            },
-            BatchFetchItem {
-                package_identifier: "google-chrome".to_string(),
-            },
+            BatchFetchItem::new("firefox".to_string()),
+            BatchFetchItem::new("google-chrome".to_string()),
         ];
         let results = plugin.batch_fetch_releases(&items).await.expect("ok");
 

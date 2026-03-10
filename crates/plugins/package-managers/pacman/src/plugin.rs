@@ -226,22 +226,12 @@ impl Plugin for PacmanPlugin {
 
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
         vec![
-            SudoCommandEntry {
-                command: "pacman".into(),
-                explanation: "Package database sync requires root privileges".into(),
-                helper_script: None,
-                // `-Sy` matches the exact refresh call (no extra args).
-                args_suffix: Some(Cow::Borrowed("-Sy")),
-                needs_setenv: false,
-            },
-            SudoCommandEntry {
-                command: "pacman".into(),
-                explanation: "Package installation requires root privileges".into(),
-                helper_script: None,
-                // `-S --noconfirm *` covers single and batch installs.
-                args_suffix: Some(Cow::Borrowed("-S --noconfirm *")),
-                needs_setenv: false,
-            },
+            // `-Sy` matches the exact refresh call (no extra args).
+            SudoCommandEntry::new("pacman", "Package database sync requires root privileges")
+                .with_args_suffix(Cow::Borrowed("-Sy")),
+            // `-S --noconfirm *` covers single and batch installs.
+            SudoCommandEntry::new("pacman", "Package installation requires root privileges")
+                .with_args_suffix(Cow::Borrowed("-S --noconfirm *")),
         ]
     }
 
@@ -415,17 +405,12 @@ impl Plugin for PacmanPlugin {
             version = %version,
             "Pacman upstream version resolved"
         );
-        Ok(vec![UpstreamRelease {
-            version: Version::new(&version),
-            tag: version,
-            is_prerelease: false,
-            release_url: String::new(),
-            release_notes: None,
-            published_at: None,
-            assets: vec![],
-            category: None,
-            attestation_status: None,
-        }])
+        Ok(vec![UpstreamRelease::new(
+            Version::new(&version),
+            version,
+            false,
+            "",
+        )])
     }
 
     #[tracing::instrument(skip_all)]
@@ -549,10 +534,8 @@ impl Plugin for PacmanPlugin {
         let success = cmd_output.exit_code == 0;
         let results = items
             .iter()
-            .map(|item| BatchUpdateResult {
-                package_identifier: item.package_identifier.clone(),
-                success,
-                output: output.clone(),
+            .map(|item| {
+                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
             })
             .collect();
 
@@ -608,10 +591,8 @@ impl Plugin for PacmanPlugin {
                 let error_str = format!("pacman -Q failed: {e}");
                 return Ok(items
                     .iter()
-                    .map(|item| BatchDetectResult {
-                        package_identifier: item.package_identifier.clone(),
-                        installed_version: None,
-                        error: Some(error_str.clone()),
+                    .map(|item| {
+                        BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
                     })
                     .collect());
             }
@@ -625,11 +606,7 @@ impl Plugin for PacmanPlugin {
             .iter()
             .map(|item| {
                 let installed_version = query_map.get(&item.package_identifier).map(Version::new);
-                BatchDetectResult {
-                    package_identifier: item.package_identifier.clone(),
-                    installed_version,
-                    error: None,
-                }
+                BatchDetectResult::new(item.package_identifier.clone(), installed_version, None)
             })
             .collect();
 
@@ -688,10 +665,8 @@ impl Plugin for PacmanPlugin {
                 let error_str = format!("pacman -Si failed: {e}");
                 return Ok(items
                     .iter()
-                    .map(|item| BatchFetchResult {
-                        package_identifier: item.package_identifier.clone(),
-                        releases: vec![],
-                        error: Some(error_str.clone()),
+                    .map(|item| {
+                        BatchFetchResult::error(item.package_identifier.clone(), error_str.clone())
                     })
                     .collect());
             }
@@ -704,28 +679,18 @@ impl Plugin for PacmanPlugin {
             .map(|item| {
                 let Some(version) = parsed.get(&item.package_identifier) else {
                     // Package not found in any configured repository.
-                    return BatchFetchResult {
-                        package_identifier: item.package_identifier.clone(),
-                        releases: vec![],
-                        error: None,
-                    };
+                    return BatchFetchResult::empty(item.package_identifier.clone());
                 };
 
-                BatchFetchResult {
-                    package_identifier: item.package_identifier.clone(),
-                    releases: vec![UpstreamRelease {
-                        version: Version::new(version),
-                        tag: version.clone(),
-                        is_prerelease: false,
-                        release_url: String::new(),
-                        release_notes: None,
-                        published_at: None,
-                        assets: vec![],
-                        category: None,
-                        attestation_status: None,
-                    }],
-                    error: None,
-                }
+                BatchFetchResult::found(
+                    item.package_identifier.clone(),
+                    vec![UpstreamRelease::new(
+                        Version::new(version),
+                        version.clone(),
+                        false,
+                        "",
+                    )],
+                )
             })
             .collect();
 
@@ -1249,12 +1214,8 @@ mod tests {
             .expect("create");
 
         let items = vec![
-            BatchDetectItem {
-                package_identifier: "nginx".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "python".to_string(),
-            },
+            BatchDetectItem::new("nginx".to_string()),
+            BatchDetectItem::new("python".to_string()),
         ];
         let results = plugin
             .batch_detect_installed_version(&items)
@@ -1285,12 +1246,8 @@ mod tests {
             .expect("create");
 
         let items = vec![
-            BatchDetectItem {
-                package_identifier: "nginx".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "curl".to_string(),
-            },
+            BatchDetectItem::new("nginx".to_string()),
+            BatchDetectItem::new("curl".to_string()),
         ];
         let results = plugin
             .batch_detect_installed_version(&items)
@@ -1323,9 +1280,7 @@ mod tests {
         let plugin = PacmanPlugin::new(PacmanConfig::default(), test_executor())
             .await
             .expect("create");
-        let items = vec![BatchDetectItem {
-            package_identifier: "INVALID_UPPERCASE".to_string(),
-        }];
+        let items = vec![BatchDetectItem::new("INVALID_UPPERCASE".to_string())];
         let result = plugin.batch_detect_installed_version(&items).await;
         assert!(result.is_err());
     }
@@ -1351,15 +1306,9 @@ mod tests {
             .expect("create");
 
         let items = vec![
-            BatchFetchItem {
-                package_identifier: "nginx".to_string(),
-            },
-            BatchFetchItem {
-                package_identifier: "git".to_string(),
-            },
-            BatchFetchItem {
-                package_identifier: "curl".to_string(),
-            },
+            BatchFetchItem::new("nginx".to_string()),
+            BatchFetchItem::new("git".to_string()),
+            BatchFetchItem::new("curl".to_string()),
         ];
         let results = plugin.batch_fetch_releases(&items).await.expect("ok");
 
@@ -1403,9 +1352,7 @@ mod tests {
         let plugin = PacmanPlugin::new(PacmanConfig::default(), test_executor())
             .await
             .expect("create");
-        let items = vec![BatchFetchItem {
-            package_identifier: "INVALID".to_string(),
-        }];
+        let items = vec![BatchFetchItem::new("INVALID".to_string())];
         let result = plugin.batch_fetch_releases(&items).await;
         assert!(result.is_err());
     }

@@ -205,16 +205,17 @@ impl ForgejoPlugin {
             })
             .collect();
 
-        Some(UpstreamRelease {
-            version,
-            tag: release.tag_name.clone(),
-            is_prerelease: release.prerelease,
-            release_url: release.html_url.clone(),
-            release_notes: release.body.clone(),
-            published_at,
-            assets,
-            category: None,
-            attestation_status: None,
+        Some({
+            let mut r = UpstreamRelease::new(
+                version,
+                release.tag_name.clone(),
+                release.prerelease,
+                release.html_url.clone(),
+            );
+            r.release_notes = release.body.clone();
+            r.published_at = published_at;
+            r.assets = assets;
+            r
         })
     }
 

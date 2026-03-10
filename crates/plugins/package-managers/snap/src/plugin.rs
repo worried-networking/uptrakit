@@ -249,15 +249,12 @@ impl Plugin for SnapPlugin {
     }
 
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        vec![SudoCommandEntry {
-            command: "snap".into(),
-            explanation: "Snap package refresh requires root privileges".into(),
-            helper_script: None,
+        vec![
             // `refresh *` covers `snap refresh PKG`, `snap refresh PKG --channel=stable`,
             // and batch `snap refresh PKG1 PKG2 ...`.
-            args_suffix: Some(Cow::Borrowed("refresh *")),
-            needs_setenv: false,
-        }]
+            SudoCommandEntry::new("snap", "Snap package refresh requires root privileges")
+                .with_args_suffix(Cow::Borrowed("refresh *")),
+        ]
     }
 
     #[tracing::instrument(skip_all)]
@@ -342,10 +339,8 @@ impl Plugin for SnapPlugin {
                 let error_str = format!("snap list failed: {e}");
                 return Ok(items
                     .iter()
-                    .map(|item| BatchDetectResult {
-                        package_identifier: item.package_identifier.clone(),
-                        installed_version: None,
-                        error: Some(error_str.clone()),
+                    .map(|item| {
+                        BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
                     })
                     .collect());
             }
@@ -358,12 +353,8 @@ impl Plugin for SnapPlugin {
         Ok(items
             .iter()
             .map(|item| {
-                let version = installed.get(&item.package_identifier).map(Version::new);
-                BatchDetectResult {
-                    package_identifier: item.package_identifier.clone(),
-                    installed_version: version,
-                    error: None,
-                }
+                let installed_version = installed.get(&item.package_identifier).map(Version::new);
+                BatchDetectResult::new(item.package_identifier.clone(), installed_version, None)
             })
             .collect())
     }
@@ -416,16 +407,15 @@ impl Plugin for SnapPlugin {
             "Snap upstream version resolved"
         );
 
-        Ok(vec![UpstreamRelease {
-            version: Version::new(&info.version),
-            tag: info.version.clone(),
-            is_prerelease,
-            release_url: String::new(),
-            release_notes: None,
-            published_at: info.published_at,
-            assets: vec![],
-            category: None,
-            attestation_status: None,
+        Ok(vec![{
+            let mut release = UpstreamRelease::new(
+                Version::new(&info.version),
+                info.version.clone(),
+                is_prerelease,
+                "",
+            );
+            release.published_at = info.published_at;
+            release
         }])
     }
 
@@ -555,10 +545,8 @@ impl Plugin for SnapPlugin {
 
         Ok(items
             .iter()
-            .map(|item| BatchUpdateResult {
-                package_identifier: item.package_identifier.clone(),
-                success,
-                output: output.clone(),
+            .map(|item| {
+                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
             })
             .collect())
     }
@@ -979,15 +967,9 @@ mod tests {
             .unwrap();
 
         let items = vec![
-            BatchDetectItem {
-                package_identifier: "vlc".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "code".to_string(),
-            },
-            BatchDetectItem {
-                package_identifier: "notinstalled".to_string(),
-            },
+            BatchDetectItem::new("vlc".to_string()),
+            BatchDetectItem::new("code".to_string()),
+            BatchDetectItem::new("notinstalled".to_string()),
         ];
 
         let results = plugin.batch_detect_installed_version(&items).await.unwrap();

@@ -269,9 +269,7 @@ impl FetchReleasesExecutor {
                 let fetch_items: Vec<BatchFetchItem> = job
                     .packages
                     .keys()
-                    .map(|pkg| BatchFetchItem {
-                        package_identifier: pkg.clone(),
-                    })
+                    .map(|pkg| BatchFetchItem::new(pkg.clone()))
                     .collect();
                 let results = job.plugin.batch_fetch_releases(&fetch_items).await;
                 Ok((job.packages, results))

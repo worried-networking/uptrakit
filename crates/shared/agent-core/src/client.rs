@@ -444,10 +444,12 @@ async fn batch_update_inner(
     let items: Vec<uptrakit_plugin_infrastructure_core::BatchUpdateItem> = payload
         .updates
         .iter()
-        .map(|u| uptrakit_plugin_infrastructure_core::BatchUpdateItem {
-            package_identifier: u.package_identifier.clone(),
-            to_version: u.to_version.clone(),
-            release_info: u.release_info.clone(),
+        .map(|u| {
+            uptrakit_plugin_infrastructure_core::BatchUpdateItem::new(
+                u.package_identifier.clone(),
+                u.to_version.clone(),
+                u.release_info.clone(),
+            )
         })
         .collect();
 

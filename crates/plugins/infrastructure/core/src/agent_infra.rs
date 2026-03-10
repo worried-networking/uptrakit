@@ -32,6 +32,7 @@ use crate::error::Result;
 ///
 /// The plugin parses these from the extension action request. The SSH agent
 /// performs the actual bootstrap using its own SSH transport and DB.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct GuestBootstrapParams {
     /// Local DB ID of the infrastructure host to use as gateway.
@@ -54,11 +55,49 @@ pub struct GuestBootstrapParams {
     pub service_id: Option<uuid::Uuid>,
 }
 
+impl GuestBootstrapParams {
+    /// Create a new [`GuestBootstrapParams`] with all required fields.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        gateway_host_id: impl Into<String>,
+        guest_id: u32,
+        guest_type: impl Into<String>,
+        name: impl Into<String>,
+        target_username: impl Into<String>,
+        allow_all: bool,
+        remove_stale_keys: bool,
+        host_id: uuid::Uuid,
+        service_id: Option<uuid::Uuid>,
+    ) -> Self {
+        Self {
+            gateway_host_id: gateway_host_id.into(),
+            guest_id,
+            guest_type: guest_type.into(),
+            name: name.into(),
+            target_username: target_username.into(),
+            allow_all,
+            remove_stale_keys,
+            host_id,
+            service_id,
+        }
+    }
+}
+
 /// Result of a successful guest bootstrap.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct GuestBootstrapResult {
     /// The hostname/IP of the bootstrapped guest.
     pub guest_ip: String,
+}
+
+impl GuestBootstrapResult {
+    /// Create a new [`GuestBootstrapResult`].
+    pub fn new(guest_ip: impl Into<String>) -> Self {
+        Self {
+            guest_ip: guest_ip.into(),
+        }
+    }
 }
 
 /// Callback for performing the actual guest bootstrap.

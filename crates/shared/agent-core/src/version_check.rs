@@ -167,9 +167,7 @@ pub async fn batch_check_versions(
                 let batch_items: Vec<BatchDetectItem> = group
                     .items
                     .iter()
-                    .map(|(_, pkg)| BatchDetectItem {
-                        package_identifier: pkg.clone(),
-                    })
+                    .map(|(_, pkg)| BatchDetectItem::new(pkg.clone()))
                     .collect();
 
                 let plugin = match PluginRegistry::create_plugin(
@@ -291,9 +289,7 @@ pub async fn batch_check_versions(
                 let batch_items: Vec<BatchFetchItem> = group
                     .items
                     .iter()
-                    .map(|(_, pkg)| BatchFetchItem {
-                        package_identifier: pkg.clone(),
-                    })
+                    .map(|(_, pkg)| BatchFetchItem::new(pkg.clone()))
                     .collect();
 
                 let plugin = match PluginRegistry::create_plugin(
