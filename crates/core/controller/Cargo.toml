@@ -8,8 +8,9 @@ repository.workspace = true
 version.workspace = true
 
 [features]
-default = ["db-sqlite", "oidc"]
+default = ["db-sqlite", "oidc", "zeroconf"]
 embedded-scheduler = ["dep:uptrakit-scheduler-engine"]
+zeroconf = ["dep:mdns-sd"]
 oidc = ["uptrakit-web-api/oidc", "uptrakit-scheduler-engine?/oidc"]
 swagger-ui = ["uptrakit-web-api/swagger-ui"]
 db-all = ["db-sqlite", "db-postgres", "db-mysql", "uptrakit-web-api/db-all"]
@@ -67,6 +68,7 @@ uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-scheduler-engine = { workspace = true, optional = true }
 tracing-journald = { workspace = true, optional = true }
 rust-embed = { workspace = true, optional = true, features = ["mime-guess"] }
+mdns-sd = { workspace = true, optional = true }
 
 [dev-dependencies]
 uptrakit-crypto = { workspace = true, features = ["testing"] }

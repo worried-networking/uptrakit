@@ -47,6 +47,7 @@ pub mod system_services;
 pub use masked_url::MaskedUrl;
 pub mod settings_nats;
 pub mod settings_smtp;
+pub mod settings_zeroconf;
 pub mod software_items;
 pub mod system_alerts;
 pub mod system_enrollment_tokens;

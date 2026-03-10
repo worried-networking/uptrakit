@@ -16,6 +16,8 @@ mod scheduler;
 mod server;
 mod startup;
 mod tasks;
+#[cfg(feature = "zeroconf")]
+mod zeroconf;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -681,6 +683,24 @@ async fn run(args: cli::Args) -> Result<()> {
         ) {
             Ok(()) => tracing::info!(pid = old_pid, "sent SIGUSR1 to old process"),
             Err(e) => tracing::warn!(pid = old_pid, error = %e, "failed to signal old process"),
+        }
+    }
+
+    // Spawn zeroconf mDNS advertiser if enabled
+    #[cfg(feature = "zeroconf")]
+    {
+        let zeroconf_settings = app_state.settings.zeroconf();
+        if zeroconf_settings.enabled {
+            let ca_snap = app_state.ca_snapshot.borrow().clone();
+            let zc_cancel = bg.child_token();
+            let zc_addr = reconciled.https_addr;
+            let handle = tokio::spawn(zeroconf::run_advertiser(
+                zc_cancel,
+                zc_addr,
+                ca_snap,
+                zeroconf_settings,
+            ));
+            bg.track("zeroconf-advertiser", handle);
         }
     }
 

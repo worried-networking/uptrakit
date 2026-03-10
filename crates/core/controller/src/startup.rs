@@ -784,6 +784,103 @@ pub(crate) async fn reconcile_all_settings(
         nats_url_opt
     };
 
+    // Zeroconf settings reconciliation (only when zeroconf feature is enabled)
+    #[cfg(feature = "zeroconf")]
+    {
+        let zeroconf_enabled =
+            crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
+                db,
+                key: SettingKey::ZeroconfEnabled,
+                raw: global_raw,
+                cli_value: if args.zeroconf { Some(true) } else { None },
+                default_value: false,
+                force,
+                convert: crate::reconcile::JsonConvert {
+                    to_json: |v| serde_json::json!(v),
+                    from_json: |v| v.as_bool(),
+                },
+            })
+            .await
+            .context(AppError::Settings)?;
+
+        let zeroconf_url = crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
+            db,
+            key: SettingKey::ZeroconfUrl,
+            raw: global_raw,
+            cli_value: args.zeroconf_url.clone(),
+            default_value: String::new(),
+            force,
+            convert: crate::reconcile::JsonConvert {
+                to_json: |v| {
+                    if v.is_empty() {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::json!(v)
+                    }
+                },
+                from_json: |v| {
+                    if v.is_null() {
+                        Some(String::new())
+                    } else {
+                        v.as_str().map(String::from)
+                    }
+                },
+            },
+        })
+        .await
+        .context(AppError::Settings)?;
+        let zeroconf_url_opt = if zeroconf_url.is_empty() {
+            None
+        } else {
+            Some(zeroconf_url)
+        };
+
+        // Fall back to reconciled pki_addr if no explicit zeroconf_pki_addr
+        let zeroconf_pki_addr_cli = args
+            .zeroconf_pki_addr
+            .clone()
+            .or_else(|| pki_addr_opt.clone());
+        let zeroconf_pki_addr =
+            crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
+                db,
+                key: SettingKey::ZeroconfPkiAddr,
+                raw: global_raw,
+                cli_value: zeroconf_pki_addr_cli,
+                default_value: String::new(),
+                force,
+                convert: crate::reconcile::JsonConvert {
+                    to_json: |v| {
+                        if v.is_empty() {
+                            serde_json::Value::Null
+                        } else {
+                            serde_json::json!(v)
+                        }
+                    },
+                    from_json: |v| {
+                        if v.is_null() {
+                            Some(String::new())
+                        } else {
+                            v.as_str().map(String::from)
+                        }
+                    },
+                },
+            })
+            .await
+            .context(AppError::Settings)?;
+        let zeroconf_pki_addr_opt = if zeroconf_pki_addr.is_empty() {
+            None
+        } else {
+            Some(zeroconf_pki_addr)
+        };
+
+        let zeroconf_snapshot = uptrakit_web_api::settings::ZeroconfSnapshot {
+            enabled: zeroconf_enabled,
+            url: zeroconf_url_opt,
+            pki_addr: zeroconf_pki_addr_opt,
+        };
+        settings.set_zeroconf(zeroconf_snapshot).await;
+    }
+
     Ok(ReconciledSettings {
         extra_sans,
         pki_addr: pki_addr_opt,

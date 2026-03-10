@@ -271,6 +271,27 @@ pub struct Args {
     #[arg(long, value_enum, default_value = "all")]
     pub audit_log_filter: AuditLogFilterArg,
 
+    /// Advertise this controller via mDNS/DNS-SD for zero-configuration
+    /// discovery. Services on the same LAN can discover the controller
+    /// without --url.
+    #[cfg(feature = "zeroconf")]
+    #[arg(long)]
+    pub zeroconf: bool,
+
+    /// Override the HTTPS URL advertised via mDNS for reverse proxy
+    /// deployments. When set, services use this URL instead of
+    /// constructing one from the mDNS-resolved address.
+    /// Example: https://proxy.example.com:443
+    #[cfg(feature = "zeroconf")]
+    #[arg(long, requires = "zeroconf")]
+    pub zeroconf_url: Option<String>,
+
+    /// Override the PKI address advertised via mDNS for reverse proxy
+    /// deployments. Defaults to --pki-addr if set.
+    #[cfg(feature = "zeroconf")]
+    #[arg(long, requires = "zeroconf")]
+    pub zeroconf_pki_addr: Option<String>,
+
     /// NATS server URL for cross-controller messaging.
     /// When set, NATS JetStream is used for inter-controller event delivery.
     /// Without this, the controller runs in single-instance mode.
