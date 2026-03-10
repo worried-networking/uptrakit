@@ -37,6 +37,19 @@ pub struct ShellConfig {
     /// unsupported error.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_command: Option<String>,
+
+    /// Request PTY-backed interactive execution for the update command.
+    ///
+    /// When `true`, the controller sets `interactive: true` in the
+    /// `ExecuteUpdate` wire payload, causing the agent to allocate a PTY and
+    /// keep stdin open during the update. This enables scripts that read from
+    /// `/dev/tty` (e.g. the Proxmox Helper Scripts `/usr/bin/update` for
+    /// low-storage warnings) to function correctly.
+    ///
+    /// Defaults to `false`. Set to `true` for update commands that require an
+    /// interactive terminal — typically those that may prompt the user for input.
+    #[serde(default)]
+    pub prefer_interactive: bool,
 }
 
 impl ShellConfig {
@@ -92,6 +105,9 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ShellConfig {
             FieldDef::new("update_command", "Update Command")
                 .with_type(FieldType::Textarea)
                 .with_help_text("Shell command to execute an update (supports {version}, {tag}, {package_identifier})"),
+            FieldDef::new("prefer_interactive", "Interactive Mode")
+                .with_type(FieldType::Toggle)
+                .with_help_text("Allocate a PTY for the update command. Enable for scripts that read from /dev/tty (e.g. interactive prompts)."),
         ]
     }
 }
@@ -127,6 +143,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("myapp --version".to_string()),
             update_command: None,
+            prefer_interactive: false,
         };
         assert!(config.validate().is_ok());
     }
@@ -136,6 +153,7 @@ mod tests {
         let config = ShellConfig {
             version_command: None,
             update_command: Some("apt-get install -y myapp".to_string()),
+            prefer_interactive: false,
         };
         assert!(config.validate().is_ok());
     }
@@ -145,6 +163,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("myapp --version".to_string()),
             update_command: Some("apt-get install -y myapp".to_string()),
+            prefer_interactive: false,
         };
         assert!(config.validate().is_ok());
     }
@@ -154,6 +173,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("myapp --version".to_string()),
             update_command: None,
+            prefer_interactive: false,
         };
         let json = serde_json::to_string(&config).expect("serialize");
         assert!(!json.contains("update_command"));
@@ -161,15 +181,36 @@ mod tests {
     }
 
     #[test]
+    fn serde_prefer_interactive_roundtrip() {
+        let config = ShellConfig {
+            version_command: Some("myapp --version".to_string()),
+            update_command: Some("myapp update".to_string()),
+            prefer_interactive: true,
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        let deserialized: ShellConfig = serde_json::from_str(&json).expect("deserialize");
+        assert!(deserialized.prefer_interactive);
+    }
+
+    #[test]
+    fn serde_prefer_interactive_defaults_to_false() {
+        let json = r#"{"version_command":"echo 1","update_command":"echo 2"}"#;
+        let deserialized: ShellConfig = serde_json::from_str(json).expect("deserialize");
+        assert!(!deserialized.prefer_interactive);
+    }
+
+    #[test]
     fn serde_roundtrip() {
         let config = ShellConfig {
             version_command: Some("myapp --version".to_string()),
             update_command: Some("myapp update".to_string()),
+            prefer_interactive: false,
         };
         let json = serde_json::to_string(&config).expect("serialize");
         let deserialized: ShellConfig = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized.version_command, config.version_command);
         assert_eq!(deserialized.update_command, config.update_command);
+        assert_eq!(deserialized.prefer_interactive, config.prefer_interactive);
     }
 
     #[test]
@@ -178,6 +219,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some(cmd),
             update_command: None,
+            prefer_interactive: false,
         };
         assert!(config.validate().is_ok());
     }
@@ -188,6 +230,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some(cmd),
             update_command: None,
+            prefer_interactive: false,
         };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("version_command"));
@@ -200,6 +243,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("echo ok".to_string()),
             update_command: Some(cmd),
+            prefer_interactive: false,
         };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("update_command"));
@@ -210,9 +254,11 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("cmd".to_string()),
             update_command: Some("update".to_string()),
+            prefer_interactive: false,
         };
         let masked = config.clone().with_secrets_masked();
         assert_eq!(masked.version_command, config.version_command);
         assert_eq!(masked.update_command, config.update_command);
+        assert_eq!(masked.prefer_interactive, config.prefer_interactive);
     }
 }

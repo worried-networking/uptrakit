@@ -137,6 +137,7 @@ mod tests {
             ShellConfig {
                 version_command: version_command.map(String::from),
                 update_command: update_command.map(String::from),
+                prefer_interactive: false,
             },
             test_executor(),
         )
