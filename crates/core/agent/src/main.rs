@@ -379,7 +379,7 @@ async fn main() {
         return;
     }
 
-    uptrakit_service_sdk::init_tracing("uptrakit_agent", args.common.verbose);
+    init_tracing("uptrakit_agent", args.common.verbose);
     uptrakit_service_sdk::init_crypto();
 
     // Resolve the freeze file path early so we can pass it to the handler.
@@ -407,4 +407,38 @@ async fn main() {
         &mut handler,
     )
     .await;
+}
+
+/// Initialize `tracing_subscriber` with a verbosity-aware filter.
+///
+/// Verbosity levels expand scope progressively, keeping third-party crates
+/// silent unless `RUST_LOG` explicitly enables them:
+///
+/// - `verbosity == 0`: `{own_module}=info`
+/// - `verbosity == 1`: `{own_module}=debug`
+/// - `verbosity == 2`: `uptrakit=debug`
+/// - `verbosity >= 3`: `uptrakit=trace`
+fn init_tracing(own_module: &str, verbosity: u8) {
+    use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::prelude::*;
+
+    if verbosity > 3 {
+        eprintln!(
+            "warning: -vvvv or more has no additional effect; maximum verbosity is -vvv (trace)"
+        );
+    }
+
+    let directive = match verbosity {
+        0 => format!("{own_module}=info"),
+        1 => format!("{own_module}=debug"),
+        2 => "uptrakit=debug".to_string(),
+        _ => "uptrakit=trace".to_string(),
+    };
+    let mut filter = EnvFilter::from_default_env();
+    if let Ok(d) = directive.parse() {
+        filter = filter.add_directive(d);
+    }
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_filter(filter))
+        .init();
 }

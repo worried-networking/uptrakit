@@ -228,7 +228,7 @@ async fn main() {
         return;
     }
 
-    uptrakit_service_sdk::init_tracing("uptrakit_mqtt", args.common.verbose);
+    init_tracing("uptrakit_mqtt", args.common.verbose);
     uptrakit_service_sdk::init_crypto();
 
     let instance_id = generate_instance_id();
@@ -263,4 +263,30 @@ fn generate_instance_id() -> String {
     // ASCII hex digits. Using `.get()` for defence-in-depth.
     let uuid_prefix = uuid_str.get(..8).unwrap_or(&uuid_str);
     format!("{host}-{uuid_prefix}")
+}
+
+/// Initialize `tracing_subscriber` with a verbosity-aware filter.
+fn init_tracing(own_module: &str, verbosity: u8) {
+    use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::prelude::*;
+
+    if verbosity > 3 {
+        eprintln!(
+            "warning: -vvvv or more has no additional effect; maximum verbosity is -vvv (trace)"
+        );
+    }
+
+    let directive = match verbosity {
+        0 => format!("{own_module}=info"),
+        1 => format!("{own_module}=debug"),
+        2 => "uptrakit=debug".to_string(),
+        _ => "uptrakit=trace".to_string(),
+    };
+    let mut filter = EnvFilter::from_default_env();
+    if let Ok(d) = directive.parse() {
+        filter = filter.add_directive(d);
+    }
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_filter(filter))
+        .init();
 }

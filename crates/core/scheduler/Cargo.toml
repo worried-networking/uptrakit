@@ -25,6 +25,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "
 tokio-rustls = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 uptrakit-crypto = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-nats = { workspace = true }
