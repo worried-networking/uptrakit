@@ -38,6 +38,7 @@ pub enum PluginType {
     PackageManagerPacman,
     PackageManagerPkg,
     PackageManagerApk,
+    PackageManagerSnap,
     GenericShell,
     InfrastructureProxmox,
     /// An unknown plugin type received from a newer peer.
@@ -67,6 +68,7 @@ impl PluginType {
             Self::PackageManagerPacman => "package_manager_pacman",
             Self::PackageManagerPkg => "package_manager_pkg",
             Self::PackageManagerApk => "package_manager_apk",
+            Self::PackageManagerSnap => "package_manager_snap",
             Self::GenericShell => "generic_shell",
             Self::InfrastructureProxmox => "infrastructure_proxmox",
             Self::Other(s) => s.as_str(),
@@ -91,6 +93,7 @@ impl PluginType {
             Self::PackageManagerPacman => "Pacman",
             Self::PackageManagerPkg => "BSD pkg",
             Self::PackageManagerApk => "APK",
+            Self::PackageManagerSnap => "Snap",
             Self::GenericShell => "Shell",
             Self::InfrastructureProxmox => "Proxmox VE",
             Self::Other(s) => s.as_str(),
@@ -131,6 +134,7 @@ impl FromStr for PluginType {
             "package_manager_pacman" => Ok(Self::PackageManagerPacman),
             "package_manager_pkg" => Ok(Self::PackageManagerPkg),
             "package_manager_apk" => Ok(Self::PackageManagerApk),
+            "package_manager_snap" => Ok(Self::PackageManagerSnap),
             "generic_shell" => Ok(Self::GenericShell),
             "infrastructure_proxmox" => Ok(Self::InfrastructureProxmox),
             _ => Err(ParsePluginTypeError::Invalid),
@@ -171,6 +175,7 @@ impl From<String> for PluginType {
             "package_manager_pacman" => Self::PackageManagerPacman,
             "package_manager_pkg" => Self::PackageManagerPkg,
             "package_manager_apk" => Self::PackageManagerApk,
+            "package_manager_snap" => Self::PackageManagerSnap,
             "generic_shell" => Self::GenericShell,
             "infrastructure_proxmox" => Self::InfrastructureProxmox,
             _ => Self::Other(s),
@@ -196,6 +201,7 @@ impl From<PluginType> for String {
             PluginType::PackageManagerPacman => "package_manager_pacman".to_string(),
             PluginType::PackageManagerPkg => "package_manager_pkg".to_string(),
             PluginType::PackageManagerApk => "package_manager_apk".to_string(),
+            PluginType::PackageManagerSnap => "package_manager_snap".to_string(),
             PluginType::GenericShell => "generic_shell".to_string(),
             PluginType::InfrastructureProxmox => "infrastructure_proxmox".to_string(),
             PluginType::Other(s) => s,
@@ -520,6 +526,10 @@ mod tests {
             PluginType::PackageManagerApk
         );
         assert_eq!(
+            PluginType::from("package_manager_snap".to_string()),
+            PluginType::PackageManagerSnap
+        );
+        assert_eq!(
             PluginType::from("generic_shell".to_string()),
             PluginType::GenericShell
         );
@@ -580,6 +590,10 @@ mod tests {
             PluginType::PackageManagerApk.to_string(),
             "package_manager_apk"
         );
+        assert_eq!(
+            PluginType::PackageManagerSnap.to_string(),
+            "package_manager_snap"
+        );
         assert_eq!(PluginType::GenericShell.to_string(), "generic_shell");
         assert_eq!(
             PluginType::InfrastructureProxmox.to_string(),
@@ -634,6 +648,10 @@ mod tests {
         assert_eq!(
             "package_manager_apk".parse::<PluginType>().ok(),
             Some(PluginType::PackageManagerApk)
+        );
+        assert_eq!(
+            "package_manager_snap".parse::<PluginType>().ok(),
+            Some(PluginType::PackageManagerSnap)
         );
         assert_eq!(
             "releases_gitlab".parse::<PluginType>().ok(),
@@ -700,6 +718,7 @@ mod tests {
         assert_eq!(PluginType::PackageManagerPacman.display_name(), "Pacman");
         assert_eq!(PluginType::PackageManagerPkg.display_name(), "BSD pkg");
         assert_eq!(PluginType::PackageManagerApk.display_name(), "APK");
+        assert_eq!(PluginType::PackageManagerSnap.display_name(), "Snap");
         assert_eq!(PluginType::GenericShell.display_name(), "Shell");
         assert_eq!(
             PluginType::InfrastructureProxmox.display_name(),
@@ -711,6 +730,22 @@ mod tests {
     fn display_name_other_returns_raw_string() {
         let pt = PluginType::Other("custom_plugin".to_string());
         assert_eq!(pt.display_name(), "custom_plugin");
+    }
+
+    #[test]
+    fn plugin_type_snap_serialization() {
+        let snap = PluginType::PackageManagerSnap;
+        let json = serde_json::to_string(&snap).expect("serialize");
+        assert_eq!(json, r#""package_manager_snap""#);
+        let deserialized: PluginType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, snap);
+    }
+
+    #[test]
+    fn plugin_type_snap_deserializes_to_snap_variant() {
+        let deserialized: PluginType =
+            serde_json::from_str(r#""package_manager_snap""#).expect("deserialize snap");
+        assert_eq!(deserialized, PluginType::PackageManagerSnap);
     }
 
     #[test]
@@ -728,6 +763,7 @@ mod tests {
             PluginType::PackageManagerPacman,
             PluginType::PackageManagerPkg,
             PluginType::PackageManagerApk,
+            PluginType::PackageManagerSnap,
             PluginType::GenericShell,
             PluginType::InfrastructureProxmox,
         ];
@@ -755,6 +791,7 @@ mod tests {
             PluginType::PackageManagerPacman,
             PluginType::PackageManagerPkg,
             PluginType::PackageManagerApk,
+            PluginType::PackageManagerSnap,
             PluginType::GenericShell,
             PluginType::InfrastructureProxmox,
             PluginType::Other("my_plugin".to_string()),
