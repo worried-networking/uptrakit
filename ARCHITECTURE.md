@@ -429,10 +429,9 @@ The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared 
   See [Service Lifecycle](docs/development/service-lifecycle.md).
 - **Event Loop**: The SDK owns the unified `tokio::select!` loop that handles ping/pong, certificate renewal, CA staleness checks, signal handling,
   and close-reason dispatch. Services inject custom behaviour through `ServiceHandler` callbacks (`poll_service_event`, `on_service_event`).
-- **Main Helpers**: `init_crypto()`, `print_build_info()`, `init_tracing()`, `default_resolve_shutdown()`, and
-  `run_lifecycle_and_handle_errors()` reduce `main()` boilerplate. `init_tracing()` configures a **registry-based**
-  tracing subscriber (each binary calls it explicitly — the SDK does not configure the global dispatcher autonomously).
-  The registry architecture allows adding an OpenTelemetry exporter layer as a one-line change.
+- **Main Helpers**: `init_crypto()`, `print_build_info()`, `default_resolve_shutdown()`, and
+  `run_lifecycle_and_handle_errors()` reduce `main()` boilerplate. Each binary owns its own `init_tracing()` function
+  using `tracing-subscriber` directly — the SDK does not configure the global dispatcher.
   `default_resolve_shutdown()` maps `ShutdownCause` to `(DisconnectReason, LoopOutcome)` for standard binaries.
 - **Signal Handling**: Cross-platform `SignalWatcher` for `SIGINT`, `SIGTERM`, and `SIGHUP`.
 - **Enrollment**: WebSocket-based enrollment with certificate issuance.
@@ -460,7 +459,9 @@ Two registration models coexist:
 
 - **Compile-time (plugins)**: `PluginOps::extension_manifests()` returns manifests at
   controller startup. Actions are dispatched in-process via
-  `PluginOps::handle_extension_action()`. The Proxmox VE plugin uses this model.
+  `PluginOps::handle_extension_action()`. The `PluginOps` trait is defined in
+  `infrastructure-core` (feature `plugin-ops`) and implemented by `PluginRegistry` in
+  `infrastructure-registry`. The Proxmox VE plugin uses this model.
 - **Runtime (services)**: Services register via `ServiceMessage::ExtensionRegister` over
   WebSocket. Actions are proxied to the service via request/response correlation.
 

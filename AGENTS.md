@@ -105,7 +105,7 @@ uptrakit/
 │   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API + SSE streaming coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing; sse.rs provides lightweight SSE parser; update_output_stream.rs provides typed stream_update_output() method; device_auth_stream.rs provides SSE-first device auth; events_stream.rs provides typed admin event SSE client
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
 │   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, interval+jitter scheduling (interval.rs: compute_next_run_at), TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); tasks categorised as internal (CrlRenewal, CaRotationCheck, ServiceCertCheck — embedded scheduler only) vs external (AuthCleanup, StaleLeaseCleanup, FetchReleases, DetectVersion — deferrable to external scheduler); `external_scheduler_connected: Arc<AtomicBool>` flag skips external tasks when set; FetchReleasesExecutor Phase B sends fetch assignments for host_software_items so that latest_version is populated
-│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity (ServiceIdentityState: service_id + enrollment_secret + tenant_id in service.json), TLS, CA bootstrap, main helpers; default_resolve_shutdown(), init_tracing(); `decrypt_sensitive_params<T>()` generic ECIES sealed-box decryption for extension sensitive params
+│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity (ServiceIdentityState: service_id + enrollment_secret + tenant_id in service.json), TLS, CA bootstrap, main helpers; default_resolve_shutdown(); `decrypt_sensitive_params<T>()` generic ECIES sealed-box decryption for extension sensitive params
 │   │   ├── audit-log/                  # uptrakit-audit-log                      (lib)  — AuditLogBackend trait, AuditEntry, AuditFilter, AuditLogDispatcher; backends: NoopBackend, DatabaseBackend (cfg db), JournaldBackend (cfg journald), MultiplexBackend; fire-and-forget dispatcher pattern
 │   │   ├── update-hooks/               # uptrakit-update-hooks                  (lib)  — update hook resolution and config merge logic (extracted from web-api)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields; report pagination (`paginate.rs` Paginatable trait + `report_tracker.rs` ReportTracker); re-exports `uptrakit-extension-framework` as `extension` module
@@ -542,8 +542,11 @@ for user review. Key invariants:
    Plugins with no identifier constraints must still implement the associated function as a no-op returning `Ok(())`.
    The `register_plugins!` macro auto-generates `PluginRegistry::validate_package_identifier()` by dispatching through
    each config struct's associated function — no manual match arm is required in the registry.
-   The `PluginOps` trait exposes this as `validate_package_identifier_str(plugin_type: &str, value: &str)` for
-   trait-object dispatch. Never add plugin-specific validation logic directly to web API query helpers or route
+   The `PluginOps` trait (defined in `infrastructure-core` behind the `plugin-ops` feature, re-exported by
+   `infrastructure-registry`) exposes this as `validate_package_identifier_str(plugin_type: &str, value: &str)` for
+   trait-object dispatch. Crates that only need `PluginOps` (e.g. `web-api-queries`) should depend on
+   `infrastructure-core` with `features = ["plugin-ops"]` rather than the full registry.
+   Never add plugin-specific validation logic directly to web API query helpers or route
    handlers. See [Plugin Guidelines](docs/development/plugin-guidelines.md) for the full extension pattern.
 
 7. **Plugins declare required sudo commands via `required_sudo_commands()`.** Any plugin that needs root-level
@@ -1141,8 +1144,8 @@ subscriber from a library causes a panic if anything else in the process has alr
 another library).
 
 **`uptrakit-service-sdk` does not provide `init_tracing()`.** Each binary (`uptrakit-agent`, `uptrakit-agent-ssh`,
-`uptrakit-mqtt`) owns its own `init_tracing()` helper in `src/main.rs`. `tracing-subscriber` must appear in each
-binary's `[dependencies]`, not in shared library crates.
+`uptrakit-mqtt`, `uptrakit-scheduler`) owns its own `init_tracing()` helper in `src/main.rs`. `tracing-subscriber`
+must appear in each binary's `[dependencies]`, not in shared library crates.
 
 **Pattern:** Use `EnvFilter::from_default_env().add_directive(...)` with an `if let Ok(d) = directive.parse()`
 fallback — do not use `.expect()` on the parse. This prevents a panic if the verbosity directive string is ever

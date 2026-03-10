@@ -332,7 +332,7 @@ to the specific WebSocket connection that originated or should receive them. The
 | `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` | WS message handling (both directions) |
 | `crates/shared/service-sdk/src/lifecycle.rs` | `ServiceHandler` trait (`on_extension_request` + `on_extension_response`) |
 | `crates/shared/service-sdk/src/event_loop.rs` | Event loop dispatch |
-| `crates/plugins/infrastructure/registry/src/lib.rs` | `PluginOps` trait |
+| `crates/plugins/infrastructure/core/src/plugin_ops.rs` | `PluginOps` trait (feature `plugin-ops`) |
 | `frontend/src/lib/components/extensions/` | Schema-driven Svelte components |
 | `frontend/src/lib/extensions.svelte.ts` | Extension store |
 

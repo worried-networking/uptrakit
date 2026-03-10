@@ -881,7 +881,7 @@ a provider automatically or handles it directly (for plugins).
 | `crates/shared/service-sdk/src/lifecycle.rs` | `ServiceHandler::on_extension_request` + `on_extension_response` |
 | `crates/shared/service-sdk/src/extension_proxy.rs` | `ServiceExtensionProxy` for service-initiated invocations |
 | `crates/shared/service-sdk/src/event_loop.rs` | `ExtensionRequest` + `ExtensionResponse` dispatch |
-| `crates/plugins/infrastructure/registry/src/lib.rs` | `PluginOps::extension_manifests` |
+| `crates/plugins/infrastructure/core/src/plugin_ops.rs` | `PluginOps` trait (feature `plugin-ops`) |
 | `crates/ui/cli/src/commands/extensions.rs` | CLI `extensions` subcommand (static + dynamic) |
 | `crates/core/agent-ssh/src/extension.rs` | SSH agent extension implementation (reference) |
 | `crates/shared/crypto/src/ecies.rs` | ECIES sealed-box encryption/decryption (Rust, backend) |

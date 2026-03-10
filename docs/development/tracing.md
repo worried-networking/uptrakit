@@ -17,8 +17,9 @@ tracing_subscriber::registry()
     .init();
 ```
 
-Service daemons initialise via `uptrakit_service_sdk::init_tracing()`. The controller has
-its own setup in `main.rs` (with an optional journald layer).
+Each binary owns its own `init_tracing()` function in `src/main.rs`. The controller has
+its own setup (with an optional journald layer). The service-sdk does not provide tracing
+initialization — libraries must not configure the global dispatcher.
 
 ## Span Naming Conventions
 
