@@ -7,6 +7,10 @@ authors.workspace = true
 repository.workspace = true
 version.workspace = true
 
+[features]
+default = ["zeroconf"]
+zeroconf = ["uptrakit-service-sdk/zeroconf"]
+
 [dependencies]
 async-trait = { workspace = true }
 clap = { workspace = true }

@@ -12,7 +12,8 @@ name = "uptrakit-mqtt"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["zeroconf"]
+zeroconf = ["uptrakit-service-sdk/zeroconf"]
 
 [dependencies]
 async-trait = { workspace = true }

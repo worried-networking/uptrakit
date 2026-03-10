@@ -8,7 +8,8 @@ repository.workspace = true
 version.workspace = true
 
 [features]
-default = ["db-sqlite"]
+default = ["db-sqlite", "zeroconf"]
+zeroconf = ["uptrakit-service-sdk/zeroconf"]
 db-all = ["db-sqlite", "db-postgres", "db-mysql"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres"]
