@@ -471,9 +471,6 @@
 							>{item.featured ? '★' : '☆'}</span
 						>
 					{/if}
-					{#if item.update_available}
-						<span class="badge preset-filled-warning-500">Update Available</span>
-					{/if}
 					{#if item.plugins.length > 0}
 						<span class="text-sm text-surface-500">{item.plugins.join(', ')}</span>
 					{/if}
@@ -589,7 +586,17 @@
 									{/if}
 								</td>
 								<td>
-									<span class="badge {versionStatusClass(host)}">{versionStatusLabel(host)}</span>
+									{#if canManage && host.update_available}
+										<button
+											class="badge {versionStatusClass(host)} cursor-pointer hover:opacity-80"
+											title="Update to {formatVersion(host.latest_version ?? item.latest_version)}"
+											onclick={() => openUpdateModal(host)}
+										>
+											{versionStatusLabel(host)}
+										</button>
+									{:else}
+										<span class="badge {versionStatusClass(host)}">{versionStatusLabel(host)}</span>
+									{/if}
 								</td>
 								<td>{formatDate(host.installed_version_detected_at)}</td>
 								{#if canManage}
