@@ -201,11 +201,11 @@ fn probe_local_socket_path() -> Option<String> {
     candidates.push("/run/podman/podman.sock".to_string());
 
     for path in &candidates {
-        if let Ok(meta) = std::fs::metadata(path) {
-            if meta.file_type().is_socket() {
-                tracing::debug!(socket = %path, "selected local Docker/Podman socket");
-                return Some(path.clone());
-            }
+        if let Ok(meta) = std::fs::metadata(path)
+            && meta.file_type().is_socket()
+        {
+            tracing::debug!(socket = %path, "selected local Docker/Podman socket");
+            return Some(path.clone());
         }
     }
     None
@@ -298,19 +298,19 @@ impl BollardDockerClient {
                     ));
                 }
                 // Use TLS when configured for TCP connections.
-                if h.starts_with("tcp://") || h.starts_with("http://") {
-                    if let Some(tls_cfg) = tls {
-                        use std::path::Path;
-                        return bollard::Docker::connect_with_ssl(
-                            h,
-                            Path::new(tls_cfg.client_key_path.as_deref().unwrap_or("")),
-                            Path::new(tls_cfg.client_cert_path.as_deref().unwrap_or("")),
-                            Path::new(tls_cfg.ca_cert_path.as_deref().unwrap_or("")),
-                            TIMEOUT,
-                            API_DEFAULT_VERSION,
-                        )
-                        .context_to::<DockerError>();
-                    }
+                if (h.starts_with("tcp://") || h.starts_with("http://"))
+                    && let Some(tls_cfg) = tls
+                {
+                    use std::path::Path;
+                    return bollard::Docker::connect_with_ssl(
+                        h,
+                        Path::new(tls_cfg.client_key_path.as_deref().unwrap_or("")),
+                        Path::new(tls_cfg.client_cert_path.as_deref().unwrap_or("")),
+                        Path::new(tls_cfg.ca_cert_path.as_deref().unwrap_or("")),
+                        TIMEOUT,
+                        API_DEFAULT_VERSION,
+                    )
+                    .context_to::<DockerError>();
                 }
                 bollard::Docker::connect_with_http(h, TIMEOUT, API_DEFAULT_VERSION)
                     .context_to::<DockerError>()

@@ -152,6 +152,20 @@ pub struct DockerConfig {
     /// `"docker"` or `"podman"` to skip auto-detection.
     #[serde(default, skip_serializing_if = "is_auto_runtime")]
     pub container_runtime: ContainerRuntime,
+
+    /// When `true`, read registry credentials from the Docker credential store
+    /// (`~/.docker/config.json` on the host where this plugin executes).
+    ///
+    /// **Credential resolution order:**
+    /// 1. Explicit `auth` in this config (always wins when set).
+    /// 2. `~/.docker/config.json` on the execution host:
+    ///    - `credHelpers.<registry>` → invoke `docker-credential-{helper} get`
+    ///    - `auths.<registry>` → base64-decoded Basic auth
+    /// 3. Unauthenticated (if nothing found).
+    ///
+    /// Defaults to `false` to avoid unexpected reads from the credential store.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub use_system_credentials: bool,
 }
 
 impl DockerConfig {
@@ -912,6 +926,11 @@ mod tests {
             !json.contains("container_runtime"),
             "auto should be omitted: {json}"
         );
+    }
+
+    #[test]
+    fn use_system_credentials_defaults_to_false() {
+        assert!(!DockerConfig::default().use_system_credentials);
     }
 
     #[test]

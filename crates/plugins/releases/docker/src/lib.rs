@@ -1,6 +1,8 @@
 pub mod api_types;
 pub mod auth;
 pub mod config;
+#[cfg(feature = "daemon")]
+mod credentials;
 pub mod docker_client;
 #[cfg(all(unix, feature = "daemon"))]
 mod docker_proxy;

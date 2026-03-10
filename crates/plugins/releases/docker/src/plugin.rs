@@ -17,7 +17,9 @@ use uptrakit_plugin_infrastructure_core::{
 /// Type-erased RAII handle kept alive alongside the Docker client.
 type OpaqueHandle = Option<Box<dyn std::any::Any + Send + Sync>>;
 
-use crate::config::{ContainerRuntime, DockerConfig};
+#[cfg(feature = "daemon")]
+use crate::config::ContainerRuntime;
+use crate::config::DockerConfig;
 #[cfg(feature = "daemon")]
 use crate::docker_client::BollardDockerClient;
 use crate::docker_client::{DockerClient, NoopDockerClient};
@@ -47,9 +49,14 @@ pub struct DockerPlugin {
     /// is configured, a [`crate::docker_proxy::DockerSocketProxy`] is started
     /// and stored here. The proxy is stopped and the socket removed when the
     /// plugin is dropped.
+    #[cfg(feature = "daemon")]
     proxy_handle: parking_lot::Mutex<OpaqueHandle>,
     /// Container runtime detected during `detect_host_compatibility` (Auto mode).
+    #[cfg(feature = "daemon")]
     detected_runtime: parking_lot::Mutex<Option<ContainerRuntime>>,
+    /// Cache of resolved system credentials (keyed by registry hostname).
+    #[cfg(feature = "daemon")]
+    credential_cache: crate::credentials::CredentialCache,
 }
 
 impl DockerPlugin {
@@ -146,7 +153,7 @@ impl DockerPlugin {
         config: DockerConfig,
         executor: Arc<dyn CommandExecutor>,
         docker_client: Arc<dyn DockerClient>,
-        proxy_handle: OpaqueHandle,
+        #[cfg_attr(not(feature = "daemon"), allow(unused_variables))] proxy_handle: OpaqueHandle,
     ) -> Result<Self> {
         config.validate()?;
 
@@ -157,8 +164,12 @@ impl DockerPlugin {
             registry_client,
             docker_client: parking_lot::Mutex::new(docker_client),
             executor,
+            #[cfg(feature = "daemon")]
             proxy_handle: parking_lot::Mutex::new(proxy_handle),
+            #[cfg(feature = "daemon")]
             detected_runtime: parking_lot::Mutex::new(None),
+            #[cfg(feature = "daemon")]
+            credential_cache: crate::credentials::CredentialCache::new(),
         })
     }
 
@@ -209,6 +220,41 @@ impl DockerPlugin {
             }
         }
         true
+    }
+
+    /// Returns the effective registry authentication for the given image reference.
+    ///
+    /// Resolution order:
+    /// 1. Explicit `config.auth` (always wins).
+    /// 2. System credentials from `~/.docker/config.json` when `use_system_credentials` is true.
+    /// 3. `None` (unauthenticated).
+    #[cfg(feature = "daemon")]
+    async fn effective_auth(&self, image: &str) -> Option<crate::config::DockerAuth> {
+        // Explicit auth always wins.
+        if self.config.auth.is_some() {
+            return self.config.auth.clone();
+        }
+
+        if !self.config.use_system_credentials {
+            return None;
+        }
+
+        // Determine whether we're accessing a remote host.
+        let is_remote = self.executor.supports_stdio_tunnel();
+
+        // Parse registry from the image reference.
+        let registry = image
+            .parse::<crate::image_ref::ImageRef>()
+            .map(|r| r.server_address())
+            .unwrap_or_else(|_| image.to_string());
+
+        crate::credentials::resolve_system_credentials(
+            &registry,
+            &self.executor,
+            is_remote,
+            &self.credential_cache,
+        )
+        .await
     }
 
     /// Probe the executor for the available container runtime and, when running
@@ -468,9 +514,13 @@ impl Plugin for DockerPlugin {
         output.push_str(&format!("Pulling Docker image {image}:{tag}\n"));
 
         tracing::debug!(image = %image, tag = %tag, "pulling Docker image");
+        #[cfg(feature = "daemon")]
+        let auth = self.effective_auth(image).await;
+        #[cfg(not(feature = "daemon"))]
+        let auth: Option<crate::config::DockerAuth> = self.config.auth.clone();
         let client = Arc::clone(&*self.docker_client.lock());
         let pull_output = client
-            .pull_image(image, tag, self.config.auth.as_ref(), output_tx)
+            .pull_image(image, tag, auth.as_ref(), output_tx)
             .await
             .context_transform(|e| PluginError::InstallFailed(e.to_string()))?;
         tracing::debug!("Docker image pull completed");
