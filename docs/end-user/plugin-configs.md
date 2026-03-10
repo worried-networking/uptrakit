@@ -27,6 +27,7 @@ Uptrakit ships with eleven built-in plugin types:
 | `package_manager_npm` | Tracks globally installed npm packages. Fetches upstream versions from the npm registry (controller-side). Discovers globally installed packages and executes updates via `npm install -g`. Requires `sudo` access for updates. | Yes |
 | `package_manager_mas` | Tracks Mac App Store apps via the `mas` CLI tool. Agent-side only. Discovers installed apps and checks for updates via `mas list` and `mas outdated`. No `sudo` required. Requires `brew install mas`. | Yes |
 | `package_manager_pacman` | Tracks Arch Linux packages managed by Pacman. Installed versions are resolved locally by the agent using `pacman -Q`; latest versions are fetched from repositories using `pacman -Si`. Requires `sudo` access for updates and database sync. | Yes |
+| `package_manager_pkg` | Tracks packages managed by the BSD `pkg` tool (FreeBSD, TrueNAS SCALE, OPNsense, pfSense, DragonFly BSD). Installed and available versions are resolved locally by the agent. Requires `sudo` access for updates and index refresh. | Yes |
 
 ### `releases_github` configuration fields
 
@@ -295,6 +296,32 @@ preserved).
 
 For full details and `sudoers` configuration requirements, see
 [Pacman Plugin](plugins/pacman.md).
+
+### `package_manager_pkg` configuration fields
+
+The BSD `pkg` plugin tracks packages managed by FreeBSD's `pkgng` package manager. It works
+on FreeBSD, TrueNAS SCALE, OPNsense, pfSense, and DragonFly BSD.
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `discovery_filter` | No | Controls which packages are surfaced during autodiscovery. `"all"` (default) — all installed packages. `"manual"` — only packages the user explicitly installed (auto-install flag `0`). Omitting this field (or sending `{}`) puts the plugin in discover-all mode so the controller can auto-create the config. |
+
+**Package identifier format:** The FreeBSD package name (e.g., `curl`, `nginx`, `python39`,
+`php82-extensions`, `p5-Net-SSLeay`).
+
+Required `sudo` commands: `pkg` (for `pkg update` and `pkg install`).
+
+**Capabilities:** version detection, package index refresh, autodiscovery, batch updates.
+
+**Discovery behaviour:** When the config is empty (`{}`), the plugin emits one `DiscoveryTarget`
+per installed package pointing to a shared plugin config named `"BSD pkg"`. Uptrakit creates
+this config once and reuses it across all discovered packages. When an explicit
+`discovery_filter` is set, the config-ID path is used and no targets are emitted.
+
+Installed versions are resolved on the agent via `pkg query "%v" <name>`. Upstream versions
+are read from the local repository database via `pkg rquery "%v" <name>` (no additional
+network access required beyond the repository index, which is refreshed by `pkg update -q`).
+Updates are executed via `pkg install -y <name>` with `sudo`.
 
 ## Role-Based Host Assignments
 

@@ -17,6 +17,7 @@ use uptrakit_plugin_package_manager_homebrew::{HomebrewConfig, HomebrewPlugin};
 use uptrakit_plugin_package_manager_mas::{MasConfig, MasPlugin};
 use uptrakit_plugin_package_manager_npm::{NpmConfig, NpmPlugin};
 use uptrakit_plugin_package_manager_pacman::{PacmanConfig, PacmanPlugin};
+use uptrakit_plugin_package_manager_pkg::{PkgConfig, PkgPlugin};
 use uptrakit_plugin_releases_docker::{DockerConfig, DockerPlugin};
 use uptrakit_plugin_releases_forgejo::{ForgejoConfig, ForgejoPlugin};
 use uptrakit_plugin_releases_github::{GitHubConfig, GitHubPlugin};
@@ -502,6 +503,7 @@ register_plugins! {
     PackageManagerNpm             => { config: NpmConfig,                  plugin: NpmPlugin },
     PackageManagerMas             => { config: MasConfig,                  plugin: MasPlugin },
     PackageManagerPacman          => { config: PacmanConfig,               plugin: PacmanPlugin },
+    PackageManagerPkg             => { config: PkgConfig,                  plugin: PkgPlugin },
     GenericShell                  => { config: ShellConfig,                plugin: ShellPlugin },
     InfrastructureProxmox         => {
         config: ProxmoxConfig,
