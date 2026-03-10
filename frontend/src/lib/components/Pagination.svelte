@@ -15,8 +15,8 @@
 	 * Build a list of page numbers and ellipsis markers to render.
 	 *
 	 * Strategy:
-	 *  - Always show first 2 and last 2 pages
-	 *  - Always show current page and 1 neighbour on each side
+	 *  - Always show first and last page
+	 *  - Always show current page and 2 neighbours on each side
 	 *  - Bridge gaps with `null` (rendered as "...")
 	 *  - For <= 7 total pages, show all without ellipsis
 	 */
@@ -26,7 +26,9 @@
 		}
 
 		// Collect candidate pages, then deduplicate and sort.
-		const candidates = [1, 2, last - 1, last, current - 1, current, current + 1].filter((p) => p >= 1 && p <= last);
+		const candidates = [1, last, current - 2, current - 1, current, current + 1, current + 2].filter(
+			(p) => p >= 1 && p <= last
+		);
 
 		const sorted = candidates.sort((a, b) => a - b).filter((p, i, arr) => i === 0 || p !== arr[i - 1]);
 		const result: (number | null)[] = [];
