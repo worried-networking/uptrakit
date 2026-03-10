@@ -195,3 +195,36 @@ No consistency issues found.
 ### Issues
 
 No maintainability issues found.
+
+---
+
+## 2026-03-10 Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references and heap,
+and maintainability.
+
+### Dimension: Security
+
+#### Strengths
+
+- `src/plugin.rs:110-126` -- PHS plugin HTTP client correctly applies `SsrfSafeResolver::new()`
+  (line 116), `redirect(Policy::none())` (line 115), `connect_timeout(10s)` (line 117), and
+  `timeout(60s)` (line 118). Since PHS fetches from public hosts (`raw.githubusercontent.com`,
+  Codeberg), `new()` (strict mode) is the correct choice.
+
+#### Issues
+
+**[MEDIUM]** The sibling `uptrakit-plugin-infrastructure-proxmox` crate's API client
+(`client.rs:29-38`) is missing `SsrfSafeResolver` entirely. Since the Proxmox VE API is
+intentionally a private-network service, `SsrfSafeResolver::permissive()` is the appropriate
+resolver. See umbrella `plugins/CODEREVIEW.md` finding S1 for the full recommendation.
+
+### Dimension: Coding Standards
+
+#### Issues
+
+**[MEDIUM]** The sibling `uptrakit-plugin-infrastructure-proxmox` API client omits the SSRF
+resolver, deviating from the project standard that all plugins building `reqwest::Client` must
+set `.dns_resolver(...)`. The PHS plugin itself is compliant (line 116). See umbrella
+`plugins/CODEREVIEW.md` finding S1 for the full recommendation.

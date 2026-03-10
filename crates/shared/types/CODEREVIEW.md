@@ -188,6 +188,50 @@ from a newer controller causes a hard deserialization error in an older agent re
 
 ### Strengths (2026-03-10)
 
-- `src/ssrf.rs` — SSRF resolver filters at DNS resolution time, handles the all-private-IPs
+- `src/ssrf.rs` -- SSRF resolver filters at DNS resolution time, handles the all-private-IPs
   edge case, and cleanly separates `new()` (blocking) from `permissive()` (self-hosted). The
   implementation is defense-in-depth correct and well-tested.
+
+---
+
+## 2026-03-10 Review Update (12-Dimension)
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Tests (D4)
+
+#### Issues
+
+**[MEDIUM]** `src/plugin_types.rs`, `src/service_status.rs`, `src/hook_shell.rs` -- 3 instances
+of prohibited `thiserror` Display format tests. Tests that assert on the exact string output of
+`thiserror`-derived `Display` implementations (e.g., `assert_eq!(err.to_string(), "...")`) are
+testing `thiserror` macro behavior rather than application logic. These tests are brittle: any
+rewording of the `#[error("...")]` attribute string breaks the test without indicating a real
+regression. Recommendation: remove Display string assertions from error type tests; keep only
+tests that verify error variant construction and the `From` / `context_to` conversion paths.
+
+### Dimension: Extensibility (D8)
+
+#### Strengths
+
+- `src/` -- Consistent `#[non_exhaustive]` on public enums: `PluginType`, `ServiceStatus`,
+  `MqttTransport`, `MqttClientConnectionStatus`, `OutputStreamType`, `DeviceAuthStatus`,
+  `SoftwareDiscoveryState`, `HookShell`, `BatchStatus`, and `UpdateCategory`. All follow the
+  same pattern with appropriate forward-compatibility mechanisms (`Other(String)` where wire-safe,
+  `#[non_exhaustive]` alone where `Copy` is required).
+
+### Dimension: Idiomatic Rust (D10)
+
+#### Strengths
+
+- `src/` -- Exemplary wire-safe enum pattern across multiple types. `PluginType`, `BatchStatus`,
+  and `UpdateCategory` all use `Other(String)` with infallible custom `Deserialize` for wire
+  safety, and strict `FromStr` for DB/URL contexts. The dual deserialization strategy (infallible
+  for wire, strict for storage) is consistently applied.
+
+- `src/service_status.rs` -- `const fn as_str()` on `ServiceStatus` enables compile-time string
+  conversion. The `as_str()` method returns `&'static str` and is `const fn`, allowing use in
+  const contexts and pattern matching. This is the most efficient conversion pattern for enums
+  without `Other(String)` variants.

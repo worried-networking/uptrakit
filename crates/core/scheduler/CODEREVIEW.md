@@ -288,3 +288,32 @@ as lacking coverage for topic construction; this finding confirms the sole exist
 that module is not meaningful. Recommendation: remove the stub test and replace it with a
 mock-NATS test that verifies the subject format produced by `signal_ca_rotation` (and at
 minimum one other method) matches the string the controller subscribes to.
+
+## 2026-03-10 12-Dimension Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: High Availability (D5)
+
+#### Strengths
+
+- `crates/shared/scheduler-engine/src/claim.rs` -- Robust optimistic locking. `try_claim`
+  uses a single atomic `UPDATE WHERE locked_by IS NULL` statement, making task claim
+  acquisition TOCTOU-free. Two concurrent schedulers racing for the same task have exactly
+  one winner determined by the database engine.
+- `crates/shared/scheduler-engine/src/scheduler.rs` -- Claims released on shutdown. The
+  `token.cancelled()` arm in the scheduler loop calls `release_all_claims` before exiting,
+  ensuring a clean shutdown does not leave stale locks that would block task execution for
+  the 10-minute recovery window.
+- `crates/shared/scheduler-engine/src/scheduler.rs` -- Concurrent execution within each poll
+  cycle. Due tasks discovered by `find_due_tasks` are dispatched to their registered executors
+  and awaited, allowing multiple independent tasks to make progress within a single poll
+  interval rather than being strictly serialized.
+- `crates/shared/scheduler-engine/src/scheduler.rs` -- Unknown task types are skipped during
+  rolling upgrades. When a new scheduler version adds a `ScheduledTaskType` variant but an
+  older instance is still running, the older instance encounters the unknown type in
+  `find_due_tasks` results and skips it with a log warning rather than panicking. This enables
+  safe rolling deployments where new task types are seeded in the database before all scheduler
+  instances are upgraded.

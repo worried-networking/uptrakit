@@ -201,3 +201,31 @@ No consistency issues found.
 ### Issues
 
 No maintainability issues found.
+
+---
+
+## 2026-03-10 Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references and heap,
+and maintainability.
+
+### Dimension: Tests
+
+#### Strengths
+
+- `src/docker_client.rs:194-197` -- The `#[cfg(not(test))]` / `#[cfg(test)]` pattern for the
+  `TIMEOUT` constant (120s in production, 5s in tests) is correct: it prevents test suites
+  from blocking for 2 minutes when the Docker daemon is unreachable, while preserving the
+  production timeout for real deployments. The `MockDockerClient::ping_should_hang` flag
+  (line 548-550) works in conjunction with this to enable reliable timeout tests using
+  `tokio::time::advance`.
+
+### Dimension: Coding Standards
+
+#### Issues
+
+**[LOW]** `src/docker_client.rs:194` -- `#[cfg(not(test))]` for the timeout constant is an
+acceptable pattern for test ergonomics but worth noting: it means the production timeout value
+(120s) is never exercised by the test suite. This is a deliberate tradeoff documented by the
+comment at lines 191-193.

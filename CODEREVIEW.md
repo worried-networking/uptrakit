@@ -4,6 +4,8 @@
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Parallel review date**: 2026-03-06
 - **Parallel reviewers**: 10 AI agents (architecture, security, code quality, tests, HA, database, coding standards, extensibility, consistency, maintainability)
+- **Comprehensive 12-dimension review date**: 2026-03-10
+- **12-dimension reviewers**: 12 AI agents (architecture, security, code quality, tests, high availability, database, coding standards, extensibility, consistency, idiomatic Rust, references & heap, maintainability)
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -51,6 +53,25 @@ The dependency graph is a clean DAG with no circular dependencies. Feature flags
 judiciously for database backends, OIDC, NATS, and embedded components. The plugin system is
 well-designed with a macro-generated registry. The service SDK provides an excellent abstraction
 for the enrollment-lifecycle-reconnect flow shared across all service binaries.
+
+Updated on 2026-03-10 with findings from a comprehensive 12-dimension parallel review covering
+architecture, security, code quality, tests, high availability, database, coding standards,
+extensibility, consistency, idiomatic Rust, references and heap allocation, and maintainability.
+Key new findings: the login endpoint leaks deactivated user existence via timing and response
+differentiation (D2 Security, MEDIUM); Telegram, Proxmox Helper Scripts, and GitHub download
+plugins are missing SSRF-safe DNS resolvers on HTTP clients (D2 Security, MEDIUM); 10 prohibited
+`thiserror` Display format tests were found that test the `thiserror` crate rather than
+application logic (D4 Tests, MEDIUM); 41% of source files lack any test code (D4 Tests, HIGH);
+production `.expect()` persists in the email plugin `merge_smtp_into_config` (D7 Standards, HIGH);
+5 `cfg(not(feature))` violations remain (D7 Standards, MEDIUM); 11 `#[allow(clippy::type_complexity)]`
+suppressions exist in `web-api-queries` (D7 Standards, MEDIUM); `UpdateFinalStatus` and
+`DisconnectReason` are missing `Other(String)` catch-all variants required for wire-safe enums
+(D8 Extensibility, HIGH); `HookCommand` is missing a catch-all (D8 Extensibility, MEDIUM);
+`NotificationOps` is missing `restore_config_secrets` (D8 Extensibility, MEDIUM); 13+ public
+structs in `plugin-infrastructure-core` are missing `#[non_exhaustive]` (D8 Extensibility, MEDIUM);
+triple clone in MQTT `tenant_manager` on every state push (D11 Heap, MEDIUM); double `format!()`
+in HA discovery topics (D11 Heap, MEDIUM); CLI `main.rs` at 5,915 lines needs decomposition
+(D12 Maintainability, HIGH).
 
 Key areas for improvement: the `web-api` crate at ~38K LoC is approaching "god crate" territory
 and would benefit from decomposition; and remaining HA concerns should be addressed before
@@ -149,6 +170,7 @@ now carry `publish = false`.
 | `crates/core/agent` | [CODEREVIEW.md](crates/core/agent/CODEREVIEW.md) |
 | `crates/core/mqtt` | [CODEREVIEW.md](crates/core/mqtt/CODEREVIEW.md) |
 | `crates/core/scheduler` | [CODEREVIEW.md](crates/core/scheduler/CODEREVIEW.md) |
+| `crates/core/integration-tests` | [CODEREVIEW.md](crates/core/integration-tests/CODEREVIEW.md) |
 | `crates/shared` (umbrella: macros, directories, build-info, update-hooks) | [CODEREVIEW.md](crates/shared/CODEREVIEW.md) |
 | `crates/shared/agent-core` | [CODEREVIEW.md](crates/shared/agent-core/CODEREVIEW.md) |
 | `crates/shared/command` | [CODEREVIEW.md](crates/shared/command/CODEREVIEW.md) |

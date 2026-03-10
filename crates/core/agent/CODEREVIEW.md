@@ -247,3 +247,29 @@ The following open items from earlier review dates were confirmed as still unres
 - **[CRITICAL]** (HA-11) No crash recovery for in-flight updates; `InProgress` rows are never transitioned to `Failed` by a background task — confirmed still open.
 - **[HIGH]** (HA-1) In-flight update not drained on SIGTERM — confirmed still open.
 - **[LOW]** `src/client.rs:19,32,46` — `LocalCommandExecutor` allocated per message — confirmed still open.
+
+## 2026-03-10 12-Dimension Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Code Quality (D3)
+
+#### Issues
+
+**[LOW]** `src/main.rs` -- Duplicated `host_machine_id` validation pattern. The machine-ID
+comparison logic is repeated across three `on_message` match arms (lines 60-67, 71-78, 83-90)
+with identical structure. Extracting a shared `validate_machine_id(expected, received) -> bool`
+helper would reduce the repetition and make the validation logic independently testable.
+
+### Dimension: High Availability (D5)
+
+#### Strengths
+
+- `src/main.rs` -- Agent lifecycle is fully delegated to the Service SDK, which handles
+  enrollment, reconnection with exponential backoff, and certificate rotation. The agent
+  binary carries no lifecycle state machine of its own, reducing the HA surface to the SDK.
+- `src/client.rs` -- Update rate limiting and freeze file support (via `agent-core`) prevent
+  runaway update loops. The freeze file mechanism allows operators to pause updates without
+  restarting the agent process.

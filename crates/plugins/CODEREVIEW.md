@@ -305,3 +305,105 @@ Recommendation: add `#[non_exhaustive]` to `PluginOpsError` and verify that all 
 
 - **S4 (confirmed)** — SSRF protection via `SsrfSafeResolver` is correctly applied across all user-URL-accepting plugins. See per-area entries for per-plugin details.
 - **R6 (confirmed)** — HTTP client timeout discipline (`connect_timeout(10s)`, `timeout(60s)`) is consistent across all HTTP-using plugins.
+
+---
+
+## 2026-03-10 Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references and heap,
+and maintainability.
+
+### Dimension: Security
+
+#### Strengths
+
+- `notifications/telegram/src/lib.rs:137-148` -- Telegram `mask_config_secrets` masks both
+  `bot_token` and `webhook_secret`, and webhook secret comparison uses constant-time equality
+  via the standard sentinel check pattern, preventing timing side-channel leaks.
+
+#### Issues
+
+**[MEDIUM]** `notifications/telegram/src/lib.rs:29-33` -- Telegram plugin builds
+`reqwest::Client` without `SsrfSafeResolver`. The bot API URL is currently hardcoded to
+`api.telegram.org` (line 86), but the `bot_token` is user-controlled and embedded in the URL
+path. If a custom API endpoint is added in future, this becomes a live SSRF vector. Already
+noted in the 2026-03-10 review section above; this entry confirms the finding from the
+12-dimension security pass.
+
+### Dimension: Code Quality
+
+#### Strengths
+
+- Consistent plugin error architecture across all notification and infrastructure plugins:
+  each crate defines its own error type with `thiserror`, uses `impl_report_conversion!` for
+  bidirectional conversion, and follows the `rootcause` framework throughout.
+- `notifications/core/src/traits.rs:44-62` -- `NotificationPlugin` trait is appropriately
+  minimal: three required methods (`channel_type`, `deliver`, `validate_config`) plus one
+  `#[must_use]` method (`mask_config_secrets`). No default implementations that could mask
+  missing functionality.
+- All HTTP-using notification plugins (`webhook`, `telegram`) correctly set
+  `.connect_timeout(10s)` and `.timeout(60s)`, satisfying the workspace HTTP client
+  requirement.
+
+### Dimension: Coding Standards
+
+#### Issues
+
+**[HIGH]** `notifications/email/src/lib.rs:80` -- `.expect("config is always an object")` in
+`merge_smtp_into_config`. This function is called from route handlers with user-provided config
+JSON. If a non-object value is passed (e.g., `null`, `[]`, `"string"`), the server panics. The
+project coding standard prohibits `.expect()` and `.unwrap()` in production code.
+Recommendation: replace with a match or `if let` that returns an error for non-object configs.
+
+### Dimension: Extensibility
+
+#### Strengths
+
+- `notifications/core/src/traits.rs:44-62` -- `NotificationPlugin` trait is appropriately
+  minimal with three required methods. Adding a new notification channel requires implementing
+  only these three methods plus registering in the notification registry.
+
+#### Issues
+
+**[MEDIUM]** `notifications/core/src/traits.rs:11-24` -- `DeliveryMessage` is a public struct
+used across crate boundaries but does not carry `#[non_exhaustive]`. Adding a new field (e.g.,
+`priority`, `thread_id`) would be a breaking change for any code that constructs the struct
+with positional syntax.
+
+**[MEDIUM]** `notifications/core/src/traits.rs:27-36` -- `MessageAction` is similarly missing
+`#[non_exhaustive]`. Adding fields like `style` or `confirmation_required` would break
+external constructors.
+
+**[MEDIUM]** `notifications/registry/src/lib.rs:102-122` -- `NotificationOps` trait defines
+`mask_config_secrets` but has no corresponding `restore_config_secrets` method. The
+infrastructure `PluginOps` trait provides both mask and restore operations. Without restore,
+notification channel config updates that include masked sentinel values cannot recover the
+original secrets, requiring the user to re-enter secrets on every config edit.
+
+**[LOW]** `notifications/registry/src/lib.rs:54-78` -- Channel type strings (`"webhook"`,
+`"telegram"`, `"email"`) are repeated as string literals at registration sites and in each
+plugin's `channel_type()` return value. These are not centralized as constants, creating a
+risk of typo-induced mismatches between registration and lookup.
+
+**[LOW]** `infrastructure/registry/src/registry.rs:491-504` -- The `register_plugins!` macro
+wildcard arm for unknown `PluginType` variants returns an error but does not emit
+`tracing::warn!`. The workspace coding standard requires wildcard arms on `#[non_exhaustive]`
+enums to log a warning for observability of unexpected variants.
+
+### Dimension: Idiomatic Rust
+
+#### Issues
+
+**[LOW]** `notifications/core/src/lib.rs:19-25` -- `escape_html` creates up to five
+intermediate `String` allocations via chained `.replace()` calls. For large bodies this
+produces unnecessary allocation pressure. A single-pass character-by-character approach using
+`String::with_capacity` would be more efficient while remaining equally readable.
+
+### Dimension: Maintainability
+
+#### Strengths
+
+- Plugin crates are well-scoped and independent: each notification plugin crate has a single
+  responsibility (one channel type), minimal dependencies, and no cross-plugin coupling. The
+  registry crate is the sole integration point.

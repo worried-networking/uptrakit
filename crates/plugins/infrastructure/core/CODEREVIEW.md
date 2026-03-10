@@ -169,3 +169,58 @@ could mislead implementors into thinking the allocation pattern varies intention
 ### Issues
 
 No test coverage issues found.
+
+---
+
+## 2026-03-10 Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references and heap,
+and maintainability.
+
+### Dimension: Extensibility
+
+#### Strengths
+
+- `src/traits.rs:141-386` -- `Plugin` trait with sensible defaults is well-designed: one
+  required method (`plugin_type`), all operation methods default to typed errors, and batch
+  methods fall back to sequential per-item calls. This enables incremental capability adoption
+  without breaking existing plugins.
+- `src/secrets.rs:9-17` -- `SecretMasking` trait with no-op defaults is well-designed. Plugins
+  with no secrets implement a single empty `impl`, and the JSON round-trip pattern ensures
+  masking logic never diverges from the serialized representation.
+- `src/form_schema.rs` -- `ConfigFormSchema` trait enables dynamic UI generation from plugin
+  config metadata, allowing the frontend to render plugin configuration forms without
+  hardcoded knowledge of each plugin's fields.
+- `src/agent_infra.rs:215-307` -- `AgentInfraPlugin` trait is comprehensive, covering
+  bootstrap detection, sync, extension actions, post-report callbacks, plugin config response,
+  migrations, sudo commands, and guest exec provider. Default implementations for optional
+  methods (`required_sudo_commands`, `guest_exec_provider`) reduce boilerplate.
+
+#### Issues
+
+**[MEDIUM]** `src/types.rs:12-43` -- `UpstreamRelease` is a public struct used across crate
+boundaries but does not carry `#[non_exhaustive]`. Adding new fields (e.g., `signature`,
+`changelog_url`) would be a breaking change for any code that constructs the struct with
+positional syntax. All current construction sites use named fields, but external crates are
+not protected.
+
+**[MEDIUM]** `src/agent_infra.rs:35-55` -- `GuestBootstrapParams` is a public struct missing
+`#[non_exhaustive]`. Similarly, `GuestBootstrapResult` (line 58-62), `PluginConfigReport`
+(line 162-170), `BootstrapInfraResult` (line 173-182), `InfraResolvedSudo` (line 188-196),
+`SyncInfraResult` (line 199-205), and `InfraPluginContext` (line 141-157) are all public
+structs used across crate boundaries without `#[non_exhaustive]`. Adding fields to any of
+these would break external constructors.
+
+**[LOW]** `src/batch_detect.rs:10-14` -- `BatchDetectItem` and `BatchDetectResult` (line
+18-33) are public structs missing `#[non_exhaustive]`. Similarly, `BatchFetchItem`
+(`batch_fetch.rs:10-14`) and `BatchFetchResult` (line 17-29), `BatchUpdateItem`
+(`batch_update.rs:9-18`) and `BatchUpdateResult` (line 21-30) are all missing the annotation.
+
+**[LOW]** `src/traits.rs:29-46` -- `UpdateHookContext` and `PreUpdateHookResult` are public
+structs missing `#[non_exhaustive]`. Adding fields like `from_version` to `UpdateHookContext`
+or `warnings` to `PreUpdateHookResult` would break external constructors.
+
+**[LOW]** `src/traits.rs:68-75` -- `SudoHelperScript` is a public struct missing
+`#[non_exhaustive]`. Similarly, `SudoCommandEntry` (line 101-133) is missing the annotation.
+Both are constructed by plugins across crate boundaries.

@@ -264,3 +264,47 @@ regressions.
 but no ignored integration test exists to exercise them. The connection and publish paths
 are covered only by end-to-end system tests, making regressions harder to catch during
 development.
+
+---
+
+## 2026-03-10 Review Update (12-Dimension)
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Code Quality (D3)
+
+#### Issues
+
+**[LOW]** `src/error.rs` -- Missing `Result` type alias and prelude import. The crate does not
+define a `type Result<T> = std::result::Result<T, Report<NatsError>>` alias, unlike most other
+shared crates in the workspace. Callers must write the full `Result<T, Report<NatsError>>` type.
+Minor inconsistency.
+
+**[LOW]** `src/error.rs` -- Opaque error messages. `NatsError` variants use generic messages
+(e.g., `"NATS connection error"`) without including the underlying cause in the Display output.
+While the `rootcause` chain preserves the original error via `context_to`, the top-level Display
+string alone is insufficient for quick log triage.
+
+### Dimension: High Availability (D5)
+
+#### Strengths
+
+- `src/connection.rs:52-78` -- NATS connection with startup retry. The `connect()` function
+  retries up to 10 times with exponential backoff (1s-30s), handling transient NATS unavailability
+  at startup. This is critical for container orchestration environments where NATS may start after
+  the controller.
+
+- `src/connection.rs:131-163` -- Credential-bearing messages are blocked from publication to NATS.
+  The `publish()` method defensively checks `is_nats_publishable()` on every message before
+  publishing, with both a runtime check and a `debug_assert!` for development builds. This
+  prevents accidental credential leakage to the NATS bus.
+
+### Dimension: Coding Standards (D7)
+
+#### Issues
+
+**[LOW]** `src/connection.rs` -- `.expect()` used in the connection retry loop for stream
+creation. The coding standard prohibits `.expect()` in production code. Replace with a fallible
+path that returns `Report<NatsError>`.

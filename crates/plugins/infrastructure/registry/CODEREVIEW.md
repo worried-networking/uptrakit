@@ -156,3 +156,50 @@ mock. For `create_plugin` tests this is benign (plugins are constructed but not 
 but it means no test verifies that `CommandExecutor` calls are forwarded correctly from the
 registry dispatch methods down to individual plugins. A `MockCommandExecutor` that records
 calls and returns canned stdout/stderr would enable dispatch-correctness tests.
+
+---
+
+## 2026-03-10 Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references and heap,
+and maintainability.
+
+### Dimension: Code Quality
+
+#### Issues
+
+**[LOW]** `src/error.rs:14` -- `PluginRegistryError::ConfigParse` uses `#[from]` to derive
+`From<serde_json::Error>`, while line 28 also declares
+`impl_report_conversion!(serde_json::Error => PluginRegistryError::ConfigParse)`. The
+`#[from]` conversion generates `From<serde_json::Error> for PluginRegistryError`, while the
+macro generates `From<Report<serde_json::Error>> for Report<PluginRegistryError>`. Both are
+needed in practice (the `#[from]` for `?` on bare errors, the macro for `?` on `Report`
+errors), but the dual declaration is not obviously intentional. A comment documenting that
+both are required would prevent future cleanup from accidentally removing one.
+
+### Dimension: Extensibility
+
+#### Strengths
+
+- `src/registry.rs:491-504` -- `register_plugins!` macro provides single-point registration.
+  Adding a new plugin requires exactly one line in the macro invocation, and all seven dispatch
+  methods are auto-generated with consistent error handling.
+- `src/lib.rs:57-86` -- `PluginOps` trait enables clean decoupling between the web API and the
+  concrete registry. Route handlers testable in isolation by substituting a mock implementation.
+
+### Dimension: Idiomatic Rust
+
+#### Strengths
+
+- `src/registry.rs:43-156` -- Macro-generated plugin dispatch eliminates all dispatch
+  duplication. Each method is generated uniformly from the macro entries.
+
+#### Issues
+
+**[LOW]** `src/registry.rs:31-44` -- `mask_secrets_for` clones `config` twice on the success
+path: once at line 32 (`serde_json::from_value::<T>(config.clone())`) and the clone produced
+by the deserialization itself. On the error fallback path (line 43), a third clone is produced.
+The success path could avoid one clone by consuming the `Value` directly, but the function
+signature takes `&serde_json::Value` to match the `PluginOps` trait. This is low-priority since
+masking runs only on API responses, not on hot paths.

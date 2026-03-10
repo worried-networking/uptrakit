@@ -134,3 +134,47 @@ path, the date-parse path, and the pre-release exclusion path end-to-end.
 behavior, not application logic, violating the project testing philosophy documented in
 `docs/development/testing.md`. They should be removed. See umbrella `plugins/CODEREVIEW.md`
 for the full cross-plugin finding. (Confirmed by Tests parallel review, finding 2.1.)~~ *(Fixed: entire `mod tests` block removed from `src/error.rs`.)*
+
+---
+
+## 2026-03-10 Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references and heap,
+and maintainability.
+
+### Dimension: Security
+
+#### Strengths
+
+- `src/plugin.rs:118-128` -- API client correctly applies `SsrfSafeResolver::new()` (line
+  125), `redirect(Policy::none())` (line 124), `connect_timeout(10s)` (line 126), and
+  `timeout(60s)` (line 127). SSRF protection is comprehensive for the API path.
+
+#### Issues
+
+**[MEDIUM]** `src/plugin.rs:639-647` -- The download client (built at `execute_update` time
+for asset downloads) does not set `.dns_resolver(Arc::new(SsrfSafeResolver::new()))`. The
+download URL comes from the GitHub API response (`asset.download_url`), which is
+attacker-controllable for repositories with write access. A malicious release could point the
+download URL at a private network host. The API client (line 118) correctly applies the SSRF
+resolver, but the download client omits it.
+Recommendation: add `.dns_resolver(Arc::new(SsrfSafeResolver::new()))` to the download client
+builder at line 639.
+
+### Dimension: Idiomatic Rust
+
+#### Strengths
+
+- `src/plugin.rs:118-128` -- SSRF-safe HTTP client construction follows the project standard
+  pattern with all four required settings (SSRF resolver, redirect policy, connect timeout,
+  request timeout) applied in a single builder chain.
+
+#### Issues
+
+**[LOW]** `src/plugin.rs:139` -- `Regex::new(p)` is called for each asset filter pattern
+inside `GitHubPlugin::new()`, which runs on every plugin instantiation. Since plugins are
+re-created from config on each version-check cycle, the same patterns are compiled repeatedly.
+Caching compiled regexes in a `LazyLock<Regex>` or moving compilation to config validation
+time would avoid redundant work. This is low-priority since regex compilation is fast and the
+number of patterns per plugin is small.

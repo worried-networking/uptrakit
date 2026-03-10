@@ -358,3 +358,47 @@ in auth_cleanup executor. No additional dependencies.`
   provides DB-level "at most one active update per host" enforcement. Confirmed correct.
 - `recover_stale_claims` sets `last_error` to a descriptive string so post-mortem DB queries
   reveal recovered tasks. Confirmed correct.
+
+---
+
+## 2026-03-10 Review Update (12-Dimension)
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Architecture (D1)
+
+#### Issues
+
+**[MEDIUM]** `Cargo.toml` -- Depends on `plugin-infrastructure-registry` which compiles all
+plugins. The scheduler only needs plugin capabilities for version-check executor configuration,
+not full plugin execution code. *Prior finding confirmed from Architecture section.*
+
+### Dimension: Tests (D4)
+
+#### Issues
+
+**[LOW]** `src/claim.rs` -- Test mocks use `std::sync::Mutex` for shared state in async test
+contexts. The project standard prescribes `parking_lot::Mutex` everywhere. Replace with
+`parking_lot::Mutex` for consistency.
+
+#### Strengths
+
+- `src/claim.rs:200-464` -- Scheduler tests correctly avoid `start_paused` since no Tokio time
+  APIs are used. All nine claim lifecycle tests use `#[tokio::test]` without `start_paused`,
+  which is correct because they interact only with the in-memory SQLite database and do not call
+  `tokio::time::sleep`, `advance`, or `timeout`.
+
+- `src/claim.rs` -- FK constraints are correctly handled in test setup. All parent rows (tenants,
+  scheduled tasks) are inserted before child rows, satisfying the `PRAGMA foreign_keys = ON`
+  enforcement in SQLite test databases.
+
+### Dimension: High Availability (D5)
+
+#### Strengths
+
+- Robust optimistic locking via `try_claim` single-statement `UPDATE WHERE locked_by IS NULL`.
+  Claims are released on shutdown via `release_all_claims` scoped to the shutting-down controller.
+  Unknown task types are skipped at the query level via `IS IN (...)` filtering, preventing
+  deserialization failures during rolling upgrades. *Confirmed from prior HA and Database sections.*

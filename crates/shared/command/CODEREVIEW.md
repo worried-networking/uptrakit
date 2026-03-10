@@ -126,3 +126,52 @@ No extensibility issues found.
 timeout but no test for the interleaved stdout/stderr ordering guarantee. A test with
 interleaved output lines would verify that `UpdateOutputLine::Stdout` and `::Stderr` are
 tagged correctly and that neither channel starves the other.
+
+---
+
+## 2026-03-10 Review Update (12-Dimension)
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Code Quality (D3)
+
+#### Issues
+
+**[LOW]** `src/interactive.rs` -- 7 instances of `return Err(report!(...))` anti-pattern. The
+project standard is to use `bail!(...)` for early-return error paths, which is equivalent but
+more concise and consistent with the rest of the codebase. Replace each
+`return Err(report!("..."))` with `bail!("...")`.
+
+### Dimension: Tests (D4)
+
+#### Strengths
+
+- `src/executor.rs` -- `execute_quiet_timeout_fires` and `execute_timeout_fires` correctly use
+  `#[tokio::test(start_paused = true)]` with `tokio::time::advance`. The `start_paused` annotation
+  is justified by direct use of Tokio time APIs (`tokio::time::timeout`, `tokio::time::advance`).
+  Tests that do not use time APIs correctly omit `start_paused`.
+
+### Dimension: Idiomatic Rust (D10)
+
+#### Strengths
+
+- `src/command.rs` -- Clean builder pattern on `CommandSpec` with `#[must_use]` on all builder
+  methods (`with_working_dir`, `with_timeout`, `with_env`, `with_sudo_context`). Each builder
+  method returns `Self`, enabling fluent chaining. The pattern is idiomatic and consistent with
+  the Rust API guidelines.
+
+- `src/executor.rs` -- Trait object design for `CommandExecutor` (`Arc<dyn CommandExecutor>`)
+  enables dependency injection across all agent and plugin code. `NoopCommandExecutor` provides
+  a canonical no-op implementation for the controller side. The `Send + Sync` bounds are correctly
+  applied for `Arc` storage.
+
+### Dimension: References and Heap (D11)
+
+#### Issues
+
+**[LOW]** `src/command.rs` -- `CommandSpec::resolve()` clones `program` and `args` when building
+the resolved command. For `CommandMode::Shell`, the entire argument list is serialized into a
+single shell string, making the clone necessary. For `CommandMode::Exec`, the clone could be
+avoided by taking ownership. Minor allocation overhead; no correctness impact.

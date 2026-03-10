@@ -310,3 +310,33 @@ contributor. Add: `// start_paused not required: test inputs always produce non-
 - `parse_dpkg_output` uses `filter_map` with `splitn`; `parse_madison_output` uses `find_map`.
   Iterator combinators used correctly throughout. Confirmed correct.
 - `Arc::clone` placed correctly at task spawn boundaries. Confirmed correct.
+
+---
+
+## 2026-03-10 Review Update (12-Dimension)
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Coding Standards (D7)
+
+#### Issues
+
+**[LOW]** `src/version_check.rs` -- `.expect()` used in the retry loop within `run_with_retry`.
+The `expect` is reachable only after prior validation succeeds, but the coding standard prohibits
+`expect()` in production code. Replace with a fallible path returning `Report`.
+
+### Dimension: Idiomatic Rust (D10)
+
+#### Strengths
+
+- `src/connection_context.rs` -- `ConnectionContext` provides a clean config-override injection
+  mechanism via `apply_to_config`. The pattern allows callers (SSH agent, local agent) to inject
+  transport-specific overrides without modifying the plugin config schema. The struct groups all
+  per-connection mutable state, keeping function signatures readable.
+
+- `src/version_check.rs` -- Batch grouping by `(PluginType, effective_config)` tuple is the correct
+  approach for deduplicating plugin instantiation and package-index refreshes. Each unique
+  (type, config) pair creates exactly one plugin instance, and `RefreshPackageIndex` is called at
+  most once per unique fetch group.

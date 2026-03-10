@@ -217,3 +217,55 @@ added in the future. No action required now; noted for awareness.
   semantic purpose. Confirmed correct.
 - `EncryptedString` SeaORM custom type makes encryption transparent to query code. Masked
   `Debug` output shows `ENC:***`. Confirmed correct.
+
+---
+
+## 2026-03-10 Review Update (12-Dimension)
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Code Quality (D3)
+
+#### Strengths
+
+- `src/lib.rs` -- Comprehensive documentation throughout. Every public function, type, and error
+  variant has a doc comment. The `ENC:v1:` / `ENC:v2:` / `ENC:v3:` version prefix scheme is
+  documented with migration notes. The `DataKeyRing` invariants are documented in the struct-level
+  doc comment.
+
+- `src/lib.rs` -- Security-conscious design decisions are explicitly documented: `Zeroizing` for
+  key material, `OnceLock` for immutable global state, `Debug` redaction on `EncryptedString`,
+  and AAD binding to prevent ciphertext relocation.
+
+### Dimension: Coding Standards (D7)
+
+#### Issues
+
+**[LOW]** `src/lib.rs:423` -- `TEST_LOCK: Mutex<()>` uses `std::sync::Mutex` in test code. The
+project standard prescribes `parking_lot::Mutex` everywhere. While test code is less critical,
+the inconsistency may confuse contributors who grep for `std::sync::Mutex` usage. Replace with
+`parking_lot::Mutex<()>`.
+
+### Dimension: Idiomatic Rust (D10)
+
+#### Strengths
+
+- `src/lib.rs` -- `Zeroizing<[u8; 32]>` for all key material ensures cryptographic keys are
+  scrubbed from memory on drop. The `Zeroizing` wrapper is used consistently for the master key,
+  data encryption keys, and intermediate key material.
+
+- `src/lib.rs` -- `DataKeyRing` enforces the invariant that `active_key_id` must reference a key
+  present in the `keys` map. The constructor validates this at creation time, and the ring is
+  immutable thereafter. The `active_key()` accessor is infallible after successful construction.
+
+### Dimension: Maintainability (D12)
+
+#### Issues
+
+**[LOW]** `src/lib.rs` -- At 1,914 lines, this single file contains all encryption logic (AES-GCM,
+envelope encryption, key ring management), the `EncryptedString` SeaORM integration, plaintext mode,
+key verification, and all tests. Splitting into `src/encryption.rs` (core AES-GCM operations),
+`src/keyring.rs` (DataKeyRing and key management), `src/encrypted_string.rs` (SeaORM type), and
+`src/lib.rs` (re-exports and public API) would improve navigability.

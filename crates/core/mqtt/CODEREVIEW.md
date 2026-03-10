@@ -342,3 +342,70 @@ to avoid materialising an owned `Vec` at the call site.
 `mpsc::Sender` clone is an atomic ref-count increment and is cheap. No correctness action is
 required, but annotating the clone site with a brief comment noting its cheapness would prevent
 future reviewers from considering it a performance concern.
+
+## 2026-03-10 12-Dimension Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: High Availability (D5)
+
+#### Strengths
+
+- `src/mqtt_client.rs` -- Non-blocking post-ConnAck operations prevent self-deadlock. After
+  receiving ConnAck, the client publishes online status and subscribes to command topics using
+  `try_publish`/`try_subscribe` with a deferred-retry flag rather than blocking the event loop.
+  This avoids deadlocking the `rumqttc` channel when the internal buffer is full.
+
+#### Issues
+
+**[MEDIUM]** `src/mqtt_client.rs` -- Clean session mode documentation. The MQTT client uses
+`clean_session = true`, which means all subscriptions and queued messages are discarded on
+disconnect. This is intentional (state is rebuilt from the controller on reconnect), but the
+rationale is not documented in a code comment. A brief comment explaining why `clean_session`
+is appropriate for this use case would prevent future contributors from changing it to `false`
+for perceived reliability gains.
+
+### Dimension: Coding Standards (D7)
+
+#### Issues
+
+**[MEDIUM]** `src/ha_discovery.rs` -- `#[allow(clippy::too_many_arguments)]` on the
+`ha_discovery` function. The function accepts 8+ parameters for constructing Home Assistant
+discovery configs. While the argument count is driven by the HA MQTT discovery protocol
+requirements, the suppression diverges from the project-wide zero-suppression standard.
+Consider grouping related parameters into a `HaDiscoveryParams` struct.
+
+### Dimension: References and Heap (D11)
+
+#### Issues
+
+**[MEDIUM]** `src/tenant_manager.rs` -- Triple clone on every state push. When
+`update_software_states` is called, the payload is cloned into the cache, then the original
+is used for publishing, and `handle_reconnected` clones the cached data again when
+re-publishing after a broker reconnect. Under large software-state payloads (hundreds of items
+across many hosts), this creates significant transient heap pressure. Recommendation: reorder
+operations to publish first, then move ownership into the cache; make publish methods accept
+`&self` to eliminate the reconnect-path clone.
+
+**[MEDIUM]** `src/ha_discovery.rs` -- Double `format!()` in HA discovery topic construction.
+Topic strings are constructed via `format!()` and then immediately passed to another
+`format!()` that wraps them in the full MQTT topic path. Each topic publish thus allocates two
+transient `String` objects where one would suffice. Recommendation: use a single `format!()`
+call with all segments inline, or use `write!` into a pre-allocated buffer.
+
+**[LOW]** `src/tenant_manager.rs` -- `.as_bytes().to_vec()` pattern for MQTT publish payloads.
+String payloads are converted to bytes via `.as_bytes().to_vec()`, which allocates a new `Vec`
+copying the string contents. If the `MqttHandle::publish_retained` API accepted `&[u8]`,
+the intermediate allocation could be avoided.
+
+### Dimension: Maintainability (D12)
+
+#### Issues
+
+**[MEDIUM]** `src/ha_discovery.rs` -- At 3,208 lines, `ha_discovery.rs` is the largest single
+file in the MQTT crate. It contains topic construction, discovery config building, state
+publishing, and command parsing. Candidate for splitting into sub-modules: `topics.rs` (topic
+string construction), `config.rs` (discovery config building), `publish.rs` (state
+publishing), and `commands.rs` (command topic parsing).

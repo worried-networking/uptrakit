@@ -705,3 +705,58 @@ extract CNs. It also iterates `self.trusted` twice. Recommendation: merge the tw
 each PEM is parsed once, returning all three values (`fingerprint`, `not_after`, `cn`) in a
 single pass. This reduces allocations and simplifies the error surface for malformed PEM
 inputs.
+
+## 2026-03-10 12-Dimension Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Code Quality (D3)
+
+#### Strengths
+
+- `src/startup.rs` -- Startup phase decomposition into typed intermediate structs
+  (`ReconciledSettings`, `ValidatedConfig`, `PkiRuntime`) provides compile-time safety for
+  phase ordering. Each phase function is independently readable and testable.
+
+#### Issues
+
+**[LOW]** `src/startup.rs` -- Dual `#[from]` and `impl_report_conversion!` on `DbError::SeaOrm`.
+The `AppError` enum uses `#[from]` on `sea_orm::DbErr` while `impl_report_conversion!` also
+generates a conversion path. Only one mechanism is needed; the dual conversion is dead code.
+
+### Dimension: High Availability (D5)
+
+#### Strengths
+
+- `src/tasks.rs:76-133` -- Five-phase graceful shutdown: (1) stop accepting new connections,
+  (2) scatter restart notifications across a configurable window, (3) cancel cooperative tasks
+  via `CancellationToken`, (4) abort non-cooperative tasks, (5) await all handles with bounded
+  timeouts. Each phase has explicit timeout bounds.
+- `src/server.rs:42-60` -- Zero-downtime restart via `SO_REUSEPORT`. A new controller instance
+  binds the same port before the old one has fully shut down, enabling blue/green deployments
+  with no gap in service availability.
+- `src/tasks.rs` and `src/main.rs` -- `CancellationToken` hierarchy: a root token in `main.rs`
+  is cloned into every `spawn_*` helper and the scheduler engine. Child tokens are derived for
+  sub-tasks that need independent cancellation. The hierarchy ensures that a top-level shutdown
+  signal reaches all background work without manual bookkeeping.
+- `src/pki.rs` -- CA rotation uses optimistic locking via compare-and-swap
+  (`UPDATE WHERE value = expected_fp`). Two controllers racing to rotate the CA will have
+  exactly one winner; the loser detects `rows_affected == 0` and skips the rotation without
+  corruption.
+
+### Dimension: Coding Standards (D7)
+
+#### Issues
+
+**[LOW]** `src/main.rs` -- `.expect()` in journald tracing layer construction. The
+`tracing_journald::layer().expect("journald layer")` call is acceptable because it occurs
+during binary startup before the tracing subscriber is initialized; a failure here means the
+system does not support journald and the binary cannot proceed. Documented here for
+completeness.
+
+**[LOW]** `src/main.rs` -- `eprintln!` used for pre-tracing error output. Acceptable because
+the tracing subscriber has not yet been initialized at this point in the startup sequence.
+The `eprintln!` calls are limited to the early startup path and are replaced by `tracing::error!`
+once the subscriber is active.

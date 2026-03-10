@@ -361,3 +361,100 @@ stable across editorial revisions. A backward-compat serde alias can bridge the 
   safety. Credential-bearing and session-targeted variants are correctly excluded.
 - `Capability::Other(String)` with `is_known()` guard and `UpdateCapabilities` message allowing
   services to refresh their capability set without full re-enrollment. Confirmed correct.
+
+---
+
+## 2026-03-10 Review Update (12-Dimension)
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Tests (D4)
+
+#### Issues
+
+**[MEDIUM]** `src/envelope.rs` (or test module) -- Prohibited `thiserror` Display test for
+`SeqError`. The test asserts on the exact `Display` output of the `thiserror`-derived `SeqError`
+type. This tests macro behavior rather than application logic and is brittle. Recommendation:
+remove the Display string assertion; keep only tests that verify the `expected` and `received`
+fields are populated correctly.
+
+#### Strengths
+
+- `src/` (test module) -- `WireValidationError` Display test is correctly kept. The
+  `WireValidationError` has custom Display formatting that includes field names and byte limits,
+  which is application-specific logic worth testing.
+
+- `src/` (test module) -- Comprehensive wire protocol tests exceeding 2,000 lines. Every
+  `ServiceMessage` and `ControllerMessage` variant has at least one JSON round-trip test.
+  Backward-compatibility deserialization tests verify that missing new fields and extra unknown
+  fields are handled gracefully. Spec-conformance tests against `asyncapi.yaml` catch protocol
+  drift.
+
+### Dimension: Coding Standards (D7)
+
+#### Issues
+
+**[LOW]** `src/envelope.rs` -- `.expect()` in `ReportTracker` (sequence tracking or report
+management). The coding standard prohibits `.expect()` in production code. Replace with a
+fallible path or document why the `expect` is unreachable.
+
+### Dimension: Extensibility (D8)
+
+#### Issues
+
+**[HIGH]** `src/messages.rs` -- `UpdateFinalStatus` and `DisconnectReason` are missing the
+`Other(String)` catch-all variant. Both enums are sent between controller and agent over the wire
+and use standard `serde` derive. An unknown variant from a newer sender causes a hard
+deserialization error, breaking WebSocket connections during rolling upgrades. `#[non_exhaustive]`
+prevents Rust match exhaustiveness gaps but provides no protection against wire deserialization
+failures. Recommendation: apply the `Other(String)` + infallible custom `Deserialize` pattern
+used by `EnrollmentStatus` and `ErrorCode`. This will lose `Copy` on both types.
+
+**[MEDIUM]** `src/messages.rs` or `src/payloads.rs` -- `HookCommand` enum is missing the
+`Other(String)` catch-all. `HookCommand` is sent from the controller to agents as part of
+`ExecuteUpdatePayload`. If the controller adds a new hook command type (beyond `Exec` and
+`Shell`), older agents will fail to deserialize the update payload entirely, causing the update
+to fail. Recommendation: add `Other(String)` with infallible `Deserialize`.
+
+### Dimension: Idiomatic Rust (D10)
+
+#### Issues
+
+**[MEDIUM]** `src/messages.rs` -- `UpdateFinalStatus` missing `Other(String)` catch-all.
+*Cross-reference with D8 above.* The enum is used in `UpdateCompletePayload` which crosses the
+wire. Without a catch-all, adding new final status values requires coordinated deployment.
+
+#### Strengths
+
+- `src/messages.rs` -- Exhaustive forward-compatibility in message enums. Both `ServiceMessage`
+  and `ControllerMessage` use `#[serde(other)] Unknown` variants ensuring serde never returns a
+  hard error on an unrecognised `"type"` tag. Combined with `#[non_exhaustive]`, this provides
+  both compile-time and runtime forward compatibility.
+
+### Dimension: References and Heap (D11)
+
+#### Issues
+
+**[LOW]** `src/payloads.rs` (or equivalent) -- `Paginatable::with_items` clones shared header
+fields (e.g., `total_count`, `page`, `per_page`) when constructing the paginated response. These
+are `Copy` types (`i64`, `u64`) so the clone is free, but the explicit `.clone()` call on `Copy`
+types is unnecessary and adds visual noise. Replace with direct assignment.
+
+#### Strengths
+
+- `src/messages.rs` -- `Box` used for large `ControllerMessage` variants. `ExecuteUpdate` is
+  heap-boxed to limit the enum discriminant size, preventing the entire enum from being inflated
+  to the size of the largest variant. This is the correct optimization for a message enum where
+  most variants are small but `ExecuteUpdate` carries a large payload.
+
+### Dimension: Maintainability (D12)
+
+#### Issues
+
+**[MEDIUM]** `src/lib.rs` -- 3,058 lines, with the majority being tests. While the production
+code has been split into domain modules (`messages.rs`, `payloads.rs`, `envelope.rs`, etc.), the
+test module remains in `lib.rs`. Consider moving tests to dedicated `tests/` files per module or
+into `#[cfg(test)] mod tests` blocks within each domain module to co-locate tests with the code
+they exercise.

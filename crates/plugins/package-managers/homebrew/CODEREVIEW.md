@@ -117,3 +117,9 @@ parsing code path inside these methods end-to-end using a mock executor that ret
 pre-built `brew info --json=v2` fixture. The gap means that the executor invocation logic
 (argument assembly, JSON capture, error handling) is untested even though the underlying
 parsers are well-tested.
+
+---
+
+## 2026-03-10 Review Update
+
+No new findings beyond existing review content.

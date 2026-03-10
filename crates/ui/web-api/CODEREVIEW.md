@@ -946,3 +946,130 @@ Cross-referenced against the 2026-03-06 findings; items already recorded there a
 | **Low** | `service_ws.rs` tests: `_app` binding immediately drops `TestApp`, leaking the spawned Axum server without clean shutdown. Add `app.shutdown_token.cancel()` at test end. |
 | **Low** | `software_items_crud.rs:248-267` uses an inline `ActiveModel` literal instead of the `insert_host` fixture. A new required DB column would not be caught here. Use the fixture and pass `host_id.to_string()` as `machine_id`. |
 | **Info** | The `test_harness` pattern (per-test in-memory SQLite, `tower::ServiceExt::oneshot`, real `AppState`, zero shared state) is well-engineered. Document it in `docs/development/testing.md`. |
+
+---
+
+## 2026-03-10 Comprehensive Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references and heap,
+and maintainability. Only findings not already recorded above are listed.
+
+### Dimension: Security (D2)
+
+#### Issues
+
+**[MEDIUM]** `routes/auth.rs` (login handler) -- Login endpoint leaks deactivated user
+existence: a deactivated user receives HTTP 403 while a nonexistent user receives HTTP 401.
+An attacker can enumerate valid usernames by observing the status code difference. Return
+401 for both cases with an identical error message.
+
+**[LOW]** `routes/auth.rs` (register handler) -- Registration endpoint returns HTTP 409 on
+duplicate email, confirming that the email address is already registered. This is a user
+enumeration vector. Consider returning a generic 200 response that instructs the user to
+check their email, regardless of whether the account exists.
+
+### Dimension: Code Quality (D3)
+
+#### Issues
+
+**[MEDIUM]** `routes/service_ws/handler/mod.rs` -- `handle_authenticated_loop` exceeds 700
+lines with high cyclomatic complexity. The function handles ping, message dispatch, approval
+polling, cancellation, and update lifecycle in a single `tokio::select!` loop. Extract
+discrete handlers for each message type into private helper functions.
+
+**[MEDIUM]** `routes/update_batches.rs` and `routes/software_items.rs` -- Duplicated batch
+action side-effect logic: the approve/reject/deactivate branches in batch endpoints repeat
+the same per-item update + audit-log + notification sequence found in single-item endpoints.
+Extract shared `apply_status_change` helpers in the query layer.
+
+### Dimension: High Availability (D5)
+
+#### Strengths
+
+- `event_broadcaster.rs` -- Subscriber tracking with per-topic `broadcast::Sender` channels
+  allows targeted event delivery without scanning all connections.
+
+#### Issues
+
+**[MEDIUM]** `event_broadcaster.rs` -- `EventBroadcaster` uses `tokio::sync::RwLock` instead
+of `parking_lot::RwLock`. Guards are dropped before `await` today, but this violates the
+project-wide `parking_lot` standard and exposes the same future-maintenance risk as
+`ServiceConnectionRegistry`. Replace with `parking_lot::RwLock`.
+
+### Dimension: Database (D6)
+
+#### Issues
+
+**[HIGH]** `routes/service_ws/interactive_ws.rs:143` -- `ServiceHost::find()` without tenant
+join. The interactive WebSocket handler queries `service_host` directly without routing
+through `tenant_db.find_via_tenant_join`. Replace with the standard tenant-join pattern.
+
+**[MEDIUM]** `routes/autodiscovery.rs` (discovery results handler) --
+`.unwrap_or_default()` silences database errors when loading discovery results. A transient
+DB failure returns an empty result set instead of surfacing a 500 error. Replace with
+explicit error propagation via `context_to()?`.
+
+**[MEDIUM]** `routes/autodiscovery.rs` (discovery results handler) -- N+1 query pattern in
+discovery results host lookup: each discovery result triggers a separate host query. Batch
+the host lookups into a single `is_in()` query.
+
+### Dimension: Coding Standards (D7)
+
+#### Issues
+
+**[MEDIUM]** `notifications/dispatcher.rs`, `routes/notifications.rs`,
+`routes/settings.rs` -- Additional `#[cfg(not(feature = "..."))]` violations beyond those
+already noted for `batch_progress_broadcaster.rs` and `settings_global_combined.rs`. Convert
+to `cfg!()` macro or `if cfg!(feature = "...")` blocks per the additive-only feature flag
+rule.
+
+**[MEDIUM]** `oidc_http_client.rs` -- `.expect()` on `reqwest::Client::builder().build()`
+can panic if the system TLS backend is misconfigured. Replace with proper error propagation
+returning `Report`.
+
+**[MEDIUM]** `oidc_http_client.rs` -- Missing `SsrfSafeResolver` on the OIDC HTTP client.
+The OIDC provider URL is operator-configured and could resolve to a private IP in
+misconfigured environments. Add `.dns_resolver(Arc::new(SsrfSafeResolver::new()))` per the
+project HTTP client standard, or document the exception with a comment explaining why OIDC
+providers are trusted.
+
+### Dimension: Consistency (D9)
+
+#### Issues
+
+**[MEDIUM]** `routes/auth.rs` (register handler) -- Registration validation error uses
+`e.into_response()` directly, bypassing the `error_response()` helper used by every other
+route. This produces a response body that does not match the standard `ErrorBody` JSON
+shape. Route through `error_response(StatusCode::BAD_REQUEST, &e.to_string())`.
+
+**[MEDIUM]** `routes/extensions.rs` -- `error_response_with_code` helper is defined and used
+only in the extensions module, while every other route file uses `error_response`. Unify on
+a single error-response function, or if the `code` field is needed, add it to the shared
+`error_response` helper.
+
+**[LOW]** `routes/autodiscovery.rs` (ignore handler) -- `create_autodiscovery_ignore`
+swallows database errors on duplicate-check: `.ok()` on the DB result drops any error other
+than a unique constraint violation. Propagate the error and handle only the specific
+constraint-violation case.
+
+### Dimension: Idiomatic Rust (D10)
+
+#### Issues
+
+**[LOW]** `routes/software_items.rs` (batch actions) -- Batch action type is matched via
+string comparison (`"approve"`, `"reject"`, `"deactivate"`) rather than a typed enum.
+Introduce a `BatchAction` enum with `FromStr` / `Deserialize` to get compile-time
+exhaustiveness checks, consistent with `ActorType` and `BatchType`.
+
+### Dimension: Heap and References (D11)
+
+#### Issues
+
+**[LOW]** `routes/service_ws/connection.rs` -- `HashMap::new()` used to parse WebSocket
+query parameters on every connection. The map typically holds 1-3 entries; use
+`HashMap::with_capacity(4)` or parse parameters inline without an intermediate map.
+
+**[LOW]** `routes/service_ws/handler/updates.rs` -- `cert_serial.clone()` used solely to
+pass to a SeaORM `.eq()` filter. SeaORM accepts `&str` via `Into<Value>`; pass a reference
+instead of cloning.

@@ -241,3 +241,20 @@ No consistency issues found.
 ### Issues
 
 No maintainability issues found.
+
+---
+
+## 2026-03-10 Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references and heap,
+and maintainability.
+
+### Dimension: Tests
+
+#### Strengths
+
+- `src/config.rs:161-309` -- Plugin config validation tests use resilient `contains`
+  assertions on error messages rather than exact string equality. This makes tests robust
+  against error message rewording while still verifying that the correct validation rule was
+  triggered. Consistent with the Forgejo plugin's test style.

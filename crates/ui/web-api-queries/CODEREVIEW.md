@@ -297,3 +297,92 @@ below. New findings are additive.
 | --- | --- |
 | **Medium** | Missing integration tests for `settings_mqtt.rs` routes (729 LOC, credential storage, password encryption). At minimum: GET returns 200, PUT with valid config returns 200, GET after PUT does not return the plaintext password (returns `has_password: true`). *Adds to prior HIGH test-gap finding.* |
 | **Low** | `test_harness/fixtures.rs` — `register_and_get_token` hardcodes email `owner@test.local`. Calling it twice per `TestApp` instance fails on a duplicate email constraint. Accept `email` and `password` parameters, or document the single-use constraint. |
+
+---
+
+## 2026-03-10 Comprehensive Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references and heap,
+and maintainability. Only findings not already recorded above are listed.
+
+### Dimension: Code Quality (D3)
+
+#### Issues
+
+**[MEDIUM]** `queries/services.rs` and `queries/system_services.rs` -- Duplicated batch
+query pattern: both modules implement nearly identical approve/reject/deactivate loops with
+per-item SELECT + UPDATE. Extract a shared `batch_status_transition` helper parameterized by
+status filter and target status.
+
+**[LOW]** `queries/autodiscovery.rs` -- Four instances of `return Err(report!(...))` instead
+of `bail!(...)`. The `bail!` macro is the project-standard shorthand for early error returns.
+Replace for consistency.
+
+### Dimension: Database (D6)
+
+#### Issues
+
+**[MEDIUM]** `queries/update_triggers.rs:271` -- `ServiceHost::find()` without tenant join.
+The `service_host` table has no `tenant_id` column; per project standard, queries must route
+through `find_via_tenant_join`. Replace with
+`tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(...)`.
+
+**[MEDIUM]** `queries/hosts.rs` -- `batch_deactivate_hosts` executes per-host soft-delete +
+certificate revocation without a wrapping transaction. A failure partway through leaves some
+hosts deactivated and others untouched. Wrap in `db.begin()` / `txn.commit()`.
+
+**[MEDIUM]** `queries/update_batches.rs` (batch creation) -- N+1 in
+`validate_update_preconditions` during batch creation: each candidate host triggers a
+separate precondition-check query. Batch the host-level checks into a single query with
+`is_in()` to reduce round-trips for large batches.
+
+**[LOW]** `queries/services.rs:380` -- `ServiceHost::find()` without tenant join when
+loading service-host links for merge. Currently safe because the service ID is pre-scoped,
+but violates the structural convention. Replace with `find_via_tenant_join`.
+
+**[LOW]** `queries/mqtt_software_states.rs:332` -- `ServiceHost::find()` without tenant join
+when loading host links for MQTT state aggregation. Same structural convention gap. Replace
+with `find_via_tenant_join`.
+
+**[LOW]** `queries/update_triggers.rs` -- Duplicate `#[tracing::instrument]` attribute on
+`load_target_for_dispatch`. The function has the attribute applied twice, which causes the
+second to silently shadow the first. Remove the duplicate.
+
+### Dimension: Coding Standards (D7)
+
+#### Issues
+
+**[MEDIUM]** Crate-wide -- 11 `#[allow(clippy::type_complexity)]` annotations across query
+modules. These suppress warnings on complex return types (typically
+`Select<Entity, SelectModel<...>>`). Where possible, introduce type aliases for the complex
+return types to eliminate the suppressions. Where SeaORM generics make aliases impractical,
+document the justification inline.
+
+### Dimension: Idiomatic Rust (D10)
+
+#### Strengths
+
+- `queries/hosts.rs`, `queries/host_tags.rs` -- Consistent use of `HashMap::entry()` API
+  for building lookup maps from batch query results, avoiding redundant key lookups.
+
+### Dimension: Heap and References (D11)
+
+#### Issues
+
+**[LOW]** `queries/update_batches.rs`, `queries/hosts.rs` -- `Vec::new()` used for batch
+result collection without `Vec::with_capacity()` hints when the expected size is known from
+a prior COUNT query or input slice length.
+
+**[LOW]** `queries/update_batches.rs` (batch loops) -- Repeated `.to_string()` on string
+literals (`"pending"`, `"completed"`, etc.) inside loops. Hoist to `&'static str` constants
+or use `Cow<'static, str>` to avoid per-iteration heap allocation.
+
+**[LOW]** `queries/host_tags.rs` -- `tags_map.get(&id).cloned()` clones a `Vec<String>` on
+every lookup. Use `.get(&id).map(|v| v.as_slice())` where the caller only needs a reference,
+or move out of the map with `.remove(&id)` when the entry will not be reused.
+
+**[LOW]** `queries/services.rs` (`model_to_response`) -- `cap_strings` allocated via
+`.iter().map(|c| c.to_string()).collect()` on every response conversion. If the source
+capabilities are already `String` values, use `.clone()` instead of `.to_string()` to avoid
+the `Display` formatting overhead.

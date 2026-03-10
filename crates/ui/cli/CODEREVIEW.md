@@ -448,3 +448,44 @@ test gaps remain open and are confirmed below. New findings are additive.
 | --- | --- | --- |
 | **Low** | `src/config.rs:15` | **`Credentials { token: Option<String> }` written to disk**: the token field should be `SecretString` to prevent accidental logging and ensure zeroization on drop. *Extends prior plaintext token HIGH finding.* |
 | **Low** | `src/commands/settings.rs:409,427` | **`client_secret: String / Option<String>` in OIDC config structs**: Clap does not natively support `SecretString`, so this exception should be documented explicitly with a comment at the field definition. |
+
+---
+
+## 2026-03-10 Comprehensive Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references and heap,
+and maintainability. Only findings not already recorded above are listed.
+
+### Dimension: Architecture (D1)
+
+#### Issues
+
+**[MEDIUM]** `src/main.rs` -- At 5,915 lines (increased from 5,894 at last review), the
+file continues to grow. *Confirmed -- no structural change since prior finding.*
+
+### Dimension: Code Quality (D3)
+
+#### Issues
+
+**[LOW]** `src/error.rs` -- Dual `#[from]` and `impl_report_conversion!` on 4 `CliError`
+variants (`reqwest::Error`, `serde_json::Error`, `std::io::Error`, `serde_yaml_ng::Error`).
+The `#[from]` derives are unused because all call sites use `context_to()` or explicit
+`report!()` wrapping. Remove the `#[from]` attributes to eliminate the dead conversion paths
+and make the single error-propagation strategy (rootcause context chain) unambiguous.
+
+### Dimension: Maintainability (D12)
+
+#### Issues
+
+**[HIGH]** `src/main.rs` -- 5,915-line monolith combining Clap argument definitions (~900
+lines), dispatch logic (~1,730 lines), utility functions, and parse tests (~1,500 lines).
+*Confirmed -- extends prior HIGH finding. No structural improvement since 2026-03-06.*
+
+#### Strengths
+
+- Command module organization in `src/commands/` is well-structured: each file handles one
+  namespace with co-located `HumanOutput` implementations, param structs, and tests. The
+  `batch_update.rs` module (455 lines) exemplifies the target structure. This organization
+  provides clear ownership boundaries and makes adding new command namespaces a localized
+  change.

@@ -381,3 +381,78 @@ explicit `DROP INDEX IF EXISTS uix_host_tags_tenant_name` before dropping the ta
   "at most one active update per host". Confirmed correct.
 - Three-format ciphertext design (`v1`/`v2`/`v3`) with backward compatibility in
   `uptrakit-crypto` is correctly handled by the migration path. Confirmed correct.
+
+---
+
+## 2026-03-10 Review Update (12-Dimension)
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Architecture (D1)
+
+#### Strengths
+
+- `src/entity/` -- Entity definitions are centralized in a single crate with the `TenantScoped`
+  trait providing compile-time tenant isolation. All tenant-scoped queries are forced through
+  `TenantDb`, making cross-tenant data leakage structurally impossible for the ten implementing
+  entities.
+
+### Dimension: Database (D6)
+
+#### Strengths
+
+- `src/entity/tenant_scoped.rs` -- `TenantDb` abstraction is well-designed. The `find_all`,
+  `find_by_id`, `find_via_tenant_join`, and `count` methods all automatically apply the tenant
+  filter. The abstraction is transparent to callers and eliminates an entire class of
+  authorization bugs.
+
+- `src/entity/tenant_scoped.rs` -- Comprehensive `TenantScoped` implementations across all
+  tenant-owned entities: `software_item`, `host`, `plugin_config`, `enrollment_token`,
+  `api_token`, `notification_channel`, `notification_rule`, `oidc_provider`,
+  `host_software_item`, and `host_tag`.
+
+- `src/migration/` -- All migrations have proper `down()` implementations. Large structural
+  migrations use the rename-temp-table pattern with crash-recovery detection. Irreversible
+  migrations (UUID repair, datetime repair) have explicit no-op `down()` methods with comments.
+
+- `src/migration/` -- Good index coverage across all entity tables. Composite indexes support
+  the most frequent query patterns: `(tenant_id, ...)` for tenant-scoped lookups, partial unique
+  indexes for soft-delete uniqueness (`WHERE deactivated_at IS NULL`), and covering indexes for
+  session and token cleanup.
+
+- `src/entity/` -- `is_unique_constraint_violation` is properly portable across SQLite and
+  PostgreSQL. The function checks for both the SQLite `UNIQUE constraint failed` and PostgreSQL
+  `duplicate key value` error messages, enabling the same application code to handle constraint
+  violations on both backends.
+
+- `src/entity/` -- No raw SQL in query modules. All queries use SeaORM's query builder API,
+  ensuring portability across database backends and preventing SQL injection.
+
+- `src/migration/mod.rs:43` -- Robust migration testing. The smoke test runs all migrations
+  `up()` and `down()` against an in-memory SQLite instance, verifying syntactic validity and
+  execution correctness.
+
+#### Issues
+
+**[LOW]** `src/migration/mod.rs` -- Migration ordering in the `migrations()` vector does not match
+the chronological file naming timestamps for several entries. While the vector position controls
+actual execution order and this was intentionally reordered to resolve FK dependencies, the
+mismatch between file dates and vector order creates confusion. *Prior finding (2026-03-06,
+`[INFO]`) and (2026-03-10, `[MEDIUM]`) confirmed.*
+
+### Dimension: Maintainability (D12)
+
+#### Strengths
+
+- `src/entity/` -- 56 entity files are well-organized in the `entity/` directory with consistent
+  structure: `Model` struct, `Relation` enum, `Related` implementations, and `ActiveModelBehavior`.
+  The `prelude.rs` re-exports all `Entity` and `Model` types from a single path.
+
+#### Issues
+
+**[LOW]** `src/migration/` -- 41 migration files totaling 11,261 lines. While each migration is
+well-structured individually, the cumulative volume makes it difficult to understand the full
+schema by reading migrations alone. Consider generating a schema snapshot documentation file
+from the final migration state.

@@ -64,3 +64,23 @@ Recommendation: Add a module-level doc comment to `tests/system.rs` and `tests/r
 that lists each scenario file, its coverage intent, and the precondition that Docker is required.
 A brief section in `docs/development/testing.md` cross-referencing the integration suite would
 also serve contributors discovering the test structure for the first time.
+
+## 2026-03-10 12-Dimension Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Tests (D4)
+
+#### Strengths
+
+- `tests/system/` -- Comprehensive lifecycle integration tests covering agent enrollment,
+  SSH agent enrollment, controller startup, full system end-to-end flow, MQTT service
+  enrollment, and scheduler enrollment. These tests exercise the complete enrollment protocol,
+  wire message sequencing, mTLS handshake, and multi-service startup ordering -- scenarios
+  that are structurally unreachable from unit tests.
+- `tests/reverse_proxy/` -- Reverse proxy and mTLS termination tests across six proxy
+  implementations (Caddy, Envoy, HAProxy, nginx, Traefik) with CRL and OCSP revocation
+  scenarios. This is high-value coverage for the PKI infrastructure that validates
+  certificate revocation propagation through real proxy configurations.

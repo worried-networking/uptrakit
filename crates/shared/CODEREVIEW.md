@@ -298,3 +298,53 @@ umbrella crates.
   canonical no-op implementation for the controller side. Do not duplicate inline. Confirmed.
 - `uptrakit-extension-framework`: `#[non_exhaustive]` with `new()` constructors applied
   consistently to all public framework types. Confirmed correct.
+
+---
+
+## 2026-03-10 Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Architecture (D1)
+
+#### Strengths
+
+- `crates/shared/backoff/src/lib.rs` -- Synchronous backoff crate with no async dependency is the
+  correct design choice. Consumers in async contexts wrap the delay in `tokio::time::sleep`; consumers
+  in synchronous contexts (e.g., blocking retry loops) use it directly without pulling in a runtime.
+
+### Dimension: Coding Standards (D7)
+
+#### Issues
+
+**[LOW]** `crates/shared/directories/src/lib.rs` -- `cfg(not(target_os))` guards for platform-specific
+code are acceptable for platform-divergent filesystem operations. No action required; noted for
+completeness.
+
+### Dimension: Extensibility (D8)
+
+#### Strengths
+
+- `crates/shared/extension-framework/src/lib.rs` -- Comprehensive `#[non_exhaustive]` coverage on all
+  public framework types (`ExtensionManifest`, `ActionDef`, `FieldDef`, `FormDef`, `WizardStep`, etc.)
+  with `new()` constructors and `with_*()` builder methods. External crates cannot construct these types
+  via struct literals, ensuring additive evolution without breaking downstream code.
+
+### Dimension: Idiomatic Rust (D10)
+
+#### Strengths
+
+- `crates/shared/backoff/src/lib.rs` -- Simple, no-dependency design with a minimal `next_delay` /
+  `reset` API. The `rand` crate is the sole dependency, used only for jitter. No async runtime, no
+  trait objects, no generics beyond what is necessary.
+
+### Dimension: Maintainability (D12)
+
+#### Issues
+
+**[LOW]** `crates/shared/extension-framework/src/lib.rs` -- Single file at 1,562 lines containing all
+framework types, builders, validation, and tests. While the file is well-organized with clear section
+headers, splitting into `types.rs`, `builders.rs`, `validation.rs`, and `tests.rs` would improve
+navigability as the framework grows.

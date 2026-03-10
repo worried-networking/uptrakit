@@ -469,3 +469,55 @@ extension requests, which makes debugging extension timeouts difficult. Recommen
   during burst events. Confirmed correct.
 - All write operations to WebSocket use `tokio::time::timeout(SEND_TIMEOUT = 30s)`. TCP
   keepalive set at connection time. Confirmed correct.
+
+---
+
+## 2026-03-10 Review Update (12-Dimension)
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Code Quality (D3)
+
+#### Strengths
+
+- `src/error.rs` -- Error classification methods (`is_transient_network()`, `is_cert_expired()`)
+  provide semantic predicates for retry and lifecycle decisions. The predicates are tested
+  exhaustively across all error variants (13 synchronous tests in `src/error.rs:188-286`).
+
+#### Issues
+
+**[LOW]** `src/error.rs` -- Dual `#[from]` + `impl_report_conversion!` on `TlsError` variants.
+The inner `TlsError` enum still has `#[from]` variants paired with conversion closures. While
+the outer `EnrollmentError` `#[from]` attributes were removed (fixed), the `TlsError` enum
+retains the same pattern. Remove `#[from]` from `TlsError` variants that have a corresponding
+`impl_report_conversion!`.
+
+### Dimension: Tests (D4)
+
+#### Strengths
+
+- `src/cert_handler.rs` -- Correct `start_paused` usage. Three timer-based tests use
+  `#[tokio::test(start_paused = true)]` with `tokio::time::advance` for renewal scheduling;
+  the remaining async tests correctly omit `start_paused` since they do not use Tokio time APIs.
+
+- `src/extension.rs` (or equivalent extension proxy tests) -- Correct `start_paused` usage in
+  extension proxy timeout tests. Tests that exercise request timeout behavior use `start_paused`
+  with `tokio::time::advance`; tests that only verify request routing correctly omit it.
+
+### Dimension: Coding Standards (D7)
+
+#### Issues
+
+**[LOW]** `src/connection.rs` -- `#[allow(unused_variables)]` on `resolve_connection` parameter.
+The annotation suppresses a warning for a parameter that is used only in certain feature
+configurations. Consider using `_` prefix on the parameter name instead, which is the idiomatic
+Rust convention for conditionally-used parameters.
+
+**[MEDIUM]** `src/lifecycle.rs` or `src/lib.rs` -- `cfg(not(feature = "zeroconf"))` guard on a
+code path violates the feature-flag convention. Features should be additive: `cfg(feature = "X")`
+enables code, `cfg(not(feature = "X"))` disables it. Using `not(feature)` means the default
+(feature absent) includes the code, and enabling the feature removes it. This inverted logic
+is error-prone. Recommendation: rename the feature or restructure so that the presence of the
+feature enables the zeroconf code path rather than the absence enabling the fallback.

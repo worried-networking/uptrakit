@@ -247,3 +247,40 @@ implementation and the doc comment. This makes the default values auditable in o
 
 - `extract_error_message` is a clean combinator chain with an unambiguous fallback. Confirmed.
 - Builder pattern on `UptrakitClient` with `#[must_use]` on all builder methods. Confirmed.
+
+---
+
+## 2026-03-10 Review Update (12-Dimension)
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Code Quality (D3)
+
+#### Issues
+
+**[LOW]** `src/error.rs` -- Dual `#[from]` and `impl_report_conversion!` overlap on error
+variants. When callers use `.context_to()?` (the prescribed pattern), only the
+`impl_report_conversion!` path is exercised. The `#[from]` generates unused `From` impls.
+Remove `#[from]` from variants that have a corresponding `impl_report_conversion!`.
+
+### Dimension: Tests (D4)
+
+#### Issues
+
+**[MEDIUM]** `src/lib.rs` -- Retry tests do not use `start_paused = true`. The tests call
+`tokio::time::sleep` indirectly through the retry loop but run against wall-clock time. This
+means: (1) tests are slow (they actually sleep), and (2) timing assertions are impossible.
+Converting to `#[tokio::test(start_paused = true)]` would enable virtual-time assertions on
+backoff durations and eliminate wall-clock delays. *Prior finding confirmed from retry-backoff
+test analysis.*
+
+### Dimension: Coding Standards (D7)
+
+#### Issues
+
+**[LOW]** `src/lib.rs:362,381` -- `#[allow(dead_code)]` on private utility methods (`delete_json`,
+`delete_with_query_json`). Dead private methods are technical debt. *Prior finding (2026-03-10
+idiomatic review) confirmed.* Remove the methods or replace `#[allow(dead_code)]` with a `// TODO:`
+comment explaining planned use.

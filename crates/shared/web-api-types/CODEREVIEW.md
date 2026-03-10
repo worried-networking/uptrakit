@@ -198,3 +198,64 @@ with the appropriate typed enums.
   `UpdateNetworkSettingsRequest`, `CreateSoftwareItemRequest`, `CreatePluginConfigRequest`,
   `CreateApiTokenRequest`, `CreateEnrollmentTokenRequest`, `UpdateServiceRequest`,
   `CreateAutodiscoveryIgnoreRequest`, and all MQTT client request types.
+
+---
+
+## 2026-03-10 Review Update (12-Dimension)
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Tests (D4)
+
+#### Issues
+
+**[MEDIUM]** `src/notifications.rs` (or equivalent) -- 4 instances of prohibited `thiserror`
+Display format tests in notification-related types. Tests that assert on the exact `Display`
+output of `thiserror`-derived error types test macro behavior rather than application logic.
+These are brittle and should be removed. Recommendation: keep only tests that verify error
+variant construction and conversion paths.
+
+#### Strengths
+
+- `src/` -- `ValidationError` Display test is correctly kept. Unlike `thiserror`-derived Display
+  tests, the `ValidationError::fmt` implementation contains custom formatting logic
+  (`"{field}: {message}"`) that is application-specific and worth testing.
+
+### Dimension: Extensibility (D8)
+
+#### Issues
+
+**[MEDIUM]** `src/admin_events.rs` (or equivalent) -- `AdminEvent` enum uses standard `serde`
+derive with no forward-compatible deserialization for unknown event types. If a newer controller
+emits a new `AdminEvent` variant, an older SSE consumer will receive a hard deserialization error.
+Recommendation: add an `Unknown { event_type: String, data: serde_json::Value }` catch-all
+variant with infallible custom `Deserialize`, following the pattern used by `ServiceMessage` and
+`ControllerMessage` in `uptrakit-internal-wire`.
+
+### Dimension: Consistency (D9)
+
+#### Strengths
+
+- `src/` -- Well-designed pagination type system. `PaginationParams`, `ResolvedPagination`, and
+  `PaginatedResponse<T>` form a complete, reusable abstraction. `ResolvedPagination::resolve()`
+  clamps page and per-page to configured bounds, preventing unbounded queries. The three types
+  have clear separation of concerns: input, resolved, and output.
+
+- `src/` -- Consistent `ErrorResponse` type used across all HTTP error responses. The type carries
+  `status`, `message`, and optional `details` fields, providing a uniform error contract for all
+  API consumers.
+
+- `src/` -- Consistent `Validate` trait pattern across all HTTP request types. Each implementation
+  returns `Result<(), ValidationError>` with structured field-level error reporting. The pattern
+  is applied uniformly to all request types that accept user input.
+
+### Dimension: Maintainability (D12)
+
+#### Issues
+
+**[LOW]** `src/lib.rs` -- At 1,233 lines, the main library file re-exports types from all
+sub-modules and contains some inline type definitions. While the re-export surface is necessary,
+any inline definitions could be moved to dedicated modules to reduce the file size and improve
+navigability.

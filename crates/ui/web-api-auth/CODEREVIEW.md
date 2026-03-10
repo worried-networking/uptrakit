@@ -152,3 +152,61 @@ remain open and are confirmed below. New findings are additive.
 | --- | --- |
 | **High** | `settings_store.rs` — 580 lines, 7 `OffsetDateTime::now_utc()` calls, zero tests. `generate_or_load_jwt_key`, `load_settings_snapshot`, and setting reconciliation logic are entirely untested. *Confirmed.* |
 | **Medium** | DB row backdating in `auth/oidc_state.rs` (lines 628-639, 669-679, 702-712, 838, 916) and `auth/device_flow.rs` (lines 236-255). Add `with_clock` constructors as per the `RateLimitStore` pattern and advance the injected clock in tests rather than backdating DB rows. *Confirmed.* |
+
+---
+
+## 2026-03-10 Comprehensive Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references and heap,
+and maintainability. Only findings not already recorded above are listed.
+
+### Dimension: Security (D2)
+
+#### Strengths
+
+- OIDC auto-linking is disabled by default. A user authenticated via OIDC whose email
+  matches an existing local account is not silently linked; the flow requires explicit
+  password re-authentication (`LinkViaPasswordRequired` resolution). This prevents account
+  takeover via a compromised identity provider that emits arbitrary email claims.
+- Registration token secrets are verified using Argon2id (same parameters as password
+  hashing), not plain string comparison. A leaked hash does not allow offline brute-force
+  within practical time bounds.
+- First-user registration race condition is prevented: the handler checks user count inside
+  a serialized transaction, so concurrent first-registration requests cannot both succeed.
+
+#### Issues
+
+**[LOW]** `auth/token_denylist.rs` -- Token denylist uses `tokio::sync::RwLock` instead of
+`parking_lot::RwLock`. The lock guards are dropped before `await` points today, making this
+functionally correct but inconsistent with the project-wide `parking_lot` standard. Replace
+for consistency and to prevent future regressions.
+
+**[LOW]** `auth/device_flow.rs` -- Device flow user code entropy is adequate (8 uppercase
+alphanumeric characters, ~41 bits) for a short-lived user-facing code, but sits below the
+commonly recommended 20-bit minimum for device codes with rate limiting. The existing
+rate-limit enforcement on the poll endpoint mitigates brute-force risk.
+
+### Dimension: Code Quality (D3)
+
+#### Strengths
+
+- `AuthError` uses semantic variants (`InvalidCredentials`, `TokenExpired`, `Deactivated`,
+  `EmailNotVerified`, `RateLimited`, etc.) that map cleanly to HTTP status codes. No
+  catch-all `Other(String)` variant exists for auth errors, forcing explicit handling of
+  every failure mode.
+
+#### Issues
+
+**[LOW]** `auth/error.rs` -- Dual `#[from]` and `impl_report_conversion!` on 5 `AuthError`
+variants (beyond the 3 already noted in the 2026-03-10 review above). The redundancy covers
+`DbErr`, `CryptoError`, `JwtError`, `OidcError`, and `SessionError`. The `#[from]` derives
+are unused because all call sites use `context_to()`. Remove the `#[from]` attributes to
+eliminate the dead conversion paths and make the error-propagation strategy unambiguous.
+
+### Dimension: Tests (D4)
+
+#### Issues
+
+**[LOW]** `settings_store.rs` -- Lacks any unit or integration tests. *Confirmed from
+2026-03-06 finding; no change in status.*

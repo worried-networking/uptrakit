@@ -391,3 +391,35 @@ to avoid the allocation in the common case where the source string outlives the 
 
 > **Confirmed positive** — `Arc::clone` is placed correctly at task spawn boundaries in
 > `version_check.rs`. No action required.
+
+## 2026-03-10 12-Dimension Review Update
+
+Comprehensive 12-dimension review covering architecture, security, code quality, tests, HA,
+database, coding standards, extensibility, consistency, idiomatic Rust, references & heap,
+and maintainability.
+
+### Dimension: Code Quality (D3)
+
+#### Issues
+
+**[LOW]** `src/error.rs` -- Dual `#[from]` and `impl_report_conversion!` on the same error
+variant. The `Error` enum uses `#[from]` on `sea_orm::DbErr` to auto-generate a `From` impl,
+while `impl_report_conversion!` also generates a conversion path. Only one mechanism is needed;
+the dual conversion is dead code that may confuse contributors.
+
+### Dimension: Coding Standards (D7)
+
+#### Issues
+
+**[LOW]** `src/db/m20260215_000001_initial.rs` -- `#[allow(clippy::enum_variant_names)]` on the
+migration module. While migration modules are typically write-once code, the suppression diverges
+from the project-wide zero-suppression standard. The variant names could be renamed to avoid the
+prefix repetition that triggers the lint.
+
+### Dimension: Idiomatic Rust (D10)
+
+#### Strengths
+
+- `src/ssh_transport.rs` -- `ConnectionContext` pattern encapsulates SSH connection parameters
+  (host, port, username, auth method) in a single struct passed through the connection pipeline.
+  This avoids long parameter lists and makes the connection setup self-documenting.
