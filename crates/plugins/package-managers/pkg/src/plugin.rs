@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -162,13 +163,22 @@ impl Plugin for PkgPlugin {
     }
 
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        vec![SudoCommandEntry {
-            command: "pkg".into(),
-            explanation: "Package installation and index refresh require root privileges".into(),
-            helper_script: None,
-            args_suffix: None,
-            needs_setenv: false,
-        }]
+        vec![
+            SudoCommandEntry {
+                command: "pkg".into(),
+                explanation: "Package index refresh requires root privileges".into(),
+                helper_script: None,
+                args_suffix: Some(Cow::Borrowed("update *")),
+                needs_setenv: false,
+            },
+            SudoCommandEntry {
+                command: "pkg".into(),
+                explanation: "Package installation requires root privileges".into(),
+                helper_script: None,
+                args_suffix: Some(Cow::Borrowed("install -y *")),
+                needs_setenv: false,
+            },
+        ]
     }
 
     #[tracing::instrument(skip_all)]
@@ -665,6 +675,11 @@ fn build_discovered(name: String, version: String, emit_targets: bool) -> Discov
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_plugin_infrastructure_core::LocalCommandExecutor;
+
+    fn test_executor() -> Arc<dyn CommandExecutor> {
+        Arc::new(LocalCommandExecutor)
+    }
 
     // ── validate_identifier ───────────────────────────────────────────────────
 
@@ -838,5 +853,20 @@ mod tests {
     fn parse_pkg_query_with_auto_line_empty_output() {
         let result = PkgPlugin::parse_pkg_query_with_auto_line("");
         assert!(result.is_empty());
+    }
+
+    // ── required_sudo_commands ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn pkg_plugin_required_sudo_commands() {
+        let plugin = PkgPlugin::new(PkgConfig::default(), test_executor())
+            .await
+            .expect("create plugin");
+        let entries = plugin.required_sudo_commands();
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|e| e.command == "pkg"));
+        assert!(entries.iter().all(|e| !e.needs_setenv));
+        assert_eq!(entries[0].args_suffix.as_deref(), Some("update *"));
+        assert_eq!(entries[1].args_suffix.as_deref(), Some("install -y *"));
     }
 }

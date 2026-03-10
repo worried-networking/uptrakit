@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -250,9 +251,11 @@ impl Plugin for SnapPlugin {
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
         vec![SudoCommandEntry {
             command: "snap".into(),
-            explanation: "Snap package installation and refresh require root privileges".into(),
+            explanation: "Snap package refresh requires root privileges".into(),
             helper_script: None,
-            args_suffix: None,
+            // `refresh *` covers `snap refresh PKG`, `snap refresh PKG --channel=stable`,
+            // and batch `snap refresh PKG1 PKG2 ...`.
+            args_suffix: Some(Cow::Borrowed("refresh *")),
             needs_setenv: false,
         }]
     }
@@ -1094,5 +1097,19 @@ mod tests {
         assert!(SYSTEM_SNAPS.contains(&"snapd"));
         assert!(SYSTEM_SNAPS.contains(&"bare"));
         assert!(SYSTEM_SNAPS.contains(&"core22"));
+    }
+
+    // ── required_sudo_commands ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn snap_plugin_required_sudo_commands() {
+        let plugin = SnapPlugin::new(SnapConfig::default(), make_executor("", 0))
+            .await
+            .expect("create plugin");
+        let entries = plugin.required_sudo_commands();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].command, "snap");
+        assert!(!entries[0].needs_setenv);
+        assert_eq!(entries[0].args_suffix.as_deref(), Some("refresh *"));
     }
 }

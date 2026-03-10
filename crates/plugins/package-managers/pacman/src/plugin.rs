@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -224,13 +225,24 @@ impl Plugin for PacmanPlugin {
     }
 
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        vec![SudoCommandEntry {
-            command: "pacman".into(),
-            explanation: "Package installation and index refresh require root privileges".into(),
-            helper_script: None,
-            args_suffix: None,
-            needs_setenv: false,
-        }]
+        vec![
+            SudoCommandEntry {
+                command: "pacman".into(),
+                explanation: "Package database sync requires root privileges".into(),
+                helper_script: None,
+                // `-Sy` matches the exact refresh call (no extra args).
+                args_suffix: Some(Cow::Borrowed("-Sy")),
+                needs_setenv: false,
+            },
+            SudoCommandEntry {
+                command: "pacman".into(),
+                explanation: "Package installation requires root privileges".into(),
+                helper_script: None,
+                // `-S --noconfirm *` covers single and batch installs.
+                args_suffix: Some(Cow::Borrowed("-S --noconfirm *")),
+                needs_setenv: false,
+            },
+        ]
     }
 
     #[tracing::instrument(skip_all)]
@@ -1074,10 +1086,11 @@ mod tests {
             .await
             .expect("create plugin");
         let entries = plugin.required_sudo_commands();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].command, "pacman");
-        assert!(!entries[0].explanation.is_empty());
-        assert!(!entries[0].needs_setenv);
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|e| e.command == "pacman"));
+        assert!(entries.iter().all(|e| !e.needs_setenv));
+        assert_eq!(entries[0].args_suffix.as_deref(), Some("-Sy"));
+        assert_eq!(entries[1].args_suffix.as_deref(), Some("-S --noconfirm *"));
     }
 
     // ── capabilities ─────────────────────────────────────────────────────────

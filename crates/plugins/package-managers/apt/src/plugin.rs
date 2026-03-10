@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -14,6 +15,14 @@ use uptrakit_plugin_infrastructure_core::{
 };
 
 use crate::config::{AptConfig, AptDiscoveryFilter};
+
+/// Fixed path for the temporary APT preferences file used during batch updates.
+///
+/// This path is hardcoded on both the write side (`execute_batch_update`) and
+/// the sudoers declaration side (`required_sudo_commands`) so that the sudoers
+/// rule can be maximally restrictive: the rule locks in exactly this path and
+/// no other. Changing this value requires updating both uses simultaneously.
+pub(crate) const APT_BATCH_PREF_FILE: &str = "/tmp/uptrakit-apt-batch.pref";
 
 /// Validate a Debian APT package identifier.
 ///
@@ -275,13 +284,40 @@ impl Plugin for AptPlugin {
     }
 
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        vec![SudoCommandEntry {
-            command: "apt-get".into(),
-            explanation: "Package installation and index refresh require root privileges".into(),
-            helper_script: None,
-            args_suffix: None,
-            needs_setenv: true,
-        }]
+        vec![
+            SudoCommandEntry {
+                command: "apt-get".into(),
+                explanation: "Package index refresh requires root privileges".into(),
+                helper_script: None,
+                // Restrict to `apt-get update` only (with optional flags).
+                args_suffix: Some(Cow::Borrowed("update *")),
+                needs_setenv: true,
+            },
+            SudoCommandEntry {
+                command: "apt-get".into(),
+                explanation: "Package installation requires root privileges".into(),
+                helper_script: None,
+                // Restrict to `apt-get install` only; covers single and batch installs.
+                args_suffix: Some(Cow::Borrowed("install *")),
+                needs_setenv: true,
+            },
+            SudoCommandEntry {
+                command: "apt-get".into(),
+                explanation: "Batch package upgrade (pinned versions) requires root privileges"
+                    .into(),
+                helper_script: None,
+                // Lock in the exact -o Dir::Etc::Preferences= invocation that
+                // execute_batch_update uses. The path is intentionally hardcoded on
+                // both sides; see APT_BATCH_PREF_FILE. Using `apt-get upgrade` (not
+                // `install`) preserves the apt manual/auto install mark — packages
+                // auto-installed as dependencies keep their `auto` mark, allowing
+                // `apt autoremove` to clean them up correctly.
+                args_suffix: Some(Cow::Owned(format!(
+                    "-o Dir::Etc::Preferences={APT_BATCH_PREF_FILE} upgrade *"
+                ))),
+                needs_setenv: true,
+            },
+        ]
     }
 
     #[tracing::instrument(skip_all)]
@@ -609,9 +645,11 @@ impl Plugin for AptPlugin {
             ));
         }
 
-        // Write to a fixed temp path (agent-writable, no sudo needed).
-        let pref_path = std::env::temp_dir().join("uptrakit-apt-batch.pref");
-        std::fs::write(&pref_path, &prefs).map_err(|e| {
+        // APT_BATCH_PREF_FILE is hardcoded here and in required_sudo_commands()
+        // so the sudoers rule locks down this exact -o Dir::Etc::Preferences=
+        // invocation. Never change this path without updating both.
+        let pref_path = std::path::Path::new(APT_BATCH_PREF_FILE);
+        std::fs::write(pref_path, &prefs).map_err(|e| {
             report!(PluginError::PluginInternal(format!(
                 "failed to write apt preferences file: {e}"
             )))
@@ -665,7 +703,7 @@ impl Plugin for AptPlugin {
             .await;
 
         // Always clean up the temp file (no sudo needed).
-        if let Err(e) = std::fs::remove_file(&pref_path) {
+        if let Err(e) = std::fs::remove_file(pref_path) {
             tracing::warn!(path = %pref_path_str, error = %e, "failed to remove apt preferences file");
         }
 
@@ -1176,9 +1214,23 @@ mod tests {
             .await
             .expect("create plugin");
         let entries = plugin.required_sudo_commands();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].command, "apt-get");
-        assert!(!entries[0].explanation.is_empty());
+        assert_eq!(entries.len(), 3);
+        // All three entries are for apt-get.
+        assert!(entries.iter().all(|e| e.command == "apt-get"));
+        // All three require SETENV: (DEBIAN_FRONTEND=noninteractive).
+        assert!(entries.iter().all(|e| e.needs_setenv));
+        // Index refresh entry.
+        assert_eq!(entries[0].args_suffix.as_deref(), Some("update *"));
+        // Single-package install entry.
+        assert_eq!(entries[1].args_suffix.as_deref(), Some("install *"));
+        // Batch upgrade entry locks in the pref-file path.
+        let batch_suffix = entries[2].args_suffix.as_deref().unwrap();
+        assert!(
+            batch_suffix.contains(APT_BATCH_PREF_FILE),
+            "batch args_suffix must reference APT_BATCH_PREF_FILE"
+        );
+        assert!(batch_suffix.starts_with("-o Dir::Etc::Preferences="));
+        assert!(batch_suffix.ends_with("upgrade *"));
     }
 
     // ── capabilities ────────────────────────────────────────────────────

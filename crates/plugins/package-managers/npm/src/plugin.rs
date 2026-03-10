@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -374,7 +375,9 @@ impl Plugin for NpmPlugin {
             command: "npm".into(),
             explanation: "Global npm package installation requires root".into(),
             helper_script: None,
-            args_suffix: None,
+            // `install -g *` covers both `npm install -g PKG@VER` and
+            // batch `npm install -g PKG1@VER1 PKG2@VER2 ...`.
+            args_suffix: Some(Cow::Borrowed("install -g *")),
             needs_setenv: false,
         }]
     }
@@ -1094,8 +1097,9 @@ mod tests {
         let entries = plugin.required_sudo_commands();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].command, "npm");
-        assert!(!entries[0].explanation.is_empty());
+        assert!(!entries[0].needs_setenv);
         assert!(entries[0].helper_script.is_none());
+        assert_eq!(entries[0].args_suffix.as_deref(), Some("install -g *"));
     }
 
     // ── detect_host_compatibility ─────────────────────────────────────────────
