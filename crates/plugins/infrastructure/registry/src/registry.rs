@@ -12,6 +12,7 @@ use uptrakit_plugin_infrastructure_core::{
 };
 use uptrakit_plugin_infrastructure_proxmox::{ProxmoxConfig, ProxmoxPlugin};
 use uptrakit_plugin_package_manager_apt::{AptConfig, AptPlugin};
+use uptrakit_plugin_package_manager_dnf::{DnfConfig, DnfPlugin};
 use uptrakit_plugin_package_manager_homebrew::{HomebrewConfig, HomebrewPlugin};
 use uptrakit_plugin_package_manager_mas::{MasConfig, MasPlugin};
 use uptrakit_plugin_package_manager_npm::{NpmConfig, NpmPlugin};
@@ -496,6 +497,7 @@ register_plugins! {
     DiscoveryProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig, plugin: ProxmoxHelperScriptsPlugin },
     PackageManagerHomebrew        => { config: HomebrewConfig,             plugin: HomebrewPlugin },
     PackageManagerApt             => { config: AptConfig,                  plugin: AptPlugin },
+    PackageManagerDnf             => { config: DnfConfig,                  plugin: DnfPlugin },
     PackageManagerNpm             => { config: NpmConfig,                  plugin: NpmPlugin },
     PackageManagerMas             => { config: MasConfig,                  plugin: MasPlugin },
     GenericShell                  => { config: ShellConfig,                plugin: ShellPlugin },

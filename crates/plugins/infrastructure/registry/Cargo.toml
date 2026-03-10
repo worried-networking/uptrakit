@@ -29,6 +29,7 @@ uptrakit-plugin-package-manager-homebrew = { workspace = true }
 uptrakit-plugin-package-manager-apt = { workspace = true }
 uptrakit-plugin-package-manager-npm = { workspace = true }
 uptrakit-plugin-package-manager-mas = { workspace = true }
+uptrakit-plugin-package-manager-dnf = { workspace = true }
 uptrakit-plugin-generic-shell = { workspace = true }
 uptrakit-plugin-infrastructure-proxmox = { workspace = true }
 uptrakit-extension-framework = { workspace = true }
