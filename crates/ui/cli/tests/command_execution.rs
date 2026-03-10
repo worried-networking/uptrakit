@@ -95,6 +95,7 @@ fn sample_software_item() -> SoftwareItemResponse {
         featured: true,
         last_checked_at: None,
         host_count: 2,
+        installed_version: None,
         latest_version: None,
         update_available: false,
         created_at: datetime!(2025-01-01 00:00:00 UTC),

@@ -464,6 +464,7 @@ export interface SoftwareItemResponse {
 	featured: boolean;
 	last_checked_at: string | null;
 	host_count: number;
+	installed_version?: string | null;
 	latest_version?: string | null;
 	update_available: boolean;
 	created_at: string;

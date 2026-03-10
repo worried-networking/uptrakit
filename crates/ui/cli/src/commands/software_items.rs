@@ -144,6 +144,9 @@ impl HumanOutput for SoftwareItemResponse {
         };
         out.push_str(&format!("Plugins:         {}\n", plugins_str));
         out.push_str(&format!("Featured:        {}\n", self.featured));
+        if let Some(ref iv) = self.installed_version {
+            out.push_str(&format!("Installed:       {}\n", iv));
+        }
         if let Some(ref lv) = self.latest_version {
             out.push_str(&format!("Latest Version:  {}\n", lv));
         }
@@ -475,6 +478,7 @@ mod tests {
             featured: true,
             last_checked_at: None,
             host_count: 2,
+            installed_version: None,
             latest_version: None,
             update_available: false,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
@@ -492,6 +496,7 @@ mod tests {
             featured: true,
             last_checked_at: None,
             host_count: 1,
+            installed_version: None,
             latest_version: Some("3.0.0".to_string()),
             update_available: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
@@ -661,6 +666,7 @@ mod tests {
             featured: true,
             last_checked_at: None,
             host_count: 0,
+            installed_version: None,
             latest_version: Some("1.5.0".to_string()),
             update_available: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
@@ -685,6 +691,7 @@ mod tests {
             featured: true,
             last_checked_at: None,
             host_count: 1,
+            installed_version: None,
             latest_version: None,
             update_available: false,
             created_at: datetime!(2025-01-01 00:00:00 UTC),

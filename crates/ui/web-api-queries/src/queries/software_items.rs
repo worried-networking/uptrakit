@@ -82,6 +82,7 @@ fn build_list_response(
     item: &software_item::Model,
     plugins: Vec<String>,
     host_count: u64,
+    installed_version: Option<String>,
     latest_version: Option<String>,
     update_available: bool,
 ) -> SoftwareItemResponse {
@@ -92,6 +93,7 @@ fn build_list_response(
         featured: item.featured,
         last_checked_at: item.last_checked_at,
         host_count,
+        installed_version,
         latest_version,
         update_available,
         created_at: item.created_at,
@@ -560,7 +562,7 @@ pub async fn create_software_item(
 
     txn.commit().await.context_to()?;
 
-    Ok(build_list_response(&inserted, vec![], 0, None, false))
+    Ok(build_list_response(&inserted, vec![], 0, None, None, false))
 }
 
 #[tracing::instrument(skip_all)]
@@ -678,7 +680,7 @@ pub async fn list_software_items(
         latest_version: Option<String>,
     }
 
-    let installed_rows: Vec<InstalledVersionRow> = HostSoftwareItem::find()
+    let mut installed_query = HostSoftwareItem::find()
         .select_only()
         .column(host_software_item::Column::SoftwareItemId)
         .column(host_software_item::Column::InstalledVersion)
@@ -688,7 +690,13 @@ pub async fn list_software_items(
             host_software_item::Relation::Host.def(),
         )
         .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
-        .filter(host::Column::DeactivatedAt.is_null())
+        .filter(host::Column::DeactivatedAt.is_null());
+
+    if let Some(host_id) = params.host_id {
+        installed_query = installed_query.filter(host_software_item::Column::HostId.eq(host_id));
+    }
+
+    let installed_rows: Vec<InstalledVersionRow> = installed_query
         .into_model::<InstalledVersionRow>()
         .all(tenant_db.db())
         .await
@@ -702,6 +710,8 @@ pub async fn list_software_items(
             .or_default()
             .push((row.installed_version, row.latest_version));
     }
+
+    let host_id_filter = params.host_id;
 
     let response: Vec<SoftwareItemResponse> = items
         .iter()
@@ -717,7 +727,23 @@ pub async fn list_software_items(
                         .any(|(iv, lv)| host_update_available(iv.as_deref(), lv.as_deref()))
                 })
                 .unwrap_or(false);
-            build_list_response(item, plugins, host_count, latest_version, update_available)
+            // When filtered by host_id, expose the per-host installed version.
+            let installed_version = if host_id_filter.is_some() {
+                installed_map
+                    .get(&item.id)
+                    .and_then(|pairs| pairs.first())
+                    .and_then(|(iv, _)| iv.clone())
+            } else {
+                None
+            };
+            build_list_response(
+                item,
+                plugins,
+                host_count,
+                installed_version,
+                latest_version,
+                update_available,
+            )
         })
         .collect();
 
@@ -828,6 +854,7 @@ pub async fn update_software_item(
         &updated,
         plugins,
         host_count,
+        None,
         latest_version,
         update_available,
     ))
@@ -1297,6 +1324,7 @@ mod tests {
             &item,
             vec!["releases_github".to_string()],
             3,
+            None,
             Some("22.0.0".to_string()),
             true,
         );
@@ -1305,6 +1333,7 @@ mod tests {
         assert_eq!(resp.plugins, vec!["releases_github"]);
         assert_eq!(resp.host_count, 3);
         assert!(resp.last_checked_at.is_some());
+        assert!(resp.installed_version.is_none());
         assert_eq!(resp.latest_version.as_deref(), Some("22.0.0"));
         assert!(resp.update_available);
     }
@@ -1323,10 +1352,39 @@ mod tests {
             deactivated_at: None,
         };
 
-        let resp = build_list_response(&item, vec![], 0, None, false);
+        let resp = build_list_response(&item, vec![], 0, None, None, false);
 
         assert!(!resp.update_available);
+        assert!(resp.installed_version.is_none());
         assert!(resp.latest_version.is_none());
+    }
+
+    #[test]
+    fn build_list_response_with_installed_version() {
+        let now = OffsetDateTime::now_utc();
+        let item = software_item::Model {
+            id: uuid::Uuid::now_v7(),
+            tenant_id: uuid::Uuid::nil(),
+            name: "Nginx".to_string(),
+            featured: true,
+            last_checked_at: Some(now),
+            created_at: now,
+            updated_at: now,
+            deactivated_at: None,
+        };
+
+        let resp = build_list_response(
+            &item,
+            vec!["package_manager_apt".to_string()],
+            1,
+            Some("1.24.0".to_string()),
+            Some("1.26.0".to_string()),
+            true,
+        );
+
+        assert_eq!(resp.installed_version.as_deref(), Some("1.24.0"));
+        assert_eq!(resp.latest_version.as_deref(), Some("1.26.0"));
+        assert!(resp.update_available);
     }
 
     #[test]
@@ -1417,7 +1475,7 @@ mod tests {
             deactivated_at: None,
         };
 
-        let resp = build_list_response(&item, vec![], 0, None, false);
+        let resp = build_list_response(&item, vec![], 0, None, None, false);
 
         assert!(!resp.featured);
         assert!(resp.last_checked_at.is_none());

@@ -102,6 +102,10 @@ pub struct SoftwareItemResponse {
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
     pub last_checked_at: Option<OffsetDateTime>,
     pub host_count: u64,
+    /// Installed version on the specific host. Present only when the `host_id`
+    /// query filter is used; `None` otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_version: Option<String>,
     /// Latest known version derived as the maximum across all hosts'
     /// `latest_version` values. `None` when no host has a known latest version yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -489,6 +493,7 @@ mod tests {
             featured: true,
             last_checked_at: Some(datetime!(2025-06-01 12:00:00 UTC)),
             host_count: 5,
+            installed_version: Some("8.9.0".to_string()),
             latest_version: Some("8.10.0".to_string()),
             update_available: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
@@ -502,6 +507,7 @@ mod tests {
         assert_eq!(deserialized.host_count, 5);
         assert_eq!(deserialized.plugins.len(), 2);
         assert!(deserialized.featured);
+        assert_eq!(deserialized.installed_version.as_deref(), Some("8.9.0"));
         assert_eq!(deserialized.latest_version.as_deref(), Some("8.10.0"));
         assert!(deserialized.update_available);
     }
@@ -516,6 +522,7 @@ mod tests {
             featured: true,
             last_checked_at: None,
             host_count: 1,
+            installed_version: None,
             latest_version: None,
             update_available: false,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
@@ -524,11 +531,13 @@ mod tests {
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: SoftwareItemResponse =
             serde_json::from_str(&json).expect("deserialization should succeed");
+        assert!(deserialized.installed_version.is_none());
         assert!(deserialized.latest_version.is_none());
         assert!(!deserialized.update_available);
-        // latest_version is skipped when None
+        // installed_version and latest_version are skipped when None
         let json_value =
             serde_json::to_value(&resp).expect("serialization to Value should succeed");
+        assert!(json_value.get("installed_version").is_none());
         assert!(json_value.get("latest_version").is_none());
     }
 
@@ -542,6 +551,7 @@ mod tests {
             featured: false,
             last_checked_at: None,
             host_count: 0,
+            installed_version: None,
             latest_version: None,
             update_available: false,
             created_at: datetime!(2025-01-01 00:00:00 UTC),

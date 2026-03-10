@@ -486,7 +486,7 @@
 								{#each assignedSoftware as item (item.id)}
 									<tr>
 										<td class="font-medium">{item.name}</td>
-										<td class="text-sm text-surface-500">—</td>
+										<td class="text-sm text-surface-500">{item.installed_version ?? '—'}</td>
 										<td class="text-sm text-surface-500">{item.latest_version ?? '—'}</td>
 										<td>
 											{#if item.update_available}
