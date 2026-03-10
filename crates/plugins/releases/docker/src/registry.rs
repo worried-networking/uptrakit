@@ -104,7 +104,7 @@ impl RegistryClient {
                 .unwrap_or("")
                 .to_string();
 
-            let token = self.auth.fetch_token(&self.client, &www_auth, url).await?;
+            let token = self.auth.fetch_token(&self.client, &www_auth).await?;
 
             let retry_response = self
                 .client
