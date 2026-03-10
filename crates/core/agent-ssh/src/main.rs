@@ -656,13 +656,14 @@ impl ServiceHandler for SshAgentHandler {
         }
 
         // Send Disconnecting and close pooled SSH connections.
+        let reason_dbg = format!("{disconnect_reason:?}");
         let disconnecting_msg =
             ServiceMessage::Disconnecting(DisconnectingPayload::new(disconnect_reason));
         if let Err(e) = conn.send(disconnecting_msg).await {
             tracing::debug!(error = %e, "failed to send Disconnecting message");
         } else {
             tracing::debug!(
-                reason = ?disconnect_reason,
+                reason = %reason_dbg,
                 "sent Disconnecting message to controller"
             );
         }

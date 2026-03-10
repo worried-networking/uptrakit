@@ -117,7 +117,7 @@ pub async fn send_update_result(
 ) -> Result<()> {
     match result {
         Ok(exec_result) => {
-            let status = exec_result.result.status;
+            let status = exec_result.result.status.clone();
             let error = exec_result.result.error.clone();
             conn.send(ServiceMessage::UpdateResult(exec_result.result))
                 .await?;
@@ -207,12 +207,13 @@ pub async fn handle_graceful_shutdown(
     }
 
     // Send Disconnecting message to controller
+    let reason_dbg = format!("{disconnect_reason:?}");
     let disconnecting_msg =
         ServiceMessage::Disconnecting(DisconnectingPayload::new(disconnect_reason));
     if let Err(e) = conn.send(disconnecting_msg).await {
         tracing::debug!(error = %e, "failed to send Disconnecting message");
     } else {
-        tracing::debug!(reason = ?disconnect_reason, "sent Disconnecting message to controller");
+        tracing::debug!(reason = %reason_dbg, "sent Disconnecting message to controller");
     }
 
     outcome

@@ -61,7 +61,9 @@ pub struct ServiceEnvelope {
 ///
 /// JSON on the wire includes an optional `trace_context` object for distributed
 /// tracing correlation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Note: Eq is not derived because ControllerMessage contains ExecuteUpdate/
+// ExecuteBatchUpdate which hold HookCommand with serde_json::Value (not Eq).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ControllerEnvelope {
     pub protocol_version: u32,
     pub seq: u64,

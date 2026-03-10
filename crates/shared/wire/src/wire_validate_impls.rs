@@ -913,6 +913,9 @@ impl WireValidate for HookCommand {
                     "hook_command.working_dir",
                 )?;
             }
+            HookCommand::Other { .. } => {
+                tracing::warn!("received unknown HookCommand variant — skipping validation");
+            }
         }
         Ok(())
     }

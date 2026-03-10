@@ -323,7 +323,9 @@ pub struct VersionCheckResult {
 // --- Update execution messages ---
 
 /// Controller -> Agent: Trigger an update.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Note: Eq is not derived because pre_update_hooks/post_update_hooks contain
+// HookCommand which may hold serde_json::Value (Other variant, not Eq).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExecuteUpdatePayload {
     /// The machine_id of the host to run the update on.
     ///
@@ -410,7 +412,9 @@ pub struct UpdateResultPayload {
 ///
 /// Groups multiple items under a single plugin type so the agent can
 /// run a single bulk command (e.g., `apt-get upgrade`, `brew upgrade`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Note: Eq is not derived because pre_update_hooks/post_update_hooks contain
+// HookCommand which may hold serde_json::Value (Other variant, not Eq).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExecuteBatchUpdatePayload {
     /// The machine_id of the host to run the update on.
     pub host_machine_id: String,

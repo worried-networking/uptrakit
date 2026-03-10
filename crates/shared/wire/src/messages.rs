@@ -35,9 +35,18 @@ pub fn now_millis() -> Timestamp {
 ///
 /// Predefined hooks use the `Exec` variant which avoids shell interpretation.
 /// Custom commands use the `Shell` variant which runs through a shell.
+///
+/// # Wire forward-compatibility
+///
+/// `Other { raw }` is a catch-all for hook command types introduced in a
+/// newer agent build. Serde deserialization is infallible: an unknown
+/// variant becomes `Other { raw: ... }` rather than a parse error, allowing
+/// older controllers to survive rolling upgrades.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+// Note: Eq is not derived because the Other variant contains serde_json::Value
+// which does not implement Eq.
 pub enum HookCommand {
     /// Execute a command string through a shell interpreter.
     Shell {
@@ -53,6 +62,52 @@ pub enum HookCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         working_dir: Option<String>,
     },
+    /// Unknown hook command from a newer peer.
+    ///
+    /// The raw JSON value is preserved for logging. The receiver should
+    /// log a warning and skip execution.
+    #[serde(skip)]
+    Other { raw: serde_json::Value },
+}
+
+impl<'de> Deserialize<'de> for HookCommand {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = serde_json::Value::deserialize(deserializer)?;
+        if let Some(obj) = raw.as_object() {
+            if let Some(shell_val) = obj.get("shell") {
+                #[derive(Deserialize)]
+                struct ShellFields {
+                    command: String,
+                    #[serde(default)]
+                    shell: HookShell,
+                }
+                if let Ok(f) = serde_json::from_value::<ShellFields>(shell_val.clone()) {
+                    return Ok(HookCommand::Shell {
+                        command: f.command,
+                        shell: f.shell,
+                    });
+                }
+            }
+            if let Some(exec_val) = obj.get("exec") {
+                #[derive(Deserialize)]
+                struct ExecFields {
+                    program: String,
+                    #[serde(default)]
+                    args: Vec<String>,
+                    #[serde(default)]
+                    working_dir: Option<String>,
+                }
+                if let Ok(f) = serde_json::from_value::<ExecFields>(exec_val.clone()) {
+                    return Ok(HookCommand::Exec {
+                        program: f.program,
+                        args: f.args,
+                        working_dir: f.working_dir,
+                    });
+                }
+            }
+        }
+        Ok(HookCommand::Other { raw })
+    }
 }
 
 /// Human-readable formatting for logging only. Not intended for round-trip
@@ -75,17 +130,70 @@ impl fmt::Display for HookCommand {
                 }
                 Ok(())
             }
+            Self::Other { raw } => write!(f, "<unknown hook command: {raw}>"),
         }
     }
 }
 
 /// Final status of an update execution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// # Wire forward-compatibility
+///
+/// `Other(String)` is a catch-all for status strings received from a newer
+/// agent that this build does not yet recognise. Serde deserialization is
+/// infallible: an unknown string becomes `Other(...)` rather than a parse
+/// error, allowing older controllers to survive rolling upgrades without
+/// dropping the enclosing `UpdateResult` message.
 #[non_exhaustive]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateFinalStatus {
     Completed,
     Failed,
+    /// An unknown status received from a newer peer.
+    ///
+    /// The inner string is the raw snake_case value as it appeared on the wire.
+    Other(String),
+}
+
+impl UpdateFinalStatus {
+    /// Returns the string representation.
+    ///
+    /// For [`UpdateFinalStatus::Other`], returns the inner string as-is.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+}
+
+impl fmt::Display for UpdateFinalStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<String> for UpdateFinalStatus {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "completed" => Self::Completed,
+            "failed" => Self::Failed,
+            _ => Self::Other(s),
+        }
+    }
+}
+
+impl Serialize for UpdateFinalStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for UpdateFinalStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(UpdateFinalStatus::from)
+    }
 }
 
 /// Default timeout for update execution (2 hours).
@@ -97,14 +205,65 @@ pub(crate) fn default_update_timeout() -> std::time::Duration {
 }
 
 /// Reason for service disconnection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// # Wire forward-compatibility
+///
+/// `Other(String)` is a catch-all for reason strings received from a newer
+/// peer that this build does not yet recognise. Serde deserialization is
+/// infallible: an unknown string becomes `Other(...)` rather than a parse
+/// error, allowing rolling upgrades without dropping the `Disconnecting` message.
 #[non_exhaustive]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DisconnectReason {
     /// SIGTERM/SIGINT - clean exit.
     Shutdown,
     /// SIGHUP - will reconnect after external restart.
     Restart,
+    /// An unknown reason received from a newer peer.
+    ///
+    /// The inner string is the raw snake_case value as it appeared on the wire.
+    Other(String),
+}
+
+impl DisconnectReason {
+    /// Returns the string representation.
+    ///
+    /// For [`DisconnectReason::Other`], returns the inner string as-is.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Shutdown => "shutdown",
+            Self::Restart => "restart",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+}
+
+impl fmt::Display for DisconnectReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<String> for DisconnectReason {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "shutdown" => Self::Shutdown,
+            "restart" => Self::Restart,
+            _ => Self::Other(s),
+        }
+    }
+}
+
+impl Serialize for DisconnectReason {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for DisconnectReason {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(DisconnectReason::from)
+    }
 }
 
 /// Messages sent from a service (agent or MQTT) to the controller.
@@ -225,7 +384,9 @@ pub enum ServiceMessage {
 /// encountered, the service logs a warning and continues without closing the
 /// connection, allowing rolling upgrades where services and controllers are not
 /// updated simultaneously.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Note: Eq is not derived because ExecuteUpdate/ExecuteBatchUpdate contain
+// HookCommand which holds serde_json::Value in its Other variant (not Eq).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ControllerMessage {
