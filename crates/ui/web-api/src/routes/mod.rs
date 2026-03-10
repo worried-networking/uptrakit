@@ -1,3 +1,4 @@
+pub mod access_presets;
 pub(crate) mod agents;
 pub mod api_tokens;
 pub mod audit_logs;
@@ -21,6 +22,7 @@ pub mod oidc_auth;
 #[cfg(feature = "oidc")]
 pub mod oidc_providers;
 pub mod plugin_configs;
+pub mod roles;
 pub mod scheduler;
 pub mod server_cert;
 pub mod service_ws;
@@ -43,3 +45,4 @@ pub mod system_enrollment_tokens;
 pub mod system_services;
 pub mod update_batches;
 pub mod update_history;
+pub mod users;

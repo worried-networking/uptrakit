@@ -121,16 +121,22 @@ pub async fn insert_host(db: &DatabaseConnection, tenant_id: uuid::Uuid) -> host
     .expect("insert host")
 }
 
-/// Seed permissions that are not yet in the initial migration and assign them
-/// to the `owner` role.  This lets integration tests exercise endpoints that
-/// require these permissions without altering the production migration chain.
+/// Ensure the named permissions exist in the database and are linked to
+/// at least one role that the first registered user holds.
+///
+/// After the granular permissions migration all 32 permissions are already
+/// seeded with correct role assignments, so this is effectively a no-op in
+/// normal circumstances. It is kept for backwards-compatibility with tests
+/// that call it and as a safety net if a permission somehow wasn't seeded.
 pub async fn seed_permissions_for_owner(db: &DatabaseConnection, names: &[&str]) {
-    let owner_role = role::Entity::find()
-        .filter(role::Column::Name.eq("owner"))
+    // Use the first built-in role we find — after migration the first
+    // registered user holds all 8 roles, so any role will do.
+    let any_role = role::Entity::find()
+        .filter(role::Column::IsBuiltIn.eq(true))
         .one(db)
         .await
-        .expect("find owner role")
-        .expect("owner role must exist");
+        .expect("find built-in role")
+        .expect("at least one built-in role must exist");
 
     let now = time::OffsetDateTime::now_utc();
     for name in names {
@@ -156,14 +162,14 @@ pub async fn seed_permissions_for_owner(db: &DatabaseConnection, names: &[&str])
             id
         };
 
-        // Link to owner role (ignore if already linked).
-        let link_exists = role_permission::Entity::find_by_id((owner_role.id, perm_id))
+        // Link to a role (ignore if already linked).
+        let link_exists = role_permission::Entity::find_by_id((any_role.id, perm_id))
             .one(db)
             .await
             .expect("query role_permission");
         if link_exists.is_none() {
             role_permission::ActiveModel {
-                role_id: Set(owner_role.id),
+                role_id: Set(any_role.id),
                 permission_id: Set(perm_id),
             }
             .insert(db)

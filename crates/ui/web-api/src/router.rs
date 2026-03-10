@@ -32,7 +32,8 @@ use crate::AppState;
         (name = "Host Tags", description = "Host tag management"),
         (name = "Notifications", description = "Notification channel, rule, and log management"),
         (name = "Global Settings", description = "Infrastructure-scoped settings requiring global administrator access"),
-        (name = "Audit Logs", description = "Tenant and system-level audit log access")
+        (name = "Audit Logs", description = "Tenant and system-level audit log access"),
+        (name = "Users", description = "User management, roles, and access presets")
     ),
     paths(
         crate::routes::auth::register,
@@ -165,6 +166,18 @@ use crate::AppState;
         // Audit logs
         crate::routes::audit_logs::list_audit_logs,
         crate::routes::audit_logs::list_system_audit_logs,
+        // User management
+        crate::routes::users::list_users,
+        crate::routes::users::get_user,
+        crate::routes::users::update_user_roles,
+        crate::routes::users::update_user_active,
+        crate::routes::users::list_permissions,
+        // Roles (read-only)
+        crate::routes::roles::list_roles,
+        crate::routes::roles::get_role,
+        // Access presets
+        crate::routes::access_presets::list_access_presets,
+        crate::routes::access_presets::apply_preset,
     ),
     components(
         schemas(
@@ -293,6 +306,15 @@ use crate::AppState;
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationChannelResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationRuleResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationLogResponse>,
+            // User management
+            crate::routes::users::UserWithRolesResponse,
+            crate::routes::users::UserRoleSummary,
+            crate::routes::users::UpdateUserRolesRequest,
+            crate::routes::users::UpdateUserActiveRequest,
+            crate::routes::users::ApplyPresetRequest,
+            crate::routes::users::PermissionInfo,
+            crate::routes::roles::RoleResponse,
+            crate::routes::access_presets::AccessPresetResponse,
             // Update batches
             crate::routes::update_batches::BatchUpdateResponse,
             crate::routes::update_batches::BatchUpdateItem,
@@ -633,6 +655,18 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         // Audit logs
         .routes(routes!(crate::routes::audit_logs::list_audit_logs))
         .routes(routes!(crate::routes::audit_logs::list_system_audit_logs))
+        // User management
+        .routes(routes!(crate::routes::users::list_users))
+        .routes(routes!(crate::routes::users::list_permissions))
+        .routes(routes!(crate::routes::users::get_user))
+        .routes(routes!(crate::routes::users::update_user_roles))
+        .routes(routes!(crate::routes::users::update_user_active))
+        // Roles (read-only)
+        .routes(routes!(crate::routes::roles::list_roles))
+        .routes(routes!(crate::routes::roles::get_role))
+        // Access presets
+        .routes(routes!(crate::routes::access_presets::list_access_presets))
+        .routes(routes!(crate::routes::access_presets::apply_preset))
         // Admin events SSE stream
         .route(
             "/api/v1/events/stream",
