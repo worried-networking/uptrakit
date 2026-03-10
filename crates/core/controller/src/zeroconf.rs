@@ -24,7 +24,7 @@ pub fn build_txt_properties(
     ca_snapshot: &CaPublicSnapshot,
     zeroconf: &ZeroconfSnapshot,
 ) -> Vec<(&'static str, String)> {
-    let mut properties = vec![("ca_fp".into(), ca_snapshot.active_fingerprint.clone())];
+    let mut properties = vec![("ca_fp", ca_snapshot.active_fingerprint.clone())];
 
     if let Some(ref url) = zeroconf.url {
         properties.push(("url", url.clone()));

@@ -245,6 +245,12 @@ deny = [
 
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
+    # bitflags: 1.x via nix 0.29 (uptrakit-agent-ssh), 2.x via modern ecosystem
+    { crate = "bitflags@1.3.2", reason = "pulled by nix 0.29 (uptrakit-agent-ssh); newer 2.x used by nix 0.31, tokio" },
+
+    # socket2: 0.5.x via mdns-sd, 0.6.x via tokio
+    { crate = "socket2@0.5.10", reason = "pulled by mdns-sd; newer 0.6.x used by tokio, hyper" },
+
     # getrandom: 0.2.17 via ring, 0.3.4 via newer crates. Will resolve when ring updates.
     { crate = "getrandom@0.2.17", reason = "pulled by ring 0.17.14; waiting for ring update to resolve" },
 
@@ -297,6 +303,8 @@ skip = [
 
     # windows-sys 0.45.x via jni → rustls-platform-verifier → reqwest 0.13
     { crate = "windows-sys@0.45.0", reason = "pulled by jni → rustls-platform-verifier → reqwest 0.13; waiting for upstream update" },
+    # windows-sys 0.48.x via socket2 0.5 (mdns-sd dep); newer 0.52+/0.61 used by tokio/clap
+    { crate = "windows-sys@0.48.0", reason = "pulled by socket2 0.5 (mdns-sd); newer versions used by tokio, clap" },
     { crate = "windows-targets@0.42.2", reason = "pulled by windows-sys@0.45.0 via jni → rustls-platform-verifier" },
     { crate = "windows_aarch64_gnullvm@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
     { crate = "windows_aarch64_msvc@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
