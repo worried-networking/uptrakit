@@ -586,6 +586,16 @@ pub async fn list_software_items(
         base_query = base_query.filter(software_item::Column::Featured.eq(featured));
     }
 
+    if let Some(host_id) = params.host_id {
+        base_query = base_query
+            .join(
+                sea_orm::JoinType::InnerJoin,
+                host_software_item::Relation::SoftwareItem.def().rev(),
+            )
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::DeactivatedAt.is_null());
+    }
+
     let total = base_query
         .clone()
         .count(tenant_db.db())

@@ -307,7 +307,8 @@ pub async fn create_software_item(
     params(
         ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
         ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)"),
-        ("featured" = Option<bool>, Query, description = "Filter by featured status. Omit to return all items.")
+        ("featured" = Option<bool>, Query, description = "Filter by featured status. Omit to return all items."),
+        ("host_id" = Option<Uuid>, Query, description = "Filter by host UUID — only return items assigned to this host.")
     ),
     extensions(("x-required-permission" = json!("view_software"))),
     responses(

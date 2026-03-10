@@ -286,6 +286,8 @@ pub struct ListSoftwareItemsParams {
     pub per_page: Option<u64>,
     /// Filter by featured status. Omit to return all items.
     pub featured: Option<bool>,
+    /// Filter by host — only return software items assigned to this host.
+    pub host_id: Option<Uuid>,
 }
 
 impl ListSoftwareItemsParams {
