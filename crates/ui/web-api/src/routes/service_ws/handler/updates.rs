@@ -27,6 +27,7 @@ use super::{HandlerError, HandlerResult, LoopAction, MAX_UPDATE_OUTPUT_BYTES};
 use crate::AppState;
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
 use crate::routes::service_ws::protocol::serialize_controller_msg;
+use uptrakit_web_api_types::events::AdminEvent;
 
 // ---------------------------------------------------------------------------
 // load_linked_host_ids
@@ -393,6 +394,8 @@ pub(super) async fn handle_update_started(
     let record_batch_id = record.batch_id;
     let record_host_id = record.host_id;
     let record_software_item_id = record.software_item_id;
+    let record_interactive = record.interactive;
+    let record_tenant_id = record.tenant_id;
     let mut active: update_history::ActiveModel = record.into();
     active.status = Set(update_history::UpdateStatus::InProgress);
     active.started_at = Set(Some(time::OffsetDateTime::now_utc()));
@@ -435,6 +438,21 @@ pub(super) async fn handle_update_started(
             .push_software_states_for_tenant(state.db(), svc.tenant_id)
             .await;
     }
+
+    // Broadcast AdminEvent::UpdateStarted so the history-list SSE subscribers
+    // can update the "Input Required" badge in real-time without reloading.
+    state
+        .event_broadcaster
+        .send(
+            record_tenant_id,
+            AdminEvent::UpdateStarted {
+                update_history_id: payload.update_history_id,
+                host_id: record_host_id,
+                software_item_id: record_software_item_id,
+                interactive: record_interactive,
+            },
+        )
+        .await;
 
     // Emit batch progress event if this update is part of a batch.
     if let Some(batch_id) = record_batch_id {

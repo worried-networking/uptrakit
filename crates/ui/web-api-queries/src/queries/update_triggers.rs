@@ -153,6 +153,12 @@ pub struct CreateUpdateRecordParams<'a> {
     /// [`update_history::UpdateStatus::Queued`] for non-first items on a
     /// host so that only one active record exists per host at a time.
     pub initial_status: update_history::UpdateStatus,
+    /// Whether the update is dispatched in interactive mode (PTY allocated).
+    ///
+    /// Must reflect the fully-resolved value (i.e. `params.interactive ||
+    /// config_prefers_interactive(...)`) so the persisted column accurately
+    /// records how the agent was instructed to run.
+    pub interactive: bool,
 }
 
 /// Parameters for [`dispatch_update_to_agent`].
@@ -399,6 +405,7 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
         created_at: Set(now),
         update_category: Set(params.update_category.to_string()),
         batch_id: Set(params.batch_id),
+        interactive: Set(params.interactive),
     };
 
     record.insert(db).await.context_to()?;
@@ -539,6 +546,17 @@ pub async fn trigger_update_for_host(
     let target =
         validate_update_preconditions(db, params.tenant_id, params.host_id, params.item_id).await?;
 
+    // Resolve the interactive flag before creating the history record so the
+    // persisted column accurately reflects whether the agent will open a PTY,
+    // including when the plugin config opts in via `prefer_interactive: true`.
+    let execute_update_plugin =
+        build_plugin_assignment(&target.execute_update_data.0, &target.execute_update_data.1)?;
+    let resolved_interactive = params.interactive
+        || config_prefers_interactive(
+            &execute_update_plugin.plugin_type,
+            &execute_update_plugin.config,
+        );
+
     let update_history_id = create_update_history_record(
         db,
         &CreateUpdateRecordParams {
@@ -553,6 +571,7 @@ pub async fn trigger_update_for_host(
             update_category: &target.hsi_link.update_category,
             batch_id: None,
             initial_status: update_history::UpdateStatus::Pending,
+            interactive: resolved_interactive,
         },
     )
     .await?;
@@ -1053,6 +1072,7 @@ mod tests {
             created_at: Set(now),
             update_category: Set("feature".to_string()),
             batch_id: Set(None),
+            interactive: Set(false),
         }
         .insert(&db)
         .await
@@ -1107,6 +1127,7 @@ mod tests {
             created_at: Set(now),
             update_category: Set("feature".to_string()),
             batch_id: Set(None),
+            interactive: Set(false),
         }
         .insert(&db)
         .await

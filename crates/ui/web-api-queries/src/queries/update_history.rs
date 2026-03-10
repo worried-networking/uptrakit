@@ -51,6 +51,7 @@ fn build_response(
         completed_at: record.completed_at,
         created_at: record.created_at,
         update_category: record.update_category.clone(),
+        interactive: record.interactive,
     }
 }
 
@@ -285,6 +286,7 @@ mod tests {
             created_at: now,
             update_category: "unknown".to_string(),
             batch_id: None,
+            interactive: false,
         };
 
         let resp = build_response(
@@ -326,6 +328,7 @@ mod tests {
             created_at: now,
             update_category: "security".to_string(),
             batch_id: None,
+            interactive: false,
         };
 
         let resp = build_response(
@@ -365,6 +368,7 @@ mod tests {
             created_at: now,
             update_category: "unknown".to_string(),
             batch_id: None,
+            interactive: false,
         };
 
         let resp = build_response(

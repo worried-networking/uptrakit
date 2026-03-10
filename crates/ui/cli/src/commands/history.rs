@@ -165,6 +165,7 @@ mod tests {
             output: "Success".to_string(),
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             update_category: "security".to_string(),
+            interactive: false,
         }
     }
 

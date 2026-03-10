@@ -27,6 +27,13 @@ pub struct Model {
     pub update_category: String,
     /// Optional batch this update belongs to.
     pub batch_id: Option<Uuid>,
+    /// Whether the update was dispatched in interactive mode (PTY allocated).
+    ///
+    /// Set at dispatch time and immutable — describes how the update was
+    /// started. Used to show an "Input Required" badge in the history list
+    /// for every in-progress interactive update.
+    #[sea_orm(default_value = "false")]
+    pub interactive: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

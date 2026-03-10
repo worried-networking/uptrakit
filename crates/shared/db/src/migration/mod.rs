@@ -43,6 +43,7 @@ mod m20260317_000001_fix_hosts_count_desync;
 mod m20260318_000001_host_software_item_qualifier;
 mod m20260318_000002_cron_to_interval;
 mod m20260319_000001_software_items_sort_index;
+mod m20260320_000001_update_history_interactive;
 
 pub struct Migrator;
 
@@ -90,6 +91,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260309_000003_unified_software_tracking::Migration),
             Box::new(m20260319_000001_software_items_sort_index::Migration),
             Box::new(m20260310_000002_granular_permissions::Migration),
+            Box::new(m20260320_000001_update_history_interactive::Migration),
         ]
     }
 }

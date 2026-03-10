@@ -44,6 +44,12 @@ pub enum AdminEvent {
         update_history_id: Uuid,
         host_id: Uuid,
         software_item_id: Uuid,
+        /// Whether the update was dispatched in interactive mode (PTY allocated).
+        ///
+        /// Allows the history list to show an "Input Required" badge in
+        /// real-time without reloading, as soon as the update transitions to
+        /// `in_progress`.
+        interactive: bool,
     },
     /// A software update completed (successfully or with failure).
     UpdateCompleted {
@@ -120,6 +126,7 @@ mod tests {
                 update_history_id: id,
                 host_id: id,
                 software_item_id: id,
+                interactive: false,
             },
             AdminEvent::UpdateCompleted {
                 update_history_id: id,
@@ -185,6 +192,7 @@ mod tests {
                 update_history_id: id,
                 host_id: id,
                 software_item_id: id,
+                interactive: false,
             }
             .event_name(),
             "update_started"

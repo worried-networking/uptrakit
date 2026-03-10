@@ -398,6 +398,7 @@ pub async fn create_batch(
                 update_category: &candidate.update_category,
                 batch_id: Some(batch_id),
                 initial_status,
+                interactive: false,
             },
         )
         .await?;
@@ -1453,6 +1454,7 @@ mod tests {
             created_at: Set(now),
             update_category: Set("security".to_string()),
             batch_id: Set(Some(batch_id)),
+            interactive: Set(false),
         }
         .insert(db)
         .await
@@ -1476,6 +1478,7 @@ mod tests {
             created_at: Set(now),
             update_category: Set("security".to_string()),
             batch_id: Set(Some(batch_id)),
+            interactive: Set(false),
         }
         .insert(db)
         .await
