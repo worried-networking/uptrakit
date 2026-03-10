@@ -9,6 +9,7 @@ pub struct Model {
     #[sea_orm(unique)]
     pub name: String,
     pub description: Option<String>,
+    pub is_built_in: bool,
     pub created_at: OffsetDateTime,
 }
 
