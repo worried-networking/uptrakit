@@ -83,6 +83,9 @@ async fn spawn_update_task(
 pub enum UpdateEvent {
     Output(crate::update::UpdateOutputMessage),
     Completed(std::result::Result<crate::update::UpdateExecutionResult, tokio::task::JoinError>),
+    /// The update process appears to be waiting for stdin input.
+    /// Carries the `update_history_id` for correlation.
+    Attention(uuid::Uuid),
 }
 
 /// Send an update output message to the controller.

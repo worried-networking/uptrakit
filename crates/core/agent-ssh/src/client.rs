@@ -22,16 +22,17 @@ use crate::ssh_executor::SshCommandExecutor;
 use crate::ssh_pool::SshConnectionPool;
 
 // Re-export shared update types for use in main.rs.
-pub(crate) use uptrakit_agent_core::{InFlightUpdate, UpdateEvent};
+pub(crate) use uptrakit_agent_core::UpdateEvent;
 
 // ── SSH in-flight update tracking ────────────────────────────────────────────
 
 /// State for a per-host in-flight update managed by the SSH agent.
 ///
 /// Unlike `InFlightUpdate` (which owns the JoinHandle and output channel
-/// directly), `SshInFlightUpdate` only stores the update ID and a handle to
-/// the **forwarder task**. The forwarder task owns the underlying
-/// `InFlightUpdate` and forwards all events to the shared aggregate channel.
+/// directly), `SshInFlightUpdate` stores the update ID, a handle to the
+/// **forwarder task**, and interactive channels (when the `interactive`
+/// feature is enabled). The forwarder task owns the underlying output/handle
+/// and forwards all events to the shared aggregate channel.
 pub(crate) struct SshInFlightUpdate {
     /// The update history ID used to correlate events with the controller.
     pub update_history_id: uuid::Uuid,
@@ -39,6 +40,20 @@ pub(crate) struct SshInFlightUpdate {
     ///
     /// Dropped when the update completes normally; aborted on shutdown timeout.
     pub forwarder: tokio::task::JoinHandle<()>,
+    /// Stdin writer for interactive updates. `None` for non-interactive.
+    #[cfg(feature = "interactive")]
+    pub stdin_tx: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
+    /// Signal sender for interactive updates. `None` for non-interactive.
+    #[cfg(feature = "interactive")]
+    pub signal_tx: Option<tokio::sync::mpsc::Sender<i32>>,
+}
+
+/// Receive from an optional attention channel. Pends forever when `None`.
+async fn recv_attention_opt(rx: &mut Option<tokio::sync::mpsc::Receiver<()>>) -> Option<()> {
+    if let Some(rx) = rx {
+        return rx.recv().await;
+    }
+    std::future::pending().await
 }
 
 // ── Connection context ────────────────────────────────────────────────────────
@@ -359,7 +374,7 @@ pub(crate) async fn report_hosts_after_config_change(
 
 /// Capabilities advertised by the SSH agent service.
 pub(crate) fn ssh_agent_capabilities() -> BTreeSet<Capability> {
-    [
+    let mut caps: BTreeSet<Capability> = [
         Capability::SoftwareDiscovery,
         Capability::UpdateHooks,
         Capability::GracefulShutdown,
@@ -367,7 +382,11 @@ pub(crate) fn ssh_agent_capabilities() -> BTreeSet<Capability> {
         Capability::UiExtensions,
     ]
     .into_iter()
-    .collect()
+    .collect();
+    if cfg!(feature = "interactive") {
+        caps.insert(Capability::InteractiveUpdates);
+    }
+    caps
 }
 
 // ── ExecuteUpdate ─────────────────────────────────────────────────────────────
@@ -487,7 +506,13 @@ pub(crate) async fn handle_execute_update_ssh(
     let host_machine_id = payload.host_machine_id.clone();
     let update_history_id = payload.update_history_id;
 
-    let in_flight = uptrakit_agent_core::start_update(payload, executor, conn, &ctx).await;
+    let mut in_flight = uptrakit_agent_core::start_update(payload, executor, conn, &ctx).await;
+
+    // Extract interactive channels before moving InFlightUpdate into the forwarder.
+    #[cfg(feature = "interactive")]
+    let stdin_tx = in_flight.stdin_tx.take();
+    #[cfg(feature = "interactive")]
+    let signal_tx = in_flight.signal_tx.take();
 
     tracing::debug!(
         host_machine_id = %host_machine_id,
@@ -496,16 +521,19 @@ pub(crate) async fn handle_execute_update_ssh(
     );
 
     // Spawn a forwarder task that owns the InFlightUpdate and forwards all
-    // output/completion events to the shared aggregate channel.
+    // output/completion/attention events to the shared aggregate channel.
     let host_id = host_machine_id.clone();
     let tx = aggregate_tx.clone();
     let forwarder = tokio::spawn(async move {
-        let InFlightUpdate {
-            update_history_id: _,
-            mut handle,
-            mut output_rx,
-            ..
-        } = in_flight;
+        let mut handle = in_flight.handle;
+        let mut output_rx = in_flight.output_rx;
+        let update_history_id = in_flight.update_history_id;
+        // Extract the attention channel (feature-gated in InFlightUpdate).
+        let mut _attention_rx: Option<tokio::sync::mpsc::Receiver<()>> = None;
+        #[cfg(feature = "interactive")]
+        {
+            _attention_rx = in_flight.attention_rx;
+        }
         loop {
             tokio::select! {
                 biased;
@@ -518,6 +546,9 @@ pub(crate) async fn handle_execute_update_ssh(
                     let _ = tx.send((host_id, UpdateEvent::Completed(result))).await;
                     break;
                 }
+                Some(()) = recv_attention_opt(&mut _attention_rx) => {
+                    let _ = tx.send((host_id.clone(), UpdateEvent::Attention(update_history_id))).await;
+                }
             }
         }
     });
@@ -527,6 +558,10 @@ pub(crate) async fn handle_execute_update_ssh(
         SshInFlightUpdate {
             update_history_id,
             forwarder,
+            #[cfg(feature = "interactive")]
+            stdin_tx,
+            #[cfg(feature = "interactive")]
+            signal_tx,
         },
     );
 }
@@ -854,6 +889,50 @@ async fn run_execute_batch_update_ssh(
 
 pub(crate) use uptrakit_agent_core::{send_update_output, send_update_result};
 
+/// Forward stdin data or a signal from the controller to the correct SSH host's
+/// in-flight update.
+#[cfg(feature = "interactive")]
+pub(crate) fn handle_update_stdin_data_ssh(
+    payload: uptrakit_internal_wire::UpdateStdinDataPayload,
+    in_flight_updates: &HashMap<String, SshInFlightUpdate>,
+) {
+    // Find the update by update_history_id across all hosts.
+    let Some((_, update)) = in_flight_updates
+        .iter()
+        .find(|(_, u)| u.update_history_id == payload.update_history_id)
+    else {
+        tracing::debug!(
+            update_id = %payload.update_history_id,
+            "received UpdateStdinData but no matching in-flight update found; ignoring"
+        );
+        return;
+    };
+
+    if let Some(signal) = payload.signal {
+        if let Some(ref signal_tx) = update.signal_tx {
+            if signal_tx.try_send(signal).is_err() {
+                tracing::warn!("signal channel full or closed; dropping signal {signal}");
+            }
+        } else {
+            tracing::debug!("signal_tx not available for this update; ignoring signal");
+        }
+    } else if let Some(ref stdin_tx) = update.stdin_tx {
+        use base64::Engine as _;
+        match base64::engine::general_purpose::STANDARD.decode(&payload.data) {
+            Ok(bytes) => {
+                if stdin_tx.try_send(bytes).is_err() {
+                    tracing::warn!("stdin channel full or closed; dropping stdin data");
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to decode base64 stdin data");
+            }
+        }
+    } else {
+        tracing::debug!("stdin_tx not available for this update; ignoring stdin data");
+    }
+}
+
 // ── Private helpers ───────────────────────────────────────────────────────────
 
 /// Build a failed `UpdateResult` [`ServiceMessage`] for SSH error paths.
@@ -918,6 +997,10 @@ mod tests {
         SshInFlightUpdate {
             update_history_id: uuid::Uuid::nil(),
             forwarder: tokio::spawn(std::future::pending()),
+            #[cfg(feature = "interactive")]
+            stdin_tx: None,
+            #[cfg(feature = "interactive")]
+            signal_tx: None,
         }
     }
 

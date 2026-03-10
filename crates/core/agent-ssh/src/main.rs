@@ -349,6 +349,11 @@ impl ServiceHandler for SshAgentHandler {
                 handle_set_update_freeze(&self.freeze_file_path, payload).await;
                 Ok(None)
             }
+            #[cfg(feature = "interactive")]
+            ControllerMessage::UpdateStdinData(payload) => {
+                client::handle_update_stdin_data_ssh(payload, &self.in_flight_updates);
+                Ok(None)
+            }
             ControllerMessage::ReportPluginConfigResponse(payload) => {
                 if payload.success {
                     if let Some(config_id_str) = &payload.plugin_config_id {
@@ -439,6 +444,14 @@ impl ServiceHandler for SshAgentHandler {
                             return Ok(Some(LoopOutcome::Disconnected));
                         }
                         self.in_flight_updates.remove(&host_machine_id);
+                    }
+                    client::UpdateEvent::Attention(uid) => {
+                        conn.send_best_effort(
+                            uptrakit_internal_wire::ServiceMessage::StdinAttention(
+                                uptrakit_internal_wire::StdinAttentionPayload::new(uid),
+                            ),
+                        )
+                        .await;
                     }
                 }
                 Ok(None)
@@ -597,6 +610,9 @@ impl ServiceHandler for SshAgentHandler {
                                         tracing::warn!(error = %e, "failed to send UpdateResult during shutdown");
                                     }
                                     self.in_flight_updates.remove(&host_id);
+                                }
+                                client::UpdateEvent::Attention(_) => {
+                                    // Ignore attention during shutdown.
                                 }
                             }
                         }
@@ -1611,6 +1627,10 @@ mod tests {
             client::SshInFlightUpdate {
                 update_history_id: uuid::Uuid::nil(),
                 forwarder: tokio::spawn(std::future::pending()),
+                #[cfg(feature = "interactive")]
+                stdin_tx: None,
+                #[cfg(feature = "interactive")]
+                signal_tx: None,
             },
         );
 

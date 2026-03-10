@@ -239,6 +239,9 @@ impl ServiceHandler for AgentHandler {
                         }
                         self.in_flight_update = None;
                     }
+                    client::UpdateEvent::Attention(_) => {
+                        // Handled via AgentEvent::Attention; should not reach here.
+                    }
                 }
                 Ok(None)
             }
