@@ -22,22 +22,16 @@ pub fn build_delivery_message(
             callback_base_url.trim_end_matches('/'),
             channel_id
         );
-        vec![MessageAction {
-            label: format!("Install {}", params.to_version),
+        vec![MessageAction::new(
+            format!("Install {}", params.to_version),
             callback_url,
-            token: token.to_string(),
-        }]
+            token.to_string(),
+        )]
     } else {
         vec![]
     };
 
-    DeliveryMessage {
-        title,
-        body,
-        body_html: Some(body_html),
-        event_payload,
-        actions,
-    }
+    DeliveryMessage::new(title, body, Some(body_html), event_payload, actions)
 }
 
 fn build_content(event: &NotificationEvent) -> (String, String, String) {

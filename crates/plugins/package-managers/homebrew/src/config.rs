@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uptrakit_plugin_infrastructure_core::SecretMasking;
 
 /// Homebrew package type: formula (CLI tools, libraries) or cask (GUI applications).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HomebrewPackageType {
     /// Standard Homebrew formula (default).

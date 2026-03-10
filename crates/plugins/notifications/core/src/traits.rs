@@ -8,6 +8,7 @@ use crate::error;
 ///
 /// Channel implementations render this into their native format
 /// (JSON payload for webhooks, HTML message for Telegram, etc.).
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct DeliveryMessage {
     /// One-line human-readable title (e.g. "Update Available: nginx").
@@ -24,6 +25,7 @@ pub struct DeliveryMessage {
 }
 
 /// A single actionable button attached to a notification.
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct MessageAction {
     /// Button label (e.g. "Install Update").
@@ -33,6 +35,40 @@ pub struct MessageAction {
     /// Opaque token identifying this action. Channels embed it in their
     /// native callback mechanism.
     pub token: String,
+}
+
+impl MessageAction {
+    /// Create a new [`MessageAction`].
+    pub fn new(
+        label: impl Into<String>,
+        callback_url: impl Into<String>,
+        token: impl Into<String>,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            callback_url: callback_url.into(),
+            token: token.into(),
+        }
+    }
+}
+
+impl DeliveryMessage {
+    /// Create a new [`DeliveryMessage`].
+    pub fn new(
+        title: impl Into<String>,
+        body: impl Into<String>,
+        body_html: Option<String>,
+        event_payload: serde_json::Value,
+        actions: Vec<MessageAction>,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            body: body.into(),
+            body_html,
+            event_payload,
+            actions,
+        }
+    }
 }
 
 /// Trait implemented by each notification plugin (webhook, Telegram, email, etc.).

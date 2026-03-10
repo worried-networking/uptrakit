@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uptrakit_plugin_infrastructure_core::SecretMasking;
 
 /// Discovery filter: which packages to surface during autodiscovery.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AptDiscoveryFilter {
     /// All installed packages reported by dpkg.
@@ -96,9 +96,7 @@ impl AptConfig {
     /// `None` (default config) behaves as `All` — all installed dpkg packages
     /// are reported.
     pub(crate) fn effective_filter(&self) -> AptDiscoveryFilter {
-        self.discovery_filter
-            .clone()
-            .unwrap_or(AptDiscoveryFilter::All)
+        self.discovery_filter.unwrap_or(AptDiscoveryFilter::All)
     }
 }
 

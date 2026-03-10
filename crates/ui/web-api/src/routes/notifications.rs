@@ -323,13 +323,13 @@ pub async fn test_channel(
     };
 
     // Build test message
-    let test_msg = DeliveryMessage {
-        title: "Test Notification".to_string(),
-        body: "This is a test notification from Uptrakit.".to_string(),
-        body_html: None,
-        event_payload: serde_json::json!({"test": true}),
-        actions: vec![],
-    };
+    let test_msg = DeliveryMessage::new(
+        "Test Notification",
+        "This is a test notification from Uptrakit.",
+        None,
+        serde_json::json!({"test": true}),
+        vec![],
+    );
 
     // Deliver
     match channel_impl.deliver(&config_json, &test_msg).await {

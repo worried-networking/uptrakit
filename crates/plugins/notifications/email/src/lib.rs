@@ -384,13 +384,7 @@ mod tests {
     async fn deliver_returns_error_on_missing_required_fields() {
         // Config missing smtp_host and from_address should fail deserialization or validation.
         let config = serde_json::json!({"to_addresses": ["user@example.com"]});
-        let msg = DeliveryMessage {
-            title: "Test".to_string(),
-            body: "Body".to_string(),
-            body_html: None,
-            event_payload: serde_json::json!({}),
-            actions: vec![],
-        };
+        let msg = DeliveryMessage::new("Test", "Body", None, serde_json::json!({}), vec![]);
         let result = plugin().deliver(&config, &msg).await;
         assert!(result.is_err(), "missing smtp_host should produce an error");
     }
@@ -411,13 +405,7 @@ mod tests {
             "to_addresses": ["user@example.com"],
             "tls_mode": "none"
         });
-        let msg = DeliveryMessage {
-            title: "Test".to_string(),
-            body: "Body".to_string(),
-            body_html: None,
-            event_payload: serde_json::json!({}),
-            actions: vec![],
-        };
+        let msg = DeliveryMessage::new("Test", "Body", None, serde_json::json!({}), vec![]);
         let result = plugin().deliver(&config, &msg).await;
         assert!(
             result.is_err(),
