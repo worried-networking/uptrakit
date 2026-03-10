@@ -47,6 +47,18 @@ pub enum SettingKey {
     ///
     /// DB key: `audit_log.retention_days`
     AuditLogRetentionDays,
+    /// Whether mDNS/DNS-SD zero-configuration advertising is enabled.
+    ///
+    /// DB key: `zeroconf.enabled`
+    ZeroconfEnabled,
+    /// Override URL advertised via mDNS (for reverse proxy deployments).
+    ///
+    /// DB key: `zeroconf.url`
+    ZeroconfUrl,
+    /// Override PKI address advertised via mDNS (for reverse proxy deployments).
+    ///
+    /// DB key: `zeroconf.pki_addr`
+    ZeroconfPkiAddr,
 }
 
 impl SettingKey {
@@ -82,6 +94,9 @@ impl SettingKey {
             Self::NatsUrl => "nats.url",
             Self::AuditLogFilter => "audit_log.filter",
             Self::AuditLogRetentionDays => "audit_log.retention_days",
+            Self::ZeroconfEnabled => "zeroconf.enabled",
+            Self::ZeroconfUrl => "zeroconf.url",
+            Self::ZeroconfPkiAddr => "zeroconf.pki_addr",
         }
     }
 
@@ -119,6 +134,9 @@ impl SettingKey {
             "nats.url" => Some(Self::NatsUrl),
             "audit_log.filter" => Some(Self::AuditLogFilter),
             "audit_log.retention_days" => Some(Self::AuditLogRetentionDays),
+            "zeroconf.enabled" => Some(Self::ZeroconfEnabled),
+            "zeroconf.url" => Some(Self::ZeroconfUrl),
+            "zeroconf.pki_addr" => Some(Self::ZeroconfPkiAddr),
             _ => None,
         }
     }
@@ -141,6 +159,9 @@ impl SettingKey {
                 | Self::JwtSigningKey
                 | Self::MasterKeyVerification
                 | Self::NatsUrl
+                | Self::ZeroconfEnabled
+                | Self::ZeroconfUrl
+                | Self::ZeroconfPkiAddr
         )
     }
 }

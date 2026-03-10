@@ -120,6 +120,17 @@ impl fmt::Debug for SmtpSettingsSnapshot {
     }
 }
 
+/// Zero-configuration discovery settings for mDNS/DNS-SD advertising.
+#[derive(Clone, Debug, Default)]
+pub struct ZeroconfSnapshot {
+    /// Whether mDNS/DNS-SD advertising is enabled on the controller.
+    pub enabled: bool,
+    /// Override URL advertised via mDNS (for reverse proxy deployments).
+    pub url: Option<String>,
+    /// Override PKI address advertised via mDNS (for reverse proxy deployments).
+    pub pki_addr: Option<String>,
+}
+
 /// Immutable snapshot of all settings. Published atomically via a watch channel
 /// so readers never see a mix of old and new values.
 #[derive(Clone, Debug)]
@@ -136,6 +147,8 @@ pub struct SettingsSnapshot {
     /// NATS server URL (raw, decrypted). `None` when not configured.
     /// Stored as `Option<MaskedUrl>` so `Debug` automatically masks any password.
     pub nats_url: Option<MaskedUrl>,
+    /// Zero-configuration discovery settings.
+    pub zeroconf: ZeroconfSnapshot,
 }
 
 #[derive(Clone)]
@@ -180,6 +193,7 @@ impl Settings {
             mqtt_max_clients_per_tenant: DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT,
             smtp: SmtpSettingsSnapshot::default(),
             nats_url: None,
+            zeroconf: ZeroconfSnapshot::default(),
         };
         let (tx, rx) = tokio::sync::watch::channel(snapshot);
         Self {
@@ -233,6 +247,7 @@ impl Settings {
 
         let smtp = Self::load_smtp_settings(&combined);
         let nats_url = Self::load_nats_url(&global_raw);
+        let zeroconf = Self::load_zeroconf_settings(&global_raw);
 
         // Read initial version counters
         let (version, global_version) =
@@ -247,6 +262,7 @@ impl Settings {
             mqtt_max_clients_per_tenant,
             smtp,
             nats_url,
+            zeroconf,
         };
         let (tx, rx) = tokio::sync::watch::channel(snapshot);
         let settings = Self {
@@ -364,6 +380,7 @@ impl Settings {
         // NatsUrl is a global-only key, so it is present in `combined` (which
         // started as a copy of global_raw extended with per-tenant rows).
         let nats_url = Self::load_nats_url(&combined);
+        let zeroconf = Self::load_zeroconf_settings(&combined);
 
         // Publish complete snapshot atomically
         let _guard = self.inner.write_mutex.lock().await;
@@ -376,6 +393,7 @@ impl Settings {
             mqtt_max_clients_per_tenant,
             smtp,
             nats_url,
+            zeroconf,
         });
 
         // Update cached version counters
@@ -691,6 +709,47 @@ impl Settings {
             None
         } else {
             Some(MaskedUrl::new(raw_url))
+        }
+    }
+
+    // --- Zeroconf settings ---
+
+    /// Read the zeroconf settings snapshot (synchronous).
+    pub fn zeroconf(&self) -> ZeroconfSnapshot {
+        self.inner.snapshot_rx.borrow().zeroconf.clone()
+    }
+
+    /// Replace zeroconf settings (acquires write mutex for atomic publish).
+    pub async fn set_zeroconf(&self, zeroconf: ZeroconfSnapshot) {
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.zeroconf = zeroconf);
+    }
+
+    /// Load zeroconf settings from a [`RawSettings`] map.
+    pub fn load_zeroconf_settings(raw: &RawSettings) -> ZeroconfSnapshot {
+        let enabled = raw
+            .get_setting(SettingKey::ZeroconfEnabled)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let url = raw
+            .get_setting(SettingKey::ZeroconfUrl)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
+        let pki_addr = raw
+            .get_setting(SettingKey::ZeroconfPkiAddr)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
+        ZeroconfSnapshot {
+            enabled,
+            url,
+            pki_addr,
         }
     }
 
