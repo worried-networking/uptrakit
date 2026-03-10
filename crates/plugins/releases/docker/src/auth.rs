@@ -143,6 +143,20 @@ impl RegistryAuth {
             )))
         })?;
 
+        // Prefer `token`; fall back to `access_token` (OAuth 2.0 style).
+        // Docker Hub returns both keys with the same value; having separate
+        // optional fields avoids the serde duplicate-key error that the
+        // old `alias` approach produced.
+        let token = token_resp
+            .token
+            .or(token_resp.access_token)
+            .ok_or_else(|| {
+                report!(DockerError::ParseResponse(
+                    "registry token response contained neither 'token' nor 'access_token'"
+                        .to_string()
+                ))
+            })?;
+
         // Cache the token
         let expires_at = token_resp.expires_in.map(|secs| {
             if secs > EXPIRY_SAFETY_MARGIN_SECS {
@@ -152,11 +166,10 @@ impl RegistryAuth {
             }
         });
 
-        let token = token_resp.token.clone();
         {
             let mut guard = self.cached_token.lock();
             *guard = Some(CachedToken {
-                token: token_resp.token,
+                token: token.clone(),
                 expires_at,
             });
         }

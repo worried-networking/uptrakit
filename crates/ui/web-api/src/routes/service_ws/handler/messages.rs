@@ -428,6 +428,22 @@ pub(super) async fn handle_version_check_results(
 
     let now = time::OffsetDateTime::now_utc();
 
+    // Look up tenant_id and service details once; reused per-result for notifications.
+    let svc_tenant_id = match service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(svc)) => Some(svc.tenant_id),
+        Ok(None) => {
+            tracing::warn!(%service_id, "service not found for version check results");
+            None
+        }
+        Err(e) => {
+            tracing::warn!(%service_id, error = %e, "failed to look up service");
+            None
+        }
+    };
+
     for result in &payload.results {
         if result.error.is_some() {
             tracing::debug!(
@@ -439,116 +455,105 @@ pub(super) async fn handle_version_check_results(
             continue;
         }
 
-        // Route to host_software_item.
         let software_item_id = result.software_item_id;
 
-        // Update installed version and latest version on all host_software_item records
-        // for this (host_id, software_item_id) pair.  Using update_many ensures that all
-        // qualifier rows (e.g. multiple Docker containers using the same image) are updated
-        // in a single statement.
-        for &host_id in &host_ids {
-            // Check if any row exists for notification dispatch purposes.
-            let row_exists = host_software_item::Entity::find()
-                .filter(host_software_item::Column::HostId.eq(host_id))
-                .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
+        // Query all host_software_item rows for this software item that belong to
+        // this service's hosts in one round-trip. This replaces the old per-host
+        // loop that issued one SELECT per host and logged "not found" for the
+        // many hosts that don't have this software item.
+        let matching_rows = host_software_item::Entity::find()
+            .filter(host_software_item::Column::HostId.is_in(host_ids.clone()))
+            .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
+            .filter(host_software_item::Column::DeactivatedAt.is_null())
+            .all(state.db())
+            .await;
+
+        let matching_rows = match matching_rows {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    software_item_id = %software_item_id,
+                    "failed to look up host_software_items"
+                );
+                continue;
+            }
+        };
+
+        if matching_rows.is_empty() {
+            continue;
+        }
+
+        let matching_host_ids: Vec<uuid::Uuid> = matching_rows.iter().map(|r| r.host_id).collect();
+
+        // Build and run the update across all matched host_software_item rows.
+        let mut update = host_software_item::Entity::update_many()
+            .filter(host_software_item::Column::HostId.is_in(matching_host_ids.clone()))
+            .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id));
+        update = update.col_expr(
+            host_software_item::Column::UpdateCategory,
+            sea_orm::sea_query::Expr::value(result.update_category.to_string()),
+        );
+        if let Some(ref installed_version) = result.installed_version {
+            update = update
+                .col_expr(
+                    host_software_item::Column::InstalledVersion,
+                    sea_orm::sea_query::Expr::value(Some(installed_version.clone())),
+                )
+                .col_expr(
+                    host_software_item::Column::InstalledVersionDetectedAt,
+                    sea_orm::sea_query::Expr::value(Some(now)),
+                );
+        }
+        if let Some(ref latest_version) = result.latest_version {
+            update = update
+                .col_expr(
+                    host_software_item::Column::LatestVersion,
+                    sea_orm::sea_query::Expr::value(Some(latest_version.clone())),
+                )
+                .col_expr(
+                    host_software_item::Column::LatestVersionFetchedAt,
+                    sea_orm::sea_query::Expr::value(Some(now)),
+                );
+        }
+        if let Err(e) = update.exec(state.db()).await {
+            tracing::warn!(
+                error = %e,
+                software_item_id = %software_item_id,
+                host_count = matching_host_ids.len(),
+                "failed to update host_software_items"
+            );
+        }
+
+        // Dispatch notification per matched host when a new version is detected.
+        if let (Some(latest_version), Some(tenant_id)) = (&result.latest_version, svc_tenant_id) {
+            let sw_name = software_item::Entity::find_by_id(software_item_id)
                 .one(state.db())
-                .await;
+                .await
+                .ok()
+                .flatten()
+                .map(|sw| sw.name.clone());
 
-            match row_exists {
-                Ok(Some(_)) => {
-                    // Build the update_many expression for fields that are Some.
-                    let mut update = host_software_item::Entity::update_many()
-                        .filter(host_software_item::Column::HostId.eq(host_id))
-                        .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id));
-                    // Always update update_category.
-                    update = update.col_expr(
-                        host_software_item::Column::UpdateCategory,
-                        sea_orm::sea_query::Expr::value(result.update_category.to_string()),
-                    );
-                    if let Some(ref installed_version) = result.installed_version {
-                        update = update
-                            .col_expr(
-                                host_software_item::Column::InstalledVersion,
-                                sea_orm::sea_query::Expr::value(Some(installed_version.clone())),
-                            )
-                            .col_expr(
-                                host_software_item::Column::InstalledVersionDetectedAt,
-                                sea_orm::sea_query::Expr::value(Some(now)),
-                            );
-                    }
-                    if let Some(ref latest_version) = result.latest_version {
-                        update = update
-                            .col_expr(
-                                host_software_item::Column::LatestVersion,
-                                sea_orm::sea_query::Expr::value(Some(latest_version.clone())),
-                            )
-                            .col_expr(
-                                host_software_item::Column::LatestVersionFetchedAt,
-                                sea_orm::sea_query::Expr::value(Some(now)),
-                            );
-                    }
-                    if let Err(e) = update.exec(state.db()).await {
-                        tracing::warn!(
-                            error = %e,
-                            host_id = %host_id,
-                            software_item_id = %software_item_id,
-                            "failed to update host_software_item"
-                        );
-                    }
+            for host_id in matching_host_ids {
+                let host_name = host::Entity::find_by_id(host_id)
+                    .one(state.db())
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|h| h.hostname.clone());
 
-                    // Dispatch notification event when a new version is detected.
-                    if let Some(ref latest_version) = result.latest_version {
-                        // Look up software item name for the notification message.
-                        let sw_name = software_item::Entity::find_by_id(software_item_id)
-                            .one(state.db())
-                            .await
-                            .ok()
-                            .flatten()
-                            .map(|sw| sw.name.clone());
-
-                        // Look up host name for the notification message.
-                        let host_name = host::Entity::find_by_id(host_id)
-                            .one(state.db())
-                            .await
-                            .ok()
-                            .flatten()
-                            .map(|h| h.hostname.clone());
-
-                        // Look up tenant_id from the service.
-                        if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
-                            .one(state.db())
-                            .await
-                        {
-                            state.notification_dispatcher.dispatch(NotificationEvent {
-                                tenant_id: svc.tenant_id,
-                                host_id: Some(host_id),
-                                host_name,
-                                software_item_id: Some(software_item_id),
-                                software_item_name: sw_name,
-                                plugin_type: None,
-                                details: NotificationEventDetails::UpdateAvailable {
-                                    installed_version: result.installed_version.clone(),
-                                    latest_version: latest_version.clone(),
-                                },
-                            });
-                        }
-                    }
-                }
-                Ok(None) => {
-                    tracing::debug!(
-                        host_id = %host_id,
-                        software_item_id = %software_item_id,
-                        "no host_software_item record found, skipping"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        host_id = %host_id,
-                        software_item_id = %software_item_id,
-                        "failed to look up host_software_item"
-                    );
-                }
+                state.notification_dispatcher.dispatch(NotificationEvent {
+                    tenant_id,
+                    host_id: Some(host_id),
+                    host_name,
+                    software_item_id: Some(software_item_id),
+                    software_item_name: sw_name.clone(),
+                    plugin_type: None,
+                    details: NotificationEventDetails::UpdateAvailable {
+                        installed_version: result.installed_version.clone(),
+                        latest_version: latest_version.clone(),
+                    },
+                });
             }
         }
     }

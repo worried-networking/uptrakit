@@ -1,11 +1,17 @@
 use serde::Deserialize;
 
 /// Response from the registry token endpoint (Bearer token auth).
+///
+/// Some registries (e.g. Docker Hub) return **both** `token` and
+/// `access_token` with the same value. Serde's `alias` attribute errors on
+/// duplicate keys, so both fields are modelled as optional; the caller picks
+/// whichever is populated.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenResponse {
-    /// The bearer token.
-    #[serde(alias = "access_token")]
-    pub token: String,
+    /// Bearer token (`token` key).
+    pub token: Option<String>,
+    /// Bearer token (`access_token` key — OAuth 2.0 style).
+    pub access_token: Option<String>,
     /// Token expiry in seconds (optional).
     pub expires_in: Option<u64>,
 }
@@ -36,19 +42,35 @@ mod tests {
             "expires_in": 300
         });
         let resp: TokenResponse = serde_json::from_value(json).expect("deserialize");
-        assert!(resp.token.starts_with("eyJ"));
+        assert!(resp.token.as_deref().unwrap_or("").starts_with("eyJ"));
         assert_eq!(resp.expires_in, Some(300));
     }
 
     #[test]
-    fn deserialize_token_response_with_access_token() {
-        // Some registries use "access_token" instead of "token"
+    fn deserialize_token_response_with_access_token_only() {
+        // Some registries use only "access_token" (OAuth 2.0 style).
         let json = serde_json::json!({
             "access_token": "abc123",
             "expires_in": 600
         });
         let resp: TokenResponse = serde_json::from_value(json).expect("deserialize");
-        assert_eq!(resp.token, "abc123");
+        assert_eq!(resp.access_token.as_deref(), Some("abc123"));
+        assert!(resp.token.is_none());
+    }
+
+    #[test]
+    fn deserialize_token_response_both_keys() {
+        // Docker Hub returns both "token" and "access_token" with the same value.
+        // With separate optional fields this must not error on duplicate keys.
+        let json = serde_json::json!({
+            "token": "tok1",
+            "access_token": "tok1",
+            "expires_in": 300,
+            "issued_at": "2026-03-10T20:16:49Z"
+        });
+        let resp: TokenResponse = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(resp.token.as_deref(), Some("tok1"));
+        assert_eq!(resp.access_token.as_deref(), Some("tok1"));
     }
 
     #[test]
@@ -57,7 +79,7 @@ mod tests {
             "token": "abc"
         });
         let resp: TokenResponse = serde_json::from_value(json).expect("deserialize");
-        assert_eq!(resp.token, "abc");
+        assert_eq!(resp.token.as_deref(), Some("abc"));
         assert!(resp.expires_in.is_none());
     }
 
@@ -98,6 +120,6 @@ mod tests {
             "scope": "repository:library/nginx:pull"
         });
         let resp: TokenResponse = serde_json::from_value(json).expect("deserialize");
-        assert_eq!(resp.token, "tok");
+        assert_eq!(resp.token.as_deref(), Some("tok"));
     }
 }
