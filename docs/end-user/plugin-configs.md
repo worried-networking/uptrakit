@@ -11,7 +11,7 @@ same plugin config.
 
 ## Plugin Types
 
-Uptrakit ships with eleven built-in plugin types:
+Uptrakit ships with fourteen built-in plugin types:
 
 | Plugin type | Description | Autodiscovery |
 | --- | --- | --- |
@@ -28,6 +28,7 @@ Uptrakit ships with eleven built-in plugin types:
 | `package_manager_mas` | Tracks Mac App Store apps via the `mas` CLI tool. Agent-side only. Discovers installed apps and checks for updates via `mas list` and `mas outdated`. No `sudo` required. Requires `brew install mas`. | Yes |
 | `package_manager_pacman` | Tracks Arch Linux packages managed by Pacman. Installed versions are resolved locally by the agent using `pacman -Q`; latest versions are fetched from repositories using `pacman -Si`. Requires `sudo` access for updates and database sync. | Yes |
 | `package_manager_pkg` | Tracks packages managed by the BSD `pkg` tool (FreeBSD, TrueNAS SCALE, OPNsense, pfSense, DragonFly BSD). Installed and available versions are resolved locally by the agent. Requires `sudo` access for updates and index refresh. | Yes |
+| `package_manager_apk` | Tracks Alpine Linux packages managed by APK. Installed and latest versions are resolved locally by the agent using `apk`. Requires `sudo` access for updates and index refresh. | Yes |
 
 ### `releases_github` configuration fields
 
@@ -322,6 +323,29 @@ Installed versions are resolved on the agent via `pkg query "%v" <name>`. Upstre
 are read from the local repository database via `pkg rquery "%v" <name>` (no additional
 network access required beyond the repository index, which is refreshed by `pkg update -q`).
 Updates are executed via `pkg install -y <name>` with `sudo`.
+### `package_manager_apk` configuration fields
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `discovery_filter` | No | `all` (default) or `world`. Controls which packages are surfaced during autodiscovery. `all` surfaces every installed package (`apk list --installed`); `world` surfaces only packages explicitly listed in `/etc/apk/world`. |
+
+Uptrakit auto-creates a config named `"APK"` when the first agent with APK support
+connects and no matching plugin config exists.
+
+**Package identifier format:** The Alpine package name (e.g. `busybox`, `openssl`,
+`ca-certificates`). Must start with a lowercase letter or digit; may contain lowercase
+letters, digits, `.`, `_`, `+`, and `-`. Length: 2–100 characters.
+
+**Discovery behaviour:** In default (discover-all) mode, the plugin runs `apk list --installed`
+and emits one `DiscoveryTarget` per package pointing to a shared `"APK"` config. With the
+`world` filter, only packages in `/etc/apk/world` are surfaced using `apk info -v`.
+
+**Sudoers entries:** The APK plugin declares two restricted `sudo` entries:
+
+- `apk update` — for refreshing the package index
+- `apk add *` — for installing packages
+
+See [APK Plugin](plugins/apk.md) for full details.
 
 ## Role-Based Host Assignments
 

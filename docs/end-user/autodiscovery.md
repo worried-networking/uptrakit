@@ -9,7 +9,7 @@ The `featured` flag on each item controls how it appears in the UI:
 
 - **Featured items** (Docker, Proxmox Helper Scripts) appear individually in the main Software
   list.
-- **Non-featured items** (APT, Homebrew, npm, Mac App Store) appear as aggregated per-host
+- **Non-featured items** (APT, APK, Homebrew, npm, Mac App Store) appear as aggregated per-host
   package summaries.
 
 ## How It Works
@@ -26,7 +26,7 @@ it:
 | Featured | UI location | Typical plugins |
 | --- | --- | --- |
 | `true` | Main Software list (individual entries) | Docker, Proxmox Helper Scripts |
-| `false` | Host detail page (aggregated package view) | APT, Homebrew, Mac App Store, npm |
+| `false` | Host detail page (aggregated package view) | APT, APK, Homebrew, Mac App Store, npm |
 
 Plugins set the `featured` flag explicitly during discovery. The controller routes items based
 on this flag -- see [Plugin Guidelines](../development/plugin-guidelines.md) for plugin
@@ -50,7 +50,7 @@ assignments:
 All assignments default to `execution_site: auto`, meaning the system decides where each
 operation runs based on the plugin's capabilities. Plugins that support controller-side release
 fetching (GitHub Releases, Docker) will have their `fetch_releases` role executed on the
-controller automatically. Plugins that require a local package index (Homebrew, APT) always run
+controller automatically. Plugins that require a local package index (Homebrew, APT, APK) always run
 on the agent.
 
 For non-featured items, the `plugin_config_id` and `package_identifier` are stored directly on
@@ -67,6 +67,7 @@ Discovery-capable plugins currently supported:
 | Plugin | What it discovers |
 | --- | --- |
 | APT | Debian/Ubuntu packages installed via APT |
+| APK | Alpine Linux packages installed via APK |
 | Docker | Running and stopped containers on the host -- one software item per container |
 | Homebrew (Formulae) | Homebrew formula packages installed on the host |
 | Homebrew (Casks) | Homebrew cask packages installed on the host |
