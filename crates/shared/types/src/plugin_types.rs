@@ -35,6 +35,7 @@ pub enum PluginType {
     PackageManagerDnf,
     PackageManagerNpm,
     PackageManagerMas,
+    PackageManagerPacman,
     GenericShell,
     InfrastructureProxmox,
     /// An unknown plugin type received from a newer peer.
@@ -61,6 +62,7 @@ impl PluginType {
             Self::PackageManagerDnf => "package_manager_dnf",
             Self::PackageManagerNpm => "package_manager_npm",
             Self::PackageManagerMas => "package_manager_mas",
+            Self::PackageManagerPacman => "package_manager_pacman",
             Self::GenericShell => "generic_shell",
             Self::InfrastructureProxmox => "infrastructure_proxmox",
             Self::Other(s) => s.as_str(),
@@ -82,6 +84,7 @@ impl PluginType {
             Self::PackageManagerDnf => "DNF",
             Self::PackageManagerNpm => "npm",
             Self::PackageManagerMas => "Mac App Store",
+            Self::PackageManagerPacman => "Pacman",
             Self::GenericShell => "Shell",
             Self::InfrastructureProxmox => "Proxmox VE",
             Self::Other(s) => s.as_str(),
@@ -119,6 +122,7 @@ impl FromStr for PluginType {
             "package_manager_dnf" => Ok(Self::PackageManagerDnf),
             "package_manager_npm" => Ok(Self::PackageManagerNpm),
             "package_manager_mas" => Ok(Self::PackageManagerMas),
+            "package_manager_pacman" => Ok(Self::PackageManagerPacman),
             "generic_shell" => Ok(Self::GenericShell),
             "infrastructure_proxmox" => Ok(Self::InfrastructureProxmox),
             _ => Err(ParsePluginTypeError::Invalid),
@@ -156,6 +160,7 @@ impl From<String> for PluginType {
             "package_manager_dnf" => Self::PackageManagerDnf,
             "package_manager_npm" => Self::PackageManagerNpm,
             "package_manager_mas" => Self::PackageManagerMas,
+            "package_manager_pacman" => Self::PackageManagerPacman,
             "generic_shell" => Self::GenericShell,
             "infrastructure_proxmox" => Self::InfrastructureProxmox,
             _ => Self::Other(s),
@@ -178,6 +183,7 @@ impl From<PluginType> for String {
             PluginType::PackageManagerDnf => "package_manager_dnf".to_string(),
             PluginType::PackageManagerNpm => "package_manager_npm".to_string(),
             PluginType::PackageManagerMas => "package_manager_mas".to_string(),
+            PluginType::PackageManagerPacman => "package_manager_pacman".to_string(),
             PluginType::GenericShell => "generic_shell".to_string(),
             PluginType::InfrastructureProxmox => "infrastructure_proxmox".to_string(),
             PluginType::Other(s) => s,
@@ -389,6 +395,16 @@ mod tests {
     }
 
     #[test]
+    fn plugin_type_pacman_serialization() {
+        let pacman = PluginType::PackageManagerPacman;
+        let json = serde_json::to_string(&pacman).expect("serialize");
+        assert_eq!(json, r#""package_manager_pacman""#);
+
+        let deserialized: PluginType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, pacman);
+    }
+
+    #[test]
     fn plugin_type_shell_serialization() {
         let shell = PluginType::GenericShell;
         let json = serde_json::to_string(&shell).expect("serialize");
@@ -460,6 +476,10 @@ mod tests {
             PluginType::PackageManagerMas
         );
         assert_eq!(
+            PluginType::from("package_manager_pacman".to_string()),
+            PluginType::PackageManagerPacman
+        );
+        assert_eq!(
             PluginType::from("generic_shell".to_string()),
             PluginType::GenericShell
         );
@@ -508,6 +528,10 @@ mod tests {
             PluginType::PackageManagerMas.to_string(),
             "package_manager_mas"
         );
+        assert_eq!(
+            PluginType::PackageManagerPacman.to_string(),
+            "package_manager_pacman"
+        );
         assert_eq!(PluginType::GenericShell.to_string(), "generic_shell");
         assert_eq!(
             PluginType::InfrastructureProxmox.to_string(),
@@ -550,6 +574,10 @@ mod tests {
         assert_eq!(
             "package_manager_mas".parse::<PluginType>().ok(),
             Some(PluginType::PackageManagerMas)
+        );
+        assert_eq!(
+            "package_manager_pacman".parse::<PluginType>().ok(),
+            Some(PluginType::PackageManagerPacman)
         );
         assert_eq!(
             "releases_gitlab".parse::<PluginType>().ok(),
@@ -613,6 +641,7 @@ mod tests {
             PluginType::PackageManagerMas.display_name(),
             "Mac App Store"
         );
+        assert_eq!(PluginType::PackageManagerPacman.display_name(), "Pacman");
         assert_eq!(PluginType::GenericShell.display_name(), "Shell");
         assert_eq!(
             PluginType::InfrastructureProxmox.display_name(),
@@ -638,6 +667,7 @@ mod tests {
             PluginType::PackageManagerApt,
             PluginType::PackageManagerNpm,
             PluginType::PackageManagerMas,
+            PluginType::PackageManagerPacman,
             PluginType::GenericShell,
             PluginType::InfrastructureProxmox,
         ];
@@ -662,6 +692,7 @@ mod tests {
             PluginType::PackageManagerApt,
             PluginType::PackageManagerNpm,
             PluginType::PackageManagerMas,
+            PluginType::PackageManagerPacman,
             PluginType::GenericShell,
             PluginType::InfrastructureProxmox,
             PluginType::Other("my_plugin".to_string()),
