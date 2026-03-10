@@ -489,17 +489,14 @@ for user review. Key invariants:
         (only `tag_strip_prefix`, `include_prereleases`, `asset_patterns`), and
         `package_identifier: Some("owner/repo")` override.
      2. `plugin_type: GenericShell`, roles `[DetectVersion, ExecuteUpdate]`, config with
-        `version_command` (`sudo /usr/local/bin/uptrakit-phs-version {package_identifier}`) and
-        `update_command` (`sudo /usr/local/bin/uptrakit-phs-update`). `sudo` is embedded in
-        both commands because the Shell plugin uses `CommandSpec::shell()`, where the
-        `privileged` flag has no effect. Each command delegates to a dedicated helper script
-        installed by bootstrap:
-        - `uptrakit-phs-version <slug>`: validates the slug and reads `/root/.<slug>`
-          for version detection.
-        - `uptrakit-phs-update`: runs `env PHS_SILENT=1 /usr/bin/update` for unattended
-          container updates (no arguments, so no argument validation is needed).
-        Both are declared via `ProxmoxHelperScriptsPlugin::required_sudo_commands()` using
-        `SudoHelperScript { install_path, content }` — bootstrap installs both scripts.
+        `version_command` (`sudo /usr/local/bin/uptrakit-phs-version {package_identifier}`),
+        `update_command` (`sudo PHS_SILENT=1 TERM=xterm /usr/bin/update`), and
+        `prefer_interactive: true`. `sudo` is embedded because the Shell plugin uses
+        `CommandSpec::shell()`, where `privileged` has no effect. `prefer_interactive: true`
+        causes the controller to automatically set `interactive: true` in `ExecuteUpdatePayload`
+        (see `config_prefers_interactive` in `update_triggers.rs`), allocating a PTY so
+        `/dev/tty` is available for prompts that `PHS_SILENT=1` does not suppress (e.g. the
+        low-storage warning `read -r prompt < /dev/tty`).
      The PHS shell constants live in `crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs`.
    - Codeberg-managed apps (detected via `check_for_codeberg_release` or `CODEBERG_REPO=`) emit **two**
      `DiscoveryTarget` values:
