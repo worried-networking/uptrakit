@@ -10,9 +10,14 @@
 		output?: string;
 		/** Additional CSS classes for the container. */
 		class?: string;
+		/**
+		 * When provided, stdin is enabled and each keypress / paste in the
+		 * terminal calls this handler with the raw xterm data string.
+		 */
+		onInput?: (data: string) => void;
 	}
 
-	let { output, class: className = '' }: Props = $props();
+	let { output, class: className = '', onInput }: Props = $props();
 
 	let containerEl: HTMLDivElement | undefined = $state(undefined);
 	let terminal: Terminal | null = null;
@@ -78,13 +83,13 @@
 		if (!containerEl) return;
 
 		terminal = new Terminal({
-			disableStdin: true,
+			disableStdin: onInput === undefined,
 			convertEol: true,
 			scrollback: 10000,
 			fontSize: 13,
 			fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
 			theme: getTheme(),
-			cursorBlink: false,
+			cursorBlink: onInput !== undefined,
 			cursorStyle: 'bar',
 			cursorInactiveStyle: 'none'
 		});
@@ -95,6 +100,10 @@
 
 		terminal.open(containerEl);
 		fitAddon.fit();
+
+		if (onInput) {
+			terminal.onData(onInput);
+		}
 
 		// Auto-resize when the container changes size.
 		resizeObserver = new ResizeObserver(() => {

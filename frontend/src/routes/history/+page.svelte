@@ -9,8 +9,8 @@
 	import Pagination from '$lib/components/Pagination.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
-	import { connectOutputStream } from '$lib/sse';
-	import type { SseConnectionState } from '$lib/sse';
+	import { connectInteractiveSession } from '$lib/interactive';
+	import type { InteractiveConnectionState } from '$lib/interactive';
 	import { Permission } from '$lib/types';
 	import type { UpdateHistoryResponse, UpdateHistoryStatus, SoftwareItemResponse } from '$lib/types';
 
@@ -33,10 +33,11 @@
 	let statusFilter: StatusFilter = $state(parseUrlParam(page.url, 'status', STATUS_FILTER_VALUES, 'all'));
 	let expandedId: string | null = $state(null);
 
-	// SSE streaming state for expanded in-progress items
-	let activeDisconnect: (() => void) | null = null;
+	// Interactive WS state for expanded in-progress items
+	let activeWsHandle: ReturnType<typeof connectInteractiveSession> | null = null;
 	let activeStreamId: string | null = $state(null);
-	let streamState: SseConnectionState = $state('disconnected');
+	let wsState: InteractiveConnectionState = $state('disconnected');
+	let stdinAttention: boolean = $state(false);
 	let terminalRefs: Record<string, TerminalOutput> = {};
 
 	// Trigger update modal state
@@ -94,12 +95,13 @@
 	});
 
 	function disconnectStream() {
-		if (activeDisconnect) {
-			activeDisconnect();
-			activeDisconnect = null;
-			activeStreamId = null;
-			streamState = 'disconnected';
+		if (activeWsHandle) {
+			activeWsHandle.disconnect();
+			activeWsHandle = null;
 		}
+		activeStreamId = null;
+		wsState = 'disconnected';
+		stdinAttention = false;
 	}
 
 	function isLiveStatus(status: UpdateHistoryStatus): boolean {
@@ -118,34 +120,36 @@
 
 		expandedId = id;
 
-		// If the item is in-progress or pending, connect to SSE stream
+		// If the item is in-progress or pending, connect interactive WS
 		const item = items.find((i) => i.id === id);
 		if (item && isLiveStatus(item.status)) {
-			// Defer SSE connection to next tick so the terminal has mounted
-			setTimeout(() => connectSse(id), 0);
+			// Defer connection to next tick so the terminal has mounted.
+			setTimeout(() => connectInteractive(id), 0);
 		}
 	}
 
-	function connectSse(updateHistoryId: string) {
+	function connectInteractive(updateHistoryId: string) {
 		const termRef = terminalRefs[updateHistoryId];
 		activeStreamId = updateHistoryId;
-		streamState = 'connecting';
+		wsState = 'connecting';
+		stdinAttention = false;
 
-		activeDisconnect = connectOutputStream(updateHistoryId, {
+		activeWsHandle = connectInteractiveSession(updateHistoryId, {
 			onOutput: (line) => {
-				if (termRef) {
-					termRef.write(line.text);
-				}
+				termRef?.write(line.text);
 			},
 			onCompleted: () => {
-				// Reload the individual item to get the final status
+				stdinAttention = false;
 				reloadItem(updateHistoryId);
 			},
-			onStateChange: (state) => {
-				streamState = state;
+			onStdinAttention: () => {
+				stdinAttention = true;
 			},
-			onError: (err) => {
-				showError(`Stream error: ${err}`);
+			onStateChange: (state) => {
+				wsState = state;
+			},
+			onError: (msg) => {
+				showError(`Interactive session error: ${msg}`);
 			}
 		});
 	}
@@ -309,14 +313,30 @@
 									<td colspan="6" class="bg-surface-50 dark:bg-surface-900 p-4">
 										<div class="mb-1 flex items-center gap-2">
 											<p class="text-sm font-medium text-surface-600 dark:text-surface-400">Output</p>
-											{#if activeStreamId === item.id && streamState === 'streaming'}
+											{#if activeStreamId === item.id && wsState === 'connected'}
 												<span class="badge preset-filled-success-500 text-xs animate-pulse">Live</span>
-											{:else if activeStreamId === item.id && streamState === 'connecting'}
+											{:else if activeStreamId === item.id && wsState === 'connecting'}
 												<span class="badge preset-tonal text-xs">Connecting…</span>
+											{/if}
+											{#if stdinAttention && activeStreamId === item.id}
+												<span class="badge preset-filled-warning-500 text-xs animate-pulse">Input Required</span>
+											{/if}
+											{#if activeStreamId === item.id && (wsState === 'connected' || wsState === 'connecting')}
+												<button
+													class="btn btn-sm preset-tonal-error ml-auto text-xs"
+													title="Send Ctrl+C (SIGINT)"
+													onclick={() => activeWsHandle?.sendSignal(2)}
+												>
+													Ctrl+C
+												</button>
 											{/if}
 										</div>
 										{#if isLiveStatus(item.status)}
-											<TerminalOutput bind:this={terminalRefs[item.id]} class="h-80" />
+											<TerminalOutput
+												bind:this={terminalRefs[item.id]}
+												class="h-80"
+												onInput={(data) => (activeStreamId === item.id ? activeWsHandle?.sendInput(data) : undefined)}
+											/>
 										{:else if item.output}
 											<TerminalOutput output={item.output} class="h-80" />
 										{:else}

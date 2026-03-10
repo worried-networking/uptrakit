@@ -21,8 +21,8 @@
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
 	import EditHostAssignmentModal from '$lib/components/EditHostAssignmentModal.svelte';
 	import AssignToHostModal from '$lib/components/AssignToHostModal.svelte';
-	import { connectOutputStream } from '$lib/sse';
-	import type { SseConnectionState } from '$lib/sse';
+	import { connectInteractiveSession } from '$lib/interactive';
+	import type { InteractiveConnectionState } from '$lib/interactive';
 	import { Permission, hasAnyPermission } from '$lib/types';
 	import type { AttestationStatus, SoftwareItemDetailResponse, SoftwareItemHostSummary } from '$lib/types';
 
@@ -84,8 +84,9 @@
 
 	// Live terminal modal state
 	let liveModal: { updateHistoryId: string; hostName: string } | null = $state(null);
-	let liveStreamState: SseConnectionState = $state('disconnected');
-	let liveDisconnect: (() => void) | null = null;
+	let liveWsState: InteractiveConnectionState = $state('disconnected');
+	let liveWsHandle: ReturnType<typeof connectInteractiveSession> | null = null;
+	let liveStdinAttention: boolean = $state(false);
 	let liveTerminalRef: TerminalOutput | undefined = $state(undefined);
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
@@ -322,34 +323,38 @@
 
 	function openLiveModal(updateHistoryId: string, hostName: string) {
 		liveModal = { updateHistoryId, hostName };
-		liveStreamState = 'connecting';
+		liveWsState = 'connecting';
+		liveStdinAttention = false;
 		setTimeout(() => {
-			liveDisconnect = connectOutputStream(updateHistoryId, {
+			liveWsHandle = connectInteractiveSession(updateHistoryId, {
 				onOutput: (line) => {
-					if (liveTerminalRef) {
-						liveTerminalRef.write(line.text);
-					}
+					liveTerminalRef?.write(line.text);
 				},
 				onCompleted: () => {
+					liveStdinAttention = false;
 					loadItem(true);
 				},
+				onStdinAttention: () => {
+					liveStdinAttention = true;
+				},
 				onStateChange: (state) => {
-					liveStreamState = state;
+					liveWsState = state;
 				},
 				onError: (err) => {
-					showError(`Stream error: ${err}`);
+					showError(`Interactive session error: ${err}`);
 				}
 			});
 		}, 0);
 	}
 
 	function closeLiveModal() {
-		if (liveDisconnect) {
-			liveDisconnect();
-			liveDisconnect = null;
+		if (liveWsHandle) {
+			liveWsHandle.disconnect();
+			liveWsHandle = null;
 		}
 		liveModal = null;
-		liveStreamState = 'disconnected';
+		liveWsState = 'disconnected';
+		liveStdinAttention = false;
 	}
 
 	async function openUpdateAllModal() {
@@ -757,24 +762,38 @@
 		<div class="flex items-center justify-between">
 			<div class="flex items-center gap-2">
 				<h3 class="h3">Update Output</h3>
-				{#if liveStreamState === 'streaming'}
+				{#if liveWsState === 'connected'}
 					<span class="badge preset-filled-success-500 text-xs animate-pulse">Live</span>
-				{:else if liveStreamState === 'connecting'}
+				{:else if liveWsState === 'connecting'}
 					<span class="badge preset-tonal text-xs">Connecting...</span>
-				{:else if liveStreamState === 'completed'}
+				{:else if liveWsState === 'completed'}
 					<span class="badge preset-filled-success-500 text-xs">Completed</span>
-				{:else if liveStreamState === 'error'}
+				{:else if liveWsState === 'error'}
 					<span class="badge preset-filled-error-500 text-xs">Error</span>
 				{/if}
+				{#if liveStdinAttention}
+					<span class="badge preset-filled-warning-500 text-xs animate-pulse">Input Required</span>
+				{/if}
 			</div>
-			<p class="text-sm text-surface-500">{liveModal.hostName}</p>
+			<div class="flex items-center gap-2">
+				{#if liveWsState === 'connected' || liveWsState === 'connecting'}
+					<button
+						class="btn btn-sm preset-tonal-error text-xs"
+						title="Send Ctrl+C (SIGINT)"
+						onclick={() => liveWsHandle?.sendSignal(2)}
+					>
+						Ctrl+C
+					</button>
+				{/if}
+				<p class="text-sm text-surface-500">{liveModal.hostName}</p>
+			</div>
 		</div>
 
-		<TerminalOutput bind:this={liveTerminalRef} class="h-96" />
+		<TerminalOutput bind:this={liveTerminalRef} class="h-96" onInput={(data) => liveWsHandle?.sendInput(data)} />
 
 		{#snippet footer()}
 			<button class="btn preset-tonal-surface" onclick={closeLiveModal}>
-				{liveStreamState === 'streaming' || liveStreamState === 'connecting' ? 'Close (update continues)' : 'Close'}
+				{liveWsState === 'connected' || liveWsState === 'connecting' ? 'Close (update continues)' : 'Close'}
 			</button>
 		{/snippet}
 	</Modal>
