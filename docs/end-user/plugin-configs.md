@@ -324,6 +324,7 @@ Installed versions are resolved on the agent via `pkg query "%v" <name>`. Upstre
 are read from the local repository database via `pkg rquery "%v" <name>` (no additional
 network access required beyond the repository index, which is refreshed by `pkg update -q`).
 Updates are executed via `pkg install -y <name>` with `sudo`.
+
 ### `package_manager_apk` configuration fields
 
 | Field | Required | Description |

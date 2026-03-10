@@ -169,7 +169,7 @@ SudoCommandEntry {
     command: "systemctl".to_string(),
     explanation: "Stop services before asset installation".to_string(),
     helper_script: None,
-    args_suffix: Some("stop *"),
+    args_suffix: Some(std::borrow::Cow::Borrowed("stop *")),
     needs_setenv: false,
 }
 ```
@@ -182,6 +182,55 @@ uptrakit ALL=(root) NOPASSWD: /usr/bin/systemctl stop *
 
 The `*` wildcard allows any service name but the subcommand is fixed. This is safe because
 sudoers argument matching is positional — `stop *` does not match `disable myservice`.
+
+## Per-plugin sudo entries
+
+Each registered plugin declares which commands it needs root access for, and how restricted
+those commands are. The table below documents the exact sudoers patterns generated for each
+plugin. The `*` wildcard as the **last** argument matches zero or more additional arguments —
+positional matching in sudoers means it does **not** match an earlier subcommand position.
+
+| Plugin | Sudoers pattern | Notes |
+| --- | --- | --- |
+| **APT** | `SETENV: /usr/bin/apt-get update *` | Index refresh; `SETENV:` required for `DEBIAN_FRONTEND=noninteractive` |
+| **APT** | `SETENV: /usr/bin/apt-get install *` | Single-package install |
+| **APT** | `SETENV: /usr/bin/apt-get -o Dir::Etc::Preferences=/tmp/uptrakit-apt-batch.pref upgrade *` | Batch upgrade via pinned preferences file; uses `upgrade` (not `install`) to preserve apt manual/auto marks |
+| **APK** | `/usr/sbin/apk update` | Index refresh; no wildcard needed |
+| **APK** | `/usr/sbin/apk add *` | Package installation |
+| **Pacman** | `/usr/bin/pacman -Sy` | Database sync; no wildcard |
+| **Pacman** | `/usr/bin/pacman -S --noconfirm *` | Package installation (single and batch) |
+| **BSD pkg** | `/usr/local/sbin/pkg update *` | Index refresh |
+| **BSD pkg** | `/usr/local/sbin/pkg install -y *` | Package installation |
+| **Snap** | `/usr/bin/snap refresh *` | Package refresh; covers `snap refresh PKG`, `snap refresh PKG --channel=stable`, and batch |
+| **npm** | `/usr/bin/npm install -g *` | Global package install (single and batch) |
+| **GitHub Releases** | `/usr/bin/install` | Asset installation; no restriction on arguments |
+| **GitHub Releases** | `/usr/bin/systemctl stop *` | Stop services before asset installation |
+| **GitHub Releases** | `/usr/bin/systemctl start *` | Start services after asset installation |
+| **Proxmox Helper Scripts** | `/usr/local/bin/uptrakit-phs-version` | Version detection helper script |
+| **Proxmox Helper Scripts** | `SETENV: /usr/bin/update` | PHS update execution |
+
+> **Note on APT batch upgrade:** `apt-get upgrade` is used (not `apt-get install pkg=version`)
+> because `upgrade` preserves the apt **manual/auto install mark**. Packages auto-installed as
+> dependencies keep their `auto` mark, allowing `apt autoremove` to clean them up correctly
+> later. Changing to `install` would flip those packages to `manual` and break auto-removal.
+> The preferences file path `/tmp/uptrakit-apt-batch.pref` is fixed on both the write side and
+> the sudoers declaration side so the rule is maximally restrictive — no other `-o` path is
+> permitted.
+
+### `*` wildcard semantics
+
+In sudoers, a trailing `*` matches zero or more **space-separated tokens** at that position
+and beyond. Positional matching means the subcommand token is fixed:
+
+```text
+# Allows: apt-get install vim   apt-get install vim=2.0   apt-get install vim curl
+# Denies: apt-get upgrade       apt-get purge vim          apt-get remove vim
+uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get install *
+```
+
+Note that `*` in sudoers **does match `/`**, which is why helper scripts are preferred when
+argument values influence file paths. For subcommand-only restriction (no path arguments
+from user input), `args_suffix` with `*` is safe.
 
 ## The `--allow-all` fallback
 
@@ -271,11 +320,20 @@ uptrakit-agent-ssh host sync my-server --dry-run
 ```text
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
 # Regenerate: uptrakit-agent-ssh host sync <host>
-# <absolute-path>: <explanation>
-<username> ALL=(root) NOPASSWD: [SETENV: ]<absolute-path>
+# <absolute-path>[<args-suffix>]: <explanation>
+<username> ALL=(root) NOPASSWD: [SETENV: ]<absolute-path>[<args-suffix>]
 ```
 
-`SETENV:` is included only when the plugin sets `needs_setenv = true` (currently only `apt-get`).
+When a plugin sets `args_suffix`, the resolved path includes the suffix verbatim:
+
+```text
+# /usr/bin/apt-get update *: Package index refresh requires root privileges
+uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get update *
+# /usr/bin/apt-get install *: Package installation requires root privileges
+uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get install *
+```
+
+`SETENV:` is included only when the plugin sets `needs_setenv = true` (currently the three `apt-get` entries).
 
 Or with `--allow-all`:
 
