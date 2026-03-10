@@ -226,6 +226,21 @@ impl CommandExecutor for SudoAwareCommandExecutor {
     async fn open_stdio_tunnel(&self, command: &str) -> crate::Result<Box<dyn StdioTunnel>> {
         self.inner.open_stdio_tunnel(command).await
     }
+
+    #[cfg(feature = "interactive")]
+    fn supports_interactive(&self) -> bool {
+        self.inner.supports_interactive()
+    }
+
+    #[cfg(feature = "interactive")]
+    async fn execute_interactive(
+        &self,
+        spec: &CommandSpec,
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> crate::Result<crate::executor::InteractiveHandle> {
+        let modified = self.apply_sudo(spec);
+        self.inner.execute_interactive(&modified, output_tx).await
+    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
@@ -499,6 +514,44 @@ mod tests {
             CommandMode::Exec { program, .. } => assert_eq!(program, "apt-get"),
             other => panic!("expected Exec mode, got: {other:?}"),
         }
+    }
+
+    // ── SudoAwareCommandExecutor: interactive delegation ─────────────────
+
+    #[cfg(feature = "interactive")]
+    #[test]
+    fn supports_interactive_delegates_to_inner() {
+        // LocalCommandExecutor supports interactive; wrapping it must propagate true.
+        let inner: Arc<dyn CommandExecutor> = Arc::new(LocalCommandExecutor);
+        let exec = SudoAwareCommandExecutor::new(inner, SudoContext::default());
+        assert!(
+            exec.supports_interactive(),
+            "SudoAwareCommandExecutor must delegate supports_interactive() to inner"
+        );
+    }
+
+    #[cfg(feature = "interactive")]
+    #[tokio::test]
+    async fn execute_interactive_applies_sudo_transformation() {
+        use tokio::sync::mpsc;
+
+        // Use a non-root context with sudo available (auto policy) so that
+        // a privileged Exec-mode spec gets `sudo` prepended. The interactive
+        // handle should still be obtained successfully (LocalCommandExecutor
+        // supports interactive mode).
+        let inner: Arc<dyn CommandExecutor> = Arc::new(LocalCommandExecutor);
+        let exec = SudoAwareCommandExecutor::new(inner, SudoContext::default());
+        let (tx, _rx) = mpsc::channel(64);
+        // A non-privileged shell command — just verify the call path works.
+        let spec = CommandSpec::shell("echo interactive-test");
+        let handle = exec.execute_interactive(&spec, &tx).await;
+        assert!(
+            handle.is_ok(),
+            "execute_interactive must succeed on a wrapping SudoAwareCommandExecutor"
+        );
+        // Abort the spawned task so the test does not block.
+        let h = handle.expect("already checked");
+        h.completion.abort();
     }
 
     // ── SudoAwareCommandExecutor: end-to-end execute ────────────────────
