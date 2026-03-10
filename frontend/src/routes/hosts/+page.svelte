@@ -6,7 +6,7 @@
 	import { getUser } from '$lib/auth.svelte';
 	import { getHosts, updateHost, deactivateHost, triggerHostDiscovery, batchHosts } from '$lib/api';
 	import type { HostResponse, BatchActionResponse } from '$lib/types';
-	import { Permission } from '$lib/types';
+	import { Permission, hasAnyPermission } from '$lib/types';
 	import { formatDate, parseUrlPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
@@ -213,8 +213,17 @@
 		}
 	}
 
-	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageHosts) ?? false);
-	const canManageSoftware = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
+	const canManage = $derived(hasAnyPermission(getUser(), Permission.UpdateHosts, Permission.DeactivateHosts));
+	const canManageSoftware = $derived(
+		hasAnyPermission(
+			getUser(),
+			Permission.CreateSoftware,
+			Permission.UpdateSoftware,
+			Permission.DeleteSoftware,
+			Permission.TriggerChecks,
+			Permission.TriggerUpdates
+		)
+	);
 </script>
 
 <svelte:window onclick={handleWindowClick} />

@@ -29,7 +29,7 @@
 
 	// --- Permissions ---
 	const canViewHosts = $derived(getUser()?.permissions.includes(Permission.ViewHosts) ?? false);
-	const canViewAgents = $derived(getUser()?.permissions.includes(Permission.ViewAgents) ?? false);
+	const canViewAgents = $derived(getUser()?.permissions.includes(Permission.ViewServices) ?? false);
 	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;

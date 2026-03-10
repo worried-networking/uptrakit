@@ -26,7 +26,7 @@
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 	import type { SoftwareItemResponse, SoftwareItemDetailResponse, BatchActionResponse } from '$lib/types';
-	import { Permission } from '$lib/types';
+	import { Permission, hasAnyPermission } from '$lib/types';
 	import { getTabExtensions } from '$lib/extensions.svelte';
 	import IgnoreRulesTab from './IgnoreRulesTab.svelte';
 	import ExtensionTabContent from '$lib/components/extensions/ExtensionTabContent.svelte';
@@ -62,7 +62,16 @@
 	let batchResult: BatchActionResponse | null = $state(null);
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
-	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
+	const canManage = $derived(
+		hasAnyPermission(
+			getUser(),
+			Permission.CreateSoftware,
+			Permission.UpdateSoftware,
+			Permission.DeleteSoftware,
+			Permission.TriggerChecks,
+			Permission.TriggerUpdates
+		)
+	);
 
 	const batchActions = $derived.by(() => {
 		const selected = items.filter((i) => batchSelectedIds.has(i.id));

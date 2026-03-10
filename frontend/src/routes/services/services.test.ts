@@ -35,7 +35,12 @@ const adminUser = {
 	email: 'admin@example.com',
 	first_name: 'Admin',
 	last_name: 'User',
-	permissions: [Permission.ManageAgents]
+	permissions: [
+		Permission.ApproveServices,
+		Permission.RejectServices,
+		Permission.RemoveServices,
+		Permission.UpdateServices
+	]
 };
 
 function makePage(items: ServiceResponse[]): PaginatedResponse<ServiceResponse> {

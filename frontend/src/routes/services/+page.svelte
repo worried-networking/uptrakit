@@ -14,7 +14,7 @@
 		batchServices
 	} from '$lib/api';
 	import type { ServiceResponse, BatchActionResponse } from '$lib/types';
-	import { Permission } from '$lib/types';
+	import { Permission, hasAnyPermission } from '$lib/types';
 	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
@@ -53,7 +53,15 @@
 	let batchConfirmAction: string | null = $state(null);
 	let batchResult: BatchActionResponse | null = $state(null);
 
-	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageAgents) ?? false);
+	const canManage = $derived(
+		hasAnyPermission(
+			getUser(),
+			Permission.ApproveServices,
+			Permission.RejectServices,
+			Permission.RemoveServices,
+			Permission.UpdateServices
+		)
+	);
 
 	const batchActions = $derived.by(() => {
 		const acts: { id: string; label: string; destructive?: boolean }[] = [];

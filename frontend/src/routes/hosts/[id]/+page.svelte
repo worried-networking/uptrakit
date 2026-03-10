@@ -21,7 +21,7 @@
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
-	import { Permission, PluginCapability } from '$lib/types';
+	import { Permission, PluginCapability, hasAnyPermission } from '$lib/types';
 	import type {
 		HostResponse,
 		UpdateHistoryResponse,
@@ -63,8 +63,17 @@
 	let showSetTagsModal: boolean = $state(false);
 	let selectedTagIds: string[] = $state([]);
 
-	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageHosts) ?? false);
-	const canManageSoftware = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
+	const canManage = $derived(hasAnyPermission(getUser(), Permission.UpdateHosts, Permission.DeactivateHosts));
+	const canManageSoftware = $derived(
+		hasAnyPermission(
+			getUser(),
+			Permission.CreateSoftware,
+			Permission.UpdateSoftware,
+			Permission.DeleteSoftware,
+			Permission.TriggerChecks,
+			Permission.TriggerUpdates
+		)
+	);
 	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;

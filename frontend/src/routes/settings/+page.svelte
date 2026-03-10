@@ -12,7 +12,7 @@
 		MqttClientResponse,
 		OidcProviderResponse
 	} from '$lib/types';
-	import { Permission } from '$lib/types';
+	import { Permission, hasAnyPermission } from '$lib/types';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { getTabExtensions } from '$lib/extensions.svelte';
 
@@ -28,9 +28,26 @@
 	import ExtensionTabContent from '$lib/components/extensions/ExtensionTabContent.svelte';
 
 	// ── Permissions ─────────────────────────────────────────────────────
-	const canManageSettings = $derived(getUser()?.permissions.includes(Permission.ManageSettings) ?? false);
+	const canManageSettings = $derived(
+		hasAnyPermission(
+			getUser(),
+			Permission.ManageAuthSettings,
+			Permission.ManageEnrollmentTokens,
+			Permission.ManageAgentCerts
+		)
+	);
 	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
-	const canManageSoftware = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
+	const canManageSoftware = $derived(
+		hasAnyPermission(
+			getUser(),
+			Permission.CreateSoftware,
+			Permission.UpdateSoftware,
+			Permission.DeleteSoftware,
+			Permission.TriggerChecks,
+			Permission.TriggerUpdates,
+			Permission.ManageScheduler
+		)
+	);
 	const canManageGlobalSettings = $derived(getUser()?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
 	const hasAnyTabPermission = $derived(
 		canManageSettings || canViewSoftware || canManageSoftware || canManageGlobalSettings

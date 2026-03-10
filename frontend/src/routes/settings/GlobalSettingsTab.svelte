@@ -11,7 +11,7 @@
 		updateZeroconfSettings,
 		rotateCA
 	} from '$lib/api';
-	import { Permission, type SystemAlert } from '$lib/types';
+	import { Permission, hasAnyPermission, type SystemAlert } from '$lib/types';
 	import { showSuccess, showError, clearError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SystemServicesSettings from './SystemServicesSettings.svelte';
@@ -48,7 +48,15 @@
 	// --- Loading ---
 	let loading: boolean = $state(true);
 
-	const canManageSystemServices = $derived(getUser()?.permissions.includes(Permission.ManageSystemServices) ?? false);
+	const canManageSystemServices = $derived(
+		hasAnyPermission(
+			getUser(),
+			Permission.ApproveSystemServices,
+			Permission.RejectSystemServices,
+			Permission.RemoveSystemServices,
+			Permission.UpdateSystemServices
+		)
+	);
 
 	$effect(() => {
 		loadGlobalSettings();

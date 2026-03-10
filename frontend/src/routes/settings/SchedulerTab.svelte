@@ -8,7 +8,7 @@
 	import { Permission } from '$lib/types';
 	import type { ScheduledTaskResponse } from '$lib/types';
 
-	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
+	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageScheduler) ?? false);
 
 	let tasks: ScheduledTaskResponse[] = $state([]);
 	let loading: boolean = $state(true);

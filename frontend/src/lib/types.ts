@@ -4,22 +4,53 @@ export interface ErrorResponse {
 }
 
 export enum Permission {
-	ViewSettings = 'view_settings',
-	ManageSettings = 'manage_settings',
-	ViewAgents = 'view_agents',
-	ManageAgents = 'manage_agents',
-	ManageGlobalSettings = 'manage_global_settings',
+	// Services
+	ViewServices = 'view_services',
+	ApproveServices = 'approve_services',
+	RejectServices = 'reject_services',
+	RemoveServices = 'remove_services',
+	UpdateServices = 'update_services',
+	// System services
+	ViewSystemServices = 'view_system_services',
+	ApproveSystemServices = 'approve_system_services',
+	RejectSystemServices = 'reject_system_services',
+	RemoveSystemServices = 'remove_system_services',
+	UpdateSystemServices = 'update_system_services',
+	// Software
 	ViewSoftware = 'view_software',
-	ManageSoftware = 'manage_software',
-	ManageCommands = 'manage_commands',
+	CreateSoftware = 'create_software',
+	UpdateSoftware = 'update_software',
+	DeleteSoftware = 'delete_software',
+	TriggerChecks = 'trigger_checks',
+	TriggerUpdates = 'trigger_updates',
+	ManageScheduler = 'manage_scheduler',
+	// Hosts
 	ViewHosts = 'view_hosts',
-	ManageHosts = 'manage_hosts',
+	UpdateHosts = 'update_hosts',
+	DeactivateHosts = 'deactivate_hosts',
+	// Settings
+	ViewSettings = 'view_settings',
+	ManageAuthSettings = 'manage_auth_settings',
+	ManageEnrollmentTokens = 'manage_enrollment_tokens',
+	ManageAgentCerts = 'manage_agent_certs',
+	ManageGlobalSettings = 'manage_global_settings',
+	// Commands
+	ManageCommands = 'manage_commands',
+	// Notifications
 	ViewNotifications = 'view_notifications',
 	ManageNotifications = 'manage_notifications',
-	ViewSystemServices = 'view_system_services',
-	ManageSystemServices = 'manage_system_services',
+	// Audit logs
 	ViewAuditLogs = 'view_audit_logs',
-	ViewSystemAuditLogs = 'view_system_audit_logs'
+	ViewSystemAuditLogs = 'view_system_audit_logs',
+	// Users & ignores
+	ManageUsers = 'manage_users',
+	ManageIgnores = 'manage_ignores'
+}
+
+/** Returns true if the user holds at least one of the given permissions. */
+export function hasAnyPermission(user: User | null | undefined, ...perms: Permission[]): boolean {
+	if (!user) return false;
+	return perms.some((p) => user.permissions.includes(p));
 }
 
 export interface User {

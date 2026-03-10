@@ -23,7 +23,7 @@
 	import AssignToHostModal from '$lib/components/AssignToHostModal.svelte';
 	import { connectOutputStream } from '$lib/sse';
 	import type { SseConnectionState } from '$lib/sse';
-	import { Permission } from '$lib/types';
+	import { Permission, hasAnyPermission } from '$lib/types';
 	import type { AttestationStatus, SoftwareItemDetailResponse, SoftwareItemHostSummary } from '$lib/types';
 
 	const id = $derived($page.params.id as string);
@@ -89,7 +89,16 @@
 	let liveTerminalRef: TerminalOutput | undefined = $state(undefined);
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
-	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
+	const canManage = $derived(
+		hasAnyPermission(
+			getUser(),
+			Permission.CreateSoftware,
+			Permission.UpdateSoftware,
+			Permission.DeleteSoftware,
+			Permission.TriggerChecks,
+			Permission.TriggerUpdates
+		)
+	);
 
 	const ROLE_SHORT: Record<string, string> = {
 		detect_version: 'Detect',

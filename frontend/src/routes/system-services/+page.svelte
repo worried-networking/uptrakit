@@ -13,7 +13,7 @@
 		batchSystemServices
 	} from '$lib/api';
 	import type { SystemServiceResponse, BatchActionResponse } from '$lib/types';
-	import { Permission } from '$lib/types';
+	import { Permission, hasAnyPermission } from '$lib/types';
 	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
@@ -49,7 +49,15 @@
 	let batchResult: BatchActionResponse | null = $state(null);
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSystemServices) ?? false);
-	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSystemServices) ?? false);
+	const canManage = $derived(
+		hasAnyPermission(
+			getUser(),
+			Permission.ApproveSystemServices,
+			Permission.RejectSystemServices,
+			Permission.RemoveSystemServices,
+			Permission.UpdateSystemServices
+		)
+	);
 
 	const batchActions = $derived.by(() => {
 		const acts: { id: string; label: string; destructive?: boolean }[] = [];

@@ -13,7 +13,7 @@
 	import { Permission } from '$lib/types';
 	import type { SoftwareIgnoreResponse, BatchActionResponse } from '$lib/types';
 
-	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
+	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageIgnores) ?? false);
 
 	let ignores: SoftwareIgnoreResponse[] = $state([]);
 	let ignoresLoading: boolean = $state(true);

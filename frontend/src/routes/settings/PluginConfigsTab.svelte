@@ -20,7 +20,7 @@
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 	import { getUser } from '$lib/auth.svelte';
-	import { Permission, PluginCapability } from '$lib/types';
+	import { Permission, PluginCapability, hasAnyPermission } from '$lib/types';
 	import type {
 		PluginConfigResponse,
 		TenantDiscoveryAllowlistEntry,
@@ -31,7 +31,9 @@
 	} from '$lib/types';
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
-	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
+	const canManage = $derived(
+		hasAnyPermission(getUser(), Permission.CreateSoftware, Permission.UpdateSoftware, Permission.DeleteSoftware)
+	);
 
 	// Plugin types
 	let pluginTypes: PluginTypeInfo[] = $state([]);

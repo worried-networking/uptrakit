@@ -49,7 +49,7 @@
 	let releaseUrl: string = $state('');
 	let triggering: boolean = $state(false);
 
-	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
+	const canManage = $derived(getUser()?.permissions.includes(Permission.TriggerUpdates) ?? false);
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 
 	const selectedItem = $derived(softwareItems.find((i) => i.id === selectedItemId));

@@ -37,7 +37,15 @@ const adminUser = {
 	email: 'admin@example.com',
 	first_name: 'Admin',
 	last_name: 'User',
-	permissions: [Permission.ManageHosts, Permission.ManageSoftware]
+	permissions: [
+		Permission.UpdateHosts,
+		Permission.DeactivateHosts,
+		Permission.CreateSoftware,
+		Permission.UpdateSoftware,
+		Permission.DeleteSoftware,
+		Permission.TriggerChecks,
+		Permission.TriggerUpdates
+	]
 };
 
 function makePage(items: HostResponse[]): PaginatedResponse<HostResponse> {
@@ -123,10 +131,10 @@ describe('Hosts Page', () => {
 		expect(screen.getByRole('button', { name: /actions for production server/i })).toBeInTheDocument();
 	});
 
-	it('does not show the actions button when the user lacks ManageHosts permission', async () => {
+	it('does not show the actions button when the user lacks host management permissions', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [Permission.ManageSoftware]
+			permissions: [Permission.TriggerChecks]
 		});
 		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
 		render(HostsPage);
@@ -147,7 +155,7 @@ describe('Hosts Page', () => {
 		expect(screen.getByRole('menuitem', { name: 'Deactivate' })).toBeInTheDocument();
 	});
 
-	it('shows the Trigger Discovery menu item when the user has ManageSoftware permission', async () => {
+	it('shows the Trigger Discovery menu item when the user has software management permissions', async () => {
 		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
@@ -158,10 +166,10 @@ describe('Hosts Page', () => {
 		expect(screen.getByRole('menuitem', { name: 'Trigger Discovery' })).toBeInTheDocument();
 	});
 
-	it('does not show Trigger Discovery when the user lacks ManageSoftware permission', async () => {
+	it('does not show Trigger Discovery when the user lacks software management permissions', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [Permission.ManageHosts]
+			permissions: [Permission.UpdateHosts]
 		});
 		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
 		render(HostsPage);

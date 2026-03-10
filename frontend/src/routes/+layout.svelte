@@ -97,9 +97,14 @@
 			priority: 1000,
 			permission: [
 				Permission.ViewSettings,
-				Permission.ManageSettings,
+				Permission.ManageAuthSettings,
+				Permission.ManageEnrollmentTokens,
+				Permission.ManageAgentCerts,
 				Permission.ViewSoftware,
-				Permission.ManageSoftware,
+				Permission.CreateSoftware,
+				Permission.UpdateSoftware,
+				Permission.DeleteSoftware,
+				Permission.ManageScheduler,
 				Permission.ManageGlobalSettings
 			]
 		}
