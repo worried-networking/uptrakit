@@ -436,10 +436,17 @@ async fn run(args: cli::Args) -> Result<()> {
         Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry);
     let extension_manifests = plugin_ops.extension_manifests();
     let extension_actions = plugin_ops.extension_actions();
+
+    // Notification extensions (only enabled plugins produce manifests).
+    let notification_manifests = notification_ops.extension_manifests();
+    let notification_actions = notification_ops.extension_actions();
+
     let extension_registry = Arc::new(
         uptrakit_web_api::extension_registry::ExtensionRegistry::new(
             extension_manifests,
             extension_actions,
+            notification_manifests,
+            notification_actions,
         ),
     );
 
