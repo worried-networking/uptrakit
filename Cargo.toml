@@ -112,6 +112,7 @@ uptrakit-plugin-package-manager-apt = { path = "crates/plugins/package-managers/
 uptrakit-plugin-package-manager-npm = { path = "crates/plugins/package-managers/npm" }
 uptrakit-plugin-package-manager-mas = { path = "crates/plugins/package-managers/mas" }
 uptrakit-plugin-package-manager-dnf = { path = "crates/plugins/package-managers/dnf" }
+uptrakit-plugin-package-manager-pacman = { path = "crates/plugins/package-managers/pacman" }
 uptrakit-plugin-infrastructure-proxmox = { path = "crates/plugins/infrastructure/proxmox" }
 uptrakit-plugin-discovery-proxmox-helper-scripts = { path = "crates/plugins/discovery/proxmox-helper-scripts" }
 # External deps used by a single crate — declared here so all versions are pinned in one place
