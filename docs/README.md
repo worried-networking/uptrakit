@@ -31,6 +31,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Interactive Updates](end-user/interactive-updates.md) | Bidirectional terminal I/O for update sessions with PTY allocation and stdin forwarding. See also: [Interactive Updates API](api/interactive-updates.md), [Interactive Updates Security](security/interactive-updates.md). |
 | [Audit Logs](end-user/audit-logs.md) | Viewing audit logs (tenant and system), filter reference, permissions, and CLI usage. See also: [Audit Logs API](api/audit-logs.md), [Audit Logs Security](security/audit-logs.md). |
 | [Profile and API Tokens](end-user/profile-tokens.md) | Account info, API token lifecycle, security best practices. See also: [Auth Flows](api/auth-flows.md), [Auth and Authorization](security/auth-and-authorization.md). |
+| [Zero-Configuration Discovery](end-user/zeroconf-discovery.md) | Automatic controller discovery via mDNS/DNS-SD on the LAN. See also: [Zeroconf Development](development/zeroconf-discovery.md), [Zeroconf Security](security/zeroconf-discovery.md). |
 | [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md) | Reverse proxy deployment choices, headers, and API snippets. See also: [PKI and Certificates](security/pki-certificates.md), [Reverse Proxy Security](security/reverse-proxy-security.md). |
 
 ## API and Protocol
@@ -67,6 +68,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Notifications Security](security/notifications-security.md) | Notification secret storage, callback verification, action token lifecycle, and tenant isolation. See also: [Notifications API](api/notifications.md), [Notifications Development](development/notifications.md). |
 | [Audit Logs Security](security/audit-logs.md) | Audit log data scope, tenant isolation (two-table design, no FK on tenant_id), access permissions, retention/GDPR, backend security properties. See also: [Audit Logs Development](development/audit-logs.md), [Audit Logs API](api/audit-logs.md). |
 | [Interactive Updates Security](security/interactive-updates.md) | Threat model, permission model, audit logging, and wire protocol security for interactive update sessions. See also: [Interactive Updates API](api/interactive-updates.md), [Interactive Updates Development](development/interactive-updates.md). |
+| [Zero-Configuration Discovery Security](security/zeroconf-discovery.md) | mDNS threat model, MITM mitigation, and recommendations for high-security environments. See also: [Zeroconf Development](development/zeroconf-discovery.md), [Zeroconf Guide](end-user/zeroconf-discovery.md). |
 
 ## Architecture
 
@@ -111,6 +113,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Embedded Frontend](development/embedded-frontend.md) | Building the controller with the frontend embedded in the binary (`embed-frontend` feature). See also: [Setup](development/setup.md), [Deployment Guides](end-user/deployment/README.md). |
 | [Docker](development/docker.md) | Docker image build, CI workflow, and local development with docker-compose. See also: [Docker Deployment](end-user/deployment/docker.md). |
 | [Interactive Updates](development/interactive-updates.md) | Interactive updates feature: PTY allocation, feature gate strategy, architecture, testing. See also: [Interactive Updates API](api/interactive-updates.md), [Interactive Updates Security](security/interactive-updates.md). |
+| [Zero-Configuration Discovery](development/zeroconf-discovery.md) | mDNS/DNS-SD zero-configuration discovery architecture, TXT records, feature flags, and testing. See also: [Zeroconf Guide](end-user/zeroconf-discovery.md), [Zeroconf Security](security/zeroconf-discovery.md). |
 
 ## Deployment Guides
 

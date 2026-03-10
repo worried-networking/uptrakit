@@ -28,6 +28,8 @@ See [External Scheduler Deployment](docs/end-user/deployment/external-scheduler.
 
 - Reverse proxy deployment: [docs/end-user/deployment/reverse-proxy.md](docs/end-user/deployment/reverse-proxy.md)
 
+- Zero-configuration discovery (mDNS/DNS-SD): [docs/development/zeroconf-discovery.md](docs/development/zeroconf-discovery.md)
+
 - Security architecture: [docs/security/security-architecture.md](docs/security/security-architecture.md)
 
 - Plugin development expectations: [docs/development/plugin-guidelines.md](docs/development/plugin-guidelines.md)

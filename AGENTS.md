@@ -105,7 +105,7 @@ uptrakit/
 │   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API + SSE streaming coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing; sse.rs provides lightweight SSE parser; update_output_stream.rs provides typed stream_update_output() method; device_auth_stream.rs provides SSE-first device auth; events_stream.rs provides typed admin event SSE client
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
 │   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, interval+jitter scheduling (interval.rs: compute_next_run_at), TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); tasks categorised as internal (CrlRenewal, CaRotationCheck, ServiceCertCheck — embedded scheduler only) vs external (AuthCleanup, StaleLeaseCleanup, FetchReleases, DetectVersion — deferrable to external scheduler); `external_scheduler_connected: Arc<AtomicBool>` flag skips external tasks when set; FetchReleasesExecutor Phase B sends fetch assignments for host_software_items so that latest_version is populated
-│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity (ServiceIdentityState: service_id + enrollment_secret + tenant_id in service.json), TLS, CA bootstrap, main helpers; default_resolve_shutdown(); `decrypt_sensitive_params<T>()` generic ECIES sealed-box decryption for extension sensitive params
+│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity (ServiceIdentityState: service_id + enrollment_secret + tenant_id in service.json), TLS, CA bootstrap, main helpers; default_resolve_shutdown(); `decrypt_sensitive_params<T>()` generic ECIES sealed-box decryption for extension sensitive params; `zeroconf` feature (default): mDNS/DNS-SD discovery module (browse for `_uptrakit._tcp.local.`, cache in `discovery.json` with 0o600 permissions); when `--url` omitted + feature enabled, auto-discovers controller on LAN
 │   │   ├── audit-log/                  # uptrakit-audit-log                      (lib)  — AuditLogBackend trait, AuditEntry, AuditFilter, AuditLogDispatcher; backends: NoopBackend, DatabaseBackend (cfg db), JournaldBackend (cfg journald), MultiplexBackend; fire-and-forget dispatcher pattern
 │   │   ├── update-hooks/               # uptrakit-update-hooks                  (lib)  — update hook resolution and config merge logic (extracted from web-api)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields; report pagination (`paginate.rs` Paginatable trait + `report_tracker.rs` ReportTracker); re-exports `uptrakit-extension-framework` as `extension` module
@@ -165,6 +165,7 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 | `swagger-ui` | No | Swagger UI at `/swagger-ui` |
 | `embed-frontend` | No | Embeds the SvelteKit frontend build into the binary via `rust-embed`. Requires `frontend/build/` to exist at compile time. Removes the `--static-dir` CLI argument. See [Embedded Frontend](docs/development/embedded-frontend.md). |
 | `interactive` | No | Interactive (PTY-based) update sessions with stdin forwarding. Propagates to `uptrakit-web-api/interactive`. Adds the interactive WebSocket endpoint and `InteractiveSessionRegistry`. See [Interactive Updates](docs/development/interactive-updates.md). |
+| `zeroconf` | Yes | mDNS/DNS-SD zero-configuration advertising. Enables the `--zeroconf` CLI flag and the advertiser module. Uses the `mdns-sd` crate. See [Zeroconf Discovery](docs/development/zeroconf-discovery.md). |
 
 ### Web-API feature flags
 
@@ -915,6 +916,11 @@ URL via `PUT /api/v1/settings/nats` or `uptrakit settings nats set` requires a c
 effect. The `SettingsSnapshot.nats_url` field is a `MaskedUrl` that redacts the password in all
 serialized/logged output. See `crates/ui/web-api-auth/src/setting_key.rs` (`NatsUrl` variant) and
 `docs/development/nats-integration.md` for full details.
+
+Zeroconf settings (`zeroconf.enabled`, `zeroconf.url`, `zeroconf.pki_addr`) are persisted in the global `settings`
+table and reconciled with CLI flags (`--zeroconf`, `--zeroconf-url`, `--zeroconf-pki-addr`) at startup using the
+standard 5-case priority. The in-memory cache is `ZeroconfSnapshot` (in `SettingsSnapshot`). REST API:
+`GET/PUT /api/v1/global-settings/zeroconf`. See `docs/development/zeroconf-discovery.md` for full details.
 
 #### REST API
 

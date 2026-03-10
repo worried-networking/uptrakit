@@ -197,11 +197,15 @@ pub async fn run_service_lifecycle(
 
 It executes the following sequence:
 
-1. Parse URL from CLI arguments.
 1. Resolve application directories and create them with secure permissions (0o700).
+1. Resolve the controller URL: if `--url` is provided, use it directly. If omitted and the `zeroconf`
+   feature is enabled, run [mDNS discovery](zeroconf-discovery.md) (try cache, then browse). If omitted
+   and the feature is disabled, exit with an error.
 1. Load identity state from disk.
 1. Handle `--force-enroll` by clearing existing enrollment state.
-1. Bootstrap CA certificate (cached, file, PKI endpoint, TOFU, or system trust).
+1. Bootstrap CA certificate (cached, file, PKI endpoint, TOFU, or system trust). When the controller was
+   discovered via mDNS, the advertised CA fingerprint is passed as `tofu_fingerprint` and TOFU is
+   implicitly enabled.
 1. If already certified: check expiry, try authenticated loop, fall back to enrollment on `CertificateExpired`.
 1. Build TLS connector for enrollment (server-auth only, no client cert).
 1. Run enrollment with exponential backoff on disconnects.
