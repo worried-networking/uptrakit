@@ -990,3 +990,46 @@ export interface ExtensionProviderInfo {
 	/** Base64-encoded uncompressed P-256 public key (65 bytes) used for ECIES sealed-box encryption. */
 	encryption_public_key?: string;
 }
+
+// ── Notification Rules + Log ──
+
+export type NotificationEventType =
+	| 'update_available'
+	| 'update_completed'
+	| 'update_failed'
+	| 'new_software_discovered'
+	| 'new_service_enrolled'
+	| 'ca_rotated'
+	| 'batch_update_completed'
+	| 'batch_update_partially_completed'
+	| 'stdin_attention';
+
+export type NotificationDeliveryStatus = 'pending' | 'delivered' | 'failed';
+
+export interface NotificationChannelSummary {
+	id: string;
+	name: string;
+	channel_type: string;
+}
+
+export interface NotificationRuleResponse {
+	id: string;
+	channel_id: string;
+	event_type: string;
+	host_id: string | null;
+	software_item_id: string | null;
+	plugin_type: string | null;
+	enabled: boolean;
+	created_at: string;
+}
+
+export interface NotificationLogEntry {
+	id: string;
+	channel_id: string;
+	rule_id: string;
+	event_type: string;
+	status: string;
+	error_message: string | null;
+	created_at: string;
+	delivered_at: string | null;
+}

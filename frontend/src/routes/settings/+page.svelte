@@ -26,6 +26,8 @@
 	import SchedulerTab from './SchedulerTab.svelte';
 	import GlobalSettingsTab from './GlobalSettingsTab.svelte';
 	import ExtensionTabContent from '$lib/components/extensions/ExtensionTabContent.svelte';
+	import NotificationRulesSettings from './NotificationRulesSettings.svelte';
+	import NotificationLogView from './NotificationLogView.svelte';
 
 	// ── Permissions ─────────────────────────────────────────────────────
 	const canManageSettings = $derived(
@@ -49,8 +51,9 @@
 		)
 	);
 	const canManageGlobalSettings = $derived(getUser()?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
+	const canViewNotifications = $derived(getUser()?.permissions.includes(Permission.ViewNotifications) ?? false);
 	const hasAnyTabPermission = $derived(
-		canManageSettings || canViewSoftware || canManageSoftware || canManageGlobalSettings
+		canManageSettings || canViewSoftware || canManageSoftware || canManageGlobalSettings || canViewNotifications
 	);
 
 	// ── Tab state ────────────────────────────────────────────────────────
@@ -73,13 +76,16 @@
 			(activeTab === 'general' && canManageSettings) ||
 			(activeTab === 'plugin-configs' && canViewSoftware) ||
 			(activeTab === 'scheduler' && canManageSoftware) ||
-			(activeTab === 'global-settings' && canManageGlobalSettings);
+			(activeTab === 'global-settings' && canManageGlobalSettings) ||
+			(activeTab === 'notification-rules' && canViewNotifications) ||
+			(activeTab === 'notification-log' && canViewNotifications);
 		const isExtAccessible = tabExtensions.some((e) => e.id === activeTab);
 		if (!isBuiltinAccessible && !isExtAccessible) {
 			if (canManageSettings) activeTab = 'general';
 			else if (canViewSoftware) activeTab = 'plugin-configs';
 			else if (canManageSoftware) activeTab = 'scheduler';
 			else if (canManageGlobalSettings) activeTab = 'global-settings';
+			else if (canViewNotifications) activeTab = 'notification-rules';
 			else if (tabExtensions.length > 0) activeTab = tabExtensions[0].id;
 		}
 	});
@@ -236,6 +242,20 @@
 				Global Settings
 			</button>
 		{/if}
+		{#if canViewNotifications}
+			<button
+				class="btn btn-sm {activeTab === 'notification-rules' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				onclick={() => (activeTab = 'notification-rules')}
+			>
+				Notification Rules
+			</button>
+			<button
+				class="btn btn-sm {activeTab === 'notification-log' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				onclick={() => (activeTab = 'notification-log')}
+			>
+				Notification Log
+			</button>
+		{/if}
 		{#each tabExtensions as ext (ext.id)}
 			<button
 				class="btn btn-sm {activeTab === ext.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
@@ -310,6 +330,14 @@
 		<!-- Global Settings tab -->
 	{:else if activeTab === 'global-settings'}
 		<GlobalSettingsTab />
+
+		<!-- Notification Rules tab -->
+	{:else if activeTab === 'notification-rules'}
+		<NotificationRulesSettings onSuccess={showSuccess} onError={showError} />
+
+		<!-- Notification Log tab -->
+	{:else if activeTab === 'notification-log'}
+		<NotificationLogView />
 
 		<!-- Extension tabs -->
 	{:else}

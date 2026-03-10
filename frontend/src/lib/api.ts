@@ -80,7 +80,10 @@ import type {
 	CreateHostTagRequest,
 	UpdateHostTagRequest,
 	SetHostTagsRequest,
-	HostTagSummary
+	HostTagSummary,
+	NotificationChannelSummary,
+	NotificationRuleResponse,
+	NotificationLogEntry
 } from './types';
 
 const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
@@ -1106,4 +1109,50 @@ export function apiSubmitRequest(
 export function apiGet<T = unknown>(path: string): Promise<T> {
 	const relativePath = path.startsWith(BASE) ? path.slice(BASE.length) : path;
 	return request<T>(relativePath);
+}
+
+// ── Notification Rules + Log ──
+
+export function listNotificationChannels(
+	page = 1,
+	perPage = 50
+): Promise<PaginatedResponse<NotificationChannelSummary>> {
+	return request(`/notifications/channels?page=${page}&per_page=${perPage}`);
+}
+
+export function listNotificationRules(opts?: {
+	channelId?: string;
+	eventType?: string;
+	page?: number;
+	perPage?: number;
+}): Promise<PaginatedResponse<NotificationRuleResponse>> {
+	const params = new URLSearchParams();
+	if (opts?.channelId) params.set('channel_id', opts.channelId);
+	if (opts?.eventType) params.set('event_type', opts.eventType);
+	params.set('page', String(opts?.page ?? 1));
+	params.set('per_page', String(opts?.perPage ?? 50));
+	return request(`/notifications/rules?${params.toString()}`);
+}
+
+export function createNotificationRule(data: {
+	channel_id: string;
+	event_type: string;
+	host_id?: string;
+	software_item_id?: string;
+	plugin_type?: string;
+	enabled?: boolean;
+}): Promise<NotificationRuleResponse> {
+	return request('/notifications/rules', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export function updateNotificationRule(id: string, data: Record<string, unknown>): Promise<NotificationRuleResponse> {
+	return request(`/notifications/rules/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export function deleteNotificationRule(id: string): Promise<void> {
+	return request(`/notifications/rules/${id}`, { method: 'DELETE' });
+}
+
+export function listNotificationLog(page = 1, perPage = 50): Promise<PaginatedResponse<NotificationLogEntry>> {
+	return request(`/notifications/log?page=${page}&per_page=${perPage}`);
 }
