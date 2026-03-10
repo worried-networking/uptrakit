@@ -54,7 +54,11 @@ const PHS_DETECT_VERSION_CMD: &str =
 ///
 /// Runs `/usr/bin/update` with `PHS_SILENT=1` to suppress interactive whiptail
 /// dialogs and `TERM=xterm` so that terminal commands (e.g. `clear`) succeed
-/// over a non-interactive SSH channel.
+/// over a PTY-backed SSH channel. The Shell plugin config carries
+/// `"prefer_interactive": true`, so the controller allocates a PTY for this
+/// command by default, making `/dev/tty` available for prompts that
+/// `PHS_SILENT=1` does not suppress (e.g. the low-storage warning
+/// `read -r prompt < /dev/tty`).
 ///
 /// `sudo` is embedded in the command string because the Shell plugin executes
 /// update commands through [`CommandSpec::shell`], which does not support the
@@ -261,6 +265,7 @@ impl ProxmoxHelperScriptsPlugin {
             plugin_config: serde_json::json!({
                 "version_command": PHS_DETECT_VERSION_CMD,
                 "update_command": PHS_INSTALL_CMD,
+                "prefer_interactive": true,
             }),
             plugin_config_name: "PHS Shell".to_string(),
             roles: vec![PluginRole::DetectVersion, PluginRole::ExecuteUpdate],
@@ -362,6 +367,7 @@ impl ProxmoxHelperScriptsPlugin {
             plugin_config: serde_json::json!({
                 "version_command": PHS_DETECT_VERSION_CMD,
                 "update_command": PHS_INSTALL_CMD,
+                "prefer_interactive": true,
             }),
             plugin_config_name: "PHS Shell".to_string(),
             roles: vec![PluginRole::ExecuteUpdate],
@@ -423,7 +429,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
             SudoCommandEntry {
                 command: "update".into(),
                 explanation: "Runs /usr/bin/update with PHS_SILENT=1 and TERM=xterm for \
-                    unattended PHS container updates; SETENV: is required so the agent \
+                    PHS container updates over a PTY; SETENV: is required so the agent \
                     can pass the env vars inline in the sudo call"
                     .into(),
                 helper_script: None,
@@ -855,6 +861,16 @@ mod tests {
             update_cmd.contains("/usr/bin/update"),
             "update_command must call /usr/bin/update, got: {update_cmd}"
         );
+        // PHS updates must request a PTY so /dev/tty is available for prompts
+        // that PHS_SILENT=1 does not suppress (e.g. low-storage warning).
+        assert_eq!(
+            target
+                .plugin_config
+                .get("prefer_interactive")
+                .and_then(|v| v.as_bool()),
+            Some(true),
+            "phs_shell_target must set prefer_interactive=true"
+        );
         // Without an override, the software item's own package_identifier
         // (the container slug) is used at runtime.
         assert!(target.package_identifier.is_none());
@@ -873,6 +889,14 @@ mod tests {
             PHS_DETECT_VERSION_CMD
         );
         assert_eq!(target.plugin_config["update_command"], PHS_INSTALL_CMD);
+        assert_eq!(
+            target
+                .plugin_config
+                .get("prefer_interactive")
+                .and_then(|v| v.as_bool()),
+            Some(true),
+            "phs_shell_target must set prefer_interactive=true"
+        );
         assert_eq!(
             target.package_identifier.as_deref(),
             Some("paperless"),
@@ -926,7 +950,7 @@ mod tests {
         assert!(!update_entry.explanation.is_empty());
         assert!(
             update_entry.needs_setenv,
-            "update entry must set needs_setenv=true (PHS_SILENT=1 passed inline)"
+            "update entry must set needs_setenv=true (PHS_SILENT=1 and TERM=xterm passed inline)"
         );
         assert!(
             update_entry.helper_script.is_none(),
@@ -978,6 +1002,15 @@ mod tests {
             PHS_DETECT_VERSION_CMD
         );
         assert_eq!(target.plugin_config["update_command"], PHS_INSTALL_CMD);
+        // PHS updates must request a PTY so /dev/tty is available for prompts.
+        assert_eq!(
+            target
+                .plugin_config
+                .get("prefer_interactive")
+                .and_then(|v| v.as_bool()),
+            Some(true),
+            "phs_update_only_target must set prefer_interactive=true"
+        );
         // No package_identifier override — uses the software item's own identifier.
         assert!(target.package_identifier.is_none());
     }
