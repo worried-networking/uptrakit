@@ -11,6 +11,7 @@ use uptrakit_plugin_infrastructure_core::{
     ConfigFormSchema, Plugin, PluginType, SecretMasking, SudoCommandEntry,
 };
 use uptrakit_plugin_infrastructure_proxmox::{ProxmoxConfig, ProxmoxPlugin};
+use uptrakit_plugin_package_manager_apk::{ApkConfig, ApkPlugin};
 use uptrakit_plugin_package_manager_apt::{AptConfig, AptPlugin};
 use uptrakit_plugin_package_manager_dnf::{DnfConfig, DnfPlugin};
 use uptrakit_plugin_package_manager_homebrew::{HomebrewConfig, HomebrewPlugin};
@@ -504,6 +505,7 @@ register_plugins! {
     PackageManagerMas             => { config: MasConfig,                  plugin: MasPlugin },
     PackageManagerPacman          => { config: PacmanConfig,               plugin: PacmanPlugin },
     PackageManagerPkg             => { config: PkgConfig,                  plugin: PkgPlugin },
+    PackageManagerApk             => { config: ApkConfig,                  plugin: ApkPlugin },
     GenericShell                  => { config: ShellConfig,                plugin: ShellPlugin },
     InfrastructureProxmox         => {
         config: ProxmoxConfig,

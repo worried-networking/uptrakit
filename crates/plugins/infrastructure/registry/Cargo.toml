@@ -32,6 +32,7 @@ uptrakit-plugin-package-manager-mas = { workspace = true }
 uptrakit-plugin-package-manager-dnf = { workspace = true }
 uptrakit-plugin-package-manager-pacman = { workspace = true }
 uptrakit-plugin-package-manager-pkg = { workspace = true }
+uptrakit-plugin-package-manager-apk = { workspace = true }
 uptrakit-plugin-generic-shell = { workspace = true }
 uptrakit-plugin-infrastructure-proxmox = { workspace = true }
 uptrakit-extension-framework = { workspace = true }
