@@ -673,12 +673,14 @@ export function getPluginConfigs(page?: number, perPage?: number): Promise<Pagin
 export function getSoftwareItems(
 	page?: number,
 	perPage?: number,
-	featured?: boolean
+	featured?: boolean,
+	hostId?: string
 ): Promise<PaginatedResponse<SoftwareItemResponse>> {
 	const params = new URLSearchParams();
 	if (page != null) params.set('page', String(page));
 	if (perPage != null) params.set('per_page', String(perPage));
 	if (featured != null) params.set('featured', String(featured));
+	if (hostId != null) params.set('host_id', hostId);
 	const query = params.toString();
 	return request(`/software-items${query ? `?${query}` : ''}`);
 }

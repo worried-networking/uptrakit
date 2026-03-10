@@ -5,7 +5,7 @@
 	import { formatDate } from '$lib/utils';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import { Permission } from '$lib/types';
-	import type { ServiceResponse, SoftwareItemResponse, UpdateHistoryResponse, PaginatedResponse } from '$lib/types';
+	import type { ServiceResponse, UpdateHistoryResponse, PaginatedResponse } from '$lib/types';
 
 	// --- Dashboard state ---
 	let loading = $state(true);
@@ -14,7 +14,6 @@
 	let totalHosts = $state(0);
 	let services: ServiceResponse[] = $state([]);
 	let totalServices = $state(0);
-	let softwareItems: SoftwareItemResponse[] = $state([]);
 	let totalSoftwareItems = $state(0);
 	let unfeaturedSoftwareCount = $state(0);
 	let recentUpdates: UpdateHistoryResponse[] = $state([]);
@@ -23,9 +22,7 @@
 	// --- Derived stats ---
 	const pendingServices = $derived(services.filter((s) => s.status === 'pending').length);
 	const failedUpdates = $derived(recentUpdates.filter((u) => u.status === 'failed').length);
-	const itemsWithUpdates = $derived(softwareItems.filter((i) => i.update_available).length);
-
-	const hasAttentionItems = $derived(pendingServices > 0 || unfeaturedSoftwareCount > 0 || failedUpdates > 0);
+	const hasAttentionItems = $derived(pendingServices > 0 || failedUpdates > 0);
 
 	// --- Permissions ---
 	const canViewHosts = $derived(getUser()?.permissions.includes(Permission.ViewHosts) ?? false);
@@ -94,9 +91,8 @@
 
 		if (canViewSoftware) {
 			promises.push(
-				getSoftwareItems(1, 100, true)
-					.then((result: PaginatedResponse<SoftwareItemResponse>) => {
-						softwareItems = result.items;
+				getSoftwareItems(1, 1, true)
+					.then((result) => {
 						totalSoftwareItems = result.total;
 					})
 					.catch(() => {
@@ -106,7 +102,7 @@
 
 			promises.push(
 				getSoftwareItems(1, 1, false)
-					.then((result: PaginatedResponse<SoftwareItemResponse>) => {
+					.then((result) => {
 						unfeaturedSoftwareCount = result.total;
 					})
 					.catch(() => {
@@ -195,15 +191,9 @@
 			{#if canViewSoftware}
 				<a href="/software" class="card p-5 hover:ring-1 hover:ring-primary-500 transition-shadow">
 					<p class="text-sm font-medium text-surface-500">Software Items</p>
-					<p class="mt-1 text-3xl font-bold">{totalSoftwareItems}</p>
+					<p class="mt-1 text-3xl font-bold">{totalSoftwareItems + unfeaturedSoftwareCount}</p>
 					<p class="mt-1 text-sm text-surface-400">
-						{#if unfeaturedSoftwareCount > 0}
-							<span class="text-warning-500">{unfeaturedSoftwareCount} unfeatured</span>
-						{:else if itemsWithUpdates > 0}
-							{itemsWithUpdates} with updates available
-						{:else}
-							All up to date
-						{/if}
+						{totalSoftwareItems} featured · {unfeaturedSoftwareCount} unfeatured
 					</p>
 				</a>
 
@@ -238,22 +228,6 @@
 							</span>
 							<span class="text-sm">
 								{pendingServices === 1 ? 'service awaiting approval' : 'services awaiting approval'}
-							</span>
-						</a>
-					{/if}
-
-					{#if unfeaturedSoftwareCount > 0 && canViewSoftware}
-						<a
-							href="/software?tab=unfeatured"
-							class="card flex items-center gap-3 p-4 hover:ring-1 hover:ring-warning-500 transition-shadow"
-						>
-							<span
-								class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full preset-filled-warning-500 text-sm font-bold"
-							>
-								{unfeaturedSoftwareCount}
-							</span>
-							<span class="text-sm">
-								unfeatured software {unfeaturedSoftwareCount === 1 ? 'item' : 'items'}
 							</span>
 						</a>
 					{/if}

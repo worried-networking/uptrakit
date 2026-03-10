@@ -14,13 +14,15 @@
 		deleteHostDiscoveryAllowlistEntry,
 		listPluginTypes,
 		getHostTags,
-		setHostTags
+		setHostTags,
+		getSoftwareItems
 	} from '$lib/api';
 	import { formatDate, formatVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import Pagination from '$lib/components/Pagination.svelte';
 	import { Permission, PluginCapability, hasAnyPermission } from '$lib/types';
 	import type {
 		HostResponse,
@@ -29,7 +31,8 @@
 		UpdateHistoryStatus,
 		HostDiscoveryAllowlistEntry,
 		PluginTypeInfo,
-		HostTagResponse
+		HostTagResponse,
+		SoftwareItemResponse
 	} from '$lib/types';
 	import TagBadge from '$lib/components/TagBadge.svelte';
 
@@ -63,6 +66,14 @@
 	let showSetTagsModal: boolean = $state(false);
 	let selectedTagIds: string[] = $state([]);
 
+	// Assigned software state
+	let assignedSoftware: SoftwareItemResponse[] = $state([]);
+	let assignedSoftwareTotal = $state(0);
+	let assignedSoftwarePage = $state(1);
+	let assignedSoftwareLoading = $state(false);
+	let assignedSoftwareError: string | null = $state(null);
+	const assignedSoftwareTotalPages = $derived(Math.ceil(assignedSoftwareTotal / 20));
+
 	const canManage = $derived(hasAnyPermission(getUser(), Permission.UpdateHosts, Permission.DeactivateHosts));
 	const canManageSoftware = $derived(
 		hasAnyPermission(
@@ -85,6 +96,7 @@
 		if (canViewSoftware) {
 			loadPluginTypes();
 			loadHostAllowlist();
+			loadAssignedSoftware();
 		}
 		unsubscribers.push(
 			subscribeToEvent('host_updated', (data) => {
@@ -144,6 +156,21 @@
 			showError(e instanceof Error ? e.message : 'Failed to load host discovery allowlist');
 		} finally {
 			hostAllowlistLoading = false;
+		}
+	}
+
+	async function loadAssignedSoftware(page = 1) {
+		assignedSoftwareLoading = true;
+		assignedSoftwareError = null;
+		try {
+			const result = await getSoftwareItems(page, 20, undefined, id);
+			assignedSoftware = result.items;
+			assignedSoftwareTotal = result.total;
+			assignedSoftwarePage = page;
+		} catch (e) {
+			assignedSoftwareError = e instanceof Error ? e.message : 'Failed to load assigned software';
+		} finally {
+			assignedSoftwareLoading = false;
 		}
 	}
 
@@ -432,6 +459,61 @@
 				</div>
 			{/if}
 		</section>
+
+		<!-- Assigned Software -->
+		{#if canViewSoftware}
+			<section class="mb-6">
+				<h2 class="h3 mb-3">Assigned Software</h2>
+				{#if assignedSoftwareLoading}
+					<p class="text-sm text-center py-4 text-surface-500">Loading...</p>
+				{:else if assignedSoftwareError}
+					<aside class="rounded-lg p-4 preset-filled-error-500 text-sm">{assignedSoftwareError}</aside>
+				{:else if assignedSoftware.length === 0}
+					<p class="text-sm text-surface-500">No software assigned to this host yet.</p>
+				{:else}
+					<div class="table-wrap">
+						<table class="table">
+							<thead>
+								<tr>
+									<th>Name</th>
+									<th>Installed Version</th>
+									<th>Latest Version</th>
+									<th>Status</th>
+									<th class="w-24">Details</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each assignedSoftware as item (item.id)}
+									<tr>
+										<td class="font-medium">{item.name}</td>
+										<td class="text-sm text-surface-500">—</td>
+										<td class="text-sm text-surface-500">{item.latest_version ?? '—'}</td>
+										<td>
+											{#if item.update_available}
+												<span class="badge preset-filled-warning-500">Update Available</span>
+											{:else if item.latest_version}
+												<span class="badge preset-filled-success-500">Up to date</span>
+											{:else}
+												<span class="badge preset-tonal">Unknown</span>
+											{/if}
+										</td>
+										<td>
+											<a href="/software/{item.id}" class="btn btn-sm preset-tonal">View</a>
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+					<Pagination
+						currentPage={assignedSoftwarePage}
+						totalPages={assignedSoftwareTotalPages}
+						total={assignedSoftwareTotal}
+						onPageChange={(p) => loadAssignedSoftware(p)}
+					/>
+				{/if}
+			</section>
+		{/if}
 
 		<!-- Discovery Allowlist -->
 		{#if canViewSoftware}
