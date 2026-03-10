@@ -8,7 +8,7 @@ repository.workspace = true
 version.workspace = true
 
 [features]
-default = ["zeroconf"]
+default = ["zeroconf", "interactive"]
 zeroconf = ["uptrakit-service-sdk/zeroconf"]
 interactive = ["uptrakit-command/interactive", "uptrakit-agent-core/interactive"]
 

@@ -8,7 +8,7 @@ repository.workspace = true
 version.workspace = true
 
 [features]
-default = ["db-sqlite", "oidc", "zeroconf"]
+default = ["db-sqlite", "oidc", "zeroconf", "interactive"]
 embedded-scheduler = ["dep:uptrakit-scheduler-engine"]
 zeroconf = ["dep:mdns-sd"]
 oidc = ["uptrakit-web-api/oidc", "uptrakit-scheduler-engine?/oidc"]
