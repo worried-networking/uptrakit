@@ -185,6 +185,11 @@ impl ServiceHandler for AgentHandler {
                 handle_set_update_freeze(&self.freeze_file_path, payload).await;
                 Ok(None)
             }
+            #[cfg(feature = "interactive")]
+            ControllerMessage::UpdateStdinData(payload) => {
+                client::handle_update_stdin_data(payload, &self.in_flight_update);
+                Ok(None)
+            }
             _ => {
                 tracing::debug!("ignoring unrecognized message in authenticated loop");
                 Ok(None)
@@ -195,23 +200,10 @@ impl ServiceHandler for AgentHandler {
     async fn poll_service_event(&mut self) -> Self::ServiceEvent {
         tokio::select! {
             biased;
-            // In-flight update events (highest priority).
-            event = async {
-                if let Some(ref mut update) = self.in_flight_update {
-                    tokio::select! {
-                        biased;
-                        Some(output_msg) = update.output_rx.recv() => {
-                            client::UpdateEvent::Output(output_msg)
-                        }
-                        result = &mut update.handle => {
-                            client::UpdateEvent::Completed(result)
-                        }
-                    }
-                } else {
-                    std::future::pending().await
-                }
-            } => {
-                client::AgentEvent::Update(event)
+            // In-flight update events (highest priority): output, completion,
+            // and interactive attention (stdin-waiting detection).
+            event = client::poll_in_flight_update(&mut self.in_flight_update) => {
+                event
             }
             // Background task results (version checks, discovery, batch updates).
             Some(msg) = self.bg_rx.recv() => {
@@ -248,6 +240,13 @@ impl ServiceHandler for AgentHandler {
                         self.in_flight_update = None;
                     }
                 }
+                Ok(None)
+            }
+            client::AgentEvent::Attention(update_history_id) => {
+                conn.send_best_effort(uptrakit_internal_wire::ServiceMessage::StdinAttention(
+                    uptrakit_internal_wire::StdinAttentionPayload::new(update_history_id),
+                ))
+                .await;
                 Ok(None)
             }
             client::AgentEvent::BackgroundResult(msg) => {
@@ -358,13 +357,17 @@ async fn handle_set_update_freeze(
 
 /// Capabilities advertised by the agent service.
 fn agent_capabilities() -> BTreeSet<Capability> {
-    [
+    let mut caps: BTreeSet<Capability> = [
         Capability::SoftwareDiscovery,
         Capability::UpdateHooks,
         Capability::GracefulShutdown,
     ]
     .into_iter()
-    .collect()
+    .collect();
+    if cfg!(feature = "interactive") {
+        caps.insert(Capability::InteractiveUpdates);
+    }
+    caps
 }
 
 #[tokio::main]

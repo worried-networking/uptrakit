@@ -1175,3 +1175,21 @@ pub struct StdinAttentionPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
+
+impl StdinAttentionPayload {
+    /// Create a new attention payload.
+    pub fn new(update_history_id: Uuid) -> Self {
+        Self {
+            update_history_id,
+            hint: None,
+        }
+    }
+
+    /// Create a new attention payload with a hint.
+    pub fn with_hint(update_history_id: Uuid, hint: String) -> Self {
+        Self {
+            update_history_id,
+            hint: Some(hint),
+        }
+    }
+}
