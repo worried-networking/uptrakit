@@ -145,42 +145,147 @@ environment.
 
 ## Permissions Model - Detailed
 
-Authorization uses a typed `Permission` enum (defined in `crates/shared/web-api-types/src/permissions.rs`, re-exported
-from `crates/ui/web-api-auth/src/auth/permissions.rs`) rather than raw role-name strings. The enum variants are:
+Authorization uses a typed `Permission` enum (defined in `crates/shared/types/src/permissions.rs`, re-exported
+via `crates/shared/web-api-types/src/permissions.rs`) rather than raw role-name strings. There are 32 granular
+permissions organized by domain:
+
+### Permissions reference
+
+#### Services
 
 | Permission | Serialized name | Purpose |
 | --- | --- | --- |
-| `ViewSettings` | `view_settings` | Read settings, OIDC providers, auth config |
-| `ManageSettings` | `manage_settings` | Modify settings, OIDC providers, auth config |
-| `ViewAgents` | `view_agents` | List agents/services |
-| `ManageAgents` | `manage_agents` | Approve, reject, delete, merge agents; manage enrollment tokens |
-| `ManageGlobalSettings` | `manage_global_settings` | View and modify global settings (network, CA, TLS, system alerts) |
-| `ViewSoftware` | `view_software` | View software items, plugin configs, and update history |
-| `ManageSoftware` | `manage_software` | Manage software items, version checks, update scheduling, and non-command plugin config fields |
-| `ManageCommands` | `manage_commands` | Create and modify plugin configs containing command-bearing fields (shell commands, `post_pull_command`, custom hook `commands` arrays). **Treat as equivalent to root access on all managed hosts.** |
+| `ViewServices` | `view_services` | View tenant services and their status |
+| `ApproveServices` | `approve_services` | Approve pending service enrollments |
+| `RejectServices` | `reject_services` | Reject pending service enrollments |
+| `RemoveServices` | `remove_services` | Deactivate/remove services |
+| `UpdateServices` | `update_services` | Update service settings (ping interval, freeze, merge) |
+
+#### System services
+
+| Permission | Serialized name | Purpose |
+| --- | --- | --- |
+| `ViewSystemServices` | `view_system_services` | View system services (MQTT bridge, external scheduler) |
+| `ApproveSystemServices` | `approve_system_services` | Approve pending system services |
+| `RejectSystemServices` | `reject_system_services` | Reject pending system services |
+| `RemoveSystemServices` | `remove_system_services` | Deactivate system services |
+| `UpdateSystemServices` | `update_system_services` | Update system service settings |
+
+#### Software
+
+| Permission | Serialized name | Purpose |
+| --- | --- | --- |
+| `ViewSoftware` | `view_software` | View software items, plugin configs, history |
+| `CreateSoftware` | `create_software` | Create software items and plugin configs |
+| `UpdateSoftware` | `update_software` | Edit software items and plugin configs |
+| `DeleteSoftware` | `delete_software` | Delete software items and plugin configs |
+| `TriggerChecks` | `trigger_checks` | Trigger version checks and autodiscovery |
+| `TriggerUpdates` | `trigger_updates` | Trigger update execution (single and batch) |
+| `ManageScheduler` | `manage_scheduler` | Manage scheduled tasks |
+
+#### Hosts
+
+| Permission | Serialized name | Purpose |
+| --- | --- | --- |
 | `ViewHosts` | `view_hosts` | View hosts |
-| `ManageHosts` | `manage_hosts` | Manage hosts (update, deactivate) |
-| `ViewSystemServices` | `view_system_services` | List and inspect system services (MQTT bridge, external scheduler) |
-| `ManageSystemServices` | `manage_system_services` | Approve, reject, deactivate, and update system services; create, list, and revoke system enrollment tokens |
+| `UpdateHosts` | `update_hosts` | Update host properties and tags |
+| `DeactivateHosts` | `deactivate_hosts` | Deactivate hosts |
+
+#### Settings
+
+| Permission | Serialized name | Purpose |
+| --- | --- | --- |
+| `ViewSettings` | `view_settings` | View all tenant settings (unified read) |
+| `ManageAuthSettings` | `manage_auth_settings` | Manage registration, authentication, OIDC providers |
+| `ManageEnrollmentTokens` | `manage_enrollment_tokens` | Manage tenant enrollment tokens |
+| `ManageAgentCerts` | `manage_agent_certs` | Manage agent certificate settings |
+| `ManageGlobalSettings` | `manage_global_settings` | Manage global infrastructure settings |
+
+#### Commands
+
+| Permission | Serialized name | Purpose |
+| --- | --- | --- |
+| `ManageCommands` | `manage_commands` | Modify command-bearing plugin config fields (code execution authority) |
 
 > **Security note:** `ManageCommands` grants effective code-execution authority on all managed hosts
 > assigned to the affected software items. Users with this permission can configure arbitrary shell
 > commands that execute on managed hosts. Assign with the same care as granting `root` access.
 
-### Roles
+#### Notifications
+
+| Permission | Serialized name | Purpose |
+| --- | --- | --- |
+| `ViewNotifications` | `view_notifications` | View notification channels, rules, log |
+| `ManageNotifications` | `manage_notifications` | Create/modify notification channels and rules; SMTP settings |
+
+#### Audit logs
+
+| Permission | Serialized name | Purpose |
+| --- | --- | --- |
+| `ViewAuditLogs` | `view_audit_logs` | View tenant-scoped audit log entries |
+| `ViewSystemAuditLogs` | `view_system_audit_logs` | View system-level audit log entries |
+
+#### User management
+
+| Permission | Serialized name | Purpose |
+| --- | --- | --- |
+| `ManageUsers` | `manage_users` | Manage user roles and access |
+
+#### Autodiscovery
+
+| Permission | Serialized name | Purpose |
+| --- | --- | --- |
+| `ManageIgnores` | `manage_ignores` | Manage autodiscovery ignore rules |
+
+### Built-in roles
+
+Eight built-in roles group permissions into logical responsibilities:
 
 | Role | Permissions |
 | --- | --- |
-| `owner` | All permissions (including `manage_commands`) |
-| `admin` | All except `manage_global_settings` (including `manage_commands`, `view_system_services`, `manage_system_services`) |
-| `user` | `view_settings`, `view_agents`, `view_software`, `view_hosts` |
+| `viewer` | `view_services`, `view_software`, `view_hosts`, `view_settings` |
+| `operator` | `approve_services`, `reject_services`, `trigger_checks`, `trigger_updates` |
+| `service_manager` | `approve_services`, `reject_services`, `remove_services`, `update_services` |
+| `software_manager` | `create_software`, `update_software`, `delete_software`, `trigger_checks`, `trigger_updates`, `manage_scheduler`, `manage_ignores` |
+| `host_manager` | `update_hosts`, `deactivate_hosts` |
+| `settings_manager` | `manage_auth_settings`, `manage_enrollment_tokens`, `manage_agent_certs`, `view_notifications`, `manage_notifications`, `view_audit_logs`, `manage_users` |
+| `command_manager` | `manage_commands` |
+| `system_administrator` | `manage_global_settings`, `view_system_services`, `approve_system_services`, `reject_system_services`, `remove_system_services`, `update_system_services`, `view_system_audit_logs` |
 
-The first registered user gets the `owner` role — whether registered via password or OIDC. Subsequent users (password or
-OIDC auto-created) get the `user` role by default. OIDC role mapping can override this.
+Built-in roles are marked with `is_built_in = true` in the `roles` table.
+
+### Access presets
+
+Access presets are code-defined bundles (not stored in the database) that assign one or more roles
+in a single operation. They are exposed via the `GET /api/v1/access-presets` and
+`POST /api/v1/users/{id}/apply-preset` endpoints.
+
+| Preset | Roles assigned | Use case |
+| --- | --- | --- |
+| `read_only` | `viewer` | Dashboard viewers, stakeholders |
+| `operator` | `viewer`, `operator` | On-call staff |
+| `manager` | `viewer`, `service_manager`, `software_manager`, `host_manager` | Team leads |
+| `administrator` | `viewer`, `service_manager`, `software_manager`, `host_manager`, `settings_manager`, `command_manager` | Tenant administrators |
+| `owner` | All 8 roles | System owner |
+
+See [User Management API](../api/user-management.md) for the full endpoint reference and
+[User Management Guide](../end-user/user-management.md) for the end-user documentation.
+
+### First user setup
+
+The first registered user -- whether via password or OIDC -- receives all 8 built-in roles
+(equivalent to the `owner` preset). Subsequent users receive only the `viewer` role by default.
+OIDC role mapping can override this.
+
+### Lockout prevention
+
+The system prevents removing the `manage_users` permission from the last user who holds it.
+Attempts to change roles in a way that would leave no user with `manage_users` are rejected
+with HTTP 409 Conflict.
 
 ### How it works
 
-1. `get_user_permissions()` (`routes/auth.rs`) resolves a user's permissions: user → user_roles → role_permissions →
+1. `get_user_permissions()` (`routes/auth.rs`) resolves a user's permissions: user -> user_roles -> role_permissions ->
    permissions table.
 1. The resolved `Vec<Permission>` is embedded in the JWT access token (`permissions` claim) and returned in
    `UserResponse.permissions`.
@@ -193,12 +298,12 @@ OIDC auto-created) get the `user` role by default. OIDC role mapping can overrid
 1. Every protected endpoint also carries an `x-required-permission` OpenAPI extension (set in the `#[utoipa::path]`
    annotation, e.g. `extensions(("x-required-permission" = json!("view_hosts")))`). This makes the required
    permission machine-readable in the generated OpenAPI spec.
-1. The frontend receives permissions as `string[]` (e.g. `["view_settings", "manage_agents"]`) and uses the `Permission`
+1. The frontend receives permissions as `string[]` (e.g. `["view_settings", "view_services"]`) and uses the `Permission`
    TypeScript enum for checks.
 
 ### Self-authenticated endpoints and the `"self"` sentinel
 
-Some endpoints — `create_api_token`, `list_api_tokens`, `revoke_api_token`, `logout`, and `me` — are
+Some endpoints -- `create_api_token`, `list_api_tokens`, `revoke_api_token`, `logout`, and `me` -- are
 authenticated (require a valid Bearer token) but not governed by the RBAC permission model. Any authenticated
 user may call them regardless of their assigned roles. These endpoints use `Extension<AuthenticatedUser>`
 directly rather than a typed permission extractor, and carry:
@@ -216,17 +321,37 @@ RBAC permission. Tools must treat `"self"` as "any authenticated user is authori
 | Extractor | Permission checked |
 | --- | --- |
 | `CanViewSettings` | `Permission::ViewSettings` |
-| `CanManageSettings` | `Permission::ManageSettings` |
-| `CanViewAgents` | `Permission::ViewAgents` |
-| `CanManageAgents` | `Permission::ManageAgents` |
+| `CanManageAuthSettings` | `Permission::ManageAuthSettings` |
+| `CanManageEnrollmentTokens` | `Permission::ManageEnrollmentTokens` |
+| `CanManageAgentCerts` | `Permission::ManageAgentCerts` |
 | `CanManageGlobalSettings` | `Permission::ManageGlobalSettings` |
+| `CanViewServices` | `Permission::ViewServices` |
+| `CanApproveServices` | `Permission::ApproveServices` |
+| `CanRejectServices` | `Permission::RejectServices` |
+| `CanRemoveServices` | `Permission::RemoveServices` |
+| `CanUpdateServices` | `Permission::UpdateServices` |
 | `CanViewSoftware` | `Permission::ViewSoftware` |
-| `CanManageSoftware` | `Permission::ManageSoftware` |
+| `CanCreateSoftware` | `Permission::CreateSoftware` |
+| `CanUpdateSoftware` | `Permission::UpdateSoftware` |
+| `CanDeleteSoftware` | `Permission::DeleteSoftware` |
+| `CanTriggerChecks` | `Permission::TriggerChecks` |
+| `CanTriggerUpdates` | `Permission::TriggerUpdates` |
+| `CanManageScheduler` | `Permission::ManageScheduler` |
 | `CanManageCommands` | `Permission::ManageCommands` |
 | `CanViewHosts` | `Permission::ViewHosts` |
-| `CanManageHosts` | `Permission::ManageHosts` |
+| `CanUpdateHosts` | `Permission::UpdateHosts` |
+| `CanDeactivateHosts` | `Permission::DeactivateHosts` |
+| `CanViewNotifications` | `Permission::ViewNotifications` |
+| `CanManageNotifications` | `Permission::ManageNotifications` |
 | `CanViewSystemServices` | `Permission::ViewSystemServices` |
-| `CanManageSystemServices` | `Permission::ManageSystemServices` |
+| `CanApproveSystemServices` | `Permission::ApproveSystemServices` |
+| `CanRejectSystemServices` | `Permission::RejectSystemServices` |
+| `CanRemoveSystemServices` | `Permission::RemoveSystemServices` |
+| `CanUpdateSystemServices` | `Permission::UpdateSystemServices` |
+| `CanViewAuditLogs` | `Permission::ViewAuditLogs` |
+| `CanViewSystemAuditLogs` | `Permission::ViewSystemAuditLogs` |
+| `CanManageUsers` | `Permission::ManageUsers` |
+| `CanManageIgnores` | `Permission::ManageIgnores` |
 
 All extractors derive `Debug`, expose `pub AuthenticatedUser` as field 0 for handler use, and provide a
 `::new(user)` constructor for use in unit tests that call handlers directly (bypassing the HTTP layer).
@@ -235,11 +360,11 @@ See also: [`docs/development/coding-standards.md`](../development/coding-standar
 
 ### Adding a new permission
 
-1. Add a variant to the `Permission` enum in `crates/shared/web-api-types/src/permissions.rs` (with `as_str` / `parse`
-   arms).
-1. Write a DB migration to insert it into the `permissions` table and assign it explicitly to the appropriate
-   roles by name: `owner` always gets all permissions; `admin` gets all except `manage_global_settings`-level
-   permissions; `user` gets all `view_*` permissions.
+1. Add a variant to the `Permission` enum in `crates/shared/types/src/permissions.rs` (with `as_str` / `from_str` /
+   `description` arms).
+1. Write a DB migration to insert it into the `permissions` table and assign it to the appropriate built-in
+   role(s) using `grant_permission()`. Decide which role(s) should include the new permission based on the
+   domain (e.g. software permissions go to `software_manager`, host permissions to `host_manager`).
 1. Add a `CanXxx => Permission::Xxx` entry to the `permission_extractor!` macro call in
    `crates/ui/web-api/src/middleware/permission.rs`.
 1. Use `CanXxx(_user): CanXxx` (or `CanXxx(user): CanXxx` if you need the user) in the relevant route handler(s),

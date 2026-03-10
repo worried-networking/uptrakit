@@ -16,7 +16,7 @@ Types are imported via `uptrakit_openapi_client::types::*` (re-exported from `up
   hardcoded string identifiers. This ensures UUID validation at the serialization boundary.
 - Rate limiting applies per-IP via the `api_rate_limits` table (see `crates/ui/web-api-auth/src/auth/rate_limit.rs`). Rate limited endpoints return `429`
   with a message describing the limit window.
-- Route handlers enforce permissions via typed Axum extractors (e.g. `CanViewHosts`, `CanManageAgents`) defined in
+- Route handlers enforce permissions via typed Axum extractors (e.g. `CanViewHosts`, `CanApproveServices`) defined in
   `crates/ui/web-api/src/middleware/permission.rs`. The required permission is declared once in the extractor and
   reflected in the OpenAPI spec via the `x-required-permission` extension on every protected endpoint.
   See [Authentication and Authorization](../security/auth-and-authorization.md) for the full permission model.
@@ -91,7 +91,7 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `DELETE /api/v1/services/{id}`: deactivate (soft-delete) a service.
 - `POST /api/v1/services/{target_id}/merge`: merge a source into a target.
 - `POST /api/v1/services/{id}/update-freeze`: enable or disable the update freeze on a connected
-  service. Requires `manage_agents`. The freeze file blocks `ExecuteUpdate` and
+  service. Requires `update_services`. The freeze file blocks `ExecuteUpdate` and
   `ExecuteBatchUpdate` messages on the agent side, providing an emergency stop against
   RCE via a compromised controller without terminating the WebSocket connection.
 - `/api/v1/enrollment-tokens`: CRUD endpoints for enrollment tokens (create, list, get, revoke).
@@ -102,16 +102,16 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `POST /api/v1/software-items/{id}/hosts`: assign a software item to one or more hosts. Each host
   assignment carries a list of role-specific plugin assignments (`plugins: Vec<HostPluginRoleAssignment>`),
   where each role entry specifies the `role`, `plugin_config_id` (or inline `plugin_config`),
-  `package_identifier`, optional `config_override`, and `execution_site`. Requires `manage_software`.
+  `package_identifier`, optional `config_override`, and `execution_site`. Requires `create_software`.
 - `PUT /api/v1/software-items/{id}/hosts/{host_id}`: update a specific role assignment for a host --
   change the plugin config, package identifier, config override, or execution site. The request body
-  includes `role` to identify which role to update. Requires `manage_software`.
+  includes `role` to identify which role to update. Requires `update_software`.
 - `DELETE /api/v1/software-items/{id}/hosts/{host_id}[?ignore=true]`: remove a host assignment.
   Pass `?ignore=true` to also create a software ignore rule for the software item's
-  name. Requires `manage_software`.
+  name. Requires `delete_software`.
 - `/api/v1/update-history`: read-only history with filters by host, software item, or status.
-- `POST /api/v1/hosts/{id}/discover`: trigger software discovery on a specific host. Requires `manage_software`.
-- `POST /api/v1/plugin-configs/{id}/discover`: trigger discovery for a specific plugin config. Requires `manage_software`.
+- `POST /api/v1/hosts/{id}/discover`: trigger software discovery on a specific host. Requires `trigger_checks`.
+- `POST /api/v1/plugin-configs/{id}/discover`: trigger discovery for a specific plugin config. Requires `trigger_checks`.
 
 `PluginConfigResponse` includes a `capabilities: Vec<String>` field listing the snake\_case capability strings
 declared by the plugin type (e.g. `["discover_local_software"]`). Clients should use this field to determine
@@ -122,7 +122,7 @@ when `"discover_local_software"` is present. Discovery-capable plugin types are 
 
 - `/api/v1/software-ignores`: CRUD for permanent suppression rules. See [Autodiscovery API](autodiscovery.md) for full details.
 - `/api/v1/discovery-allowlist`: tenant-wide list of plugin types permitted to run during host
-  discovery. `GET` requires `view_software`; `POST`/`DELETE` require `manage_software`.
+  discovery. `GET` requires `view_software`; `POST`/`DELETE` require `update_software`.
 - `/api/v1/hosts/{id}/discovery-allowlist`: per-host override of the tenant-wide allowlist.
   Same permission requirements. When a host has its own entries the tenant-wide list is ignored
   entirely for that host. When neither list has entries all discovery-capable plugins run (default).
@@ -137,7 +137,7 @@ field. The `service_label` is a human-readable display name derived from the ser
 
 ### `PUT /api/v1/services/{id}`
 
-Update a service's configurable settings. Requires the `ManageAgents` permission.
+Update a service's configurable settings. Requires the `UpdateServices` permission.
 
 **Path parameters**: `id` -- service UUID.
 
@@ -196,7 +196,8 @@ Types are defined in `crates/shared/web-api-types/src/services.rs`:
 
 - Tenant-aware tables store `tenant_id` (e.g., `services`, `hosts`, `plugin_configs`, `software_items`, `settings`, `mqtt_clients`).
 - `TenantContext` middleware extracts `X-Tenant-Id` from the request or falls back to the default tenant (`AppState.default_tenant_id`).
-- Global tables like `users`, `roles`, `permissions`, `api_tokens`, and `pending_*` remain unscoped.
+- Global tables like `users`, `roles`, `permissions`, `user_roles`, `role_permissions`, `api_tokens`, and `pending_*`
+  remain unscoped.
 
 ## Update Output Streaming (SSE)
 
@@ -262,7 +263,7 @@ Types are defined in `crates/shared/web-api-types/src/update_history.rs`:
 ## Interactive Update WebSocket
 
 `GET /api/v1/update-history/{id}/interactive` — WebSocket endpoint for bidirectional terminal I/O
-with an interactive update session. Requires the `ManageSoftware` permission. Only available when
+with an interactive update session. Requires the `TriggerUpdates` permission. Only available when
 the controller is compiled with the `interactive` feature.
 
 This endpoint provides the same output streaming as the SSE endpoint above, plus the ability to
@@ -284,7 +285,7 @@ after one completes (or fails), the next is dispatched.
 
 ### `POST /api/v1/hosts/{host_id}/batch-update`
 
-Trigger a host-wide batch update for all outdated software items on a host. Requires `ManageSoftware`.
+Trigger a host-wide batch update for all outdated software items on a host. Requires `TriggerUpdates`.
 
 **Request body** (`HostBatchUpdateRequest`):
 
@@ -331,7 +332,7 @@ If no eligible items are found, returns `200` with `batch_id: null` and `total_c
 
 ### `POST /api/v1/software-items/{id}/batch-update`
 
-Trigger an item-wide batch update to roll out a software item version to hosts. Requires `ManageSoftware`.
+Trigger an item-wide batch update to roll out a software item version to hosts. Requires `TriggerUpdates`.
 
 **Request body** (`ItemBatchUpdateRequest`):
 
@@ -443,13 +444,13 @@ actions are simple multi-ID operations that return per-item success/failure resu
 
 | Method | Path | Supported actions | Permission |
 | --- | --- | --- | --- |
-| `POST` | `/api/v1/services/batch` | `approve`, `reject`, `deactivate`, `delete` | `ManageAgents` |
-| `POST` | `/api/v1/system-services/batch` | `approve`, `reject`, `deactivate`, `delete` | `ManageSystemServices` |
-| `POST` | `/api/v1/hosts/batch` | `deactivate`, `delete` | `ManageHosts` |
-| `POST` | `/api/v1/software-items/batch` | `delete` | `ManageSoftware` |
-| `POST` | `/api/v1/plugin-configs/batch` | `delete` | `ManageSoftware` |
-| `POST` | `/api/v1/software-ignores/batch` | `delete` | `ManageSoftware` |
-| `POST` | `/api/v1/host-tags/batch` | `delete` | `ManageHosts` |
+| `POST` | `/api/v1/services/batch` | `approve`, `reject`, `deactivate`, `delete` | Per-action (e.g. `ApproveServices`, `RemoveServices`) |
+| `POST` | `/api/v1/system-services/batch` | `approve`, `reject`, `deactivate`, `delete` | Per-action (e.g. `ApproveSystemServices`, `RemoveSystemServices`) |
+| `POST` | `/api/v1/hosts/batch` | `deactivate`, `delete` | `DeactivateHosts` |
+| `POST` | `/api/v1/software-items/batch` | `delete` | `DeleteSoftware` |
+| `POST` | `/api/v1/plugin-configs/batch` | `delete` | `DeleteSoftware` |
+| `POST` | `/api/v1/software-ignores/batch` | `delete` | `ManageIgnores` |
+| `POST` | `/api/v1/host-tags/batch` | `delete` | `DeactivateHosts` |
 
 See [Batch Actions API](batch-actions.md) for full request/response schema and error handling.
 
@@ -460,12 +461,12 @@ Host tags provide user-defined labels for organizing hosts within a tenant. See
 
 - `GET /api/v1/host-tags` -- list tags with pagination and search (`?search=`). Requires
   `ViewHosts`.
-- `POST /api/v1/host-tags` -- create a tag. Requires `ManageHosts`.
+- `POST /api/v1/host-tags` -- create a tag. Requires `UpdateHosts`.
 - `GET /api/v1/host-tags/{id}` -- get a single tag. Requires `ViewHosts`.
-- `PUT /api/v1/host-tags/{id}` -- update a tag. Requires `ManageHosts`.
-- `DELETE /api/v1/host-tags/{id}` -- soft-delete a tag. Requires `ManageHosts`.
-- `POST /api/v1/host-tags/batch` -- batch delete tags. Requires `ManageHosts`.
-- `PUT /api/v1/hosts/{id}/tags` -- set (replace-all) tags on a host. Requires `ManageHosts`.
+- `PUT /api/v1/host-tags/{id}` -- update a tag. Requires `UpdateHosts`.
+- `DELETE /api/v1/host-tags/{id}` -- soft-delete a tag. Requires `DeactivateHosts`.
+- `POST /api/v1/host-tags/batch` -- batch delete tags. Requires `DeactivateHosts`.
+- `PUT /api/v1/hosts/{id}/tags` -- set (replace-all) tags on a host. Requires `UpdateHosts`.
 
 ### Key files
 
@@ -475,6 +476,32 @@ Host tags provide user-defined labels for organizing hosts within a tenant. See
 | `crates/ui/web-api-queries/src/queries/host_tags.rs` | Query functions |
 | `crates/shared/web-api-types/src/host_tags.rs` | Request/response types |
 | `crates/shared/openapi-client/src/host_tags.rs` | Typed API client |
+
+## User Management Endpoints
+
+User, role, and access preset management. All endpoints require the `ManageUsers` permission.
+See [User Management API](user-management.md) for the full endpoint reference with
+request/response examples.
+
+- `GET /api/v1/users` -- list users with their assigned roles. Paginated.
+- `GET /api/v1/users/{id}` -- get a single user with roles and resolved permissions.
+- `PUT /api/v1/users/{id}/roles` -- replace a user's role assignments.
+- `PUT /api/v1/users/{id}/active` -- activate or deactivate a user.
+- `GET /api/v1/permissions` -- list all available permissions.
+- `GET /api/v1/roles` -- list all roles with their permissions.
+- `GET /api/v1/roles/{id}` -- get a single role with its permissions.
+- `GET /api/v1/access-presets` -- list all access presets with their role compositions.
+- `POST /api/v1/users/{id}/apply-preset` -- apply an access preset to a user.
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/ui/web-api/src/routes/users.rs` | Route handlers |
+| `crates/ui/web-api/src/routes/access_presets.rs` | Preset route handlers |
+| `crates/shared/web-api-types/src/users.rs` | Request/response types |
+| `crates/shared/web-api-types/src/access_presets.rs` | Preset response types |
+| `crates/shared/types/src/access_preset.rs` | `AccessPreset` enum |
 
 ## System Services Endpoints
 
@@ -487,14 +514,14 @@ See [System Services Architecture](../architecture/system-services.md) for the f
 - `GET /api/v1/system-services/{id}`: get a single system service by UUID
   (requires `view_system_services`).
 - `PUT /api/v1/system-services/{id}`: update configurable settings — `ping_interval_seconds` and
-  `cert_lifetime_hours` (requires `manage_system_services`). Same field semantics as
+  `cert_lifetime_hours` (requires `update_system_services`). Same field semantics as
   `PUT /api/v1/services/{id}`: `0` clears the override, positive value sets it, omit to keep current.
 - `POST /api/v1/system-services/{id}/approve`: approve a pending system service
-  (requires `manage_system_services`).
+  (requires `approve_system_services`).
 - `POST /api/v1/system-services/{id}/reject`: reject a pending system service
-  (requires `manage_system_services`).
+  (requires `reject_system_services`).
 - `DELETE /api/v1/system-services/{id}`: deactivate (soft-delete) a system service, revoke its
-  certificates, and bump the CRL (requires `manage_system_services`). Returns `204 No Content`.
+  certificates, and bump the CRL (requires `remove_system_services`). Returns `204 No Content`.
 
 ### System Enrollment Token Endpoints
 
@@ -569,7 +596,7 @@ See [Audit Logs API Reference](audit-logs.md) for the full specification.
 - `GET /api/v1/audit-logs`: list tenant-scoped audit log entries
   (requires `view_audit_logs`). Returns `PaginatedResponse<AuditLogResponse>`.
 - `GET /api/v1/system-audit-logs`: list system-level audit log entries
-  (requires `view_system_audit_logs`, `owner` only). Returns `PaginatedResponse<SystemAuditLogResponse>`.
+  (requires `view_system_audit_logs`). Returns `PaginatedResponse<SystemAuditLogResponse>`.
 
 ### `SystemServiceResponse` fields
 
@@ -601,9 +628,9 @@ See [Audit Logs API Reference](audit-logs.md) for the full specification.
 
 ## Service Operations
 
-- `/api/v1/agents/{id}/version-check`: trigger a version check (requires `ManageSoftware`).
-- `/api/v1/agents/{id}/execute-update`: send `execute_update` (requires `ManageSoftware`).
-- `/api/v1/mqtt/tenants`: manage MQTT tenant assignments (requires `ManageSettings`).
+- `/api/v1/agents/{id}/version-check`: trigger a version check (requires `TriggerChecks`).
+- `/api/v1/agents/{id}/execute-update`: send `execute_update` (requires `TriggerUpdates`).
+- `/api/v1/mqtt/tenants`: manage MQTT tenant assignments (requires `ManageAuthSettings`).
 
 Update history records each attempt and stores the full command output for auditing.
 
@@ -622,7 +649,7 @@ across all update types.
 
 ## Software Item Version Check Endpoints
 
-These endpoints trigger granular per-item version checks. Both require the `ManageSoftware` permission.
+These endpoints trigger granular per-item version checks. Both require the `TriggerChecks` permission.
 
 ### `POST /api/v1/software-items/{id}/check-versions`
 
@@ -724,7 +751,7 @@ See [Software Item Entity](../architecture/software-item-entity.md) for the full
 
 ## Scheduler Endpoints
 
-All scheduler endpoints require the `ManageSoftware` permission.
+All scheduler endpoints require the `ManageScheduler` permission.
 
 ### `GET /api/v1/scheduler/tasks`
 
@@ -998,7 +1025,7 @@ Two SSE (Server-Sent Events) endpoints provide real-time push notifications:
 
 - `GET /api/v1/auth/device/stream?device_code=<code>` — Unauthenticated. Pushes `authorized` or `expired` events
   for the device authorization flow.
-- `GET /api/v1/events/stream` — Authenticated (requires `ViewAgents` permission). Pushes admin events for the
+- `GET /api/v1/events/stream` — Authenticated (requires `ViewServices` permission). Pushes admin events for the
   user's tenant (host/service/software changes, version checks, updates, discovery).
 
 See [SSE Events API](sse-events.md) for full event format documentation.

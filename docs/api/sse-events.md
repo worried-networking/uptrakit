@@ -80,7 +80,7 @@ GET /api/v1/events/stream
 
 ### Authentication
 
-Bearer token required. The authenticated user must have the `ViewAgents` permission.
+Bearer token required. The authenticated user must have the `ViewServices` permission.
 
 ### Keep-Alive
 

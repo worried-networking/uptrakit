@@ -75,7 +75,7 @@ List all tenant-wide discovery allowlist entries.
 
 Add a plugin type to the tenant-wide discovery allowlist.
 
-**Permission:** `manage_software`
+**Permission:** `update_software`
 
 **Request body:**
 
@@ -114,7 +114,7 @@ entry is returned with status `201`. No duplicate is created.
 
 Remove an entry from the tenant-wide discovery allowlist.
 
-**Permission:** `manage_software`
+**Permission:** `update_software`
 
 **Path parameters:**
 
@@ -182,7 +182,7 @@ List all discovery allowlist entries for a specific host.
 
 Add a plugin type to the allowlist for a specific host.
 
-**Permission:** `manage_software`
+**Permission:** `update_software`
 
 **Path parameters:**
 
@@ -229,7 +229,7 @@ the existing entry is returned with status `201`. No duplicate is created.
 
 Remove an entry from a host's discovery allowlist.
 
-**Permission:** `manage_software`
+**Permission:** `update_software`
 
 **Path parameters:**
 

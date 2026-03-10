@@ -42,13 +42,13 @@ fail. Callers must inspect both arrays to determine the outcome of each item.
 
 | Endpoint | Actions | Permission |
 | --- | --- | --- |
-| `POST /api/v1/services/batch` | `approve`, `reject`, `deactivate` | `CanManageAgents` |
-| `POST /api/v1/system-services/batch` | `approve`, `reject`, `deactivate` | `CanManageSystemServices` |
-| `POST /api/v1/software-items/batch` | `delete` | `CanManageSoftware` |
-| `POST /api/v1/hosts/batch` | `deactivate` | `CanManageHosts` |
-| `POST /api/v1/software-ignores/batch` | `delete` | `CanManageSoftware` |
-| `POST /api/v1/plugin-configs/batch` | `delete` | `CanManageSoftware` |
-| `POST /api/v1/host-tags/batch` | `delete` | `CanManageHosts` |
+| `POST /api/v1/services/batch` | `approve`, `reject`, `deactivate` | Per-action (`CanApproveServices`, `CanRejectServices`, `CanRemoveServices`) |
+| `POST /api/v1/system-services/batch` | `approve`, `reject`, `deactivate` | Per-action (`CanApproveSystemServices`, `CanRejectSystemServices`, `CanRemoveSystemServices`) |
+| `POST /api/v1/software-items/batch` | `delete` | `CanDeleteSoftware` |
+| `POST /api/v1/hosts/batch` | `deactivate` | `CanDeactivateHosts` |
+| `POST /api/v1/software-ignores/batch` | `delete` | `CanManageIgnores` |
+| `POST /api/v1/plugin-configs/batch` | `delete` | `CanDeleteSoftware` |
+| `POST /api/v1/host-tags/batch` | `delete` | `CanDeactivateHosts` |
 
 All endpoints require a valid Bearer token. Permission extractors are declared on each route
 handler and reflected in the OpenAPI spec via `x-required-permission`.

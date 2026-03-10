@@ -17,7 +17,7 @@ Trigger an autodiscovery run for a specific host. The controller dispatches disc
 all connected agents linked to this host. Each agent queries its discovery-capable plugins and
 returns results.
 
-**Permission:** `manage_software`
+**Permission:** `trigger_checks`
 
 **Path parameters:**
 
@@ -54,7 +54,7 @@ returns results.
 Trigger an autodiscovery run for a specific plugin config across all connected agents.
 Returns an error if the plugin type does not support the `DiscoverLocalSoftware` capability.
 
-**Permission:** `manage_software`
+**Permission:** `trigger_checks`
 
 **Path parameters:**
 
@@ -149,7 +149,7 @@ Two types of rules are supported:
 - **Tenant-wide** (no `host_id`): suppresses software by name across all hosts and plugins.
 - **Host-specific** (with `host_id`): suppresses a specific package on a specific host.
 
-**Permission:** `manage_software`
+**Permission:** `manage_ignores`
 
 **Request body (tenant-wide):**
 
@@ -191,7 +191,7 @@ Two types of rules are supported:
 Delete an ignore rule. After deletion, the suppressed software can be re-discovered in future
 discovery runs.
 
-**Permission:** `manage_software`
+**Permission:** `manage_ignores`
 
 **Path parameters:**
 

@@ -28,11 +28,12 @@ details, see [SECURITY.md](SECURITY.md). For the documentation catalogue, see [d
 ## Documentation split
 
 - **End-user docs** ([`docs/end-user/`](docs/end-user/)): overview, manual update workflow, Home Assistant/MQTT
-  integration, deployment map, CLI usage guide, plugin configurations, update history, profile and API
-  tokens, and autodiscovery (including
-  [docs/end-user/deployment/reverse-proxy.md](docs/end-user/deployment/reverse-proxy.md)).
+  integration, deployment map, CLI usage guide, plugin configurations, update history, user management
+  ([user-management.md](docs/end-user/user-management.md)), profile and API tokens, and autodiscovery
+  (including [docs/end-user/deployment/reverse-proxy.md](docs/end-user/deployment/reverse-proxy.md)).
 - **API & protocol docs** ([`docs/api/`](docs/api/)): AsyncAPI/wire protocol
   ([wire-protocol.md](docs/api/wire-protocol.md)), REST API endpoints ([http-web-api.md](docs/api/http-web-api.md)),
+  user management API ([user-management.md](docs/api/user-management.md)),
   settings reconciliation ([settings-runtime.md](docs/api/settings-runtime.md)), auth flows
   ([auth-flows.md](docs/api/auth-flows.md)), and service/tenant operations
   ([services-operations.md](docs/api/services-operations.md)).
@@ -390,7 +391,8 @@ These are non-negotiable design constraints. Do not violate them.
    [Secure Development — SSRF Protection](docs/security/secure-development.md#ssrf-protection).
 1. **Use typed permission extractors for route authorization.** Never call `user.has_permission(...)` directly in
    handler bodies. Instead, declare the required permission via an Axum extractor in the handler signature (e.g.
-   `CanViewHosts(_user): CanViewHosts`). The extractors are defined in
+   `CanViewHosts(_user): CanViewHosts`). There are 32 granular extractors (e.g. `CanViewServices`,
+   `CanApproveServices`, `CanCreateSoftware`, `CanTriggerUpdates`, `CanManageUsers`). The extractors are defined in
    `crates/ui/web-api/src/middleware/permission.rs` via the `permission_extractor!` macro. Each protected endpoint
    must also carry the matching `x-required-permission` OpenAPI extension in its `#[utoipa::path]` annotation (e.g.
    `extensions(("x-required-permission" = json!("view_hosts")))`). See
@@ -1285,6 +1287,26 @@ to be waiting for stdin input.
 ### Permissions
 
 `ViewNotifications` (view channels, rules, log) and `ManageNotifications` (create/edit/delete channels and rules).
+
+### User management
+
+The system uses 32 granular permissions grouped into 8 built-in roles (`viewer`, `operator`,
+`service_manager`, `software_manager`, `host_manager`, `settings_manager`, `command_manager`,
+`system_administrator`). Five access presets (`read_only`, `operator`, `manager`, `administrator`,
+`owner`) provide convenient role bundles. The first registered user receives all 8 roles (owner preset);
+subsequent users receive only `viewer`.
+
+User management endpoints (`/api/v1/users`, `/api/v1/roles`, `/api/v1/permissions`,
+`/api/v1/access-presets`) require the `ManageUsers` permission. Lockout prevention rejects
+changes that would leave no user with `manage_users`.
+
+Key files: `crates/shared/types/src/permissions.rs` (32 `Permission` variants),
+`crates/shared/types/src/access_preset.rs` (`AccessPreset` enum),
+`crates/ui/web-api/src/routes/users.rs`, `crates/ui/web-api/src/routes/access_presets.rs`,
+`crates/shared/web-api-types/src/users.rs`, `crates/shared/web-api-types/src/access_presets.rs`.
+
+See [Authentication and Authorization](docs/security/auth-and-authorization.md) for the full
+permission model and [User Management API](docs/api/user-management.md) for the endpoint reference.
 
 ### Adding a new channel
 

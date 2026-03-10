@@ -11,7 +11,7 @@ and a specific permission.
 Lists tenant-scoped audit log entries. Records HTTP requests made by authenticated users within
 the tenant (host management, software updates, service operations, settings changes, etc.).
 
-**Required permission:** `view_audit_logs` (`owner` or `admin`)
+**Required permission:** `view_audit_logs` (included in the `settings_manager` role)
 
 #### Query parameters
 
@@ -75,7 +75,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 Lists system-level audit log entries. Records HTTP requests to infrastructure management
 endpoints (global settings changes, CA rotation, MQTT limit updates, system service management).
 
-**Required permission:** `view_system_audit_logs` (`owner` only)
+**Required permission:** `view_system_audit_logs` (included in the `system_administrator` role)
 
 #### Query parameters
 

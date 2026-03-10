@@ -21,8 +21,8 @@ The logs never contain passwords, request bodies, response bodies, or authentica
 
 | Log | Contents | Who can view |
 | --- | --- | --- |
-| Tenant Logs | All regular API operations (hosts, software, services, settings) | `owner`, `admin` |
-| System Logs | Global infrastructure operations (global settings, CA rotation, MQTT limits, system services) | `owner` only |
+| Tenant Logs | All regular API operations (hosts, software, services, settings) | Users with `view_audit_logs` (e.g. `settings_manager` role) |
+| System Logs | Global infrastructure operations (global settings, CA rotation, MQTT limits, system services) | Users with `view_system_audit_logs` (e.g. `system_administrator` role) |
 
 ## Viewing audit logs in the UI
 
@@ -82,7 +82,7 @@ uptrakit audit-logs list --method DELETE --status 403
 # Filter by time range (RFC 3339 format)
 uptrakit audit-logs list --from 2026-03-01T00:00:00Z --to 2026-03-03T23:59:59Z
 
-# List system audit log entries (owner only)
+# List system audit log entries (requires view_system_audit_logs)
 uptrakit audit-logs system list
 uptrakit audit-logs system list --method PUT
 ```

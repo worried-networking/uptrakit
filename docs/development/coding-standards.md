@@ -113,6 +113,8 @@ Enums currently annotated with `#[non_exhaustive]`:
 - `ServiceStatus`
 - `BatchStatus`
 - `UpdateStatus`
+- `Permission`
+- `AccessPreset`
 
 **`uptrakit-internal-wire`:**
 
@@ -126,7 +128,6 @@ Enums currently annotated with `#[non_exhaustive]`:
 
 - `AlertSeverity`
 - `TriggerUpdateStatus`
-- `Permission`
 - `UpdateStatus`
 - `RegistrationMode`
 - `SystemdAction`, `DockerComposeAction`, `PredefinedHook`
@@ -890,12 +891,17 @@ pub async fn list_hosts(
     tenant_db: TenantDb,
     CanViewHosts(_user): CanViewHosts,   // permission enforced here
 ) -> Response {
-    // handler body — 401/403 already handled by the extractor
+    // handler body -- 401/403 already handled by the extractor
 }
 ```
 
 Use the bound variable name `_user` when the `AuthenticatedUser` value is not used in the body, and `user`
 when it is (e.g. `user.user_id` for an `actor_id` field).
+
+There are 32 granular permission extractors (e.g. `CanViewServices`, `CanApproveServices`,
+`CanCreateSoftware`, `CanTriggerUpdates`, `CanManageUsers`). See
+[Authentication and Authorization](../security/auth-and-authorization.md#permission-extractor-reference)
+for the full list.
 
 ### Required utoipa extension
 
@@ -969,7 +975,7 @@ For multi-param routes:
 ```rust
 pub async fn unassign_host(
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanDeleteSoftware(_user): CanDeleteSoftware,
     Path((item_id, host_id)): Path<(Uuid, Uuid)>,
 ) -> Response { ... }
 ```

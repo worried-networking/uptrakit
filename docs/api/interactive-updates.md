@@ -30,7 +30,7 @@ Both JWT session tokens and API tokens are accepted.
 
 ### Permissions
 
-The authenticated user must have the `ManageSoftware` permission. Stdin forwarding is
+The authenticated user must have the `TriggerUpdates` permission. Stdin forwarding is
 equivalent to code execution on the target host.
 
 ### Preconditions

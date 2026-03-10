@@ -29,8 +29,9 @@ All foundation work is done. Summary of what was delivered:
 - **Core Data Models** — Host, SoftwareItem, Version (semver + custom), UpdateRecord, validation,
   repositories/DAOs.
 - **User Authentication & Authorization** — Argon2id passwords, JWT + session tokens, full RBAC
-  (9 permissions, admin/user roles), OIDC, rate limiting, audit logging. Auth API (register, login,
-  logout, me). OpenAPI/Swagger docs.
+  (32 granular permissions, 8 built-in roles, 5 access presets), OIDC, rate limiting, audit logging.
+  Auth API (register, login, logout, me), user management API (users, roles, permissions, presets).
+  OpenAPI/Swagger docs.
 - **Agent Authentication & Security** — mTLS with auto-issued client certificates, CA pinning,
   dual-CA rotation (6-month window, 24h check), partitioned CRLs, OCSP, certificate expiration
   monitoring, automated renewal (agent + server certs), revocation checking.
@@ -223,10 +224,12 @@ ______________________________________________________________________
   - **Category**: UI | **Impact**: Medium | **Effort**: Medium
   - Replace the text-based cron input with a visual picker (day-of-week, hour, interval). Enable/
     disable and manual trigger already work.
-- [ ] Settings UI: user management
+- [x] ~~Settings UI: user management~~ — Backend complete: user management API with granular
+  RBAC (32 permissions, 8 roles, 5 presets), lockout prevention, user activation/deactivation.
+  Frontend page pending.
   - **Category**: UI / Security | **Impact**: Medium-High | **Effort**: Medium
-  - No dedicated user admin page exists. Add user list, create/deactivate users, role assignment,
-    password reset.
+  - Backend user management API is complete. Frontend page for managing users, roles, and presets
+    is pending.
 - [ ] Notification configuration UI
   - **Category**: UI | **Impact**: Medium-High | **Effort**: Medium
   - Frontend page for managing notification plugins and rules. The backend REST API is already
