@@ -6768,6 +6768,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "uptrakit-extension-framework",
  "uptrakit-notification-plugin-core",
  "uptrakit-notification-plugin-email",
  "uptrakit-notification-plugin-telegram",

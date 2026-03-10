@@ -20,6 +20,7 @@ async-trait = { workspace = true }
 rootcause = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+uptrakit-extension-framework = { workspace = true }
 uptrakit-notification-plugin-core = { workspace = true }
 uptrakit-notification-plugin-webhook = { workspace = true, optional = true }
 uptrakit-notification-plugin-telegram = { workspace = true, optional = true }

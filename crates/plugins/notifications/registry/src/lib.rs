@@ -5,6 +5,8 @@
 //! by the web API to interact with notification plugins without depending on
 //! concrete implementations.
 
+pub mod extensions;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -106,6 +108,12 @@ pub trait NotificationOps: Send + Sync + 'static {
     /// Return the list of supported channel type names.
     fn supported_types(&self) -> Vec<&'static str>;
 
+    /// Return UI extension manifests for each enabled notification plugin.
+    fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest>;
+
+    /// Return action definitions for notification extension manifests.
+    fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef>;
+
     /// Validate channel-specific config JSON.
     fn validate_config(
         &self,
@@ -139,6 +147,40 @@ impl NotificationOps for NotificationPluginRegistry {
 
     fn supported_types(&self) -> Vec<&'static str> {
         self.supported_types()
+    }
+
+    fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
+        let mut v = Vec::new();
+        #[cfg(feature = "webhook")]
+        if self.plugins.contains_key("webhook") {
+            v.push(extensions::webhook::manifest());
+        }
+        #[cfg(feature = "telegram")]
+        if self.plugins.contains_key("telegram") {
+            v.push(extensions::telegram::manifest());
+        }
+        #[cfg(feature = "email")]
+        if self.plugins.contains_key("email") {
+            v.push(extensions::email::manifest());
+        }
+        v
+    }
+
+    fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
+        let mut v = Vec::new();
+        #[cfg(feature = "webhook")]
+        if self.plugins.contains_key("webhook") {
+            v.extend(extensions::webhook::actions());
+        }
+        #[cfg(feature = "telegram")]
+        if self.plugins.contains_key("telegram") {
+            v.extend(extensions::telegram::actions());
+        }
+        #[cfg(feature = "email")]
+        if self.plugins.contains_key("email") {
+            v.extend(extensions::email::actions());
+        }
+        v
     }
 
     fn validate_config(

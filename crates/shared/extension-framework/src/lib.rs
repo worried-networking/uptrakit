@@ -1153,6 +1153,7 @@ mod tests {
                     list: false,
                     visible_when: None,
                 }],
+                pre_load_action: None,
             },
             submit_action: Some("validate-host".to_string()),
         };
@@ -1169,7 +1170,10 @@ mod tests {
             steps: vec![WizardStep {
                 step_id: "s1".to_string(),
                 label: "Step 1".to_string(),
-                form: FormDef { fields: vec![] },
+                form: FormDef {
+                    fields: vec![],
+                    pre_load_action: None,
+                },
                 submit_action: None,
             }],
         };
@@ -1375,6 +1379,7 @@ mod tests {
                 list: false,
                 visible_when: None,
             }],
+            pre_load_action: None,
         };
 
         let json = serde_json::to_string(&form).expect("serialize should succeed");
