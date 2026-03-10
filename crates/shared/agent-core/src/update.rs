@@ -644,7 +644,7 @@ async fn send_output(
 ) {
     let _ = output_tx
         .send(UpdateOutputMessage {
-            output: message.to_string(),
+            output: format!("{message}\n"),
             stream,
         })
         .await;

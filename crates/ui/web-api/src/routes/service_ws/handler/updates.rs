@@ -484,7 +484,7 @@ pub(super) async fn handle_update_output(
         return LoopAction::Continue;
     }
 
-    let output_line = format!("{}\n", payload.output);
+    let output_line = payload.output.clone();
     let line_len = output_line.len() as i64;
     let updated = update_history::Entity::update_many()
         .col_expr(

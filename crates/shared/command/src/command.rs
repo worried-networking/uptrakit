@@ -106,7 +106,7 @@ pub(crate) async fn run_command_exec_impl(
             if let Some(ref tx) = stdout_tx {
                 let _ = tx
                     .send(UpdateOutputLine {
-                        text: line.clone(),
+                        text: format!("{line}\n"),
                         stream: OutputStreamType::Stdout,
                     })
                     .await;
@@ -135,7 +135,7 @@ pub(crate) async fn run_command_exec_impl(
             if let Some(ref tx) = stderr_tx {
                 let _ = tx
                     .send(UpdateOutputLine {
-                        text: line.clone(),
+                        text: format!("{line}\n"),
                         stream: OutputStreamType::Stderr,
                     })
                     .await;
