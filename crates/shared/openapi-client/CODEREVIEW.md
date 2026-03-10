@@ -217,3 +217,33 @@ wrappers. Most coverage comes from the `mock` module used by other crates' integ
 The 0%-coverage files above represent newer API surface that has not yet been exercised by
 any consumer's tests. Adding mock endpoint definitions for these would enable downstream
 integration tests to exercise the full API surface.
+
+---
+
+## Review — 2026-03-10
+
+### Summary
+
+This review adds findings from an idiomatic Rust and API surface pass on 2026-03-10. All items
+are low-severity. Prior open issues are confirmed.
+
+### Idiomatic Rust
+
+**[LOW]** `src/lib.rs:362` and `src/lib.rs:381` — Two private methods (`delete_json`,
+`delete_with_query_json`) carry `#[allow(dead_code)]`. Dead private methods are technical debt:
+they increase the maintenance surface, can cause confusion during refactoring, and may become
+stale. Recommendation: remove both methods if there is no imminent plan to use them. If
+scaffolding is intentional, replace `#[allow(dead_code)]` with a `// TODO:` comment explaining
+the planned use.
+
+**[LOW]** `src/lib.rs` — `RetryConfig::default()` is hand-written rather than using associated
+constants. The default values (initial delay, max delay, max retries) are duplicated between
+the `Default` impl and any documentation. Recommendation: define associated constants on
+`RetryConfig` (e.g., `DEFAULT_INITIAL_DELAY`, `DEFAULT_MAX_DELAY`, `DEFAULT_MAX_RETRIES`)
+following the `DEFAULT_CONNECT_TIMEOUT` pattern, and reference them in both the `Default`
+implementation and the doc comment. This makes the default values auditable in one place.
+
+### Strengths (2026-03-10)
+
+- `extract_error_message` is a clean combinator chain with an unambiguous fallback. Confirmed.
+- Builder pattern on `UptrakitClient` with `#[must_use]` on all builder methods. Confirmed.

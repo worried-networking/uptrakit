@@ -287,3 +287,77 @@ maintenance cost compounds with each new service role added.
 
 ~~**[LOW]** `src/lib.rs:102-116` -- `ParseCapabilityError(std::convert::Infallible)` is a dead
 struct.~~ *(Fixed: `ParseCapabilityError` has been removed during the module split.)*
+
+---
+
+## Review — 2026-03-10
+
+### Summary
+
+This review adds findings from a protocol-architecture, code-consistency, and extensibility pass
+on 2026-03-10. Several issues are new; existing open issues from prior rounds are confirmed
+where still unresolved.
+
+### Architecture
+
+**[HIGH]** `src/envelope.rs` — Protocol version is a binary hard-fault with no graceful
+negotiation. `CURRENT_PROTOCOL_VERSION = 1`: any mismatch severs the WebSocket connection
+immediately. No `(min_version, max_version)` range is exchanged during enrollment. Rolling
+upgrades therefore require simultaneous deployment of all components (controller + all
+agents). Recommendation: add `min_protocol_version` and `max_protocol_version` fields to the
+`Enroll` payload; close only when the ranges do not overlap. Until implemented, add a doc
+comment on `CURRENT_PROTOCOL_VERSION` stating that bumping it is a coordinated breaking
+deployment and must be accompanied by a migration plan.
+
+**[MEDIUM]** `src/messages.rs` — `ServiceMessage` mixes agent-specific, MQTT-specific, and
+extension variants in a single enum. Any agent handler must consciously ignore MQTT variants
+(`Register`, `ReleaseTenants`, `MqttClientStatus`) or route them to the default arm. The
+`Unknown` catch-all handles misrouted variants correctly at runtime, but the enum creates
+cognitive load and increases the surface area a reviewer must check when auditing a new service
+role. *This finding is confirmed from prior reviews (Architecture and Maintainability sections
+above) — restated here for completeness.*
+
+**[MEDIUM]** `connection.rs:118-137` — Per-message double-deserialization: each WebSocket frame
+is deserialized into `EnvelopeHeader` (to extract `version` and `seq`), then deserialized again
+into a full `ControllerEnvelope`. Recommendation: deserialize once to `serde_json::Value`,
+extract `version` and `seq` by key lookup on the `Value`, then deserialize the `Value` into
+`ControllerEnvelope`. This eliminates the redundant JSON parse on every message.
+
+### Code and Logic Consistency
+
+**[MEDIUM]** `src/messages.rs:82-108` — `UpdateFinalStatus` and `DisconnectReason` use standard
+`serde` derive with no `Other(String)` catch-all. An unknown variant received from a newer
+sender causes a hard deserialization error. `#[non_exhaustive]` prevents Rust match
+exhaustiveness gaps but provides no protection against wire deserialization failures. These enums
+are sent between controller and agent over the wire and will lose `Copy` when the catch-all is
+added. Recommendation: apply the `Other(String)` + infallible custom `Deserialize` pattern
+already used by `EnrollmentStatus` and `ErrorCode` in `src/lib.rs`.
+
+### Extensibility
+
+**[MEDIUM]** Capabilities are not versioned. The `Capability` enum is a flat set of boolean
+flags. When the semantics of a capability change (e.g., `ExecuteUpdate` gains a new required
+exchange), the controller cannot determine which version of the capability an agent implements.
+Recommendation: add an optional `capability_versions: BTreeMap<Capability, u32>` field to the
+enrollment payload so callers can gate on both presence and version.
+
+**[LOW]** `ControllerMessage::is_nats_publishable` uses a deny-list: sensitive variants are
+explicitly excluded and all others are permitted. A future sensitive variant (e.g., one carrying
+credentials or session-specific state) defaults to publishable unless the developer remembers to
+add it to the deny-list. Recommendation: invert to an allowlist so that new variants default to
+non-publishable and must be explicitly opted in.
+
+**[LOW]** `src/close_reason.rs` — `CloseReason` uses human-readable strings as wire values
+(`"certificate rotated"`, `"certificate revoked"`). A typo or editorial rewording in a future
+version silently becomes `Unknown(String)` for older receivers. Recommendation: migrate
+discriminator strings to lowercase snake_case identifiers (`"certificate_rotated"`) that are
+stable across editorial revisions. A backward-compat serde alias can bridge the transition.
+
+### Strengths (2026-03-10)
+
+- `src/limits.rs` — `WireValidate` trait with exhaustive field-level byte-length limits is a
+  solid defense against payload amplification attacks. Limit constants are named and documented.
+- `ControllerMessage::is_nats_publishable` — single authoritative gate for NATS publication
+  safety. Credential-bearing and session-targeted variants are correctly excluded.
+- `Capability::Other(String)` with `is_known()` guard and `UpdateCapabilities` message allowing
+  services to refresh their capability set without full re-enrollment. Confirmed correct.

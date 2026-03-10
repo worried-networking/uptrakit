@@ -237,3 +237,76 @@ Key untested paths:
 - Multiple assignments with same plugin type but different configs form separate groups
 - `RefreshPackageIndex` is called before `batch_fetch_releases` but not for detect-only groups
 - Plugin creation failure for one group does not block other groups
+
+---
+
+## Review — 2026-03-10
+
+### Summary
+
+This review adds findings from an idiomatic Rust, allocation, and test coverage pass on
+2026-03-10. Several issues are new; existing open issues are confirmed where unresolved.
+
+### Idiomatic Rust
+
+**[MEDIUM]** `src/client.rs` (within `batch_update_inner`) — Two "all packages fail" error arms
+are structurally identical, differing only in the error message string. This is a DRY violation.
+Recommendation: extract a small helper closure or function `build_all_failed_results(items:
+&[BatchUpdateItem], error: &str) -> Vec<BatchUpdateResult>` and call it from both arms.
+
+**[MEDIUM]** `src/version_check.rs:132-151` — `effective_config.to_string()` is called for
+every assignment when building the group key in `batch_check_versions`. For N assignments
+sharing the same config, the same JSON is serialized N times. Recommendation: use a two-pass
+approach — collect configs into a `Vec`, serialize each unique config once, then map assignments
+to their serialized key by index.
+
+**[LOW]** `src/version_check.rs:423-433` — The `'a` lifetime bound on `Pin<Box<dyn Future + 'a>>`
+in `run_with_retry` has no doc comment explaining why the future must not outlive the closure's
+captured data. A future implementor may remove the lifetime bound and encounter subtle issues.
+Add a comment: `// 'a ensures the future does not outlive the closure's captured references.`
+
+**[LOW]** Function-local type alias `type GroupKey = (PluginType, String)` and struct `Group`
+are defined inside the `batch_check_versions` function body. Recommendation: move these
+definitions to module level with `pub(crate)` visibility, which is the conventional placement
+and improves navigability.
+
+**[LOW]** `format!("Failed to create plugin: {e}")` appears in multiple locations and tests
+assert on this string fragment. This is fragile coupling between test assertions and production
+error messages. Recommendation: define a `const PLUGIN_CREATE_ERROR_PREFIX: &str = "Failed to
+create plugin:"` and use it both in production code and in test assertions.
+
+### References and Allocation
+
+**[MEDIUM]** `src/version_check.rs:246` — `plugin_type.clone()` is called unnecessarily inside
+the index-refresh loop, in addition to the closure-capture clone at line 176. One of these
+clones is redundant. Audit which clone is required and remove the other.
+
+### Tests
+
+**[MEDIUM]** `src/version_check.rs` — `batch_check_versions` (~300 lines) has no unit tests.
+This function handles grouping by serialized config, deduplication of package-index refreshes,
+ordering preservation, and per-item error propagation. A bug in the grouping key would not be
+caught by any existing test. Recommended test scenarios:
+- Empty input returns empty output.
+- Assignments with the same plugin type and config are grouped together.
+- Assignments with the same plugin type but different configs form separate groups.
+- `RefreshPackageIndex` is called exactly once per unique fetch group.
+- Output order matches input order.
+- A plugin creation failure for one group does not block other groups.
+- A partial failure within one group propagates per-item errors correctly.
+
+*This finding was identified in the test coverage analysis (2026-03-05) and is confirmed open.*
+
+**[LOW]** The test module in `src/version_check.rs` lacks a comment explaining why
+`start_paused` is absent. The reason is that all test inputs produce non-retryable errors and
+`run_with_retry`'s sleep path is never reached — but this is non-obvious to a future
+contributor. Add: `// start_paused not required: test inputs always produce non-retryable errors
+// so run_with_retry's sleep is never entered.`
+
+### Strengths (2026-03-10)
+
+- `ConnectionContext` implements custom `Debug` replacing opaque `Arc<dyn Any>` handles with
+  `[N handle(s)]`, preventing accidental logging of implementation details. Confirmed correct.
+- `parse_dpkg_output` uses `filter_map` with `splitn`; `parse_madison_output` uses `find_map`.
+  Iterator combinators used correctly throughout. Confirmed correct.
+- `Arc::clone` placed correctly at task spawn boundaries. Confirmed correct.

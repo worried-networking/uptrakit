@@ -254,3 +254,47 @@ have been merged into this file where specific to umbrella crates. The `command`
 was added (shell escape, fail-early settings, kill_on_drop, output limit, sudo context). The
 `shared-types` recompilation concern and `shared-db` entity module count are noted in the
 Summary section.*
+
+---
+
+## Review — 2026-03-10
+
+### Summary
+
+This review adds findings for `uptrakit-command` and `uptrakit-extension-framework` on
+2026-03-10. The crates covered here also include `uptrakit-backoff`, `uptrakit-build-info`,
+`uptrakit-shared-macros`, `uptrakit-directories`, and `uptrakit-update-hooks` (no new findings
+for those five). Prior open issues are confirmed where still unresolved.
+
+### `uptrakit-command` — Idiomatic Rust
+
+**[MEDIUM]** `src/executor.rs` — `run_command_exec_impl` takes `&[(String, String)]` for
+environment variables, while the `CommandSpec` builder method `with_env` accepts `impl Into<String>`
+for individual key and value parameters. The API surface is inconsistent: callers building a
+`CommandSpec` use ergonomic generic bounds, but the underlying executor function takes a
+concrete slice of owned `String` pairs, forcing callers who have `&str` key-value pairs to
+allocate. Recommendation: align the internal slice type with the builder API or document the
+reason for the divergence.
+
+### `uptrakit-extension-framework` — Extensibility
+
+**[INFO]** All public framework types (`ExtensionManifest`, `ActionDef`, `FieldDef`, `FormDef`,
+`WizardStep`, etc.) carry `#[non_exhaustive]` with `new()` constructors and `with_*()` builder
+methods. This is the correct pattern for an evolving schema where external crates must not
+depend on struct literal initialization. Confirmed correct.
+
+### `uptrakit-scheduler-engine` — Maintainability (cross-reference)
+
+**[MEDIUM]** `uptrakit-scheduler-engine/Cargo.toml:12` — `oidc = []` empty feature declaration
+with no documentation. Full finding recorded in `crates/shared/scheduler-engine/CODEREVIEW.md`.
+Noted here to flag that the same documentation gap may apply to other small feature flags in
+umbrella crates.
+
+### Strengths (2026-03-10)
+
+- `uptrakit-command`: `CommandSpec` builder pattern with `#[must_use]` on all builder methods.
+  Confirmed correct.
+- `uptrakit-command`: `NoopCommandExecutor` in `crates/shared/command/src/executor.rs` is the
+  canonical no-op implementation for the controller side. Do not duplicate inline. Confirmed.
+- `uptrakit-extension-framework`: `#[non_exhaustive]` with `new()` constructors applied
+  consistently to all public framework types. Confirmed correct.

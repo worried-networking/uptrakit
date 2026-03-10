@@ -870,3 +870,79 @@ constructs `AppState` with ~50 fields, duplicating the `TestApp` harness. The in
 calls `.unwrap()` extensively (lines 557, 558, 560, 566, 568, 691, 712). Should use the
 shared `test_harness::TestApp` instead. *Confirmed by parallel consistency review
 (2026-03-06).*
+
+---
+
+## Review — 2026-03-10
+
+### Summary
+
+Second review pass covering architecture decomposition, lock discipline, tenant isolation
+correctness, security-surface enforcement in the extension subsystem, and test coverage gaps.
+Cross-referenced against the 2026-03-06 findings; items already recorded there are noted as
+**confirmed** where they remain open.
+
+### Strengths
+
+- `ServiceConnectionRegistry::send()` correctly drops the `RwLock` read guard before the async
+  `mpsc::Sender::send()` call — no guard held across an `await` point.
+- `broadcast_server_restarting_scattered` spawns per-service tasks with jittered delays,
+  correctly preventing thundering-herd reconnect storms on server restart.
+- `ca_snapshot.rs`, `cert_signer.rs`, and `ocsp.rs` PKI operations wrap multi-step mutations
+  in SeaORM transactions.
+- `ExtensionRegistry` atomic validation pattern: pre-validates all manifests before mutating
+  state, so registration either fully succeeds or fully fails.
+- Auth test coverage is thorough: registration, login, refresh, logout, expired JWT, OIDC
+  callback error paths, and atomic refresh token rotation are all exercised.
+
+### Concerns
+
+#### Architecture
+
+| Severity | Location | Finding |
+| --- | --- | --- |
+| **High** | `app_state.rs` | **God-object `AppState`** with 30+ `pub` fields gives every route handler full visibility into CA key store, credential sources, PKI, MQTT coordination, and extension proxy with no type-level access control. Introduce domain-scoped sub-state accessors (`AppState::auth()`, `AppState::pki()`, `AppState::notification()`); immediate step: mark `ca_key_store` and `credential_sources` `pub(crate)` with typed accessors. *Confirmed — extends prior god-crate finding.* |
+| **High** | `service_connections.rs` | **`tokio::sync::RwLock`** used for `ServiceConnectionRegistry`, violating the project standard requiring `parking_lot::RwLock`. Guards are correctly dropped before `await` today, but future maintainers adding `.await` inside a `write().await` guard will introduce a silent deadlock. Replace with `parking_lot::RwLock`. |
+| **High** | crate-wide | **God-crate size** (~36,459 LOC, 105 files, five concern domains). Recommended two-phase extraction: Phase 1 — `uptrakit-web-api-pki` (`ca_snapshot`, `cert_signer`, `pki_utils`, `ocsp`); Phase 2 — `uptrakit-web-api-push` (broadcaster modules + `service_connections`). *Confirmed — extends prior finding.* |
+| **Medium** | `router.rs` | **Flat 650-line router** with 80+ sequential `.routes()` calls. Decompose into domain sub-routers (`auth_router()`, `services_router()`, `hosts_router()`, `software_router()`, `notifications_router()`, `pki_router()`) merged in `build_router()`. |
+| **Low** | `server.rs:88-102` | **Counterintuitive middleware ordering**: layers listed later execute first. Use `tower::ServiceBuilder` to make execution order match declaration order. |
+
+#### Security
+
+| Severity | Location | Finding |
+| --- | --- | --- |
+| **High** | `routes/extensions.rs:143` | **Extension action permissions declared but never enforced**: `ActionDef::permission` and `ExtensionManifest::required_permission` are ignored at the invocation layer on both the plugin dispatch and the service proxy path. Any authenticated user can invoke any extension action. Resolve `ActionDef` for the requested `action_id`, verify caller permissions against `TenantContext` before dispatching. |
+| **Low** | `middleware/rate_limit.rs:187-189` | **Rate-limiter silent bypass** when `ClientIp` extension is absent: connections bypass rate limiting with no log entry. Add `tracing::warn!` on the `None` path. |
+| **Low** | entrypoint | **No production guard on `enable_plaintext_mode()`**: assert this flag is not set when the DB is non-SQLite or `UPTRAKIT_ENV=production`. |
+| **Info** | `security_headers.rs:31-34` | **Split-CSP**: HTTP-level CSP contains only `frame-ancestors 'none'`; full policy emitted by SvelteKit at build time. Add a CI check verifying the built frontend HTML contains the expected CSP meta tag. |
+
+#### Code Quality
+
+| Severity | Location | Finding |
+| --- | --- | --- |
+| **High** | `routes/software_items.rs:1119`, `routes/hosts.rs:218` | **`ServiceHost::find()` without tenant join** bypasses tenant isolation. Per project standard, `service_host` has no `tenant_id` column. Replace with `tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(service_host::Relation::Service.def())`. |
+| **High** | `routes/software_items.rs:1300-1331` | **N+1 in `batch_software_items` approve branch**: one `SELECT` + one `UPDATE` per item; a batch of 100 items issues 200 sequential round-trips. Extract to `batch_approve_software_items` in `web-api-queries` using an `is_in()` filter. |
+| **High** | `settings.rs:167` | **`tokio::sync::Mutex` for `write_mutex`** holds the guard across `.await` in `reload_from_db`, violating the project standard. Restructure so async DB work completes before guard acquisition, then switch to `parking_lot::Mutex`. |
+| **Medium** | `routes/software_items.rs:791-1058` | **267-line `check_versions` handler** with all business logic inline. Extract to `check_versions_for_item` in `web-api-queries`. |
+| **Medium** | `routes/services.rs:344-367` | **`bump_revocation_version` failure swallowed**: `tracing::warn!` rather than `?` allows the transaction to commit with an unbumped revocation counter. Propagate the error. *Also confirmed in `web-api-queries` review.* |
+| **Medium** | `mqtt_lease_coordinator.rs:111-166` | **Offset-based pagination inside a transaction**: skips/duplicates rows under concurrent inserts. Early return before `begin()` commits an empty transaction. Switch to keyset pagination; skip transaction on early return. |
+| **Medium** | `mqtt_lease_coordinator.rs:253,481,520,533` | **`.is_in(slice.to_vec())`** heap allocations avoidable by `.is_in(slice.iter().copied())`. |
+| **Medium** | `routes/software_items.rs:903-989` | **`plugin_by_host_role` HashMap keyed `(Uuid, String)`**: the `String` is always one of two fixed values, allocating per look-up. Replace with a typed `PluginRole` enum (`Copy`), consistent with `ActorType`/`BatchType`. |
+| **Medium** | `routes/software_items.rs:914,938,992,1188` | **Unnecessary `serde_json::Value::String` boxing**: use `config_model.plugin_type.parse::<PluginType>()` via `FromStr` instead. |
+| **Low** | `middleware/tenant_context.rs:16` | **Multi-tenancy TODO lacks issue tracker reference**. |
+| **Low** | `routes/services.rs:229,304,355` | **`AdminEvent::ServiceStatusChanged { status: "approved".to_string() }`** allocates on every call. Consider `Cow<'static, str>` or a typed enum. |
+| **Low** | `routes/software_items.rs:848` | **Avoidable `host_ids.clone()`**: reorder the two queries to eliminate it. |
+| **Low** | `routes/update_batches.rs:350-361` | **Double-collect deduplication** (`iter → HashSet → Vec`). Use `sort + dedup_by_key` or pass `HashSet` directly to `is_in()`. |
+| **Low** | `routes/extensions.rs:276-286` | **`ActionDef::timeout_seconds` without upper bound**: a service could declare an arbitrarily large timeout. Cap at a server-side maximum (e.g., 600 seconds) in `resolve_action_timeout`. |
+| **Low** | `extension_registry.rs:97-116` | **Implicit lock acquisition order**: five `Mutex`-guarded `HashMaps` locked in varying combinations. Document the acquisition order in a comment, or merge into one `RegistryState` `Mutex`. |
+
+#### Tests
+
+| Severity | Finding |
+| --- | --- |
+| **Medium** | No integration tests for eight critical route files: `update_batches.rs` (711 LOC), `api_tokens.rs`, `device_auth.rs`, `host_tags.rs` (380 LOC), `autodiscovery.rs`, `system_services.rs` (470 LOC), `audit_logs.rs`, `settings_mqtt.rs` (729 LOC). `update_batches` and `api_tokens` are highest priority given permission gating and status-machine transitions. *Confirmed — extends prior tests gap finding.* |
+| **Medium** | No permission-enforcement tests (403 Forbidden for authenticated users lacking required permissions). A regression removing a check on a destructive route would not be caught. Add a `permissions_enforced.rs` test module. |
+| **Medium** | Thin `enrollment_tokens.rs` test suite: create, list, and revoke covered. Missing: revoke non-existent (404), enroll with revoked token, create with empty name (400). |
+| **Low** | `service_ws.rs` tests: `_app` binding immediately drops `TestApp`, leaking the spawned Axum server without clean shutdown. Add `app.shutdown_token.cancel()` at test end. |
+| **Low** | `software_items_crud.rs:248-267` uses an inline `ActiveModel` literal instead of the `insert_host` fixture. A new required DB column would not be caught here. Use the fixture and pass `host_id.to_string()` as `machine_id`. |
+| **Info** | The `test_harness` pattern (per-test in-memory SQLite, `tower::ServiceExt::oneshot`, real `AppState`, zero shared state) is well-engineered. Document it in `docs/development/testing.md`. |

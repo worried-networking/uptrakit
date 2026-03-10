@@ -332,3 +332,52 @@ renaming to `db_unscoped()` or adding a lint comment pattern to flag intentional
 - 29 migrations with both `up()` and `down()`. Irreversible migrations (UUID repair, datetime
   repair) have explicit no-op `down()` methods with comments.
   *(2026-03-06 parallel review -- maintainability)*
+
+---
+
+## Review — 2026-03-10
+
+### Summary
+
+This review adds findings from a migration-quality, schema-integrity, and tenant-isolation pass
+on 2026-03-10. Several issues are new; existing open issues from prior rounds are confirmed
+where still unresolved.
+
+### Database
+
+**[MEDIUM]** `src/migration/mod.rs:51-91` — Migration execution order in the `migrations()`
+vector does not match the alphabetical date-based file naming for several entries. `sea-orm-migration`
+uses the `name()` string as the identifier, so the vector position controls actual execution
+order. A developer adding a migration at the wrong vector position could silently break the
+schema. Recommendation: add a prominent comment at the top of the `migrations()` function
+stating that the vector is the authoritative execution order and must not be reordered; consider
+a CI test that panics if any migration with an earlier date appears after one with a later date.
+*Prior finding (2026-03-06, `[INFO]`) confirmed and promoted to `[MEDIUM]` based on risk.*
+
+**[MEDIUM]** `src/migration/m20260209_000001_initial.rs` — `update_output_lines.update_history_id`
+has no index in the initial migration. Queries filtering on this column (used in
+`web-api/src/queries/update_history.rs:61,171` to load output lines for a history record) perform
+full table scans as the table grows. Recommendation: add a migration creating
+`idx_update_output_lines_update_history_id`.
+
+**[MEDIUM]** `src/migration/m20260318_000002_cron_to_interval.rs:265-270` — Raw SQL UPDATE uses
+`format!` string interpolation for a `'{task_type}'` literal value. No user input is involved
+here, but establishing the pattern of interpolating string values into raw SQL fragments is
+dangerous precedent that future contributors may imitate with user-controlled values.
+Recommendation: replace with a parameterized `sea_query` statement.
+
+**[LOW]** `src/migration/m20260309_000003_host_tags.rs` — `down()` relies on implicit cascade to
+drop the `uix_host_tags_tenant_name` partial index when the table is dropped. The `up()` method
+explicitly creates the index with a named identifier. An asymmetric `down()` is fragile if the
+DB engine's cascade behavior differs between SQLite and PostgreSQL. Recommendation: add an
+explicit `DROP INDEX IF EXISTS uix_host_tags_tenant_name` before dropping the table.
+
+### Strengths (2026-03-10)
+
+- All migrations implement `down()`. Large structural migrations use the rename-temp-table pattern
+  with crash-recovery detection. `run_migrations` wraps all migrations in a single transaction.
+  Confirmed correct.
+- Partial unique index `uix_update_history_host_active` provides database-level enforcement of
+  "at most one active update per host". Confirmed correct.
+- Three-format ciphertext design (`v1`/`v2`/`v3`) with backward compatibility in
+  `uptrakit-crypto` is correctly handled by the migration path. Confirmed correct.

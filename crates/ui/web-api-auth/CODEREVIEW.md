@@ -109,3 +109,46 @@ backdate database rows directly." These stores (`OidcFlowStore`, `AccountLinkSto
 production code without clock injection. The correct fix per the canonical pattern would be to
 add `with_clock` constructors (like `RateLimitStore`) and advance the injected clock in tests.
 *Found in parallel tests review (2026-03-06).*
+
+---
+
+## Review — 2026-03-10
+
+### Summary
+
+Focused review of the authentication module covering token hashing design, secret type usage,
+and error-conversion redundancy. The 2026-03-06 findings around test coverage and DB backdating
+remain open and are confirmed below. New findings are additive.
+
+### Strengths
+
+- JWT validation is rigorous: both `aud` and `iss` in `required_spec_claims`, 15-minute expiry,
+  JTI + user-level denylist for immediate revocation. `test_decode_legacy_token_without_aud_rejected`
+  verifies legacy tokens are rejected.
+- Refresh token rotation uses an atomic DB transaction (begin → revoke old → insert new →
+  commit). `test_rotate_same_token_twice_fails` validates replay detection.
+- Password hashing uses Argon2id with OWASP-recommended parameters (19 MiB memory, 2
+  iterations, parallelism 1), random salt, constant-time verify, 1,024-char max.
+
+### Concerns
+
+#### Security
+
+| Severity | Location | Finding |
+| --- | --- | --- |
+| **Medium** | `auth/token.rs:17-21` | **Un-keyed SHA-256 for token hashes**: `hash_token` uses plain SHA-256 with no salt and no HMAC secret for API token and enrollment secret hashes. With 256-bit entropy the tokens resist online brute-force, but a compromised read-only DB replica allows instant verification of any token known to the attacker (deterministic un-keyed hash). Replace with `HMAC-SHA256(server_secret, token)` where the server secret is derived from or co-located with the master encryption key. |
+| **Low** | `auth/refresh_cookie.rs:19,26` | **Silent empty `Set-Cookie` on `HeaderValue` parse failure**: `HeaderValue::from_str(&value).unwrap_or_else(\|_\| HeaderValue::from_static(""))` silently emits an empty header rather than surfacing a bug. The error branch is unreachable in practice (base64url tokens are always valid), but the fallback would suppress a potential header-injection signal. Replace with `expect("refresh token cookie contains only base64url characters")`. |
+
+#### Code and Logic Consistency
+
+| Severity | Location | Finding |
+| --- | --- | --- |
+| **Low** | `auth/oidc_state.rs:20-38`, `auth/error.rs` | **Redundant `#[from]` and `impl_report_conversion!`**: both attributes cover the same three conversion types. The `#[from]` derives are unused because the codebase exclusively uses `context_to()`. Remove the redundant `#[from]` attributes where `impl_report_conversion!` covers the same path. |
+| **Low** | `CreatedApiToken` | **`plaintext_token: String` should be `SecretString`**: this is the one-time plaintext API token returned to the user. `SecretString` prevents accidental logging and zeroes the value on drop. |
+
+#### Tests (confirmed from 2026-03-06)
+
+| Severity | Finding |
+| --- | --- |
+| **High** | `settings_store.rs` — 580 lines, 7 `OffsetDateTime::now_utc()` calls, zero tests. `generate_or_load_jwt_key`, `load_settings_snapshot`, and setting reconciliation logic are entirely untested. *Confirmed.* |
+| **Medium** | DB row backdating in `auth/oidc_state.rs` (lines 628-639, 669-679, 702-712, 838, 916) and `auth/device_flow.rs` (lines 236-255). Add `with_clock` constructors as per the `RateLimitStore` pattern and advance the injected clock in tests rather than backdating DB rows. *Confirmed.* |

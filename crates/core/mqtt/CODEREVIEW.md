@@ -273,3 +273,72 @@ have no unit tests. The `on_connected` path parses the initial MQTT config deliv
 and sends a status event; the `on_message` dispatch arms handle config updates and HA-online
 events. These are thin wires over `TenantManager`, but the wiring itself (including the
 unbounded channel send at line 148 noted as a HA concern) is untested.
+
+## Review — 2026-03-10
+
+- **Reviewer**: AI code review (HA|references|consistency)
+- **Branch**: docs/codereview-backend
+
+### Summary
+
+Five findings added from the 2026-03-10 review pass: one HA/observability concern about
+in-memory cache loss on process restart, and four allocation-efficiency concerns in
+`tenant_manager.rs`. Two positives confirmed. One low-severity consistency annotation noted.
+The allocation findings are all medium severity and compound under large software-state payloads.
+
+### Strengths
+
+- **Confirmed** — `handle_reconnected` re-publishes from the in-memory cache to the MQTT
+  broker on reconnect. This is the correct HA pattern for broker-level disconnects.
+- **Confirmed** — `display_name` helper in `ha_discovery.rs` correctly returns `&'a str`
+  borrowing from its inputs — zero allocation for name selection in every HA discovery config
+  publish.
+- **Confirmed** — `mqtt_client.rs:337-352` — `try_publish`/`try_subscribe` with
+  deferred-retry flag avoids deadlocking the event loop channel without buffering publish
+  payloads in memory.
+
+### Concerns
+
+**[LOW] HA — In-memory caches not persisted across process restarts**
+
+`tenant_manager.rs` — The in-memory caches (`software_states`, `host_summary_states`,
+`host_metadata`, `connectivity_cache`) are built purely from push messages received during the
+current process lifetime and are not written to disk. On process restart (not merely a broker
+reconnect), all cached state is lost. Services remain visible via MQTT broker retained topics,
+but new hosts added during the downtime will have no cached data until the next organic push
+from the controller. Recommendation: document this behavior explicitly in the `TenantManager`
+struct doc comment. Consider requesting a full state resync from the controller immediately
+after authentication, similar to the pattern used by `handle_reconnected` for broker reconnects.
+
+**[MEDIUM] Allocation — `update_software_states` clones payload before publish**
+
+`tenant_manager.rs:136-139` — `update_software_states` clones the entire payload collections
+before storing them in the cache, then uses the originals for the publish phase. Large
+software-states messages (hundreds of items across many hosts) are duplicated on the heap before
+either copy is consumed. Recommendation: reorder operations — use `payload.items` for publishing
+first, then move ownership into the cache.
+
+**[MEDIUM] Allocation — `handle_reconnected` and `handle_ha_online` call `.cloned()` on map entries**
+
+`tenant_manager.rs:208-215` — Both `handle_reconnected` and `handle_ha_online` call `.cloned()`
+on `HashMap` entries to obtain owned `Vec`s before passing them to publish methods, because the
+publish methods require `&mut self`. This produces deep copies of potentially large collections
+on every broker reconnect event. Recommendation: review whether `publish_software_states` and
+`publish_ha_configs_only` need `&mut self`; if truly read-only, making them `&self` eliminates
+the borrow conflict and removes the need for the `.cloned()` call.
+
+**[MEDIUM] Allocation — O(N×M) transient heap buffers per MQTT publish**
+
+`tenant_manager.rs:443-504` — Each MQTT publish allocates a new heap buffer via
+`as_bytes().to_vec()` and `serde_json::Value.to_string().into_bytes()`. For large
+software-state pushes covering many hosts and items this produces O(N×M) transient allocations
+per publish cycle. Recommendation: use `serde_json::to_vec(&config_json)` directly to serialize
+into a single allocation; also consider whether `MqttHandle::publish_retained` can accept `&[u8]`
+to avoid materialising an owned `Vec` at the call site.
+
+**[LOW] Consistency — `self.event_tx.clone()` inside `start_or_update_client`**
+
+`tenant_manager.rs:370` — `self.event_tx.clone()` is called inside `start_or_update_client`.
+`mpsc::Sender` clone is an atomic ref-count increment and is cheap. No correctness action is
+required, but annotating the clone site with a brief comment noting its cheapness would prevent
+future reviewers from considering it a performance concern.

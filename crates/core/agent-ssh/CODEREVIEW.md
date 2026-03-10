@@ -337,3 +337,57 @@ comment in the existing review noting that a clarifying comment is needed. This 
 any future operator mistake of pointing the agent-ssh binary at a shared (multi-tenant) database
 would silently return all tenants' hosts. The clarifying comment should explicitly state
 "single-tenant local SQLite — no tenant filter required by design".
+
+## Review — 2026-03-10
+
+- **Reviewer**: AI code review (quality|consistency|extensibility|security|references)
+- **Branch**: docs/codereview-backend
+
+### Summary
+
+Four new findings added from the 2026-03-10 review pass covering code quality, security,
+extensibility, and allocation efficiency. Three positives confirmed. One medium-severity
+security finding (plain `String` for SSH credentials) is newly introduced and represents the
+most actionable item for this date.
+
+### Strengths
+
+- **Confirmed** — `ssh_pool.rs` correctly addresses the TOCTOU race in concurrent `acquire()`
+  calls using `HashMap::entry()` after releasing the lock before the SSH handshake. Pool
+  documentation explains each step; tests validate the `Entry` API semantic independently.
+- **Confirmed** — `host_ops.rs` has thorough unit test coverage with in-memory SQLite,
+  including the regression test `update_host_machine_id_does_not_change_updated_at` for the
+  infinite-reload-loop bug fix.
+- **Confirmed** — `parking_lot::Mutex` usage in `ssh_pool.rs` is correct; guard always dropped
+  before every `.await` across the lock/unlock boundary.
+
+### Concerns
+
+**[MEDIUM] Security — `BootstrapParams` and `SyncParams` hold SSH credentials as plain `String`**
+
+`src/commands/bootstrap.rs:44-49` — `BootstrapParams` contains `auth_password: Option<String>`,
+`auth_private_key_pem: Option<String>`, and `target_private_key_pem: Option<String>` as plain
+`String`. `SyncParams` (`sync.rs:48,50,403,405`) has the same pattern. SSH credentials stored
+as plain `String` are not zeroed on drop and are visible in `Debug` output unless a hand-written
+impl is present. Recommendation: apply `SecretString` to `auth_password`, `auth_private_key_pem`,
+and `target_private_key_pem` in both structs, consistent with the `MqttConfig` precedent in
+`uptrakit-mqtt`.
+
+**[MEDIUM] Architecture — No public extension guide for `ServiceHandler` UI extension pattern**
+
+`src/extension.rs` provides the reference implementation for `ServiceHandler` with UI extensions,
+including the pattern of calling `on_settings` to gate `ExtensionRegister` on agreed capabilities.
+This is non-obvious for third-party service authors. Recommendation: add an
+`# Extension Registration` section to the `ServiceHandler` trait doc comment (in
+`uptrakit-service-sdk`) linking to `agent-ssh/src/extension.rs` as the canonical reference
+implementation.
+
+**[LOW] References — Per-item `package_identifier` clone in `batch_check_versions`**
+
+`version_check.rs:167-172` — In `batch_check_versions`, `package_identifier` is cloned per-item
+when constructing each `BatchDetectItem`. For large batches this creates per-item heap
+allocations. Consider whether `BatchDetectItem` could hold a `Cow<'_, str>` for the batch path
+to avoid the allocation in the common case where the source string outlives the batch.
+
+> **Confirmed positive** — `Arc::clone` is placed correctly at task spawn boundaries in
+> `version_check.rs`. No action required.

@@ -248,3 +248,52 @@ extraction into a `queries/autodiscovery/` directory. *Found in parallel archite
 exercised indirectly by `web-api` integration tests, but `host_packages`, `audit_logs`, and
 `scheduled_tasks` have no corresponding integration test files either. *Found in parallel
 tests review (2026-03-06).*
+
+---
+
+## Review — 2026-03-10
+
+### Summary
+
+Second review pass focusing on transaction safety in write paths, tenant isolation in batch
+operations, N+1 patterns in multi-row mutations, and the coupling of the query layer to the
+notification plugin registry. Items from the 2026-03-06 review that remain open are confirmed
+below. New findings are additive.
+
+### Strengths
+
+- All list endpoints correctly implement batch loading to avoid N+1: `list_hosts` uses two
+  queries total + in-memory map; `list_update_history` batches `update_output_line` records
+  in a single `IS IN` query; `batch_count_hosts` aggregates assignment counts in one query.
+
+### Concerns
+
+#### Code Quality
+
+| Severity | Location | Finding |
+| --- | --- | --- |
+| **High** | `queries/services.rs:344-367` | **`bump_revocation_version` failure swallowed in `merge_service`**: `tracing::warn!` is used instead of `?`, allowing the transaction to commit with an unbumped revocation counter. Revoked certificates may remain visible as valid until the next CRL refresh. Propagate the error with `?` consistent with `deactivate_service`. *Also confirmed in `web-api` review.* |
+| **Medium** | `queries/services.rs:451-461,498-508` | **`batch_approve_services` and `batch_reject_services` N+1 without transaction**: one `UPDATE` per service in a loop with no wrapping transaction. Partial failures leave the DB in a partially-updated state. Use a single `update_many()` with `is_in()` filter on eligible IDs. |
+| **Medium** | `queries/update_history.rs:218-260` | **Authorization-after-data-load in `get_update_history`**: the `update_history` row is loaded before the tenant authorization check via a secondary `find_by_id` on the host. Join the host tenant filter into the initial `update_history` query so data is never fetched for unauthorised callers. |
+| **Medium** | `queries/hosts.rs:80-92,182-198` | **Duplicated `ServiceStatus` mapping logic** in `load_host_agents` and `list_hosts`. Extract to a private `fn map_service_status(s: service::ServiceStatus) -> ServiceStatus`. |
+| **Medium** | `queries/notifications.rs:74-97` | **`list_channels` builds the base query twice** (once for count, once for data). Other list queries share the base via `.clone()`. Build `base_query` once and clone for the count: `let total = base_query.clone().count(...)`. |
+| **Low** | `queries/services.rs:451-508` | **No structured log per item** in batch approve/reject loops. Add `tracing::debug!` per approval and `tracing::warn!` per ineligible item. |
+
+#### Maintainability
+
+| Severity | Location | Finding |
+| --- | --- | --- |
+| **Medium** | `Cargo.toml` | **Query layer depends on `uptrakit-notification-plugin-registry`** with hardcoded `features = ["webhook"]`, pulling `reqwest` and all notification plugin structs into a crate intended as a pure DB abstraction. Five query functions accept `&dyn NotificationOps`. Define a narrower `NotificationConfigValidator` trait in the query crate or in `notification-plugin-core`; pass the concrete `NotificationOps` from the route-handler layer. |
+
+#### Database — Tenant Isolation
+
+| Severity | Location | Finding |
+| --- | --- | --- |
+| **Medium** | `queries/host_tags.rs:279-290` | **`load_host_tags_batch` is unscoped**: `host_tag_assignment::Entity::find()` filtered only by `host_id` with no structural tenant isolation on this join table. Currently safe because `host_ids` are pre-scoped by callers, but the precondition is implicit. Add an explicit `#[doc]` comment stating `host_ids` must be pre-scoped to the caller's tenant; add a debug-mode assertion. |
+
+#### Tests
+
+| Severity | Finding |
+| --- | --- |
+| **Medium** | Missing integration tests for `settings_mqtt.rs` routes (729 LOC, credential storage, password encryption). At minimum: GET returns 200, PUT with valid config returns 200, GET after PUT does not return the plaintext password (returns `has_password: true`). *Adds to prior HIGH test-gap finding.* |
+| **Low** | `test_harness/fixtures.rs` — `register_and_get_token` hardcodes email `owner@test.local`. Calling it twice per `TestApp` instance fails on a duplicate email constraint. Accept `email` and `password` parameters, or document the single-use constraint. |

@@ -179,3 +179,41 @@ No extensibility issues found.
 ### Issues
 
 No test coverage issues found.
+
+---
+
+## Review — 2026-03-10
+
+### Summary
+
+This review adds one new security concern and one informational note on 2026-03-10. All prior
+open issues are confirmed. No previously resolved issues have regressed.
+
+### Security
+
+**[LOW]** `src/lib.rs:104-109` — `enable_plaintext_mode()` sets a global `AtomicBool` that
+disables all encryption. The call site comment states "Must never be set in production" but
+there is no code-level guard. A misconfigured deployment that sets `--allow-plaintext-secrets`
+on a production instance stores all secrets in cleartext without any startup-time warning in
+log monitoring. Recommendation: add a startup check — if `allow_plaintext_secrets` is
+requested AND any of the following are true (master key file is provided, database URL is not
+SQLite in-memory, or environment variable `UPTRAKIT_ENV=production` is set), refuse to start
+with a descriptive error. At minimum, emit a `tracing::warn!` at startup that monitoring can
+alert on. *This finding was noted in prior review (2026-03-06, `[LOW]`) and is confirmed open.*
+
+### Informational
+
+**[INFO]** `src/notifications.rs:451` — `expose_secret()` is called inside `mask_channel_config`
+to pass decrypted JSON through a plugin's `mask_config_secrets` function. If any intermediate
+`tracing` span instruments the return value of the function (e.g., a `#[tracing::instrument]`
+annotation on a calling function that logs all arguments), decrypted JSON could appear in trace
+output. Current code does not do this, but the pattern is a latent risk if instrumentation is
+added in the future. No action required now; noted for awareness.
+
+### Strengths (2026-03-10)
+
+- Envelope encryption: AES-256-GCM, fresh random 96-bit nonces per encryption, `Zeroizing` for
+  all key material, `DataKeyRing` for O(1) master key rotation, AAD binding ciphertexts to
+  semantic purpose. Confirmed correct.
+- `EncryptedString` SeaORM custom type makes encryption transparent to query code. Masked
+  `Debug` output shows `ENC:***`. Confirmed correct.

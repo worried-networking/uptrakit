@@ -414,3 +414,37 @@ integration tests. Key gaps:
 - `settings.rs`: the SMTP, NATS, and auth settings subcommands have low coverage
 - `main.rs`: the dispatch match arms for newer command groups (system-services,
   system-enrollment-tokens, audit-logs, discovery-allowlist) lack test coverage
+
+---
+
+## Review — 2026-03-10
+
+### Summary
+
+Second review pass focused on file organisation, secret handling consistency, and test
+coverage. The 2026-03-06 findings on `main.rs` size, plaintext token storage, and integration
+test gaps remain open and are confirmed below. New findings are additive.
+
+### Strengths
+
+- `SecretString` at credential boundaries: OIDC `client_secret` and MQTT `password`/`ca_pem`
+  are wrapped before API client calls (`settings.rs:576-577`, `settings.rs:695`).
+- URL scheme validation before browser open (`auth.rs:393-403`) rejects `file://`,
+  `javascript:`, `data:`, and bare paths. Eight tests cover all scheme categories.
+- `batch_update.rs` is a well-scoped 455-line module with params, commands, helpers, and tests
+  co-located — the target structure for all command modules.
+
+### Concerns
+
+#### Maintainability
+
+| Severity | Location | Finding |
+| --- | --- | --- |
+| **High** | `src/main.rs` | **Inverted `lib`/`bin` split**: `main.rs` is 5,614 LOC containing the entire Clap argument tree (37 enum/struct definitions, 22 command groups, ~1,730-line dispatch function, ~1,500 lines of parse tests). `lib.rs` is only 10 lines. Recommended split: (1) move `Commands` enum and sub-command structs to `src/commands.rs` or `src/cli.rs`; (2) move parse tests to `tests/cli_parsing.rs`; (3) split the dispatch `match` into per-namespace helper functions. `main.rs` should contain only the `Cli` top struct, the `#[tokio::main]` entry point, and the top-level `run(cli).await` call. *Confirmed — extends prior finding.* |
+
+#### Code and Logic Consistency
+
+| Severity | Location | Finding |
+| --- | --- | --- |
+| **Low** | `src/config.rs:15` | **`Credentials { token: Option<String> }` written to disk**: the token field should be `SecretString` to prevent accidental logging and ensure zeroization on drop. *Extends prior plaintext token HIGH finding.* |
+| **Low** | `src/commands/settings.rs:409,427` | **`client_secret: String / Option<String>` in OIDC config structs**: Clap does not natively support `SecretString`, so this exception should be documented explicitly with a comment at the field definition. |

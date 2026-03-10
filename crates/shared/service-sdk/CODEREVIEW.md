@@ -406,3 +406,66 @@ Recommended tests (unit-testable with mock WebSocket streams):
 **[BUSINESS] `connection.rs` — agreed capabilities (0% coverage)**
 
 `ControllerConnection::set_agreed_capabilities` and accessor methods have no tests.
+
+---
+
+## Review — 2026-03-10
+
+### Summary
+
+This review adds findings from a high-availability, architecture, and extensibility pass on
+2026-03-10. Several issues are new; prior open issues are confirmed.
+
+### High Availability
+
+**[MEDIUM]** `src/lifecycle.rs` — `CertExpired` error from the post-enrollment path propagates
+as fatal `std::process::exit(1)` via `run_lifecycle_and_handle_errors`. A certificate expiring
+in the narrow window between enrollment completion and receipt of the first `ServiceSettings`
+causes a permanent process exit rather than triggering re-enrollment. Recommendation: treat a
+propagated `CertExpired` in `run_lifecycle_and_handle_errors` as a re-enrollment trigger
+(equivalent to the `CertExpired` handling inside the authenticated reconnect loop).
+
+**[MEDIUM]** `src/lifecycle.rs` — `LoopError::Other(_)` is mapped to a fatal process exit.
+`ProtocolError::VersionMismatch` — which is expected during a rolling upgrade when the
+controller is updated before all services — is currently mapped to `LoopError::Other`. Every
+service connected to the new controller permanently exits until an operator manually restarts it.
+Recommendation: evaluate mapping `VersionMismatch` to `LoopError::TransientNetwork` so services
+reconnect with backoff instead of exiting.
+
+**[MEDIUM]** `src/lifecycle.rs:613-614` — Backoff reset semantics on `Disconnected` outcome are
+subtle and undocumented. `Ok(outcome)` → `reconnect_backoff.reset()` applies to both the
+`Disconnected` and `Reconnect` outcomes. A future maintainer may incorrectly conclude that only
+cert-rotation resets the backoff. Recommendation: add an inline comment at the `reset()` call
+explaining: `// Reset backoff on any clean disconnect (Disconnected or Reconnect); only error
+exits accumulate delay.`
+
+### Architecture
+
+**[LOW]** `src/lifecycle.rs` — `ServiceHandler` uses `#[async_trait]` which boxes all async
+return types, adding a heap allocation per virtual call. Rust 1.75+ (edition 2024, already in
+use) supports native `async fn` in traits (RPITIT). Recommendation: migrate `ServiceHandler` to
+use native `async fn` in trait definitions, removing the `async_trait` dependency for this
+trait.
+
+### Extensibility
+
+**[MEDIUM]** `ServiceHandler` trait has no public end-to-end guide for implementing UI
+extensions. The pattern of calling `on_settings` to gate `ExtensionRegister` on agreed
+capabilities is non-obvious; without documentation, implementors discover it by reading SDK
+source code or asking for help. Recommendation: add an `# Extension Registration` section to
+the `ServiceHandler` trait doc comment documenting the required sequence: receive `on_settings`
+→ check capability → call `conn.send(ServiceMessage::ExtensionRegister(...))`.
+
+**[LOW]** `src/extension.rs` (or equivalent) — `ServiceExtensionProxy::has_pending` is
+`#[cfg(test)]` only. There is no production-visible way to observe the number of in-flight
+extension requests, which makes debugging extension timeouts difficult. Recommendation: expose a
+`pub fn pending_count(&self) -> usize` method without the `#[cfg(test)]` gate.
+
+### Strengths (2026-03-10)
+
+- Reconnect backoff: `Backoff::new(2s, 60s)` with jitter, interruptible via `tokio::select!`
+  against `signals.recv()`, reset on success. Confirmed correct.
+- Event loop uses `MAX_CONSECUTIVE_SERVICE_EVENTS = 16` budget preventing ping-timer starvation
+  during burst events. Confirmed correct.
+- All write operations to WebSocket use `tokio::time::timeout(SEND_TIMEOUT = 30s)`. TCP
+  keepalive set at connection time. Confirmed correct.

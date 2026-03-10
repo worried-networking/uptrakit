@@ -226,3 +226,24 @@ would allow unit coverage of the success and rejection paths without a live conn
 `info.hostname.is_some()` unconditionally. On CI containers where `hostname` is not in `PATH`
 the production code correctly returns `None` but the test will fail. The assertion should be
 conditionalized or replaced with a non-panic expectation.
+
+## Review — 2026-03-10
+
+- **Reviewer**: AI code review (quality|consistency|extensibility|HA|references)
+- **Branch**: docs/codereview-backend
+
+### Summary
+
+No new findings were raised against `uptrakit-agent` in the 2026-03-10 review pass. All
+findings from this pass targeted `uptrakit-agent-ssh`, `uptrakit-mqtt`, and
+`uptrakit-integration-tests`. Prior findings remain open as recorded above.
+
+### Confirmed Prior Findings
+
+The following open items from earlier review dates were confirmed as still unresolved:
+
+- **[HIGH]** (Tests) `AgentHandler::on_message` machine-ID validation has zero unit test coverage — confirmed still open.
+- **[HIGH]** (Tests) `on_connected`, `on_service_event`, and `agent_capabilities()` have no unit tests — confirmed still open.
+- **[CRITICAL]** (HA-11) No crash recovery for in-flight updates; `InProgress` rows are never transitioned to `Failed` by a background task — confirmed still open.
+- **[HIGH]** (HA-1) In-flight update not drained on SIGTERM — confirmed still open.
+- **[LOW]** `src/client.rs:19,32,46` — `LocalCommandExecutor` allocated per message — confirmed still open.

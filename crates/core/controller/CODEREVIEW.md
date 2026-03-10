@@ -626,3 +626,82 @@ Task registration and the embedded scheduler toggle logic have low coverage.
 The `db-migrate` subcommand copies all data between DB backends (42 tables). Nearly untested.
 This is acceptable since it requires two running DB instances, but the `verify_all` function
 could be unit-tested with mock data.
+
+---
+
+## Review — 2026-03-10
+
+- **Reviewer**: AI code review (architecture|quality|HA|maintainability)
+- **Scope**: Controller-specific findings from architecture, code quality, and HA passes
+
+### Architecture
+
+#### Strengths
+
+- **(A5, confirmed)** Dependency boundary discipline is clean: no circular dependencies,
+  confirmed by the 2026-03-10 architecture pass. `service-sdk` and `shared-types` carry no
+  reverse dependencies on `controller`.
+
+- **(A6, confirmed)** `BackgroundTasks` and startup signal handling use `CancellationToken`
+  propagated to all background tasks. Already documented in the HA section above under
+  `src/tasks.rs:17-115`; confirmed again by the 2026-03-10 review.
+
+#### Issues
+
+**[HIGH]** (A1) `uptrakit-web-api` (`app_state.rs`) — `AppState` is a god object with 30+
+publicly accessible fields. All route handlers obtain a reference to the full `AppState`,
+including the CA key store, SSRF-safe resolver, SMTP credentials, and notification registry,
+regardless of which subset the handler requires. This compounds the existing
+`[HIGH] main.rs:33-34` layering inversion finding: not only does the controller depend on
+`web-api`, it then receives back an `AppState` with no access restriction at call sites.
+Recommendation: introduce domain-scoped sub-state accessor methods (`AppState::auth()`,
+`AppState::pki()`) and mark sensitive fields `pub(crate)`. This change is a prerequisite for
+a clean controller → web-api boundary separation.
+
+**[MEDIUM]** (A2) `src/main.rs:155-487` — The startup sequence has 14 sequential phases with
+no parallelism. Several phases are logically independent: JWT initialization, OIDC store
+construction, and notification registry setup do not depend on each other's outputs and could
+run concurrently via `tokio::try_join!`. This is not a current bottleneck (startup is
+fast), but the rigid sequential structure makes it harder to introduce optional or
+conditionally-compiled init phases in the future. No immediate action required; informational.
+
+**[LOW]** (A3) `src/tasks.rs:133-147` — `BackgroundTasks::shutdown()` iterates tasks
+sequentially, awaiting each per-task timeout before proceeding to the next. Worst-case
+total shutdown time is the sum of all per-task timeouts rather than the maximum single timeout.
+With the current set of background tasks this is unlikely to cause an observable delay, but it
+is a structural issue that would become a problem if more long-timeout tasks are added.
+Recommendation: replace the sequential loop with `futures::future::join_all` or
+`FuturesUnordered` so all handles are awaited concurrently and total shutdown time is bounded
+by the single longest timeout.
+
+**[LOW]** (A4) `src/server.rs:88-102` — Axum middleware layers execute in reverse declaration
+order (layers added later execute first). The current layer ordering is counterintuitive to
+read: a developer adding a new layer must mentally reverse the list to understand execution
+order. Recommendation: refactor to use `tower::ServiceBuilder::layer()` chain, which executes
+in declaration order and makes the execution sequence self-documenting.
+
+### Code Quality
+
+#### Strengths
+
+- **(Q3, confirmed)** Atomic database semantics applied consistently. `pki.rs` wraps all
+  multi-step CA operations in `db.begin()`/`txn.commit()` blocks. `merge_service` uses
+  `lock_exclusive()` to prevent TOCTOU races. Already documented in the Database section
+  above; confirmed by the 2026-03-10 code quality pass.
+
+#### Issues
+
+**[MEDIUM]** (Q1) `src/pki.rs:614-638` — `set_global_setting_i64` uses a SELECT-then-INSERT-
+or-UPDATE pattern (two round-trips) instead of a single upsert. This creates an inconsistency
+window: if two controller instances call this function concurrently on first startup, both may
+observe the SELECT returning no row and both issue an INSERT, causing one to fail with a unique
+constraint violation. Recommendation: replace with a SeaORM
+`insert(...).on_conflict(OnConflict::column(...).update_column(...).build(...))` upsert to
+eliminate the window in a single statement.
+
+**[MEDIUM]** (Q2) `src/pki.rs:205-237` — `CaState::to_snapshot` parses each trusted CA cert
+PEM twice in two separate loops: once to extract fingerprint and `not_after`, and once to
+extract CNs. It also iterates `self.trusted` twice. Recommendation: merge the two loops so
+each PEM is parsed once, returning all three values (`fingerprint`, `not_after`, `cn`) in a
+single pass. This reduces allocations and simplifies the error surface for malformed PEM
+inputs.

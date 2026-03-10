@@ -320,3 +320,41 @@ The assignment-building logic groups by host and sends batch version check messa
 
 `push_software_states` builds the state payload and publishes to MQTT services. The state
 aggregation logic (combining host software items + host packages) has low coverage.
+
+---
+
+## Review — 2026-03-10
+
+### Summary
+
+This review adds findings from a high-availability, maintainability, and Cargo configuration pass
+on 2026-03-10. Existing open issues are confirmed.
+
+### High Availability
+
+**[MEDIUM]** `src/scheduler.rs:110-128` — `poll_cycle` drains synchronously before returning to
+the interval tick. A hung poll cycle (e.g., all DB queries timing out) blocks the cancellation
+token check for up to `TASK_EXECUTION_TIMEOUT` (2 hours). During this window, a shutdown
+request is silently ignored. Recommendation: wrap the `poll_cycle` call in a `tokio::select!`
+that also watches `token.cancelled()` so shutdown requests are honoured even during a hung
+poll.
+
+**[LOW]** `src/claim.rs:19` — `STALE_CLAIM_SECONDS = 600`. When `recover_stale_claims` returns
+a non-zero count, only `tracing::info!` is emitted. A non-zero stale claim count indicates a
+crashed or unclean shutdown and warrants operator attention. Recommendation: emit at
+`tracing::warn!` level and increment a counter metric so alerting can be configured.
+
+### Maintainability
+
+**[MEDIUM]** `Cargo.toml:12` — `oidc = []` feature declaration is empty with no documentation
+comment. In `src/executors/auth_cleanup.rs`, `#[cfg(feature = "oidc")]` gates OIDC session
+table cleanup. The feature is real and load-bearing, but the declaration gives no indication of
+what it controls. Recommendation: add an inline comment: `# Enables OIDC session table cleanup
+in auth_cleanup executor. No additional dependencies.`
+
+### Strengths (2026-03-10)
+
+- Partial unique index on `update_history(host_id) WHERE status IN ('pending', 'in_progress')`
+  provides DB-level "at most one active update per host" enforcement. Confirmed correct.
+- `recover_stale_claims` sets `last_error` to a descriptive string so post-mortem DB queries
+  reveal recovered tasks. Confirmed correct.

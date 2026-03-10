@@ -226,3 +226,65 @@ Recommended tests:
 
 NATS publish wrappers with topic construction. The topic format is a contract between the
 scheduler and the controller. At minimum, topic string formatting should be unit-tested.
+
+---
+
+## Review — 2026-03-10
+
+- **Reviewer**: AI code review (HA|consistency|tests)
+- **Scope**: Scheduler-specific findings from HA, code quality, and consistency passes
+
+### High Availability
+
+#### Strengths
+
+- **(H5, confirmed)** Backoff implementation is correct and complete. `Backoff::new(2s, 60s)`
+  with jitter, interruptible via `tokio::select!`, resets on success. This is a well-designed
+  resilience pattern used appropriately in the scheduler's reconnect loop.
+
+#### Issues
+
+**[MEDIUM]** (H1) `src/handler.rs` (`on_message`) — A transient DB or NATS failure while
+handling a `ServiceCredentials` message causes `std::process::exit(1)`, permanently killing
+the scheduler process. A transient database unavailability at credential delivery time becomes
+an unrecoverable outage requiring operator intervention to restart the binary. Recommendation:
+for transient infrastructure errors (`DbErr::Conn`, NATS timeout), return `Ok(None)` or map
+to a reconnect-triggering error variant so the event loop can retry. Reserve
+`std::process::exit(1)` for configuration errors (invalid key material, wrong key length)
+where retrying would not help.
+
+**[MEDIUM]** (H2) `crates/shared/scheduler-engine/src/scheduler.rs:110-128` —
+`poll_cycle` drains all due tasks synchronously before returning to the interval tick.
+During this drain, the `token.cancelled()` arm of the surrounding `tokio::select!` is not
+evaluated, so a cooperative shutdown signal can be delayed by up to `TASK_EXECUTION_TIMEOUT`
+(2 hours) if a task happens to be running at shutdown time. Recommendation: wrap the
+`poll_cycle` call in a nested `tokio::select!` that also monitors `token.cancelled()`, so
+shutdown is responsive even while a long-running task is in progress.
+
+**[LOW]** (H3) `crates/shared/scheduler-engine/src/claim.rs:19` — Stale claim recovery is
+logged at `info` level when `recovered > 0`. Because stale claims indicate a previous
+instance crashed or lost connectivity without releasing its locks, this event is operationally
+significant and warrants `warn` level. An application metric counter (e.g., via `metrics::counter!`)
+would also enable post-incident analysis of crash frequency without requiring log triage.
+
+**[LOW]** (H4) `src/handler.rs:278-297` — `on_shutdown` ignores the `shutdown_timeout`
+parameter (shadowed as `_shutdown_timeout`) and instead applies a hard-coded
+`STOP_SCHEDULER_TIMEOUT = 30s` regardless of the controller-configured value. If the controller
+sends a shutdown with a different timeout expectation, the scheduler may stop its task loop
+prematurely or linger longer than intended. Recommendation: use the parameter value as the
+timeout and document `STOP_SCHEDULER_TIMEOUT` as a safety upper bound to prevent infinite
+waits.
+
+### Consistency
+
+#### Issues
+
+**[MEDIUM]** (C1) `src/nats_notifier.rs` — `nats_scheduler_notifier_new` test (lines 83-90)
+is a no-op stub that asserts `std::mem::size_of::<Uuid>() == 16`. This assertion tests the
+Rust standard library, not any application behavior. The test provides no isolation-level
+value for the scheduler crate and would pass even if the NATS subject construction were
+completely broken. Already noted under the Tests section above (`[LOW] src/nats_notifier.rs`)
+as lacking coverage for topic construction; this finding confirms the sole existing test in
+that module is not meaningful. Recommendation: remove the stub test and replace it with a
+mock-NATS test that verifies the subject format produced by `signal_ca_rotation` (and at
+minimum one other method) matches the string the controller subscribes to.

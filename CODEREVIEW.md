@@ -1089,3 +1089,98 @@ These should be wrapped in a single encompassing transaction.
   - `software_items.rs:824` -- `assign_hosts` host existence check lacks tenant filter (user-provided `host_id`)
   - `host_packages.rs:435,485` -- `find_or_create_host_package` omits `tenant_id` filter on `HostPackage::find()`
 These are mitigated by upstream tenant scoping but violate the defense-in-depth convention.
+
+---
+
+## Review — 2026-03-10
+
+- **Reviewer**: AI code review (architecture|quality|maintainability)
+- **Scope**: Workspace-level findings from architecture, maintainability, and code quality passes
+
+### Architecture
+
+#### Strengths
+
+- **(A5, confirmed)** Dependency boundary discipline is clean. No circular dependencies.
+  `shared/wire`, `service-sdk`, and `shared-types` have zero reverse dependencies on `web-api`
+  or `controller`. Plugin crates depend on `infrastructure-core` and `shared-types` but not
+  `web-api`. This was noted in the 2026-03-06 parallel review and is confirmed unchanged.
+
+- **(A6, confirmed)** `BackgroundTasks` and startup signal handling correctly use a
+  `shutdown_token` (`CancellationToken`) propagated to all background tasks. Confirmed by the
+  architecture review pass.
+
+#### Issues
+
+**[HIGH]** (A1) `uptrakit-web-api` (`app_state.rs`) — `AppState` is a god object with 30+
+publicly accessible fields. All route handlers have full access to CA key store, credential
+sources, SMTP settings, and other sensitive subsystems regardless of whether the handler
+requires them. This is a reinforcement of the existing `AppState.pub` concern documented in
+the 2026-03-06 parallel review (`[LOW] AppStateBuilder has no compile-time safety for its 32
+Option fields`). Recommendation: introduce domain-scoped sub-state accessor methods
+(`AppState::auth()`, `AppState::pki()`, etc.) and mark sensitive fields `pub(crate)` so only
+the controller startup path can construct them directly.
+
+### Maintainability
+
+#### Strengths
+
+- **(M6, confirmed)** All 45 crates use `workspace = true` for every third-party dependency
+  with zero inline version declarations in member `Cargo.toml` files. Workspace
+  `[dependencies]` is the authoritative version source. Already noted in the dependency graph
+  analysis section; confirmed by the 2026-03-10 maintainability pass.
+
+- **(M7, confirmed)** `resolver = "3"` is correctly declared. All crates are on edition 2024.
+  Consistent with the crate-structure analysis above.
+
+- **(M8, confirmed)** The dependency graph is acyclic. No circular crate dependencies. Already
+  established in the 2026-03-06 crate structure analysis.
+
+- **(M9, confirmed)** Feature flag propagation chains are well-structured for
+  `db-sqlite`/`db-postgres`, notification plugins (`webhook`, `telegram`, `email`), OIDC, and
+  `zeroconf`. No orphaned or contradicted flags found.
+
+#### Issues
+
+**[HIGH]** (M1) Workspace `Cargo.toml` — Notification plugin sub-crates (`webhook`,
+`telegram`, `email`, `registry`) reference `uptrakit-notification-plugin-core` via
+`path = "../core"` instead of `{ workspace = true }`. This bypasses workspace version control:
+if the core crate version is ever bumped in `[workspace.dependencies]`, these four crates will
+silently reference a different version than the rest of the workspace. Recommendation: change
+all four path references to `uptrakit-notification-plugin-core = { workspace = true }`.
+
+**[MEDIUM]** (M2) Workspace `Cargo.toml:42-43` — `sea-orm` and `sea-orm-migration` are pinned
+to `2.0.0-rc.35` (pre-release). This is reinforced by the existing `[LOW]` note in the
+controller review (`SeaORM pinned at 2.0.0-rc.35`). Add an inline `# TODO: upgrade to stable
+once SeaORM 2.0 GA ships` comment on both lines so the pin intent is visible in `cargo deny`
+audits and does not appear as an oversight.
+
+**[MEDIUM]** (M3) Workspace — Multiple duplicate dependency versions are present: `base64`
+(0.21 + 0.22), `darling` (0.20 + 0.21), `der` (0.7 + 0.8), `getrandom` (0.2 + 0.3 + 0.4,
+triple split). The triple-split `getrandom` is the most risky because it activates three
+distinct `getrandom` initialization paths at link time. Recommendation: run
+`cargo update --aggressive` periodically to collapse minor-version splits; add
+`cargo deny [bans]` `skip-tree` entries with an expiry comment for the `getrandom` triple-split
+so it is visible and dated.
+
+**[LOW]** (M4) All 45 member crates — `edition = "2024"` is repeated verbatim in every member
+`Cargo.toml` and is not inherited from `[workspace.package]`. Recommendation: add
+`edition = "2024"` to `[workspace.package]` and replace each member's `edition = "2024"` with
+`edition.workspace = true`. Pure mechanical change with no semantic effect; reduces the
+surface where a future edition change must be applied.
+
+**[LOW]** (M5) Workspace `Cargo.toml` — Binary/entry-point crates (`controller`, `scheduler`,
+`agent`, `mqtt`, `agent-ssh`) are intentionally absent from `[workspace.dependencies]` (they
+are never imported by other crates), but this convention is undocumented. Add a brief comment
+in `[workspace.dependencies]` such as `# Binary crates are excluded — they are never depended
+upon and are not listed here` so the omission reads as intentional rather than an oversight.
+
+### Code Quality
+
+#### Strengths
+
+- **(Q3, confirmed)** Atomic database semantics applied consistently across `uptrakit-controller`
+  and `crates/ui/web-api-queries`. `pki.rs` wraps all multi-step CA operations in explicit
+  `db.begin()`/`txn.commit()` blocks. `merge_service` uses `lock_exclusive()` to prevent TOCTOU
+  races. This pattern matches the `Multi-Statement DB Cleanup` coding standard documented in the
+  project memory.

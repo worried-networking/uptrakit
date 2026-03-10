@@ -160,3 +160,34 @@ documented as a future risk.
 `src/software_discovery_state.rs` have no tests despite following the same `as_str`/`FromStr`
 pattern as the tested types. A regression in any `FromStr` implementation would not be
 detected until runtime.
+
+---
+
+## Review — 2026-03-10
+
+### Summary
+
+This review adds one new finding and confirms one prior open issue on 2026-03-10. No previously
+resolved issues have regressed.
+
+### Code and Logic Consistency
+
+**[MEDIUM]** `src/permissions.rs:15` — `Permission` enum is `#[non_exhaustive]` with standard
+`serde` derive and no `Other(String)` catch-all. `Permission` crosses the wire inside
+`ServiceMessage::ExtensionActionsRegister`. An unknown permission variant received from a newer
+controller causes a hard serde deserialization error on an older agent. Recommendation: apply
+the `Other(String)` + infallible custom `Deserialize` pattern used by `EnrollmentStatus` and
+`ErrorCode` in `uptrakit-internal-wire`. This change loses `Copy`.
+
+### Extensibility (confirmed)
+
+**[LOW]** `src/plugin_types.rs` — `AttestationStatus` is `#[non_exhaustive]` but lacks
+`Other(String)`. Confirmed open from prior review (2026-03-06). An unknown attestation status
+from a newer controller causes a hard deserialization error in an older agent receiving
+`ExecuteUpdatePayload`. No change in status.
+
+### Strengths (2026-03-10)
+
+- `src/ssrf.rs` — SSRF resolver filters at DNS resolution time, handles the all-private-IPs
+  edge case, and cleanly separates `new()` (blocking) from `permissive()` (self-hosted). The
+  implementation is defense-in-depth correct and well-tested.

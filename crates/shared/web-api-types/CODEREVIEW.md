@@ -136,3 +136,65 @@ conceptual quantity (number of updates) but use three different integer types. C
 between them require explicit casts that can silently truncate on platforms where `usize`
 differs from `i32`. Standardise on a single integer type (e.g., `i64` to match the DB
 aggregate return type) across all batch-related structs.
+
+---
+
+## Review — 2026-03-10
+
+### Summary
+
+This review adds new findings across coding standards, maintainability, and code consistency on
+2026-03-10. The `Validate` coverage gap for `UpdateHostRequest` and `InvokeExtensionActionRequest`
+is the highest-severity new finding.
+
+### Coding Standards
+
+**[MEDIUM]** `src/hosts.rs:54` — `UpdateHostRequest` has no `Validate` implementation. The
+route handler writes to the database without validating `friendly_name` length. An attacker
+could supply an arbitrarily long string, causing a DB write rejection at the ORM boundary
+(unhandled error) or silently truncating the value. Recommendation: implement `Validate` for
+`UpdateHostRequest` enforcing a maximum byte length on `friendly_name` consistent with the DB
+column definition.
+
+**[MEDIUM]** `src/extensions.rs:33` — `InvokeExtensionActionRequest` has no `Validate`
+implementation. The `params: serde_json::Value` field is unbounded; `sensitive_params:
+Option<SecretString>` is also unbounded. A malicious caller could send a multi-megabyte JSON
+payload that passes deserialization but exhausts memory when the extension handler processes
+it. Recommendation: add `Validate` checking the maximum serialized byte length of `params`
+(align with `MAX_EXTENSION_PARAMS_LEN` from `uptrakit-internal-wire`'s `limits.rs`).
+
+**[LOW]** `src/agents.rs` — `MergeAgentRequest` has no `Validate` implementation. The request
+contains only a strongly-typed `Uuid` field so there is no injection risk, but the absence
+breaks the workspace-wide pattern that all HTTP request types implement `Validate`. Add a
+trivial `impl Validate` returning `Ok(())` for consistency.
+
+### Maintainability
+
+**[MEDIUM]** `src/settings_ca.rs` — This file is a 1-line stub: `pub use super::agents::MessageResponse as RotateCaResponse;`. The misleading module name implies CA-settings request/response types but the file contains only a type alias re-export. Recommendation: remove the file and move the re-export to `src/lib.rs` directly.
+
+**[MEDIUM]** The ten `settings_*.rs` files have inconsistent granularity: `src/settings_auth.rs`
+is ~40 LOC with 3 structs, `src/settings_ca.rs` is 1 LOC, while `src/settings_mqtt.rs` is
+~506 LOC. The smallest settings modules create file-navigation noise without providing
+modularity benefit. Recommendation: group the smallest modules (`settings_ca.rs`,
+`settings_auth.rs`, `settings_zeroconf.rs` if present) under a `settings/` sub-directory or
+consolidate into a single `settings_misc.rs`.
+
+### Code and Logic Consistency
+
+**[LOW]** `src/admin_events.rs` (or equivalent SSE event types) — `AdminEvent::ServiceStatusChanged
+{ status: String }`, `AdminEvent::UpdateCompleted { status: String }`, and
+`AdminEvent::SystemServiceStatusChanged { status: String }` use plain `String` for typed status
+values rather than the appropriate typed enums (`ServiceStatus`, `UpdateStatus`). This prevents
+the compiler from catching invalid status strings at the serialization boundary and requires
+callers to perform their own string-to-enum conversion. Recommendation: replace `String` fields
+with the appropriate typed enums.
+
+### Strengths (2026-03-10)
+
+- `SecretString` used consistently for all sensitive fields in HTTP API request/response types.
+  Confirmed correct — no credential field uses a bare `String`.
+- `Validate` trait implementations confirmed for all previously identified request types:
+  `RegisterRequest`, `LoginRequest`, `CreateOidcProviderRequest`, `UpdateScheduledTaskRequest`,
+  `UpdateNetworkSettingsRequest`, `CreateSoftwareItemRequest`, `CreatePluginConfigRequest`,
+  `CreateApiTokenRequest`, `CreateEnrollmentTokenRequest`, `UpdateServiceRequest`,
+  `CreateAutodiscoveryIgnoreRequest`, and all MQTT client request types.
