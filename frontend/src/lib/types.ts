@@ -627,6 +627,21 @@ export interface CreateDiscoveryAllowlistEntryRequest {
 	plugin_type: string;
 }
 
+// Zeroconf settings
+
+export interface ZeroconfSettingsResponse {
+	enabled: boolean;
+	url?: string;
+	pki_addr?: string;
+	ca_fingerprint?: string;
+}
+
+export interface UpdateZeroconfSettingsRequest {
+	enabled?: boolean;
+	url?: string;
+	pki_addr?: string;
+}
+
 // NATS settings
 
 export interface NatsSettingsResponse {

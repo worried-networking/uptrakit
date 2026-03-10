@@ -7,6 +7,8 @@
 		updateNetworkSettings,
 		getNatsSettings,
 		updateNatsSettings,
+		getZeroconfSettings,
+		updateZeroconfSettings,
 		rotateCA
 	} from '$lib/api';
 	import { Permission, type SystemAlert } from '$lib/types';
@@ -35,6 +37,14 @@
 	let natsSaving: boolean = $state(false);
 	let natsClearing: boolean = $state(false);
 
+	// --- Zeroconf Settings ---
+	let zeroconfAvailable: boolean = $state(false);
+	let zeroconfEnabled: boolean = $state(false);
+	let zeroconfCaFingerprint: string | null = $state(null);
+	let zeroconfUrlOverride: string = $state('');
+	let zeroconfPkiAddrOverride: string = $state('');
+	let zeroconfSaving: boolean = $state(false);
+
 	// --- Loading ---
 	let loading: boolean = $state(true);
 
@@ -46,7 +56,12 @@
 
 	async function loadGlobalSettings() {
 		loading = true;
-		const results = await Promise.allSettled([getNetworkSettings(), getSystemAlerts(), getNatsSettings()]);
+		const results = await Promise.allSettled([
+			getNetworkSettings(),
+			getSystemAlerts(),
+			getNatsSettings(),
+			getZeroconfSettings()
+		]);
 
 		if (results[0].status === 'fulfilled') {
 			const net = results[0].value;
@@ -66,6 +81,17 @@
 		} else {
 			// 404 means the NATS feature is not compiled in — hide the section gracefully
 			natsAvailable = false;
+		}
+		if (results[3].status === 'fulfilled') {
+			zeroconfAvailable = true;
+			const zc = results[3].value;
+			zeroconfEnabled = zc.enabled;
+			zeroconfCaFingerprint = zc.ca_fingerprint ?? null;
+			zeroconfUrlOverride = zc.url ?? '';
+			zeroconfPkiAddrOverride = zc.pki_addr ?? '';
+		} else {
+			// 404 means the zeroconf feature is not compiled in — hide the section gracefully
+			zeroconfAvailable = false;
 		}
 
 		loading = false;
@@ -99,6 +125,30 @@
 			showError(e instanceof Error ? e.message : 'Failed to clear NATS URL');
 		} finally {
 			natsClearing = false;
+		}
+	}
+
+	// --- Zeroconf Settings ---
+	async function saveZeroconfSettings() {
+		clearError();
+		zeroconfSaving = true;
+		try {
+			const res = await updateZeroconfSettings({
+				enabled: zeroconfEnabled,
+				url: zeroconfUrlOverride.trim() || undefined,
+				pki_addr: zeroconfPkiAddrOverride.trim() || undefined
+			});
+			zeroconfEnabled = res.enabled;
+			zeroconfCaFingerprint = res.ca_fingerprint ?? null;
+			zeroconfUrlOverride = res.url ?? '';
+			zeroconfPkiAddrOverride = res.pki_addr ?? '';
+			showSuccess(
+				'Zero-configuration discovery settings saved. Changes take effect after the controller is restarted.'
+			);
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to save zeroconf settings');
+		} finally {
+			zeroconfSaving = false;
 		}
 	}
 
@@ -208,7 +258,62 @@
 		</div>
 	{/if}
 
-	<!-- Section 2: Network Settings -->
+	<!-- Section 2: Zero-Configuration Discovery -->
+	{#if zeroconfAvailable}
+		<div class="card mb-6 p-6">
+			<h2 class="h3 mb-4">Zero-Configuration Discovery</h2>
+			<p class="mb-4 text-surface-600 dark:text-surface-400">
+				When enabled, the controller advertises itself on the local network via mDNS (Bonjour/Avahi), allowing agents to
+				discover and enroll without manual URL configuration. Use the override fields below for reverse proxy or
+				split-network deployments where the advertised addresses differ from the controller's local addresses.
+			</p>
+
+			<aside class="mb-4 rounded-lg bg-surface-100-900 p-3 text-sm">
+				<strong>Requires restart:</strong> Changes to these settings take effect after the controller is restarted.
+			</aside>
+
+			<label class="label mb-4 flex items-center gap-2">
+				<input class="checkbox" type="checkbox" bind:checked={zeroconfEnabled} />
+				<span>Enable mDNS advertising</span>
+				<span class="badge preset-tonal-warning ml-2 text-xs">Requires restart</span>
+			</label>
+
+			{#if zeroconfCaFingerprint}
+				<div class="mb-4">
+					<span class="label-text text-sm font-medium">CA Fingerprint</span>
+					<p class="mt-1 font-mono text-sm text-surface-700 dark:text-surface-300">
+						{zeroconfCaFingerprint}
+					</p>
+				</div>
+			{/if}
+
+			<label class="label mb-4">
+				<span>URL Override</span>
+				<input
+					class="input font-mono"
+					type="text"
+					placeholder="https://proxy.example.com:443"
+					bind:value={zeroconfUrlOverride}
+				/>
+			</label>
+
+			<label class="label mb-4">
+				<span>PKI Address Override</span>
+				<input
+					class="input font-mono"
+					type="text"
+					placeholder="http://pki.local:8080"
+					bind:value={zeroconfPkiAddrOverride}
+				/>
+			</label>
+
+			<button class="btn preset-filled-primary-500" onclick={saveZeroconfSettings} disabled={zeroconfSaving}>
+				{zeroconfSaving ? 'Saving...' : 'Save'}
+			</button>
+		</div>
+	{/if}
+
+	<!-- Section 3: Network Settings -->
 	<div class="card mb-6 p-6">
 		<h2 class="h3 mb-4">Network Settings</h2>
 		<p class="mb-4 text-surface-600 dark:text-surface-400">
@@ -251,7 +356,7 @@
 		<button class="btn preset-filled-primary-500" onclick={saveNetworkSettings}> Save </button>
 	</div>
 
-	<!-- Section 3: Controller TLS Certificate -->
+	<!-- Section 4: Controller TLS Certificate -->
 	<div class="card mb-6 p-6">
 		<h2 class="h3 mb-4">Controller TLS Certificate</h2>
 		<p class="mb-4 text-surface-600 dark:text-surface-400">
@@ -276,12 +381,12 @@
 		</button>
 	</div>
 
-	<!-- Section 4: System Services -->
+	<!-- Section 5: System Services -->
 	{#if canManageSystemServices}
 		<SystemServicesSettings onSuccess={showSuccess} onError={showError} />
 	{/if}
 
-	<!-- Section 5: CA Certificate -->
+	<!-- Section 6: CA Certificate -->
 	<div class="card mb-6 p-6">
 		<h2 class="h3 mb-4">CA Certificate</h2>
 		<p class="mb-4 text-surface-600 dark:text-surface-400">

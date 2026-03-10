@@ -64,6 +64,8 @@ import type {
 	CreateDiscoveryAllowlistEntryRequest,
 	NatsSettingsResponse,
 	UpdateNatsSettingsRequest,
+	ZeroconfSettingsResponse,
+	UpdateZeroconfSettingsRequest,
 	SystemServiceResponse,
 	UpdateSystemServiceRequest,
 	CreateSystemEnrollmentTokenRequest,
@@ -578,6 +580,16 @@ export function getNatsSettings(): Promise<NatsSettingsResponse> {
 
 export function updateNatsSettings(data: UpdateNatsSettingsRequest): Promise<NatsSettingsResponse> {
 	return request('/global-settings/nats', { method: 'PUT', body: JSON.stringify(data) });
+}
+
+// --- Zeroconf Settings ---
+
+export function getZeroconfSettings(): Promise<ZeroconfSettingsResponse> {
+	return request('/global-settings/zeroconf');
+}
+
+export function updateZeroconfSettings(data: UpdateZeroconfSettingsRequest): Promise<ZeroconfSettingsResponse> {
+	return request('/global-settings/zeroconf', { method: 'PUT', body: JSON.stringify(data) });
 }
 
 // --- System Services APIs ---
