@@ -6,6 +6,7 @@ pub use uptrakit_shared_types::SecretString;
 /// without a direct `uptrakit-shared-types` dependency.
 pub use uptrakit_shared_types::PluginRole;
 
+pub mod access_presets;
 pub mod agents;
 pub mod api_tokens;
 pub mod audit_logs;
@@ -33,6 +34,7 @@ pub mod permissions;
 pub mod plugin_configs;
 pub mod prelude;
 pub mod registration;
+pub mod roles;
 pub mod scheduler;
 pub mod server_cert;
 pub mod services;
@@ -54,6 +56,7 @@ pub mod system_enrollment_tokens;
 pub mod update_batches;
 pub mod update_history;
 pub mod update_hooks;
+pub mod users;
 pub mod validation;
 
 /// Default value for `enabled` fields in create-request types.
@@ -153,7 +156,7 @@ mod tests {
 
     #[test]
     fn permission_iter_covers_all_variants() {
-        assert_eq!(Permission::iter().count(), 33);
+        assert_eq!(Permission::iter().count(), 32);
     }
 
     #[test]
