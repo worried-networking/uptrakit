@@ -502,8 +502,17 @@ for user review. Key invariants:
         The plugin config name is `"Codeberg Releases"` to distinguish it from generic Forgejo instances.
      2. `plugin_type: GenericShell`, roles `[DetectVersion, ExecuteUpdate]` — same PHS Shell target
         as for GitHub-managed items.
-   - APT-managed apps emit a `DiscoveryTarget` with `plugin_type: PackageManagerApt`, empty config `{}`, and
-     name `"APT (auto)"`.
+   - npm-managed apps emit **two** `DiscoveryTarget` values:
+     1. `plugin_type: PackageManagerNpm`, roles `[DetectVersion, FetchReleases]` (no `ExecuteUpdate`),
+        config `{}`, name `"NPM (auto)"`, and `package_identifier: Some("<npm-package>")`.
+     2. `plugin_type: GenericShell`, roles `[ExecuteUpdate]`, same PHS Shell config as GitHub/Codeberg
+        items (`version_command` + `update_command`), name `"PHS Shell"`, no `package_identifier`.
+     Updates always go through `/usr/bin/update`, not `npm install -g`.
+   - APT-managed apps emit **two** `DiscoveryTarget` values:
+     1. `plugin_type: PackageManagerApt`, roles `[DetectVersion, FetchReleases]` (no `ExecuteUpdate`),
+        config `{}`, name `"APT (auto)"`, no `package_identifier`.
+     2. `plugin_type: GenericShell`, roles `[ExecuteUpdate]`, same PHS Shell config as above.
+     Updates always go through `/usr/bin/update`, not `apt-get install`.
    - Apps whose scripts contain neither GitHub nor Codeberg patterns nor a specific `apt install` line are skipped.
    The PHS plugin config itself (`discovery_proxmox_helper_scripts`, always `{}`) is retained as an anchor for
    discovery runs but never linked directly to `SoftwareItem` host assignments.

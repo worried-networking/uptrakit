@@ -93,16 +93,28 @@ create:
   Releases plugin config from the target. The software item's plugin config will be the
   auto-created GitHub config, not the PHS config.
 
-- **APT-managed apps** (e.g. Grafana, Plex): The PHS plugin emits a target for the
-  `package_manager_apt` plugin type. The controller finds or creates a shared `APT (auto)`
-  plugin config. The software item's `package_identifier` is the Debian package name.
+- **npm-managed apps** (e.g. n8n, Zigbee2MQTT): The PHS plugin emits two targets -- one for
+  the `package_manager_npm` plugin type (version detection and release fetching) and one for
+  the `generic_shell` plugin type (updates via `/usr/bin/update`). Version information comes
+  from npm, but updates always use the PHS update script.
+
+- **APT-managed apps** (e.g. Grafana, Plex): The PHS plugin emits two targets -- one for the
+  `package_manager_apt` plugin type (version detection and release fetching) and one for the
+  `generic_shell` plugin type (updates via `/usr/bin/update`). The software item's
+  `package_identifier` is the Debian package name. Version information comes from APT, but
+  updates always use the PHS update script.
 
 - **Undetectable apps**: Apps whose scripts contain neither a GitHub release source nor a
   specific `apt install` line are skipped. A warning is logged on the agent. Check agent logs
   (`journalctl -u uptrakit-agent`) if you expect to see an app but it does not appear.
 
-After discovery, version checking and updates are handled by the target `releases_github` or
-`APT` configs -- not by the PHS plugin itself.
+After discovery, version checking is handled by the target plugin configs (`releases_github`,
+`NPM`, or `APT`), while updates are always handled by the PHS Shell config (which runs
+`/usr/bin/update`). The PHS plugin config itself is not linked directly to software items.
+
+**Migration note**: Existing PHS-discovered npm/APT items retain their old plugin assignments.
+To apply the new update routing, delete the affected items and re-trigger discovery, or
+manually reassign the `execute_update` role to the GenericShell (PHS Shell) plugin config.
 
 Auto-created config name for the PHS discovery anchor: **`"Proxmox Helper Scripts"`**.
 
