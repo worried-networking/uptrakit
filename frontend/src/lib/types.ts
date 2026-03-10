@@ -565,6 +565,8 @@ export interface UpdateHistoryResponse {
 	completed_at: string | null;
 	output: string | null;
 	created_at: string;
+	/** Whether the update was dispatched in interactive mode (PTY allocated). */
+	interactive: boolean;
 }
 
 export interface ReleaseInfoRequest {

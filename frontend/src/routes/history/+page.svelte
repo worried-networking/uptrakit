@@ -11,6 +11,7 @@
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
 	import { connectInteractiveSession } from '$lib/interactive';
 	import type { InteractiveConnectionState } from '$lib/interactive';
+	import { connectEventStream } from '$lib/sse';
 	import { Permission } from '$lib/types';
 	import type { UpdateHistoryResponse, UpdateHistoryStatus, SoftwareItemResponse } from '$lib/types';
 
@@ -40,6 +41,9 @@
 	let stdinAttention: boolean = $state(false);
 	let terminalRefs: Record<string, TerminalOutput> = {};
 
+	// Admin SSE event stream for real-time list updates
+	let disconnectEventStream: (() => void) | null = null;
+
 	// Trigger update modal state
 	let showTriggerModal: boolean = $state(false);
 	let softwareItems: SoftwareItemResponse[] = $state([]);
@@ -68,7 +72,27 @@
 	});
 
 	onMount(() => {
-		if (canView) loadHistory(currentPage);
+		if (canView) {
+			loadHistory(currentPage);
+			// Subscribe to admin events for real-time list updates.
+			disconnectEventStream = connectEventStream({
+				onEvent: (eventType, data) => {
+					if (eventType === 'update_started') {
+						const historyId = data.update_history_id as string;
+						const interactive = data.interactive as boolean;
+						// Mark the matching item as interactive so the badge appears
+						// immediately without waiting for a reload.
+						items = items.map((i) => (i.id === historyId ? { ...i, interactive } : i));
+					} else if (eventType === 'update_completed') {
+						// Reload the completed item so status and output are fresh.
+						const historyId = data.update_history_id as string;
+						if (items.some((i) => i.id === historyId)) {
+							reloadItem(historyId);
+						}
+					}
+				}
+			});
+		}
 	});
 
 	async function loadHistory(page: number) {
@@ -92,6 +116,7 @@
 
 	onDestroy(() => {
 		disconnectStream();
+		disconnectEventStream?.();
 	});
 
 	function disconnectStream() {
@@ -304,6 +329,9 @@
 											? 'In Progress'
 											: item.status.charAt(0).toUpperCase() + item.status.slice(1)}
 									</span>
+									{#if item.status === 'in_progress' && item.interactive}
+										<span class="badge preset-filled-warning-500 text-xs animate-pulse">Input Required</span>
+									{/if}
 								</td>
 								<td>{formatDate(item.started_at)}</td>
 								<td>{formatDate(item.completed_at)}</td>
