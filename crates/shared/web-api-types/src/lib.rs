@@ -32,6 +32,7 @@ pub mod oidc_providers;
 pub mod pagination;
 pub mod permissions;
 pub mod plugin_configs;
+pub mod plugin_type_settings;
 pub mod prelude;
 pub mod registration;
 pub mod roles;

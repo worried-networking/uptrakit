@@ -1738,21 +1738,21 @@ mod tests {
             .iter()
             .find(|l| l.role == "fetch_releases")
             .expect("fetch_releases role must exist");
-        assert_eq!(fetch.plugin_config_id, github_config_id);
+        assert_eq!(fetch.plugin_config_id, Some(github_config_id));
         assert_eq!(fetch.package_identifier, "BookLore/BookLore");
 
         let detect = plugin_links
             .iter()
             .find(|l| l.role == "detect_version")
             .expect("detect_version role must exist");
-        assert_eq!(detect.plugin_config_id, shell_config_id);
+        assert_eq!(detect.plugin_config_id, Some(shell_config_id));
         assert_eq!(detect.package_identifier, "booklore");
 
         let update = plugin_links
             .iter()
             .find(|l| l.role == "execute_update")
             .expect("execute_update role must exist");
-        assert_eq!(update.plugin_config_id, shell_config_id);
+        assert_eq!(update.plugin_config_id, Some(shell_config_id));
         assert_eq!(update.package_identifier, "booklore");
     }
 

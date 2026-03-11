@@ -120,8 +120,14 @@ pub struct ValidatedUpdateTarget {
     pub host: host::Model,
     pub hsi_link: host_software_item::Model,
     pub agent: service::Model,
-    pub execute_update_data: (host_software_item_plugin::Model, plugin_config::Model),
-    pub detect_version_data: Option<(host_software_item_plugin::Model, plugin_config::Model)>,
+    pub execute_update_data: (
+        host_software_item_plugin::Model,
+        Option<plugin_config::Model>,
+    ),
+    pub detect_version_data: Option<(
+        host_software_item_plugin::Model,
+        Option<plugin_config::Model>,
+    )>,
     /// The merged config for the `fetch_releases` role plugin, if assigned.
     ///
     /// Used to extract `require_attestation` at dispatch time without a
@@ -182,7 +188,12 @@ async fn load_role_plugin(
     host_id: Uuid,
     software_item_id: Uuid,
     role: &str,
-) -> Result<Option<(host_software_item_plugin::Model, plugin_config::Model)>> {
+) -> Result<
+    Option<(
+        host_software_item_plugin::Model,
+        Option<plugin_config::Model>,
+    )>,
+> {
     let assignment = HostSoftwareItemPlugin::find()
         .filter(host_software_item_plugin::Column::HostId.eq(host_id))
         .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
@@ -195,30 +206,40 @@ async fn load_role_plugin(
         return Ok(None);
     };
 
-    let pc_id = assignment
-        .plugin_config_id
-        .ok_or_else(|| report!(TriggerUpdateError::PluginConfigNotFound))?;
-    let config = PluginConfig::find_by_id(pc_id)
-        .filter(plugin_config::Column::DeactivatedAt.is_null())
-        .one(db)
-        .await
-        .context_to()?
-        .ok_or_else(|| report!(TriggerUpdateError::PluginConfigNotFound))?;
+    let config = if let Some(pc_id) = assignment.plugin_config_id {
+        Some(
+            PluginConfig::find_by_id(pc_id)
+                .filter(plugin_config::Column::DeactivatedAt.is_null())
+                .one(db)
+                .await
+                .context_to()?
+                .ok_or_else(|| report!(TriggerUpdateError::PluginConfigNotFound))?,
+        )
+    } else {
+        None
+    };
 
     Ok(Some((assignment, config)))
 }
 
-/// Build a [`PluginAssignment`] from a role plugin row and its config.
+/// Build a [`PluginAssignment`] from a role plugin row and its optional config.
+///
+/// When `config` is `None` (no `plugin_config` linked to the assignment), the
+/// plugin type is read from `assignment.plugin_type` and the effective config
+/// is built from the assignment-level override alone.
 fn build_plugin_assignment(
     assignment: &host_software_item_plugin::Model,
-    config: &plugin_config::Model,
+    config: Option<&plugin_config::Model>,
 ) -> Result<PluginAssignment> {
     let plugin_type: uptrakit_internal_wire::PluginType =
-        serde_json::from_value(serde_json::Value::String(config.plugin_type.clone()))
-            .map_err(|_| TriggerUpdateError::UnknownPluginType(config.plugin_type.clone()))?;
+        serde_json::from_value(serde_json::Value::String(assignment.plugin_type.clone()))
+            .map_err(|_| TriggerUpdateError::UnknownPluginType(assignment.plugin_type.clone()))?;
 
-    let merged_config =
-        uptrakit_update_hooks::merge_config(&config.config, assignment.config.as_ref());
+    let merged_config = uptrakit_update_hooks::resolve_effective_config(
+        None,
+        config.map(|c| &c.config),
+        assignment.config.as_ref(),
+    );
 
     Ok(PluginAssignment {
         plugin_type,
@@ -309,7 +330,11 @@ pub(crate) async fn load_target_for_dispatch(
     let fetch_releases_config = load_role_plugin(db, host_id, item_id, "fetch_releases")
         .await?
         .map(|(assignment, config)| {
-            uptrakit_update_hooks::merge_config(&config.config, assignment.config.as_ref())
+            uptrakit_update_hooks::resolve_effective_config(
+                None,
+                config.as_ref().map(|c| &c.config),
+                assignment.config.as_ref(),
+            )
         });
 
     Ok(ValidatedUpdateTarget {
@@ -457,17 +482,25 @@ pub async fn dispatch_update_to_agent(
     target: &ValidatedUpdateTarget,
     params: DispatchUpdateParams,
 ) -> Result<bool> {
-    let execute_update_plugin =
-        build_plugin_assignment(&target.execute_update_data.0, &target.execute_update_data.1)?;
+    let execute_update_plugin = build_plugin_assignment(
+        &target.execute_update_data.0,
+        target.execute_update_data.1.as_ref(),
+    )?;
 
     let detect_version_plugin = target
         .detect_version_data
         .as_ref()
-        .map(|(a, c)| build_plugin_assignment(a, c))
+        .map(|(a, c)| build_plugin_assignment(a, c.as_ref()))
         .transpose()?;
 
+    let empty_config = serde_json::json!({});
+    let hooks_base_config = target
+        .execute_update_data
+        .1
+        .as_ref()
+        .map_or(&empty_config, |c| &c.config);
     let resolved_hooks = uptrakit_update_hooks::resolve_hooks(
-        &target.execute_update_data.1.config,
+        hooks_base_config,
         target.execute_update_data.0.config.as_ref(),
     );
 
@@ -552,8 +585,10 @@ pub async fn trigger_update_for_host(
     // Resolve the interactive flag before creating the history record so the
     // persisted column accurately reflects whether the agent will open a PTY,
     // including when the plugin config opts in via `prefer_interactive: true`.
-    let execute_update_plugin =
-        build_plugin_assignment(&target.execute_update_data.0, &target.execute_update_data.1)?;
+    let execute_update_plugin = build_plugin_assignment(
+        &target.execute_update_data.0,
+        target.execute_update_data.1.as_ref(),
+    )?;
     let resolved_interactive = params.interactive
         || config_prefers_interactive(
             &execute_update_plugin.plugin_type,
