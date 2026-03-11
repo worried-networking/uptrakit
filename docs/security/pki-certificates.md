@@ -260,16 +260,24 @@ hot-reloads the TLS listener. Admins can also trigger renewal manually via
 
 ## Server Certificate SAN Sanity Checks
 
-At startup, the controller validates that `--san` values match the existing managed server certificate's SANs:
+At startup, the controller validates that the canonical SAN list matches the existing managed server certificate's SANs:
 
 1. **`--san` is incompatible with `--tls-cert`/`--tls-key`**: the controller rejects this combination because SANs are
    only configurable for controller-managed certificates.
-1. **SAN mismatch + same CA**: if `--san` values are not present in the existing cert's SANs and the cert was signed by
+1. **SAN mismatch + same CA**: if the canonical SANs do not match the existing cert's SANs and the cert was signed by
    the currently active CA, the cert is silently regenerated.
 1. **SAN mismatch + different CA**: if the cert needing SAN regeneration was signed by a different CA (e.g. after CA
    rotation), the controller fails with a multi-step fix message guiding the admin through manual certificate renewal.
 
-Shared PKI utility functions (`SanCollection`, `collect_sans`, `cert_signed_by_ca`) live in
+### SAN resolution
+
+SANs follow a three-case resolution model:
+
+1. **`--san` provided**: the CLI values become the canonical list (no auto-detection). Stored in DB as `network.sans`.
+1. **No `--san`, DB has `network.sans`**: the stored value is used as-is.
+1. **No `--san`, no DB value (first start)**: hostname, FQDN, and localhost are auto-detected, saved to DB, and used.
+
+Shared PKI utility functions (`SanCollection`, `auto_detect_sans`, `parse_san_list`, `cert_signed_by_ca`) live in
 `crates/ui/web-api/src/pki_utils.rs` and are used by both the web API handlers and the controller startup logic.
 
 ## State Management

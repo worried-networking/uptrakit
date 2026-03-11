@@ -613,11 +613,11 @@ uptrakit settings certificates update --lifetime-days 365 --renewal-window-hours
 uptrakit settings network show
 uptrakit settings network update --trusted-proxies "10.0.0.0/8,172.16.0.0/12"
 uptrakit settings network update --real-ip-header X-Real-IP --https-addr 0.0.0.0:8443
-uptrakit settings network update --extra-sans "alt.example.com,10.0.0.1"
+uptrakit settings network update --sans "alt.example.com,10.0.0.1"
 uptrakit settings network update --pki-addr "https://pki.example.com"
 ```
 
-The `--trusted-proxies` and `--extra-sans` flags accept comma-separated values.
+The `--trusted-proxies` and `--sans` flags accept comma-separated values.
 
 ### CA rotation and server certificate renewal
 

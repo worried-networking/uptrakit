@@ -48,7 +48,7 @@ Most CLI arguments are reconciled with DB-persisted values at startup. The recon
 | --- | --- | --- | --- |
 | `--trusted-proxy` | `network.trusted_proxies` | `[]` | Yes |
 | `--real-ip-header` | `network.real_ip_header` | `X-Forwarded-For` | Yes |
-| `--san` | `network.extra_sans` | `[]` | Yes |
+| `--san` | `network.sans` | auto-detected | Yes |
 | `--forwarded-client-cert-info-header` | `network.forwarded_client_cert_info_header` | `null` | Yes |
 | `--forwarded-client-cert-pem-header` | `network.forwarded_client_cert_pem_header` | `null` | Yes |
 | `--pki-addr` | `network.pki_addr` | `null` | Yes (requires CA rotation) |

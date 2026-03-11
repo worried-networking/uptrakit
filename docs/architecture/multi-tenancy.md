@@ -67,7 +67,7 @@ settings remain in the `settings` table (PK: `(tenant_id, key)`).
 
 `SettingKey::is_global()` returns `true` for the 13 system-wide settings:
 
-- **Network:** `TrustedProxies`, `RealIpHeader`, `ExtraSans`, `HttpsAddr`,
+- **Network:** `TrustedProxies`, `RealIpHeader`, `Sans`, `HttpsAddr`,
   `ForwardedClientCertInfoHeader`, `ForwardedClientCertPemHeader`, `PkiAddr`
 - **PKI:** `PkiActiveCaFingerprint`, `PkiCaVersion`
 - **System:** `MultiTenancyEnabled`

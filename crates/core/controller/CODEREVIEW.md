@@ -402,7 +402,7 @@ names) are not exercised.
 
 **[MEDIUM]** `src/startup.rs:33-34` vs all other `ReconciledSettings` fields -- The NATS URL
 field is gated with `#[cfg(feature = "nats")]`, making it the only field in `ReconciledSettings`
-that callers must feature-gate to access. Every other field (`extra_sans`, `pki_addr`,
+that callers must feature-gate to access. Every other field (`sans`, `pki_addr`,
 `https_addr`) is an unconditional plain field. This asymmetry forces `#[cfg(feature = "nats")]`
 annotations at every downstream access site (`main.rs:233`, `main.rs:269`). Wrapping NATS
 settings in a dedicated always-present sub-struct (e.g., `nats: NatsSettings` with
