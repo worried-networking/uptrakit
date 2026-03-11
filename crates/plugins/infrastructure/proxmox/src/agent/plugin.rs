@@ -368,6 +368,106 @@ impl AgentInfraPlugin for ProxmoxAgentPlugin {
     }
 }
 
+// ── PluginBase + subtrait implementations ────────────────────────────────────
+
+use uptrakit_plugin_infrastructure_core::PluginBase;
+use uptrakit_plugin_infrastructure_core::PluginCapability;
+use uptrakit_plugin_infrastructure_core::{GuestExecPlugin, HostLifecyclePlugin, HostReportPlugin};
+
+#[async_trait]
+impl PluginBase for ProxmoxAgentPlugin {
+    fn plugin_type_id(&self) -> &str {
+        "infrastructure_proxmox"
+    }
+
+    fn capabilities(&self) -> Vec<PluginCapability> {
+        vec![
+            PluginCapability::HostLifecycle,
+            PluginCapability::HostReport,
+            PluginCapability::GuestExec,
+            PluginCapability::ServiceMigrations,
+        ]
+    }
+
+    fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
+        AgentInfraPlugin::extension_manifests(self)
+    }
+
+    fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
+        AgentInfraPlugin::extension_actions(self)
+    }
+
+    fn primary_action_ids(&self) -> Vec<String> {
+        AgentInfraPlugin::primary_action_ids(self)
+    }
+
+    #[cfg(feature = "migrations")]
+    fn service_migrations(&self) -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
+        AgentInfraPlugin::migrations(self)
+    }
+
+    fn as_host_lifecycle(&self) -> Option<&dyn HostLifecyclePlugin> {
+        Some(self)
+    }
+
+    fn as_host_report(&self) -> Option<&dyn HostReportPlugin> {
+        Some(self)
+    }
+
+    fn as_guest_exec(&self) -> Option<&dyn GuestExecPlugin> {
+        Some(self)
+    }
+}
+
+#[async_trait]
+impl HostLifecyclePlugin for ProxmoxAgentPlugin {
+    async fn on_host_bootstrapped(
+        &self,
+        ctx: &InfraPluginContext<'_>,
+        executor: &dyn RemoteExecutor,
+        host_id: uuid::Uuid,
+        host_name: &str,
+    ) -> Result<BootstrapInfraResult> {
+        AgentInfraPlugin::on_host_bootstrapped(self, ctx, executor, host_id, host_name).await
+    }
+
+    async fn on_host_synced(
+        &self,
+        ctx: &InfraPluginContext<'_>,
+        executor: &dyn RemoteExecutor,
+        host_id: uuid::Uuid,
+    ) -> Result<SyncInfraResult> {
+        AgentInfraPlugin::on_host_synced(self, ctx, executor, host_id).await
+    }
+
+    async fn has_infra_state(&self, db: &DatabaseConnection, host_id: uuid::Uuid) -> bool {
+        AgentInfraPlugin::has_infra_state(self, db, host_id).await
+    }
+}
+
+#[async_trait]
+impl HostReportPlugin for ProxmoxAgentPlugin {
+    async fn on_post_report_hosts(&self, ctx: &InfraPluginContext<'_>) -> Result<()> {
+        AgentInfraPlugin::on_post_report_hosts(self, ctx).await
+    }
+
+    async fn on_plugin_config_reported(
+        &self,
+        db: &DatabaseConnection,
+        plugin_config_id: uuid::Uuid,
+        request_id: &str,
+    ) -> Result<()> {
+        AgentInfraPlugin::on_plugin_config_reported(self, db, plugin_config_id, request_id).await
+    }
+}
+
+#[async_trait]
+impl GuestExecPlugin for ProxmoxAgentPlugin {
+    fn guest_exec_provider(&self) -> Option<Arc<dyn GuestExecProvider>> {
+        AgentInfraPlugin::guest_exec_provider(self)
+    }
+}
+
 // ── PVE credential dedup ─────────────────────────────────────────────────────
 
 /// Check for existing Uptrakit PVE tokens on the cluster and either reuse

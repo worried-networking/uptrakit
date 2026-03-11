@@ -9,8 +9,10 @@ publish = false
 
 [features]
 default = []
+migrations = ["uptrakit-plugin-infrastructure-core/migrations"]
 agent-infra = [
     "uptrakit-plugin-infrastructure-core/agent-infra",
+    "migrations",
     "dep:sea-orm-migration",
 ]
 
