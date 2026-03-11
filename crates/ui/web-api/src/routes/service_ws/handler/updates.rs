@@ -200,7 +200,7 @@ pub(super) async fn deliver_pending_updates(
     // Batch 4: plugin configs referenced by the assignments above.
     let plugin_config_ids: Vec<uuid::Uuid> = assignments_map
         .values()
-        .map(|a| a.plugin_config_id)
+        .filter_map(|a| a.plugin_config_id)
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
@@ -268,10 +268,17 @@ pub(super) async fn deliver_pending_updates(
             );
             continue;
         };
-        let Some(exec_config) = configs_map.get(&exec_assignment.plugin_config_id) else {
+        let Some(exec_pc_id) = exec_assignment.plugin_config_id else {
             tracing::warn!(
                 update_id = %update_record.id,
-                plugin_config_id = %exec_assignment.plugin_config_id,
+                "execute_update plugin has no plugin_config_id, skipping"
+            );
+            continue;
+        };
+        let Some(exec_config) = configs_map.get(&exec_pc_id) else {
+            tracing::warn!(
+                update_id = %update_record.id,
+                plugin_config_id = %exec_pc_id,
                 "execute_update plugin config not found or deactivated, skipping"
             );
             continue;
@@ -292,13 +299,13 @@ pub(super) async fn deliver_pending_updates(
         let detect_key = (update_record.host_id, item.id, "detect_version".to_string());
         let detect_version_plugin = assignments_map
             .get(&detect_key)
-            .and_then(|a| configs_map.get(&a.plugin_config_id).map(|c| (a, c)))
+            .and_then(|a| configs_map.get(&a.plugin_config_id?).map(|c| (a, c)))
             .and_then(|(a, c)| build_plugin_assignment(a, c));
 
         // Resolve hooks from the execute_update plugin config + per-role override.
         let resolved_hooks = uptrakit_update_hooks::resolve_hooks(
             &exec_config.config,
-            exec_assignment.config_override.as_ref(),
+            exec_assignment.config.as_ref(),
         );
 
         let Some(host) = hosts_map.get(&update_record.host_id) else {
@@ -319,7 +326,7 @@ pub(super) async fn deliver_pending_updates(
         let fetch_key = (update_record.host_id, item.id, "fetch_releases".to_string());
         let fetch_config = assignments_map
             .get(&fetch_key)
-            .and_then(|a| configs_map.get(&a.plugin_config_id))
+            .and_then(|a| configs_map.get(&a.plugin_config_id?))
             .map(|c| &c.config);
         let release_info = crate::queries::update_triggers::enrich_release_info_with_attestation(
             None,
@@ -1120,7 +1127,7 @@ fn build_plugin_assignment(
         serde_json::from_value(serde_json::Value::String(config.plugin_type.clone())).ok()?;
 
     let merged_config =
-        uptrakit_update_hooks::merge_config(&config.config, assignment.config_override.as_ref());
+        uptrakit_update_hooks::merge_config(&config.config, assignment.config.as_ref());
 
     Some(PluginAssignment {
         plugin_type,

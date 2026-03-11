@@ -858,7 +858,7 @@ pub async fn check_versions(
     let host_ids: Vec<uuid::Uuid> = links.iter().map(|l| l.host_id).collect();
     let config_ids: Vec<uuid::Uuid> = plugin_assignments
         .iter()
-        .map(|p| p.plugin_config_id)
+        .filter_map(|p| p.plugin_config_id)
         .collect();
 
     // Batch query: Hosts (tenant-scoped).
@@ -928,14 +928,14 @@ pub async fn check_versions(
     // Helper to build a PluginAssignment from a plugin row and its config.
     let build_assignment =
         |plugin: &host_software_item_plugin::Model| -> Option<uptrakit_internal_wire::PluginAssignment> {
-            let config_model = configs.get(&plugin.plugin_config_id)?;
+            let config_model = configs.get(&plugin.plugin_config_id?)?;
             let plugin_type: uptrakit_internal_wire::PluginType = serde_json::from_value(
                 serde_json::Value::String(config_model.plugin_type.clone()),
             )
             .ok()?;
             let merged = uptrakit_update_hooks::merge_config(
                 &config_model.config,
-                plugin.config_override.as_ref(),
+                plugin.config.as_ref(),
             );
             Some(uptrakit_internal_wire::PluginAssignment {
                 plugin_type,
@@ -951,7 +951,10 @@ pub async fn check_versions(
         .iter()
         .filter(|pa| pa.role == "fetch_releases")
     {
-        let Some(config_model) = configs.get(&pa.plugin_config_id) else {
+        let Some(pa_pc_id) = pa.plugin_config_id else {
+            continue;
+        };
+        let Some(config_model) = configs.get(&pa_pc_id) else {
             continue;
         };
         let Ok(plugin_type) = serde_json::from_value::<PluginType>(serde_json::Value::String(
@@ -959,10 +962,9 @@ pub async fn check_versions(
         )) else {
             continue;
         };
-        let merged =
-            uptrakit_update_hooks::merge_config(&config_model.config, pa.config_override.as_ref());
+        let merged = uptrakit_update_hooks::merge_config(&config_model.config, pa.config.as_ref());
         if is_controller_fetch_site(&pa.execution_site, &plugin_type, &merged) {
-            let key = (pa.plugin_config_id, pa.package_identifier.clone());
+            let key = (pa_pc_id, pa.package_identifier.clone());
             controller_job_map
                 .entry(key)
                 .or_insert_with(|| ControllerFetchJob {
@@ -1007,15 +1009,13 @@ pub async fn check_versions(
         let fetch_releases = plugin_by_host_role
             .get(&(link.host_id, "fetch_releases".to_string()))
             .and_then(|p| {
-                let config_model = configs.get(&p.plugin_config_id)?;
+                let config_model = configs.get(&p.plugin_config_id?)?;
                 let plugin_type: PluginType = serde_json::from_value(serde_json::Value::String(
                     config_model.plugin_type.clone(),
                 ))
                 .ok()?;
-                let merged = uptrakit_update_hooks::merge_config(
-                    &config_model.config,
-                    p.config_override.as_ref(),
-                );
+                let merged =
+                    uptrakit_update_hooks::merge_config(&config_model.config, p.config.as_ref());
                 // Skip assignments that ran (or will run) controller-side.
                 if is_controller_fetch_site(&p.execution_site, &plugin_type, &merged) {
                     None
@@ -1192,12 +1192,15 @@ pub async fn check_versions_host(
     let mut controller_fetch_jobs: Vec<ControllerFetchJob> = Vec::new();
 
     for plugin in &role_plugins {
-        let config = match find_raw_active_config(&tenant_db, plugin.plugin_config_id).await {
+        let Some(plugin_pc_id) = plugin.plugin_config_id else {
+            continue;
+        };
+        let config = match find_raw_active_config(&tenant_db, plugin_pc_id).await {
             Ok(Some(c)) => c,
             Ok(None) => continue,
             Err(e) => {
                 tracing::error!(
-                    plugin_config_id = %plugin.plugin_config_id,
+                    plugin_config_id = %plugin_pc_id,
                     error = %e,
                     "DB error loading plugin config, skipping role assignment"
                 );
@@ -1210,8 +1213,7 @@ pub async fn check_versions_host(
             tracing::error!("Unknown plugin type: {}", config.plugin_type);
             continue;
         };
-        let merged =
-            uptrakit_update_hooks::merge_config(&config.config, plugin.config_override.as_ref());
+        let merged = uptrakit_update_hooks::merge_config(&config.config, plugin.config.as_ref());
         let pa = uptrakit_internal_wire::PluginAssignment {
             plugin_type: plugin_type.clone(),
             package_identifier: plugin.package_identifier.clone(),

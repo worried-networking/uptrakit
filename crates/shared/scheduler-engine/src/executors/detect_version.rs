@@ -74,7 +74,7 @@ impl DetectVersionExecutor {
                 )))
             })?;
 
-            let config = match row.config_override {
+            let config = match row.assignment_config {
                 Some(ovr) => merge_config(&row.config, &ovr),
                 None => row.config,
             };

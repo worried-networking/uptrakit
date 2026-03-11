@@ -36,6 +36,7 @@ mod m20260311_000002_audit_log_permissions;
 mod m20260311_000003_rename_extra_sans_to_sans;
 mod m20260312_000001_system_enrollment_tokens;
 mod m20260312_000002_discover_host_packages_task;
+mod m20260312_000003_plugin_type_settings;
 mod m20260313_000001_per_host_update_locking;
 mod m20260314_000001_proxmox_host_mapping;
 mod m20260315_000001_proxmox_hm_machine_id;
@@ -96,6 +97,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260320_000001_update_history_interactive::Migration),
             Box::new(m20260311_000003_rename_extra_sans_to_sans::Migration),
             Box::new(m20260321_000001_software_items_icon_url::Migration),
+            Box::new(m20260312_000003_plugin_type_settings::Migration),
         ]
     }
 }
@@ -130,10 +132,10 @@ mod tests {
     use crate::entity::{
         audit_log, crl_cache, data_encryption_key, global_setting, host_discovery_allowlist,
         host_software_item, host_tag, host_tag_assignment, notification_channel, notification_log,
-        notification_rule, plugin_config, proxmox_host_mapping, revoked_token_jti,
-        revoked_token_user, role_permission, service, software_ignore, software_item,
-        system_audit_log, system_enrollment_token, system_service, system_service_certificate,
-        tenant_discovery_allowlist, update_batch, update_history,
+        notification_rule, plugin_config, plugin_type_setting, proxmox_host_mapping,
+        revoked_token_jti, revoked_token_user, role_permission, service, software_ignore,
+        software_item, system_audit_log, system_enrollment_token, system_service,
+        system_service_certificate, tenant_discovery_allowlist, update_batch, update_history,
     };
 
     /// Simulate the "existing database" upgrade scenario:
@@ -215,6 +217,12 @@ mod tests {
         // Verify host_tags and host_tag_assignments tables exist.
         host_tag::Entity::find().count(&db).await.unwrap();
         host_tag_assignment::Entity::find()
+            .count(&db)
+            .await
+            .unwrap();
+
+        // Verify plugin_type_settings table exists.
+        plugin_type_setting::Entity::find()
             .count(&db)
             .await
             .unwrap();

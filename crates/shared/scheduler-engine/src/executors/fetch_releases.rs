@@ -82,7 +82,7 @@ struct ControllerFetchRow {
     package_identifier: String,
     plugin_type: String,
     config: serde_json::Value,
-    config_override: Option<serde_json::Value>,
+    assignment_config: Option<serde_json::Value>,
     execution_site: String,
 }
 
@@ -160,13 +160,13 @@ impl FetchReleasesExecutor {
         // ── 1. Build groups map ───────────────────────────────────────────
         // Group rows by plugin_config_id only. All packages sharing the same plugin
         // config are batched into a single batch_fetch_releases call instead of N
-        // individual fetch_releases calls. The first row's config_override is used
+        // individual fetch_releases calls. The first row's assignment_config is used
         // as a representative merge for plugin instantiation.
         let mut groups: HashMap<Uuid, PhaseAGroup> = HashMap::new();
 
         for row in &rows {
             let entry = groups.entry(row.plugin_config_id).or_insert_with(|| {
-                let merged_config = match row.config_override.as_ref() {
+                let merged_config = match row.assignment_config.as_ref() {
                     Some(ovr) => merge_config(&row.config, ovr),
                     None => row.config.clone(),
                 };
@@ -450,8 +450,8 @@ impl FetchReleasesExecutor {
             .column_as(plugin_config::Column::PluginType, "plugin_type")
             .column_as(plugin_config::Column::Config, "config")
             .column_as(
-                host_software_item_plugin::Column::ConfigOverride,
-                "config_override",
+                host_software_item_plugin::Column::Config,
+                "assignment_config",
             )
             .column_as(
                 host_software_item_plugin::Column::ExecutionSite,
@@ -517,7 +517,7 @@ impl FetchReleasesExecutor {
                 )))
             })?;
 
-            let config = match row.config_override {
+            let config = match row.assignment_config {
                 Some(ovr) => merge_config(&row.config, &ovr),
                 None => row.config,
             };

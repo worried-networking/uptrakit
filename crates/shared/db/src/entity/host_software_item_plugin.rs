@@ -9,7 +9,9 @@ pub struct Model {
     pub host_id: Uuid,
     pub software_item_id: Uuid,
     pub host_software_item_id: Uuid,
-    pub plugin_config_id: Uuid,
+    pub plugin_config_id: Option<Uuid>,
+    #[sea_orm(column_name = "plugin_type")]
+    pub plugin_type: String,
     /// Plugin role: "detect_version", "fetch_releases", "execute_update".
     /// Stored as TEXT; parsed to PluginRole at application boundaries.
     pub role: String,
@@ -18,7 +20,7 @@ pub struct Model {
     pub ordinal: i32,
     pub package_identifier: String,
     #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub config_override: Option<serde_json::Value>,
+    pub config: Option<serde_json::Value>,
     /// Controls where this plugin's operation executes:
     /// "auto" (default), "agent", or "controller".
     pub execution_site: String,

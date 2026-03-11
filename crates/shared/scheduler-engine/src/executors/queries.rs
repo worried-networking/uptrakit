@@ -21,7 +21,7 @@ pub(crate) struct AgentAssignmentRow {
     pub(crate) plugin_type: String,
     pub(crate) package_identifier: String,
     pub(crate) config: serde_json::Value,
-    pub(crate) config_override: Option<serde_json::Value>,
+    pub(crate) assignment_config: Option<serde_json::Value>,
     pub(crate) execution_site: String,
 }
 
@@ -55,8 +55,8 @@ pub(crate) async fn query_agent_assignment_rows(
         )
         .column_as(plugin_config::Column::Config, "config")
         .column_as(
-            host_software_item_plugin::Column::ConfigOverride,
-            "config_override",
+            host_software_item_plugin::Column::Config,
+            "assignment_config",
         )
         .column_as(
             host_software_item_plugin::Column::ExecutionSite,

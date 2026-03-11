@@ -25,6 +25,7 @@ pub mod pending_oidc_registration;
 pub mod pending_oidc_token_exchange;
 pub mod permission;
 pub mod plugin_config;
+pub mod plugin_type_setting;
 pub mod revoked_token_jti;
 pub mod revoked_token_user;
 pub mod role;

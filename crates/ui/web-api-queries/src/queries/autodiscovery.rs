@@ -351,7 +351,16 @@ async fn process_plugin_result(
             process_targets_discovery(db, tenant_id, host_id, &item_info, &item.targets, now)
                 .await?;
         } else if let Some(existing_pc_id) = result.plugin_config_id {
-            process_one_discovery(db, tenant_id, host_id, existing_pc_id, item_info, now).await?;
+            process_one_discovery(
+                db,
+                tenant_id,
+                host_id,
+                existing_pc_id,
+                &result.plugin_type.to_string(),
+                item_info,
+                now,
+            )
+            .await?;
         } else {
             tracing::warn!(
                 plugin_type = %result.plugin_type,
@@ -447,11 +456,12 @@ async fn process_targets_discovery(
                 host_id: Set(host_id),
                 software_item_id: Set(software_item_id),
                 host_software_item_id: Set(hsi_id),
-                plugin_config_id: Set(pc_id),
+                plugin_config_id: Set(Some(pc_id)),
+                plugin_type: Set(target_plugin_type_str.clone()),
                 role: Set(role.as_str().to_string()),
                 ordinal: Set(0),
                 package_identifier: Set(target_item.effective_plugin_pkg_id().to_string()),
-                config_override: Set(target.config_override.clone()),
+                config: Set(target.config_override.clone()),
                 execution_site: Set(execution_site.to_owned()),
                 created_at: Set(now),
                 updated_at: Set(now),
@@ -722,6 +732,7 @@ async fn process_one_discovery(
     tenant_id: Uuid,
     host_id: Uuid,
     plugin_config_id: Uuid,
+    plugin_type_str: &str,
     args: DiscoveredItemInfo<'_>,
     now: OffsetDateTime,
 ) -> Result<()> {
@@ -738,11 +749,12 @@ async fn process_one_discovery(
             host_id: Set(host_id),
             software_item_id: Set(software_item_id),
             host_software_item_id: Set(hsi_id),
-            plugin_config_id: Set(plugin_config_id),
+            plugin_config_id: Set(Some(plugin_config_id)),
+            plugin_type: Set(plugin_type_str.to_string()),
             role: Set(role.to_string()),
             ordinal: Set(0),
             package_identifier: Set(args.effective_plugin_pkg_id().to_string()),
-            config_override: Set(None),
+            config: Set(None),
             execution_site: Set("auto".to_string()),
             created_at: Set(now),
             updated_at: Set(now),
@@ -899,11 +911,12 @@ mod tests {
                 host_id: Set(host_id),
                 software_item_id: Set(software_item_id),
                 host_software_item_id: Set(hsi_id),
-                plugin_config_id: Set(plugin_config_id),
+                plugin_config_id: Set(Some(plugin_config_id)),
+                plugin_type: Set("package_manager_homebrew".to_string()),
                 role: Set(role.to_string()),
                 ordinal: Set(0),
                 package_identifier: Set(package_identifier.to_string()),
-                config_override: Set(None),
+                config: Set(None),
                 execution_site: Set("auto".to_string()),
                 created_at: Set(now),
                 updated_at: Set(now),
@@ -1097,9 +1110,17 @@ mod tests {
             plugin_package_identifier: None,
         };
 
-        process_one_discovery(&db, tenant_id, host_id, pc_id, args, now)
-            .await
-            .expect("process_one_discovery");
+        process_one_discovery(
+            &db,
+            tenant_id,
+            host_id,
+            pc_id,
+            "package_manager_homebrew",
+            args,
+            now,
+        )
+        .await
+        .expect("process_one_discovery");
 
         let orphan_count = HostSoftwareItem::find()
             .filter(host_software_item::Column::SoftwareItemId.eq(old_item_id))
@@ -1162,9 +1183,17 @@ mod tests {
             plugin_package_identifier: None,
         };
 
-        process_one_discovery(&db, tenant_id, host_id, pc_id, args, now)
-            .await
-            .expect("process_one_discovery");
+        process_one_discovery(
+            &db,
+            tenant_id,
+            host_id,
+            pc_id,
+            "package_manager_homebrew",
+            args,
+            now,
+        )
+        .await
+        .expect("process_one_discovery");
 
         let items = SoftwareItem::find()
             .filter(software_item::Column::TenantId.eq(tenant_id))
@@ -1233,9 +1262,17 @@ mod tests {
             plugin_package_identifier: None,
         };
 
-        process_one_discovery(&db, tenant_id, host_id, pc_id, args, now)
-            .await
-            .expect("process_one_discovery");
+        process_one_discovery(
+            &db,
+            tenant_id,
+            host_id,
+            pc_id,
+            "package_manager_homebrew",
+            args,
+            now,
+        )
+        .await
+        .expect("process_one_discovery");
 
         let items = SoftwareItem::find()
             .filter(software_item::Column::TenantId.eq(tenant_id))
@@ -1301,9 +1338,17 @@ mod tests {
             plugin_package_identifier: None,
         };
 
-        process_one_discovery(&db, tenant_id, host_id, pc_id, args, now)
-            .await
-            .expect("process_one_discovery");
+        process_one_discovery(
+            &db,
+            tenant_id,
+            host_id,
+            pc_id,
+            "package_manager_homebrew",
+            args,
+            now,
+        )
+        .await
+        .expect("process_one_discovery");
 
         let link = HostSoftwareItem::find()
             .filter(host_software_item::Column::HostId.eq(host_id))

@@ -195,7 +195,10 @@ async fn load_role_plugin(
         return Ok(None);
     };
 
-    let config = PluginConfig::find_by_id(assignment.plugin_config_id)
+    let pc_id = assignment
+        .plugin_config_id
+        .ok_or_else(|| report!(TriggerUpdateError::PluginConfigNotFound))?;
+    let config = PluginConfig::find_by_id(pc_id)
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .one(db)
         .await
@@ -215,7 +218,7 @@ fn build_plugin_assignment(
             .map_err(|_| TriggerUpdateError::UnknownPluginType(config.plugin_type.clone()))?;
 
     let merged_config =
-        uptrakit_update_hooks::merge_config(&config.config, assignment.config_override.as_ref());
+        uptrakit_update_hooks::merge_config(&config.config, assignment.config.as_ref());
 
     Ok(PluginAssignment {
         plugin_type,
@@ -306,7 +309,7 @@ pub(crate) async fn load_target_for_dispatch(
     let fetch_releases_config = load_role_plugin(db, host_id, item_id, "fetch_releases")
         .await?
         .map(|(assignment, config)| {
-            uptrakit_update_hooks::merge_config(&config.config, assignment.config_override.as_ref())
+            uptrakit_update_hooks::merge_config(&config.config, assignment.config.as_ref())
         });
 
     Ok(ValidatedUpdateTarget {
@@ -465,7 +468,7 @@ pub async fn dispatch_update_to_agent(
 
     let resolved_hooks = uptrakit_update_hooks::resolve_hooks(
         &target.execute_update_data.1.config,
-        target.execute_update_data.0.config_override.as_ref(),
+        target.execute_update_data.0.config.as_ref(),
     );
 
     let enriched_release_info = enrich_release_info_with_attestation(
@@ -878,11 +881,12 @@ mod tests {
             host_id: Set(host_id),
             software_item_id: Set(item_id),
             host_software_item_id: Set(hsi_id),
-            plugin_config_id: Set(plugin_config_id),
+            plugin_config_id: Set(Some(plugin_config_id)),
+            plugin_type: Set("releases_github".to_string()),
             role: Set("execute_update".to_string()),
             ordinal: Set(0),
             package_identifier: Set("org/repo".to_string()),
-            config_override: Set(None),
+            config: Set(None),
             execution_site: Set("auto".to_string()),
             created_at: Set(now),
             updated_at: Set(now),

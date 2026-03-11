@@ -297,7 +297,10 @@ async fn load_item_hosts(
     };
 
     // Collect all plugin config IDs and bulk-load the configs.
-    let pc_ids: Vec<Uuid> = plugin_rows.iter().map(|r| r.plugin_config_id).collect();
+    let pc_ids: Vec<Uuid> = plugin_rows
+        .iter()
+        .filter_map(|r| r.plugin_config_id)
+        .collect();
     let plugin_configs: HashMap<Uuid, plugin_config::Model> = match PluginConfig::find()
         .filter(plugin_config::Column::Id.is_in(pc_ids))
         .all(db)
@@ -331,14 +334,14 @@ async fn load_item_hosts(
                 .map(|rows| {
                     rows.iter()
                         .filter_map(|pr| {
-                            let pc = plugin_configs.get(&pr.plugin_config_id)?;
+                            let pc = plugin_configs.get(&pr.plugin_config_id?)?;
                             Some(HostPluginRoleSummary {
                                 role: PluginRole::from(pr.role.clone()),
                                 plugin_config_id: pc.id,
                                 plugin_config_name: pc.name.clone(),
                                 plugin_type: pc.plugin_type.clone(),
                                 package_identifier: pr.package_identifier.clone(),
-                                config_override: pr.config_override.clone(),
+                                config_override: pr.config.clone(),
                                 execution_site: pr.execution_site.clone(),
                             })
                         })
@@ -979,9 +982,10 @@ pub async fn assign_hosts(
                 Some(existing) => {
                     // Update existing plugin assignment for this role.
                     let mut active: host_software_item_plugin::ActiveModel = existing.into();
-                    active.plugin_config_id = Set(plugin_config_id);
+                    active.plugin_config_id = Set(Some(plugin_config_id));
+                    active.plugin_type = Set(config.plugin_type.clone());
                     active.package_identifier = Set(role_assignment.package_identifier.clone());
-                    active.config_override = Set(role_assignment.config_override.clone());
+                    active.config = Set(role_assignment.config_override.clone());
                     active.execution_site = Set(execution_site.clone());
                     active.updated_at = Set(now);
                     active.update(&txn).await.context_to()?;
@@ -992,11 +996,12 @@ pub async fn assign_hosts(
                         host_id: Set(host_id),
                         software_item_id: Set(id),
                         host_software_item_id: Set(hsi_id),
-                        plugin_config_id: Set(plugin_config_id),
+                        plugin_config_id: Set(Some(plugin_config_id)),
+                        plugin_type: Set(config.plugin_type.clone()),
                         role: Set(role.as_str().to_string()),
                         ordinal: Set(0),
                         package_identifier: Set(role_assignment.package_identifier.clone()),
-                        config_override: Set(role_assignment.config_override.clone()),
+                        config: Set(role_assignment.config_override.clone()),
                         execution_site: Set(execution_site.clone()),
                         created_at: Set(now),
                         updated_at: Set(now),
@@ -1076,9 +1081,9 @@ pub async fn update_host_assignment(
     let (existing_pcid, existing_pkg, existing_override, existing_exec_site) =
         if let Some(ref ep) = existing_plugin {
             (
-                Some(ep.plugin_config_id),
+                ep.plugin_config_id,
                 Some(ep.package_identifier.clone()),
-                ep.config_override.clone(),
+                ep.config.clone(),
                 Some(ep.execution_site.clone()),
             )
         } else {
@@ -1122,15 +1127,16 @@ pub async fn update_host_assignment(
     match existing_plugin {
         Some(existing) => {
             let mut active: host_software_item_plugin::ActiveModel = existing.into();
-            active.plugin_config_id = Set(plugin_config_id);
+            active.plugin_config_id = Set(Some(plugin_config_id));
+            active.plugin_type = Set(config.plugin_type.clone());
             active.package_identifier = Set(synthetic.package_identifier);
 
-            // Handle config_override: explicit null in request clears it.
+            // Handle config: explicit null in request clears it.
             if let Some(ref override_val) = req.config_override {
                 if override_val.is_null() {
-                    active.config_override = Set(None);
+                    active.config = Set(None);
                 } else {
-                    active.config_override = Set(Some(override_val.clone()));
+                    active.config = Set(Some(override_val.clone()));
                 }
             }
 
@@ -1146,11 +1152,12 @@ pub async fn update_host_assignment(
                 host_id: Set(host_id),
                 software_item_id: Set(id),
                 host_software_item_id: Set(hsi_id),
-                plugin_config_id: Set(plugin_config_id),
+                plugin_config_id: Set(Some(plugin_config_id)),
+                plugin_type: Set(config.plugin_type.clone()),
                 role: Set(req.role.as_str().to_string()),
                 ordinal: Set(0),
                 package_identifier: Set(synthetic.package_identifier),
-                config_override: Set(synthetic.config_override),
+                config: Set(synthetic.config_override),
                 execution_site: Set(synthetic.execution_site),
                 created_at: Set(now),
                 updated_at: Set(now),
