@@ -257,15 +257,17 @@ export interface RenewServerCertResponse {
 export interface NetworkSettings {
 	trusted_proxies: string[];
 	real_ip_header: string;
-	extra_sans: string[];
+	sans: string[];
 	https_addr: string;
+	cert_regenerated?: boolean;
 }
 
 export interface UpdateNetworkSettings {
 	trusted_proxies?: string[];
 	real_ip_header?: string;
-	extra_sans?: string[];
+	sans?: string[];
 	https_addr?: string;
+	regenerate_cert?: boolean;
 }
 
 export type MqttTransport = 'tcp' | 'tls';

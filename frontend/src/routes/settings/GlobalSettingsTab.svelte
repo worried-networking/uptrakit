@@ -19,7 +19,8 @@
 	// --- Network Settings ---
 	let trustedProxiesText: string = $state('');
 	let realIpHeader: string = $state('X-Forwarded-For');
-	let extraSansText: string = $state('');
+	let sansText: string = $state('');
+	let regenerateCert: boolean = $state(false);
 	let httpsAddr: string = $state('[::]:8443');
 
 	// --- TLS Certificate ---
@@ -75,7 +76,7 @@
 			const net = results[0].value;
 			trustedProxiesText = net.trusted_proxies.join('\n');
 			realIpHeader = net.real_ip_header;
-			extraSansText = net.extra_sans.join('\n');
+			sansText = net.sans.join('\n');
 			httpsAddr = net.https_addr;
 		}
 		if (results[1].status === 'fulfilled') {
@@ -168,21 +169,27 @@
 				.split('\n')
 				.map((s) => s.trim())
 				.filter((s) => s.length > 0);
-			const sans = extraSansText
+			const sans = sansText
 				.split('\n')
 				.map((s) => s.trim())
 				.filter((s) => s.length > 0);
 			const res = await updateNetworkSettings({
 				trusted_proxies: proxies,
 				real_ip_header: realIpHeader,
-				extra_sans: sans,
-				https_addr: httpsAddr
+				sans: sans,
+				https_addr: httpsAddr,
+				regenerate_cert: regenerateCert || undefined
 			});
 			trustedProxiesText = res.trusted_proxies.join('\n');
 			realIpHeader = res.real_ip_header;
-			extraSansText = res.extra_sans.join('\n');
+			sansText = res.sans.join('\n');
 			httpsAddr = res.https_addr;
-			showSuccess('Network settings saved.');
+			regenerateCert = false;
+			if (res.cert_regenerated) {
+				showSuccess('Network settings saved. Server certificate regenerated.');
+			} else {
+				showSuccess('Network settings saved.');
+			}
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to save network settings');
 		}
@@ -347,13 +354,15 @@
 		</label>
 
 		<label class="label mb-4">
-			<span>Extra SANs (one IP or DNS name per line)</span>
-			<textarea
-				class="textarea"
-				rows="3"
-				placeholder="e.g. controller.local&#10;192.168.1.100"
-				bind:value={extraSansText}
+			<span>Certificate SANs (one IP or DNS name per line)</span>
+			<textarea class="textarea" rows="3" placeholder="e.g. controller.local&#10;192.168.1.100" bind:value={sansText}
 			></textarea>
+			<p class="text-surface-500 text-xs mt-1">Auto-detected on first startup. Changes here replace the full list.</p>
+		</label>
+
+		<label class="label mb-4 flex items-center gap-2">
+			<input type="checkbox" class="checkbox" bind:checked={regenerateCert} />
+			<span>Regenerate server certificate after update</span>
 		</label>
 
 		<label class="label mb-4">
