@@ -9,9 +9,13 @@ use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType,
-    Plugin, PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result,
-    SudoCommandEntry, UpdateCategory, UpdateOutputLine, UpstreamRelease, Version,
+    PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry,
+    UpdateCategory, UpdateOutputLine, UpstreamRelease, Version,
 };
+
+// Subtrait imports needed by tests (via `use super::*`) to resolve method calls.
+#[cfg(test)]
+use uptrakit_plugin_infrastructure_core::PluginBase;
 
 use crate::config::{PkgConfig, PkgDiscoveryFilter};
 
@@ -140,67 +144,58 @@ impl PkgPlugin {
     }
 }
 
+// ── PluginBase + subtrait implementations ────────────────────────────────
+
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    PkgPlugin,
+    PkgConfig,
+    "package_manager_pkg",
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
+        fn required_sudo_commands(
+            &self,
+        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
+            vec![
+                SudoCommandEntry::new("pkg", "Package index refresh requires root privileges")
+                    .with_args_suffix(Cow::Borrowed("update *")),
+                SudoCommandEntry::new("pkg", "Package installation requires root privileges")
+                    .with_args_suffix(Cow::Borrowed("install -y *")),
+            ]
+        }
+
+        fn as_discovery(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
+            Some(self)
+        }
+        fn as_version_detector(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
+            Some(self)
+        }
+        fn as_release_fetcher(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
+            Some(self)
+        }
+        fn as_update_executor(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
+            Some(self)
+        }
+    }
+);
+
 #[async_trait]
-impl Plugin for PkgPlugin {
-    fn plugin_type(&self) -> PluginType {
-        PluginType::PackageManagerPkg
-    }
-
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        Self::CAPABILITIES
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        match self
-            .executor
-            .execute_quiet(&CommandSpec::exec("which", ["pkg".to_string()]))
-            .await
-        {
-            Ok(_) => Ok(HostCompatibility::Compatible),
-            Err(_) => Ok(HostCompatibility::Incompatible("pkg not found".to_string())),
-        }
-    }
-
-    fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        vec![
-            SudoCommandEntry::new("pkg", "Package index refresh requires root privileges")
-                .with_args_suffix(Cow::Borrowed("update *")),
-            SudoCommandEntry::new("pkg", "Package installation requires root privileges")
-                .with_args_suffix(Cow::Borrowed("install -y *")),
-        ]
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn refresh_package_index(&self) -> Result<()> {
-        tracing::info!("refreshing BSD pkg package index");
-        let cmd_output = self
-            .executor
-            .execute_quiet(
-                &CommandSpec::exec("pkg", ["update".to_string(), "-q".to_string()]).privileged(),
-            )
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "pkg update failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
-
-        tracing::info!("BSD pkg package index refreshed");
-        Ok(())
-    }
-
+impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for PkgPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::info!("discovering BSD pkg-managed software");
 
         let packages: Vec<DiscoveredSoftware> = match self.config.effective_filter() {
             PkgDiscoveryFilter::All => {
-                // Query all installed packages.
                 let cmd_output = self
                     .executor
                     .execute_quiet(&CommandSpec::exec(
@@ -224,7 +219,6 @@ impl Plugin for PkgPlugin {
                     .collect()
             }
             PkgDiscoveryFilter::Manual => {
-                // Query all installed packages with the auto-install flag.
                 let cmd_output = self
                     .executor
                     .execute_quiet(&CommandSpec::exec(
@@ -261,6 +255,21 @@ impl Plugin for PkgPlugin {
         Ok(packages)
     }
 
+    #[tracing::instrument(skip_all)]
+    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
+        match self
+            .executor
+            .execute_quiet(&CommandSpec::exec("which", ["pkg".to_string()]))
+            .await
+        {
+            Ok(_) => Ok(HostCompatibility::Compatible),
+            Err(_) => Ok(HostCompatibility::Incompatible("pkg not found".to_string())),
+        }
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for PkgPlugin {
     #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
@@ -304,105 +313,7 @@ impl Plugin for PkgPlugin {
         }
     }
 
-    #[tracing::instrument(skip_all)]
-    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
-        self.require_package_identifier(package_identifier)?;
-        tracing::debug!(package = %package_identifier, "fetching BSD pkg releases via pkg rquery");
-
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "pkg",
-                [
-                    "rquery".to_string(),
-                    "%v".to_string(),
-                    package_identifier.to_string(),
-                ],
-            ))
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "pkg rquery failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            // rquery returns non-zero when the package is not in the repo.
-            return Ok(vec![]);
-        }
-
-        let version = cmd_output.output.trim().to_string();
-        if version.is_empty() {
-            return Ok(vec![]);
-        }
-
-        tracing::debug!(version = %version, "BSD pkg upstream version resolved");
-
-        Ok(vec![{
-            let mut r = UpstreamRelease::new(Version::new(&version), version, false, "");
-            r.category = Some(UpdateCategory::Unknown);
-            r
-        }])
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn execute_update(
-        &self,
-        package_identifier: &str,
-        _to_version: &str,
-        _release_info: Option<&uptrakit_plugin_infrastructure_core::ReleaseInfo>,
-        output_tx: &mpsc::Sender<uptrakit_plugin_infrastructure_core::UpdateOutputLine>,
-    ) -> Result<String> {
-        self.require_package_identifier(package_identifier)?;
-
-        let args = vec![
-            "install".to_string(),
-            "-y".to_string(),
-            package_identifier.to_string(),
-        ];
-
-        tracing::debug!(
-            package = %package_identifier,
-            "running pkg install"
-        );
-
-        let display_args = std::iter::once("pkg")
-            .chain(args.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ");
-        send_output(
-            output_tx,
-            &format!("Running: {display_args}"),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        let mut output = format!("Running: {display_args}\n");
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("pkg", args).privileged(), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::InstallFailed(format!(
-                "pkg install failed with exit code {}",
-                cmd_output.exit_code
-            )));
-        }
-
-        output.push_str(&cmd_output.output);
-        Ok(output)
-    }
-
     /// Detect installed versions for multiple packages using a single `pkg query` call.
-    ///
-    /// Runs:
-    /// ```text
-    /// pkg query -a "%n\t%v"
-    /// ```
-    ///
-    /// Then filters the output in memory to match the requested packages.
     #[tracing::instrument(skip_all)]
     async fn batch_detect_installed_version(
         &self,
@@ -459,16 +370,51 @@ impl Plugin for PkgPlugin {
         );
         Ok(results)
     }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for PkgPlugin {
+    #[tracing::instrument(skip_all)]
+    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
+        self.require_package_identifier(package_identifier)?;
+        tracing::debug!(package = %package_identifier, "fetching BSD pkg releases via pkg rquery");
+
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec(
+                "pkg",
+                [
+                    "rquery".to_string(),
+                    "%v".to_string(),
+                    package_identifier.to_string(),
+                ],
+            ))
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "pkg rquery failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            return Ok(vec![]);
+        }
+
+        let version = cmd_output.output.trim().to_string();
+        if version.is_empty() {
+            return Ok(vec![]);
+        }
+
+        tracing::debug!(version = %version, "BSD pkg upstream version resolved");
+
+        Ok(vec![{
+            let mut r = UpstreamRelease::new(Version::new(&version), version, false, "");
+            r.category = Some(UpdateCategory::Unknown);
+            r
+        }])
+    }
 
     /// Fetch available releases for multiple packages using a single `pkg rquery` call.
-    ///
-    /// Runs:
-    /// ```text
-    /// pkg rquery "%n\t%v" pkg1 pkg2 ...
-    /// ```
-    ///
-    /// Output lines are matched by package name; packages absent from the output
-    /// have empty releases.
     #[tracing::instrument(skip_all)]
     async fn batch_fetch_releases(
         &self,
@@ -503,7 +449,6 @@ impl Plugin for PkgPlugin {
                 )))
             })?;
 
-        // rquery exits non-zero when no packages are found; treat output as best-effort.
         let parsed: HashMap<String, String> = Self::parse_pkg_query_line(&cmd_output.output)
             .into_iter()
             .collect();
@@ -530,18 +475,92 @@ impl Plugin for PkgPlugin {
         tracing::debug!(count = items.len(), "BSD pkg batch fetch complete");
         Ok(results)
     }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for PkgPlugin {
+    #[tracing::instrument(skip_all)]
+    async fn refresh_package_index(&self) -> Result<()> {
+        tracing::info!("refreshing BSD pkg package index");
+        let cmd_output = self
+            .executor
+            .execute_quiet(
+                &CommandSpec::exec("pkg", ["update".to_string(), "-q".to_string()]).privileged(),
+            )
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "pkg update failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            bail!(PluginError::CommandFailed(cmd_output.exit_code));
+        }
+
+        tracing::info!("BSD pkg package index refreshed");
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for PkgPlugin {
+    #[tracing::instrument(skip_all)]
+    async fn execute_update(
+        &self,
+        package_identifier: &str,
+        _to_version: &str,
+        _release_info: Option<&ReleaseInfo>,
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<String> {
+        self.require_package_identifier(package_identifier)?;
+
+        let args = vec![
+            "install".to_string(),
+            "-y".to_string(),
+            package_identifier.to_string(),
+        ];
+
+        tracing::debug!(
+            package = %package_identifier,
+            "running pkg install"
+        );
+
+        let display_args = std::iter::once("pkg")
+            .chain(args.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ");
+        send_output(
+            output_tx,
+            &format!("Running: {display_args}"),
+            OutputStreamType::Stdout,
+        )
+        .await;
+        let mut output = format!("Running: {display_args}\n");
+
+        let cmd_output = self
+            .executor
+            .execute(&CommandSpec::exec("pkg", args).privileged(), output_tx)
+            .await
+            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
+
+        if cmd_output.exit_code != 0 {
+            bail!(PluginError::InstallFailed(format!(
+                "pkg install failed with exit code {}",
+                cmd_output.exit_code
+            )));
+        }
+
+        output.push_str(&cmd_output.output);
+        Ok(output)
+    }
 
     /// Execute batch updates using a single `pkg install -y` call.
-    ///
-    /// Runs:
-    /// ```text
-    /// pkg install -y pkg1 pkg2 ...
-    /// ```
     #[tracing::instrument(skip_all)]
     async fn execute_batch_update(
         &self,
         items: &[BatchUpdateItem],
-        output_tx: &mpsc::Sender<uptrakit_plugin_infrastructure_core::UpdateOutputLine>,
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<Vec<BatchUpdateResult>> {
         if items.is_empty() {
             return Ok(vec![]);
@@ -602,98 +621,6 @@ impl Plugin for PkgPlugin {
             .collect();
 
         Ok(results)
-    }
-}
-
-// ── PluginBase + subtrait implementations ────────────────────────────────
-
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    PkgPlugin,
-    PkgConfig,
-    "package_manager_pkg",
-    {
-        fn capabilities(&self) -> Vec<PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-        fn required_sudo_commands(
-            &self,
-        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-            Plugin::required_sudo_commands(self)
-        }
-    }
-);
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for PkgPlugin {
-    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
-        Plugin::discover_software(self).await
-    }
-
-    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        Plugin::detect_host_compatibility(self).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for PkgPlugin {
-    async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
-        Plugin::detect_installed_version(self, package_identifier).await
-    }
-
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
-        Plugin::batch_detect_installed_version(self, items).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for PkgPlugin {
-    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
-        Plugin::fetch_releases(self, package_identifier).await
-    }
-
-    async fn batch_fetch_releases(
-        &self,
-        items: &[BatchFetchItem],
-    ) -> Result<Vec<BatchFetchResult>> {
-        Plugin::batch_fetch_releases(self, items).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for PkgPlugin {
-    async fn refresh_package_index(&self) -> Result<()> {
-        Plugin::refresh_package_index(self).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for PkgPlugin {
-    async fn execute_update(
-        &self,
-        package_identifier: &str,
-        to_version: &str,
-        release_info: Option<&ReleaseInfo>,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
-        Plugin::execute_update(
-            self,
-            package_identifier,
-            to_version,
-            release_info,
-            output_tx,
-        )
-        .await
-    }
-
-    async fn execute_batch_update(
-        &self,
-        items: &[BatchUpdateItem],
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<Vec<BatchUpdateResult>> {
-        Plugin::execute_batch_update(self, items, output_tx).await
     }
 }
 

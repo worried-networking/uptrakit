@@ -7,7 +7,7 @@ use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec,
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, DiscoveredSoftware,
-    DiscoveryTarget, HostCompatibility, OutputStreamType, Plugin, PluginCapability, PluginError,
+    DiscoveryTarget, HostCompatibility, OutputStreamType, PluginCapability, PluginError,
     PluginRole, PluginType, ReleaseInfo, Result, UpdateOutputLine, UpstreamRelease, Version,
 };
 
@@ -18,7 +18,7 @@ use crate::config::MasConfig;
 /// A valid identifier is:
 /// - Non-empty
 /// - All ASCII digits only
-/// - At most 15 characters (App Store IDs are 9–10 digits as of 2025)
+/// - At most 15 characters (App Store IDs are 9-10 digits as of 2025)
 pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
     if value.is_empty() {
         return Err("package_identifier must not be empty".to_string());
@@ -67,7 +67,7 @@ fn parse_mas_list_line(line: &str) -> Option<(String, String, String)> {
     let close_paren = after_paren.find(')')?;
     let version_str = after_paren[..close_paren].trim();
 
-    // If the version contains " -> " this is an outdated line — skip in the list parser.
+    // If the version contains " -> " this is an outdated line -- skip in the list parser.
     if version_str.contains(" -> ") {
         return None;
     }
@@ -115,7 +115,7 @@ fn parse_mas_outdated_line(line: &str) -> Option<(String, String)> {
     Some((id_str.to_string(), latest_version))
 }
 
-/// Parses `mas list` output into a map of App Store ID → installed version.
+/// Parses `mas list` output into a map of App Store ID -> installed version.
 pub fn parse_mas_list(output: &str) -> HashMap<String, String> {
     output
         .lines()
@@ -124,7 +124,7 @@ pub fn parse_mas_list(output: &str) -> HashMap<String, String> {
         .collect()
 }
 
-/// Parses `mas outdated` output into a map of App Store ID → latest available version.
+/// Parses `mas outdated` output into a map of App Store ID -> latest available version.
 pub fn parse_mas_outdated(output: &str) -> HashMap<String, String> {
     output.lines().filter_map(parse_mas_outdated_line).collect()
 }
@@ -189,7 +189,7 @@ impl MasPlugin {
             })?;
 
         // `mas outdated` exits with code 0 even when there are no outdated apps.
-        // A non-zero exit is unusual but not fatal — treat as empty outdated list.
+        // A non-zero exit is unusual but not fatal -- treat as empty outdated list.
         if cmd_output.exit_code != 0 {
             tracing::warn!(
                 exit_code = cmd_output.exit_code,
@@ -206,28 +206,42 @@ impl MasPlugin {
     }
 }
 
-#[async_trait]
-impl Plugin for MasPlugin {
-    fn plugin_type(&self) -> PluginType {
-        PluginType::PackageManagerMas
-    }
+// ── PluginBase + subtrait implementations ────────────────────────────────
 
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        Self::CAPABILITIES
-    }
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    MasPlugin,
+    MasConfig,
+    "package_manager_mas",
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
 
-    #[tracing::instrument(skip_all)]
-    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        match self
-            .executor
-            .execute_quiet(&CommandSpec::exec("which", ["mas".to_string()]))
-            .await
-        {
-            Ok(_) => Ok(HostCompatibility::Compatible),
-            Err(_) => Ok(HostCompatibility::Incompatible("mas not found".to_string())),
+        fn as_discovery(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
+            Some(self)
+        }
+        fn as_version_detector(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
+            Some(self)
+        }
+        fn as_release_fetcher(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
+            Some(self)
+        }
+        fn as_update_executor(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
+            Some(self)
         }
     }
+);
 
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for MasPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::debug!("discovering installed Mac App Store apps via mas list");
@@ -269,6 +283,21 @@ impl Plugin for MasPlugin {
     }
 
     #[tracing::instrument(skip_all)]
+    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
+        match self
+            .executor
+            .execute_quiet(&CommandSpec::exec("which", ["mas".to_string()]))
+            .await
+        {
+            Ok(_) => Ok(HostCompatibility::Compatible),
+            Err(_) => Ok(HostCompatibility::Incompatible("mas not found".to_string())),
+        }
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for MasPlugin {
+    #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "detecting installed mas version");
@@ -284,76 +313,6 @@ impl Plugin for MasPlugin {
             "mas version detection result"
         );
         Ok(version)
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
-        self.require_package_identifier(package_identifier)?;
-        tracing::debug!(package = %package_identifier, "fetching mas releases");
-
-        let list_output = self.run_mas_list().await?;
-        let outdated_output = self.run_mas_outdated().await?;
-
-        let installed_map = parse_mas_list(&list_output);
-        let outdated_map = parse_mas_outdated(&outdated_output);
-
-        let latest_version = if let Some(v) = outdated_map.get(package_identifier) {
-            v.clone()
-        } else if let Some(v) = installed_map.get(package_identifier) {
-            v.clone()
-        } else {
-            bail!(PluginError::PluginInternal(format!(
-                "package not found: {package_identifier}"
-            )));
-        };
-
-        let release_url = format!("https://apps.apple.com/app/id{package_identifier}");
-
-        let releases = vec![{
-            let mut r =
-                UpstreamRelease::new(Version::new(&latest_version), latest_version, false, "");
-            r.release_url = release_url;
-            r
-        }];
-
-        tracing::debug!(
-            package = %package_identifier,
-            count = releases.len(),
-            "mas releases fetched"
-        );
-        Ok(releases)
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn execute_update(
-        &self,
-        package_identifier: &str,
-        _to_version: &str,
-        _release_info: Option<&ReleaseInfo>,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
-        self.require_package_identifier(package_identifier)?;
-
-        let args = vec!["upgrade".to_string(), package_identifier.to_string()];
-
-        let display_cmd = format!("mas {}", args.join(" "));
-        tracing::debug!(package = %package_identifier, "running mas upgrade");
-        send_output(
-            output_tx,
-            &format!("Running: {display_cmd}"),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        let mut output = format!("Running: {display_cmd}\n");
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("mas", args), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-        output.push_str(&cmd_output.output);
-
-        Ok(output)
     }
 
     #[tracing::instrument(skip_all)]
@@ -391,6 +350,47 @@ impl Plugin for MasPlugin {
 
         tracing::debug!(count = items.len(), "mas batch version detection complete");
         Ok(results)
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for MasPlugin {
+    #[tracing::instrument(skip_all)]
+    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
+        self.require_package_identifier(package_identifier)?;
+        tracing::debug!(package = %package_identifier, "fetching mas releases");
+
+        let list_output = self.run_mas_list().await?;
+        let outdated_output = self.run_mas_outdated().await?;
+
+        let installed_map = parse_mas_list(&list_output);
+        let outdated_map = parse_mas_outdated(&outdated_output);
+
+        let latest_version = if let Some(v) = outdated_map.get(package_identifier) {
+            v.clone()
+        } else if let Some(v) = installed_map.get(package_identifier) {
+            v.clone()
+        } else {
+            bail!(PluginError::PluginInternal(format!(
+                "package not found: {package_identifier}"
+            )));
+        };
+
+        let release_url = format!("https://apps.apple.com/app/id{package_identifier}");
+
+        let releases = vec![{
+            let mut r =
+                UpstreamRelease::new(Version::new(&latest_version), latest_version, false, "");
+            r.release_url = release_url;
+            r
+        }];
+
+        tracing::debug!(
+            package = %package_identifier,
+            count = releases.len(),
+            "mas releases fetched"
+        );
+        Ok(releases)
     }
 
     #[tracing::instrument(skip_all)]
@@ -447,75 +447,38 @@ impl Plugin for MasPlugin {
     }
 }
 
-// ── PluginBase + subtrait implementations ────────────────────────────────
-
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    MasPlugin,
-    MasConfig,
-    "package_manager_mas",
-    {
-        fn capabilities(&self) -> Vec<PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-    }
-);
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for MasPlugin {
-    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
-        Plugin::discover_software(self).await
-    }
-
-    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        Plugin::detect_host_compatibility(self).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for MasPlugin {
-    async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
-        Plugin::detect_installed_version(self, package_identifier).await
-    }
-
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
-        Plugin::batch_detect_installed_version(self, items).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for MasPlugin {
-    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
-        Plugin::fetch_releases(self, package_identifier).await
-    }
-
-    async fn batch_fetch_releases(
-        &self,
-        items: &[BatchFetchItem],
-    ) -> Result<Vec<BatchFetchResult>> {
-        Plugin::batch_fetch_releases(self, items).await
-    }
-}
-
 #[async_trait]
 impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for MasPlugin {
+    #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
         package_identifier: &str,
-        to_version: &str,
-        release_info: Option<&ReleaseInfo>,
+        _to_version: &str,
+        _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {
-        Plugin::execute_update(
-            self,
-            package_identifier,
-            to_version,
-            release_info,
+        self.require_package_identifier(package_identifier)?;
+
+        let args = vec!["upgrade".to_string(), package_identifier.to_string()];
+
+        let display_cmd = format!("mas {}", args.join(" "));
+        tracing::debug!(package = %package_identifier, "running mas upgrade");
+        send_output(
             output_tx,
+            &format!("Running: {display_cmd}"),
+            OutputStreamType::Stdout,
         )
-        .await
+        .await;
+        let mut output = format!("Running: {display_cmd}\n");
+
+        let cmd_output = self
+            .executor
+            .execute(&CommandSpec::exec("mas", args), output_tx)
+            .await
+            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
+        output.push_str(&cmd_output.output);
+
+        Ok(output)
     }
 }
 
@@ -584,8 +547,6 @@ mod tests {
             let output = match (program, args.as_slice()) {
                 ("which", ["mas"]) => {
                     if self.which_exit_code != 0 {
-                        // Return Err to simulate `which` not finding mas — mirrors
-                        // LocalCommandExecutor behaviour for non-zero exit codes.
                         return Err(report!(
                             uptrakit_command::error::CommandError::CommandFailed(
                                 self.which_exit_code
@@ -660,7 +621,7 @@ mod tests {
 
     #[test]
     fn validate_identifier_rejects_too_long() {
-        // 16 digits — over the 15-char limit
+        // 16 digits -- over the 15-char limit
         assert!(validate_identifier("1234567890123456").is_err());
     }
 
@@ -690,7 +651,6 @@ mod tests {
 
     #[test]
     fn parse_mas_list_skips_outdated_format() {
-        // Lines with arrows belong to `mas outdated` — should not be parsed as list entries.
         let output = "497799835  Xcode (15.4 -> 16.0)\n";
         let map = parse_mas_list(output);
         assert!(map.is_empty());
@@ -725,6 +685,7 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_returns_all_apps() {
+        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         let plugin = make_plugin(SAMPLE_LIST, "");
         let discovered = plugin.discover_software().await.expect("discover");
 
@@ -747,6 +708,7 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_empty_list() {
+        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         let plugin = make_plugin("", "");
         let discovered = plugin.discover_software().await.expect("discover");
         assert!(discovered.is_empty());
@@ -756,6 +718,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_detect_returns_correct_versions() {
+        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
         let plugin = make_plugin(SAMPLE_LIST, "");
         let items = vec![
             BatchDetectItem::new("497799835".to_string()),
@@ -780,6 +743,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_detect_returns_none_for_unknown_id() {
+        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
         let plugin = make_plugin(SAMPLE_LIST, "");
         let items = vec![BatchDetectItem::new("999999999".to_string())];
         let results = plugin
@@ -793,6 +757,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_detect_empty_items() {
+        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
         let plugin = make_plugin(SAMPLE_LIST, "");
         let results = plugin
             .batch_detect_installed_version(&[])
@@ -805,7 +770,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_fetch_outdated_path() {
-        // Xcode is outdated: installed 15.4, latest 16.0
+        use uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin;
         let plugin = make_plugin(SAMPLE_LIST, SAMPLE_OUTDATED);
         let items = vec![BatchFetchItem::new("497799835".to_string())];
         let results = plugin
@@ -824,7 +789,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_fetch_up_to_date_path() {
-        // WhatsApp is not in the outdated list — latest == installed
+        use uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin;
         let plugin = make_plugin(SAMPLE_LIST, SAMPLE_OUTDATED);
         let items = vec![BatchFetchItem::new("1147396723".to_string())];
         let results = plugin
@@ -839,6 +804,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_fetch_unknown_id_returns_error() {
+        use uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin;
         let plugin = make_plugin(SAMPLE_LIST, "");
         let items = vec![BatchFetchItem::new("999999999".to_string())];
         let results = plugin
@@ -854,6 +820,7 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_compatible() {
+        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         let plugin = make_plugin(SAMPLE_LIST, "");
         let compat = plugin
             .detect_host_compatibility()
@@ -864,6 +831,7 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_incompatible() {
+        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         let plugin = MasPlugin {
             _config: MasConfig::default(),
             executor: Arc::new(MockMasExecutor::incompatible("")),

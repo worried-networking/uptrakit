@@ -9,8 +9,14 @@ use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType,
-    Plugin, PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result,
-    SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
+    PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry,
+    UpdateOutputLine, UpstreamRelease, Version,
+};
+
+// Subtrait imports needed by tests (via `use super::*`) to resolve method calls.
+#[cfg(test)]
+use uptrakit_plugin_infrastructure_core::{
+    DiscoveryPlugin, ReleaseFetcherPlugin, UpdateExecutorPlugin, VersionDetectorPlugin,
 };
 
 use crate::config::{ApkConfig, ApkDiscoveryFilter};
@@ -262,58 +268,57 @@ impl ApkPlugin {
     }
 }
 
+// ── PluginBase + subtrait implementations ────────────────────────────────
+
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    ApkPlugin,
+    ApkConfig,
+    "package_manager_apk",
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
+        fn required_sudo_commands(
+            &self,
+        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
+            vec![
+                SudoCommandEntry::new("apk", "Package index refresh requires root privileges")
+                    .with_args_suffix(Cow::Borrowed("update")),
+                SudoCommandEntry::new("apk", "Package installation requires root privileges")
+                    .with_args_suffix(Cow::Borrowed("add *")),
+            ]
+        }
+
+        fn as_discovery(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
+            Some(self)
+        }
+        fn as_version_detector(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
+            Some(self)
+        }
+        fn as_release_fetcher(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
+            Some(self)
+        }
+        fn as_package_index(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::PackageIndexPlugin> {
+            Some(self)
+        }
+        fn as_update_executor(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
+            Some(self)
+        }
+    }
+);
+
 #[async_trait]
-impl Plugin for ApkPlugin {
-    fn plugin_type(&self) -> PluginType {
-        PluginType::PackageManagerApk
-    }
-
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        Self::CAPABILITIES
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        match self
-            .executor
-            .execute_quiet(&CommandSpec::exec("which", ["apk".to_string()]))
-            .await
-        {
-            Ok(_) => Ok(HostCompatibility::Compatible),
-            Err(_) => Ok(HostCompatibility::Incompatible("apk not found".to_string())),
-        }
-    }
-
-    fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        vec![
-            SudoCommandEntry::new("apk", "Package index refresh requires root privileges")
-                .with_args_suffix(Cow::Borrowed("update")),
-            SudoCommandEntry::new("apk", "Package installation requires root privileges")
-                .with_args_suffix(Cow::Borrowed("add *")),
-        ]
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn refresh_package_index(&self) -> Result<()> {
-        tracing::info!("refreshing APK package index");
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec("apk", ["update".to_string()]).privileged())
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "apk update failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
-
-        tracing::info!("APK package index refreshed");
-        Ok(())
-    }
-
+impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ApkPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::info!("discovering APK-managed software");
@@ -458,6 +463,21 @@ impl Plugin for ApkPlugin {
     }
 
     #[tracing::instrument(skip_all)]
+    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
+        match self
+            .executor
+            .execute_quiet(&CommandSpec::exec("which", ["apk".to_string()]))
+            .await
+        {
+            Ok(_) => Ok(HostCompatibility::Compatible),
+            Err(_) => Ok(HostCompatibility::Incompatible("apk not found".to_string())),
+        }
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for ApkPlugin {
+    #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "detecting APK installed version");
@@ -494,97 +514,6 @@ impl Plugin for ApkPlugin {
             "APK version detection result"
         );
         Ok(version)
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
-        self.require_package_identifier(package_identifier)?;
-        tracing::debug!(package = %package_identifier, "fetching APK releases");
-
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "apk",
-                ["version".to_string(), package_identifier.to_string()],
-            ))
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "apk version failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
-
-        let pkg_names: HashSet<&str> = [package_identifier].into_iter().collect();
-        let version_map = parse_apk_version_output(&cmd_output.output, &pkg_names);
-
-        let Some(latest_version) = version_map.get(package_identifier) else {
-            bail!(PluginError::PluginInternal(format!(
-                "package not installed: {package_identifier}"
-            )));
-        };
-
-        let release_url =
-            format!("https://pkgs.alpinelinux.org/packages?name={package_identifier}");
-
-        tracing::debug!(
-            package = %package_identifier,
-            version = %latest_version,
-            "APK upstream version resolved"
-        );
-
-        Ok(vec![{
-            let mut r = UpstreamRelease::new(
-                Version::new(latest_version),
-                latest_version.clone(),
-                false,
-                "",
-            );
-            r.release_url = release_url;
-            r
-        }])
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn execute_update(
-        &self,
-        package_identifier: &str,
-        to_version: &str,
-        _release_info: Option<&ReleaseInfo>,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
-        self.require_package_identifier(package_identifier)?;
-        validate_version(to_version).map_err(|e| report!(PluginError::Configuration(e)))?;
-
-        let pkg_arg = format!("{package_identifier}={to_version}");
-        let args = vec!["add".to_string(), pkg_arg];
-
-        let display_cmd = format!("apk {}", args.join(" "));
-        tracing::debug!(package = %package_identifier, version = %to_version, "running apk add");
-        send_output(
-            output_tx,
-            &format!("Running: {display_cmd}"),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        let mut output = format!("Running: {display_cmd}\n");
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("apk", args).privileged(), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-
-        output.push_str(&cmd_output.output);
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
-
-        Ok(output)
     }
 
     #[tracing::instrument(skip_all)]
@@ -639,6 +568,61 @@ impl Plugin for ApkPlugin {
 
         tracing::debug!(count = items.len(), "APK batch version detection complete");
         Ok(results)
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for ApkPlugin {
+    #[tracing::instrument(skip_all)]
+    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
+        self.require_package_identifier(package_identifier)?;
+        tracing::debug!(package = %package_identifier, "fetching APK releases");
+
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec(
+                "apk",
+                ["version".to_string(), package_identifier.to_string()],
+            ))
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "apk version failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            bail!(PluginError::CommandFailed(cmd_output.exit_code));
+        }
+
+        let pkg_names: HashSet<&str> = [package_identifier].into_iter().collect();
+        let version_map = parse_apk_version_output(&cmd_output.output, &pkg_names);
+
+        let Some(latest_version) = version_map.get(package_identifier) else {
+            bail!(PluginError::PluginInternal(format!(
+                "package not installed: {package_identifier}"
+            )));
+        };
+
+        let release_url =
+            format!("https://pkgs.alpinelinux.org/packages?name={package_identifier}");
+
+        tracing::debug!(
+            package = %package_identifier,
+            version = %latest_version,
+            "APK upstream version resolved"
+        );
+
+        Ok(vec![{
+            let mut r = UpstreamRelease::new(
+                Version::new(latest_version),
+                latest_version.clone(),
+                false,
+                "",
+            );
+            r.release_url = release_url;
+            r
+        }])
     }
 
     #[tracing::instrument(skip_all)]
@@ -714,6 +698,72 @@ impl Plugin for ApkPlugin {
         tracing::debug!(count = items.len(), "APK batch fetch complete");
         Ok(results)
     }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for ApkPlugin {
+    #[tracing::instrument(skip_all)]
+    async fn refresh_package_index(&self) -> Result<()> {
+        tracing::info!("refreshing APK package index");
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec("apk", ["update".to_string()]).privileged())
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "apk update failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            bail!(PluginError::CommandFailed(cmd_output.exit_code));
+        }
+
+        tracing::info!("APK package index refreshed");
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for ApkPlugin {
+    #[tracing::instrument(skip_all)]
+    async fn execute_update(
+        &self,
+        package_identifier: &str,
+        to_version: &str,
+        _release_info: Option<&ReleaseInfo>,
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<String> {
+        self.require_package_identifier(package_identifier)?;
+        validate_version(to_version).map_err(|e| report!(PluginError::Configuration(e)))?;
+
+        let pkg_arg = format!("{package_identifier}={to_version}");
+        let args = vec!["add".to_string(), pkg_arg];
+
+        let display_cmd = format!("apk {}", args.join(" "));
+        tracing::debug!(package = %package_identifier, version = %to_version, "running apk add");
+        send_output(
+            output_tx,
+            &format!("Running: {display_cmd}"),
+            OutputStreamType::Stdout,
+        )
+        .await;
+        let mut output = format!("Running: {display_cmd}\n");
+
+        let cmd_output = self
+            .executor
+            .execute(&CommandSpec::exec("apk", args).privileged(), output_tx)
+            .await
+            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
+
+        output.push_str(&cmd_output.output);
+
+        if cmd_output.exit_code != 0 {
+            bail!(PluginError::CommandFailed(cmd_output.exit_code));
+        }
+
+        Ok(output)
+    }
 
     #[tracing::instrument(skip_all)]
     async fn execute_batch_update(
@@ -765,98 +815,6 @@ impl Plugin for ApkPlugin {
 
         tracing::debug!(count = items.len(), success, "APK batch update complete");
         Ok(results)
-    }
-}
-
-// ── PluginBase + subtrait implementations ────────────────────────────────
-
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    ApkPlugin,
-    ApkConfig,
-    "package_manager_apk",
-    {
-        fn capabilities(&self) -> Vec<PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-        fn required_sudo_commands(
-            &self,
-        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-            Plugin::required_sudo_commands(self)
-        }
-    }
-);
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ApkPlugin {
-    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
-        Plugin::discover_software(self).await
-    }
-
-    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        Plugin::detect_host_compatibility(self).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for ApkPlugin {
-    async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
-        Plugin::detect_installed_version(self, package_identifier).await
-    }
-
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
-        Plugin::batch_detect_installed_version(self, items).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for ApkPlugin {
-    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
-        Plugin::fetch_releases(self, package_identifier).await
-    }
-
-    async fn batch_fetch_releases(
-        &self,
-        items: &[BatchFetchItem],
-    ) -> Result<Vec<BatchFetchResult>> {
-        Plugin::batch_fetch_releases(self, items).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for ApkPlugin {
-    async fn refresh_package_index(&self) -> Result<()> {
-        Plugin::refresh_package_index(self).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for ApkPlugin {
-    async fn execute_update(
-        &self,
-        package_identifier: &str,
-        to_version: &str,
-        release_info: Option<&ReleaseInfo>,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
-        Plugin::execute_update(
-            self,
-            package_identifier,
-            to_version,
-            release_info,
-            output_tx,
-        )
-        .await
-    }
-
-    async fn execute_batch_update(
-        &self,
-        items: &[BatchUpdateItem],
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<Vec<BatchUpdateResult>> {
-        Plugin::execute_batch_update(self, items, output_tx).await
     }
 }
 

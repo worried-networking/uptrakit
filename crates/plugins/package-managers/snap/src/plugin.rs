@@ -9,9 +9,10 @@ use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec,
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchUpdateItem, BatchUpdateResult, DiscoveredSoftware,
-    DiscoveryTarget, HostCompatibility, OutputStreamType, Plugin, PluginCapability, PluginError,
-    PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry, UpdateOutputLine,
-    UpstreamRelease, Version,
+    DiscoveryPlugin, DiscoveryTarget, HostCompatibility, OutputStreamType, PluginCapability,
+    PluginError, PluginRole, PluginType, ReleaseFetcherPlugin, ReleaseInfo, Result,
+    SudoCommandEntry, UpdateExecutorPlugin, UpdateOutputLine, UpstreamRelease, Version,
+    VersionDetectorPlugin,
 };
 
 use crate::config::SnapConfig;
@@ -224,14 +225,119 @@ impl SnapPlugin {
     }
 }
 
-#[async_trait]
-impl Plugin for SnapPlugin {
-    fn plugin_type(&self) -> PluginType {
-        PluginType::PackageManagerSnap
-    }
+// ── PluginBase + subtrait implementations ────────────────────────────────
 
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        Self::CAPABILITIES
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    SnapPlugin,
+    SnapConfig,
+    "package_manager_snap",
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
+        fn required_sudo_commands(
+            &self,
+        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
+            vec![
+                // `refresh *` covers `snap refresh PKG`, `snap refresh PKG --channel=stable`,
+                // and batch `snap refresh PKG1 PKG2 ...`.
+                SudoCommandEntry::new("snap", "Snap package refresh requires root privileges")
+                    .with_args_suffix(Cow::Borrowed("refresh *")),
+            ]
+        }
+
+        fn as_discovery(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
+            Some(self)
+        }
+        fn as_version_detector(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
+            Some(self)
+        }
+        fn as_release_fetcher(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
+            Some(self)
+        }
+        fn as_update_executor(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
+            Some(self)
+        }
+    }
+);
+
+#[async_trait]
+impl DiscoveryPlugin for SnapPlugin {
+    /// Discover Snap packages installed on the local system.
+    ///
+    /// Runs `snap list` and returns all user-installed snaps, excluding known
+    /// system/infrastructure snaps (`core*`, `snapd`, `bare`).
+    ///
+    /// In discover-all mode (default config `{}`), emits one [`DiscoveryTarget`]
+    /// per snap so the controller can auto-create a default Snap plugin config and
+    /// role assignments. When a real config is present (channel explicitly set),
+    /// no targets are emitted — the config-ID path is used instead.
+    #[tracing::instrument(skip_all)]
+    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
+        tracing::info!("discovering Snap-managed software");
+
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec("snap", ["list".to_string()]))
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "snap list failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            bail!(PluginError::CommandFailed(cmd_output.exit_code));
+        }
+
+        let emit_targets = self.config.is_discover_all_mode();
+
+        let packages: Vec<DiscoveredSoftware> = cmd_output
+            .output
+            .lines()
+            .filter_map(parse_snap_list_line)
+            .filter(|(name, _)| !SYSTEM_SNAPS.contains(&name.as_str()))
+            .map(|(name, version)| {
+                let targets = if emit_targets {
+                    vec![DiscoveryTarget {
+                        plugin_type: PluginType::PackageManagerSnap,
+                        plugin_config: serde_json::json!({}),
+                        plugin_config_name: "Snap".to_string(),
+                        roles: vec![
+                            PluginRole::DetectVersion,
+                            PluginRole::FetchReleases,
+                            PluginRole::ExecuteUpdate,
+                        ],
+                        package_identifier: None,
+                        config_override: None,
+                        execution_site: None,
+                    }]
+                } else {
+                    vec![]
+                };
+                DiscoveredSoftware {
+                    package_identifier: name.clone(),
+                    name,
+                    installed_version: version,
+                    targets,
+                    extra: None,
+                    qualifier: None,
+                    plugin_package_identifier: None,
+                    featured: false,
+                }
+            })
+            .collect();
+
+        tracing::debug!(count = packages.len(), "Snap software discovery complete");
+        Ok(packages)
     }
 
     #[tracing::instrument(skip_all)]
@@ -247,16 +353,10 @@ impl Plugin for SnapPlugin {
             )),
         }
     }
+}
 
-    fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        vec![
-            // `refresh *` covers `snap refresh PKG`, `snap refresh PKG --channel=stable`,
-            // and batch `snap refresh PKG1 PKG2 ...`.
-            SudoCommandEntry::new("snap", "Snap package refresh requires root privileges")
-                .with_args_suffix(Cow::Borrowed("refresh *")),
-        ]
-    }
-
+#[async_trait]
+impl VersionDetectorPlugin for SnapPlugin {
     #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
@@ -346,7 +446,7 @@ impl Plugin for SnapPlugin {
             }
         };
 
-        // Build a name → version map from the output.
+        // Build a name -> version map from the output.
         let installed: HashMap<String, String> =
             stdout.lines().filter_map(parse_snap_list_line).collect();
 
@@ -358,7 +458,10 @@ impl Plugin for SnapPlugin {
             })
             .collect())
     }
+}
 
+#[async_trait]
+impl ReleaseFetcherPlugin for SnapPlugin {
     /// Fetch the latest release for a Snap package from a specific channel.
     ///
     /// Runs `snap info <name>` and parses the `channels:` section. Returns a
@@ -418,7 +521,10 @@ impl Plugin for SnapPlugin {
             release
         }])
     }
+}
 
+#[async_trait]
+impl UpdateExecutorPlugin for SnapPlugin {
     /// Execute a single Snap package update via `snap refresh`.
     ///
     /// Runs `snap refresh <name>` with an optional `--channel=<channel>` argument
@@ -550,159 +656,12 @@ impl Plugin for SnapPlugin {
             })
             .collect())
     }
-
-    /// Discover Snap packages installed on the local system.
-    ///
-    /// Runs `snap list` and returns all user-installed snaps, excluding known
-    /// system/infrastructure snaps (`core*`, `snapd`, `bare`).
-    ///
-    /// In discover-all mode (default config `{}`), emits one [`DiscoveryTarget`]
-    /// per snap so the controller can auto-create a default Snap plugin config and
-    /// role assignments. When a real config is present (channel explicitly set),
-    /// no targets are emitted — the config-ID path is used instead.
-    #[tracing::instrument(skip_all)]
-    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
-        tracing::info!("discovering Snap-managed software");
-
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec("snap", ["list".to_string()]))
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "snap list failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
-
-        let emit_targets = self.config.is_discover_all_mode();
-
-        let packages: Vec<DiscoveredSoftware> = cmd_output
-            .output
-            .lines()
-            .filter_map(parse_snap_list_line)
-            .filter(|(name, _)| !SYSTEM_SNAPS.contains(&name.as_str()))
-            .map(|(name, version)| {
-                let targets = if emit_targets {
-                    vec![DiscoveryTarget {
-                        plugin_type: PluginType::PackageManagerSnap,
-                        plugin_config: serde_json::json!({}),
-                        plugin_config_name: "Snap".to_string(),
-                        roles: vec![
-                            PluginRole::DetectVersion,
-                            PluginRole::FetchReleases,
-                            PluginRole::ExecuteUpdate,
-                        ],
-                        package_identifier: None,
-                        config_override: None,
-                        execution_site: None,
-                    }]
-                } else {
-                    vec![]
-                };
-                DiscoveredSoftware {
-                    package_identifier: name.clone(),
-                    name,
-                    installed_version: version,
-                    targets,
-                    extra: None,
-                    qualifier: None,
-                    plugin_package_identifier: None,
-                    featured: false,
-                }
-            })
-            .collect();
-
-        tracing::debug!(count = packages.len(), "Snap software discovery complete");
-        Ok(packages)
-    }
-}
-
-// ── PluginBase + subtrait implementations ────────────────────────────────
-
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    SnapPlugin,
-    SnapConfig,
-    "package_manager_snap",
-    {
-        fn capabilities(&self) -> Vec<PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-        fn required_sudo_commands(
-            &self,
-        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-            Plugin::required_sudo_commands(self)
-        }
-    }
-);
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for SnapPlugin {
-    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
-        Plugin::discover_software(self).await
-    }
-
-    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        Plugin::detect_host_compatibility(self).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for SnapPlugin {
-    async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
-        Plugin::detect_installed_version(self, package_identifier).await
-    }
-
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
-        Plugin::batch_detect_installed_version(self, items).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for SnapPlugin {
-    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
-        Plugin::fetch_releases(self, package_identifier).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for SnapPlugin {
-    async fn execute_update(
-        &self,
-        package_identifier: &str,
-        to_version: &str,
-        release_info: Option<&ReleaseInfo>,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
-        Plugin::execute_update(
-            self,
-            package_identifier,
-            to_version,
-            release_info,
-            output_tx,
-        )
-        .await
-    }
-
-    async fn execute_batch_update(
-        &self,
-        items: &[BatchUpdateItem],
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<Vec<BatchUpdateResult>> {
-        Plugin::execute_batch_update(self, items, output_tx).await
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::CommandOutput;
+    use uptrakit_plugin_infrastructure_core::{CommandOutput, PluginBase};
 
     /// Mock executor that returns a fixed output and exit code for all commands.
     struct FixedOutputExecutor {

@@ -3,8 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, Plugin, PluginCapability, PluginRole,
-    PluginType, SudoCommandEntry, SudoHelperScript,
+    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, PluginCapability, PluginRole,
+    PluginType, SudoHelperScript,
 };
 use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
@@ -378,61 +378,49 @@ impl ProxmoxHelperScriptsPlugin {
     }
 }
 
-#[async_trait]
-impl Plugin for ProxmoxHelperScriptsPlugin {
-    fn plugin_type(&self) -> PluginType {
-        PluginType::DiscoveryProxmoxHelperScripts
-    }
+// ── PluginBase + subtrait implementations ────────────────────────────────
 
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        Self::CAPABILITIES
-    }
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    ProxmoxHelperScriptsPlugin,
+    ProxmoxHelperScriptsConfig,
+    "discovery_proxmox_helper_scripts",
+    {
+        fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
+        fn required_sudo_commands(
+            &self,
+        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
+            vec![
+                uptrakit_plugin_infrastructure_core::SudoCommandEntry::new(
+                    "uptrakit-phs-version",
+                    "Reads /root/.<slug> for PHS version detection; the helper script \
+                        validates the slug argument to prevent path traversal",
+                )
+                .with_helper_script(SudoHelperScript::new(
+                    PHS_VERSION_HELPER_PATH,
+                    PHS_VERSION_HELPER_CONTENT,
+                )),
+                uptrakit_plugin_infrastructure_core::SudoCommandEntry::new(
+                    "update",
+                    "Runs /usr/bin/update with PHS_SILENT=1 and TERM=xterm for \
+                        PHS container updates over a PTY; SETENV: is required so the agent \
+                        can pass the env vars inline in the sudo call",
+                )
+                .with_setenv(),
+            ]
+        }
 
-    #[tracing::instrument(skip_all)]
-    async fn detect_host_compatibility(
-        &self,
-    ) -> uptrakit_plugin_infrastructure_core::Result<HostCompatibility> {
-        // A Proxmox Helper Scripts host is identified by the presence of
-        // `/usr/bin/update` — the PHS update script installed on all Proxmox VE
-        // nodes.  Any other system (Flatcar Linux, Ubuntu servers, macOS, …)
-        // will not have this file, so the plugin is incompatible and its helper
-        // scripts must not be installed.
-        match self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "test",
-                ["-f".to_string(), UPDATE_SCRIPT_PATH.to_string()],
-            ))
-            .await
-        {
-            Ok(_) => Ok(HostCompatibility::Compatible),
-            Err(_) => Ok(HostCompatibility::Incompatible(format!(
-                "PHS update script not found at {UPDATE_SCRIPT_PATH} — not a Proxmox Helper Scripts host"
-            ))),
+        fn as_discovery(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
+            Some(self)
         }
     }
+);
 
-    fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        vec![
-            SudoCommandEntry::new(
-                "uptrakit-phs-version",
-                "Reads /root/.<slug> for PHS version detection; the helper script \
-                    validates the slug argument to prevent path traversal",
-            )
-            .with_helper_script(SudoHelperScript::new(
-                PHS_VERSION_HELPER_PATH,
-                PHS_VERSION_HELPER_CONTENT,
-            )),
-            SudoCommandEntry::new(
-                "update",
-                "Runs /usr/bin/update with PHS_SILENT=1 and TERM=xterm for \
-                    PHS container updates over a PTY; SETENV: is required so the agent \
-                    can pass the env vars inline in the sudo call",
-            )
-            .with_setenv(),
-        ]
-    }
-
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ProxmoxHelperScriptsPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(
         &self,
@@ -480,7 +468,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                 // GitHub-managed: read version via the helper script.
                 // Use the version file basename from the analysis (which may differ
                 // from the slug when the check_for_gh_release key differs, e.g.
-                // Paperless-ngx uses key "paperless" → /root/.paperless).
+                // Paperless-ngx uses key "paperless" -> /root/.paperless).
                 let vfb = analysis
                     .version_file_basename
                     .as_deref()
@@ -600,7 +588,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     featured: true,
                 });
             } else {
-                // Neither — try install-script fallback.
+                // Neither -- try install-script fallback.
                 use crate::discovery::PHS_INSTALL_URL_PREFIX;
                 let install_url = format!("{PHS_INSTALL_URL_PREFIX}{}-install.sh", script.slug);
                 let Some(install_body) = self.fetch_text(&install_url).await else {
@@ -687,45 +675,36 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
 
         Ok(discovered)
     }
-}
 
-// ── PluginBase + subtrait implementations ────────────────────────────────
-
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    ProxmoxHelperScriptsPlugin,
-    ProxmoxHelperScriptsConfig,
-    "discovery_proxmox_helper_scripts",
-    {
-        fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-        fn required_sudo_commands(
-            &self,
-        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-            Plugin::required_sudo_commands(self)
-        }
-    }
-);
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ProxmoxHelperScriptsPlugin {
-    async fn discover_software(
-        &self,
-    ) -> uptrakit_plugin_infrastructure_core::Result<Vec<DiscoveredSoftware>> {
-        Plugin::discover_software(self).await
-    }
-
+    #[tracing::instrument(skip_all)]
     async fn detect_host_compatibility(
         &self,
     ) -> uptrakit_plugin_infrastructure_core::Result<HostCompatibility> {
-        Plugin::detect_host_compatibility(self).await
+        // A Proxmox Helper Scripts host is identified by the presence of
+        // `/usr/bin/update` -- the PHS update script installed on all Proxmox VE
+        // nodes.  Any other system (Flatcar Linux, Ubuntu servers, macOS, ...)
+        // will not have this file, so the plugin is incompatible and its helper
+        // scripts must not be installed.
+        match self
+            .executor
+            .execute_quiet(&CommandSpec::exec(
+                "test",
+                ["-f".to_string(), UPDATE_SCRIPT_PATH.to_string()],
+            ))
+            .await
+        {
+            Ok(_) => Ok(HostCompatibility::Compatible),
+            Err(_) => Ok(HostCompatibility::Incompatible(format!(
+                "PHS update script not found at {UPDATE_SCRIPT_PATH} — not a Proxmox Helper Scripts host"
+            ))),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::LocalCommandExecutor;
+    use uptrakit_plugin_infrastructure_core::{DiscoveryPlugin, LocalCommandExecutor, PluginBase};
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)
@@ -776,15 +755,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn plugin_type_is_proxmox_helper_scripts() {
+    async fn plugin_type_id_is_proxmox_helper_scripts() {
         let plugin =
             ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), test_executor())
                 .await
                 .expect("create");
-        assert_eq!(
-            plugin.plugin_type(),
-            PluginType::DiscoveryProxmoxHelperScripts
-        );
+        assert_eq!(plugin.plugin_type_id(), "discovery_proxmox_helper_scripts");
     }
 
     #[tokio::test]

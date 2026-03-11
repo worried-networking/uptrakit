@@ -9,7 +9,7 @@ use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec,
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, DiscoveredSoftware,
-    DiscoveryTarget, HostCompatibility, OutputStreamType, Plugin, PluginCapability, PluginError,
+    DiscoveryTarget, HostCompatibility, OutputStreamType, PluginCapability, PluginError,
     PluginRole, PluginType, ReleaseInfo, Result, UpdateOutputLine, UpstreamRelease, Version,
 };
 use uptrakit_shared_types::ssrf::SsrfSafeResolver;
@@ -71,7 +71,7 @@ fn is_prerelease_version(version: &str) -> bool {
     version.contains('-')
 }
 
-/// Parse `cargo install --list` output into a crate name → version map.
+/// Parse `cargo install --list` output into a crate name -> version map.
 ///
 /// The output format is:
 /// ```text
@@ -87,7 +87,7 @@ fn is_prerelease_version(version: &str) -> bool {
 ///
 /// Lines not starting with whitespace are crate headers. Each header matches
 /// `<name> v<version>[optional (path)]:`. Binary listing lines (indented) are
-/// ignored — the crate name is tracked, not the binary name.
+/// ignored -- the crate name is tracked, not the binary name.
 ///
 /// **Scope:** `cargo install --list` reads `$CARGO_HOME/.crates.toml` (default
 /// `~/.cargo`). Crates installed with `--root /custom/path` are stored in a
@@ -216,11 +216,11 @@ async fn fetch_crate_releases(
 
 /// Plugin for tracking and updating Rust binaries installed via `cargo install`.
 ///
-/// - **Discovery**: `cargo install --list` — finds all installed crates and their versions.
-/// - **Version detection**: `cargo install --list` — single call, looked up in the map.
-/// - **Release fetching**: crates.io sparse index (`https://index.crates.io`) — controller-side,
+/// - **Discovery**: `cargo install --list` -- finds all installed crates and their versions.
+/// - **Version detection**: `cargo install --list` -- single call, looked up in the map.
+/// - **Release fetching**: crates.io sparse index (`https://index.crates.io`) -- controller-side,
 ///   bounded parallel HTTP lookups via `buffer_unordered(10)`.
-/// - **Updates**: `cargo install <crate> --version <ver>` — no `sudo` needed.
+/// - **Updates**: `cargo install <crate> --version <ver>` -- no `sudo` needed.
 /// - **Discover-all mode**: active when the config is the default `{}` (no registry override,
 ///   no prerelease filter). Emits one [`DiscoveryTarget`] per installed crate.
 pub struct CargoPlugin {
@@ -278,14 +278,102 @@ impl CargoPlugin {
     }
 }
 
-#[async_trait]
-impl Plugin for CargoPlugin {
-    fn plugin_type(&self) -> PluginType {
-        PluginType::PackageManagerCargo
-    }
+// ── PluginBase + subtrait implementations ────────────────────────────────
 
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        Self::CAPABILITIES
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    CargoPlugin,
+    CargoConfig,
+    "package_manager_cargo",
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
+
+        fn as_discovery(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
+            Some(self)
+        }
+        fn as_version_detector(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
+            Some(self)
+        }
+        fn as_release_fetcher(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
+            Some(self)
+        }
+        fn as_update_executor(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
+            Some(self)
+        }
+    }
+);
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for CargoPlugin {
+    /// Discover crates installed via `cargo install` on the local system.
+    #[tracing::instrument(skip_all)]
+    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
+        tracing::info!("discovering cargo-installed software");
+
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec(
+                "cargo",
+                ["install".to_string(), "--list".to_string()],
+            ))
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "cargo install --list failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            bail!(PluginError::CommandFailed(cmd_output.exit_code));
+        }
+
+        let emit_targets = self.config.is_discover_all_mode();
+        let installed = parse_cargo_install_list(&cmd_output.output);
+
+        let packages: Vec<DiscoveredSoftware> = installed
+            .into_iter()
+            .map(|(name, version)| {
+                let targets = if emit_targets {
+                    vec![DiscoveryTarget {
+                        plugin_type: PluginType::PackageManagerCargo,
+                        plugin_config: serde_json::json!({}),
+                        plugin_config_name: "cargo install".to_string(),
+                        roles: vec![
+                            PluginRole::DetectVersion,
+                            PluginRole::FetchReleases,
+                            PluginRole::ExecuteUpdate,
+                        ],
+                        package_identifier: None,
+                        config_override: None,
+                        execution_site: None,
+                    }]
+                } else {
+                    vec![]
+                };
+                DiscoveredSoftware {
+                    package_identifier: name.clone(),
+                    name,
+                    installed_version: version,
+                    targets,
+                    extra: None,
+                    qualifier: None,
+                    plugin_package_identifier: None,
+                    featured: false,
+                }
+            })
+            .collect();
+
+        tracing::debug!(count = packages.len(), "cargo software discovery complete");
+        Ok(packages)
     }
 
     #[tracing::instrument(skip_all)]
@@ -301,15 +389,11 @@ impl Plugin for CargoPlugin {
             )),
         }
     }
+}
 
-    fn required_sudo_commands(&self) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-        // cargo install runs as the current user; no sudo required.
-        vec![]
-    }
-
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for CargoPlugin {
     /// Detect the installed version of a single crate.
-    ///
-    /// Runs `cargo install --list` and looks up the crate in the resulting map.
     #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
@@ -345,9 +429,6 @@ impl Plugin for CargoPlugin {
     }
 
     /// Detect installed versions for multiple crates using a single `cargo install --list` call.
-    ///
-    /// A single `cargo install --list` returns all installed crates; the output is
-    /// parsed once and all requested identifiers are looked up in the resulting map.
     #[tracing::instrument(skip_all)]
     async fn batch_detect_installed_version(
         &self,
@@ -413,12 +494,11 @@ impl Plugin for CargoPlugin {
             })
             .collect())
     }
+}
 
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for CargoPlugin {
     /// Fetch available releases for a single crate from the sparse registry index.
-    ///
-    /// Makes one HTTP `GET` to the sparse index, parses the newline-delimited JSON
-    /// index file, filters out yanked versions and (by default) pre-release versions,
-    /// and returns the remaining releases.
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
@@ -434,11 +514,6 @@ impl Plugin for CargoPlugin {
     }
 
     /// Fetch releases for multiple crates in parallel, bounded to 10 concurrent requests.
-    ///
-    /// Uses `futures_util::StreamExt::buffer_unordered(10)` to saturate the CDN-backed
-    /// sparse index while respecting fair usage limits. Each crate lookup is independent;
-    /// individual failures are recorded in [`BatchFetchResult::error`] without failing
-    /// the whole batch.
     #[tracing::instrument(skip_all)]
     async fn batch_fetch_releases(
         &self,
@@ -477,11 +552,11 @@ impl Plugin for CargoPlugin {
 
         Ok(results)
     }
+}
 
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for CargoPlugin {
     /// Execute a `cargo install` update for a single crate.
-    ///
-    /// Runs `cargo install <name> --version <to_version>`. No `sudo` is needed —
-    /// `cargo install` places binaries in `~/.cargo/bin` under the current user.
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
@@ -517,7 +592,7 @@ impl Plugin for CargoPlugin {
         .await;
         let mut output = format!("Running: {display_cmd}\n");
 
-        // No `.privileged()` — cargo install does not require sudo.
+        // No `.privileged()` -- cargo install does not require sudo.
         let cmd_output = self
             .executor
             .execute(&CommandSpec::exec("cargo", args), output_tx)
@@ -668,14 +743,8 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for CargoPlugin {
         release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {
-        Plugin::execute_update(
-            self,
-            package_identifier,
-            to_version,
-            release_info,
-            output_tx,
-        )
-        .await
+        Plugin::execute_update(self, package_identifier, to_version, release_info, output_tx)
+            .await
     }
 }
 
@@ -924,6 +993,7 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_compatible_when_cargo_found() {
+        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         let plugin = CargoPlugin::new(CargoConfig::default(), make_executor("", 0))
             .await
             .unwrap();
@@ -933,7 +1003,8 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_incompatible_when_cargo_missing() {
-        // Exit code != 0 from `which cargo` → incompatible.
+        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
+        // Exit code != 0 from `which cargo` -> incompatible.
         let plugin = CargoPlugin::new(CargoConfig::default(), make_executor("", 1))
             .await
             .unwrap();
@@ -945,6 +1016,7 @@ mod tests {
 
     #[tokio::test]
     async fn required_sudo_commands_empty() {
+        use uptrakit_plugin_infrastructure_core::PluginBase;
         let plugin = CargoPlugin::new(CargoConfig::default(), make_executor("", 0))
             .await
             .unwrap();
@@ -964,6 +1036,7 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_found() {
+        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
         let output = "bat v0.24.0:\n    bat\nripgrep v14.1.1:\n    rg\n";
         let plugin = CargoPlugin::new(CargoConfig::default(), make_executor(output, 0))
             .await
@@ -975,6 +1048,7 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_not_found() {
+        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
         let output = "bat v0.24.0:\n    bat\n";
         let plugin = CargoPlugin::new(CargoConfig::default(), make_executor(output, 0))
             .await
@@ -986,6 +1060,7 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_invalid_identifier_fails() {
+        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
         let plugin = CargoPlugin::new(CargoConfig::default(), make_executor("", 0))
             .await
             .unwrap();
@@ -998,6 +1073,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_detect_installed_version_basic() {
+        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
         let output = "bat v0.24.0:\n    bat\nripgrep v14.1.1:\n    rg\n";
         let plugin = CargoPlugin::new(CargoConfig::default(), make_executor(output, 0))
             .await
@@ -1033,6 +1109,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_detect_installed_version_empty_returns_empty() {
+        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
         let plugin = CargoPlugin::new(CargoConfig::default(), make_executor("", 0))
             .await
             .unwrap();
@@ -1045,6 +1122,7 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_emits_targets_in_discover_all_mode() {
+        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         let output = "bat v0.24.0:\n    bat\nripgrep v14.1.1:\n    rg\n";
         let plugin = CargoPlugin::new(CargoConfig::default(), make_executor(output, 0))
             .await
@@ -1062,6 +1140,7 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_no_targets_with_explicit_config() {
+        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         let output = "bat v0.24.0:\n    bat\n";
         let plugin = CargoPlugin::new(
             CargoConfig {
@@ -1080,6 +1159,7 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_no_targets_with_custom_registry() {
+        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         let output = "bat v0.24.0:\n    bat\n";
         let plugin = CargoPlugin::new(
             CargoConfig {
@@ -1098,6 +1178,7 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_empty_install_list() {
+        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         let plugin = CargoPlugin::new(CargoConfig::default(), make_executor("", 0))
             .await
             .unwrap();

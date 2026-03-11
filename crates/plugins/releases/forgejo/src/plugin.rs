@@ -8,7 +8,7 @@ use time::format_description::well_known::Rfc3339;
 use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
 use uptrakit_plugin_infrastructure_core::{
-    Plugin, PluginCapability, PluginError, PluginType, ReleaseAsset, UpstreamRelease, Version,
+    PluginCapability, PluginError, ReleaseAsset, UpstreamRelease, Version,
 };
 
 use crate::api_types::{ForgejoApiError, ForgejoRelease};
@@ -251,16 +251,27 @@ fn parse_link_next(headers: &reqwest::header::HeaderMap) -> Option<String> {
     })
 }
 
+// ── PluginBase + subtrait implementations ────────────────────────────────
+
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    ForgejoPlugin,
+    ForgejoConfig,
+    "releases_forgejo",
+    {
+        fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
+
+        fn as_release_fetcher(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
+            Some(self)
+        }
+    }
+);
+
 #[async_trait]
-impl Plugin for ForgejoPlugin {
-    fn plugin_type(&self) -> PluginType {
-        PluginType::ReleasesForgejo
-    }
-
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        Self::CAPABILITIES
-    }
-
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for ForgejoPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(
         &self,
@@ -339,29 +350,6 @@ impl Plugin for ForgejoPlugin {
         );
 
         Ok(upstream_releases)
-    }
-}
-
-// ── PluginBase + subtrait implementations ────────────────────────────────
-
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    ForgejoPlugin,
-    ForgejoConfig,
-    "releases_forgejo",
-    {
-        fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-    }
-);
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for ForgejoPlugin {
-    async fn fetch_releases(
-        &self,
-        package_identifier: &str,
-    ) -> uptrakit_plugin_infrastructure_core::Result<Vec<UpstreamRelease>> {
-        Plugin::fetch_releases(self, package_identifier).await
     }
 }
 

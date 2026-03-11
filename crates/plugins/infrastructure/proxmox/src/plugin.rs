@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use uptrakit_plugin_infrastructure_core::{
-    Plugin, PluginCapability, PluginType, command::CommandExecutor,
-};
+use uptrakit_plugin_infrastructure_core::{PluginCapability, command::CommandExecutor};
 
 use crate::config::ProxmoxConfig;
 
@@ -34,17 +31,6 @@ impl ProxmoxPlugin {
     }
 }
 
-#[async_trait]
-impl Plugin for ProxmoxPlugin {
-    fn plugin_type(&self) -> PluginType {
-        PluginType::InfrastructureProxmox
-    }
-
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        Self::CAPABILITIES
-    }
-}
-
 // ── PluginBase implementation ────────────────────────────────────────────
 
 uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
@@ -61,7 +47,7 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::{LocalCommandExecutor, SecretString};
+    use uptrakit_plugin_infrastructure_core::{LocalCommandExecutor, PluginBase, SecretString};
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)
@@ -77,7 +63,7 @@ mod tests {
         let plugin = ProxmoxPlugin::new(config, test_executor())
             .await
             .expect("create");
-        assert_eq!(plugin.plugin_type(), PluginType::InfrastructureProxmox);
+        assert_eq!(plugin.plugin_type_id(), "infrastructure_proxmox");
     }
 
     #[tokio::test]

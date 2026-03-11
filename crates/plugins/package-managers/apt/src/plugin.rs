@@ -9,9 +9,14 @@ use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType,
-    Plugin, PluginCapability, PluginError, PluginRole, PluginType, PreUpdateHookResult,
-    ReleaseInfo, Result, SudoCommandEntry, UpdateCategory, UpdateHookContext, UpdateOutputLine,
-    UpstreamRelease, Version,
+    PluginCapability, PluginError, PluginRole, PluginType, PreUpdateHookResult, ReleaseInfo,
+    Result, SudoCommandEntry, UpdateCategory, UpdateHookContext, UpdateOutputLine, UpstreamRelease,
+    Version,
+};
+// Subtrait imports needed by tests (via `use super::*`) to resolve method calls.
+#[cfg(test)]
+use uptrakit_plugin_infrastructure_core::{
+    DiscoveryPlugin, PluginBase, ReleaseFetcherPlugin, UpdateHooksPlugin, VersionDetectorPlugin,
 };
 
 use crate::config::{AptConfig, AptDiscoveryFilter};
@@ -230,111 +235,80 @@ impl AptPlugin {
     }
 }
 
-#[async_trait]
-impl Plugin for AptPlugin {
-    fn plugin_type(&self) -> PluginType {
-        PluginType::PackageManagerApt
-    }
+// ── PluginBase + subtrait implementations ────────────────────────────────
 
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        Self::CAPABILITIES
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        match self
-            .executor
-            .execute_quiet(&CommandSpec::exec("which", ["apt-get".to_string()]))
-            .await
-        {
-            Ok(_) => Ok(HostCompatibility::Compatible),
-            Err(_) => Ok(HostCompatibility::Incompatible(
-                "apt-get not found".to_string(),
-            )),
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    AptPlugin,
+    AptConfig,
+    "package_manager_apt",
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
         }
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn post_update_hook(
-        &self,
-        _ctx: &UpdateHookContext,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<()> {
-        // `test -f` exits 0 when the file exists, non-zero when absent.
-        // `execute_quiet` returns Err on any non-zero exit, so Ok(_) means
-        // the reboot-required file is present.
-        if self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "test",
-                ["-f".to_string(), "/var/run/reboot-required".to_string()],
-            ))
-            .await
-            .is_ok()
-        {
-            send_output(
-                output_tx,
-                "[post-hook] Reboot required to complete the update.",
-                OutputStreamType::Stdout,
-            )
-            .await;
-        }
-
-        Ok(())
-    }
-
-    fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        vec![
-            SudoCommandEntry::new("apt-get", "Package index refresh requires root privileges")
-                // Restrict to `apt-get update` only (with optional flags).
-                .with_args_suffix(Cow::Borrowed("update *"))
-                .with_setenv(),
-            SudoCommandEntry::new("apt-get", "Package installation requires root privileges")
-                // Restrict to `apt-get install` only; covers single and batch installs.
-                .with_args_suffix(Cow::Borrowed("install *"))
-                .with_setenv(),
-            SudoCommandEntry::new(
-                "apt-get",
-                "Batch package upgrade (pinned versions) requires root privileges",
-            )
-            // Lock in the exact -o Dir::Etc::Preferences= invocation that
-            // execute_batch_update uses. The path is intentionally hardcoded on
-            // both sides; see APT_BATCH_PREF_FILE. Using `apt-get upgrade` (not
-            // `install`) preserves the apt manual/auto install mark — packages
-            // auto-installed as dependencies keep their `auto` mark, allowing
-            // `apt autoremove` to clean them up correctly.
-            .with_args_suffix(Cow::Owned(format!(
-                "-o Dir::Etc::Preferences={APT_BATCH_PREF_FILE} upgrade *"
-            )))
-            .with_setenv(),
-        ]
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn refresh_package_index(&self) -> Result<()> {
-        tracing::info!("refreshing APT package index");
-        let cmd_output = self
-            .executor
-            .execute_quiet(
-                &CommandSpec::exec("apt-get", ["update".to_string(), "-q".to_string()])
-                    .with_env("DEBIAN_FRONTEND", "noninteractive")
-                    .privileged(),
-            )
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "apt-get update failed: {e}"
+        fn required_sudo_commands(
+            &self,
+        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
+            vec![
+                SudoCommandEntry::new("apt-get", "Package index refresh requires root privileges")
+                    // Restrict to `apt-get update` only (with optional flags).
+                    .with_args_suffix(Cow::Borrowed("update *"))
+                    .with_setenv(),
+                SudoCommandEntry::new("apt-get", "Package installation requires root privileges")
+                    // Restrict to `apt-get install` only; covers single and batch installs.
+                    .with_args_suffix(Cow::Borrowed("install *"))
+                    .with_setenv(),
+                SudoCommandEntry::new(
+                    "apt-get",
+                    "Batch package upgrade (pinned versions) requires root privileges",
+                )
+                // Lock in the exact -o Dir::Etc::Preferences= invocation that
+                // execute_batch_update uses. The path is intentionally hardcoded on
+                // both sides; see APT_BATCH_PREF_FILE. Using `apt-get upgrade` (not
+                // `install`) preserves the apt manual/auto install mark — packages
+                // auto-installed as dependencies keep their `auto` mark, allowing
+                // `apt autoremove` to clean them up correctly.
+                .with_args_suffix(Cow::Owned(format!(
+                    "-o Dir::Etc::Preferences={APT_BATCH_PREF_FILE} upgrade *"
                 )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
+                .with_setenv(),
+            ]
         }
 
-        tracing::info!("APT package index refreshed");
-        Ok(())
+        fn as_discovery(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
+            Some(self)
+        }
+        fn as_version_detector(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
+            Some(self)
+        }
+        fn as_release_fetcher(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
+            Some(self)
+        }
+        fn as_package_index(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::PackageIndexPlugin> {
+            Some(self)
+        }
+        fn as_update_executor(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
+            Some(self)
+        }
+        fn as_update_hooks(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateHooksPlugin> {
+            Some(self)
+        }
     }
+);
 
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for AptPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::info!("discovering APT-managed software");
@@ -430,6 +404,23 @@ impl Plugin for AptPlugin {
     }
 
     #[tracing::instrument(skip_all)]
+    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
+        match self
+            .executor
+            .execute_quiet(&CommandSpec::exec("which", ["apt-get".to_string()]))
+            .await
+        {
+            Ok(_) => Ok(HostCompatibility::Compatible),
+            Err(_) => Ok(HostCompatibility::Incompatible(
+                "apt-get not found".to_string(),
+            )),
+        }
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for AptPlugin {
+    #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "detecting APT installed version");
@@ -472,6 +463,83 @@ impl Plugin for AptPlugin {
         }
     }
 
+    /// Detect installed versions for multiple packages using a single `dpkg-query` call.
+    ///
+    /// Runs:
+    /// ```text
+    /// dpkg-query --show --showformat='${Package}\t${Version}\n' pkg1 pkg2 pkg3
+    /// ```
+    ///
+    /// The exit code is intentionally ignored: `dpkg-query` exits non-zero when any
+    /// requested package is unknown, but packages that *are* found still appear in
+    /// stdout. Packages absent from stdout are treated as not installed (`None` with
+    /// no error).
+    #[tracing::instrument(skip_all)]
+    async fn batch_detect_installed_version(
+        &self,
+        items: &[BatchDetectItem],
+    ) -> Result<Vec<BatchDetectResult>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Validate all identifiers up front.
+        for item in items {
+            validate_identifier(&item.package_identifier)
+                .map_err(|e| report!(PluginError::Configuration(e)))?;
+        }
+
+        let mut args = vec![
+            "--show".to_string(),
+            "--showformat=${Package}\\t${Version}\\n".to_string(),
+        ];
+        for item in items {
+            args.push(item.package_identifier.clone());
+        }
+
+        tracing::debug!(
+            count = items.len(),
+            "batch detecting APT installed versions"
+        );
+
+        // Non-zero exit is expected when any package is unknown; ignore it.
+        let stdout = match self
+            .executor
+            .execute_quiet(&CommandSpec::exec("dpkg-query", args))
+            .await
+        {
+            Ok(o) => o.output,
+            Err(e) => {
+                // dpkg-query completely failed (e.g., not found on PATH).
+                let error_str = format!("dpkg-query failed: {e}");
+                return Ok(items
+                    .iter()
+                    .map(|item| {
+                        BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
+                    })
+                    .collect());
+            }
+        };
+
+        // Parse output into a map for O(1) lookup.
+        let dpkg_map: HashMap<String, String> =
+            Self::parse_dpkg_output(&stdout).into_iter().collect();
+
+        let results = items
+            .iter()
+            .map(|item| {
+                let installed_version = dpkg_map.get(&item.package_identifier).map(Version::new);
+                BatchDetectResult::new(item.package_identifier.clone(), installed_version, None)
+            })
+            .collect();
+
+        tracing::debug!(count = items.len(), "APT batch version detection complete");
+        Ok(results)
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for AptPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
@@ -519,6 +587,119 @@ impl Plugin for AptPlugin {
         }])
     }
 
+    /// Fetch available releases for multiple packages using a single `apt-cache madison` call.
+    ///
+    /// Runs:
+    /// ```text
+    /// apt-cache madison pkg1 pkg2 pkg3
+    /// ```
+    ///
+    /// Output lines are grouped by package name; only the first (highest-priority)
+    /// entry per package is used. Packages absent from the output have empty releases.
+    #[tracing::instrument(skip_all)]
+    async fn batch_fetch_releases(
+        &self,
+        items: &[BatchFetchItem],
+    ) -> Result<Vec<BatchFetchResult>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Validate all identifiers up front.
+        for item in items {
+            validate_identifier(&item.package_identifier)
+                .map_err(|e| report!(PluginError::Configuration(e)))?;
+        }
+
+        let mut args = vec!["madison".to_string()];
+        for item in items {
+            args.push(item.package_identifier.clone());
+        }
+
+        tracing::debug!(
+            count = items.len(),
+            "batch fetching APT releases via apt-cache madison"
+        );
+
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec("apt-cache", args))
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "apt-cache madison failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            bail!(PluginError::CommandFailed(cmd_output.exit_code));
+        }
+
+        let parsed = Self::parse_madison_output_batch(&cmd_output.output);
+
+        let results = items
+            .iter()
+            .map(|item| {
+                let Some(entry) = parsed.get(&item.package_identifier) else {
+                    // Package not found in any configured repository.
+                    return BatchFetchResult::empty(item.package_identifier.clone());
+                };
+
+                let category = if Self::is_security_source(&entry.source) {
+                    Some(UpdateCategory::Security)
+                } else {
+                    None
+                };
+
+                let release = {
+                    let mut r = UpstreamRelease::new(
+                        Version::new(&entry.version),
+                        entry.version.clone(),
+                        false,
+                        "",
+                    );
+                    r.category = category;
+                    r
+                };
+                BatchFetchResult::found(item.package_identifier.clone(), vec![release])
+            })
+            .collect();
+
+        tracing::debug!(count = items.len(), "APT batch fetch complete");
+        Ok(results)
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for AptPlugin {
+    #[tracing::instrument(skip_all)]
+    async fn refresh_package_index(&self) -> Result<()> {
+        tracing::info!("refreshing APT package index");
+        let cmd_output = self
+            .executor
+            .execute_quiet(
+                &CommandSpec::exec("apt-get", ["update".to_string(), "-q".to_string()])
+                    .with_env("DEBIAN_FRONTEND", "noninteractive")
+                    .privileged(),
+            )
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "apt-get update failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            bail!(PluginError::CommandFailed(cmd_output.exit_code));
+        }
+
+        tracing::info!("APT package index refreshed");
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for AptPlugin {
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
@@ -694,272 +875,45 @@ impl Plugin for AptPlugin {
 
         Ok(results)
     }
-
-    /// Detect installed versions for multiple packages using a single `dpkg-query` call.
-    ///
-    /// Runs:
-    /// ```text
-    /// dpkg-query --show --showformat='${Package}\t${Version}\n' pkg1 pkg2 pkg3
-    /// ```
-    ///
-    /// The exit code is intentionally ignored: `dpkg-query` exits non-zero when any
-    /// requested package is unknown, but packages that *are* found still appear in
-    /// stdout. Packages absent from stdout are treated as not installed (`None` with
-    /// no error).
-    #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Validate all identifiers up front.
-        for item in items {
-            validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
-        }
-
-        let mut args = vec![
-            "--show".to_string(),
-            "--showformat=${Package}\\t${Version}\\n".to_string(),
-        ];
-        for item in items {
-            args.push(item.package_identifier.clone());
-        }
-
-        tracing::debug!(
-            count = items.len(),
-            "batch detecting APT installed versions"
-        );
-
-        // Non-zero exit is expected when any package is unknown; ignore it.
-        let stdout = match self
-            .executor
-            .execute_quiet(&CommandSpec::exec("dpkg-query", args))
-            .await
-        {
-            Ok(o) => o.output,
-            Err(e) => {
-                // dpkg-query completely failed (e.g., not found on PATH).
-                let error_str = format!("dpkg-query failed: {e}");
-                return Ok(items
-                    .iter()
-                    .map(|item| {
-                        BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
-                    })
-                    .collect());
-            }
-        };
-
-        // Parse output into a map for O(1) lookup.
-        let dpkg_map: HashMap<String, String> =
-            Self::parse_dpkg_output(&stdout).into_iter().collect();
-
-        let results = items
-            .iter()
-            .map(|item| {
-                let installed_version = dpkg_map.get(&item.package_identifier).map(Version::new);
-                BatchDetectResult::new(item.package_identifier.clone(), installed_version, None)
-            })
-            .collect();
-
-        tracing::debug!(count = items.len(), "APT batch version detection complete");
-        Ok(results)
-    }
-
-    /// Fetch available releases for multiple packages using a single `apt-cache madison` call.
-    ///
-    /// Runs:
-    /// ```text
-    /// apt-cache madison pkg1 pkg2 pkg3
-    /// ```
-    ///
-    /// Output lines are grouped by package name; only the first (highest-priority)
-    /// entry per package is used. Packages absent from the output have empty releases.
-    #[tracing::instrument(skip_all)]
-    async fn batch_fetch_releases(
-        &self,
-        items: &[BatchFetchItem],
-    ) -> Result<Vec<BatchFetchResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Validate all identifiers up front.
-        for item in items {
-            validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
-        }
-
-        let mut args = vec!["madison".to_string()];
-        for item in items {
-            args.push(item.package_identifier.clone());
-        }
-
-        tracing::debug!(
-            count = items.len(),
-            "batch fetching APT releases via apt-cache madison"
-        );
-
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec("apt-cache", args))
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "apt-cache madison failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
-
-        let parsed = Self::parse_madison_output_batch(&cmd_output.output);
-
-        let results = items
-            .iter()
-            .map(|item| {
-                let Some(entry) = parsed.get(&item.package_identifier) else {
-                    // Package not found in any configured repository.
-                    return BatchFetchResult::empty(item.package_identifier.clone());
-                };
-
-                let category = if Self::is_security_source(&entry.source) {
-                    Some(UpdateCategory::Security)
-                } else {
-                    None
-                };
-
-                let release = {
-                    let mut r = UpstreamRelease::new(
-                        Version::new(&entry.version),
-                        entry.version.clone(),
-                        false,
-                        "",
-                    );
-                    r.category = category;
-                    r
-                };
-                BatchFetchResult::found(item.package_identifier.clone(), vec![release])
-            })
-            .collect();
-
-        tracing::debug!(count = items.len(), "APT batch fetch complete");
-        Ok(results)
-    }
-}
-
-// ── PluginBase + subtrait implementations ────────────────────────────────
-
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    AptPlugin,
-    AptConfig,
-    "package_manager_apt",
-    {
-        fn capabilities(&self) -> Vec<PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-        fn required_sudo_commands(
-            &self,
-        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-            Plugin::required_sudo_commands(self)
-        }
-    }
-);
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for AptPlugin {
-    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
-        Plugin::discover_software(self).await
-    }
-
-    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        Plugin::detect_host_compatibility(self).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for AptPlugin {
-    async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
-        Plugin::detect_installed_version(self, package_identifier).await
-    }
-
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
-        Plugin::batch_detect_installed_version(self, items).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for AptPlugin {
-    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
-        Plugin::fetch_releases(self, package_identifier).await
-    }
-
-    async fn batch_fetch_releases(
-        &self,
-        items: &[BatchFetchItem],
-    ) -> Result<Vec<BatchFetchResult>> {
-        Plugin::batch_fetch_releases(self, items).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for AptPlugin {
-    async fn refresh_package_index(&self) -> Result<()> {
-        Plugin::refresh_package_index(self).await
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for AptPlugin {
-    async fn execute_update(
-        &self,
-        package_identifier: &str,
-        to_version: &str,
-        release_info: Option<&ReleaseInfo>,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
-        Plugin::execute_update(
-            self,
-            package_identifier,
-            to_version,
-            release_info,
-            output_tx,
-        )
-        .await
-    }
-
-    async fn execute_batch_update(
-        &self,
-        items: &[BatchUpdateItem],
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<Vec<BatchUpdateResult>> {
-        Plugin::execute_batch_update(self, items, output_tx).await
-    }
 }
 
 #[async_trait]
 impl uptrakit_plugin_infrastructure_core::UpdateHooksPlugin for AptPlugin {
     async fn pre_update_hook(
         &self,
-        ctx: &UpdateHookContext,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
+        _ctx: &UpdateHookContext,
+        _output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<PreUpdateHookResult> {
-        Plugin::pre_update_hook(self, ctx, output_tx).await
+        Ok(PreUpdateHookResult::proceed())
     }
 
+    #[tracing::instrument(skip_all)]
     async fn post_update_hook(
         &self,
-        ctx: &UpdateHookContext,
+        _ctx: &UpdateHookContext,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<()> {
-        Plugin::post_update_hook(self, ctx, output_tx).await
+        // `test -f` exits 0 when the file exists, non-zero when absent.
+        // `execute_quiet` returns Err on any non-zero exit, so Ok(_) means
+        // the reboot-required file is present.
+        if self
+            .executor
+            .execute_quiet(&CommandSpec::exec(
+                "test",
+                ["-f".to_string(), "/var/run/reboot-required".to_string()],
+            ))
+            .await
+            .is_ok()
+        {
+            send_output(
+                output_tx,
+                "[post-hook] Reboot required to complete the update.",
+                OutputStreamType::Stdout,
+            )
+            .await;
+        }
+
+        Ok(())
     }
 }
 
