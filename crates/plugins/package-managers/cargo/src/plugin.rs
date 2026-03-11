@@ -597,7 +597,7 @@ impl Plugin for CargoPlugin {
                     extra: None,
                     qualifier: None,
                     plugin_package_identifier: None,
-                    featured: false,
+                    featured: true,
                 }
             })
             .collect();
