@@ -14,7 +14,7 @@
 	} from '$lib/types';
 	import { Permission, hasAnyPermission } from '$lib/types';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
-	import { getTabExtensions } from '$lib/extensions.svelte';
+	import { getGroupedTabExtensions } from '$lib/extensions.svelte';
 
 	import RegistrationSettings from './RegistrationSettings.svelte';
 	import AuthenticationSettings from './AuthenticationSettings.svelte';
@@ -57,7 +57,9 @@
 	);
 
 	// ── Tab state ────────────────────────────────────────────────────────
-	const tabExtensions = $derived(getTabExtensions('settings'));
+	const groupedTabs = $derived(getGroupedTabExtensions('settings'));
+	const tabExtensions = $derived([...groupedTabs.ungrouped]);
+	const tabGroupNames = $derived([...groupedTabs.groups.keys()]);
 
 	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'general');
 
@@ -79,13 +81,15 @@
 			(activeTab === 'global-settings' && canManageGlobalSettings) ||
 			(activeTab === 'notification-rules' && canViewNotifications) ||
 			(activeTab === 'notification-log' && canViewNotifications);
-		const isExtAccessible = tabExtensions.some((e) => e.id === activeTab);
+		const isExtAccessible =
+			tabExtensions.some((e) => e.id === activeTab) || tabGroupNames.some((g) => `group:${g}` === activeTab);
 		if (!isBuiltinAccessible && !isExtAccessible) {
 			if (canManageSettings) activeTab = 'general';
 			else if (canViewSoftware) activeTab = 'plugin-configs';
 			else if (canManageSoftware) activeTab = 'scheduler';
 			else if (canManageGlobalSettings) activeTab = 'global-settings';
 			else if (canViewNotifications) activeTab = 'notification-rules';
+			else if (tabGroupNames.length > 0) activeTab = `group:${tabGroupNames[0]}`;
 			else if (tabExtensions.length > 0) activeTab = tabExtensions[0].id;
 		}
 	});
@@ -256,6 +260,14 @@
 				Notification Log
 			</button>
 		{/if}
+		{#each tabGroupNames as group (group)}
+			<button
+				class="btn btn-sm {activeTab === `group:${group}` ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				onclick={() => (activeTab = `group:${group}`)}
+			>
+				{group}
+			</button>
+		{/each}
 		{#each tabExtensions as ext (ext.id)}
 			<button
 				class="btn btn-sm {activeTab === ext.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
@@ -339,7 +351,18 @@
 	{:else if activeTab === 'notification-log'}
 		<NotificationLogView />
 
-		<!-- Extension tabs -->
+		<!-- Extension group tabs -->
+	{:else if activeTab.startsWith('group:')}
+		{@const groupName = activeTab.slice('group:'.length)}
+		{@const groupExts = groupedTabs.groups.get(groupName) ?? []}
+		{#each groupExts as ext (ext.id)}
+			<div class="card mb-6 p-6">
+				<h2 class="h3 mb-4">{ext.label}</h2>
+				<ExtensionTabContent extension={ext} />
+			</div>
+		{/each}
+
+		<!-- Ungrouped extension tabs -->
 	{:else}
 		{#each tabExtensions as ext (ext.id)}
 			{#if activeTab === ext.id}

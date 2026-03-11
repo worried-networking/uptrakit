@@ -781,7 +781,7 @@ export interface PanelPosition {
 
 export type ExtensionPlacement =
 	| { type: 'page'; nav_section: string; icon?: string }
-	| { type: 'panel'; target_page: string; position: PanelPosition }
+	| { type: 'panel'; target_page: string; position: PanelPosition; tab_group?: string }
 	| { type: 'context_menu_group'; target_entity: string; group_label: string }
 	| { type: 'table_columns'; target_table: string; columns: ExtensionColumn[] };
 

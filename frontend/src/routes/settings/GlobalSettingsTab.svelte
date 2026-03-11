@@ -15,6 +15,8 @@
 	import { showSuccess, showError, clearError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SystemServicesSettings from './SystemServicesSettings.svelte';
+	import ExtensionTabContent from '$lib/components/extensions/ExtensionTabContent.svelte';
+	import { getBelowExtensions } from '$lib/extensions.svelte';
 
 	// --- Network Settings ---
 	let trustedProxiesText: string = $state('');
@@ -48,6 +50,8 @@
 
 	// --- Loading ---
 	let loading: boolean = $state(true);
+
+	const belowExtensions = $derived(getBelowExtensions('global-settings'));
 
 	const canManageSystemServices = $derived(
 		hasAnyPermission(
@@ -427,4 +431,12 @@
 			oncancel={() => (showRotateCaConfirm = false)}
 		/>
 	{/if}
+
+	<!-- Extension panels positioned below global settings -->
+	{#each belowExtensions as ext (ext.id)}
+		<div class="card mb-6 p-6">
+			<h2 class="h3 mb-4">{ext.label}</h2>
+			<ExtensionTabContent extension={ext} />
+		</div>
+	{/each}
 {/if}
