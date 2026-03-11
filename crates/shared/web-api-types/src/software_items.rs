@@ -20,6 +20,9 @@ pub struct CreateSoftwareItemRequest {
     /// Whether this item is featured (shown prominently). Defaults to true for manual creation.
     #[serde(default = "crate::default_featured")]
     pub featured: bool,
+    /// Optional HTTPS URL to an icon/logo image for this software item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
 }
 
 /// Partial update for a software item. Only `name` and `featured` are updatable.
@@ -28,6 +31,13 @@ pub struct CreateSoftwareItemRequest {
 pub struct UpdateSoftwareItemRequest {
     pub name: Option<String>,
     pub featured: Option<bool>,
+    /// Set, clear, or keep the icon URL.
+    ///
+    /// - Absent / `None` JSON key: keep existing value.
+    /// - `null`: clear the icon URL.
+    /// - String: set a new HTTPS URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<serde_json::Value>,
 }
 
 /// Per-host plugin assignment used when assigning hosts to a software item.
@@ -120,6 +130,9 @@ pub struct SoftwareItemResponse {
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub updated_at: OffsetDateTime,
+    /// Optional HTTPS URL to an icon/logo image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -146,6 +159,9 @@ pub struct SoftwareItemDetailResponse {
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub updated_at: OffsetDateTime,
+    /// Optional HTTPS URL to an icon/logo image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
     pub hosts: Vec<SoftwareItemHostSummary>,
 }
 
@@ -312,6 +328,40 @@ impl Validate for CreateSoftwareItemRequest {
                 message: "name must not be empty".to_string(),
             });
         }
+        if let Some(url) = &self.icon_url {
+            if url.len() > 2048 {
+                return Err(ValidationError {
+                    field: "icon_url",
+                    message: "icon_url must not exceed 2048 characters".to_string(),
+                });
+            }
+            if !url.starts_with("https://") {
+                return Err(ValidationError {
+                    field: "icon_url",
+                    message: "icon_url must start with https://".to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Validate for UpdateSoftwareItemRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if let Some(serde_json::Value::String(url)) = &self.icon_url {
+            if url.len() > 2048 {
+                return Err(ValidationError {
+                    field: "icon_url",
+                    message: "icon_url must not exceed 2048 characters".to_string(),
+                });
+            }
+            if !url.starts_with("https://") {
+                return Err(ValidationError {
+                    field: "icon_url",
+                    message: "icon_url must start with https://".to_string(),
+                });
+            }
+        }
         Ok(())
     }
 }
@@ -329,6 +379,7 @@ mod tests {
         CreateSoftwareItemRequest {
             name: "1Password".to_string(),
             featured: true,
+            icon_url: None,
         }
     }
 
@@ -365,6 +416,7 @@ mod tests {
         let req = CreateSoftwareItemRequest {
             name: "".to_string(),
             featured: true,
+            icon_url: None,
         };
         let err = req
             .validate()
@@ -377,11 +429,78 @@ mod tests {
         let req = CreateSoftwareItemRequest {
             name: "   ".to_string(),
             featured: true,
+            icon_url: None,
         };
         let err = req
             .validate()
             .expect_err("whitespace-only name should fail validation");
         assert_eq!(err.field, "name");
+    }
+
+    #[test]
+    fn create_software_item_icon_url_https_passes() {
+        let req = CreateSoftwareItemRequest {
+            name: "App".to_string(),
+            featured: true,
+            icon_url: Some("https://example.com/icon.png".to_string()),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn create_software_item_icon_url_http_rejected() {
+        let req = CreateSoftwareItemRequest {
+            name: "App".to_string(),
+            featured: true,
+            icon_url: Some("http://example.com/icon.png".to_string()),
+        };
+        let err = req.validate().expect_err("http URL should fail validation");
+        assert_eq!(err.field, "icon_url");
+    }
+
+    #[test]
+    fn create_software_item_icon_url_none_passes() {
+        let req = CreateSoftwareItemRequest {
+            name: "App".to_string(),
+            featured: true,
+            icon_url: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn update_software_item_icon_url_https_passes() {
+        let req = UpdateSoftwareItemRequest {
+            name: None,
+            featured: None,
+            icon_url: Some(serde_json::Value::String(
+                "https://example.com/icon.png".to_string(),
+            )),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn update_software_item_icon_url_null_clears() {
+        let req = UpdateSoftwareItemRequest {
+            name: None,
+            featured: None,
+            icon_url: Some(serde_json::Value::Null),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn update_software_item_icon_url_http_rejected() {
+        let req = UpdateSoftwareItemRequest {
+            name: None,
+            featured: None,
+            icon_url: Some(serde_json::Value::String(
+                "http://example.com/icon.png".to_string(),
+            )),
+        };
+        let err = req.validate().expect_err("http URL should fail validation");
+        assert_eq!(err.field, "icon_url");
     }
 
     // ── AssignHostsRequest round-trip ──────────────────────────────
@@ -498,6 +617,7 @@ mod tests {
             update_available: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-06-01 12:00:00 UTC),
+            icon_url: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: SoftwareItemResponse =
@@ -527,6 +647,7 @@ mod tests {
             update_available: false,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
+            icon_url: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: SoftwareItemResponse =
@@ -556,6 +677,7 @@ mod tests {
             update_available: false,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
+            icon_url: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: SoftwareItemResponse =

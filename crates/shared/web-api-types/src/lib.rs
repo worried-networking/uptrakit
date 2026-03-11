@@ -932,6 +932,7 @@ mod tests {
         let req = CreateSoftwareItemRequest {
             name: "Node.js".to_string(),
             featured: true,
+            icon_url: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -942,6 +943,7 @@ mod tests {
         let req = CreateSoftwareItemRequest {
             name: "".to_string(),
             featured: true,
+            icon_url: None,
         };
         let err = req.validate().unwrap_err();
         assert_eq!(err.field, "name");
