@@ -768,6 +768,94 @@ impl Plugin for ApkPlugin {
     }
 }
 
+// ── PluginBase + subtrait implementations ────────────────────────────────
+
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    ApkPlugin,
+    ApkConfig,
+    "package_manager_apk",
+    fn capabilities(&self) -> Vec<PluginCapability> {
+        Self::CAPABILITIES.to_vec()
+    },
+    fn required_sudo_commands(&self) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
+        Plugin::required_sudo_commands(self)
+    }
+);
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ApkPlugin {
+    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
+        Plugin::discover_software(self).await
+    }
+
+    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
+        Plugin::detect_host_compatibility(self).await
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for ApkPlugin {
+    async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
+        Plugin::detect_installed_version(self, package_identifier).await
+    }
+
+    async fn batch_detect_installed_version(
+        &self,
+        items: &[BatchDetectItem],
+    ) -> Result<Vec<BatchDetectResult>> {
+        Plugin::batch_detect_installed_version(self, items).await
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for ApkPlugin {
+    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
+        Plugin::fetch_releases(self, package_identifier).await
+    }
+
+    async fn batch_fetch_releases(
+        &self,
+        items: &[BatchFetchItem],
+    ) -> Result<Vec<BatchFetchResult>> {
+        Plugin::batch_fetch_releases(self, items).await
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for ApkPlugin {
+    async fn refresh_package_index(&self) -> Result<()> {
+        Plugin::refresh_package_index(self).await
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for ApkPlugin {
+    async fn execute_update(
+        &self,
+        package_identifier: &str,
+        to_version: &str,
+        release_info: Option<&ReleaseInfo>,
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<String> {
+        Plugin::execute_update(
+            self,
+            package_identifier,
+            to_version,
+            release_info,
+            output_tx,
+        )
+        .await
+    }
+
+    async fn execute_batch_update(
+        &self,
+        items: &[BatchUpdateItem],
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<Vec<BatchUpdateResult>> {
+        Plugin::execute_batch_update(self, items, output_tx).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

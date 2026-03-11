@@ -857,6 +857,92 @@ impl Plugin for DockerPlugin {
     }
 }
 
+// ── PluginBase + subtrait implementations ────────────────────────────────
+
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    DockerPlugin,
+    DockerConfig,
+    "releases_docker",
+    fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+        Self::CAPABILITIES.to_vec()
+    }
+);
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
+    async fn discover_software(
+        &self,
+    ) -> uptrakit_plugin_infrastructure_core::Result<
+        Vec<uptrakit_plugin_infrastructure_core::DiscoveredSoftware>,
+    > {
+        Plugin::discover_software(self).await
+    }
+
+    #[cfg(feature = "daemon")]
+    async fn detect_host_compatibility(
+        &self,
+    ) -> uptrakit_plugin_infrastructure_core::Result<
+        uptrakit_plugin_infrastructure_core::HostCompatibility,
+    > {
+        Plugin::detect_host_compatibility(self).await
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin {
+    async fn detect_installed_version(
+        &self,
+        package_identifier: &str,
+    ) -> uptrakit_plugin_infrastructure_core::Result<
+        Option<uptrakit_plugin_infrastructure_core::Version>,
+    > {
+        Plugin::detect_installed_version(self, package_identifier).await
+    }
+
+    async fn batch_detect_installed_version(
+        &self,
+        items: &[uptrakit_plugin_infrastructure_core::BatchDetectItem],
+    ) -> uptrakit_plugin_infrastructure_core::Result<
+        Vec<uptrakit_plugin_infrastructure_core::BatchDetectResult>,
+    > {
+        Plugin::batch_detect_installed_version(self, items).await
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for DockerPlugin {
+    async fn fetch_releases(
+        &self,
+        package_identifier: &str,
+    ) -> uptrakit_plugin_infrastructure_core::Result<
+        Vec<uptrakit_plugin_infrastructure_core::UpstreamRelease>,
+    > {
+        Plugin::fetch_releases(self, package_identifier).await
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for DockerPlugin {
+    async fn execute_update(
+        &self,
+        package_identifier: &str,
+        to_version: &str,
+        release_info: Option<&uptrakit_plugin_infrastructure_core::ReleaseInfo>,
+        output_tx: &tokio::sync::mpsc::Sender<
+            uptrakit_plugin_infrastructure_core::UpdateOutputLine,
+        >,
+    ) -> uptrakit_plugin_infrastructure_core::Result<String> {
+        Plugin::execute_update(
+            self,
+            package_identifier,
+            to_version,
+            release_info,
+            output_tx,
+        )
+        .await
+    }
+}
+
 #[cfg(all(test, feature = "daemon"))]
 mod tests {
     use super::*;

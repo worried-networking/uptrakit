@@ -470,12 +470,25 @@ pub trait GuestExecPlugin: PluginBase {
 ///
 /// # Usage
 ///
+/// Basic (all defaults):
 /// ```ignore
 /// impl_plugin_base_config!(AptPlugin, AptConfig, "package_manager_apt");
 /// ```
+///
+/// With optional method overrides (capabilities, sudo commands, etc.):
+/// ```ignore
+/// impl_plugin_base_config!(AptPlugin, AptConfig, "package_manager_apt",
+///     fn capabilities(&self) -> Vec<$crate::PluginCapability> {
+///         Self::CAPABILITIES.to_vec()
+///     }
+///     fn required_sudo_commands(&self) -> Vec<$crate::SudoCommandEntry> {
+///         $crate::Plugin::required_sudo_commands(self)
+///     }
+/// );
+/// ```
 #[macro_export]
 macro_rules! impl_plugin_base_config {
-    ($plugin:ty, $config:ty, $type_id:expr) => {
+    ($plugin:ty, $config:ty, $type_id:expr $(, $($extra_methods:tt)*)?) => {
         impl $crate::PluginBase for $plugin {
             fn plugin_type_id(&self) -> &str {
                 $type_id
@@ -526,11 +539,11 @@ macro_rules! impl_plugin_base_config {
                 serde_json::to_value(&inc).unwrap_or_else(|_| incoming.clone())
             }
 
-            fn form_schema(&self) -> Vec<uptrakit_extension_framework::FieldDef> {
+            fn form_schema(&self) -> Vec<$crate::form_schema::FieldDef> {
                 <$config as $crate::ConfigFormSchema>::form_schema()
             }
 
-            fn type_settings_form_schema(&self) -> Vec<uptrakit_extension_framework::FieldDef> {
+            fn type_settings_form_schema(&self) -> Vec<$crate::form_schema::FieldDef> {
                 <$config as $crate::ConfigFormSchema>::type_settings_form_schema()
             }
 
@@ -549,6 +562,8 @@ macro_rules! impl_plugin_base_config {
             ) -> std::result::Result<(), String> {
                 <$config>::validate_identifier(value)
             }
+
+            $($($extra_methods)*)?
         }
     };
 }

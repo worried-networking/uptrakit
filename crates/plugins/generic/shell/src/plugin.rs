@@ -7,7 +7,8 @@ use uptrakit_plugin_infrastructure_core::command::{
 };
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    OutputStreamType, Plugin, PluginError, PluginType, ReleaseInfo, UpdateOutputLine, Version,
+    OutputStreamType, Plugin, PluginCapability, PluginError, PluginType, ReleaseInfo, Result,
+    UpdateOutputLine, UpstreamRelease, Version,
 };
 
 use crate::config::ShellConfig;
@@ -119,6 +120,51 @@ impl Plugin for ShellPlugin {
             })?;
 
         Ok(cmd_output.output)
+    }
+}
+
+// ── PluginBase + subtrait implementations ────────────────────────────────
+
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    ShellPlugin,
+    ShellConfig,
+    "generic_shell",
+    fn capabilities(&self) -> Vec<PluginCapability> {
+        Self::CAPABILITIES.to_vec()
+    }
+);
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for ShellPlugin {
+    async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
+        Plugin::detect_installed_version(self, package_identifier).await
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for ShellPlugin {
+    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
+        Plugin::fetch_releases(self, package_identifier).await
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for ShellPlugin {
+    async fn execute_update(
+        &self,
+        package_identifier: &str,
+        to_version: &str,
+        release_info: Option<&ReleaseInfo>,
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<String> {
+        Plugin::execute_update(
+            self,
+            package_identifier,
+            to_version,
+            release_info,
+            output_tx,
+        )
+        .await
     }
 }
 

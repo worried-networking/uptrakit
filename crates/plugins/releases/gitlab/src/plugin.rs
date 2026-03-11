@@ -349,6 +349,27 @@ impl Plugin for GitLabPlugin {
     }
 }
 
+// ── PluginBase + subtrait implementations ────────────────────────────────
+
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    GitLabPlugin,
+    GitLabConfig,
+    "releases_gitlab",
+    fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+        Self::CAPABILITIES.to_vec()
+    }
+);
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for GitLabPlugin {
+    async fn fetch_releases(
+        &self,
+        package_identifier: &str,
+    ) -> uptrakit_plugin_infrastructure_core::Result<Vec<UpstreamRelease>> {
+        Plugin::fetch_releases(self, package_identifier).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

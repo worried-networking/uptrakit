@@ -848,6 +848,52 @@ impl Plugin for GitHubPlugin {
     }
 }
 
+// ── PluginBase + subtrait implementations ────────────────────────────────
+
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    GitHubPlugin,
+    GitHubConfig,
+    "releases_github",
+    fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+        Self::CAPABILITIES.to_vec()
+    },
+    fn required_sudo_commands(&self) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
+        Plugin::required_sudo_commands(self)
+    }
+);
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for GitHubPlugin {
+    async fn fetch_releases(
+        &self,
+        package_identifier: &str,
+    ) -> uptrakit_plugin_infrastructure_core::Result<Vec<UpstreamRelease>> {
+        Plugin::fetch_releases(self, package_identifier).await
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for GitHubPlugin {
+    async fn execute_update(
+        &self,
+        package_identifier: &str,
+        to_version: &str,
+        release_info: Option<&uptrakit_plugin_infrastructure_core::ReleaseInfo>,
+        output_tx: &tokio::sync::mpsc::Sender<
+            uptrakit_plugin_infrastructure_core::UpdateOutputLine,
+        >,
+    ) -> uptrakit_plugin_infrastructure_core::Result<String> {
+        Plugin::execute_update(
+            self,
+            package_identifier,
+            to_version,
+            release_info,
+            output_tx,
+        )
+        .await
+    }
+}
+
 /// Format an optional byte size for display.
 fn format_size(size: Option<u64>) -> String {
     match size {

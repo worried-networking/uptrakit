@@ -734,6 +734,80 @@ impl Plugin for NpmPlugin {
     }
 }
 
+// ── PluginBase + subtrait implementations ────────────────────────────────
+
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    NpmPlugin,
+    NpmConfig,
+    "package_manager_npm",
+    fn capabilities(&self) -> Vec<PluginCapability> {
+        Self::CAPABILITIES.to_vec()
+    },
+    fn required_sudo_commands(&self) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
+        Plugin::required_sudo_commands(self)
+    }
+);
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for NpmPlugin {
+    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
+        Plugin::discover_software(self).await
+    }
+
+    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
+        Plugin::detect_host_compatibility(self).await
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for NpmPlugin {
+    async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
+        Plugin::detect_installed_version(self, package_identifier).await
+    }
+
+    async fn batch_detect_installed_version(
+        &self,
+        items: &[BatchDetectItem],
+    ) -> Result<Vec<BatchDetectResult>> {
+        Plugin::batch_detect_installed_version(self, items).await
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for NpmPlugin {
+    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
+        Plugin::fetch_releases(self, package_identifier).await
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for NpmPlugin {
+    async fn execute_update(
+        &self,
+        package_identifier: &str,
+        to_version: &str,
+        release_info: Option<&ReleaseInfo>,
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<String> {
+        Plugin::execute_update(
+            self,
+            package_identifier,
+            to_version,
+            release_info,
+            output_tx,
+        )
+        .await
+    }
+
+    async fn execute_batch_update(
+        &self,
+        items: &[BatchUpdateItem],
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<Vec<BatchUpdateResult>> {
+        Plugin::execute_batch_update(self, items, output_tx).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

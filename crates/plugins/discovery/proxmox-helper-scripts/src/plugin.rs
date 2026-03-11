@@ -689,6 +689,35 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
     }
 }
 
+// ── PluginBase + subtrait implementations ────────────────────────────────
+
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    ProxmoxHelperScriptsPlugin,
+    ProxmoxHelperScriptsConfig,
+    "discovery_proxmox_helper_scripts",
+    fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+        Self::CAPABILITIES.to_vec()
+    },
+    fn required_sudo_commands(&self) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
+        Plugin::required_sudo_commands(self)
+    }
+);
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ProxmoxHelperScriptsPlugin {
+    async fn discover_software(
+        &self,
+    ) -> uptrakit_plugin_infrastructure_core::Result<Vec<DiscoveredSoftware>> {
+        Plugin::discover_software(self).await
+    }
+
+    async fn detect_host_compatibility(
+        &self,
+    ) -> uptrakit_plugin_infrastructure_core::Result<HostCompatibility> {
+        Plugin::detect_host_compatibility(self).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
