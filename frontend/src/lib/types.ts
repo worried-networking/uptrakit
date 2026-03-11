@@ -457,6 +457,7 @@ export interface CreatePluginConfigRequest {
 export interface CreateSoftwareItemRequest {
 	name: string;
 	featured?: boolean;
+	icon_url?: string | null;
 }
 
 export interface SoftwareItemResponse {
@@ -471,6 +472,7 @@ export interface SoftwareItemResponse {
 	update_available: boolean;
 	created_at: string;
 	updated_at: string;
+	icon_url?: string | null;
 }
 
 export interface SoftwareItemHostSummary {
@@ -549,6 +551,7 @@ export interface CreateSoftwareIgnoreRequest {
 export interface UpdateSoftwareItemRequest {
 	name?: string;
 	featured?: boolean;
+	icon_url?: string | null;
 }
 
 export type UpdateHistoryStatus = 'queued' | 'pending' | 'in_progress' | 'completed' | 'failed';

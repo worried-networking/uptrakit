@@ -12,7 +12,7 @@
 		deleteSoftwareItem,
 		unassignHostFromSoftwareItem
 	} from '$lib/api';
-	import { formatDate, formatVersion } from '$lib/utils';
+	import { formatDate, formatVersion, isValidLogoUrl } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -40,7 +40,7 @@
 
 	// Edit software item state
 	let editItem: boolean = $state(false);
-	let editForm = $state({ name: '', featured: true });
+	let editForm = $state({ name: '', featured: true, icon_url: '' });
 	let editSubmitting: boolean = $state(false);
 
 	// Delete software item state
@@ -174,7 +174,7 @@
 
 	function openEditModal() {
 		if (!item) return;
-		editForm = { name: item.name, featured: item.featured };
+		editForm = { name: item.name, featured: item.featured, icon_url: item.icon_url ?? '' };
 		editItem = true;
 	}
 
@@ -193,9 +193,12 @@
 		if (!item || editSubmitting) return;
 		editSubmitting = true;
 		try {
+			const trimmedIcon = editForm.icon_url.trim();
+			const icon_url = trimmedIcon === '' ? (item.icon_url ? null : undefined) : trimmedIcon;
 			await updateSoftwareItem(item.id, {
 				name: editForm.name || undefined,
-				featured: editForm.featured
+				featured: editForm.featured,
+				icon_url
 			});
 			showSuccess('Software item updated.');
 			editItem = false;
@@ -453,7 +456,16 @@
 		<!-- Header -->
 		<div class="mb-6 flex flex-wrap items-start justify-between gap-4">
 			<div>
-				<h1 class="h1">{item.name}</h1>
+				<h1 class="h1">
+					{#if isValidLogoUrl(item.icon_url)}
+						<img
+							src={item.icon_url}
+							alt=""
+							class="h-8 w-8 inline-block mr-2 rounded object-contain align-middle"
+							referrerpolicy="no-referrer"
+						/>
+					{/if}{item.name}
+				</h1>
 				<div class="mt-2 flex flex-wrap items-center gap-2">
 					{#if canManage}
 						<button
@@ -826,6 +838,13 @@
 		<label class="label">
 			<span>Name</span>
 			<input class="input" type="text" bind:value={editForm.name} />
+		</label>
+		<label class="label">
+			<span>Icon URL <span class="text-surface-400 font-normal">(optional, HTTPS)</span></span>
+			<input class="input" type="text" bind:value={editForm.icon_url} placeholder="https://example.com/icon.png" />
+			{#if editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())}
+				<p class="text-warning-500 text-xs">Icon URL must be a valid HTTPS URL.</p>
+			{/if}
 		</label>
 		<label class="flex items-center gap-3">
 			<input class="checkbox" type="checkbox" bind:checked={editForm.featured} />

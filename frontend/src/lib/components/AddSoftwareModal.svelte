@@ -2,6 +2,7 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import { createSoftwareItem } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
+	import { isValidLogoUrl } from '$lib/utils';
 	import type { SoftwareItemResponse } from '$lib/types';
 
 	let {
@@ -14,7 +15,12 @@
 
 	let name: string = $state('');
 	let featured: boolean = $state(true);
+	let iconUrl: string = $state('');
 	let submitting: boolean = $state(false);
+
+	const iconUrlWarning = $derived(
+		iconUrl.trim() && !isValidLogoUrl(iconUrl.trim()) ? 'Icon URL must be a valid HTTPS URL.' : null
+	);
 
 	async function submit() {
 		if (submitting) return;
@@ -25,7 +31,8 @@
 		}
 		submitting = true;
 		try {
-			const created = await createSoftwareItem({ name: trimmedName, featured });
+			const trimmedIcon = iconUrl.trim() || null;
+			const created = await createSoftwareItem({ name: trimmedName, featured, icon_url: trimmedIcon });
 			showSuccess('Software item registered.');
 			onsuccess(created);
 		} catch (e) {
@@ -42,6 +49,14 @@
 	<label class="label">
 		<span>Name</span>
 		<input class="input" bind:value={name} placeholder="Firefox" />
+	</label>
+
+	<label class="label">
+		<span>Icon URL <span class="text-surface-400 font-normal">(optional, HTTPS)</span></span>
+		<input class="input" bind:value={iconUrl} placeholder="https://example.com/icon.png" />
+		{#if iconUrlWarning}
+			<p class="text-warning-500 text-xs">{iconUrlWarning}</p>
+		{/if}
 	</label>
 
 	<label class="flex items-center gap-3">

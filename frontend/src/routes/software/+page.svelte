@@ -14,7 +14,7 @@
 		triggerSoftwareUpdate,
 		batchSoftwareItems
 	} from '$lib/api';
-	import { formatDate, formatVersion, parseUrlPage } from '$lib/utils';
+	import { formatDate, formatVersion, parseUrlPage, isValidLogoUrl } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
@@ -48,8 +48,8 @@
 
 	const tabExtensions = $derived(getTabExtensions('software'));
 	const isItemsTab = $derived(activeTab === 'all' || activeTab === 'featured' || activeTab === 'unfeatured');
-	let editItem: { id: string; name: string; featured: boolean } | null = $state(null);
-	let editForm = $state({ name: '', featured: true });
+	let editItem: { id: string; name: string; featured: boolean; icon_url?: string | null } | null = $state(null);
+	let editForm = $state({ name: '', featured: true, icon_url: '' });
 	let editSubmitting: boolean = $state(false);
 	let pluginTypeNames: Map<string, string> = $state(new Map());
 	let updateModalItem: SoftwareItemResponse | null = $state(null);
@@ -192,8 +192,8 @@
 
 	function openEditModal(item: SoftwareItemResponse) {
 		closeMenu();
-		editItem = { id: item.id, name: item.name, featured: item.featured };
-		editForm = { name: item.name, featured: item.featured };
+		editItem = { id: item.id, name: item.name, featured: item.featured, icon_url: item.icon_url };
+		editForm = { name: item.name, featured: item.featured, icon_url: item.icon_url ?? '' };
 	}
 
 	async function toggleFeatured(item: SoftwareItemResponse) {
@@ -210,9 +210,13 @@
 		if (!editItem || editSubmitting) return;
 		editSubmitting = true;
 		try {
+			const trimmedIcon = editForm.icon_url.trim();
+			// null clears, string sets, undefined keeps existing
+			const icon_url = trimmedIcon === '' ? (editItem.icon_url ? null : undefined) : trimmedIcon;
 			const updated = await updateSoftwareItem(editItem.id, {
 				name: editForm.name || undefined,
-				featured: editForm.featured
+				featured: editForm.featured,
+				icon_url
 			});
 			items = items.map((i) => (i.id === editItem!.id ? updated : i));
 			showSuccess(`"${updated.name}" updated.`);
@@ -492,6 +496,14 @@
 											<span class="mr-1 {item.featured ? 'text-warning-500' : 'text-surface-400'}"
 												>{item.featured ? '★' : '☆'}</span
 											>
+										{/if}
+										{#if isValidLogoUrl(item.icon_url)}
+											<img
+												src={item.icon_url}
+												alt=""
+												class="h-5 w-5 inline-block mr-1 rounded object-contain"
+												referrerpolicy="no-referrer"
+											/>
 										{/if}
 										<a href="/software/{item.id}" class="hover:underline font-medium">{item.name}</a>
 										{#if item.update_available}
@@ -785,6 +797,14 @@
 		<label class="label">
 			<span>Name</span>
 			<input class="input" type="text" bind:value={editForm.name} />
+		</label>
+
+		<label class="label">
+			<span>Icon URL <span class="text-surface-400 font-normal">(optional, HTTPS)</span></span>
+			<input class="input" type="text" bind:value={editForm.icon_url} placeholder="https://example.com/icon.png" />
+			{#if editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())}
+				<p class="text-warning-500 text-xs">Icon URL must be a valid HTTPS URL.</p>
+			{/if}
 		</label>
 
 		<label class="flex items-center gap-3">
