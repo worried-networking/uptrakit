@@ -39,6 +39,7 @@ pub enum PluginType {
     PackageManagerPkg,
     PackageManagerApk,
     PackageManagerSnap,
+    PackageManagerCargo,
     GenericShell,
     InfrastructureProxmox,
     /// An unknown plugin type received from a newer peer.
@@ -69,6 +70,7 @@ impl PluginType {
             Self::PackageManagerPkg => "package_manager_pkg",
             Self::PackageManagerApk => "package_manager_apk",
             Self::PackageManagerSnap => "package_manager_snap",
+            Self::PackageManagerCargo => "package_manager_cargo",
             Self::GenericShell => "generic_shell",
             Self::InfrastructureProxmox => "infrastructure_proxmox",
             Self::Other(s) => s.as_str(),
@@ -94,6 +96,7 @@ impl PluginType {
             Self::PackageManagerPkg => "BSD pkg",
             Self::PackageManagerApk => "APK",
             Self::PackageManagerSnap => "Snap",
+            Self::PackageManagerCargo => "cargo install",
             Self::GenericShell => "Shell",
             Self::InfrastructureProxmox => "Proxmox VE",
             Self::Other(s) => s.as_str(),
@@ -135,6 +138,7 @@ impl FromStr for PluginType {
             "package_manager_pkg" => Ok(Self::PackageManagerPkg),
             "package_manager_apk" => Ok(Self::PackageManagerApk),
             "package_manager_snap" => Ok(Self::PackageManagerSnap),
+            "package_manager_cargo" => Ok(Self::PackageManagerCargo),
             "generic_shell" => Ok(Self::GenericShell),
             "infrastructure_proxmox" => Ok(Self::InfrastructureProxmox),
             _ => Err(ParsePluginTypeError::Invalid),
@@ -176,6 +180,7 @@ impl From<String> for PluginType {
             "package_manager_pkg" => Self::PackageManagerPkg,
             "package_manager_apk" => Self::PackageManagerApk,
             "package_manager_snap" => Self::PackageManagerSnap,
+            "package_manager_cargo" => Self::PackageManagerCargo,
             "generic_shell" => Self::GenericShell,
             "infrastructure_proxmox" => Self::InfrastructureProxmox,
             _ => Self::Other(s),
@@ -202,6 +207,7 @@ impl From<PluginType> for String {
             PluginType::PackageManagerPkg => "package_manager_pkg".to_string(),
             PluginType::PackageManagerApk => "package_manager_apk".to_string(),
             PluginType::PackageManagerSnap => "package_manager_snap".to_string(),
+            PluginType::PackageManagerCargo => "package_manager_cargo".to_string(),
             PluginType::GenericShell => "generic_shell".to_string(),
             PluginType::InfrastructureProxmox => "infrastructure_proxmox".to_string(),
             PluginType::Other(s) => s,
@@ -530,6 +536,10 @@ mod tests {
             PluginType::PackageManagerSnap
         );
         assert_eq!(
+            PluginType::from("package_manager_cargo".to_string()),
+            PluginType::PackageManagerCargo
+        );
+        assert_eq!(
             PluginType::from("generic_shell".to_string()),
             PluginType::GenericShell
         );
@@ -594,6 +604,10 @@ mod tests {
             PluginType::PackageManagerSnap.to_string(),
             "package_manager_snap"
         );
+        assert_eq!(
+            PluginType::PackageManagerCargo.to_string(),
+            "package_manager_cargo"
+        );
         assert_eq!(PluginType::GenericShell.to_string(), "generic_shell");
         assert_eq!(
             PluginType::InfrastructureProxmox.to_string(),
@@ -652,6 +666,10 @@ mod tests {
         assert_eq!(
             "package_manager_snap".parse::<PluginType>().ok(),
             Some(PluginType::PackageManagerSnap)
+        );
+        assert_eq!(
+            "package_manager_cargo".parse::<PluginType>().ok(),
+            Some(PluginType::PackageManagerCargo)
         );
         assert_eq!(
             "releases_gitlab".parse::<PluginType>().ok(),
@@ -719,6 +737,10 @@ mod tests {
         assert_eq!(PluginType::PackageManagerPkg.display_name(), "BSD pkg");
         assert_eq!(PluginType::PackageManagerApk.display_name(), "APK");
         assert_eq!(PluginType::PackageManagerSnap.display_name(), "Snap");
+        assert_eq!(
+            PluginType::PackageManagerCargo.display_name(),
+            "cargo install"
+        );
         assert_eq!(PluginType::GenericShell.display_name(), "Shell");
         assert_eq!(
             PluginType::InfrastructureProxmox.display_name(),
@@ -749,6 +771,22 @@ mod tests {
     }
 
     #[test]
+    fn plugin_type_cargo_serialization() {
+        let cargo = PluginType::PackageManagerCargo;
+        let json = serde_json::to_string(&cargo).expect("serialize");
+        assert_eq!(json, r#""package_manager_cargo""#);
+        let deserialized: PluginType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, cargo);
+    }
+
+    #[test]
+    fn plugin_type_cargo_deserializes_to_cargo_variant() {
+        let deserialized: PluginType =
+            serde_json::from_str(r#""package_manager_cargo""#).expect("deserialize cargo");
+        assert_eq!(deserialized, PluginType::PackageManagerCargo);
+    }
+
+    #[test]
     fn plugin_type_display_round_trips_through_from_str() {
         let variants = [
             PluginType::ReleasesGithub,
@@ -764,6 +802,7 @@ mod tests {
             PluginType::PackageManagerPkg,
             PluginType::PackageManagerApk,
             PluginType::PackageManagerSnap,
+            PluginType::PackageManagerCargo,
             PluginType::GenericShell,
             PluginType::InfrastructureProxmox,
         ];
@@ -792,6 +831,7 @@ mod tests {
             PluginType::PackageManagerPkg,
             PluginType::PackageManagerApk,
             PluginType::PackageManagerSnap,
+            PluginType::PackageManagerCargo,
             PluginType::GenericShell,
             PluginType::InfrastructureProxmox,
             PluginType::Other("my_plugin".to_string()),
