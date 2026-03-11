@@ -167,6 +167,15 @@ pub(crate) mod plugin_configs {
     }
 }
 
+pub(crate) mod plugin_type_settings {
+    /// `GET /api/v1/plugin-type-settings`
+    pub(crate) const BASE: &str = "/api/v1/plugin-type-settings";
+    /// `GET /api/v1/plugin-type-settings/{plugin_type}` · `PUT …` · `DELETE …`
+    pub(crate) fn by_type(plugin_type: &str) -> String {
+        format!("/api/v1/plugin-type-settings/{plugin_type}")
+    }
+}
+
 pub(crate) mod scheduler {
     use uuid::Uuid;
     /// `GET /api/v1/scheduler/tasks`

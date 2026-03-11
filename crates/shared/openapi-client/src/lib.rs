@@ -24,6 +24,7 @@ pub mod oidc_providers;
 pub mod permissions;
 pub mod pki;
 pub mod plugin_configs;
+pub mod plugin_type_settings;
 pub mod roles;
 pub mod scheduler;
 pub mod services;

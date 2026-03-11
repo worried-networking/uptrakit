@@ -23,6 +23,7 @@ pub mod oidc_auth;
 #[cfg(feature = "oidc")]
 pub mod oidc_providers;
 pub mod plugin_configs;
+pub mod plugin_type_settings;
 pub mod roles;
 pub mod scheduler;
 pub mod server_cert;
