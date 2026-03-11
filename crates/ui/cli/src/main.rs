@@ -352,6 +352,9 @@ enum SoftwareItemsCommands {
         /// Feature or unfeature on creation
         #[arg(long)]
         featured: Option<bool>,
+        /// Optional HTTPS URL to an icon/logo image
+        #[arg(long)]
+        icon_url: Option<String>,
     },
     /// Update a software item
     Update {
@@ -363,6 +366,12 @@ enum SoftwareItemsCommands {
         /// Feature or unfeature
         #[arg(long)]
         featured: Option<bool>,
+        /// Set a new HTTPS icon URL
+        #[arg(long)]
+        icon_url: Option<String>,
+        /// Clear the icon URL
+        #[arg(long)]
+        clear_icon_url: bool,
     },
     /// Delete a software item
     Delete {
@@ -1983,11 +1992,16 @@ async fn run(cli: Cli) -> error::Result<()> {
                 .await?;
                 output::print_output(format, &resp)?;
             }
-            SoftwareItemsCommands::Create { name, featured } => {
+            SoftwareItemsCommands::Create {
+                name,
+                featured,
+                icon_url,
+            } => {
                 let resp =
                     commands::software_items::create(commands::software_items::CreateParams {
                         name,
                         featured,
+                        icon_url,
                         server: cli.server.as_deref(),
                         token: cli.token.as_deref(),
                         insecure,
@@ -1996,12 +2010,20 @@ async fn run(cli: Cli) -> error::Result<()> {
                     .await?;
                 output::print_output(format, &resp)?;
             }
-            SoftwareItemsCommands::Update { id, name, featured } => {
+            SoftwareItemsCommands::Update {
+                id,
+                name,
+                featured,
+                icon_url,
+                clear_icon_url,
+            } => {
                 let resp =
                     commands::software_items::update(commands::software_items::UpdateParams {
                         id: &id,
                         name,
                         featured,
+                        icon_url,
+                        clear_icon_url,
                         server: cli.server.as_deref(),
                         token: cli.token.as_deref(),
                         insecure,
@@ -5230,7 +5252,7 @@ mod tests {
                 .expect("should parse");
         match args.command {
             Some(Commands::SoftwareItems {
-                command: SoftwareItemsCommands::Create { name, featured },
+                command: SoftwareItemsCommands::Create { name, featured, .. },
             }) => {
                 assert_eq!(name, "My App");
                 assert!(featured.is_none());
@@ -5254,7 +5276,10 @@ mod tests {
         .expect("should parse");
         match args.command {
             Some(Commands::SoftwareItems {
-                command: SoftwareItemsCommands::Update { id, name, featured },
+                command:
+                    SoftwareItemsCommands::Update {
+                        id, name, featured, ..
+                    },
             }) => {
                 assert_eq!(id, uuid(ITEM_UUID));
                 assert_eq!(name.as_deref(), Some("Updated App"));

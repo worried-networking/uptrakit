@@ -191,6 +191,7 @@ pub struct ShowParams<'a> {
 pub struct CreateParams<'a> {
     pub name: String,
     pub featured: Option<bool>,
+    pub icon_url: Option<String>,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
     pub insecure: bool,
@@ -201,6 +202,8 @@ pub struct UpdateParams<'a> {
     pub id: &'a Uuid,
     pub name: Option<String>,
     pub featured: Option<bool>,
+    pub icon_url: Option<String>,
+    pub clear_icon_url: bool,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
     pub insecure: bool,
@@ -294,6 +297,7 @@ pub async fn create(params: CreateParams<'_>) -> Result<SoftwareItemResponse> {
     let req = CreateSoftwareItemRequest {
         name: params.name,
         featured: params.featured.unwrap_or(true),
+        icon_url: params.icon_url,
     };
     client.create_software_item(&req).await.context_to()
 }
@@ -305,9 +309,15 @@ pub async fn update(params: UpdateParams<'_>) -> Result<SoftwareItemResponse> {
         params.insecure,
         params.request_timeout,
     )?;
+    let icon_url = if params.clear_icon_url {
+        Some(serde_json::Value::Null)
+    } else {
+        params.icon_url.map(serde_json::Value::String)
+    };
     let req = UpdateSoftwareItemRequest {
         name: params.name,
         featured: params.featured,
+        icon_url,
     };
     client
         .update_software_item(params.id, &req)
@@ -483,6 +493,7 @@ mod tests {
             update_available: false,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
+            icon_url: None,
         }
     }
 
@@ -501,6 +512,7 @@ mod tests {
             update_available: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
+            icon_url: None,
         }
     }
 
@@ -559,6 +571,7 @@ mod tests {
             update_available: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
+            icon_url: None,
             hosts: vec![SoftwareItemHostSummary {
                 id: "f1f2f3f4-e1e2-d1d2-c1c2-b1b2b3b4b5b6"
                     .parse::<Uuid>()
@@ -617,6 +630,7 @@ mod tests {
             update_available: false,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
+            icon_url: None,
             hosts: vec![SoftwareItemHostSummary {
                 id: "f1f2f3f4-e1e2-d1d2-c1c2-b1b2b3b4b5b6"
                     .parse::<Uuid>()
@@ -671,6 +685,7 @@ mod tests {
             update_available: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
+            icon_url: None,
         };
         let s = item.to_human_string();
         assert!(s.contains("My App"));
@@ -696,6 +711,7 @@ mod tests {
             update_available: false,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
+            icon_url: None,
         };
         let s = item.to_human_string();
         assert!(s.contains(" no"), "update_available should show 'no'");

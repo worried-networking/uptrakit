@@ -100,6 +100,7 @@ fn sample_software_item() -> SoftwareItemResponse {
         update_available: false,
         created_at: datetime!(2025-01-01 00:00:00 UTC),
         updated_at: datetime!(2025-01-01 00:00:00 UTC),
+        icon_url: None,
     }
 }
 
