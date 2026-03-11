@@ -6943,6 +6943,7 @@ dependencies = [
  "tracing",
  "uptrakit-command",
  "uptrakit-extension-framework",
+ "uptrakit-notification-plugin-core",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uuid",

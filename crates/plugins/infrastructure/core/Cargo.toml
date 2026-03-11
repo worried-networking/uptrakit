@@ -9,7 +9,8 @@ publish = false
 
 [features]
 default = []
-agent-infra = ["dep:sea-orm", "dep:sea-orm-migration", "dep:uuid"]
+agent-infra = ["dep:sea-orm", "dep:sea-orm-migration", "dep:uuid", "migrations"]
+migrations = ["dep:sea-orm-migration"]
 plugin-ops = ["dep:sea-orm", "dep:uuid"]
 
 [dependencies]
@@ -25,6 +26,7 @@ tokio = { workspace = true, features = ["sync"] }
 uptrakit-command = { workspace = true }
 uptrakit-extension-framework = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
+uptrakit-notification-plugin-core = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 sea-orm = { workspace = true, optional = true }
 sea-orm-migration = { workspace = true, optional = true }

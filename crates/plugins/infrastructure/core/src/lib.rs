@@ -6,6 +6,7 @@ pub mod batch_update;
 pub mod command;
 pub mod error;
 pub mod form_schema;
+pub mod plugin_base;
 #[cfg(feature = "plugin-ops")]
 pub mod plugin_ops;
 pub mod secrets;
@@ -19,6 +20,12 @@ pub use batch_fetch::{BatchFetchItem, BatchFetchResult};
 pub use batch_update::{BatchUpdateItem, BatchUpdateResult};
 pub use error::{PluginError, Result};
 pub use form_schema::ConfigFormSchema;
+pub use plugin_base::{
+    DiscoveryPlugin, NotificationTransportPlugin, PackageIndexPlugin, PluginBase,
+    ReleaseFetcherPlugin, UpdateExecutorPlugin, UpdateHooksPlugin, VersionDetectorPlugin,
+};
+#[cfg(feature = "agent-infra")]
+pub use plugin_base::{GuestExecPlugin, HostLifecyclePlugin, HostReportPlugin};
 pub use secrets::SecretMasking;
 pub use traits::{
     HostCompatibility, Plugin, PreUpdateHookResult, SudoCommandEntry, SudoHelperScript,
