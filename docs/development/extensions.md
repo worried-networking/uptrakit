@@ -65,7 +65,7 @@ Internally tagged with `"type"`. Four variants:
 | Variant | Fields | Description |
 | --- | --- | --- |
 | `page` | `nav_section`, `icon` (optional) | Full sidebar page |
-| `panel` | `target_page`, `position` | Panel injected into an existing page |
+| `panel` | `target_page`, `position`, `tab_group` (optional) | Panel injected into an existing page |
 | `context_menu_group` | `target_entity`, `group_label` | Action group in an entity context menu |
 | `table_columns` | `target_table`, `columns` | Extra columns added to an existing table |
 
@@ -75,12 +75,22 @@ Internally tagged with `"type"`. Four variants:
 
 ### `PanelPosition`
 
+Adjacently tagged with `"type"` and `"value"`. Serialized as JSON objects (e.g., `{"type": "tab"}`).
+
 | Variant | Description |
 | --- | --- |
 | `tab` (default) | Rendered as a tab alongside existing tabs |
 | `below` | Below the main content |
 | `above` | Above the main content |
-| `Other(String)` | Forward-compatible catch-all |
+| `Other(String)` | Forward-compatible catch-all (serialized as `{"type": "other", "value": "..."}`) |
+
+### `tab_group`
+
+When set on a `Panel` placement with `position: Tab`, all extensions sharing the same
+`(target_page, tab_group)` pair render as sections within a single shared tab. The tab
+label is the `tab_group` value (e.g., `"Notification Channels"`).
+
+Extensions without a `tab_group` get their own individual tab (backward compatible).
 
 ### `ExtensionTargeting`
 

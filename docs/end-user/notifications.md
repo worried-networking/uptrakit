@@ -53,24 +53,30 @@ The Settings page in the web UI provides built-in tabs for managing notification
 rules, and viewing the delivery log. Channel management tabs appear automatically based on
 which notification plugins are enabled.
 
-### Channel management tabs
+### Notification Channels tab
 
-Each enabled notification plugin adds a tab to the Settings page:
+All enabled notification plugins share a single **Notification Channels** tab on the Settings page,
+with each channel type rendered as a section:
 
 - **Webhook Channels** — create, edit, test, and delete webhook endpoints
 - **Telegram Channels** — manage Telegram bot channels
-- **Email Channels** — manage email recipient lists and configure SMTP settings
+- **Email Channels** — manage email recipient lists and configure per-tenant SMTP overrides
 
-These tabs use the extension framework and render dynamically. Channel creation and editing
+These sections use the extension framework and render dynamically. Channel creation and editing
 open form modals with fields appropriate to the channel type. Sensitive fields (bot tokens,
 webhook secrets, SMTP passwords) are masked with `***` and preserved on edit unless explicitly
 changed.
 
 ### SMTP configuration
 
-The Email Channels tab includes a **Configure SMTP** button that opens a form pre-populated
-with the current SMTP settings. Changes are saved with patch semantics: only fields you modify
-are updated, and empty fields are left unchanged.
+SMTP settings use a two-layer architecture:
+
+- **Global SMTP Defaults** — configured on the **Global Settings** page in the "SMTP Defaults"
+  section. These are server-wide defaults shared across all tenants.
+- **Per-tenant SMTP overrides** — the Email Channels section includes a **Configure SMTP** button
+  that opens a form pre-populated with the current per-tenant SMTP settings. Non-empty fields
+  override the global defaults. Changes are saved with patch semantics: only fields you modify
+  are updated, and empty fields inherit from global defaults.
 
 ### Notification Rules tab
 

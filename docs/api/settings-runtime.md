@@ -19,7 +19,8 @@ Settings are stored in the database and reconciled with CLI flags during startup
 | Registration | `registration.*` | `/settings/registration` | Runtime-changeable. |
 | Authentication | `authentication.*` | `/settings/authentication` | Runtime-changeable. |
 | Service Certificates | `service_certificates.*` | `/settings/service-certificates` | Runtime-changeable. |
-| SMTP | `smtp.*` | `/settings/smtp` | Runtime-changeable; read by dispatcher on each delivery. |
+| SMTP (per-tenant) | `smtp.*` | Extension action | Runtime-changeable; per-tenant overrides of global defaults. |
+| SMTP (global) | `global_smtp.*` | Extension action | Runtime-changeable; server-wide defaults read by dispatcher on each delivery. |
 | NATS | `nats.url` | `/settings/nats` | Stored in DB; **requires restart** to change the live connection. |
 
 Not DB-managed: `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`, `--oidc-*` bootstrap flags.
@@ -131,7 +132,7 @@ Settings are stored in two separate tables:
 
 | Table | PK | Purpose |
 | --- | --- | --- |
-| `global_settings` | `key` | System-wide settings (no `tenant_id`). 13 keys: network, PKI, MQTT limit, multi-tenancy, JWT signing key, master key verification. |
+| `global_settings` | `key` | System-wide settings (no `tenant_id`). 20 keys: network, PKI, MQTT limit, multi-tenancy, JWT signing key, master key verification, global SMTP defaults. |
 | `settings` | `(tenant_id, key)` | Per-tenant settings (registration, authentication, service certificates, SMTP, etc.). |
 
 The `global_settings` table was introduced to cleanly separate system-wide configuration from
@@ -308,69 +309,56 @@ response always includes the computed `url`.
 
 ### SMTP settings
 
-Global SMTP settings control how the email notification channel connects to an outgoing mail server. These
-settings are shared across all email notification channels for the tenant. Per-channel config stores only
-recipient addresses (see [Notifications Development](../development/notifications.md)).
+SMTP settings use a two-layer architecture: **global defaults** (server-wide) and
+**per-tenant overrides** (optional, field-by-field). The dispatcher merges both layers before each
+email delivery. Per-channel config stores only recipient addresses
+(see [Notifications Development](../development/notifications.md)).
 
-**Settings stored in the `settings` key-value table:**
+#### Global SMTP defaults
+
+Stored in the `global_settings` table. Managed via the `get_global_smtp` / `save_global_smtp`
+extension actions on the "SMTP Defaults" panel in Global Settings.
 
 | DB key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `smtp.host` | string? | `null` | SMTP server hostname |
-| `smtp.port` | u16? | `null` (effective default: 587) | SMTP server port |
-| `smtp.username` | string? | `null` | SMTP auth username |
-| `smtp.password` | string? | `null` (encrypted) | SMTP auth password (AES-256-GCM) |
-| `smtp.from_address` | string? | `null` | Sender email address |
-| `smtp.from_name` | string? | `null` | Sender display name |
-| `smtp.tls_mode` | string | `"starttls"` | TLS mode: `starttls`, `tls`, or `none` |
+| `global_smtp.host` | string? | `null` | SMTP server hostname |
+| `global_smtp.port` | u16? | `null` (effective default: 587) | SMTP server port |
+| `global_smtp.username` | string? | `null` | SMTP auth username |
+| `global_smtp.password` | string? | `null` (encrypted) | SMTP auth password (AES-256-GCM) |
+| `global_smtp.from_address` | string? | `null` | Sender email address |
+| `global_smtp.from_name` | string? | `null` | Sender display name |
+| `global_smtp.tls_mode` | string | `"starttls"` | TLS mode: `starttls`, `tls`, or `none` |
 
-Email delivery is disabled (notifications skipped with a warning) until both `smtp.host` and
-`smtp.from_address` are configured (`SmtpSettingsSnapshot::is_configured()`).
+#### Per-tenant SMTP overrides
 
-**`GET /api/v1/settings/smtp` — Response (`SmtpSettingsResponse`):**
+Stored in the `settings` table (keyed by `tenant_id`). Managed via the `get_smtp` / `save_smtp`
+extension actions on the email channel extension.
 
-```json
-{
-  "host": "smtp.example.com",
-  "port": 587,
-  "username": "sender@example.com",
-  "has_password": true,
-  "from_address": "noreply@example.com",
-  "from_name": "Uptrakit",
-  "tls_mode": "starttls"
-}
-```
+| DB key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `smtp.host` | string? | `null` | SMTP server hostname (overrides global) |
+| `smtp.port` | u16? | `null` | SMTP server port (overrides global) |
+| `smtp.username` | string? | `null` | SMTP auth username (overrides global) |
+| `smtp.password` | string? | `null` (encrypted) | SMTP auth password (overrides global) |
+| `smtp.from_address` | string? | `null` | Sender email address (overrides global) |
+| `smtp.from_name` | string? | `null` | Sender display name (overrides global) |
+| `smtp.tls_mode` | string | `"starttls"` | TLS mode (overrides global) |
 
-`has_password: true` indicates a password is stored. The actual password is never returned.
+#### Merge semantics
 
-**`PUT /api/v1/settings/smtp` — Request (`UpdateSmtpSettingsRequest`):**
+At delivery time, `merge_smtp_into_config(global, tenant, config)` resolves the effective
+SMTP settings: for each field, the per-tenant value is used if non-empty, otherwise the
+global default. Email delivery is disabled (notifications skipped with a warning) until
+both `host` and `from_address` are configured in at least one layer
+(`SmtpSettingsSnapshot::is_configured()`).
 
-All fields are optional. Omitting a field leaves the current value unchanged. Explicitly setting a nullable
-field to `null` clears the stored value.
+#### Extension action responses
 
-```json
-{
-  "host": "smtp.example.com",
-  "port": 587,
-  "username": "sender@example.com",
-  "password": "secret",
-  "from_address": "noreply@example.com",
-  "from_name": "Uptrakit",
-  "tls_mode": "starttls"
-}
-```
+The `get_smtp` action returns per-tenant values plus `effective_*` fields showing the merged
+result and `has_global_defaults: bool`. The `get_global_smtp` action returns only global defaults.
 
-To clear the password: `"password": null`. To clear the username: `"username": null`.
-
-**Validation rules:**
-
-- `host`: non-empty string if provided
-- `port`: 1–65535 if provided
-- `from_address`: must contain `@` if provided
-- `tls_mode`: must be `"starttls"`, `"tls"`, or `"none"` if provided
-
-**Security:** The password is encrypted with `uptrakit_crypto::encrypt_str` (AES-256-GCM) before storage.
-See [Notifications Security — Email Channel Security](../security/notifications-security.md#email-channel-security).
+**Security:** Passwords are encrypted with `uptrakit_crypto::encrypt_str` (AES-256-GCM) before
+storage. See [Notifications Security — Email Channel Security](../security/notifications-security.md#email-channel-security).
 
 **CLI:**
 

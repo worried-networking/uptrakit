@@ -434,14 +434,23 @@ It is gated on the `email` feature flag.
 
 ### Config split
 
-The email plugin uses a **two-layer config** model:
+The email plugin uses a **three-layer config** model:
 
 - **Per-channel config** (stored encrypted in `notification_channels.config`): contains only `to_addresses`.
-- **Global SMTP settings** (stored in the `settings` key-value table, per-tenant): SMTP server host, port,
-  credentials, sender identity, and TLS mode.
+- **Global SMTP defaults** (stored in the `global_settings` table): server-wide SMTP server host, port,
+  credentials, sender identity, and TLS mode. Managed via the "SMTP Defaults" extension panel on the
+  Global Settings page.
+- **Per-tenant SMTP overrides** (stored in the `settings` table, keyed by `tenant_id`): per-tenant SMTP
+  settings that override global defaults on a field-by-field basis.
 
-The dispatcher merges these two sources before calling `deliver()`. Per-channel config contains no SMTP
-credentials, which means multiple email channels can share the same SMTP server without duplicating secrets.
+The dispatcher merges all three layers before calling `deliver()`:
+
+1. Start with global SMTP defaults (`settings.global_smtp()`).
+2. Overlay per-tenant SMTP settings (`settings.smtp()`): non-empty tenant fields replace global defaults.
+3. Merge the resulting SMTP config into the per-channel config object.
+
+Per-channel config contains no SMTP credentials, which means multiple email channels can share the same
+SMTP server without duplicating secrets.
 
 ### Per-channel config fields
 
@@ -453,19 +462,36 @@ credentials, which means multiple email channels can share the same SMTP server 
 
 - `to_addresses`: non-empty list of recipient email addresses (validated at channel create/update time).
 
-### Global SMTP settings
+### Global SMTP defaults
 
-Configured via `PUT /api/v1/settings/smtp` (see [Settings Runtime Architecture](../api/settings-runtime.md)):
+Server-wide SMTP defaults are stored in the `global_settings` table and managed via the
+"SMTP Defaults" extension panel on the Global Settings page. See
+[Settings Runtime Architecture](../api/settings-runtime.md) for the full key reference.
 
 | Setting key | DB key | Description |
 | --- | --- | --- |
-| SMTP host | `smtp.host` | SMTP server hostname (required for email delivery) |
-| SMTP port | `smtp.port` | SMTP server port (default: 587) |
-| SMTP username | `smtp.username` | Auth username (optional) |
-| SMTP password | `smtp.password` | Auth password (stored encrypted, optional) |
-| From address | `smtp.from_address` | Sender email address (required for email delivery) |
-| From name | `smtp.from_name` | Sender display name (optional) |
-| TLS mode | `smtp.tls_mode` | `"starttls"` (default), `"tls"`, or `"none"` |
+| SMTP host | `global_smtp.host` | SMTP server hostname |
+| SMTP port | `global_smtp.port` | SMTP server port (default: 587) |
+| SMTP username | `global_smtp.username` | Auth username (optional) |
+| SMTP password | `global_smtp.password` | Auth password (stored encrypted, optional) |
+| From address | `global_smtp.from_address` | Sender email address |
+| From name | `global_smtp.from_name` | Sender display name (optional) |
+| TLS mode | `global_smtp.tls_mode` | `"starttls"` (default), `"tls"`, or `"none"` |
+
+### Per-tenant SMTP overrides
+
+Per-tenant SMTP settings override the global defaults on a field-by-field basis. Empty fields
+inherit from global defaults. Configured via the email channel extension's "Configure SMTP" action.
+
+| Setting key | DB key | Description |
+| --- | --- | --- |
+| SMTP host | `smtp.host` | SMTP server hostname (overrides global) |
+| SMTP port | `smtp.port` | SMTP server port (overrides global) |
+| SMTP username | `smtp.username` | Auth username (overrides global) |
+| SMTP password | `smtp.password` | Auth password (stored encrypted, overrides global) |
+| From address | `smtp.from_address` | Sender email address (overrides global) |
+| From name | `smtp.from_name` | Sender display name (overrides global) |
+| TLS mode | `smtp.tls_mode` | TLS mode (overrides global) |
 
 ### TLS modes
 
@@ -492,10 +518,12 @@ The email subject is set to `message.title`.
 The dispatcher (`crates/ui/web-api/src/notifications/dispatcher.rs`) performs the merge before each delivery:
 
 1. Load the per-channel config (decrypted `to_addresses`).
-2. Read the live `SmtpSettingsSnapshot` from `settings.smtp()`.
-3. If `smtp.is_configured()` returns false (host or from_address missing), the notification is skipped
-   with a `tracing::warn!` log and the log entry is marked `"failed"`.
-4. Otherwise, call `merge_smtp_into_config()` to add SMTP fields to the config object, then call
+2. Read the live global SMTP snapshot from `settings.global_smtp()` and the per-tenant snapshot from
+   `settings.smtp()`.
+3. If neither layer has SMTP configured (`is_configured()` returns false for both), the notification is
+   skipped with a `tracing::warn!` log.
+4. Otherwise, call `merge_smtp_into_config(&global_smtp, &tenant_smtp, config)` which performs
+   field-by-field inheritance (tenant non-empty fields override global defaults), then call
    `email_plugin.deliver(&merged_config, &message)`.
 
 The same merge logic is applied in the `test_channel` route handler
@@ -548,9 +576,8 @@ The same merge logic is applied in the `test_channel` route handler
 | `crates/ui/web-api/src/notifications/message_builder.rs` | Event-to-`DeliveryMessage` translation |
 | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers, `ChannelQueryError`, `RuleQueryError` |
 | `crates/ui/web-api/src/routes/notifications.rs` | REST route handlers, Telegram callback |
-| `crates/ui/web-api/src/routes/notification_extensions.rs` | Generic extension data action handler + SMTP settings |
+| `crates/ui/web-api/src/routes/notification_extensions.rs` | Generic extension data action handler + SMTP settings (per-tenant and global) |
 | `crates/ui/web-api/src/extension_registry.rs` | Extension registry with `Notification` owner variant |
-| `crates/plugins/notifications/registry/src/extensions/` | Per-transport extension manifests and action definitions |
 
 ## Extension framework integration
 
@@ -559,26 +586,37 @@ tabs without any transport-specific knowledge in the frontend or web API route h
 
 ### Architecture
 
-Only `notification-plugin-registry` knows about specific transports. It defines `ExtensionManifest`
-and `ActionDef` entries for each enabled plugin through the `extensions/` module:
+Each notification plugin defines its own extension manifests and actions via the `NotificationPlugin`
+trait methods `extension_manifests()` and `extension_actions()`. The registry delegates to each
+registered plugin and aggregates the results:
 
-```text
-notification-plugin-registry/src/extensions/
-├── mod.rs        # feature-gated sub-modules
-├── webhook.rs    # ExtensionManifest + ActionDefs for webhook channels
-├── telegram.rs   # ExtensionManifest + ActionDefs for Telegram channels
-└── email.rs      # ExtensionManifest + ActionDefs for email channels + SMTP
+```rust
+// In NotificationPluginRegistry:
+fn extension_manifests(&self) -> Vec<ExtensionManifest> {
+    self.plugins.values().flat_map(|p| p.extension_manifests()).collect()
+}
+fn extension_actions(&self) -> Vec<ActionDef> {
+    self.plugins.values().flat_map(|p| p.extension_actions()).collect()
+}
 ```
+
+This follows the same pattern as the Proxmox plugin: each plugin crate owns its extension
+definitions, keeping transport-specific knowledge co-located with the plugin implementation.
 
 ### Extension IDs
 
 Extension IDs follow the convention `notifications.<channel_type>`:
 
-| Extension ID | Label | Sort order |
-| --- | --- | --- |
-| `notifications.webhook` | Webhook Channels | 500 |
-| `notifications.telegram` | Telegram Channels | 501 |
-| `notifications.email` | Email Channels | 502 |
+| Extension ID | Label | Sort order | Placement |
+| --- | --- | --- | --- |
+| `notifications.webhook` | Webhook Channels | 500 | Tab (group: "Notification Channels") |
+| `notifications.telegram` | Telegram Channels | 501 | Tab (group: "Notification Channels") |
+| `notifications.email` | Email Channels | 502 | Tab (group: "Notification Channels") |
+| `notifications.email.global_smtp` | SMTP Defaults | 600 | Below (target: "global-settings") |
+
+Channel extensions share the `tab_group` value `"Notification Channels"`, so they render as
+sections within a single "Notification Channels" tab on the Settings page rather than as separate
+tabs. The global SMTP extension renders below the existing Global Settings content.
 
 ### `ExtensionOwner::Notification`
 
@@ -595,10 +633,19 @@ The handler has zero transport-specific knowledge.
 
 ### SMTP settings via extensions
 
-The email extension defines two extra actions for SMTP management:
+The email extension defines actions for both per-tenant and global SMTP management:
 
-- `get_smtp` — data-only action returning current SMTP settings as flat JSON
-- `save_smtp` — receives flat params via extension invoke, performs patch-semantic updates
+**Per-tenant SMTP** (via the email channel extension):
+
+- `get_smtp` — returns current per-tenant SMTP settings plus `effective_*` fields showing the
+  resolved value after global/tenant merge, and `has_global_defaults: bool`
+- `save_smtp` — receives flat params via extension invoke, performs patch-semantic updates on
+  per-tenant settings
+
+**Global SMTP defaults** (via the `notifications.email.global_smtp` extension):
+
+- `get_global_smtp` — returns the server-wide SMTP default settings
+- `save_global_smtp` — saves global SMTP defaults to the `global_settings` table
 
 The `configure_smtp` action uses `FormDef.pre_load_action = "get_smtp"` so the frontend
 pre-populates the form with current SMTP values on open.

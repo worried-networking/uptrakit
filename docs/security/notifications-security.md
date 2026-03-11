@@ -34,19 +34,25 @@ All other config fields (e.g. `url`, `chat_id`) are returned unmasked.
 
 ## Email Channel Security
 
-The email channel uses a two-layer config model that keeps SMTP credentials separate from per-channel
+The email channel uses a three-layer config model that keeps SMTP credentials separate from per-channel
 recipient lists. This section covers the security properties of that design.
 
 ### SMTP credentials storage
 
-Global SMTP settings (host, port, credentials, sender address, TLS mode) are stored in the `settings`
-key-value table. The password field (`smtp.password`) is encrypted at rest using
-`uptrakit_crypto::encrypt_str` (AES-256-GCM with the master key) before being written to the database.
-Decryption occurs at settings-load time (`settings::load_smtp_settings`) and the plaintext is held in
-memory only within the `SmtpSettingsSnapshot` struct.
+SMTP settings are stored at two levels:
 
-The SMTP password is **never returned in API responses**. The `SmtpSettingsResponse` type exposes only
-`has_password: bool` to indicate whether a password is configured.
+- **Global defaults** in the `global_settings` table (`global_smtp.*` keys) — server-wide SMTP
+  configuration accessible to all tenants.
+- **Per-tenant overrides** in the `settings` table (`smtp.*` keys) — per-tenant settings that
+  override global defaults on a field-by-field basis.
+
+Password fields (`global_smtp.password` and `smtp.password`) are encrypted at rest using
+`uptrakit_crypto::encrypt_str` (AES-256-GCM with the master key) before being written to the database.
+Decryption occurs at settings-load time and the plaintext is held in memory only within
+`SmtpSettingsSnapshot` structs.
+
+SMTP passwords are **never returned in API responses**. Extension action responses expose only
+`has_password: bool` to indicate whether a password is configured at each level.
 
 See [Secrets and Encryption](secrets-and-encryption.md) for encryption semantics and master key
 management.
@@ -68,12 +74,14 @@ column. SMTP credentials are never written to per-channel config. This means:
 
 - Compromising a per-channel config row reveals only the recipient list, not SMTP credentials.
 - Multiple email channels share the same SMTP server without duplicating the password.
-- The dispatcher merges global SMTP settings into the config at delivery time, in memory only.
+- The dispatcher merges global and per-tenant SMTP settings into the config at delivery time,
+  in memory only.
 
 ### `has_password` masking
 
-`GET /api/v1/settings/smtp` returns `has_password: bool` rather than the actual password. This follows the
-same convention used by MQTT (`has_password`) and OIDC (`has_client_secret`).
+SMTP extension actions return `has_password: bool` rather than the actual password. This follows the
+same convention used by MQTT (`has_password`) and OIDC (`has_client_secret`). Both global and per-tenant
+SMTP responses use this masking pattern.
 
 ### Permission requirements
 
@@ -89,7 +97,7 @@ See [Auth and Authorization](auth-and-authorization.md) for the full permission 
 | File | Purpose |
 | --- | --- |
 | `crates/plugins/notifications/email/src/lib.rs` | `EmailPlugin` — SMTP delivery, config validation |
-| `crates/ui/web-api/src/routes/settings_smtp.rs` | SMTP settings GET/PUT handlers with password encryption |
+| `crates/ui/web-api/src/routes/notification_extensions.rs` | SMTP settings handlers (global and per-tenant) with password encryption |
 | `crates/ui/web-api/src/settings.rs` | `SmtpSettingsSnapshot` with masked `Debug` impl |
 | `crates/ui/web-api/src/notifications/dispatcher.rs` | `merge_smtp_into_config` — in-memory merge before delivery |
 
