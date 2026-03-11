@@ -159,6 +159,55 @@ pub trait PluginOps: Send + Sync + 'static {
     > {
         Box::pin(async { Err("plugin-backed extension actions not supported".to_string()) })
     }
+
+    // ── Notification channel operations ─────────────────────────────────
+    //
+    // Default implementations return no-op results. The `PluginRegistry`
+    // overrides these when the `notifications` feature is enabled.
+
+    /// Look up a notification plugin by channel type name (e.g. `"webhook"`).
+    ///
+    /// Returns `None` when the channel type is unknown or notifications are
+    /// not enabled.
+    fn notification_plugin(
+        &self,
+        _channel_type: &str,
+    ) -> Option<std::sync::Arc<dyn uptrakit_notification_plugin_core::NotificationPlugin>> {
+        None
+    }
+
+    /// Return the list of supported notification channel type names.
+    fn notification_supported_types(&self) -> Vec<&'static str> {
+        vec![]
+    }
+
+    /// Validate notification channel configuration JSON.
+    fn notification_validate_config(
+        &self,
+        _channel_type: &str,
+        _config: &serde_json::Value,
+    ) -> uptrakit_notification_plugin_core::Result<()> {
+        Ok(())
+    }
+
+    /// Return a copy of the notification channel config with secrets masked.
+    fn notification_mask_config_secrets(
+        &self,
+        _channel_type: &str,
+        config: &serde_json::Value,
+    ) -> serde_json::Value {
+        config.clone()
+    }
+
+    /// Restore masked secrets in notification channel config from stored values.
+    fn notification_restore_config_secrets(
+        &self,
+        _channel_type: &str,
+        incoming: &serde_json::Value,
+        _stored: &serde_json::Value,
+    ) -> serde_json::Value {
+        incoming.clone()
+    }
 }
 
 /// Context passed to plugin extension action handlers.

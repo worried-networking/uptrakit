@@ -48,6 +48,10 @@ pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};
 #[cfg(feature = "agent-infra")]
 pub use uptrakit_plugin_infrastructure_core::agent_infra::AgentInfraRegistry;
 
+// Re-export notification types when the feature is enabled.
+#[cfg(feature = "notifications")]
+pub use uptrakit_notification_plugin_registry::NotificationRegistryConfig;
+
 /// Create an [`AgentInfraRegistry`] populated with all known infrastructure plugins.
 #[cfg(feature = "agent-infra")]
 pub fn create_agent_infra_registry() -> AgentInfraRegistry {
@@ -169,5 +173,81 @@ impl PluginOps for PluginRegistry {
         >,
     > {
         PluginRegistry::handle_extension_action(ctx, extension_id, action_id, params)
+    }
+
+    fn notification_plugin(
+        &self,
+        _channel_type: &str,
+    ) -> Option<std::sync::Arc<dyn uptrakit_notification_plugin_core::NotificationPlugin>> {
+        #[cfg(feature = "notifications")]
+        {
+            self.notification_registry.get(_channel_type)
+        }
+        #[cfg(not(feature = "notifications"))]
+        {
+            None
+        }
+    }
+
+    fn notification_supported_types(&self) -> Vec<&'static str> {
+        #[cfg(feature = "notifications")]
+        {
+            self.notification_registry.supported_types()
+        }
+        #[cfg(not(feature = "notifications"))]
+        {
+            vec![]
+        }
+    }
+
+    fn notification_validate_config(
+        &self,
+        _channel_type: &str,
+        _config: &serde_json::Value,
+    ) -> uptrakit_notification_plugin_core::Result<()> {
+        #[cfg(feature = "notifications")]
+        {
+            let Some(plugin) = self.notification_registry.get(_channel_type) else {
+                return Err(rootcause::report!(
+                    uptrakit_notification_plugin_core::NotificationPluginError::InvalidConfig(
+                        format!("unknown channel type: {_channel_type}")
+                    )
+                ));
+            };
+            plugin.validate_config(_config)
+        }
+        #[cfg(not(feature = "notifications"))]
+        {
+            Ok(())
+        }
+    }
+
+    fn notification_mask_config_secrets(
+        &self,
+        _channel_type: &str,
+        config: &serde_json::Value,
+    ) -> serde_json::Value {
+        #[cfg(feature = "notifications")]
+        {
+            if let Some(plugin) = self.notification_registry.get(_channel_type) {
+                return plugin.mask_config_secrets(config);
+            }
+        }
+        config.clone()
+    }
+
+    fn notification_restore_config_secrets(
+        &self,
+        _channel_type: &str,
+        incoming: &serde_json::Value,
+        _stored: &serde_json::Value,
+    ) -> serde_json::Value {
+        #[cfg(feature = "notifications")]
+        {
+            if let Some(plugin) = self.notification_registry.get(_channel_type) {
+                return plugin.restore_config_secrets(incoming, _stored);
+            }
+        }
+        incoming.clone()
     }
 }

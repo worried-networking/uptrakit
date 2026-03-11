@@ -213,7 +213,7 @@ pub async fn build_test_state(
         notification_service,
         notification_dispatcher,
         token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
-        plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry),
+        plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry::new()),
         db,
         credential_sources: ServiceCredentialSources::default(),
         event_broadcaster: crate::event_broadcaster::EventBroadcaster::new(),

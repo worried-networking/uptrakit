@@ -542,7 +542,7 @@ impl AppStateBuilder {
                 .token_denylist
                 .ok_or(AppStateBuildError("token_denylist"))?,
             plugin_ops: self.plugin_ops.unwrap_or_else(|| {
-                Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry)
+                Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry::new())
             }),
             credential_sources: self.credential_sources.unwrap_or_default(),
             event_broadcaster: self.event_broadcaster.unwrap_or_default(),

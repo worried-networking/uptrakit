@@ -537,7 +537,12 @@ macro_rules! register_plugins {
 /// macro from a single declaration. To add a new plugin, add one line to the
 /// macro invocation below and implement `validate_identifier` on its config
 /// type (no-op `Ok(())` is acceptable for unconstrained identifiers).
-pub struct PluginRegistry;
+pub struct PluginRegistry {
+    /// Notification plugin registry, when the `notifications` feature is enabled.
+    #[cfg(feature = "notifications")]
+    pub(crate) notification_registry:
+        uptrakit_notification_plugin_registry::NotificationPluginRegistry,
+}
 
 register_plugins! {
     ReleasesGithub                => { config: GitHubConfig,               plugin: GitHubPlugin },
@@ -620,6 +625,40 @@ impl PluginRegistry {
             return vec![];
         };
         Self::capabilities_for(pt)
+    }
+
+    /// Create a plugin registry without notification support.
+    ///
+    /// Used by agent crates that don't need notification channel operations.
+    pub fn new() -> Self {
+        Self {
+            #[cfg(feature = "notifications")]
+            notification_registry:
+                uptrakit_notification_plugin_registry::NotificationPluginRegistry::new(
+                    uptrakit_notification_plugin_registry::NotificationRegistryConfig::default(),
+                )
+                .expect("default notification registry config should always succeed"),
+        }
+    }
+
+    /// Create a plugin registry with notification support.
+    ///
+    /// The `config` is forwarded to [`NotificationPluginRegistry::new`]
+    /// which registers compiled-in plugins based on feature flags.
+    #[cfg(feature = "notifications")]
+    pub fn with_notifications(
+        config: uptrakit_notification_plugin_registry::NotificationRegistryConfig,
+    ) -> uptrakit_notification_plugin_core::Result<Self> {
+        Ok(Self {
+            notification_registry:
+                uptrakit_notification_plugin_registry::NotificationPluginRegistry::new(config)?,
+        })
+    }
+}
+
+impl Default for PluginRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

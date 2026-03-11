@@ -6991,6 +6991,8 @@ dependencies = [
  "tracing",
  "uptrakit-command",
  "uptrakit-extension-framework",
+ "uptrakit-notification-plugin-core",
+ "uptrakit-notification-plugin-registry",
  "uptrakit-plugin-discovery-proxmox-helper-scripts",
  "uptrakit-plugin-generic-shell",
  "uptrakit-plugin-infrastructure-core",

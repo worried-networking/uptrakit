@@ -431,9 +431,18 @@ async fn run(args: cli::Args) -> Result<()> {
         }
     };
 
-    // Build plugin_ops and seed the extension registry with plugin-provided manifests.
-    let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
-        Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry);
+    // Build plugin_ops (with notification support) and seed the extension registry
+    // with plugin-provided manifests.
+    let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(
+        uptrakit_plugin_infrastructure_registry::PluginRegistry::with_notifications(
+            uptrakit_plugin_infrastructure_registry::NotificationRegistryConfig {
+                allow_private_urls: args.allow_private_notification_urls,
+            },
+        )
+        .context_transform(|_| {
+            AppError::Config("failed to build plugin registry with notifications".to_string())
+        })?,
+    );
     let extension_manifests = plugin_ops.extension_manifests();
     let extension_actions = plugin_ops.extension_actions();
 
