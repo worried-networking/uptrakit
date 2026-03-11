@@ -136,9 +136,9 @@ pub struct Args {
     #[arg(long)]
     pub ca_key: Option<PathBuf>,
 
-    /// Additional SAN for the generated server certificate (IP or DNS name, repeatable).
-    /// Stored in DB as `network.extra_sans`. CLI value used only on first run
-    /// or with `--force-settings-override`.
+    /// Complete SAN list for the server certificate (IP or DNS name, repeatable).
+    /// Disables auto-detection. Stored in DB as `network.sans`.
+    /// CLI value used only on first run or with `--force-settings-override`.
     #[arg(long = "san")]
     pub sans: Vec<String>,
 

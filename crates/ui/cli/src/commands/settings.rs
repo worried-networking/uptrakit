@@ -140,10 +140,7 @@ impl HumanOutput for NetworkSettingsResponse {
             self.trusted_proxies.join(", ")
         ));
         out.push_str(&format!("Real IP Header:      {}\n", self.real_ip_header));
-        out.push_str(&format!(
-            "Extra SANs:          {}\n",
-            self.extra_sans.join(", ")
-        ));
+        out.push_str(&format!("SANs:                {}\n", self.sans.join(", ")));
         out.push_str(&format!("HTTPS Address:       {}\n", self.https_addr));
         out.push_str(&format!(
             "Fwd Cert Info Header: {}\n",
@@ -163,6 +160,9 @@ impl HumanOutput for NetworkSettingsResponse {
         ));
         if let Some(ref warning) = self.pki_addr_warning {
             out.push_str(&format!("Warning:             {warning}\n"));
+        }
+        if self.cert_regenerated == Some(true) {
+            out.push_str("Cert Regenerated:    yes\n");
         }
         out
     }
@@ -347,7 +347,7 @@ pub struct NetworkUpdateParams<'a> {
     pub request_timeout: Option<std::time::Duration>,
     pub trusted_proxies: Option<Vec<String>>,
     pub real_ip_header: Option<String>,
-    pub extra_sans: Option<Vec<String>>,
+    pub sans: Option<Vec<String>>,
     pub https_addr: Option<String>,
     pub fwd_cert_info_header: Option<String>,
     pub fwd_cert_pem_header: Option<String>,
@@ -554,11 +554,12 @@ pub async fn network_update(params: NetworkUpdateParams<'_>) -> Result<NetworkSe
     let req = UpdateNetworkSettingsRequest {
         trusted_proxies: params.trusted_proxies,
         real_ip_header: params.real_ip_header,
-        extra_sans: params.extra_sans,
+        sans: params.sans,
         https_addr: params.https_addr,
         forwarded_client_cert_info_header: params.fwd_cert_info_header,
         forwarded_client_cert_pem_header: params.fwd_cert_pem_header,
         pki_addr: params.pki_addr,
+        regenerate_cert: None,
     };
     client.update_network_settings(&req).await.context_to()
 }
@@ -1081,12 +1082,13 @@ mod tests {
         let resp = NetworkSettingsResponse {
             trusted_proxies: vec!["10.0.0.0/8".to_string()],
             real_ip_header: "X-Forwarded-For".to_string(),
-            extra_sans: vec![],
+            sans: vec![],
             https_addr: "0.0.0.0:443".to_string(),
             forwarded_client_cert_info_header: None,
             forwarded_client_cert_pem_header: None,
             pki_addr: Some("https://pki.example.com".to_string()),
             pki_addr_warning: Some("CA rotation required".to_string()),
+            cert_regenerated: None,
         };
         let s = resp.to_human_string();
         assert!(s.contains("10.0.0.0/8"), "trusted proxies missing");

@@ -1037,9 +1037,9 @@ enum NetworkCommands {
         /// Header name for extracting real client IP
         #[arg(long)]
         real_ip_header: Option<String>,
-        /// Comma-separated extra Subject Alternative Names
+        /// Comma-separated Subject Alternative Names for the server certificate
         #[arg(long)]
-        extra_sans: Option<String>,
+        sans: Option<String>,
         /// HTTPS listen address
         #[arg(long)]
         https_addr: Option<String>,
@@ -2555,7 +2555,7 @@ async fn run(cli: Cli) -> error::Result<()> {
                 NetworkCommands::Update {
                     trusted_proxies,
                     real_ip_header,
-                    extra_sans,
+                    sans,
                     https_addr,
                     fwd_cert_info_header,
                     fwd_cert_pem_header,
@@ -2569,7 +2569,7 @@ async fn run(cli: Cli) -> error::Result<()> {
                             trusted_proxies: trusted_proxies
                                 .map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
                             real_ip_header,
-                            extra_sans: extra_sans
+                            sans: sans
                                 .map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
                             https_addr,
                             fwd_cert_info_header,

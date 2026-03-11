@@ -7,13 +7,16 @@ use crate::validation::{Validate, ValidationError};
 pub struct NetworkSettingsResponse {
     pub trusted_proxies: Vec<String>,
     pub real_ip_header: String,
-    pub extra_sans: Vec<String>,
+    pub sans: Vec<String>,
     pub https_addr: String,
     pub forwarded_client_cert_info_header: Option<String>,
     pub forwarded_client_cert_pem_header: Option<String>,
     pub pki_addr: Option<String>,
     /// Warning message when pki_addr was changed, explaining that CA rotation is required.
     pub pki_addr_warning: Option<String>,
+    /// Whether the server certificate was regenerated as part of this response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cert_regenerated: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -21,7 +24,7 @@ pub struct NetworkSettingsResponse {
 pub struct UpdateNetworkSettingsRequest {
     pub trusted_proxies: Option<Vec<String>>,
     pub real_ip_header: Option<String>,
-    pub extra_sans: Option<Vec<String>>,
+    pub sans: Option<Vec<String>>,
     pub https_addr: Option<String>,
     /// Header name for structured client certificate info (e.g. `X-Forwarded-Tls-Client-Cert-Info`).
     /// Empty string disables.
@@ -33,6 +36,10 @@ pub struct UpdateNetworkSettingsRequest {
     /// Supports both http:// and https:// schemes.
     /// Empty string disables.
     pub pki_addr: Option<String>,
+    /// When `true` and `sans` is also provided, regenerate the server certificate
+    /// after saving. Defaults to `false`.
+    #[serde(default)]
+    pub regenerate_cert: Option<bool>,
 }
 
 impl Validate for UpdateNetworkSettingsRequest {
@@ -83,12 +90,13 @@ mod tests {
         let resp = NetworkSettingsResponse {
             trusted_proxies: vec!["10.0.0.0/8".to_string()],
             real_ip_header: "X-Forwarded-For".to_string(),
-            extra_sans: vec!["example.com".to_string()],
+            sans: vec!["example.com".to_string()],
             https_addr: "0.0.0.0:8443".to_string(),
             forwarded_client_cert_info_header: Some("X-Forwarded-Tls-Client-Cert-Info".to_string()),
             forwarded_client_cert_pem_header: Some("X-Forwarded-Tls-Client-Cert".to_string()),
             pki_addr: Some("http://pki.example.com".to_string()),
             pki_addr_warning: Some("CA rotation required".to_string()),
+            cert_regenerated: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let de: NetworkSettingsResponse =
@@ -105,12 +113,13 @@ mod tests {
         let resp = NetworkSettingsResponse {
             trusted_proxies: vec![],
             real_ip_header: "X-Real-IP".to_string(),
-            extra_sans: vec![],
+            sans: vec![],
             https_addr: "0.0.0.0:443".to_string(),
             forwarded_client_cert_info_header: None,
             forwarded_client_cert_pem_header: None,
             pki_addr: None,
             pki_addr_warning: None,
+            cert_regenerated: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let de: NetworkSettingsResponse =
@@ -127,11 +136,12 @@ mod tests {
         let req = UpdateNetworkSettingsRequest {
             trusted_proxies: Some(vec!["192.168.0.0/16".to_string()]),
             real_ip_header: Some("X-Real-IP".to_string()),
-            extra_sans: None,
+            sans: None,
             https_addr: None,
             forwarded_client_cert_info_header: None,
             forwarded_client_cert_pem_header: None,
             pki_addr: Some("https://pki.example.com".to_string()),
+            regenerate_cert: None,
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
         let de: UpdateNetworkSettingsRequest =
@@ -148,11 +158,12 @@ mod tests {
         let req = UpdateNetworkSettingsRequest {
             trusted_proxies: Some(vec!["10.0.0.0/8".to_string(), String::new()]),
             real_ip_header: None,
-            extra_sans: None,
+            sans: None,
             https_addr: None,
             forwarded_client_cert_info_header: None,
             forwarded_client_cert_pem_header: None,
             pki_addr: None,
+            regenerate_cert: None,
         };
         let err = req.validate().expect_err("should reject empty proxy item");
         assert_eq!(err.field, "trusted_proxies");
@@ -163,11 +174,12 @@ mod tests {
         let req = UpdateNetworkSettingsRequest {
             trusted_proxies: None,
             real_ip_header: Some(String::new()),
-            extra_sans: None,
+            sans: None,
             https_addr: None,
             forwarded_client_cert_info_header: None,
             forwarded_client_cert_pem_header: None,
             pki_addr: None,
+            regenerate_cert: None,
         };
         let err = req
             .validate()
@@ -180,11 +192,12 @@ mod tests {
         let req = UpdateNetworkSettingsRequest {
             trusted_proxies: None,
             real_ip_header: None,
-            extra_sans: None,
+            sans: None,
             https_addr: None,
             forwarded_client_cert_info_header: None,
             forwarded_client_cert_pem_header: None,
             pki_addr: Some("ftp://bad.example.com".to_string()),
+            regenerate_cert: None,
         };
         let err = req.validate().expect_err("should reject ftp:// scheme");
         assert_eq!(err.field, "pki_addr");
@@ -195,11 +208,12 @@ mod tests {
         let req = UpdateNetworkSettingsRequest {
             trusted_proxies: None,
             real_ip_header: None,
-            extra_sans: None,
+            sans: None,
             https_addr: None,
             forwarded_client_cert_info_header: None,
             forwarded_client_cert_pem_header: None,
             pki_addr: Some("http://pki.local".to_string()),
+            regenerate_cert: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -209,11 +223,12 @@ mod tests {
         let req = UpdateNetworkSettingsRequest {
             trusted_proxies: None,
             real_ip_header: None,
-            extra_sans: None,
+            sans: None,
             https_addr: None,
             forwarded_client_cert_info_header: None,
             forwarded_client_cert_pem_header: None,
             pki_addr: Some("https://pki.example.com".to_string()),
+            regenerate_cert: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -223,11 +238,12 @@ mod tests {
         let req = UpdateNetworkSettingsRequest {
             trusted_proxies: None,
             real_ip_header: None,
-            extra_sans: None,
+            sans: None,
             https_addr: None,
             forwarded_client_cert_info_header: None,
             forwarded_client_cert_pem_header: None,
             pki_addr: Some(String::new()),
+            regenerate_cert: None,
         };
         assert!(
             req.validate().is_ok(),
@@ -240,11 +256,12 @@ mod tests {
         let req = UpdateNetworkSettingsRequest {
             trusted_proxies: None,
             real_ip_header: None,
-            extra_sans: None,
+            sans: None,
             https_addr: None,
             forwarded_client_cert_info_header: None,
             forwarded_client_cert_pem_header: None,
             pki_addr: None,
+            regenerate_cert: None,
         };
         assert!(req.validate().is_ok());
     }

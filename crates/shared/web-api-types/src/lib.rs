@@ -1008,11 +1008,12 @@ mod tests {
         let req = UpdateNetworkSettingsRequest {
             trusted_proxies: Some(vec!["10.0.0.0/8".to_string()]),
             real_ip_header: Some("X-Real-IP".to_string()),
-            extra_sans: None,
+            sans: None,
             https_addr: None,
             forwarded_client_cert_info_header: None,
             forwarded_client_cert_pem_header: None,
             pki_addr: Some("https://pki.example.com".to_string()),
+            regenerate_cert: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -1024,11 +1025,12 @@ mod tests {
         let req = UpdateNetworkSettingsRequest {
             trusted_proxies: Some(vec!["".to_string()]),
             real_ip_header: None,
-            extra_sans: None,
+            sans: None,
             https_addr: None,
             forwarded_client_cert_info_header: None,
             forwarded_client_cert_pem_header: None,
             pki_addr: None,
+            regenerate_cert: None,
         };
         let err = req.validate().unwrap_err();
         assert_eq!(err.field, "trusted_proxies");
