@@ -45,6 +45,7 @@ mod m20260318_000001_host_software_item_qualifier;
 mod m20260318_000002_cron_to_interval;
 mod m20260319_000001_software_items_sort_index;
 mod m20260320_000001_update_history_interactive;
+mod m20260321_000001_software_items_icon_url;
 
 pub struct Migrator;
 
@@ -94,6 +95,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260310_000002_granular_permissions::Migration),
             Box::new(m20260320_000001_update_history_interactive::Migration),
             Box::new(m20260311_000003_rename_extra_sans_to_sans::Migration),
+            Box::new(m20260321_000001_software_items_icon_url::Migration),
         ]
     }
 }

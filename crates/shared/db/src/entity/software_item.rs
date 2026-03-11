@@ -9,6 +9,7 @@ pub struct Model {
     pub tenant_id: Uuid,
     pub name: String,
     pub featured: bool,
+    pub icon_url: Option<String>,
     pub last_checked_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
