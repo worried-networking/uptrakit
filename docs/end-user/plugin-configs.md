@@ -30,6 +30,7 @@ Uptrakit ships with fifteen built-in plugin types:
 | `package_manager_pkg` | Tracks packages managed by the BSD `pkg` tool (FreeBSD, TrueNAS SCALE, OPNsense, pfSense, DragonFly BSD). Installed and available versions are resolved locally by the agent. Requires `sudo` access for updates and index refresh. | Yes |
 | `package_manager_apk` | Tracks Alpine Linux packages managed by APK. Installed and latest versions are resolved locally by the agent using `apk`. Requires `sudo` access for updates and index refresh. | Yes |
 | `package_manager_snap` | Tracks Snap packages managed by `snapd` on Linux. Agent-side only. Discovers installed snaps, resolves upstream versions via `snap info`, and executes updates via `snap refresh`. Requires `sudo` access for updates. | Yes |
+| `package_manager_cargo` | Tracks Rust binaries installed via `cargo install`. Discovery and version detection run on the agent via `cargo install --list`; upstream versions are fetched controller-side from the crates.io sparse index. No `sudo` required. | Yes |
 
 ### `releases_github` configuration fields
 
@@ -374,6 +375,46 @@ snap automatically installs the latest revision on the channel.
 
 **Requires `sudo`.** Snap refresh requires root. Uptrakit configures passwordless sudo for the
 `snap` command via `uptrakit-agent bootstrap`. See [Snap Plugin](snap-plugin.md) for full details.
+
+### `package_manager_cargo` configuration fields
+
+The Cargo install plugin tracks Rust binaries installed via `cargo install` on an agent host.
+Discovery and installed version detection run on the agent; upstream versions are fetched
+controller-side from the [crates.io sparse registry index](https://index.crates.io).
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `include_prereleases` | No | Include pre-release versions (e.g. `1.0.0-alpha.1`, `2.0.0-beta`) when checking for updates. Defaults to `false` — only stable releases are reported. |
+| `registry_url` | No | Custom sparse Cargo registry index URL. Omit to use the default crates.io sparse index (`https://index.crates.io`). Set this for private registries (e.g. `https://my-registry.example.com`). |
+
+**Package identifier format:** The crate name as published on crates.io (e.g. `ripgrep`, `bat`,
+`cargo-nextest`). Crate names are 1–64 characters, must start with an ASCII letter or underscore,
+and may only contain `[A-Za-z0-9_-]`.
+
+**Discovery behaviour:** When the Cargo plugin runs with a default empty config (`{}`), it
+operates in _discover-all mode_: it calls `cargo install --list` and emits one `DiscoveryTarget`
+per installed crate. The controller auto-creates a shared plugin config named `"cargo install"`
+with an empty config object. Setting `include_prereleases: true` or providing a custom
+`registry_url` disables discover-all mode; the plugin then only tracks items explicitly assigned
+to it.
+
+**No `sudo` required.** `cargo install` writes to `~/.cargo/bin` under the agent user account.
+No privilege escalation is needed.
+
+**Install root.** The plugin tracks crates installed in the standard Cargo home directory
+(`$CARGO_HOME`, defaulting to `~/.cargo`). Crates installed with `cargo install --root
+/custom/path` are stored in a separate `.crates.toml` file and are **not** visible to the plugin.
+If your workflow uses a custom `CARGO_HOME`, set that environment variable on the agent process —
+the `cargo install --list` command respects it automatically.
+
+**Sparse index lookups.** The controller fetches upstream versions directly from the Cargo sparse
+registry index (the same CDN-backed endpoint the `cargo` tool itself uses during builds). Up to
+10 crate lookups run concurrently, so large install lists are resolved quickly. Pre-release
+versions (`version` containing `-`) are filtered out unless `include_prereleases` is set.
+
+**Private registries.** When `registry_url` is set to a private registry, Uptrakit relaxes its
+SSRF protection to allow private/LAN addresses. Only set this if you operate a private Cargo
+registry (e.g. [Cloudsmith](https://cloudsmith.io/), [Gitea](https://gitea.com/), Artifactory).
 
 ## Role-Based Host Assignments
 
