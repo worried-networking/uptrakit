@@ -58,7 +58,7 @@ fn warn_unrecognised_keys(raw: &RawSettings) {
 pub struct NetworkSettings {
     pub trusted_proxies: Vec<IpNet>,
     pub real_ip_header: String,
-    pub extra_sans: Vec<String>,
+    pub sans: Vec<String>,
     pub https_addr: SocketAddr,
     pub forwarded_client_cert_info_header: Option<String>,
     pub forwarded_client_cert_pem_header: Option<String>,
@@ -70,7 +70,7 @@ impl Default for NetworkSettings {
         Self {
             trusted_proxies: Vec::new(),
             real_ip_header: DEFAULT_REAL_IP_HEADER.to_string(),
-            extra_sans: Vec::new(),
+            sans: Vec::new(),
             https_addr: SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 8443, 0, 0)),
             forwarded_client_cert_info_header: None,
             forwarded_client_cert_pem_header: None,
@@ -296,8 +296,8 @@ impl Settings {
             .unwrap_or(DEFAULT_REAL_IP_HEADER)
             .to_string();
 
-        let extra_sans = raw
-            .get_setting(SettingKey::ExtraSans)
+        let sans = raw
+            .get_setting(SettingKey::Sans)
             .and_then(|v| {
                 v.as_array().map(|arr| {
                     arr.iter()
@@ -335,7 +335,7 @@ impl Settings {
         NetworkSettings {
             trusted_proxies,
             real_ip_header,
-            extra_sans,
+            sans,
             https_addr,
             forwarded_client_cert_info_header,
             forwarded_client_cert_pem_header,
@@ -541,9 +541,9 @@ impl Settings {
             .clone()
     }
 
-    /// Read extra SANs (synchronous).
-    pub fn extra_sans(&self) -> Vec<String> {
-        self.inner.snapshot_rx.borrow().network.extra_sans.clone()
+    /// Read certificate SANs (synchronous).
+    pub fn sans(&self) -> Vec<String> {
+        self.inner.snapshot_rx.borrow().network.sans.clone()
     }
 
     /// Read the HTTPS listen address (synchronous).
@@ -575,12 +575,12 @@ impl Settings {
             .send_modify(|snap| snap.network.real_ip_header = header);
     }
 
-    /// Update only extra SANs.
-    pub async fn set_extra_sans(&self, sans: Vec<String>) {
+    /// Update certificate SANs.
+    pub async fn set_sans(&self, sans: Vec<String>) {
         let _guard = self.inner.write_mutex.lock().await;
         self.inner
             .snapshot_tx
-            .send_modify(|snap| snap.network.extra_sans = sans);
+            .send_modify(|snap| snap.network.sans = sans);
     }
 
     /// Update only HTTPS listen address.

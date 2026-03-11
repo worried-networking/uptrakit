@@ -511,8 +511,8 @@ pub fn spawn_server_cert_renewal(
             // Drop the key store lock before proceeding with I/O
             drop(key_store);
 
-            let extra_sans = app_state.settings.extra_sans();
-            match crate::pki::renew_server_cert(&pki_path, &ca_bundle, &extra_sans).await {
+            let sans = app_state.settings.sans();
+            match crate::pki::renew_server_cert(&pki_path, &ca_bundle, &sans).await {
                 Ok(new_cert) => {
                     crl_manager
                         .update_server_cert(new_cert.cert_pem.clone(), new_cert.key_pem.clone())

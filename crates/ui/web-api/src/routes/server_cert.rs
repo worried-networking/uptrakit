@@ -15,13 +15,11 @@ use crate::middleware::permission::CanManageGlobalSettings;
 use crate::pki_utils::{self, SanCollection};
 
 #[derive(Debug, Error)]
-enum RenewCertError {
+pub(crate) enum RenewCertError {
     #[error("failed to parse CA key: {0}")]
     CaKeyParse(String),
     #[error("failed to create CA issuer: {0}")]
     CaIssuer(String),
-    #[error("failed to collect SANs: {0}")]
-    SanCollection(String),
     #[error("failed to generate key pair: {0}")]
     KeyGeneration(String),
     #[error("failed to create cert params: {0}")]
@@ -34,10 +32,10 @@ enum RenewCertError {
     TlsConfig(#[from] TlsConfigError),
 }
 
-type RenewCertResult<T> = std::result::Result<T, Report<RenewCertError>>;
+pub(crate) type RenewCertResult<T> = std::result::Result<T, Report<RenewCertError>>;
 
 #[derive(Debug, Error)]
-enum TlsConfigError {
+pub(crate) enum TlsConfigError {
     #[error("cert PEM parse: {0}")]
     CertParse(String),
     #[error("key PEM parse: {0}")]
@@ -52,7 +50,7 @@ enum TlsConfigError {
     ServerConfig(String),
 }
 
-type TlsConfigResult<T> = std::result::Result<T, rootcause::Report<TlsConfigError>>;
+pub(crate) type TlsConfigResult<T> = std::result::Result<T, rootcause::Report<TlsConfigError>>;
 
 impl_report_conversion! {
     TlsConfigError => RenewCertError::TlsConfig,
@@ -88,7 +86,7 @@ pub async fn renew_server_certificate(
     }
 }
 
-async fn renew_server_certificate_inner(
+pub(crate) async fn renew_server_certificate_inner(
     state: &AppState,
 ) -> RenewCertResult<RenewServerCertResponse> {
     let snapshot = state.ca_snapshot.borrow().clone();
@@ -101,9 +99,8 @@ async fn renew_server_certificate_inner(
         .map_err(|e| report!(RenewCertError::CaIssuer(e.to_string())))?;
 
     // Generate new server cert
-    let extra_sans: Vec<String> = state.settings.extra_sans();
-    let sans: SanCollection = pki_utils::collect_sans(&extra_sans)
-        .map_err(|e| report!(RenewCertError::SanCollection(e.to_string())))?;
+    let san_list: Vec<String> = state.settings.sans();
+    let sans: SanCollection = pki_utils::parse_san_list(&san_list);
 
     let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
         .map_err(|e| report!(RenewCertError::KeyGeneration(e.to_string())))?;

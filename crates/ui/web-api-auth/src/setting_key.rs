@@ -15,7 +15,7 @@ pub enum SettingKey {
     AgentCertRenewalWindowHours,
     TrustedProxies,
     RealIpHeader,
-    ExtraSans,
+    Sans,
     HttpsAddr,
     ForwardedClientCertInfoHeader,
     ForwardedClientCertPemHeader,
@@ -72,7 +72,7 @@ impl SettingKey {
             Self::AgentCertRenewalWindowHours => "agent_certificate.renewal_window_hours",
             Self::TrustedProxies => "network.trusted_proxies",
             Self::RealIpHeader => "network.real_ip_header",
-            Self::ExtraSans => "network.extra_sans",
+            Self::Sans => "network.sans",
             Self::HttpsAddr => "network.https_addr",
             Self::ForwardedClientCertInfoHeader => "network.forwarded_client_cert_info_header",
             Self::ForwardedClientCertPemHeader => "network.forwarded_client_cert_pem_header",
@@ -110,7 +110,7 @@ impl SettingKey {
             "agent_certificate.renewal_window_hours" => Some(Self::AgentCertRenewalWindowHours),
             "network.trusted_proxies" => Some(Self::TrustedProxies),
             "network.real_ip_header" => Some(Self::RealIpHeader),
-            "network.extra_sans" => Some(Self::ExtraSans),
+            "network.sans" => Some(Self::Sans),
             "network.https_addr" => Some(Self::HttpsAddr),
             "network.forwarded_client_cert_info_header" => {
                 Some(Self::ForwardedClientCertInfoHeader)
@@ -147,7 +147,7 @@ impl SettingKey {
             self,
             Self::TrustedProxies
                 | Self::RealIpHeader
-                | Self::ExtraSans
+                | Self::Sans
                 | Self::HttpsAddr
                 | Self::ForwardedClientCertInfoHeader
                 | Self::ForwardedClientCertPemHeader
@@ -204,7 +204,7 @@ mod tests {
     fn global_keys_identified() {
         assert!(SettingKey::TrustedProxies.is_global());
         assert!(SettingKey::RealIpHeader.is_global());
-        assert!(SettingKey::ExtraSans.is_global());
+        assert!(SettingKey::Sans.is_global());
         assert!(SettingKey::HttpsAddr.is_global());
         assert!(SettingKey::ForwardedClientCertInfoHeader.is_global());
         assert!(SettingKey::ForwardedClientCertPemHeader.is_global());

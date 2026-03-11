@@ -44,12 +44,13 @@ pub async fn get_network_settings(
             .map(|n| n.to_string())
             .collect(),
         real_ip_header: network.real_ip_header,
-        extra_sans: network.extra_sans,
+        sans: network.sans,
         https_addr: network.https_addr.to_string(),
         forwarded_client_cert_info_header: network.forwarded_client_cert_info_header,
         forwarded_client_cert_pem_header: network.forwarded_client_cert_pem_header,
         pki_addr: network.pki_addr,
         pki_addr_warning: None,
+        cert_regenerated: None,
     };
     (StatusCode::OK, Json(response)).into_response()
 }
@@ -124,15 +125,16 @@ pub async fn update_network_settings(
         state.settings.set_real_ip_header(header.clone()).await;
     }
 
-    // Validate and apply extra_sans (runtime-changeable)
-    if let Some(ref sans) = req.extra_sans {
+    // Validate and apply sans (runtime-changeable)
+    let sans_updated = req.sans.is_some();
+    if let Some(ref sans) = req.sans {
         if let Err(e) =
-            upsert_global_setting(state.db(), SettingKey::ExtraSans, serde_json::json!(sans)).await
+            upsert_global_setting(state.db(), SettingKey::Sans, serde_json::json!(sans)).await
         {
-            tracing::error!("Failed to save extra_sans: {e:?}");
+            tracing::error!("Failed to save sans: {e:?}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
-        state.settings.set_extra_sans(sans.clone()).await;
+        state.settings.set_sans(sans.clone()).await;
     }
 
     // Validate and apply forwarded_client_cert_info_header (runtime-changeable)
@@ -259,6 +261,27 @@ pub async fn update_network_settings(
         state.settings.set_https_addr(addr).await;
     }
 
+    // Optionally regenerate server certificate when SANs were updated
+    let cert_regenerated = if sans_updated && req.regenerate_cert == Some(true) {
+        match super::server_cert::renew_server_certificate_inner(&state).await {
+            Ok(_) => {
+                tracing::info!(
+                    "server certificate regenerated after SAN update via network settings API"
+                );
+                Some(true)
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "server certificate regeneration failed after SAN update");
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "SANs updated but server certificate regeneration failed",
+                );
+            }
+        }
+    } else {
+        None
+    };
+
     let network = state.settings.network();
     let warning = if pki_addr_changed {
         Some(
@@ -276,12 +299,13 @@ pub async fn update_network_settings(
             .map(|n| n.to_string())
             .collect(),
         real_ip_header: network.real_ip_header,
-        extra_sans: network.extra_sans,
+        sans: network.sans,
         https_addr: network.https_addr.to_string(),
         forwarded_client_cert_info_header: network.forwarded_client_cert_info_header,
         forwarded_client_cert_pem_header: network.forwarded_client_cert_pem_header,
         pki_addr: network.pki_addr,
         pki_addr_warning: warning,
+        cert_regenerated,
     };
     (StatusCode::OK, Json(response)).into_response()
 }

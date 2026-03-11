@@ -33,6 +33,7 @@ mod m20260310_000001_data_encryption_keys;
 mod m20260310_000002_granular_permissions;
 mod m20260311_000001_update_history_status_index;
 mod m20260311_000002_audit_log_permissions;
+mod m20260311_000003_rename_extra_sans_to_sans;
 mod m20260312_000001_system_enrollment_tokens;
 mod m20260312_000002_discover_host_packages_task;
 mod m20260313_000001_per_host_update_locking;
@@ -92,6 +93,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260319_000001_software_items_sort_index::Migration),
             Box::new(m20260310_000002_granular_permissions::Migration),
             Box::new(m20260320_000001_update_history_interactive::Migration),
+            Box::new(m20260311_000003_rename_extra_sans_to_sans::Migration),
         ]
     }
 }

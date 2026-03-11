@@ -52,12 +52,13 @@ pub async fn get_global_combined_settings(
             .map(|n| n.to_string())
             .collect(),
         real_ip_header: network.real_ip_header,
-        extra_sans: network.extra_sans,
+        sans: network.sans,
         https_addr: network.https_addr.to_string(),
         forwarded_client_cert_info_header: network.forwarded_client_cert_info_header,
         forwarded_client_cert_pem_header: network.forwarded_client_cert_pem_header,
         pki_addr: network.pki_addr,
         pki_addr_warning: None,
+        cert_regenerated: None,
     };
 
     let mqtt_limit = MqttLimitResponse {
