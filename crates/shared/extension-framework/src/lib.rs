@@ -118,6 +118,11 @@ pub enum ExtensionPlacement {
         /// Where on the page to place the panel.
         #[serde(default)]
         position: PanelPosition,
+        /// When set on Tab-positioned panels, all panels sharing the same
+        /// `(target_page, tab_group)` render as sections within one shared tab.
+        /// The tab label is the `tab_group` value.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tab_group: Option<String>,
     },
     /// Action group added to an entity's context menu.
     ContextMenuGroup {
@@ -136,9 +141,12 @@ pub enum ExtensionPlacement {
 }
 
 /// Position of a panel on an existing page.
+///
+/// Serializes as `{"type": "tab"}`, `{"type": "below"}`, etc. to match
+/// the frontend `PanelPosition` TypeScript interface.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum PanelPosition {
     /// Rendered as a tab alongside existing tabs.
     #[default]
@@ -1038,6 +1046,7 @@ mod tests {
             placement: ExtensionPlacement::Panel {
                 target_page: "hosts".to_string(),
                 position: PanelPosition::Below,
+                tab_group: None,
             },
             required_permission: String::new(),
             targeting: ExtensionTargeting::Universal,
@@ -1047,6 +1056,39 @@ mod tests {
         };
 
         let json = serde_json::to_string(&manifest).expect("serialize should succeed");
+        // tab_group should be omitted when None
+        assert!(
+            !json.contains("tab_group"),
+            "tab_group should be omitted when None"
+        );
+        let roundtripped: ExtensionManifest =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+        assert_eq!(manifest, roundtripped);
+    }
+
+    #[test]
+    fn extension_manifest_roundtrip_panel_with_tab_group() {
+        let manifest = ExtensionManifest {
+            id: "notifications.webhook".to_string(),
+            label: "Webhook Channels".to_string(),
+            priority: 500,
+            placement: ExtensionPlacement::Panel {
+                target_page: "settings".to_string(),
+                position: PanelPosition::Tab,
+                tab_group: Some("Notification Channels".to_string()),
+            },
+            required_permission: "view_notifications".to_string(),
+            targeting: ExtensionTargeting::Universal,
+            ui: ExtensionUi::Actions {
+                actions: vec!["list".to_string()],
+            },
+        };
+
+        let json = serde_json::to_string(&manifest).expect("serialize should succeed");
+        assert!(
+            json.contains(r#""tab_group":"Notification Channels"#),
+            "tab_group should be present when Some"
+        );
         let roundtripped: ExtensionManifest =
             serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(manifest, roundtripped);
@@ -1106,9 +1148,30 @@ mod tests {
     }
 
     #[test]
+    fn panel_position_tab_serializes_as_object() {
+        let pos = PanelPosition::Tab;
+        let json = serde_json::to_string(&pos).expect("serialize should succeed");
+        assert_eq!(json, r#"{"type":"tab"}"#);
+        let roundtripped: PanelPosition =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+        assert_eq!(pos, roundtripped);
+    }
+
+    #[test]
+    fn panel_position_below_serializes_as_object() {
+        let pos = PanelPosition::Below;
+        let json = serde_json::to_string(&pos).expect("serialize should succeed");
+        assert_eq!(json, r#"{"type":"below"}"#);
+        let roundtripped: PanelPosition =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+        assert_eq!(pos, roundtripped);
+    }
+
+    #[test]
     fn panel_position_other_roundtrip() {
         let pos = PanelPosition::Other("sidebar".to_string());
         let json = serde_json::to_string(&pos).expect("serialize should succeed");
+        assert_eq!(json, r#"{"type":"other","value":"sidebar"}"#);
         let roundtripped: PanelPosition =
             serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(pos, roundtripped);

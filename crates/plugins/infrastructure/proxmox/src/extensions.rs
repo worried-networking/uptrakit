@@ -199,6 +199,7 @@ fn host_info_panel_manifest() -> ExtensionManifest {
         ExtensionPlacement::Panel {
             target_page: "host-detail".to_string(),
             position: PanelPosition::default(),
+            tab_group: None,
         },
         ExtensionUi::KeyValue {
             data_action: "get-info".to_string(),

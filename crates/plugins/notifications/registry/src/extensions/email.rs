@@ -14,6 +14,7 @@ pub fn manifest() -> ExtensionManifest {
         ExtensionPlacement::Panel {
             target_page: "settings".to_string(),
             position: PanelPosition::Tab,
+            tab_group: Some("Notification Channels".to_string()),
         },
         ExtensionUi::DataTable {
             columns: vec![

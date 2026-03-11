@@ -391,6 +391,7 @@ impl WireValidate for extension::ExtensionPlacement {
             extension::ExtensionPlacement::Panel {
                 target_page,
                 position: _,
+                tab_group: _,
             } => {
                 check_string_len(target_page, MAX_SHORT_STRING_LEN, "placement.target_page")?;
             }
