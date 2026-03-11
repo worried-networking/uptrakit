@@ -28,8 +28,7 @@ pub use plugin_base::{
 pub use plugin_base::{GuestExecPlugin, HostLifecyclePlugin, HostReportPlugin};
 pub use secrets::SecretMasking;
 pub use traits::{
-    HostCompatibility, Plugin, PreUpdateHookResult, SudoCommandEntry, SudoHelperScript,
-    UpdateHookContext,
+    HostCompatibility, PreUpdateHookResult, SudoCommandEntry, SudoHelperScript, UpdateHookContext,
 };
 pub use types::{
     AttestationStatus, DiscoveredSoftware, DiscoveryTarget, PluginCapability, PluginRole,

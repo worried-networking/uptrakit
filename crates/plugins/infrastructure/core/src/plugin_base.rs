@@ -483,7 +483,7 @@ pub trait GuestExecPlugin: PluginBase {
 ///         Self::CAPABILITIES.to_vec()
 ///     }
 ///     fn required_sudo_commands(&self) -> Vec<$crate::SudoCommandEntry> {
-///         $crate::Plugin::required_sudo_commands(self)
+///         vec![$crate::SudoCommandEntry::new("apt-get", "...")]
 ///     }
 /// });
 /// ```
