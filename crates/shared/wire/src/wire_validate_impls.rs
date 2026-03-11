@@ -1057,6 +1057,7 @@ impl WireValidate for MqttSoftwareStatesPayload {
 impl WireValidate for MqttSoftwareStateItem {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.name, MAX_SHORT_STRING_LEN, "name")?;
+        check_opt_string_len(&self.icon_url, MAX_ICON_URL_LEN, "icon_url")?;
         check_vec_len(&self.hosts, MAX_SOFTWARE_STATE_HOSTS, "hosts")?;
         for host in &self.hosts {
             host.wire_validate()?;

@@ -3375,6 +3375,16 @@ components:
           description: Human-readable software item name
           examples:
             - Node.js
+        icon_url:
+          type: string
+          nullable: true
+          description: >-
+            Optional HTTPS URL to an icon/logo image for the software item.
+            When present, the MQTT service includes this as `entity_picture` in the
+            Home Assistant discovery config so HA displays it as the entity thumbnail.
+            Maximum 2048 characters.
+          examples:
+            - https://nodejs.org/static/images/logo.svg
         hosts:
           type: array
           description: Per-host version data for this software item

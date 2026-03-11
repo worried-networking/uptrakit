@@ -146,6 +146,9 @@ pub const MAX_PLUGIN_CONFIG_JSON_LEN: usize = 65_536;
 /// interactive input; typical keystrokes are a few bytes each.
 pub const MAX_STDIN_DATA_LEN: usize = 65_536;
 
+/// Maximum byte length of a software item icon URL.
+pub const MAX_ICON_URL_LEN: usize = 2_048;
+
 // ── Pagination limits ───────────────────────────────────────────────────────
 
 /// Maximum number of pages in a single paginated report.

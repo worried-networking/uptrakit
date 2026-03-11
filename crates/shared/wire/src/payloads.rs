@@ -908,6 +908,9 @@ pub struct MqttSoftwareStateItem {
     pub software_item_id: Uuid,
     /// Human-readable software item name.
     pub name: String,
+    /// Optional HTTPS URL to an icon/logo image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
     /// Per-host version data for this software item.
     pub hosts: Vec<MqttSoftwareStateHostEntry>,
 }
