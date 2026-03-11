@@ -400,7 +400,9 @@ impl<'a> DiscoveredItemInfo<'a> {
 /// Process a discovered item that carries explicit `DiscoveryTarget` values.
 ///
 /// For each target:
-/// 1. Find-or-create a plugin config matching the target's type and JSON config.
+/// 1. For non-package-manager types: find-or-create a plugin config matching
+///    the target's type and JSON config. For package managers: skip config
+///    creation (they use `plugin_type_settings` at the tenant level).
 /// 2. Check the ignore list.
 /// 3. Upsert or create the software item and host link.
 /// 4. Create role assignments per the target's `roles` list.
@@ -423,15 +425,22 @@ async fn process_targets_discovery(
 
         let execution_site = target.execution_site.as_deref().unwrap_or("auto");
 
-        // Find-or-create plugin config for this target.
-        let pc_id = find_or_create_default_plugin_config(
-            db,
-            tenant_id,
-            &target_plugin_type_str,
-            &target.plugin_config,
-            &target.plugin_config_name,
-        )
-        .await?;
+        // Package manager types use plugin_type_settings and do not need
+        // per-config rows. Credential-bearing types still get plugin_configs.
+        let pc_id = if target.plugin_type.is_package_manager() {
+            None
+        } else {
+            Some(
+                find_or_create_default_plugin_config(
+                    db,
+                    tenant_id,
+                    &target_plugin_type_str,
+                    &target.plugin_config,
+                    &target.plugin_config_name,
+                )
+                .await?,
+            )
+        };
 
         // Build target-specific item info (may override package_identifier).
         let target_item = DiscoveredItemInfo {
@@ -443,8 +452,16 @@ async fn process_targets_discovery(
         };
 
         // Find-or-create the software item and host link.
-        let Some((software_item_id, hsi_id)) =
-            find_or_create_software_item(db, tenant_id, host_id, pc_id, &target_item, now).await?
+        let Some((software_item_id, hsi_id)) = find_or_create_software_item(
+            db,
+            tenant_id,
+            host_id,
+            pc_id,
+            &target_plugin_type_str,
+            &target_item,
+            now,
+        )
+        .await?
         else {
             continue;
         };
@@ -456,7 +473,7 @@ async fn process_targets_discovery(
                 host_id: Set(host_id),
                 software_item_id: Set(software_item_id),
                 host_software_item_id: Set(hsi_id),
-                plugin_config_id: Set(Some(pc_id)),
+                plugin_config_id: Set(pc_id),
                 plugin_type: Set(target_plugin_type_str.clone()),
                 role: Set(role.as_str().to_string()),
                 ordinal: Set(0),
@@ -498,10 +515,15 @@ async fn load_ignore_set(
 /// Returns `Some((software_item_id, hsi_id))` when a new link was created (caller must then
 /// create role assignments), or `None` if the existing link was updated in-place.
 ///
+/// `plugin_config_id` is `None` for package manager types (which use
+/// `plugin_type_settings` instead of per-config rows). In that case, Phase 1/2
+/// lookups match on `(plugin_type, package_identifier)` with a NULL
+/// `plugin_config_id` rather than `(plugin_config_id, package_identifier)`.
+///
 /// Three-phase lookup:
 ///
 /// 1. If this host already has a `host_software_item_plugin` row for
-///    `(plugin_config_id, effective_plugin_pkg_id)`, update `installed_version` in place
+///    the matching identity key, update `installed_version` in place
 ///    **if** the linked `software_item` is still active. If the item has been
 ///    discarded (soft-deleted), the orphaned link is removed and the function falls
 ///    through to phases 2/3 so a fresh pending item is created.
@@ -516,7 +538,8 @@ async fn find_or_create_software_item(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
     host_id: Uuid,
-    plugin_config_id: Uuid,
+    plugin_config_id: Option<Uuid>,
+    plugin_type_str: &str,
     item: &DiscoveredItemInfo<'_>,
     now: OffsetDateTime,
 ) -> Result<Option<(Uuid, Uuid)>> {
@@ -527,14 +550,22 @@ async fn find_or_create_software_item(
     // two containers on the same host using the same image are tracked separately.
     let lookup_pkg_id = item.effective_plugin_pkg_id();
 
-    // Phase 1: Check if this specific host already tracks (plugin_config_id, lookup_pkg_id)
-    let existing_plugin_link = HostSoftwareItemPlugin::find()
+    // Phase 1: Check if this specific host already tracks this package.
+    // For package managers (plugin_config_id = None), match on
+    // (plugin_type, package_identifier) with NULL plugin_config_id;
+    // for credential-bearing types, match on (plugin_config_id, package_identifier).
+    let mut phase1_query = HostSoftwareItemPlugin::find()
         .filter(host_software_item_plugin::Column::HostId.eq(host_id))
-        .filter(host_software_item_plugin::Column::PluginConfigId.eq(plugin_config_id))
-        .filter(host_software_item_plugin::Column::PackageIdentifier.eq(lookup_pkg_id))
-        .one(db)
-        .await
-        .context_to()?;
+        .filter(host_software_item_plugin::Column::PackageIdentifier.eq(lookup_pkg_id));
+    phase1_query = match plugin_config_id {
+        Some(pc_id) => {
+            phase1_query.filter(host_software_item_plugin::Column::PluginConfigId.eq(pc_id))
+        }
+        None => phase1_query
+            .filter(host_software_item_plugin::Column::PluginConfigId.is_null())
+            .filter(host_software_item_plugin::Column::PluginType.eq(plugin_type_str)),
+    };
+    let existing_plugin_link = phase1_query.one(db).await.context_to()?;
 
     if let Some(plugin_link) = existing_plugin_link {
         let linked_item = SoftwareItem::find()
@@ -577,7 +608,8 @@ async fn find_or_create_software_item(
 
         // The linked software item was discarded; remove the orphaned link.
         tracing::debug!(
-            %plugin_config_id,
+            plugin_config_id = ?plugin_config_id,
+            plugin_type = %plugin_type_str,
             package_identifier = %package_identifier,
             "removing orphaned host link for discarded software item; will re-discover"
         );
@@ -605,10 +637,18 @@ async fn find_or_create_software_item(
     }
 
     // Phase 2: Check if any other host in this tenant already has
-    // (plugin_config_id, lookup_pkg_id).
-    let candidate_links: Vec<Uuid> = HostSoftwareItemPlugin::find()
-        .filter(host_software_item_plugin::Column::PluginConfigId.eq(plugin_config_id))
-        .filter(host_software_item_plugin::Column::PackageIdentifier.eq(lookup_pkg_id))
+    // a matching assignment for this package.
+    let mut phase2_query = HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::PackageIdentifier.eq(lookup_pkg_id));
+    phase2_query = match plugin_config_id {
+        Some(pc_id) => {
+            phase2_query.filter(host_software_item_plugin::Column::PluginConfigId.eq(pc_id))
+        }
+        None => phase2_query
+            .filter(host_software_item_plugin::Column::PluginConfigId.is_null())
+            .filter(host_software_item_plugin::Column::PluginType.eq(plugin_type_str)),
+    };
+    let candidate_links: Vec<Uuid> = phase2_query
         .all(db)
         .await
         .context_to()?
@@ -685,7 +725,7 @@ async fn find_or_create_software_item(
         host_id: Set(host_id),
         software_item_id: Set(software_item_id),
         qualifier: Set(item.qualifier.map(|s| s.to_string())),
-        plugin_config_id: Set(Some(plugin_config_id)),
+        plugin_config_id: Set(plugin_config_id),
         package_identifier: Set(Some(item.effective_plugin_pkg_id().to_string())),
         installed_version: Set(Some(installed_version.to_string())),
         installed_version_detected_at: Set(Some(now)),
@@ -736,8 +776,16 @@ async fn process_one_discovery(
     args: DiscoveredItemInfo<'_>,
     now: OffsetDateTime,
 ) -> Result<()> {
-    let Some((software_item_id, hsi_id)) =
-        find_or_create_software_item(db, tenant_id, host_id, plugin_config_id, &args, now).await?
+    let Some((software_item_id, hsi_id)) = find_or_create_software_item(
+        db,
+        tenant_id,
+        host_id,
+        Some(plugin_config_id),
+        plugin_type_str,
+        &args,
+        now,
+    )
+    .await?
     else {
         return Ok(());
     };
@@ -1418,9 +1466,11 @@ mod tests {
         );
     }
 
-    /// An APT PHS item (with target) must create/reuse a shared `apt` plugin config.
+    /// An APT PHS item (with target) no longer creates a plugin_config;
+    /// package manager types use plugin_type_settings at the tenant level.
+    /// HSIP rows are created with `plugin_config_id = NULL`.
     #[tokio::test]
-    async fn target_based_apt_creates_apt_plugin_config() {
+    async fn target_based_apt_creates_hsip_without_plugin_config() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
@@ -1435,14 +1485,17 @@ mod tests {
             .await
             .expect("process_plugin_result");
 
+        // No plugin_config should be created for package manager types.
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
             .filter(plugin_config::Column::PluginType.eq("package_manager_apt"))
             .all(&db)
             .await
             .expect("query configs");
-        assert_eq!(configs.len(), 1, "expected one apt config");
-        assert_eq!(configs[0].name, "APT (auto)");
+        assert!(
+            configs.is_empty(),
+            "package managers no longer create plugin_configs"
+        );
 
         let plugin_links = HostSoftwareItemPlugin::find()
             .filter(host_software_item_plugin::Column::HostId.eq(host_id))
@@ -1455,6 +1508,17 @@ mod tests {
             3,
             "expected three role-based plugin links"
         );
+        // All links should have NULL plugin_config_id.
+        for link in &plugin_links {
+            assert!(
+                link.plugin_config_id.is_none(),
+                "package manager HSIP rows must have plugin_config_id = NULL"
+            );
+            assert_eq!(
+                link.plugin_type, "package_manager_apt",
+                "plugin_type must be set on the HSIP row"
+            );
+        }
 
         let hsi = HostSoftwareItem::find()
             .filter(host_software_item::Column::HostId.eq(host_id))
@@ -1972,19 +2036,17 @@ mod tests {
             .await
             .expect("process must succeed");
 
-        // Plugin config must have been auto-created from the target.
+        // No plugin_config should be created for package manager types.
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
             .filter(plugin_config::Column::PluginType.eq("package_manager_homebrew"))
             .all(&db)
             .await
             .expect("query plugin configs");
-        assert_eq!(
-            configs.len(),
-            1,
-            "exactly one Homebrew plugin config must exist"
+        assert!(
+            configs.is_empty(),
+            "package managers no longer create plugin_configs"
         );
-        assert_eq!(configs[0].name, "Homebrew (Formulae)");
 
         // host_software_items link must have been created.
         let hsi_links = HostSoftwareItem::find()
@@ -2055,14 +2117,17 @@ mod tests {
             .await
             .expect("second run");
 
-        // Still exactly one plugin config.
+        // No plugin_config should be created for package manager types.
         let config_count = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
             .filter(plugin_config::Column::PluginType.eq("package_manager_homebrew"))
             .count(&db)
             .await
             .expect("count configs");
-        assert_eq!(config_count, 1, "must not create duplicate plugin configs");
+        assert_eq!(
+            config_count, 0,
+            "package managers no longer create plugin_configs"
+        );
 
         // Still exactly one host_software_items link, but with the updated version.
         let hsi_links = HostSoftwareItem::find()

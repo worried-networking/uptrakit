@@ -43,6 +43,9 @@ pub use super::pending_oidc_token_exchange::{
 };
 pub use super::permission::{Entity as Permission, Model as PermissionModel};
 pub use super::plugin_config::{Entity as PluginConfig, Model as PluginConfigModel};
+pub use super::plugin_type_setting::{
+    Entity as PluginTypeSetting, Model as PluginTypeSettingModel,
+};
 pub use super::proxmox_host_mapping::{
     Entity as ProxmoxHostMapping, Model as ProxmoxHostMappingModel,
 };

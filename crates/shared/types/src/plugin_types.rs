@@ -77,6 +77,27 @@ impl PluginType {
         }
     }
 
+    /// Returns `true` if this plugin type is a package manager.
+    ///
+    /// Package managers use tenant-level `plugin_type_settings` rather than
+    /// per-config `plugin_configs` rows, and their `host_software_item_plugin`
+    /// rows carry `plugin_config_id = NULL`.
+    pub fn is_package_manager(&self) -> bool {
+        matches!(
+            self,
+            Self::PackageManagerHomebrew
+                | Self::PackageManagerApt
+                | Self::PackageManagerDnf
+                | Self::PackageManagerNpm
+                | Self::PackageManagerMas
+                | Self::PackageManagerPacman
+                | Self::PackageManagerPkg
+                | Self::PackageManagerApk
+                | Self::PackageManagerSnap
+                | Self::PackageManagerCargo
+        )
+    }
+
     /// Returns a human-readable display name for this plugin type.
     ///
     /// For [`PluginType::Other`], returns the raw wire string as-is.

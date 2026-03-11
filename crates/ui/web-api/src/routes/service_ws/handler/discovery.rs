@@ -12,7 +12,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use uptrakit_internal_wire::{
     ControllerMessage, DiscoverSoftwarePayload, DiscoveryPluginAssignment,
 };
-use uptrakit_shared_db::entity::plugin_config;
+use uptrakit_shared_db::entity::{plugin_config, plugin_type_setting};
 
 use crate::AppState;
 use crate::queries::discovery_allowlist::{load_host_allowlist_set, load_tenant_allowlist_set};
@@ -27,10 +27,14 @@ use crate::queries::discovery_allowlist::{load_host_allowlist_set, load_tenant_a
 /// If no configs exist for a type, sends a single default (empty-config)
 /// assignment so the agent can still discover software.
 ///
+/// For package manager plugin types, discovery config is read from the
+/// `plugin_type_settings` table instead of `plugin_configs`. These types
+/// do not require per-config credential rows.
+///
 /// The effective allowlist is determined as follows:
-/// 1. If the host has specific allowlist entries → only those plugin types run.
-/// 2. Else if the tenant has allowlist entries → only those plugin types run.
-/// 3. Else (unconfigured) → all discovery plugin types run (backward-compatible default).
+/// 1. If the host has specific allowlist entries -> only those plugin types run.
+/// 2. Else if the tenant has allowlist entries -> only those plugin types run.
+/// 3. Else (unconfigured) -> all discovery plugin types run (backward-compatible default).
 pub(crate) async fn trigger_discovery_for_agent_host(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
@@ -49,7 +53,7 @@ pub(crate) async fn trigger_discovery_for_agent_host(
         if !tenant_allowed.is_empty() {
             Some(tenant_allowed) // fall back to tenant allowlist
         } else {
-            None // unconfigured → all allowed (legacy/default)
+            None // unconfigured -> all allowed (legacy/default)
         }
     };
 
@@ -63,41 +67,70 @@ pub(crate) async fn trigger_discovery_for_agent_host(
             continue;
         }
 
-        let type_str = plugin_type.to_string();
+        if plugin_type.is_package_manager() {
+            // Package manager types read config from plugin_type_settings.
+            let type_str = plugin_type.to_string();
+            let config = match plugin_type_setting::Entity::find()
+                .filter(plugin_type_setting::Column::TenantId.eq(tenant_id))
+                .filter(plugin_type_setting::Column::PluginType.eq(&type_str))
+                .one(state.db())
+                .await
+            {
+                Ok(Some(setting)) => setting.config,
+                Ok(None) => serde_json::Value::Object(Default::default()),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        %plugin_type,
+                        "failed to query plugin_type_settings for discovery trigger"
+                    );
+                    continue;
+                }
+            };
 
-        let configs = match plugin_config::Entity::find()
-            .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq(&type_str))
-            .filter(plugin_config::Column::Enabled.eq(true))
-            .filter(plugin_config::Column::DeactivatedAt.is_null())
-            .all(state.db())
-            .await
-        {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    %plugin_type,
-                    "failed to query plugin configs for discovery trigger"
-                );
-                continue;
-            }
-        };
-
-        if configs.is_empty() {
-            // No configs for this type -- send a default assignment.
             plugins.push(DiscoveryPluginAssignment {
                 plugin_config_id: None,
                 plugin_type: plugin_type.clone(),
-                config: serde_json::Value::Object(Default::default()),
+                config,
             });
         } else {
-            for cfg in configs {
+            // Non-package-manager types read from plugin_configs as before.
+            let type_str = plugin_type.to_string();
+
+            let configs = match plugin_config::Entity::find()
+                .filter(plugin_config::Column::TenantId.eq(tenant_id))
+                .filter(plugin_config::Column::PluginType.eq(&type_str))
+                .filter(plugin_config::Column::Enabled.eq(true))
+                .filter(plugin_config::Column::DeactivatedAt.is_null())
+                .all(state.db())
+                .await
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        %plugin_type,
+                        "failed to query plugin configs for discovery trigger"
+                    );
+                    continue;
+                }
+            };
+
+            if configs.is_empty() {
+                // No configs for this type -- send a default assignment.
                 plugins.push(DiscoveryPluginAssignment {
-                    plugin_config_id: Some(cfg.id),
+                    plugin_config_id: None,
                     plugin_type: plugin_type.clone(),
-                    config: cfg.config,
+                    config: serde_json::Value::Object(Default::default()),
                 });
+            } else {
+                for cfg in configs {
+                    plugins.push(DiscoveryPluginAssignment {
+                        plugin_config_id: Some(cfg.id),
+                        plugin_type: plugin_type.clone(),
+                        config: cfg.config,
+                    });
+                }
             }
         }
     }
