@@ -170,6 +170,7 @@ Each entity displays:
 | Last checked at | Timestamp of the most recent installed-version check |
 | Release URL | Link to the upstream release page (GitHub releases only; absent otherwise) |
 | Release summary | First 500 characters of the release notes (GitHub releases only; absent otherwise) |
+| Entity picture | Software item icon/logo displayed as a thumbnail in the HA dashboard (when an icon URL is set on the software item) |
 
 When the plugin for a software item fetches releases from GitHub, Uptrakit includes `release_url` and
 `release_summary` in the HA MQTT discovery config for each entity. Home Assistant surfaces these as
@@ -178,6 +179,36 @@ without leaving Home Assistant.
 
 For plugins that only track version numbers (e.g. apt, Homebrew, Docker Hub) the `release_url` and
 `release_summary` attributes are omitted from the discovery config.
+
+### App icons
+
+Each software item supports an optional `icon_url` field (HTTPS only, max 2048 characters). When set,
+the URL is included as `entity_picture` in the HA MQTT discovery config. Home Assistant displays this
+image as the entity thumbnail in the dashboard and in lovelace cards. To set or update an icon URL, edit
+the software item in the Uptrakit web UI or pass `--icon-url` to the CLI.
+
+### Dual availability
+
+Each software item update entity in Home Assistant requires **both** the Uptrakit MQTT service **and**
+the target host's agent to be online before it reports as available. This is implemented using HA's
+`availability` array with `availability_mode: "all"`:
+
+```yaml
+availability:
+  - topic: "{prefix}/status"
+    payload_available: "online"
+    payload_not_available: "offline"
+  - topic: "{prefix}/hosts/{host_id}/connectivity/state"
+    payload_available: "online"
+    payload_not_available: "offline"
+availability_mode: all
+```
+
+The host packages and host security entities use the same dual-availability configuration.
+
+The connectivity binary sensor itself retains a single `availability_topic` pointing only to the MQTT
+service status (`{prefix}/status`). Using the agent connectivity state as a prerequisite for the
+connectivity sensor would be circular — the connectivity sensor's state _is_ the agent status.
 
 All entities for a given host — featured software items, host summaries, security updates, and the
 connectivity sensor — are grouped under a single HA device per host. The device is identified by
