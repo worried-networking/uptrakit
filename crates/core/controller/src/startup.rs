@@ -16,6 +16,7 @@ use rootcause::prelude::*;
 use uptrakit_web_api::MaskedUrl;
 use uptrakit_web_api::SettingKey;
 use uptrakit_web_api::settings::Settings;
+use uptrakit_web_api::settings_store::RawSettingsExt;
 
 use crate::AppError;
 
@@ -25,7 +26,7 @@ use crate::AppError;
 
 /// Values produced by reconciling CLI / DB / default settings.
 pub(crate) struct ReconciledSettings {
-    pub extra_sans: Vec<String>,
+    pub sans: Vec<String>,
     pub pki_addr: Option<String>,
     pub https_addr: SocketAddr,
     /// Raw (decrypted) NATS URL, or `None` when not configured.
@@ -694,31 +695,73 @@ pub(crate) async fn reconcile_all_settings(
         );
     }
 
-    let extra_sans = reconcile_setting_vec::<String>(crate::reconcile::ReconcileParams {
-        db,
-        key: SettingKey::ExtraSans,
-        raw: global_raw,
-        cli_value: if args.sans.is_empty() {
-            None
-        } else {
-            Some(args.sans.clone())
-        },
-        default_value: vec![],
-        force,
-        convert: crate::reconcile::JsonConvert {
-            to_json: |v| serde_json::json!(v),
-            from_json: |v| {
-                v.as_array().map(|arr| {
-                    arr.iter()
-                        .filter_map(|s| s.as_str().map(String::from))
-                        .collect()
-                })
+    // SANs reconciliation: full-list semantics (not additive)
+    //
+    // 1. --san provided         → standard 5-case reconcile (CLI is canonical)
+    // 2. --san absent, DB has   → use DB value (no auto-detection)
+    // 3. --san absent, DB empty → first start: auto-detect and save to DB
+    let sans = if !args.sans.is_empty() {
+        // Case 1: --san provided — standard reconcile
+        reconcile_setting_vec::<String>(crate::reconcile::ReconcileParams {
+            db,
+            key: SettingKey::Sans,
+            raw: global_raw,
+            cli_value: Some(args.sans.clone()),
+            default_value: vec![],
+            force,
+            convert: crate::reconcile::JsonConvert {
+                to_json: |v| serde_json::json!(v),
+                from_json: |v| {
+                    v.as_array().map(|arr| {
+                        arr.iter()
+                            .filter_map(|s| s.as_str().map(String::from))
+                            .collect()
+                    })
+                },
             },
-        },
-    })
-    .await
-    .context(AppError::Settings)?;
-    settings.set_extra_sans(extra_sans.clone()).await;
+        })
+        .await
+        .context(AppError::Settings)?
+    } else {
+        // No --san: check if DB has a value
+        let db_sans = global_raw.get_setting(SettingKey::Sans).and_then(|v| {
+            v.as_array().map(|arr| {
+                arr.iter()
+                    .filter_map(|s| s.as_str().map(String::from))
+                    .collect::<Vec<String>>()
+            })
+        });
+        match db_sans {
+            Some(existing) => {
+                // Case 2: DB has SANs — use them
+                tracing::debug!(count = existing.len(), "using existing SANs from database");
+                existing
+            }
+            None => {
+                // Case 3: first start — auto-detect and save
+                let detected =
+                    uptrakit_web_api::pki_utils::auto_detect_sans().context(AppError::Pki)?;
+                let san_strings: Vec<String> = detected
+                    .dns_names
+                    .into_iter()
+                    .chain(detected.ip_addrs.iter().map(|ip| ip.to_string()))
+                    .collect();
+                tracing::info!(
+                    sans = ?san_strings,
+                    "first start: auto-detected SANs, saving to database"
+                );
+                uptrakit_web_api::settings_store::upsert_global_setting(
+                    db,
+                    SettingKey::Sans,
+                    serde_json::json!(san_strings),
+                )
+                .await
+                .context(AppError::Settings)?;
+                san_strings
+            }
+        }
+    };
+    settings.set_sans(sans.clone()).await;
 
     let https_addr = reconcile_socket_addr(
         db,
@@ -882,7 +925,7 @@ pub(crate) async fn reconcile_all_settings(
     }
 
     Ok(ReconciledSettings {
-        extra_sans,
+        sans,
         pki_addr: pki_addr_opt,
         https_addr,
         #[cfg(feature = "nats")]
@@ -1205,7 +1248,7 @@ pub(crate) fn validate_configuration(
     }
 
     // --san only makes sense with managed (auto-generated) certificates
-    if !reconciled.extra_sans.is_empty() && args.tls_cert.is_some() {
+    if !reconciled.sans.is_empty() && args.tls_cert.is_some() {
         bail!(AppError::Config(
             "--san cannot be used with --tls-cert/--tls-key; \
              SANs are only configurable for controller-managed certificates"
@@ -1322,17 +1365,17 @@ pub(crate) async fn init_pki_runtime(
     let ca_key_store: uptrakit_web_api::CaKeyStoreRef =
         Arc::new(tokio::sync::RwLock::new(ca_initial_key_store));
 
-    // Resolve server certificate (using reconciled extra_sans)
+    // Resolve server certificate (using reconciled sans)
     let server_cert = if let (Some(cert_path), Some(key_path)) = (&args.tls_cert, &args.tls_key) {
         pki::load_external_cert(cert_path, key_path).context(AppError::Pki)?
     } else {
         let mut cert =
-            pki::load_or_generate_server_cert(&pki_path, &ca_state.active, &reconciled.extra_sans)
+            pki::load_or_generate_server_cert(&pki_path, &ca_state.active, &reconciled.sans)
                 .await
                 .context(AppError::Pki)?;
 
         // Check if the existing cert needs SAN regeneration
-        if pki::server_cert_needs_san_update(&cert.cert_pem, &reconciled.extra_sans)
+        if pki::server_cert_needs_san_update(&cert.cert_pem, &reconciled.sans)
             .context(AppError::Pki)?
         {
             if pki::cert_signed_by_ca(&cert.cert_pem, &ca_state.active.cert_pem)
@@ -1341,7 +1384,7 @@ pub(crate) async fn init_pki_runtime(
                 tracing::info!(
                     "server certificate SANs do not match configured values, regenerating"
                 );
-                cert = pki::renew_server_cert(&pki_path, &ca_state.active, &reconciled.extra_sans)
+                cert = pki::renew_server_cert(&pki_path, &ca_state.active, &reconciled.sans)
                     .await
                     .context(AppError::Pki)?;
             } else {
@@ -1360,7 +1403,7 @@ pub(crate) async fn init_pki_runtime(
         // Auto-renew if within renewal window
         if pki::should_renew_server_cert(&cert.cert_pem) {
             tracing::info!("server certificate is within renewal window, renewing now");
-            cert = pki::renew_server_cert(&pki_path, &ca_state.active, &reconciled.extra_sans)
+            cert = pki::renew_server_cert(&pki_path, &ca_state.active, &reconciled.sans)
                 .await
                 .context(AppError::Pki)?;
         }
