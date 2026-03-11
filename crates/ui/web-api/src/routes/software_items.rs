@@ -160,7 +160,14 @@ async fn run_controller_fetch_jobs(
             }
         };
 
-        let releases = match plugin.fetch_releases(&job.package_identifier).await {
+        let Some(fetcher) = plugin.as_release_fetcher() else {
+            tracing::warn!(
+                plugin_type = ?job.plugin_type,
+                "plugin does not implement ReleaseFetcherPlugin; skipping"
+            );
+            continue;
+        };
+        let releases = match fetcher.fetch_releases(&job.package_identifier).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(

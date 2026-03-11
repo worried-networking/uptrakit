@@ -102,7 +102,7 @@ struct PhaseAGroup {
 /// One independent controller-side fetch job, ready to be spawned into a `JoinSet`.
 struct FetchJob {
     packages: HashMap<String, Vec<(Uuid, Uuid)>>,
-    plugin: Box<dyn uptrakit_plugin_infrastructure_core::Plugin>,
+    plugin: Box<dyn uptrakit_plugin_infrastructure_core::PluginBase>,
 }
 
 #[async_trait::async_trait]
@@ -272,7 +272,11 @@ impl FetchReleasesExecutor {
                     .keys()
                     .map(|pkg| BatchFetchItem::new(pkg.clone()))
                     .collect();
-                let results = job.plugin.batch_fetch_releases(&fetch_items).await;
+                let fetcher = job
+                    .plugin
+                    .as_release_fetcher()
+                    .expect("FetchJob plugin should implement ReleaseFetcherPlugin");
+                let results = fetcher.batch_fetch_releases(&fetch_items).await;
                 Ok((job.packages, results))
             });
         }

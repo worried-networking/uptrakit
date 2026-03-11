@@ -24,8 +24,9 @@
 //!     executor,
 //! )?;
 //!
-//! // Fetch releases (owner/repo is the package_identifier, not config)
-//! let releases = plugin.fetch_releases("octocat/hello-world").await?;
+//! // Fetch releases via subtrait accessor
+//! let fetcher = plugin.as_release_fetcher().expect("plugin supports fetching");
+//! let releases = fetcher.fetch_releases("octocat/hello-world").await?;
 //! ```
 
 pub mod error;
@@ -36,7 +37,7 @@ pub use registry::PluginRegistry;
 
 // Re-export commonly used types for plugin crate convenience
 pub use uptrakit_plugin_infrastructure_core::{
-    Plugin, PluginCapability, SudoCommandEntry, SudoHelperScript,
+    PluginBase, PluginCapability, SudoCommandEntry, SudoHelperScript,
 };
 pub use uptrakit_shared_types::PluginType;
 

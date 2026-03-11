@@ -8,7 +8,7 @@ use uptrakit_plugin_discovery_proxmox_helper_scripts::{
 };
 use uptrakit_plugin_generic_shell::{ShellConfig, ShellPlugin};
 use uptrakit_plugin_infrastructure_core::{
-    ConfigFormSchema, Plugin, PluginType, SecretMasking, SudoCommandEntry,
+    ConfigFormSchema, PluginBase, PluginType, SecretMasking, SudoCommandEntry,
 };
 use uptrakit_plugin_infrastructure_proxmox::{ProxmoxConfig, ProxmoxPlugin};
 use uptrakit_plugin_package_manager_apk::{ApkConfig, ApkPlugin};
@@ -94,7 +94,7 @@ macro_rules! register_plugins {
                 plugin_type: PluginType,
                 config: &serde_json::Value,
                 executor: Arc<dyn CommandExecutor>,
-            ) -> Result<Box<dyn Plugin>> {
+            ) -> Result<Box<dyn PluginBase>> {
                 match plugin_type {
                     $(
                         PluginType::$variant => {
@@ -182,7 +182,7 @@ macro_rules! register_plugins {
                 plugin_type: PluginType,
                 config: &serde_json::Value,
                 executor: Arc<dyn CommandExecutor>,
-            ) -> Result<Box<dyn Plugin>> {
+            ) -> Result<Box<dyn PluginBase>> {
                 match plugin_type {
                     $(
                         PluginType::$variant => {
@@ -385,7 +385,8 @@ macro_rules! register_plugins {
 
             /// Returns sudo command entries only for plugins that are compatible
             /// with the target host, as determined by running each plugin's
-            /// [`Plugin::detect_host_compatibility`] check over the provided executor.
+            /// [`DiscoveryPlugin::detect_host_compatibility`] check over the
+            /// provided executor.
             ///
             /// Unlike [`all_required_sudo_commands`], this method runs host
             /// compatibility checks for every plugin that declares the
@@ -414,11 +415,7 @@ macro_rules! register_plugins {
                 let empty = serde_json::Value::Object(serde_json::Map::new());
 
                 // Phase 1: create all plugin instances sequentially.
-                // Plugin construction itself has no blocking I/O; the only async
-                // call here is `BollardDockerClient::upgrade_to_daemon_client`
-                // which returns immediately (it builds the bollard client object
-                // without opening a connection).
-                let mut instances: Vec<(PluginType, Box<dyn Plugin>)> = Vec::new();
+                let mut instances: Vec<(PluginType, Box<dyn PluginBase>)> = Vec::new();
                 $(
                     if let Ok(p) = Self::create_plugin_for_discovery(
                         PluginType::$variant, &empty, Arc::clone(&executor)).await
@@ -428,42 +425,44 @@ macro_rules! register_plugins {
                 )+
 
                 // Phase 2: run all host compatibility probes concurrently.
-                // Each probe is an independent subprocess or network call; running
-                // them in parallel reduces total latency to max(individual) rather
-                // than sum(individual).  This is especially important for the Docker
-                // probe, which contacts the daemon socket and may take several
-                // seconds if Docker Desktop is in a slow or restarting state.
                 let check_futs: Vec<_> = instances
                     .into_iter()
                     .map(|(pt, p)| async move {
                         let is_compatible = if p.has_capability(
                             uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility)
                         {
-                            match p.detect_host_compatibility().await {
-                                Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Compatible) => true,
-                                Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Incompatible(reason)) => {
-                                    tracing::debug!(
-                                        plugin = %pt,
-                                        reason = %reason,
-                                        "plugin not compatible with host; skipping sudo commands"
-                                    );
-                                    false
+                            if let Some(discovery) = p.as_discovery() {
+                                match discovery.detect_host_compatibility().await {
+                                    Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Compatible) => true,
+                                    Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Incompatible(reason)) => {
+                                        tracing::debug!(
+                                            plugin = %pt,
+                                            reason = %reason,
+                                            "plugin not compatible with host; skipping sudo commands"
+                                        );
+                                        false
+                                    }
+                                    Ok(_) => {
+                                        tracing::warn!(
+                                            plugin = %pt,
+                                            "unknown HostCompatibility variant; assuming compatible"
+                                        );
+                                        true
+                                    }
+                                    Err(e) => {
+                                        tracing::debug!(
+                                            plugin = %pt,
+                                            error = %e,
+                                            "host compatibility check failed; assuming compatible"
+                                        );
+                                        true
+                                    }
                                 }
-                                Ok(_) => {
-                                    tracing::warn!(
-                                        plugin = %pt,
-                                        "unknown HostCompatibility variant; assuming compatible"
-                                    );
-                                    true
-                                }
-                                Err(e) => {
-                                    tracing::debug!(
-                                        plugin = %pt,
-                                        error = %e,
-                                        "host compatibility check failed; assuming compatible"
-                                    );
-                                    true
-                                }
+                            } else {
+                                // Plugin declares DetectHostCompatibility but
+                                // doesn't implement DiscoveryPlugin — assume
+                                // compatible.
+                                true
                             }
                         } else {
                             true
@@ -986,7 +985,7 @@ mod tests {
         )
         .await
         .expect("create github");
-        assert_eq!(github.plugin_type(), PluginType::ReleasesGithub);
+        assert_eq!(github.plugin_type_id(), PluginType::ReleasesGithub.as_str());
 
         let docker_config = serde_json::json!({});
         let docker = PluginRegistry::create_plugin(
@@ -996,7 +995,7 @@ mod tests {
         )
         .await
         .expect("create docker");
-        assert_eq!(docker.plugin_type(), PluginType::ReleasesDocker);
+        assert_eq!(docker.plugin_type_id(), PluginType::ReleasesDocker.as_str());
 
         let proxmox_config = serde_json::json!({});
         let proxmox = PluginRegistry::create_plugin(
@@ -1007,8 +1006,8 @@ mod tests {
         .await
         .expect("create proxmox");
         assert_eq!(
-            proxmox.plugin_type(),
-            PluginType::DiscoveryProxmoxHelperScripts
+            proxmox.plugin_type_id(),
+            PluginType::DiscoveryProxmoxHelperScripts.as_str()
         );
 
         let homebrew_config = serde_json::json!({});
@@ -1019,7 +1018,10 @@ mod tests {
         )
         .await
         .expect("create homebrew");
-        assert_eq!(homebrew.plugin_type(), PluginType::PackageManagerHomebrew);
+        assert_eq!(
+            homebrew.plugin_type_id(),
+            PluginType::PackageManagerHomebrew.as_str()
+        );
 
         let apt_config = serde_json::json!({});
         let apt = PluginRegistry::create_plugin(
@@ -1029,7 +1031,7 @@ mod tests {
         )
         .await
         .expect("create apt");
-        assert_eq!(apt.plugin_type(), PluginType::PackageManagerApt);
+        assert_eq!(apt.plugin_type_id(), PluginType::PackageManagerApt.as_str());
     }
 
     #[test]
