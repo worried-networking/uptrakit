@@ -1,9 +1,11 @@
 //! Generic notification extension data action handler + SMTP settings handler.
 //!
-//! This module handles extension actions dispatched by the
-//! [`ExtensionOwner::Notification`] variant. It extracts the channel type
-//! from the extension ID (`notifications.<type>` → `<type>`) and performs
-//! generic operations without transport-specific knowledge.
+//! This module handles extension actions for notification plugins. Notification
+//! extensions are registered as `ExtensionOwner::Plugin` and identified by
+//! the `notifications.` prefix in their extension ID. The dispatch route
+//! checks this prefix and delegates here. It extracts the channel type from
+//! the extension ID (`notifications.<type>` → `<type>`) and performs generic
+//! operations without transport-specific knowledge.
 
 use std::sync::Arc;
 

@@ -443,19 +443,17 @@ async fn run(args: cli::Args) -> Result<()> {
             AppError::Config("failed to build plugin registry with notifications".to_string())
         })?,
     );
-    let extension_manifests = plugin_ops.extension_manifests();
-    let extension_actions = plugin_ops.extension_actions();
-
-    // Notification extensions (only enabled plugins produce manifests).
-    let notification_manifests = notification_ops.extension_manifests();
-    let notification_actions = notification_ops.extension_actions();
+    // Merge plugin and notification extension manifests/actions into a single
+    // collection — the unified ExtensionRegistry no longer distinguishes them.
+    let mut extension_manifests = plugin_ops.extension_manifests();
+    let mut extension_actions = plugin_ops.extension_actions();
+    extension_manifests.extend(notification_ops.extension_manifests());
+    extension_actions.extend(notification_ops.extension_actions());
 
     let extension_registry = Arc::new(
         uptrakit_web_api::extension_registry::ExtensionRegistry::new(
             extension_manifests,
             extension_actions,
-            notification_manifests,
-            notification_actions,
         ),
     );
 
