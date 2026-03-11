@@ -5,7 +5,7 @@ structured hooks (with predefined templates) and custom commands.
 
 ## Configuration format
 
-Hooks are configured in the plugin config or software item's `config_override` under a `hooks` key:
+Hooks are configured in the plugin config or per-assignment `config` under a `hooks` key:
 
 ```json
 {
@@ -137,10 +137,10 @@ Custom commands are not validated (they are intentionally arbitrary shell comman
 
 ## Merge strategy
 
-When both plugin config and software item `config_override` define hooks:
+When both plugin config and the per-assignment `config` define hooks:
 
-1. If override has a `hooks` key, it completely replaces the base config's hooks
-1. If override doesn't have `hooks`, fall back to base config's hooks
+1. If the per-assignment config has a `hooks` key, it completely replaces the base config's hooks
+1. If the per-assignment config doesn't have `hooks`, fall back to base config's hooks
 
 ## Phase markers in output
 

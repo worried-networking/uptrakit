@@ -103,10 +103,10 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
   with the item. Send `null` to clear an existing icon URL.
 - `POST /api/v1/software-items/{id}/hosts`: assign a software item to one or more hosts. Each host
   assignment carries a list of role-specific plugin assignments (`plugins: Vec<HostPluginRoleAssignment>`),
-  where each role entry specifies the `role`, `plugin_config_id` (or inline `plugin_config`),
-  `package_identifier`, optional `config_override`, and `execution_site`. Requires `create_software`.
+  where each role entry specifies the `role`, `plugin_type`, optional `plugin_config_id` (or inline `plugin_config`),
+  `package_identifier`, optional `config`, and `execution_site`. Requires `create_software`.
 - `PUT /api/v1/software-items/{id}/hosts/{host_id}`: update a specific role assignment for a host --
-  change the plugin config, package identifier, config override, or execution site. The request body
+  change the plugin type, plugin config, package identifier, per-assignment config, or execution site. The request body
   includes `role` to identify which role to update. Requires `update_software`.
 - `DELETE /api/v1/software-items/{id}/hosts/{host_id}[?ignore=true]`: remove a host assignment.
   Pass `?ignore=true` to also create a software ignore rule for the software item's
@@ -129,6 +129,16 @@ when `"discover_local_software"` is present. Discovery-capable plugin types are 
   Same permission requirements. When a host has its own entries the tenant-wide list is ignored
   entirely for that host. When neither list has entries all discovery-capable plugins run (default).
   See [Discovery Allowlist API](discovery-allowlist.md) for full details.
+- `/api/v1/plugin-type-settings`: tenant-level per-plugin-type settings (discovery preferences, behavioral
+  defaults). All endpoints require `update_software`.
+  - `GET /api/v1/plugin-type-settings` -- list all plugin types with active type settings for the tenant.
+  - `GET /api/v1/plugin-type-settings/:plugin_type` -- get the current type settings for a specific plugin type.
+    Returns `404` if no settings exist for the plugin type.
+  - `PUT /api/v1/plugin-type-settings/:plugin_type` -- upsert type settings (create or update). Request body
+    is a JSON object with the type-specific settings fields. Validates against the plugin type's
+    `type_settings_form_schema()`.
+  - `DELETE /api/v1/plugin-type-settings/:plugin_type` -- reset to built-in defaults (deletes the
+    tenant-level override row).
 
 `ServiceResponse` includes an optional `ping_interval_seconds` field (`Option<u32>`) that reports the per-service
 ping interval override. When `null`, the service uses its profile default (300s for agents/SSH agents, 15s for MQTT).
@@ -196,7 +206,7 @@ Types are defined in `crates/shared/web-api-types/src/services.rs`:
 
 ## Multi-Tenancy
 
-- Tenant-aware tables store `tenant_id` (e.g., `services`, `hosts`, `plugin_configs`, `software_items`, `settings`, `mqtt_clients`).
+- Tenant-aware tables store `tenant_id` (e.g., `services`, `hosts`, `plugin_configs`, `plugin_type_settings`, `software_items`, `settings`, `mqtt_clients`).
 - `TenantContext` middleware extracts `X-Tenant-Id` from the request or falls back to the default tenant (`AppState.default_tenant_id`).
 - Global tables like `users`, `roles`, `permissions`, `user_roles`, `role_permissions`, `api_tokens`, and `pending_*`
   remain unscoped.
@@ -715,10 +725,10 @@ Types are defined in `crates/shared/web-api-types/src/software_items.rs`:
 | `SoftwareItemResponse` | `id`, `name`, `plugins` (Vec&lt;String&gt; -- distinct plugin types), `enabled`, `featured`, `last_checked_at`, `host_count`, `installed_version` (Option -- present only when `host_id` filter is used), `latest_version` (Option), `update_available`, `created_at`, `updated_at`, `icon_url` (Option&lt;String&gt; -- HTTPS URL to an icon/logo image) |
 | `SoftwareItemDetailResponse` | Extends `SoftwareItemResponse` with `hosts: Vec<SoftwareItemHostSummary>` |
 | `SoftwareItemHostSummary` | `host_id`, `hostname`, `friendly_name`, `plugins` (Vec&lt;HostPluginRoleSummary&gt;), `installed_version`, `installed_version_detected_at`, `latest_version` (Option), `latest_release_metadata` (Option), `update_available`, `last_updated_at`, `linked_at` |
-| `HostPluginRoleSummary` | `role` (PluginRole), `plugin_config_id`, `plugin_config_name`, `plugin_type`, `package_identifier`, `config_override` (Option), `execution_site` |
+| `HostPluginRoleSummary` | `role` (PluginRole), `plugin_config_id` (Option), `plugin_config_name` (Option), `plugin_type`, `package_identifier`, `config` (Option), `execution_site` |
 | `HostSoftwareAssignment` | `host_id`, `plugins` (Vec&lt;HostPluginRoleAssignment&gt;) |
-| `HostPluginRoleAssignment` | `role` (PluginRole), `plugin_config_id` (Option), `plugin_config` (Option -- inline create), `package_identifier`, `config_override` (Option), `execution_site` (default `"auto"`) |
-| `UpdateHostAssignmentRequest` | `role` (PluginRole), `plugin_config_id` (Option), `plugin_config` (Option), `package_identifier` (Option), `config_override` (Option), `execution_site` (Option) |
+| `HostPluginRoleAssignment` | `role` (PluginRole), `plugin_type`, `plugin_config_id` (Option), `plugin_config` (Option -- inline create), `package_identifier`, `config` (Option), `execution_site` (default `"auto"`) |
+| `UpdateHostAssignmentRequest` | `role` (PluginRole), `plugin_type` (Option), `plugin_config_id` (Option), `plugin_config` (Option), `package_identifier` (Option), `config` (Option), `execution_site` (Option) |
 | `TriggerUpdateRequest` | `to_version` (String), `release_info` (Option -- `{ tag, release_url, assets }`) |
 | `TriggerUpdateResponse` | `update_history_id` (Uuid), `status` (TriggerUpdateStatus -- `pending`, `queued`) |
 

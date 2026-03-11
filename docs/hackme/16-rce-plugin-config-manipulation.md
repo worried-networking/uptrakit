@@ -70,9 +70,9 @@ code execution on managed hosts via plugin configuration manipulation.
 4. When an update is triggered, hooks execute before and after the plugin's update
    operation.
 
-### Path 4: Config override per host
+### Path 4: Per-assignment config override per host
 
-1. The attacker modifies the `config_override` on a host-software-item-plugin
+1. The attacker modifies the per-assignment `config` on a host-software-item-plugin
    assignment to inject hooks for a specific host, even if the base plugin config is
    clean.
 

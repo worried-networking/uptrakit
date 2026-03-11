@@ -68,6 +68,26 @@ All foundation work is done. Summary of what was delivered:
   - Once compatibility results are wired to the controller (above), add a column or badge to the
     Hosts page showing which plugins are compatible on each host.
 
+### Plugin Type Settings: Follow-up Items
+
+- [ ] Frontend: Plugin Type Settings UI via extension framework
+  - **Category**: UI / Plugins | **Impact**: Medium | **Effort**: Medium
+  - Build a Settings page section (or extension panel) that lists plugin types with type-level
+    settings. Render the `type_settings_form_fields` schema from `PluginTypeInfo` as a structured
+    form. Allow users to view, update, and reset type settings per plugin type.
+- [ ] CLI: `plugin-type-settings list|show|update|reset` command group
+  - **Category**: CLI / Plugins | **Impact**: Medium | **Effort**: Low
+  - Add CLI commands wrapping the `GET/PUT/DELETE /api/v1/plugin-type-settings` REST API.
+    `list` shows all plugin types with active type settings. `show <plugin_type>` displays the
+    current settings. `update <plugin_type> --config '{...}'` upserts. `reset <plugin_type>`
+    deletes the tenant-level override.
+- [ ] Cleanup: remove deprecated discovery fields from plugin config structs after migration period
+  - **Category**: Plugins / Tech Debt | **Impact**: Low | **Effort**: Low
+  - Fields like `discovery_filter` (APT, DNF, Pacman, Pkg, APK) and `package_type` (Homebrew)
+    have been migrated to plugin type settings. After a migration period, remove these fields
+    from the plugin config structs and drop the migration compatibility code that reads them
+    as fallbacks.
+
 ______________________________________________________________________
 
 ## Phase 2: Core Features

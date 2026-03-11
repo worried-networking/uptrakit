@@ -625,6 +625,77 @@ dispatch methods. The schema is served to the frontend via `GET /api/v1/plugin-t
 When adding a new plugin, implement `ConfigFormSchema` on your config struct. The macro handles
 the rest.
 
+### Type settings vs plugin configs
+
+Plugin configuration uses a **two-tier model**:
+
+- **Type settings** (`plugin_type_settings` table) -- tenant-level defaults per plugin type.
+  These store discovery preferences and behavioral defaults that apply to all instances of a
+  plugin type within a tenant. Examples: APT `discovery_filter` (`manual` vs `all`), Homebrew
+  `package_type` (`formula` vs `cask`), Pacman `discovery_filter` (`all` vs `explicit`).
+- **Plugin configs** (`plugin_configs` table) -- named configuration profiles. These store
+  credentials, API endpoints, and per-profile settings that vary between configurations.
+  Examples: GitHub `auth_token`, Docker `auth` credentials, Forgejo `api_base_url`.
+
+**When to use which:**
+
+| Use type settings for | Use plugin configs for |
+| --- | --- |
+| Discovery preferences (`discovery_filter`) | Authentication credentials (`auth_token`) |
+| Behavioral defaults (`package_type`) | API endpoints (`api_base_url`) |
+| Settings shared across all configs of a type | Settings that differ between profiles |
+
+**Implementing type settings.** Plugins that support type settings implement two additional
+methods on `ConfigFormSchema`:
+
+```rust
+impl ConfigFormSchema for AptConfig {
+    fn form_schema() -> Vec<FieldDef> {
+        // Fields for the plugin config form (credentials, profiles)
+        vec![]
+    }
+
+    fn type_settings_form_schema() -> Vec<FieldDef> {
+        // Fields for the type settings form (discovery preferences)
+        vec![
+            FieldDef::new("discovery_filter", "Discovery Filter")
+                .with_type(FieldType::Select)
+                .with_options(vec![
+                    ("manual", "Manual packages only"),
+                    ("all", "All installed packages"),
+                ]),
+        ]
+    }
+
+    fn type_settings_sample() -> serde_json::Value {
+        serde_json::json!({ "discovery_filter": "manual" })
+    }
+}
+```
+
+Plugins with no type-level settings return empty `Vec` and `json!({})` from the default
+trait implementations.
+
+The `register_plugins!` macro auto-generates `type_settings_form_schema()` and
+`type_settings_sample_for()` dispatch methods on `PluginRegistry`.
+
+### Three-layer config merge
+
+When the system needs the effective configuration for a plugin operation,
+`resolve_effective_config()` merges three layers (broadest to narrowest):
+
+1. **Type settings** -- tenant-level defaults from `plugin_type_settings`.
+2. **Profile config** -- from the `plugin_configs` row.
+3. **Assignment config** -- per-host override from `host_software_item_plugins.config`.
+
+Each layer's JSON is shallow-merged on top of the previous one. Fields present in a narrower
+layer override the same field from a broader layer. This replaces the previous two-layer
+model (plugin config + `config_override`).
+
+The `PluginTypeInfo` response (from `GET /api/v1/plugin-types`) includes
+`type_settings_form_fields` and `type_settings_sample` so the frontend can render a type
+settings form.
+
 All plugin `new()` constructors must return `Result<Self, Report<PluginError>>` so the registry can
 handle instantiation failures uniformly. The constructor should validate its configuration before
 returning.
@@ -758,7 +829,7 @@ DiscoveredSoftware {
             PluginRole::ExecuteUpdate,
         ],
         package_identifier: None,
-        config_override: None,
+        config: None,
         execution_site: None,
     }],
     extra: None,

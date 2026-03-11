@@ -39,9 +39,11 @@ Each host assignment has up to three **plugin assignments** (`host_software_item
 
 Each plugin assignment row carries:
 
-- `plugin_config_id` — which plugin config to use for this role.
+- `plugin_type` — the plugin type string (e.g. `package_manager_apt`).
+- `plugin_config_id` — optional; which plugin config to use for this role (nullable since type
+  settings may suffice).
 - `package_identifier` — the package name or image reference within that plugin.
-- `config_override` — optional per-host JSON override merged on top of the base plugin config.
+- `config` — optional per-host JSON override merged on top of the profile config and type settings.
 - `execution_site` — where the operation runs: `auto` (default), `agent`, or `controller`.
 - `role` — one of the three role strings above.
 - `ordinal` — ordering within the same role (currently always 0; reserved for future multi-instance
@@ -84,7 +86,9 @@ pub enum PluginRole {
 When Uptrakit needs to check or update a software item on a host, it:
 
 1. Loads the host assignment and its plugin assignments for the relevant role(s).
-2. For each role, loads the plugin config and merges any `config_override`.
+2. For each role, resolves the effective config by merging three layers: type settings (from
+   `plugin_type_settings`), profile config (from `plugin_configs`), and per-assignment config
+   (from `host_software_item_plugins.config`) via `resolve_effective_config()`.
 3. Creates a plugin instance via `PluginRegistry::create_plugin()` with the merged config.
 4. Runs the relevant plugin method (`detect_installed_version`, `fetch_releases`,
    `execute_update`, etc.) via the injected `CommandExecutor` (local for the regular agent,
@@ -257,7 +261,7 @@ The controller can use compatibility results to surface per-host plugin status i
 
 Plugin-level hooks (`PreUpdateHook`, `PostUpdateHook`) run as part of the update execution flow
 managed by `agent-core`. They are distinct from user-configured JSON hooks (configured in plugin
-config or `config_override` under a `hooks` key — see [Update Hooks](update-hooks.md)).
+config or per-assignment `config` under a `hooks` key -- see [Update Hooks](update-hooks.md)).
 
 Order of operations during an update:
 

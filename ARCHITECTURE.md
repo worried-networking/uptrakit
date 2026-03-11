@@ -64,7 +64,9 @@ the `PluginRole` enum (`crates/shared/types/src/plugin_role.rs`):
 | `fetch_releases` | Fetches the latest available version (controller-side or agent-side) |
 | `execute_update` | Executes the actual software update on the agent host |
 
-Each assignment carries an `execution_site` column (`auto` | `agent` | `controller`) that determines where the operation runs. Plugins declaring the
+Each assignment carries an `execution_site` column (`auto` | `agent` | `controller`) that determines where the operation runs.
+Each assignment also has a `plugin_type` column and an optional `plugin_config_id` (nullable -- assignments without a
+named profile use only type settings and per-assignment config). Plugins declaring the
 `ControllerSideFetchReleases` capability (GitHub, Docker) have their `fetch_releases` executed on the controller by default when `execution_site` is
 `auto`. Local package-index plugins (Homebrew, APT) always run agent-side. Per-host version tracking (`installed_version`, `latest_version`) lives on
 `host_software_items`; there is no separate `available_versions` table.
@@ -80,6 +82,14 @@ Each assignment carries an `execution_site` column (`auto` | `agent` | `controll
 | `package_manager_apt` | `uptrakit-plugin-package-manager-apt` | Agent (`apt-cache madison`) | Yes | Debian/Ubuntu packages via APT; detects host compatibility; post-update reboot check |
 | `package_manager_npm` | `uptrakit-plugin-package-manager-npm` | Controller (npm registry) | Yes | Globally installed npm packages; upstream versions fetched from `registry.npmjs.org`; `ControllerSideFetchReleases` capability; detects host compatibility; requires `sudo` for updates |
 | `infrastructure_proxmox` | `uptrakit-plugin-infrastructure-proxmox` | Controller (PVE REST API) | No | Proxmox VE infrastructure plugin; discovers QEMU VMs and LXC containers; manual host matching; uses Extensions framework for all UI/CLI interaction; also provides agent-side modules (`pve_setup`, `guest_exec`) for PVE node detection and guest command execution during SSH agent bootstrap |
+
+### Two-tier config model
+
+Plugin configuration uses a two-tier model: **type settings** store tenant-level defaults per plugin type
+(e.g. APT `discovery_filter`, Homebrew `package_type`) in the `plugin_type_settings` table, while **plugin
+configs** store named profiles with credentials and per-profile settings. At runtime, the effective config
+is resolved by merging three layers: type settings, profile config, and per-assignment config (see
+[Plugin Guidelines](docs/development/plugin-guidelines.md#type-settings-vs-plugin-configs)).
 
 Plugins with a local package index (`package_manager_homebrew`,
 `discovery_proxmox_helper_scripts`, `package_manager_apt`) resolve both

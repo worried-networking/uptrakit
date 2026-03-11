@@ -33,9 +33,10 @@ host to use different plugins for version detection, release fetching, and updat
   `plugin_config_id` and `package_identifier` are stored directly on this row.
 - **`host_software_item_plugins`**: role-based plugin assignments. Each (host, software_item) pair
   can have one plugin per role. Columns: `id` (UUID PK), `host_id`, `software_item_id`,
-  `plugin_config_id` (FK → `plugin_configs.id`, ON DELETE RESTRICT), `role` (TEXT —
+  `plugin_type` (TEXT, NOT NULL), `plugin_config_id` (FK → `plugin_configs.id`, ON DELETE RESTRICT,
+  nullable), `role` (TEXT —
   `"detect_version"`, `"fetch_releases"`, or `"execute_update"`), `ordinal` (INTEGER, default `0` —
-  reserved for future multi-instance roles), `package_identifier`, `config_override?` (JSON),
+  reserved for future multi-instance roles), `package_identifier`, `config` (JSON, nullable),
   `execution_site` (TEXT — `"auto"` | `"agent"` | `"controller"`, default `"auto"`), `created_at`,
   `updated_at`. Composite FK `(host_id, software_item_id)` references `host_software_items` with
   ON DELETE CASCADE.
@@ -54,11 +55,13 @@ host to use different plugins for version detection, release fetching, and updat
 
 - `SoftwareItem` ↔ `Host` via `HostSoftwareItem` junction (many:many)
 - `HostSoftwareItem` has_many `HostSoftwareItemPlugin` (one:many — one plugin per role)
-- `HostSoftwareItemPlugin` belongs_to `PluginConfig` (many:1 — multiple role assignments can share one config)
+- `HostSoftwareItemPlugin` optionally belongs_to `PluginConfig` (many:1 — multiple role assignments can share
+  one config; nullable since type settings may suffice)
 - `PluginConfig` has_many `HostSoftwareItemPlugin`
+- `PluginTypeSetting` stores tenant-level defaults per `(tenant_id, plugin_type)` pair
 - `package_identifier` on each role assignment distinguishes packages within a plugin config (e.g. different
   formulae from the same Homebrew config)
-- `config_override` on a role assignment extends/overrides the base PluginConfig at resolution time (e.g.
+- `config` on a role assignment extends/overrides the profile config and type settings at resolution time (e.g.
   different `asset_patterns` or `tag_strip_prefix` per host)
 - `execution_site` controls where the plugin operation runs: `"auto"` (system decides based on plugin
   capabilities), `"agent"` (always run on the agent), or `"controller"` (only valid for `fetch_releases`)
@@ -125,11 +128,11 @@ Extends `SoftwareItemResponse` with:
 | Field | Type | Description |
 | --- | --- | --- |
 | `role` | `PluginRole` | `detect_version`, `fetch_releases`, or `execute_update` |
-| `plugin_config_id` | `Uuid` | Referenced plugin config |
-| `plugin_config_name` | `String` | Display name of the plugin config |
+| `plugin_config_id` | `Option<Uuid>` | Referenced plugin config (nullable) |
+| `plugin_config_name` | `Option<String>` | Display name of the plugin config |
 | `plugin_type` | `String` | Plugin type identifier (e.g. `"package_manager_homebrew"`, `"releases_github"`) |
 | `package_identifier` | `String` | Plugin-specific package identifier |
-| `config_override` | `Option<Value>` | Per-role overrides merged onto the base config |
+| `config` | `Option<Value>` | Per-role overrides merged onto the profile config and type settings |
 | `execution_site` | `String` | `"auto"`, `"agent"`, or `"controller"` |
 
 > **Note:** `update_available` uses string equality only. Because version format is
@@ -149,7 +152,7 @@ Extends `SoftwareItemResponse` with:
 | PUT | `/api/v1/software-items/{id}` | ManageSoftware | 200 | Update name and/or enabled flag |
 | DELETE | `/api/v1/software-items/{id}` | ManageSoftware | 204 | Soft-delete the software item |
 | POST | `/api/v1/software-items/{id}/hosts` | ManageSoftware | 200 | Assign to additional host(s); each assignment carries a list of role-specific plugin assignments |
-| PUT | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSoftware | 200 | Update a specific role assignment (plugin config, package identifier, config override, or execution site) for a host |
+| PUT | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSoftware | 200 | Update a specific role assignment (plugin type, plugin config, package identifier, config, or execution site) for a host |
 | DELETE | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSoftware | 204 | Unassign from a host; add `?ignore=true` to also create an ignore rule |
 | POST | `/api/v1/software-items/{id}/hosts/{host_id}/update` | ManageSoftware | 200 | Trigger a software update on a specific host; returns `TriggerUpdateResponse` |
 
@@ -157,9 +160,9 @@ Extends `SoftwareItemResponse` with:
 
 - `name` must not be empty
 - `(tenant_id, name)` must be unique among active items
-- Each role assignment must reference an active (non-deactivated) plugin config
+- Each role assignment must reference an active (non-deactivated) plugin config (when `plugin_config_id` is set)
 - `package_identifier` is validated per plugin type (e.g. Homebrew naming rules)
-- `config_override`, if provided, is validated by merging with the base config and running plugin-specific validation
+- `config`, if provided, is validated by merging with the effective config (type settings + profile) and running plugin-specific validation
 - `(host_id, software_item_id, role, ordinal)` must be unique — one plugin per role per (host, software_item) pair
 - `execution_site` must be `"auto"`, `"agent"`, or `"controller"`. `"controller"` is only valid for the
   `fetch_releases` role.

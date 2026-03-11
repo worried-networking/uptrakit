@@ -61,8 +61,8 @@ a software item is saved.
 **Asset download workflow:** When `install_path` is set, `execute_update` performs:
 pre-install command (if set) → download asset to temp file → verify SHA-256 checksum →
 install to target path via `sudo install` → post-install command (if set). The `asset_patterns`
-field selects which asset to download — exactly one must match per host (use per-host
-`config_override` on the `execute_update` role assignment to narrow patterns for each
+field selects which asset to download -- exactly one must match per host (use per-host
+`config` on the `execute_update` role assignment to narrow patterns for each
 OS/architecture).
 
 **Sudoers entries:** When `install_path` is configured, the plugin declares `install` as a
@@ -416,6 +416,37 @@ versions (`version` containing `-`) are filtered out unless `include_prereleases
 SSRF protection to allow private/LAN addresses. Only set this if you operate a private Cargo
 registry (e.g. [Cloudsmith](https://cloudsmith.io/), [Gitea](https://gitea.com/), Artifactory).
 
+## Plugin Type Settings
+
+Some plugin types support **type-level settings** -- tenant-wide preferences that apply to all
+instances of that plugin type. These are separate from plugin configs and cover discovery
+behavior and broad defaults.
+
+Examples of type settings:
+
+| Plugin type | Setting | Description |
+| --- | --- | --- |
+| `package_manager_apt` | `discovery_filter` | `manual` (default) or `all` -- which packages autodiscovery surfaces |
+| `package_manager_homebrew` | `package_type` | `formula` or `cask` -- default package type for discovery |
+| `package_manager_pacman` | `discovery_filter` | `all` (default) or `explicit` -- which packages autodiscovery surfaces |
+| `package_manager_dnf` | `discovery_filter` | `all` (default) or `user_installed` |
+| `package_manager_pkg` | `discovery_filter` | `all` (default) or `manual` |
+| `package_manager_apk` | `discovery_filter` | `all` (default) or `world` |
+
+Type settings are managed via the REST API (`/api/v1/plugin-type-settings`). When no type
+settings are configured for a plugin type, built-in defaults apply.
+
+**How type settings interact with plugin configs:** When computing the effective configuration
+for a plugin operation, the system merges three layers (broadest to narrowest):
+
+1. **Type settings** -- tenant-level defaults.
+2. **Plugin config** -- the named configuration profile.
+3. **Per-assignment config** -- per-host overrides on the host-software-item plugin assignment.
+
+Fields in a narrower layer override the same field from a broader layer. This means you can
+set a tenant-wide `discovery_filter` in type settings and override it for a specific plugin
+config or host assignment if needed.
+
 ## Role-Based Host Assignments
 
 When a software item is assigned to a host, Uptrakit creates up to three **plugin assignments** —
@@ -431,8 +462,9 @@ By default, all three roles use the same plugin config. However, you can **mix a
 per role. For example, you could use an APT plugin for detecting the installed version and executing
 updates, but a GitHub Releases plugin for fetching upstream releases.
 
-Each plugin assignment carries its own `package_identifier`, `config_override`, and
-`execution_site`, giving you fine-grained control over how each role operates on each host.
+Each plugin assignment carries its own `plugin_type`, `package_identifier`, optional `config`
+override, and `execution_site`, giving you fine-grained control over how each role operates
+on each host.
 
 ### Execution site
 
@@ -488,9 +520,10 @@ small site badge appears next to the config name.
      `prometheus` for APT).
    - For **Fetch Releases** only: choose the **Execution Site** (`auto`, `agent`, or `controller`).
      See [Execution site](#execution-site) for details.
-   - Optionally expand **Config Override (advanced)** to enter a JSON object of fields to merge on
-     top of the plugin config's base settings — useful for per-host customisation without creating
-     a separate plugin config. Leave empty to clear any existing override.
+   - Optionally expand **Config (advanced)** to enter a JSON object of fields to merge on
+     top of the plugin config's base settings and type settings -- useful for per-host
+     customisation without creating a separate plugin config. Leave empty to clear any
+     existing override.
 5. Click **Save Changes**. The change takes effect on the next version check cycle.
 
 > **Removing a role:** The modal can only add or update role assignments. To remove a role entirely,

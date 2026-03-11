@@ -102,7 +102,7 @@ uptrakit/
 │   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, batch updates; spawn_background()/send_background_result() for non-blocking event loop; run_check_versions/run_discover_software/run_execute_batch_update (compute-only); handle_execute_update/handle_graceful_shutdown; start_update() for per-host parallel use by SSH agent; batch_check_versions() groups assignments by (PluginType, effective_config), calls batch_detect_installed_version in parallel, refreshes package index once per fetch group, then calls batch_fetch_releases in parallel
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor; SudoAwareCommandExecutor (wraps any executor, prepends sudo based on SudoContext); SudoPolicy enum (auto/force_with/force_without); CommandSpec.privileged flag; StdioTunnel trait (bidirectional byte-stream tunnel for remote command I/O); RemoteExecutor trait + RemoteCommandResult (transport-agnostic remote command execution for SSH and PVE guest exec)
 │   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption with envelope encryption (KEK wraps DEKs); EncryptedString, init_master_key, DataKeyRing; ENC:v1/v2/v3 formats (v3 = current default with DEK + AAD); column AAD registry (register_column_aad); DEK wrap/unwrap; O(1) master key rotation support
-│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities (hosts, host_tags, host_tag_assignments, software_items, host_software_items, software_ignores, update_history, etc.); `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`; `migration::helpers` module provides reusable SQLite table-recreation helpers (set_foreign_keys, check_crash_recovery, drop_original, rename_temp, is_sqlite)
+│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities (hosts, host_tags, host_tag_assignments, software_items, host_software_items, software_ignores, update_history, plugin_type_settings, etc.); `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`; `migration::helpers` module provides reusable SQLite table-recreation helpers (set_foreign_keys, check_crash_recovery, drop_original, rename_temp, is_sqlite)
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── extension-framework/        # uptrakit-extension-framework            (lib)  — UI extension framework types: ExtensionManifest, ActionDef, FieldDef, FormDef, RowVisibleWhen, RowCondition, wire payloads; PanelPosition (adjacently tagged serde: {"type":"tab"}); tab_group for grouped tab rendering; ActionDef supports `confirm_entity_field` for destructive action confirmation dialogs; standalone crate so plugins don't depend on uptrakit-internal-wire
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared macros (impl_report_conversion!)
@@ -688,6 +688,59 @@ for user review. Key invariants:
 | `docs/end-user/autodiscovery.md` | End-user guide (discovery workflow, review, ignore list, allowlist) |
 | `docs/end-user/plugin-configs.md` | End-user guide for plugin config CRUD and discovery |
 | `docs/end-user/cli-usage.md` | CLI command reference including `plugin-configs`, `autodiscovery`, and `discovery-allowlist` groups |
+
+### Plugin type settings (two-tier config model)
+
+Plugin configuration uses a **two-tier model**: **type settings** (tenant-level defaults per plugin type) and
+**plugin configs** (named configuration profiles with credentials/endpoints). Type settings store discovery
+preferences and behavioral defaults (e.g. APT `discovery_filter`, Homebrew `package_type`) that apply to all
+instances of a plugin type within a tenant. Plugin configs store credentials, API endpoints, and per-profile
+settings that vary between configurations.
+
+The `plugin_type_settings` table (`crates/shared/db/src/entity/plugin_type_setting.rs`) stores one row per
+`(tenant_id, plugin_type)` pair with a JSON `config` column. When no row exists, the plugin type's built-in
+defaults apply.
+
+**Three-layer config merge.** When the system needs the effective configuration for a plugin operation,
+`resolve_effective_config()` (`crates/ui/web-api-queries/src/queries/plugin_configs.rs`) merges three layers:
+
+1. **Type settings** (tenant-level defaults from `plugin_type_settings`) -- broadest scope.
+2. **Profile config** (from the `plugin_configs` row) -- named configuration.
+3. **Assignment config** (per-host override from `host_software_item_plugins.config`) -- narrowest scope.
+
+Each layer's JSON is shallow-merged on top of the previous one. Fields present in a narrower layer override
+the same field from a broader layer.
+
+**`ConfigFormSchema` trait extensions.** Plugins that support type settings implement two additional methods:
+
+- `type_settings_form_schema() -> Vec<FieldDef>` -- returns the form field definitions for the type settings
+  UI (e.g. `discovery_filter` for APT, `package_type` for Homebrew).
+- `type_settings_sample() -> serde_json::Value` -- returns a sample/default JSON for the type settings.
+
+The `register_plugins!` macro auto-generates `type_settings_form_schema()` and `type_settings_sample_for()`
+dispatch methods on `PluginRegistry`, plus the `PluginOps` trait methods `type_settings_form_schema_str()`
+and `type_settings_sample_for_str()` for trait-object dispatch.
+
+The `PluginTypeInfo` response (from `GET /api/v1/plugin-types`) includes `type_settings_form_fields` and
+`type_settings_sample` fields so the frontend can render a settings form.
+
+**REST API endpoints:**
+
+- `GET /api/v1/plugin-type-settings` -- list all plugin types with active type settings for the tenant.
+- `GET /api/v1/plugin-type-settings/:plugin_type` -- get the current type settings for a plugin type.
+- `PUT /api/v1/plugin-type-settings/:plugin_type` -- upsert type settings (create or update).
+- `DELETE /api/v1/plugin-type-settings/:plugin_type` -- reset to built-in defaults (deletes the row).
+
+All endpoints require `update_software` permission.
+
+Key files:
+
+| File | Purpose |
+| --- | --- |
+| `crates/shared/db/src/entity/plugin_type_setting.rs` | SeaORM entity for `plugin_type_settings` table |
+| `crates/plugins/infrastructure/core/src/form_schema.rs` | `ConfigFormSchema` trait with `type_settings_form_schema()` |
+| `crates/ui/web-api-queries/src/queries/plugin_configs.rs` | `resolve_effective_config()` three-layer merge |
+| `crates/ui/web-api/src/routes/plugin_type_settings.rs` | Route handlers for type settings CRUD |
 
 ### Home Assistant MQTT discovery
 
