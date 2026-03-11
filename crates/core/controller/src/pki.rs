@@ -703,7 +703,7 @@ pub fn load_external_cert(cert_path: &Path, key_path: &Path) -> Result<ServerCer
 pub async fn load_or_generate_server_cert(
     pki: &Path,
     ca: &CaBundle,
-    extra_sans: &[String],
+    sans: &[String],
 ) -> Result<ServerCertBundle> {
     let cert_path = pki.join("server.crt");
     let key_path = pki.join("server.key");
@@ -722,7 +722,7 @@ pub async fn load_or_generate_server_cert(
         tracing::warn!("server certificate expired, regenerating");
     }
 
-    let bundle = generate_server_cert(ca, extra_sans)?;
+    let bundle = generate_server_cert(ca, sans)?;
     uptrakit_directories::write_secure_file_str(&cert_path, &bundle.cert_pem)
         .await
         .context_to::<PkiError>()?;
@@ -733,11 +733,11 @@ pub async fn load_or_generate_server_cert(
     Ok(bundle)
 }
 
-fn generate_server_cert(ca: &CaBundle, extra_sans: &[String]) -> Result<ServerCertBundle> {
+fn generate_server_cert(ca: &CaBundle, sans: &[String]) -> Result<ServerCertBundle> {
     let key_pair =
         KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context_to::<PkiError>()?;
 
-    let sans = pki_utils::collect_sans(extra_sans).context_to::<PkiError>()?;
+    let sans = pki_utils::parse_san_list(sans);
 
     let mut params = CertificateParams::new(sans.dns_names.clone()).context_to::<PkiError>()?;
     for ip in &sans.ip_addrs {
@@ -852,9 +852,9 @@ pub fn should_renew_server_cert(cert_pem: &str) -> bool {
 pub async fn renew_server_cert(
     pki: &Path,
     ca: &CaBundle,
-    extra_sans: &[String],
+    sans: &[String],
 ) -> Result<ServerCertBundle> {
-    let bundle = generate_server_cert(ca, extra_sans)?;
+    let bundle = generate_server_cert(ca, sans)?;
     let cert_path = pki.join("server.crt");
     let key_path = pki.join("server.key");
     uptrakit_directories::write_secure_file_str(&cert_path, &bundle.cert_pem)
@@ -923,17 +923,12 @@ pub fn extract_sans_from_cert(cert_pem: &str) -> Result<SanCollection> {
 }
 
 /// Check whether the server certificate needs to be regenerated because its
-/// SANs do not include all the requested `extra_sans`.
+/// SANs do not match the canonical SAN list.
 ///
-/// Returns `false` if `extra_sans` is empty (no user-requested SANs to check).
-/// Otherwise computes the expected SAN set via `collect_sans(extra_sans)` and
-/// compares against the certificate's actual SANs.
-pub fn server_cert_needs_san_update(cert_pem: &str, extra_sans: &[String]) -> Result<bool> {
-    if extra_sans.is_empty() {
-        return Ok(false);
-    }
-
-    let expected = pki_utils::collect_sans(extra_sans).context_to::<PkiError>()?;
+/// Computes the expected SAN set via `parse_san_list(sans)` and uses exact
+/// equality (not subset check) since the list is now canonical.
+pub fn server_cert_needs_san_update(cert_pem: &str, sans: &[String]) -> Result<bool> {
+    let expected = pki_utils::parse_san_list(sans);
     let actual = extract_sans_from_cert(cert_pem)?;
 
     let mut expected_dns = expected.dns_names;
@@ -946,11 +941,7 @@ pub fn server_cert_needs_san_update(cert_pem: &str, extra_sans: &[String]) -> Re
     let mut actual_ips = actual.ip_addrs;
     actual_ips.sort();
 
-    // Check that every expected SAN is present in actual
-    let dns_match = expected_dns.iter().all(|name| actual_dns.contains(name));
-    let ip_match = expected_ips.iter().all(|ip| actual_ips.contains(ip));
-
-    Ok(!dns_match || !ip_match)
+    Ok(expected_dns != actual_dns || expected_ips != actual_ips)
 }
 
 /// Check if a certificate was signed by the given CA.
@@ -1215,19 +1206,21 @@ mod tests {
     }
 
     #[test]
-    fn server_cert_includes_localhost() {
-        let sans = pki_utils::collect_sans(&[]).unwrap();
+    fn parse_san_list_dns_names() {
+        let input = vec!["myhost.example.com".to_string(), "localhost".to_string()];
+        let sans = pki_utils::parse_san_list(&input);
         assert!(sans.dns_names.contains(&"localhost".to_string()));
+        assert!(sans.dns_names.contains(&"myhost.example.com".to_string()));
     }
 
     #[test]
-    fn server_cert_includes_extra_sans() {
-        let extras = vec![
+    fn parse_san_list_ips() {
+        let input = vec![
             "myhost.example.com".to_string(),
             "192.168.1.1".to_string(),
             "::1".to_string(),
         ];
-        let sans = pki_utils::collect_sans(&extras).unwrap();
+        let sans = pki_utils::parse_san_list(&input);
         assert!(sans.dns_names.contains(&"myhost.example.com".to_string()));
         assert!(
             sans.ip_addrs
@@ -1237,12 +1230,10 @@ mod tests {
     }
 
     #[test]
-    fn hostname_deduplication() {
-        let hostname = hostname::get().unwrap().to_string_lossy().to_string();
-        let extras = vec![hostname.clone()];
-        let sans = pki_utils::collect_sans(&extras).unwrap();
-        let count = sans.dns_names.iter().filter(|n| **n == hostname).count();
-        assert_eq!(count, 1);
+    fn parse_san_list_deduplication() {
+        let input = vec!["example.com".to_string(), "example.com".to_string()];
+        let sans = pki_utils::parse_san_list(&input);
+        assert_eq!(sans.dns_names.len(), 1);
     }
 
     #[test]
@@ -1270,8 +1261,8 @@ mod tests {
 
     #[test]
     fn san_ipv6_address() {
-        let extras = vec!["fd00::1".to_string()];
-        let sans = pki_utils::collect_sans(&extras).unwrap();
+        let input = vec!["fd00::1".to_string()];
+        let sans = pki_utils::parse_san_list(&input);
         assert!(
             sans.ip_addrs
                 .contains(&IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)))
@@ -1345,21 +1336,21 @@ mod tests {
     }
 
     #[test]
-    fn extract_sans_dns_only() {
+    fn extract_sans_empty_list() {
         let ca = generate_ca(None).unwrap();
         let server = generate_server_cert(&ca, &[]).unwrap();
         let sans = extract_sans_from_cert(&server.cert_pem).unwrap();
-        assert!(sans.dns_names.contains(&"localhost".to_string()));
+        // Empty SAN list produces no DNS names or IP addresses
+        assert!(sans.dns_names.is_empty());
         assert!(sans.ip_addrs.is_empty());
     }
 
     #[test]
     fn extract_sans_dns_and_ip() {
         let ca = generate_ca(None).unwrap();
-        let extras = vec!["192.168.1.1".to_string(), "myhost.example.com".to_string()];
-        let server = generate_server_cert(&ca, &extras).unwrap();
+        let san_list = vec!["192.168.1.1".to_string(), "myhost.example.com".to_string()];
+        let server = generate_server_cert(&ca, &san_list).unwrap();
         let sans = extract_sans_from_cert(&server.cert_pem).unwrap();
-        assert!(sans.dns_names.contains(&"localhost".to_string()));
         assert!(sans.dns_names.contains(&"myhost.example.com".to_string()));
         assert!(
             sans.ip_addrs
@@ -1368,10 +1359,10 @@ mod tests {
     }
 
     #[test]
-    fn server_cert_needs_san_update_empty_extra() {
+    fn server_cert_needs_san_update_empty_sans() {
         let ca = generate_ca(None).unwrap();
         let server = generate_server_cert(&ca, &[]).unwrap();
-        // Empty extra_sans always returns false
+        // Empty sans list matches cert with no SANs beyond defaults
         assert!(!server_cert_needs_san_update(&server.cert_pem, &[]).unwrap());
     }
 

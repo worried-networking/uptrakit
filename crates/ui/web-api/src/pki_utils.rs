@@ -22,14 +22,13 @@ pub struct SanCollection {
     pub ip_addrs: Vec<IpAddr>,
 }
 
-/// Collect the SANs for a server certificate.
+/// Auto-detect SANs from the local system: hostname, FQDN, and `localhost`.
 ///
-/// Always includes the system hostname (short + FQDN if applicable) and
-/// `localhost`. Extra SANs from CLI are appended. IP addresses are
-/// separated from DNS names.
-pub fn collect_sans(extra: &[String]) -> Result<SanCollection> {
+/// Used only on first-start bootstrap when no SANs are stored in the DB
+/// and no `--san` CLI flag was provided. The result is saved to DB as the
+/// canonical SAN list.
+pub fn auto_detect_sans() -> Result<SanCollection> {
     let mut dns_names = Vec::new();
-    let mut ip_addrs = Vec::new();
 
     // Add system hostname
     let hostname = hostname::get()
@@ -56,8 +55,24 @@ pub fn collect_sans(extra: &[String]) -> Result<SanCollection> {
         dns_names.push("localhost".to_string());
     }
 
-    // Add extra SANs from CLI
-    for san in extra {
+    dns_names.sort();
+    dns_names.dedup();
+
+    Ok(SanCollection {
+        dns_names,
+        ip_addrs: Vec::new(),
+    })
+}
+
+/// Parse a canonical SAN list into DNS names and IP addresses.
+///
+/// No auto-detection — the input list is treated as the full, canonical set
+/// of SANs. Used everywhere except first-start bootstrap.
+pub fn parse_san_list(sans: &[String]) -> SanCollection {
+    let mut dns_names = Vec::new();
+    let mut ip_addrs = Vec::new();
+
+    for san in sans {
         if let Ok(ip) = san.parse::<IpAddr>() {
             if !ip_addrs.contains(&ip) {
                 ip_addrs.push(ip);
@@ -67,14 +82,13 @@ pub fn collect_sans(extra: &[String]) -> Result<SanCollection> {
         }
     }
 
-    // Deduplicate dns_names
     dns_names.sort();
     dns_names.dedup();
 
-    Ok(SanCollection {
+    SanCollection {
         dns_names,
         ip_addrs,
-    })
+    }
 }
 
 /// Check if a certificate was signed by a given CA.
@@ -111,43 +125,80 @@ mod tests {
     use super::*;
 
     #[test]
-    fn collect_sans_includes_localhost() -> Result<()> {
-        let sans = collect_sans(&[]).expect("collect sans");
+    fn auto_detect_sans_includes_localhost() -> Result<()> {
+        let sans = auto_detect_sans().expect("auto detect sans");
         assert!(sans.dns_names.contains(&"localhost".to_string()));
+        assert!(sans.ip_addrs.is_empty());
         Ok(())
     }
 
     #[test]
-    fn collect_sans_includes_extra_dns() -> Result<()> {
-        let extras = vec!["myhost.example.com".to_string()];
-        let sans = collect_sans(&extras).expect("collect sans");
+    fn auto_detect_sans_includes_hostname() -> Result<()> {
+        let hostname = hostname::get()
+            .expect("hostname")
+            .to_string_lossy()
+            .to_string();
+        let sans = auto_detect_sans().expect("auto detect sans");
+        assert!(
+            sans.dns_names.contains(&hostname)
+                || sans.dns_names.iter().any(|n| hostname.starts_with(n)),
+            "expected hostname or short name in {sans:?}",
+            sans = sans.dns_names,
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_san_list_dns_names() {
+        let input = vec!["myhost.example.com".to_string(), "localhost".to_string()];
+        let sans = parse_san_list(&input);
+        assert!(sans.dns_names.contains(&"localhost".to_string()));
         assert!(sans.dns_names.contains(&"myhost.example.com".to_string()));
-        Ok(())
+        assert!(sans.ip_addrs.is_empty());
     }
 
     #[test]
-    fn collect_sans_includes_extra_ips() -> Result<()> {
-        let extras = vec!["192.168.1.1".to_string(), "::1".to_string()];
-        let sans = collect_sans(&extras).expect("collect sans");
+    fn parse_san_list_ip_addresses() {
+        let input = vec!["192.168.1.1".to_string(), "::1".to_string()];
+        let sans = parse_san_list(&input);
         assert!(
             sans.ip_addrs
                 .contains(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)))
         );
         assert!(sans.ip_addrs.contains(&IpAddr::V6(Ipv6Addr::LOCALHOST)));
-        Ok(())
+        assert!(sans.dns_names.is_empty());
     }
 
     #[test]
-    fn collect_sans_deduplicates_hostname() -> Result<()> {
-        let hostname = hostname::get()
-            .expect("hostname")
-            .to_string_lossy()
-            .to_string();
-        let extras = vec![hostname.clone()];
-        let sans = collect_sans(&extras).expect("collect sans");
-        let count = sans.dns_names.iter().filter(|n| **n == hostname).count();
-        assert_eq!(count, 1);
-        Ok(())
+    fn parse_san_list_mixed() {
+        let input = vec![
+            "myhost.example.com".to_string(),
+            "192.168.1.1".to_string(),
+            "localhost".to_string(),
+        ];
+        let sans = parse_san_list(&input);
+        assert_eq!(sans.dns_names.len(), 2);
+        assert_eq!(sans.ip_addrs.len(), 1);
+    }
+
+    #[test]
+    fn parse_san_list_deduplicates() {
+        let input = vec![
+            "example.com".to_string(),
+            "example.com".to_string(),
+            "192.168.1.1".to_string(),
+            "192.168.1.1".to_string(),
+        ];
+        let sans = parse_san_list(&input);
+        assert_eq!(sans.dns_names.len(), 1);
+        assert_eq!(sans.ip_addrs.len(), 1);
+    }
+
+    #[test]
+    fn parse_san_list_empty() {
+        let sans = parse_san_list(&[]);
+        assert!(sans.dns_names.is_empty());
+        assert!(sans.ip_addrs.is_empty());
     }
 
     #[test]
