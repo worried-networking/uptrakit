@@ -11,7 +11,7 @@ use uptrakit_shared_db::entity::scheduled_task;
 use uptrakit_shared_types::PluginType;
 use uuid::Uuid;
 
-use super::queries::{merge_config, query_agent_assignment_rows};
+use super::queries::query_agent_assignment_rows;
 use crate::error::SchedulerError;
 use crate::executor::TaskExecutor;
 use crate::notifier::SchedulerNotifier;
@@ -74,10 +74,11 @@ impl DetectVersionExecutor {
                 )))
             })?;
 
-            let config = match row.assignment_config {
-                Some(ovr) => merge_config(&row.config, &ovr),
-                None => row.config,
-            };
+            let config = uptrakit_update_hooks::resolve_effective_config(
+                None, // type_settings not loaded in scheduler query yet
+                row.profile_config.as_ref(),
+                row.assignment_config.as_ref(),
+            );
 
             let assignment = PluginAssignment {
                 plugin_type,

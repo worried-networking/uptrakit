@@ -1,6 +1,7 @@
 use rootcause::prelude::*;
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait,
+    ColumnTrait, Condition, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect,
+    RelationTrait,
 };
 use uptrakit_shared_db::entity::{
     host, host_software_item_plugin, plugin_config, service, service_host, software_item,
@@ -20,7 +21,9 @@ pub(crate) struct AgentAssignmentRow {
     pub(crate) software_item_name: String,
     pub(crate) plugin_type: String,
     pub(crate) package_identifier: String,
-    pub(crate) config: serde_json::Value,
+    /// Profile config from `plugin_configs.config`. NULL when `plugin_config_id`
+    /// is NULL (package manager assignments after type settings migration).
+    pub(crate) profile_config: Option<serde_json::Value>,
     pub(crate) assignment_config: Option<serde_json::Value>,
     pub(crate) execution_site: String,
 }
@@ -32,6 +35,11 @@ pub(crate) struct AgentAssignmentRow {
 ///
 /// `roles` is a non-empty slice of role strings (e.g. `&["detect_version"]`
 /// or `&["fetch_releases"]` or `&["detect_version", "fetch_releases"]`).
+///
+/// Uses LEFT JOIN on `plugin_configs` to handle assignments with nullable
+/// `plugin_config_id` (package manager assignments after the type settings
+/// migration). The `plugin_type` is read from `host_software_item_plugins`
+/// (denormalized column) rather than from `plugin_configs`.
 pub(crate) async fn query_agent_assignment_rows(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -48,12 +56,13 @@ pub(crate) async fn query_agent_assignment_rows(
             "software_item_id",
         )
         .column_as(software_item::Column::Name, "software_item_name")
-        .column_as(plugin_config::Column::PluginType, "plugin_type")
+        // Read plugin_type from the denormalized HSIP column (not plugin_configs).
+        .column_as(host_software_item_plugin::Column::PluginType, "plugin_type")
         .column_as(
             host_software_item_plugin::Column::PackageIdentifier,
             "package_identifier",
         )
-        .column_as(plugin_config::Column::Config, "config")
+        .column_as(plugin_config::Column::Config, "profile_config")
         .column_as(
             host_software_item_plugin::Column::Config,
             "assignment_config",
@@ -66,8 +75,9 @@ pub(crate) async fn query_agent_assignment_rows(
             JoinType::InnerJoin,
             host_software_item_plugin::Relation::SoftwareItem.def(),
         )
+        // LEFT JOIN: plugin_config_id may be NULL for package manager assignments.
         .join(
-            JoinType::InnerJoin,
+            JoinType::LeftJoin,
             host_software_item_plugin::Relation::PluginConfig.def(),
         )
         .join(
@@ -82,8 +92,17 @@ pub(crate) async fn query_agent_assignment_rows(
         .filter(host_software_item_plugin::Column::Role.is_in(role_strings))
         .filter(software_item::Column::TenantId.eq(tenant_id))
         .filter(software_item::Column::DeactivatedAt.is_null())
-        .filter(plugin_config::Column::Enabled.eq(true))
-        .filter(plugin_config::Column::DeactivatedAt.is_null())
+        // Accept rows where plugin_config_id is NULL (package managers) OR
+        // where the linked config is enabled and not deactivated.
+        .filter(
+            Condition::any()
+                .add(host_software_item_plugin::Column::PluginConfigId.is_null())
+                .add(
+                    Condition::all()
+                        .add(plugin_config::Column::Enabled.eq(true))
+                        .add(plugin_config::Column::DeactivatedAt.is_null()),
+                ),
+        )
         .filter(service::Column::DeactivatedAt.is_null())
         .into_model::<AgentAssignmentRow>()
         .all(db)
@@ -99,6 +118,11 @@ pub(crate) async fn query_agent_assignment_rows(
 ///
 /// Performs a shallow (top-level key) merge: override keys replace base keys.
 /// If either value is not a JSON object the base is returned unchanged.
+///
+/// Superseded by `uptrakit_update_hooks::resolve_effective_config` for the
+/// three-layer config merge (type_settings + profile + assignment). Retained
+/// for its unit tests and potential future use.
+#[cfg(test)]
 pub(crate) fn merge_config(
     base: &serde_json::Value,
     overrides: &serde_json::Value,

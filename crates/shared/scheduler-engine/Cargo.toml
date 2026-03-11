@@ -28,6 +28,7 @@ uptrakit-internal-wire = { workspace = true }
 uptrakit-plugin-infrastructure-core = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true }
 uptrakit-shared-db = { workspace = true }
+uptrakit-update-hooks = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }

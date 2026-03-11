@@ -7313,6 +7313,7 @@ dependencies = [
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uptrakit-update-hooks",
  "uuid",
  "x509-parser",
 ]

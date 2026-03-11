@@ -23,7 +23,7 @@ use uptrakit_shared_db::entity::{
 use uptrakit_shared_types::PluginType;
 use uuid::Uuid;
 
-use super::queries::{merge_config, query_agent_assignment_rows};
+use super::queries::query_agent_assignment_rows;
 use crate::error::SchedulerError;
 use crate::executor::TaskExecutor;
 use crate::notifier::SchedulerNotifier;
@@ -81,7 +81,7 @@ struct ControllerFetchRow {
     plugin_config_id: Uuid,
     package_identifier: String,
     plugin_type: String,
-    config: serde_json::Value,
+    profile_config: serde_json::Value,
     assignment_config: Option<serde_json::Value>,
     execution_site: String,
 }
@@ -166,10 +166,11 @@ impl FetchReleasesExecutor {
 
         for row in &rows {
             let entry = groups.entry(row.plugin_config_id).or_insert_with(|| {
-                let merged_config = match row.assignment_config.as_ref() {
-                    Some(ovr) => merge_config(&row.config, ovr),
-                    None => row.config.clone(),
-                };
+                let merged_config = uptrakit_update_hooks::resolve_effective_config(
+                    None, // type_settings not loaded in scheduler query yet
+                    Some(&row.profile_config),
+                    row.assignment_config.as_ref(),
+                );
                 PhaseAGroup {
                     plugin_type: row.plugin_type.clone(),
                     merged_config,
@@ -448,7 +449,7 @@ impl FetchReleasesExecutor {
                 "package_identifier",
             )
             .column_as(plugin_config::Column::PluginType, "plugin_type")
-            .column_as(plugin_config::Column::Config, "config")
+            .column_as(plugin_config::Column::Config, "profile_config")
             .column_as(
                 host_software_item_plugin::Column::Config,
                 "assignment_config",
@@ -517,10 +518,11 @@ impl FetchReleasesExecutor {
                 )))
             })?;
 
-            let config = match row.assignment_config {
-                Some(ovr) => merge_config(&row.config, &ovr),
-                None => row.config,
-            };
+            let config = uptrakit_update_hooks::resolve_effective_config(
+                None, // type_settings not loaded in scheduler query yet
+                row.profile_config.as_ref(),
+                row.assignment_config.as_ref(),
+            );
 
             let assignment = PluginAssignment {
                 plugin_type: plugin_type.clone(),
