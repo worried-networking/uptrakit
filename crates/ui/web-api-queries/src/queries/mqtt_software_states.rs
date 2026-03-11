@@ -199,6 +199,7 @@ pub async fn load_software_states_for_tenant(
         result_items.push(MqttSoftwareStateItem {
             software_item_id: item.id,
             name: item.name.clone(),
+            icon_url: item.icon_url.clone(),
             hosts: host_entries,
         });
     }

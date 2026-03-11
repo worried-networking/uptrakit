@@ -170,6 +170,7 @@ mod tests {
         let req = CreateSoftwareItemRequest {
             name: "Node.js".to_string(),
             featured: true,
+            icon_url: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["name"], "Node.js");
@@ -184,6 +185,7 @@ mod tests {
         let req = UpdateSoftwareItemRequest {
             name: Some("Node.js LTS".to_string()),
             featured: Some(false),
+            icon_url: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["name"], "Node.js LTS");

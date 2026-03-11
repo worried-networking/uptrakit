@@ -98,6 +98,7 @@ fn build_list_response(
         update_available,
         created_at: item.created_at,
         updated_at: item.updated_at,
+        icon_url: item.icon_url.clone(),
     }
 }
 
@@ -111,7 +112,7 @@ fn build_detail_response(
 ) -> SoftwareItemDetailResponse {
     SoftwareItemDetailResponse {
         id: item.id,
-        name: item.name,
+        name: item.name.clone(),
         plugins,
         featured: item.featured,
         last_checked_at: item.last_checked_at,
@@ -120,6 +121,7 @@ fn build_detail_response(
         update_available,
         created_at: item.created_at,
         updated_at: item.updated_at,
+        icon_url: item.icon_url.clone(),
         hosts,
     }
 }
@@ -552,6 +554,7 @@ pub async fn create_software_item(
         tenant_id: Set(tenant_db.tenant_id),
         name: Set(req.name),
         featured: Set(req.featured),
+        icon_url: Set(req.icon_url),
         last_checked_at: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
@@ -822,6 +825,11 @@ pub async fn update_software_item(
     }
     if let Some(featured) = req.featured {
         model.featured = Set(featured);
+    }
+    match req.icon_url {
+        Some(serde_json::Value::Null) => model.icon_url = Set(None),
+        Some(serde_json::Value::String(s)) => model.icon_url = Set(Some(s)),
+        _ => {}
     }
     model.updated_at = Set(now);
 
@@ -1314,6 +1322,7 @@ mod tests {
             tenant_id: uuid::Uuid::nil(),
             name: "Node.js".to_string(),
             featured: true,
+            icon_url: None,
             last_checked_at: Some(now),
             created_at: now,
             updated_at: now,
@@ -1346,6 +1355,7 @@ mod tests {
             tenant_id: uuid::Uuid::nil(),
             name: "Nginx".to_string(),
             featured: true,
+            icon_url: None,
             last_checked_at: None,
             created_at: now,
             updated_at: now,
@@ -1367,6 +1377,7 @@ mod tests {
             tenant_id: uuid::Uuid::nil(),
             name: "Nginx".to_string(),
             featured: true,
+            icon_url: None,
             last_checked_at: Some(now),
             created_at: now,
             updated_at: now,
@@ -1409,6 +1420,7 @@ mod tests {
             tenant_id: uuid::Uuid::nil(),
             name: "Redis".to_string(),
             featured: true,
+            icon_url: None,
             last_checked_at: None,
             created_at: now,
             updated_at: now,
@@ -1469,6 +1481,7 @@ mod tests {
             tenant_id: uuid::Uuid::nil(),
             name: "Nginx".to_string(),
             featured: false,
+            icon_url: None,
             last_checked_at: None,
             created_at: now,
             updated_at: now,
