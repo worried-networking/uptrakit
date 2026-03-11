@@ -1,0 +1,269 @@
+use serde::{Deserialize, Serialize};
+use uptrakit_plugin_infrastructure_core::SecretMasking;
+
+/// Configuration for the Cargo install plugin.
+///
+/// Tracks crates installed via `cargo install` on agent hosts.
+///
+/// No secrets — the `package_identifier` in `SoftwareItem` is the crate name
+/// (e.g., `ripgrep`, `bat`, `cargo-nextest`).
+///
+/// - `{}` (default): plugin operates in discover-all mode. It discovers all
+///   crates installed via `cargo install` and emits [`DiscoveryTarget`] values so
+///   the controller can auto-create the plugin config and role assignments. The
+///   effective registry index used for release lookups is the crates.io sparse index
+///   (`https://index.crates.io`).
+/// - Explicit `include_prereleases: true` or `registry_url`: pins the plugin to
+///   specific behavior and opts out of discover-all mode.
+///
+/// [`DiscoveryTarget`]: uptrakit_plugin_infrastructure_core::DiscoveryTarget
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CargoConfig {
+    /// Include pre-release crate versions (versions containing `-` in their
+    /// version string, e.g. `1.0.0-alpha.1`) when fetching upstream releases.
+    ///
+    /// Defaults to `false` — only stable releases are reported.
+    #[serde(default, skip_serializing_if = "crate::config::is_false")]
+    pub include_prereleases: bool,
+
+    /// Custom sparse Cargo registry index URL.
+    ///
+    /// When `None` (the default), the plugin uses the crates.io sparse index
+    /// (`https://index.crates.io`). Set this to the sparse index URL of a
+    /// private registry (e.g., `https://my-registry.example.com`).
+    ///
+    /// Private registry URLs allow private/LAN addresses (SSRF protection is
+    /// relaxed via `SsrfSafeResolver::permissive()`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry_url: Option<String>,
+}
+
+fn is_false(b: &bool) -> bool {
+    !b
+}
+
+impl SecretMasking for CargoConfig {}
+
+impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for CargoConfig {
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
+        vec![
+            FieldDef::new("include_prereleases", "Include pre-releases")
+                .with_type(FieldType::Toggle)
+                .with_help_text(
+                    "Include pre-release versions (e.g. 1.0.0-alpha.1) in available updates. \
+                     Defaults to false.",
+                ),
+            FieldDef::new("registry_url", "Custom registry URL")
+                .with_type(FieldType::Text)
+                .with_help_text(
+                    "Sparse Cargo registry index URL. Defaults to the crates.io sparse index \
+                     (https://index.crates.io). Set for private registries.",
+                ),
+        ]
+    }
+}
+
+impl CargoConfig {
+    /// Validate a Cargo crate identifier string.
+    ///
+    /// Delegates to the crate-level [`validate_identifier`](crate::validate_identifier)
+    /// function. A valid identifier is a Cargo crate name: 1–64 characters,
+    /// starts with a letter or underscore, and uses only `[A-Za-z0-9_-]`.
+    ///
+    /// Called by the plugin registry's `validate_package_identifier` dispatch.
+    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
+    }
+
+    /// Validate the configuration.
+    ///
+    /// When `registry_url` is set, it must be non-empty.
+    pub fn validate(&self) -> crate::error::Result<()> {
+        if let Some(url) = &self.registry_url
+            && url.is_empty()
+        {
+            return Err(rootcause::report!(CargoError::Configuration(
+                "registry_url must not be empty when set; \
+                 omit the field to use the default crates.io sparse index"
+                    .to_string()
+            )));
+        }
+        Ok(())
+    }
+
+    /// Returns `true` when the config is at its default — i.e. it was produced
+    /// by deserialising an empty JSON object `{}` with no explicit fields.
+    ///
+    /// In discover-all mode, `discover_software()` emits
+    /// [`uptrakit_plugin_infrastructure_core::DiscoveryTarget`] values so the
+    /// controller can auto-create the default plugin config and role assignments.
+    pub(crate) fn is_discover_all_mode(&self) -> bool {
+        self.registry_url.is_none() && !self.include_prereleases
+    }
+
+    /// Returns the effective sparse registry index base URL.
+    ///
+    /// `None` (default config) uses the crates.io sparse index.
+    pub(crate) fn effective_registry_url(&self) -> &str {
+        self.registry_url
+            .as_deref()
+            .unwrap_or("https://index.crates.io")
+    }
+}
+
+use crate::error::CargoError;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── is_discover_all_mode ──────────────────────────────────────────────────
+
+    #[test]
+    fn is_discover_all_mode_true_for_default_config() {
+        assert!(CargoConfig::default().is_discover_all_mode());
+    }
+
+    #[test]
+    fn is_discover_all_mode_false_when_include_prereleases() {
+        let config = CargoConfig {
+            include_prereleases: true,
+            registry_url: None,
+        };
+        assert!(!config.is_discover_all_mode());
+    }
+
+    #[test]
+    fn is_discover_all_mode_false_when_registry_url_set() {
+        let config = CargoConfig {
+            include_prereleases: false,
+            registry_url: Some("https://my-registry.example.com".to_string()),
+        };
+        assert!(!config.is_discover_all_mode());
+    }
+
+    // ── effective_registry_url ────────────────────────────────────────────────
+
+    #[test]
+    fn effective_registry_url_default_is_crates_io_sparse() {
+        assert_eq!(
+            CargoConfig::default().effective_registry_url(),
+            "https://index.crates.io"
+        );
+    }
+
+    #[test]
+    fn effective_registry_url_custom() {
+        let config = CargoConfig {
+            include_prereleases: false,
+            registry_url: Some("https://my-registry.example.com".to_string()),
+        };
+        assert_eq!(
+            config.effective_registry_url(),
+            "https://my-registry.example.com"
+        );
+    }
+
+    // ── deserialization ───────────────────────────────────────────────────────
+
+    #[test]
+    fn deserialize_empty_object_gives_defaults() {
+        let config: CargoConfig = serde_json::from_str("{}").expect("deserialize");
+        assert!(!config.include_prereleases);
+        assert!(config.registry_url.is_none());
+    }
+
+    #[test]
+    fn deserialize_with_include_prereleases() {
+        let config: CargoConfig =
+            serde_json::from_str(r#"{"include_prereleases": true}"#).expect("deserialize");
+        assert!(config.include_prereleases);
+        assert!(config.registry_url.is_none());
+    }
+
+    #[test]
+    fn deserialize_with_registry_url() {
+        let config: CargoConfig =
+            serde_json::from_str(r#"{"registry_url": "https://my.registry.com"}"#)
+                .expect("deserialize");
+        assert!(!config.include_prereleases);
+        assert_eq!(
+            config.registry_url,
+            Some("https://my.registry.com".to_string())
+        );
+    }
+
+    // ── serialization ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn serialization_default_gives_empty_object() {
+        let config = CargoConfig::default();
+        let json = serde_json::to_value(&config).expect("serialize");
+        assert_eq!(json, serde_json::json!({}));
+        let deserialized: CargoConfig = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(deserialized, config);
+    }
+
+    #[test]
+    fn serialization_roundtrip_include_prereleases() {
+        let config = CargoConfig {
+            include_prereleases: true,
+            registry_url: None,
+        };
+        let json = serde_json::to_value(&config).expect("serialize");
+        assert_eq!(json["include_prereleases"], true);
+        let deserialized: CargoConfig = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(deserialized, config);
+    }
+
+    #[test]
+    fn serialization_roundtrip_registry_url() {
+        let config = CargoConfig {
+            include_prereleases: false,
+            registry_url: Some("https://my.registry.com".to_string()),
+        };
+        let json = serde_json::to_value(&config).expect("serialize");
+        assert!(
+            json.get("include_prereleases")
+                .is_none_or(|v| v.as_bool() != Some(false))
+        );
+        assert_eq!(json["registry_url"], "https://my.registry.com");
+        let deserialized: CargoConfig = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(deserialized, config);
+    }
+
+    // ── validate ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn validate_accepts_default_config() {
+        assert!(CargoConfig::default().validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_include_prereleases() {
+        let config = CargoConfig {
+            include_prereleases: true,
+            registry_url: None,
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_valid_registry_url() {
+        let config = CargoConfig {
+            include_prereleases: false,
+            registry_url: Some("https://my-registry.example.com".to_string()),
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_empty_registry_url() {
+        let config = CargoConfig {
+            include_prereleases: false,
+            registry_url: Some(String::new()),
+        };
+        assert!(config.validate().is_err());
+    }
+}

@@ -116,6 +116,7 @@ uptrakit-plugin-package-manager-dnf = { path = "crates/plugins/package-managers/
 uptrakit-plugin-package-manager-pacman = { path = "crates/plugins/package-managers/pacman" }
 uptrakit-plugin-package-manager-apk = { path = "crates/plugins/package-managers/apk" }
 uptrakit-plugin-package-manager-snap = { path = "crates/plugins/package-managers/snap" }
+uptrakit-plugin-package-manager-cargo = { path = "crates/plugins/package-managers/cargo" }
 uptrakit-plugin-infrastructure-proxmox = { path = "crates/plugins/infrastructure/proxmox" }
 uptrakit-plugin-discovery-proxmox-helper-scripts = { path = "crates/plugins/discovery/proxmox-helper-scripts" }
 # External deps used by a single crate — declared here so all versions are pinned in one place
@@ -143,6 +144,7 @@ directories = "6"
 testcontainers = { version = "0.27", default-features = false, features = ["aws-lc-rs"] }
 sha1 = "0.10"
 httpmock = "0.8"
+tame-index = "0.26"
 serde_urlencoded = "0.7"
 husky-rs = { version = "0.3", default-features = false }
 socket2 = "0.6"
