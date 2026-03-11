@@ -1,6 +1,7 @@
 //! Core notification plugin trait and message types.
 
 use async_trait::async_trait;
+use uptrakit_extension_framework::{ActionDef, ExtensionManifest};
 
 use crate::error;
 
@@ -128,5 +129,21 @@ pub trait NotificationPlugin: Send + Sync {
             }
         }
         serde_json::Value::Object(result)
+    }
+
+    /// Return UI extension manifests for this plugin.
+    ///
+    /// Default: empty (no extensions). Override to register settings panels,
+    /// data tables, or other UI contributions.
+    fn extension_manifests(&self) -> Vec<ExtensionManifest> {
+        vec![]
+    }
+
+    /// Return action definitions for this plugin's extensions.
+    ///
+    /// Default: empty. Override to provide action definitions referenced by
+    /// the extension manifests.
+    fn extension_actions(&self) -> Vec<ActionDef> {
+        vec![]
     }
 }

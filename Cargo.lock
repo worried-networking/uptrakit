@@ -6804,6 +6804,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "uptrakit-extension-framework",
 ]
 
 [[package]]
@@ -6818,6 +6819,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "uptrakit-extension-framework",
  "uptrakit-notification-plugin-core",
 ]
 
@@ -6847,6 +6849,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "uptrakit-extension-framework",
  "uptrakit-notification-plugin-core",
 ]
 
@@ -6862,6 +6865,7 @@ dependencies = [
  "sha2 0.10.9",
  "tokio",
  "tracing",
+ "uptrakit-extension-framework",
  "uptrakit-notification-plugin-core",
  "uptrakit-shared-types",
  "url",

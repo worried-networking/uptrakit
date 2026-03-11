@@ -12,6 +12,10 @@ use mail_send::SmtpClientBuilder;
 use rootcause::prelude::*;
 use serde::Deserialize;
 
+use uptrakit_extension_framework::{
+    ActionDef, ActionUi, ApiSubmitDef, ExtensionManifest, ExtensionPlacement, ExtensionUi,
+    FieldDef, FieldType, FormDef, PanelPosition, SelectOption, TableColumn,
+};
 use uptrakit_notification_plugin_core::{
     DeliveryMessage, NotificationPlugin, NotificationPluginError, Result, escape_html,
 };
@@ -301,6 +305,181 @@ impl NotificationPlugin for EmailPlugin {
     /// in the per-channel config.
     fn mask_config_secrets(&self, config: &serde_json::Value) -> serde_json::Value {
         config.clone()
+    }
+
+    fn extension_manifests(&self) -> Vec<ExtensionManifest> {
+        vec![
+            // Channel management tab (grouped with other notification channels)
+            ExtensionManifest::new(
+                "notifications.email",
+                "Email Channels",
+                502,
+                ExtensionPlacement::Panel {
+                    target_page: "settings".to_string(),
+                    position: PanelPosition::Tab,
+                    tab_group: Some("Notification Channels".to_string()),
+                },
+                ExtensionUi::DataTable {
+                    columns: vec![
+                        TableColumn::new("name", "Name"),
+                        TableColumn::new("to_addresses", "Recipients"),
+                        TableColumn::new("enabled", "Enabled"),
+                        TableColumn::new("created_at", "Created"),
+                    ],
+                    data_action: "list".to_string(),
+                    row_actions: vec!["edit".to_string(), "test".to_string(), "delete".to_string()],
+                    primary_actions: vec!["create".to_string(), "configure_smtp".to_string()],
+                    context_selector: None,
+                    default_per_page: Some(20),
+                },
+            )
+            .with_permission("view_notifications"),
+            // Global SMTP defaults panel (below global settings)
+            ExtensionManifest::new(
+                "notifications.email.global_smtp",
+                "SMTP Defaults",
+                600,
+                ExtensionPlacement::Panel {
+                    target_page: "global-settings".to_string(),
+                    position: PanelPosition::Below,
+                    tab_group: None,
+                },
+                ExtensionUi::Form(
+                    FormDef::new(vec![
+                        FieldDef::new("host", "SMTP Host").with_placeholder("smtp.example.com"),
+                        FieldDef::new("port", "Port")
+                            .with_type(FieldType::Number)
+                            .with_default_value(serde_json::json!("587")),
+                        FieldDef::new("tls_mode", "TLS Mode")
+                            .with_type(FieldType::Select)
+                            .with_options(vec![
+                                SelectOption::new("starttls", "STARTTLS (port 587)"),
+                                SelectOption::new("tls", "TLS (port 465)"),
+                                SelectOption::new("none", "None (port 25)"),
+                            ])
+                            .with_default_value(serde_json::json!("starttls")),
+                        FieldDef::new("from_address", "From Address")
+                            .with_placeholder("noreply@example.com"),
+                        FieldDef::new("from_name", "From Name")
+                            .with_placeholder("Uptrakit Notifications"),
+                        FieldDef::new("username", "Username").with_placeholder("SMTP username"),
+                        FieldDef::new("password", "Password")
+                            .with_type(FieldType::Password)
+                            .with_help_text("Leave empty to keep current password"),
+                    ])
+                    .with_pre_load_action("get_global_smtp"),
+                ),
+            )
+            .with_permission("manage_global_settings"),
+        ]
+    }
+
+    fn extension_actions(&self) -> Vec<ActionDef> {
+        vec![
+            ActionDef::new("list", "List"),
+            ActionDef::new("create", "Add Email Channel")
+                .with_permission("manage_notifications")
+                .with_ui(ActionUi::Form(FormDef::new(vec![
+                    FieldDef::new("name", "Name").required(),
+                    FieldDef::new("to_addresses", "Recipients")
+                        .required()
+                        .with_type(FieldType::Textarea)
+                        .with_placeholder("user@example.com\nadmin@example.com")
+                        .with_help_text("One email address per line"),
+                    FieldDef::new("enabled", "Enabled")
+                        .with_type(FieldType::Toggle)
+                        .with_default_value(serde_json::json!("true")),
+                ])))
+                .with_api_submit(
+                    ApiSubmitDef::new(
+                        "POST",
+                        "/api/v1/notifications/channels",
+                        serde_json::json!({
+                            "name": "{{name}}",
+                            "channel_type": "email",
+                            "config": {
+                                "to_addresses": "{{to_addresses}}"
+                            },
+                            "enabled": "{{enabled:bool}}"
+                        }),
+                    )
+                    .with_response_id_field("id"),
+                ),
+            ActionDef::new("edit", "Edit")
+                .with_permission("manage_notifications")
+                .with_ui(ActionUi::Form(FormDef::new(vec![
+                    FieldDef::new("id", "ID").with_type(FieldType::Hidden),
+                    FieldDef::new("name", "Name").required(),
+                    FieldDef::new("to_addresses", "Recipients")
+                        .required()
+                        .with_type(FieldType::Textarea)
+                        .with_placeholder("user@example.com\nadmin@example.com")
+                        .with_help_text("One email address per line"),
+                    FieldDef::new("enabled", "Enabled")
+                        .with_type(FieldType::Toggle)
+                        .with_default_value(serde_json::json!("true")),
+                ])))
+                .with_api_submit(ApiSubmitDef::new(
+                    "PUT",
+                    "/api/v1/notifications/channels/{{id}}",
+                    serde_json::json!({
+                        "name": "{{name}}",
+                        "config": {
+                            "to_addresses": "{{to_addresses}}"
+                        },
+                        "enabled": "{{enabled:bool}}"
+                    }),
+                )),
+            ActionDef::new("test", "Test")
+                .with_permission("manage_notifications")
+                .with_api_submit(ApiSubmitDef::new(
+                    "POST",
+                    "/api/v1/notifications/channels/{{id}}/test",
+                    serde_json::json!({}),
+                )),
+            ActionDef::new("delete", "Delete")
+                .with_permission("manage_notifications")
+                .destructive()
+                .with_confirm_entity_field("name")
+                .with_api_submit(ApiSubmitDef::new(
+                    "DELETE",
+                    "/api/v1/notifications/channels/{{id}}",
+                    serde_json::json!({}),
+                )),
+            ActionDef::new("configure_smtp", "Override SMTP")
+                .with_permission("manage_notifications")
+                .with_ui(ActionUi::Form(
+                    FormDef::new(vec![
+                        FieldDef::new("host", "SMTP Host").with_placeholder("smtp.example.com"),
+                        FieldDef::new("port", "Port")
+                            .with_type(FieldType::Number)
+                            .with_default_value(serde_json::json!("587")),
+                        FieldDef::new("tls_mode", "TLS Mode")
+                            .with_type(FieldType::Select)
+                            .with_options(vec![
+                                SelectOption::new("starttls", "STARTTLS (port 587)"),
+                                SelectOption::new("tls", "TLS (port 465)"),
+                                SelectOption::new("none", "None (port 25)"),
+                            ])
+                            .with_default_value(serde_json::json!("starttls")),
+                        FieldDef::new("from_address", "From Address")
+                            .with_placeholder("noreply@example.com"),
+                        FieldDef::new("from_name", "From Name")
+                            .with_placeholder("Uptrakit Notifications"),
+                        FieldDef::new("username", "Username").with_placeholder("SMTP username"),
+                        FieldDef::new("password", "Password")
+                            .with_type(FieldType::Password)
+                            .with_help_text("Leave empty to keep current password"),
+                    ])
+                    .with_pre_load_action("get_smtp"),
+                )),
+            ActionDef::new("get_smtp", "Get SMTP Settings"),
+            ActionDef::new("save_smtp", "Save SMTP Settings")
+                .with_permission("manage_notifications"),
+            ActionDef::new("get_global_smtp", "Get Global SMTP Defaults"),
+            ActionDef::new("save_global_smtp", "Save Global SMTP Defaults")
+                .with_permission("manage_global_settings"),
+        ]
     }
 }
 

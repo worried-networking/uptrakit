@@ -16,6 +16,7 @@ rootcause = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 tracing = { workspace = true }
+uptrakit-extension-framework = { workspace = true }
 uptrakit-notification-plugin-core = { workspace = true }
 uptrakit-shared-types = { workspace = true, features = ["http-ssrf"] }
 url = { workspace = true }

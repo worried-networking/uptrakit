@@ -5,8 +5,6 @@
 //! by the web API to interact with notification plugins without depending on
 //! concrete implementations.
 
-pub mod extensions;
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -150,37 +148,17 @@ impl NotificationOps for NotificationPluginRegistry {
     }
 
     fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
-        let mut v = Vec::new();
-        #[cfg(feature = "webhook")]
-        if self.plugins.contains_key("webhook") {
-            v.push(extensions::webhook::manifest());
-        }
-        #[cfg(feature = "telegram")]
-        if self.plugins.contains_key("telegram") {
-            v.push(extensions::telegram::manifest());
-        }
-        #[cfg(feature = "email")]
-        if self.plugins.contains_key("email") {
-            v.push(extensions::email::manifest());
-        }
-        v
+        self.plugins
+            .values()
+            .flat_map(|p| p.extension_manifests())
+            .collect()
     }
 
     fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
-        let mut v = Vec::new();
-        #[cfg(feature = "webhook")]
-        if self.plugins.contains_key("webhook") {
-            v.extend(extensions::webhook::actions());
-        }
-        #[cfg(feature = "telegram")]
-        if self.plugins.contains_key("telegram") {
-            v.extend(extensions::telegram::actions());
-        }
-        #[cfg(feature = "email")]
-        if self.plugins.contains_key("email") {
-            v.extend(extensions::email::actions());
-        }
-        v
+        self.plugins
+            .values()
+            .flat_map(|p| p.extension_actions())
+            .collect()
     }
 
     fn validate_config(
