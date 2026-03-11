@@ -143,7 +143,10 @@ pub struct SettingsSnapshot {
     pub renewal_window_hours_override: Option<u16>,
     pub network: NetworkSettings,
     pub mqtt_max_clients_per_tenant: u16,
+    /// Per-tenant SMTP settings.
     pub smtp: SmtpSettingsSnapshot,
+    /// Global SMTP defaults shared across all tenants.
+    pub global_smtp: SmtpSettingsSnapshot,
     /// NATS server URL (raw, decrypted). `None` when not configured.
     /// Stored as `Option<MaskedUrl>` so `Debug` automatically masks any password.
     pub nats_url: Option<MaskedUrl>,
@@ -192,6 +195,7 @@ impl Settings {
             network: NetworkSettings::default(),
             mqtt_max_clients_per_tenant: DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT,
             smtp: SmtpSettingsSnapshot::default(),
+            global_smtp: SmtpSettingsSnapshot::default(),
             nats_url: None,
             zeroconf: ZeroconfSnapshot::default(),
         };
@@ -246,6 +250,7 @@ impl Settings {
             .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
 
         let smtp = Self::load_smtp_settings(&combined);
+        let global_smtp = Self::load_global_smtp_settings(&global_raw);
         let nats_url = Self::load_nats_url(&global_raw);
         let zeroconf = Self::load_zeroconf_settings(&global_raw);
 
@@ -261,6 +266,7 @@ impl Settings {
             network,
             mqtt_max_clients_per_tenant,
             smtp,
+            global_smtp,
             nats_url,
             zeroconf,
         };
@@ -354,7 +360,7 @@ impl Settings {
     ) -> auth::Result<()> {
         let global_raw = crate::settings_store::load_all_global_settings(db).await?;
         let tenant_raw = crate::settings_store::load_all_settings(db, tenant_id).await?;
-        let mut combined = global_raw;
+        let mut combined = global_raw.clone();
         combined.extend(tenant_raw);
 
         let registration = RegistrationSettings::from_raw(&combined);
@@ -377,6 +383,7 @@ impl Settings {
             .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
 
         let smtp = Self::load_smtp_settings(&combined);
+        let global_smtp = Self::load_global_smtp_settings(&global_raw);
         // NatsUrl is a global-only key, so it is present in `combined` (which
         // started as a copy of global_raw extended with per-tenant rows).
         let nats_url = Self::load_nats_url(&combined);
@@ -392,6 +399,7 @@ impl Settings {
             network,
             mqtt_max_clients_per_tenant,
             smtp,
+            global_smtp,
             nats_url,
             zeroconf,
         });
@@ -668,6 +676,21 @@ impl Settings {
         self.inner.snapshot_tx.send_modify(|snap| snap.smtp = smtp);
     }
 
+    // --- Global SMTP settings ---
+
+    /// Read the global SMTP settings snapshot (synchronous).
+    pub fn global_smtp(&self) -> SmtpSettingsSnapshot {
+        self.inner.snapshot_rx.borrow().global_smtp.clone()
+    }
+
+    /// Replace global SMTP settings (acquires write mutex for atomic publish).
+    pub async fn set_global_smtp(&self, smtp: SmtpSettingsSnapshot) {
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.global_smtp = smtp);
+    }
+
     // --- NATS settings ---
 
     /// Read the NATS URL snapshot (synchronous).
@@ -750,6 +773,72 @@ impl Settings {
             enabled,
             url,
             pki_addr,
+        }
+    }
+
+    /// Load global SMTP defaults from the global settings map.
+    ///
+    /// Uses the `global_smtp.*` keys. Password is stored encrypted.
+    pub fn load_global_smtp_settings(raw: &RawSettings) -> SmtpSettingsSnapshot {
+        let host = raw
+            .get_setting(SettingKey::GlobalSmtpHost)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
+        let port = raw
+            .get_setting(SettingKey::GlobalSmtpPort)
+            .and_then(|v| v.as_u64()?.try_into().ok());
+
+        let username = raw
+            .get_setting(SettingKey::GlobalSmtpUsername)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
+        let password = raw
+            .get_setting(SettingKey::GlobalSmtpPassword)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .and_then(|stored| {
+                if uptrakit_crypto::is_encrypted(stored) {
+                    uptrakit_crypto::decrypt_str(stored, "uptrakit:settings:global_smtp_password")
+                        .map_err(|e| {
+                            tracing::warn!("failed to decrypt global SMTP password: {e}");
+                        })
+                        .ok()
+                } else {
+                    Some(stored.to_string())
+                }
+            });
+
+        let from_address = raw
+            .get_setting(SettingKey::GlobalSmtpFromAddress)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
+        let from_name = raw
+            .get_setting(SettingKey::GlobalSmtpFromName)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
+        let tls_mode = raw
+            .get_setting(SettingKey::GlobalSmtpTlsMode)
+            .and_then(|v| v.as_str())
+            .filter(|s| matches!(*s, "starttls" | "tls" | "none"))
+            .unwrap_or("starttls")
+            .to_string();
+
+        SmtpSettingsSnapshot {
+            host,
+            port,
+            username,
+            password,
+            from_address,
+            from_name,
+            tls_mode,
         }
     }
 

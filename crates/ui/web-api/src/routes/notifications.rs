@@ -298,17 +298,22 @@ pub async fn test_channel(
         }
     };
 
-    // For email channels, merge global SMTP settings into the per-channel config before delivery.
+    // For email channels, merge SMTP settings (global + per-tenant) into the per-channel config.
     #[cfg(feature = "notifications-email")]
     let config_json = if channel_model.channel_type == "email" {
-        let smtp = state.settings.smtp();
-        if !smtp.is_configured() {
+        let global_smtp = state.settings.global_smtp();
+        let tenant_smtp = state.settings.smtp();
+        if !tenant_smtp.is_configured() && !global_smtp.is_configured() {
             return error_response(
                 StatusCode::BAD_REQUEST,
                 "SMTP is not configured. Set SMTP settings before testing an email channel.",
             );
         }
-        crate::notifications::dispatcher::merge_smtp_into_config_pub(&smtp, config_json)
+        crate::notifications::dispatcher::merge_smtp_into_config_pub(
+            &global_smtp,
+            &tenant_smtp,
+            config_json,
+        )
     } else {
         config_json
     };

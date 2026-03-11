@@ -47,6 +47,36 @@ pub enum SettingKey {
     ///
     /// DB key: `audit_log.retention_days`
     AuditLogRetentionDays,
+    /// Global SMTP server hostname (shared across all tenants).
+    ///
+    /// Per-tenant SMTP settings (if set) override these global defaults.
+    ///
+    /// DB key: `global_smtp.host`
+    GlobalSmtpHost,
+    /// Global SMTP server port.
+    ///
+    /// DB key: `global_smtp.port`
+    GlobalSmtpPort,
+    /// Global SMTP authentication username.
+    ///
+    /// DB key: `global_smtp.username`
+    GlobalSmtpUsername,
+    /// Global SMTP authentication password (stored encrypted).
+    ///
+    /// DB key: `global_smtp.password`
+    GlobalSmtpPassword,
+    /// Global default "From" email address.
+    ///
+    /// DB key: `global_smtp.from_address`
+    GlobalSmtpFromAddress,
+    /// Global default "From" display name.
+    ///
+    /// DB key: `global_smtp.from_name`
+    GlobalSmtpFromName,
+    /// Global SMTP TLS mode (`starttls`, `tls`, `none`).
+    ///
+    /// DB key: `global_smtp.tls_mode`
+    GlobalSmtpTlsMode,
     /// Whether mDNS/DNS-SD zero-configuration advertising is enabled.
     ///
     /// DB key: `zeroconf.enabled`
@@ -91,6 +121,13 @@ impl SettingKey {
             Self::SmtpFromAddress => "smtp.from_address",
             Self::SmtpFromName => "smtp.from_name",
             Self::SmtpTlsMode => "smtp.tls_mode",
+            Self::GlobalSmtpHost => "global_smtp.host",
+            Self::GlobalSmtpPort => "global_smtp.port",
+            Self::GlobalSmtpUsername => "global_smtp.username",
+            Self::GlobalSmtpPassword => "global_smtp.password",
+            Self::GlobalSmtpFromAddress => "global_smtp.from_address",
+            Self::GlobalSmtpFromName => "global_smtp.from_name",
+            Self::GlobalSmtpTlsMode => "global_smtp.tls_mode",
             Self::NatsUrl => "nats.url",
             Self::AuditLogFilter => "audit_log.filter",
             Self::AuditLogRetentionDays => "audit_log.retention_days",
@@ -131,6 +168,13 @@ impl SettingKey {
             "smtp.from_address" => Some(Self::SmtpFromAddress),
             "smtp.from_name" => Some(Self::SmtpFromName),
             "smtp.tls_mode" => Some(Self::SmtpTlsMode),
+            "global_smtp.host" => Some(Self::GlobalSmtpHost),
+            "global_smtp.port" => Some(Self::GlobalSmtpPort),
+            "global_smtp.username" => Some(Self::GlobalSmtpUsername),
+            "global_smtp.password" => Some(Self::GlobalSmtpPassword),
+            "global_smtp.from_address" => Some(Self::GlobalSmtpFromAddress),
+            "global_smtp.from_name" => Some(Self::GlobalSmtpFromName),
+            "global_smtp.tls_mode" => Some(Self::GlobalSmtpTlsMode),
             "nats.url" => Some(Self::NatsUrl),
             "audit_log.filter" => Some(Self::AuditLogFilter),
             "audit_log.retention_days" => Some(Self::AuditLogRetentionDays),
@@ -158,6 +202,13 @@ impl SettingKey {
                 | Self::MqttMaxClientsPerTenant
                 | Self::JwtSigningKey
                 | Self::MasterKeyVerification
+                | Self::GlobalSmtpHost
+                | Self::GlobalSmtpPort
+                | Self::GlobalSmtpUsername
+                | Self::GlobalSmtpPassword
+                | Self::GlobalSmtpFromAddress
+                | Self::GlobalSmtpFromName
+                | Self::GlobalSmtpTlsMode
                 | Self::NatsUrl
                 | Self::ZeroconfEnabled
                 | Self::ZeroconfUrl

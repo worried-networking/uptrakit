@@ -67,25 +67,34 @@ impl NotificationDispatcher {
 }
 
 /// Convert web-api's SmtpSettingsSnapshot to the email plugin's SmtpSettingsSnapshot
-/// and merge global SMTP settings into a per-channel email config object.
+/// and merge SMTP settings into a per-channel email config object.
+///
+/// Per-tenant settings override global defaults on a field-by-field basis.
 #[cfg(feature = "notifications-email")]
 #[tracing::instrument(skip_all)]
 fn merge_smtp_into_config(
-    smtp: &crate::settings::SmtpSettingsSnapshot,
+    global_smtp: &crate::settings::SmtpSettingsSnapshot,
+    tenant_smtp: &crate::settings::SmtpSettingsSnapshot,
     config: serde_json::Value,
 ) -> serde_json::Value {
-    let plugin_smtp = to_plugin_smtp_snapshot(smtp);
-    uptrakit_notification_plugin_registry::merge_smtp_into_config(&plugin_smtp, config)
+    let plugin_global = to_plugin_smtp_snapshot(global_smtp);
+    let plugin_tenant = to_plugin_smtp_snapshot(tenant_smtp);
+    uptrakit_notification_plugin_registry::merge_smtp_into_config(
+        &plugin_global,
+        &plugin_tenant,
+        config,
+    )
 }
 
 /// Public (crate-visible) re-export for use in route handlers (e.g. `test_channel`).
 #[cfg(feature = "notifications-email")]
 #[tracing::instrument(skip_all)]
 pub(crate) fn merge_smtp_into_config_pub(
-    smtp: &crate::settings::SmtpSettingsSnapshot,
+    global_smtp: &crate::settings::SmtpSettingsSnapshot,
+    tenant_smtp: &crate::settings::SmtpSettingsSnapshot,
     config: serde_json::Value,
 ) -> serde_json::Value {
-    merge_smtp_into_config(smtp, config)
+    merge_smtp_into_config(global_smtp, tenant_smtp, config)
 }
 
 /// Convert web-api's SmtpSettingsSnapshot to the email plugin's version.
@@ -204,20 +213,21 @@ async fn dispatch_loop(
                     }
                 };
 
-            // For email channels, merge the global SMTP settings into the
-            // per-channel config (which only stores `to_addresses`).
+            // For email channels, merge SMTP settings (global + per-tenant)
+            // into the per-channel config (which only stores `to_addresses`).
             let config_json = if channel_model.channel_type == "email" {
                 #[cfg(feature = "notifications-email")]
                 {
-                    let smtp = settings.smtp();
-                    if !smtp.is_configured() {
+                    let global_smtp = settings.global_smtp();
+                    let tenant_smtp = settings.smtp();
+                    if !tenant_smtp.is_configured() && !global_smtp.is_configured() {
                         tracing::warn!(
                             channel_id = %channel_model.id,
                             "skipping email notification: SMTP settings not configured"
                         );
                         continue;
                     }
-                    merge_smtp_into_config(&smtp, config_json)
+                    merge_smtp_into_config(&global_smtp, &tenant_smtp, config_json)
                 }
                 #[cfg(not(feature = "notifications-email"))]
                 {
@@ -352,12 +362,16 @@ mod tests {
 
     // ── merge_smtp_into_config ────────────────────────────────────────────────
 
+    fn empty_smtp() -> SmtpSettingsSnapshot {
+        make_smtp(None, None, None)
+    }
+
     /// The SMTP host and default port (587) are injected into the config object.
     #[test]
     fn merge_smtp_sets_host_and_default_port() {
         let smtp = make_smtp(Some("mail.example.com"), None, Some("noreply@example.com"));
         let config = serde_json::json!({ "to_addresses": ["user@test.local"] });
-        let merged = merge_smtp_into_config(&smtp, config);
+        let merged = merge_smtp_into_config(&empty_smtp(), &smtp, config);
 
         assert_eq!(merged["smtp_host"], "mail.example.com");
         assert_eq!(
@@ -378,7 +392,7 @@ mod tests {
             Some("alerts@corp.internal"),
         );
         let config = serde_json::json!({});
-        let merged = merge_smtp_into_config(&smtp, config);
+        let merged = merge_smtp_into_config(&empty_smtp(), &smtp, config);
 
         assert_eq!(merged["smtp_port"], 465);
     }
@@ -393,7 +407,7 @@ mod tests {
         smtp.tls_mode = "tls".to_string();
 
         let config = serde_json::json!({});
-        let merged = merge_smtp_into_config(&smtp, config);
+        let merged = merge_smtp_into_config(&empty_smtp(), &smtp, config);
 
         assert_eq!(merged["smtp_username"], "smtpuser");
         assert_eq!(merged["smtp_password"], "secret");
@@ -406,7 +420,7 @@ mod tests {
     fn merge_smtp_omits_host_when_none() {
         let smtp = make_smtp(None, None, None);
         let config = serde_json::json!({});
-        let merged = merge_smtp_into_config(&smtp, config);
+        let merged = merge_smtp_into_config(&empty_smtp(), &smtp, config);
 
         assert!(
             merged.get("smtp_host").is_none(),
@@ -424,10 +438,47 @@ mod tests {
         let smtp = make_smtp(Some("smtp.example.com"), None, Some("from@example.com"));
         // A webhook-style config with no email fields.
         let config = serde_json::json!({ "url": "https://webhook.example.com" });
-        let merged = merge_smtp_into_config(&smtp, config);
+        let merged = merge_smtp_into_config(&empty_smtp(), &smtp, config);
 
         // SMTP fields are merged in but the original webhook field is still there.
         assert_eq!(merged["url"], "https://webhook.example.com");
         assert_eq!(merged["smtp_host"], "smtp.example.com");
+    }
+
+    /// Per-tenant settings override global defaults field-by-field.
+    #[test]
+    fn merge_smtp_tenant_overrides_global() {
+        let global = make_smtp(
+            Some("global.smtp.com"),
+            Some(587),
+            Some("global@example.com"),
+        );
+        let tenant = make_smtp(Some("tenant.smtp.com"), None, None);
+        let config = serde_json::json!({});
+        let merged = merge_smtp_into_config(&global, &tenant, config);
+
+        // Tenant host overrides global
+        assert_eq!(merged["smtp_host"], "tenant.smtp.com");
+        // Global port inherited since tenant has None
+        assert_eq!(merged["smtp_port"], 587);
+        // Global from_address inherited since tenant has None
+        assert_eq!(merged["from_address"], "global@example.com");
+    }
+
+    /// Global defaults are used when tenant settings are empty.
+    #[test]
+    fn merge_smtp_global_defaults_used_when_tenant_empty() {
+        let global = make_smtp(
+            Some("global.smtp.com"),
+            Some(465),
+            Some("global@example.com"),
+        );
+        let tenant = empty_smtp();
+        let config = serde_json::json!({});
+        let merged = merge_smtp_into_config(&global, &tenant, config);
+
+        assert_eq!(merged["smtp_host"], "global.smtp.com");
+        assert_eq!(merged["smtp_port"], 465);
+        assert_eq!(merged["from_address"], "global@example.com");
     }
 }

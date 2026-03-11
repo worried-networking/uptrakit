@@ -31,8 +31,10 @@ pub async fn handle(
 
     match action_id {
         "list" => list_channels(state, tenant_ctx, channel_type, &params).await,
-        "get_smtp" => get_smtp_settings(state).await,
-        "save_smtp" => save_smtp_settings(state, &params).await,
+        "get_smtp" => get_smtp_settings(state, tenant_ctx).await,
+        "save_smtp" => save_smtp_settings(state, tenant_ctx, &params).await,
+        "get_global_smtp" => get_global_smtp_settings(state).await,
+        "save_global_smtp" => save_global_smtp_settings(state, &params).await,
         _ => error_response_with_code(StatusCode::NOT_FOUND, "Unknown action", "not_found"),
     }
 }
@@ -133,9 +135,13 @@ async fn list_channels(
     (StatusCode::OK, Json(response)).into_response()
 }
 
-/// Get SMTP settings as a flat JSON object for extension pre-load.
-async fn get_smtp_settings(state: &Arc<AppState>) -> Response {
+/// Get per-tenant SMTP settings as a flat JSON object for extension pre-load.
+///
+/// Returns tenant-specific values plus `effective_*` fields that show the
+/// resolved value after merging global defaults.
+async fn get_smtp_settings(state: &Arc<AppState>, _tenant_ctx: &TenantContext) -> Response {
     let smtp = state.settings.smtp();
+    let global = state.settings.global_smtp();
     let response = serde_json::json!({
         "host": smtp.host.as_deref().unwrap_or(""),
         "port": smtp.port.unwrap_or(587),
@@ -144,21 +150,29 @@ async fn get_smtp_settings(state: &Arc<AppState>) -> Response {
         "from_address": smtp.from_address.as_deref().unwrap_or(""),
         "from_name": smtp.from_name.as_deref().unwrap_or(""),
         "tls_mode": smtp.tls_mode,
+        "effective_host": smtp.host.as_ref().or(global.host.as_ref()).cloned().unwrap_or_default(),
+        "effective_from_address": smtp.from_address.as_ref().or(global.from_address.as_ref()).cloned().unwrap_or_default(),
+        "has_global_defaults": global.is_configured(),
     });
     (StatusCode::OK, Json(response)).into_response()
 }
 
-/// Save SMTP settings with patch semantics (absent keys = keep existing).
-async fn save_smtp_settings(state: &Arc<AppState>, params: &serde_json::Value) -> Response {
+/// Save per-tenant SMTP settings with patch semantics (absent keys = keep existing).
+async fn save_smtp_settings(
+    state: &Arc<AppState>,
+    tenant_ctx: &TenantContext,
+    params: &serde_json::Value,
+) -> Response {
     use crate::SettingKey;
     use crate::settings_store::upsert_setting;
 
+    let tenant_id = tenant_ctx.tenant_id;
     let mut smtp = state.settings.smtp();
 
     if let Some(host) = params.get("host").and_then(|v| v.as_str()) {
         if let Err(e) = upsert_setting(
             state.db(),
-            state.default_tenant_id,
+            tenant_id,
             SettingKey::SmtpHost,
             serde_json::json!(host),
         )
@@ -177,7 +191,7 @@ async fn save_smtp_settings(state: &Arc<AppState>, params: &serde_json::Value) -
     }) {
         if let Err(e) = upsert_setting(
             state.db(),
-            state.default_tenant_id,
+            tenant_id,
             SettingKey::SmtpPort,
             serde_json::json!(port),
         )
@@ -197,7 +211,7 @@ async fn save_smtp_settings(state: &Arc<AppState>, params: &serde_json::Value) -
         };
         if let Err(e) = upsert_setting(
             state.db(),
-            state.default_tenant_id,
+            tenant_id,
             SettingKey::SmtpUsername,
             serde_json::json!(new_username.as_deref().unwrap_or("")),
         )
@@ -227,7 +241,7 @@ async fn save_smtp_settings(state: &Arc<AppState>, params: &serde_json::Value) -
             };
         if let Err(e) = upsert_setting(
             state.db(),
-            state.default_tenant_id,
+            tenant_id,
             SettingKey::SmtpPassword,
             stored_value,
         )
@@ -242,7 +256,7 @@ async fn save_smtp_settings(state: &Arc<AppState>, params: &serde_json::Value) -
     if let Some(from_address) = params.get("from_address").and_then(|v| v.as_str()) {
         if let Err(e) = upsert_setting(
             state.db(),
-            state.default_tenant_id,
+            tenant_id,
             SettingKey::SmtpFromAddress,
             serde_json::json!(from_address),
         )
@@ -257,7 +271,7 @@ async fn save_smtp_settings(state: &Arc<AppState>, params: &serde_json::Value) -
     if let Some(from_name) = params.get("from_name").and_then(|v| v.as_str()) {
         if let Err(e) = upsert_setting(
             state.db(),
-            state.default_tenant_id,
+            tenant_id,
             SettingKey::SmtpFromName,
             serde_json::json!(from_name),
         )
@@ -272,7 +286,7 @@ async fn save_smtp_settings(state: &Arc<AppState>, params: &serde_json::Value) -
     if let Some(tls_mode) = params.get("tls_mode").and_then(|v| v.as_str()) {
         if let Err(e) = upsert_setting(
             state.db(),
-            state.default_tenant_id,
+            tenant_id,
             SettingKey::SmtpTlsMode,
             serde_json::json!(tls_mode),
         )
@@ -285,6 +299,160 @@ async fn save_smtp_settings(state: &Arc<AppState>, params: &serde_json::Value) -
     }
 
     state.settings.set_smtp(smtp.clone()).await;
+
+    let response = serde_json::json!({
+        "host": smtp.host.as_deref().unwrap_or(""),
+        "port": smtp.port.unwrap_or(587),
+        "username": smtp.username.as_deref().unwrap_or(""),
+        "has_password": smtp.password.is_some(),
+        "from_address": smtp.from_address.as_deref().unwrap_or(""),
+        "from_name": smtp.from_name.as_deref().unwrap_or(""),
+        "tls_mode": smtp.tls_mode,
+    });
+
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+/// Get global SMTP defaults.
+async fn get_global_smtp_settings(state: &Arc<AppState>) -> Response {
+    let smtp = state.settings.global_smtp();
+    let response = serde_json::json!({
+        "host": smtp.host.as_deref().unwrap_or(""),
+        "port": smtp.port.unwrap_or(587),
+        "username": smtp.username.as_deref().unwrap_or(""),
+        "has_password": smtp.password.is_some(),
+        "from_address": smtp.from_address.as_deref().unwrap_or(""),
+        "from_name": smtp.from_name.as_deref().unwrap_or(""),
+        "tls_mode": smtp.tls_mode,
+    });
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+/// Save global SMTP defaults with patch semantics.
+async fn save_global_smtp_settings(state: &Arc<AppState>, params: &serde_json::Value) -> Response {
+    use crate::SettingKey;
+    use crate::settings_store::upsert_global_setting;
+
+    let mut smtp = state.settings.global_smtp();
+
+    if let Some(host) = params.get("host").and_then(|v| v.as_str()) {
+        if let Err(e) = upsert_global_setting(
+            state.db(),
+            SettingKey::GlobalSmtpHost,
+            serde_json::json!(host),
+        )
+        .await
+        {
+            tracing::error!("Failed to save global_smtp.host: {e:?}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        smtp.host = Some(host.to_string()).filter(|h| !h.is_empty());
+    }
+
+    if let Some(port) = params.get("port").and_then(|v| {
+        v.as_u64()
+            .map(|n| n as u16)
+            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+    }) {
+        if let Err(e) = upsert_global_setting(
+            state.db(),
+            SettingKey::GlobalSmtpPort,
+            serde_json::json!(port),
+        )
+        .await
+        {
+            tracing::error!("Failed to save global_smtp.port: {e:?}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        smtp.port = Some(port);
+    }
+
+    if let Some(username) = params.get("username").and_then(|v| v.as_str()) {
+        let new_username = if username.is_empty() {
+            None
+        } else {
+            Some(username.to_string())
+        };
+        if let Err(e) = upsert_global_setting(
+            state.db(),
+            SettingKey::GlobalSmtpUsername,
+            serde_json::json!(new_username.as_deref().unwrap_or("")),
+        )
+        .await
+        {
+            tracing::error!("Failed to save global_smtp.username: {e:?}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        smtp.username = new_username;
+    }
+
+    if let Some(password) = params
+        .get("password")
+        .and_then(|v| v.as_str())
+        .filter(|p| !p.is_empty())
+    {
+        let stored_value = match uptrakit_crypto::encrypt_str(
+            password,
+            "uptrakit:settings:global_smtp_password",
+        ) {
+            Ok(encrypted) => serde_json::json!(encrypted),
+            Err(e) => {
+                tracing::error!("Failed to encrypt global SMTP password: {e:?}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+        if let Err(e) =
+            upsert_global_setting(state.db(), SettingKey::GlobalSmtpPassword, stored_value).await
+        {
+            tracing::error!("Failed to save global_smtp.password: {e:?}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        smtp.password = Some(password.to_string());
+    }
+
+    if let Some(from_address) = params.get("from_address").and_then(|v| v.as_str()) {
+        if let Err(e) = upsert_global_setting(
+            state.db(),
+            SettingKey::GlobalSmtpFromAddress,
+            serde_json::json!(from_address),
+        )
+        .await
+        {
+            tracing::error!("Failed to save global_smtp.from_address: {e:?}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        smtp.from_address = Some(from_address.to_string()).filter(|a| !a.is_empty());
+    }
+
+    if let Some(from_name) = params.get("from_name").and_then(|v| v.as_str()) {
+        if let Err(e) = upsert_global_setting(
+            state.db(),
+            SettingKey::GlobalSmtpFromName,
+            serde_json::json!(from_name),
+        )
+        .await
+        {
+            tracing::error!("Failed to save global_smtp.from_name: {e:?}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        smtp.from_name = Some(from_name.to_string()).filter(|n| !n.is_empty());
+    }
+
+    if let Some(tls_mode) = params.get("tls_mode").and_then(|v| v.as_str()) {
+        if let Err(e) = upsert_global_setting(
+            state.db(),
+            SettingKey::GlobalSmtpTlsMode,
+            serde_json::json!(tls_mode),
+        )
+        .await
+        {
+            tracing::error!("Failed to save global_smtp.tls_mode: {e:?}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        smtp.tls_mode = tls_mode.to_string();
+    }
+
+    state.settings.set_global_smtp(smtp.clone()).await;
 
     let response = serde_json::json!({
         "host": smtp.host.as_deref().unwrap_or(""),

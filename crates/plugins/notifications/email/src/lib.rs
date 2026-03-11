@@ -67,44 +67,72 @@ fn wrap_html(html_body: &str) -> String {
     )
 }
 
-/// Merge global SMTP settings into a per-channel email config object.
+/// Merge SMTP settings into a per-channel email config object.
 ///
 /// The per-channel email config contains only `to_addresses`. This function
-/// adds the SMTP connection and auth fields from the live settings snapshot
-/// so that [`EmailPlugin::deliver`] receives the full merged config.
+/// adds the SMTP connection and auth fields so that [`EmailPlugin::deliver`]
+/// receives the full merged config.
+///
+/// When both `global` and `tenant` snapshots are provided, per-tenant
+/// non-empty fields override the global defaults (field-by-field inheritance).
 ///
 /// # Arguments
 ///
-/// * `smtp` - SMTP settings snapshot containing host, port, credentials, etc.
+/// * `global` - Global SMTP defaults (shared across tenants). May be empty.
+/// * `tenant` - Per-tenant SMTP settings. Non-empty fields override global.
 /// * `config` - Per-channel config JSON (must be an object).
 pub fn merge_smtp_into_config(
-    smtp: &SmtpSettingsSnapshot,
+    global: &SmtpSettingsSnapshot,
+    tenant: &SmtpSettingsSnapshot,
     mut config: serde_json::Value,
 ) -> serde_json::Value {
     let obj = config.as_object_mut().expect("config is always an object");
-    if let Some(ref host) = smtp.host {
+
+    // Merge each field: tenant overrides global when present
+    let host = tenant.host.as_ref().or(global.host.as_ref());
+    if let Some(host) = host {
         obj.insert("smtp_host".to_string(), serde_json::json!(host));
     }
+
+    let port = tenant.port.or(global.port);
     obj.insert(
         "smtp_port".to_string(),
-        serde_json::json!(smtp.port.unwrap_or(587)),
+        serde_json::json!(port.unwrap_or(587)),
     );
-    if let Some(ref username) = smtp.username {
+
+    let username = tenant.username.as_ref().or(global.username.as_ref());
+    if let Some(username) = username {
         obj.insert("smtp_username".to_string(), serde_json::json!(username));
     }
-    if let Some(ref password) = smtp.password {
+
+    let password = tenant.password.as_ref().or(global.password.as_ref());
+    if let Some(password) = password {
         obj.insert("smtp_password".to_string(), serde_json::json!(password));
     }
-    if let Some(ref from_address) = smtp.from_address {
+
+    let from_address = tenant
+        .from_address
+        .as_ref()
+        .or(global.from_address.as_ref());
+    if let Some(from_address) = from_address {
         obj.insert("from_address".to_string(), serde_json::json!(from_address));
     }
-    if let Some(ref from_name) = smtp.from_name {
+
+    let from_name = tenant.from_name.as_ref().or(global.from_name.as_ref());
+    if let Some(from_name) = from_name {
         obj.insert("from_name".to_string(), serde_json::json!(from_name));
     }
-    obj.insert(
-        "tls_mode".to_string(),
-        serde_json::json!(smtp.tls_mode.clone()),
-    );
+
+    // TLS mode: use tenant if not the default, otherwise global
+    let tls_mode = if tenant.tls_mode != "starttls" {
+        &tenant.tls_mode
+    } else if global.tls_mode != "starttls" {
+        &global.tls_mode
+    } else {
+        &tenant.tls_mode
+    };
+    obj.insert("tls_mode".to_string(), serde_json::json!(tls_mode));
+
     config
 }
 
@@ -649,6 +677,18 @@ mod tests {
 
     // ── merge_smtp_into_config ────────────────────────────────────────────
 
+    fn empty_smtp() -> SmtpSettingsSnapshot {
+        SmtpSettingsSnapshot {
+            host: None,
+            port: None,
+            username: None,
+            password: None,
+            from_address: None,
+            from_name: None,
+            tls_mode: "starttls".to_string(),
+        }
+    }
+
     fn make_smtp(
         host: Option<&str>,
         port: Option<u16>,
@@ -669,7 +709,7 @@ mod tests {
     fn merge_smtp_sets_host_and_default_port() {
         let smtp = make_smtp(Some("mail.example.com"), None, Some("noreply@example.com"));
         let config = serde_json::json!({ "to_addresses": ["user@test.local"] });
-        let merged = merge_smtp_into_config(&smtp, config);
+        let merged = merge_smtp_into_config(&empty_smtp(), &smtp, config);
 
         assert_eq!(merged["smtp_host"], "mail.example.com");
         assert_eq!(
@@ -688,7 +728,7 @@ mod tests {
             Some("alerts@corp.internal"),
         );
         let config = serde_json::json!({});
-        let merged = merge_smtp_into_config(&smtp, config);
+        let merged = merge_smtp_into_config(&empty_smtp(), &smtp, config);
 
         assert_eq!(merged["smtp_port"], 465);
     }
@@ -702,7 +742,7 @@ mod tests {
         smtp.tls_mode = "tls".to_string();
 
         let config = serde_json::json!({});
-        let merged = merge_smtp_into_config(&smtp, config);
+        let merged = merge_smtp_into_config(&empty_smtp(), &smtp, config);
 
         assert_eq!(merged["smtp_username"], "smtpuser");
         assert_eq!(merged["smtp_password"], "secret");
@@ -714,7 +754,7 @@ mod tests {
     fn merge_smtp_omits_host_when_none() {
         let smtp = make_smtp(None, None, None);
         let config = serde_json::json!({});
-        let merged = merge_smtp_into_config(&smtp, config);
+        let merged = merge_smtp_into_config(&empty_smtp(), &smtp, config);
 
         assert!(
             merged.get("smtp_host").is_none(),
