@@ -459,6 +459,20 @@ impl ServiceConnectionRegistry {
             .any(|c| c.capabilities.contains(capability))
     }
 
+    /// Returns the subset of the given service IDs that are currently connected.
+    ///
+    /// Acquires a single read lock to check all IDs efficiently.
+    pub async fn filter_connected(
+        &self,
+        ids: &[uuid::Uuid],
+    ) -> std::collections::HashSet<uuid::Uuid> {
+        let guard = self.inner.read().await;
+        ids.iter()
+            .filter(|id| guard.connections.contains_key(*id))
+            .copied()
+            .collect()
+    }
+
     /// Get MQTT services that haven't sent a heartbeat within the given timeout.
     ///
     /// Returns a list of `(service_id, last_heartbeat_age)` for stale connections.
@@ -790,5 +804,30 @@ mod tests {
         let loads = registry.list_mqtt_service_loads().await;
         let selected = loads.first().map(|l| l.service_id);
         assert_eq!(selected, Some(svc_idle));
+    }
+
+    #[tokio::test]
+    async fn filter_connected_returns_connected_subset() {
+        let registry = ServiceConnectionRegistry::new();
+        let id1 = uuid::Uuid::now_v7();
+        let id2 = uuid::Uuid::now_v7();
+        let id3 = uuid::Uuid::now_v7();
+
+        // Register id1 and id2 only.
+        let _ = registry.register(id1, BTreeSet::new(), None, None).await;
+        let _ = registry.register(id2, BTreeSet::new(), None, None).await;
+
+        let result = registry.filter_connected(&[id1, id2, id3]).await;
+        assert!(result.contains(&id1));
+        assert!(result.contains(&id2));
+        assert!(!result.contains(&id3));
+        assert_eq!(result.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn filter_connected_empty_input() {
+        let registry = ServiceConnectionRegistry::new();
+        let result = registry.filter_connected(&[]).await;
+        assert!(result.is_empty());
     }
 }

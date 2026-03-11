@@ -183,6 +183,81 @@ impl NotificationService {
             .await;
     }
 
+    /// Push `HostConnectivityUpdated` "online" events for all agents that are
+    /// currently connected and serve hosts in `tenant_id`.
+    ///
+    /// Called when an MQTT service (re)connects to ensure the MQTT broker
+    /// receives retained connectivity state for hosts whose agents were already
+    /// online before the MQTT service connected.
+    ///
+    /// Only services that are currently registered in the connection registry
+    /// receive an "online" event.  Services not in the registry are skipped —
+    /// they will emit their own `HostConnectivityUpdated` events once they
+    /// reconnect and send `ReportHosts`.
+    #[tracing::instrument(skip_all, fields(%tenant_id))]
+    pub async fn push_connected_agent_states_for_tenant(
+        &self,
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: uuid::Uuid,
+    ) {
+        let agent_services =
+            match crate::queries::mqtt_software_states::load_agent_connectivity_for_tenant(
+                db, tenant_id,
+            )
+            .await
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        %tenant_id,
+                        "failed to load agent connectivity for MQTT push"
+                    );
+                    return;
+                }
+            };
+
+        if agent_services.is_empty() {
+            return;
+        }
+
+        let service_ids: Vec<uuid::Uuid> = agent_services.iter().map(|s| s.service_id).collect();
+        let connected = self.registry.filter_connected(&service_ids).await;
+
+        if connected.is_empty() {
+            return;
+        }
+
+        let now = time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default();
+
+        let mut updates: Vec<HostConnectivityUpdate> = Vec::new();
+        for s in &agent_services {
+            if !connected.contains(&s.service_id) {
+                continue;
+            }
+            let last_seen = s
+                .last_seen_at
+                .and_then(|t| {
+                    t.format(&time::format_description::well_known::Rfc3339)
+                        .ok()
+                })
+                .unwrap_or_else(|| now.clone());
+            for &host_id in &s.host_ids {
+                updates.push(HostConnectivityUpdate::online(
+                    host_id,
+                    Some(last_seen.clone()),
+                    s.client_version.clone(),
+                ));
+            }
+        }
+
+        if !updates.is_empty() {
+            self.send_connectivity_update(tenant_id, updates).await;
+        }
+    }
+
     /// Return the controller ID.
     pub fn controller_id(&self) -> Uuid {
         self.controller_id

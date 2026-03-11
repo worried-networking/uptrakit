@@ -343,6 +343,22 @@ pub(crate) async fn handle_authenticated_loop(
             }
         }
 
+        // Push connectivity state for agents that are already connected
+        // when this MQTT service (re)connects.  Without this, the MQTT
+        // broker never receives a retained "online" state for those hosts
+        // and HA entities remain Unavailable.
+        {
+            let mut seen_tenants_conn = HashSet::new();
+            for cfg in &mctx.tenant_configs {
+                if seen_tenants_conn.insert(cfg.tenant_id) {
+                    state
+                        .notification_service
+                        .push_connected_agent_states_for_tenant(state.db(), cfg.tenant_id)
+                        .await;
+                }
+            }
+        }
+
         tracing::info!(
             %service_id,
             instance_id = %mctx.instance_id,
