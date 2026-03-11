@@ -269,6 +269,8 @@ pub struct ReleaseInfo<'a> {
     /// Truncated to 500 Unicode characters when written to the discovery
     /// config (`release_summary`).
     pub notes: Option<&'a str>,
+    /// Optional HTTPS URL to an icon/logo image.
+    pub icon_url: Option<&'a str>,
 }
 
 /// Build the HA device block JSON shared across all entity builders.
@@ -370,9 +372,19 @@ pub fn build_discovery_config(
         "command_topic": command_topic(topic_prefix, item_id, host_id),
         "payload_install": "install",
         "json_attributes_topic": json_attributes_topic(topic_prefix, item_id, host_id),
-        "availability_topic": format!("{topic_prefix}/status"),
-        "payload_available": "online",
-        "payload_not_available": "offline",
+        "availability": [
+            {
+                "topic": format!("{topic_prefix}/status"),
+                "payload_available": "online",
+                "payload_not_available": "offline"
+            },
+            {
+                "topic": format!("{topic_prefix}/hosts/{host_id}/connectivity/state"),
+                "payload_available": "online",
+                "payload_not_available": "offline"
+            }
+        ],
+        "availability_mode": "all",
         "device": build_device_block(tenant_id, host_id, friendly_name, os_info)
     });
 
@@ -381,6 +393,9 @@ pub fn build_discovery_config(
     }
     if let Some(notes) = release.notes {
         config["release_summary"] = serde_json::Value::String(truncate_str(notes, 500).to_string());
+    }
+    if let Some(url) = release.icon_url {
+        config["entity_picture"] = serde_json::Value::String(url.to_string());
     }
 
     config
@@ -811,9 +826,19 @@ pub fn build_host_packages_discovery_config(
         "command_topic": host_packages_command_topic(topic_prefix, host_id),
         "payload_install": "install",
         "json_attributes_topic": host_packages_json_attributes_topic(topic_prefix, host_id),
-        "availability_topic": format!("{topic_prefix}/status"),
-        "payload_available": "online",
-        "payload_not_available": "offline",
+        "availability": [
+            {
+                "topic": format!("{topic_prefix}/status"),
+                "payload_available": "online",
+                "payload_not_available": "offline"
+            },
+            {
+                "topic": format!("{topic_prefix}/hosts/{host_id}/connectivity/state"),
+                "payload_available": "online",
+                "payload_not_available": "offline"
+            }
+        ],
+        "availability_mode": "all",
         "device": build_device_block(tenant_id, host_id, friendly_name, os_info)
     })
 }
@@ -1039,9 +1064,19 @@ pub fn build_host_security_discovery_config(
         "command_topic": host_security_command_topic(topic_prefix, host_id),
         "payload_install": "install",
         "json_attributes_topic": host_security_json_attributes_topic(topic_prefix, host_id),
-        "availability_topic": format!("{topic_prefix}/status"),
-        "payload_available": "online",
-        "payload_not_available": "offline",
+        "availability": [
+            {
+                "topic": format!("{topic_prefix}/status"),
+                "payload_available": "online",
+                "payload_not_available": "offline"
+            },
+            {
+                "topic": format!("{topic_prefix}/hosts/{host_id}/connectivity/state"),
+                "payload_available": "online",
+                "payload_not_available": "offline"
+            }
+        ],
+        "availability_mode": "all",
         "device": build_device_block(tenant_id, host_id, friendly_name, os_info)
     })
 }
@@ -1796,7 +1831,12 @@ mod tests {
             ReleaseInfo::default(),
             HostOsInfo::default(),
         );
-        assert_eq!(v["availability_topic"], "uptrakit/status");
+        assert_eq!(v["availability"][0]["topic"], "uptrakit/status");
+        assert_eq!(
+            v["availability"][1]["topic"],
+            format!("uptrakit/hosts/{}/connectivity/state", host())
+        );
+        assert_eq!(v["availability_mode"], "all");
     }
 
     #[test]
@@ -1811,8 +1851,8 @@ mod tests {
             ReleaseInfo::default(),
             HostOsInfo::default(),
         );
-        assert_eq!(v["payload_available"], "online");
-        assert_eq!(v["payload_not_available"], "offline");
+        assert_eq!(v["availability"][0]["payload_available"], "online");
+        assert_eq!(v["availability"][0]["payload_not_available"], "offline");
     }
 
     #[test]
@@ -1932,6 +1972,7 @@ mod tests {
             ReleaseInfo {
                 url: Some(url),
                 notes: None,
+                icon_url: None,
             },
             HostOsInfo::default(),
         );
@@ -1952,6 +1993,7 @@ mod tests {
             ReleaseInfo {
                 url: None,
                 notes: Some(notes),
+                icon_url: None,
             },
             HostOsInfo::default(),
         );
@@ -1973,6 +2015,7 @@ mod tests {
             ReleaseInfo {
                 url: None,
                 notes: Some(&notes),
+                icon_url: None,
             },
             HostOsInfo::default(),
         );
@@ -1995,6 +2038,61 @@ mod tests {
         );
         assert!(v.get("release_url").is_none());
         assert!(v.get("release_summary").is_none());
+    }
+
+    #[test]
+    fn build_discovery_config_with_icon_url() {
+        let icon = "https://example.com/icon.png";
+        let v = build_discovery_config(
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+            ReleaseInfo {
+                url: None,
+                notes: None,
+                icon_url: Some(icon),
+            },
+            HostOsInfo::default(),
+        );
+        assert_eq!(v["entity_picture"], icon);
+    }
+
+    #[test]
+    fn build_discovery_config_no_icon_url_omits_entity_picture() {
+        let v = build_discovery_config(
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+            ReleaseInfo::default(),
+            HostOsInfo::default(),
+        );
+        assert!(v.get("entity_picture").is_none());
+    }
+
+    #[test]
+    fn build_host_connectivity_discovery_config_keeps_single_availability() {
+        // connectivity sensor retains a single availability_topic — it must NOT use the dual array.
+        let v = build_host_connectivity_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "myhost",
+            HostOsInfo::default(),
+        );
+        assert!(
+            v.get("availability_topic").is_some(),
+            "connectivity sensor must have availability_topic"
+        );
+        assert!(
+            v.get("availability").is_none(),
+            "connectivity sensor must NOT have availability array"
+        );
     }
 
     // -------------------------------------------------------------------------

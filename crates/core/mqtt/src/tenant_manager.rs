@@ -547,6 +547,7 @@ impl TenantManager {
                         crate::ha_discovery::ReleaseInfo {
                             url: host.release_url.as_deref(),
                             notes: host.release_notes.as_deref(),
+                            icon_url: item.icon_url.as_deref(),
                         },
                         os_info,
                     );
@@ -654,6 +655,7 @@ impl TenantManager {
                     crate::ha_discovery::ReleaseInfo {
                         url: host.release_url.as_deref(),
                         notes: host.release_notes.as_deref(),
+                        icon_url: item.icon_url.as_deref(),
                     },
                     os_info,
                 );
@@ -1522,6 +1524,7 @@ mod tests {
             items: vec![uptrakit_internal_wire::MqttSoftwareStateItem {
                 software_item_id: Uuid::nil(),
                 name: "nginx".to_string(),
+                icon_url: None,
                 hosts: vec![],
             }],
             host_summaries: vec![],
@@ -1566,6 +1569,7 @@ mod tests {
             items: vec![uptrakit_internal_wire::MqttSoftwareStateItem {
                 software_item_id: Uuid::nil(),
                 name: "nginx".to_string(),
+                icon_url: None,
                 hosts: vec![],
             }],
             host_summaries: vec![],
@@ -1579,11 +1583,13 @@ mod tests {
                 uptrakit_internal_wire::MqttSoftwareStateItem {
                     software_item_id: Uuid::nil(),
                     name: "nginx".to_string(),
+                    icon_url: None,
                     hosts: vec![],
                 },
                 uptrakit_internal_wire::MqttSoftwareStateItem {
                     software_item_id: Uuid::from_u128(1),
                     name: "redis".to_string(),
+                    icon_url: None,
                     hosts: vec![],
                 },
             ],
