@@ -37,6 +37,17 @@ pub fn build_txt_properties(
     properties
 }
 
+/// Strip any `.local` or `.local.` suffix from a hostname, returning the bare label.
+///
+/// macOS `hostname::get()` returns names like `MacBook-Pro.local`; we need just
+/// `MacBook-Pro` so we can build clean mDNS names without duplicate `.local` labels.
+fn strip_local_suffix(hostname: &str) -> &str {
+    hostname
+        .strip_suffix(".local.")
+        .or_else(|| hostname.strip_suffix(".local"))
+        .unwrap_or(hostname)
+}
+
 /// Run the mDNS advertiser until the cancellation token is triggered.
 ///
 /// Errors during startup are logged as warnings and do not crash the controller.
@@ -46,9 +57,20 @@ pub async fn run_advertiser(
     ca_snapshot: CaPublicSnapshot,
     zeroconf: ZeroconfSnapshot,
 ) {
-    let instance_name = hostname::get()
+    let raw_hostname = hostname::get()
         .map(|h| h.to_string_lossy().to_string())
         .unwrap_or_else(|_| "uptrakit".to_string());
+
+    // Use the bare hostname (no .local suffix), lowercased, as the instance name.
+    // mdns-sd builds the fullname as `{instance}.{service_type}.local.`, so including
+    // `.local` in the instance name produces a malformed record that mDNSResponder ignores.
+    // DNS names are case-insensitive; mdns-sd lowercases during probing which causes a
+    // mismatch with mixed-case originals, silently preventing announcement.
+    let instance_name = strip_local_suffix(&raw_hostname).to_lowercase();
+    // Use a fixed mDNS hostname to avoid clashing with the OS's mDNSResponder which
+    // already owns the system hostname (e.g. `MacBook-Pro.local.`). Agents discover the
+    // controller URL from the TXT `url` record, so the A record hostname is irrelevant.
+    let host_name = "uptrakit.local.".to_string();
 
     let port = https_addr.port();
 
@@ -58,11 +80,13 @@ pub async fn run_advertiser(
     let service_info = match ServiceInfo::new(
         SERVICE_TYPE,
         &instance_name,
-        &instance_name,
+        &host_name,
         (),
         port,
         &txt_props[..],
-    ) {
+    )
+    .map(ServiceInfo::enable_addr_auto)
+    {
         Ok(info) => info,
         Err(e) => {
             tracing::warn!(error = %e, "failed to create mDNS service info, zeroconf advertising disabled");
@@ -152,6 +176,26 @@ mod tests {
             props[1],
             ("url", "https://proxy.example.com:443".to_string())
         );
+    }
+
+    #[test]
+    fn strip_local_suffix_removes_local() {
+        assert_eq!(
+            strip_local_suffix("MacBook-Pro---Andrey.local"),
+            "MacBook-Pro---Andrey"
+        );
+        assert_eq!(
+            strip_local_suffix("MacBook-Pro---Andrey.local."),
+            "MacBook-Pro---Andrey"
+        );
+        assert_eq!(strip_local_suffix("myhost"), "myhost");
+    }
+
+    #[test]
+    fn instance_name_is_lowercased() {
+        // mdns-sd silently drops mixed-case instance names during probing
+        let bare = strip_local_suffix("MacBook-Pro---Andrey.local");
+        assert_eq!(bare.to_lowercase(), "macbook-pro---andrey");
     }
 
     #[test]
