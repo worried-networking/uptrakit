@@ -401,7 +401,7 @@ pub trait NotificationTransportPlugin: PluginBase {
         &self,
         config: &serde_json::Value,
         message: &uptrakit_notification_plugin_core::DeliveryMessage,
-    ) -> std::result::Result<(), uptrakit_notification_plugin_core::NotificationPluginError>;
+    ) -> uptrakit_notification_plugin_core::Result<()>;
 }
 
 // ── Infrastructure subtraits ────────────────────────────────────────────────

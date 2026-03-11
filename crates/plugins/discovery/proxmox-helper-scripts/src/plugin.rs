@@ -697,7 +697,7 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
     "discovery_proxmox_helper_scripts",
     fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
         Self::CAPABILITIES.to_vec()
-    },
+    }
     fn required_sudo_commands(&self) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
         Plugin::required_sudo_commands(self)
     }
