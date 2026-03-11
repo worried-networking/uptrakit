@@ -362,6 +362,11 @@ impl SshSession {
     ///
     /// Reads output from the SSH channel, forwards stdin and signals, and
     /// detects attention timeouts (10s of output silence).
+    ///
+    /// PTY output is coalesced over a short flush interval before being sent
+    /// to `output_tx`. This prevents the channel from being flooded by rapid
+    /// terminal redraws (e.g. progress bars that use `\r` without `\n`), which
+    /// would cause the capacity-bounded channel to drop chunks.
     #[cfg(feature = "interactive")]
     async fn drive_interactive_ssh_session(
         channel: &mut russh::Channel<russh::client::Msg>,
@@ -376,6 +381,17 @@ impl SshSession {
         const ATTENTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
         const MAX_OUTPUT: usize = 10 * 1024 * 1024;
         const TRUNCATION_MARKER: &str = "\n... [output truncated at 10 MB] ...\n";
+        /// Flush interval for coalescing rapid PTY output chunks.
+        ///
+        /// PTY sessions (especially PHS update scripts) emit many tiny data
+        /// chunks per second when drawing progress bars with `\r`. Sending each
+        /// chunk individually would saturate the capacity-bounded output channel.
+        /// Coalescing over 50 ms (20 Hz) reduces message rate dramatically while
+        /// keeping the UI refresh rate imperceptible to a human operator.
+        const PTY_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+        /// Size threshold for immediate flush: prevent unbounded buffer growth
+        /// when output is continuous without any event-loop lull.
+        const PTY_FLUSH_SIZE_THRESHOLD: usize = 64 * 1024;
 
         let mut accumulated_output = String::new();
         let mut truncated = false;
@@ -383,6 +399,15 @@ impl SshSession {
         let mut eof_received = false;
         let mut last_output_time = tokio::time::Instant::now();
         let mut attention_sent = false;
+
+        // Pending buffers for coalesced PTY output.
+        let mut pending_stdout = String::new();
+        let mut pending_stderr = String::new();
+
+        // Periodic flush timer. The first tick fires immediately but is a no-op
+        // since both pending buffers are empty at loop start.
+        let mut flush_interval = tokio::time::interval(PTY_FLUSH_INTERVAL);
+        flush_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
             let attention_sleep = if attention_sent {
@@ -413,16 +438,22 @@ impl SshSession {
                                     accumulated_output.push_str(&text);
                                 }
                             }
-                            // Non-blocking send: we must not await here, because a full
-                            // output buffer would prevent the loop from processing
-                            // ExitStatus / Eof channel messages and stall completion
-                            // detection indefinitely.
-                            if output_tx
-                                .try_send(uptrakit_command::UpdateOutputLine {
-                                    text,
-                                    stream: OutputStreamType::Stdout,
-                                })
-                                .is_err()
+                            // Accumulate for coalesced flush rather than sending
+                            // each chunk immediately. The flush arm below drains
+                            // the buffer every PTY_FLUSH_INTERVAL. If the buffer
+                            // grows past PTY_FLUSH_SIZE_THRESHOLD (continuous high-
+                            // throughput output without any event-loop lull), flush
+                            // now so memory stays bounded.
+                            pending_stdout.push_str(&text);
+                            // Non-blocking send; must not await here so that
+                            // ExitStatus / Eof processing is never stalled.
+                            if pending_stdout.len() >= PTY_FLUSH_SIZE_THRESHOLD
+                                && output_tx
+                                    .try_send(uptrakit_command::UpdateOutputLine {
+                                        text: std::mem::take(&mut pending_stdout),
+                                        stream: OutputStreamType::Stdout,
+                                    })
+                                    .is_err()
                             {
                                 tracing::debug!(
                                     "SSH output channel full; dropping stdout chunk"
@@ -441,12 +472,14 @@ impl SshSession {
                                     accumulated_output.push_str(&text);
                                 }
                             }
-                            if output_tx
-                                .try_send(uptrakit_command::UpdateOutputLine {
-                                    text,
-                                    stream: OutputStreamType::Stderr,
-                                })
-                                .is_err()
+                            pending_stderr.push_str(&text);
+                            if pending_stderr.len() >= PTY_FLUSH_SIZE_THRESHOLD
+                                && output_tx
+                                    .try_send(uptrakit_command::UpdateOutputLine {
+                                        text: std::mem::take(&mut pending_stderr),
+                                        stream: OutputStreamType::Stderr,
+                                    })
+                                    .is_err()
                             {
                                 tracing::debug!(
                                     "SSH output channel full; dropping stderr chunk"
@@ -498,6 +531,35 @@ impl SshSession {
                     }
                 }
 
+                _ = flush_interval.tick() => {
+                    // Flush any coalesced PTY output accumulated since the last tick.
+                    // Still non-blocking (try_send) to avoid stalling completion detection.
+                    if !pending_stdout.is_empty()
+                        && output_tx
+                            .try_send(uptrakit_command::UpdateOutputLine {
+                                text: std::mem::take(&mut pending_stdout),
+                                stream: OutputStreamType::Stdout,
+                            })
+                            .is_err()
+                    {
+                        tracing::debug!(
+                            "SSH output channel full; dropping coalesced stdout chunk"
+                        );
+                    }
+                    if !pending_stderr.is_empty()
+                        && output_tx
+                            .try_send(uptrakit_command::UpdateOutputLine {
+                                text: std::mem::take(&mut pending_stderr),
+                                stream: OutputStreamType::Stderr,
+                            })
+                            .is_err()
+                    {
+                        tracing::debug!(
+                            "SSH output channel full; dropping coalesced stderr chunk"
+                        );
+                    }
+                }
+
                 _ = attention_sleep => {
                     if !attention_sent {
                         let _ = attention_tx.try_send(());
@@ -505,6 +567,21 @@ impl SshSession {
                     }
                 }
             }
+        }
+
+        // Flush any remaining buffered output before returning so the last line
+        // (e.g. "Done." without a trailing newline) is visible in the UI.
+        if !pending_stdout.is_empty() {
+            let _ = output_tx.try_send(uptrakit_command::UpdateOutputLine {
+                text: pending_stdout,
+                stream: OutputStreamType::Stdout,
+            });
+        }
+        if !pending_stderr.is_empty() {
+            let _ = output_tx.try_send(uptrakit_command::UpdateOutputLine {
+                text: pending_stderr,
+                stream: OutputStreamType::Stderr,
+            });
         }
 
         // When the remote side closed the channel cleanly (Eof/Close) without

@@ -46,8 +46,14 @@ pub struct EventLoopContext<'a> {
 /// to other `select!` arms (ping, renewal, controller messages, signals).
 ///
 /// Without this limit, a burst of service events (e.g. rapid MQTT client
-/// status changes) can starve the ping timer, causing the controller to
-/// consider the service dead and trigger unnecessary failover.
+/// status changes or SSH update output forwarding) can starve the ping timer,
+/// causing the controller to consider the service dead and trigger unnecessary
+/// failover.
+///
+/// When the budget is exhausted, a `yield_now()` arm fires (see below) so
+/// that other Tokio tasks and timers advance by one scheduler cycle before
+/// the budget resets. This prevents blocking on `conn.recv()` for an entire
+/// ping interval (up to 300 s) while update output is pending.
 const MAX_CONSECUTIVE_SERVICE_EVENTS: u32 = 16;
 
 /// Default shutdown timeout when `ServiceSettings` does not provide one.
@@ -281,6 +287,23 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                         shutdown_timeout,
                     )
                     .await;
+            }
+
+            // 6. Budget-reset yield.
+            //
+            // This arm is active only when the service-event budget is
+            // exhausted (`!poll_service`). It yields the task to the Tokio
+            // scheduler for exactly one scheduling cycle — long enough for
+            // timers (ping, renewal) and incoming messages to register as
+            // ready — then resets the counter so service events can be
+            // processed again on the next iteration.
+            //
+            // Without this arm the select would block on `conn.recv()` (arm 4)
+            // until the next controller message arrives. For agents whose ping
+            // interval is 300 s that means up to 5 minutes of silence while
+            // update output is queued in the aggregate channel.
+            _ = tokio::task::yield_now(), if !poll_service => {
+                consecutive_service_events = 0;
             }
         }
     };
