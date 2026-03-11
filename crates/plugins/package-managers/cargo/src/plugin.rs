@@ -613,8 +613,10 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
     CargoPlugin,
     CargoConfig,
     "package_manager_cargo",
-    fn capabilities(&self) -> Vec<PluginCapability> {
-        Self::CAPABILITIES.to_vec()
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
     }
 );
 

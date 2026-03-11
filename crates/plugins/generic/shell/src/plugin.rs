@@ -129,8 +129,10 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
     ShellPlugin,
     ShellConfig,
     "generic_shell",
-    fn capabilities(&self) -> Vec<PluginCapability> {
-        Self::CAPABILITIES.to_vec()
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
     }
 );
 

@@ -453,8 +453,10 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
     MasPlugin,
     MasConfig,
     "package_manager_mas",
-    fn capabilities(&self) -> Vec<PluginCapability> {
-        Self::CAPABILITIES.to_vec()
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
     }
 );
 

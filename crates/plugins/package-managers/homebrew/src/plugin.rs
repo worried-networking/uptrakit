@@ -791,8 +791,10 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
     HomebrewPlugin,
     HomebrewConfig,
     "package_manager_homebrew",
-    fn capabilities(&self) -> Vec<PluginCapability> {
-        Self::CAPABILITIES.to_vec()
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
     }
 );
 

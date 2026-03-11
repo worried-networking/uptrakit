@@ -854,11 +854,15 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
     GitHubPlugin,
     GitHubConfig,
     "releases_github",
-    fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
-        Self::CAPABILITIES.to_vec()
-    }
-    fn required_sudo_commands(&self) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-        Plugin::required_sudo_commands(self)
+    {
+        fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
+        fn required_sudo_commands(
+            &self,
+        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
+            Plugin::required_sudo_commands(self)
+        }
     }
 );
 

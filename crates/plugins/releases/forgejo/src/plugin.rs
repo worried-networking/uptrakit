@@ -348,8 +348,10 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
     ForgejoPlugin,
     ForgejoConfig,
     "releases_forgejo",
-    fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
-        Self::CAPABILITIES.to_vec()
+    {
+        fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
     }
 );
 

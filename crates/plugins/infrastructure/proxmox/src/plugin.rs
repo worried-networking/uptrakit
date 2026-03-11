@@ -51,8 +51,10 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
     ProxmoxPlugin,
     ProxmoxConfig,
     "infrastructure_proxmox",
-    fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
-        Self::CAPABILITIES.to_vec()
+    {
+        fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
     }
 );
 

@@ -475,20 +475,30 @@ pub trait GuestExecPlugin: PluginBase {
 /// impl_plugin_base_config!(AptPlugin, AptConfig, "package_manager_apt");
 /// ```
 ///
-/// With optional method overrides (capabilities, sudo commands, etc.):
+/// With optional method overrides (capabilities, sudo commands, etc.),
+/// wrapped in braces to prevent `cargo fmt` from inserting commas:
 /// ```ignore
-/// impl_plugin_base_config!(AptPlugin, AptConfig, "package_manager_apt",
+/// impl_plugin_base_config!(AptPlugin, AptConfig, "package_manager_apt", {
 ///     fn capabilities(&self) -> Vec<$crate::PluginCapability> {
 ///         Self::CAPABILITIES.to_vec()
 ///     }
 ///     fn required_sudo_commands(&self) -> Vec<$crate::SudoCommandEntry> {
 ///         $crate::Plugin::required_sudo_commands(self)
 ///     }
-/// );
+/// });
 /// ```
 #[macro_export]
 macro_rules! impl_plugin_base_config {
-    ($plugin:ty, $config:ty, $type_id:expr $(, $($extra_methods:tt)*)?) => {
+    // With extra method overrides wrapped in braces.
+    ($plugin:ty, $config:ty, $type_id:expr, { $($extra_methods:item)* }) => {
+        $crate::impl_plugin_base_config!(@inner $plugin, $config, $type_id, $($extra_methods)*);
+    };
+    // No extra methods.
+    ($plugin:ty, $config:ty, $type_id:expr) => {
+        $crate::impl_plugin_base_config!(@inner $plugin, $config, $type_id,);
+    };
+    // Internal rule that generates the impl block.
+    (@inner $plugin:ty, $config:ty, $type_id:expr, $($extra_methods:item)*) => {
         impl $crate::PluginBase for $plugin {
             fn plugin_type_id(&self) -> &str {
                 $type_id
@@ -563,7 +573,7 @@ macro_rules! impl_plugin_base_config {
                 <$config>::validate_identifier(value)
             }
 
-            $($($extra_methods)*)?
+            $($extra_methods)*
         }
     };
 }

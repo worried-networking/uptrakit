@@ -627,11 +627,15 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
     SnapPlugin,
     SnapConfig,
     "package_manager_snap",
-    fn capabilities(&self) -> Vec<PluginCapability> {
-        Self::CAPABILITIES.to_vec()
-    }
-    fn required_sudo_commands(&self) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-        Plugin::required_sudo_commands(self)
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
+        fn required_sudo_commands(
+            &self,
+        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
+            Plugin::required_sudo_commands(self)
+        }
     }
 );
 
