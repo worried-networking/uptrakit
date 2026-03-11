@@ -135,6 +135,17 @@ impl PluginOps for PluginRegistry {
         PluginRegistry::config_form_schema_str(plugin_type)
     }
 
+    fn type_settings_form_schema_str(
+        &self,
+        plugin_type: &str,
+    ) -> Option<Vec<uptrakit_extension_framework::FieldDef>> {
+        PluginRegistry::type_settings_form_schema_str(plugin_type)
+    }
+
+    fn type_settings_sample_for_str(&self, plugin_type: &str) -> serde_json::Value {
+        PluginRegistry::type_settings_sample_str(plugin_type)
+    }
+
     fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
         uptrakit_plugin_infrastructure_proxmox::extensions::extension_manifests()
     }

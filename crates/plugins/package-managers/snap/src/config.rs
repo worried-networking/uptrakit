@@ -90,6 +90,28 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for SnapConfig {
                 ),
         ]
     }
+
+    fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
+    {
+        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
+        vec![
+            FieldDef::new("channel", "Channel")
+                .with_type(FieldType::Select)
+                .with_options(vec![
+                    SelectOption::new("latest/stable", "Stable"),
+                    SelectOption::new("latest/candidate", "Candidate"),
+                    SelectOption::new("latest/beta", "Beta"),
+                    SelectOption::new("latest/edge", "Edge"),
+                ])
+                .with_help_text("Default Snap channel to track for discovered packages"),
+        ]
+    }
+
+    fn type_settings_sample() -> serde_json::Value {
+        serde_json::json!({
+            "channel": "latest/stable"
+        })
+    }
 }
 
 impl SnapConfig {

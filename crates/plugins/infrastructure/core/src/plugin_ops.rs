@@ -102,6 +102,24 @@ pub trait PluginOps: Send + Sync + 'static {
         plugin_type: &str,
     ) -> Option<Vec<uptrakit_extension_framework::FieldDef>>;
 
+    /// Returns type-settings form field definitions for the given plugin type.
+    ///
+    /// Returns `None` for unknown plugin types, empty `Vec` for plugins
+    /// with no type-level settings.
+    fn type_settings_form_schema_str(
+        &self,
+        plugin_type: &str,
+    ) -> Option<Vec<uptrakit_extension_framework::FieldDef>> {
+        let _ = plugin_type;
+        None
+    }
+
+    /// Returns a sample/default JSON for type settings of the given plugin type.
+    fn type_settings_sample_for_str(&self, plugin_type: &str) -> serde_json::Value {
+        let _ = plugin_type;
+        serde_json::Value::Object(serde_json::Map::new())
+    }
+
     /// Returns UI extension manifests provided by all registered plugins.
     ///
     /// Default returns empty — no plugin provides extensions yet. Override

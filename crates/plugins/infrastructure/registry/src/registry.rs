@@ -261,6 +261,52 @@ macro_rules! register_plugins {
                 Self::config_form_schema(pt)
             }
 
+            /// Returns type-settings form field definitions for the given plugin type.
+            ///
+            /// Uses [`ConfigFormSchema::type_settings_form_schema`]. Returns `None`
+            /// for unknown / `Other` types.
+            pub fn type_settings_form_schema(
+                plugin_type: PluginType,
+            ) -> Option<Vec<uptrakit_extension_framework::FieldDef>> {
+                match plugin_type {
+                    $(
+                        PluginType::$variant => Some(<$config as ConfigFormSchema>::type_settings_form_schema()),
+                    )+
+                    _ => None,
+                }
+            }
+
+            /// String-accepting convenience wrapper around [`type_settings_form_schema`].
+            pub fn type_settings_form_schema_str(
+                plugin_type: &str,
+            ) -> Option<Vec<uptrakit_extension_framework::FieldDef>> {
+                let Ok(pt) = plugin_type.parse::<PluginType>() else {
+                    return None;
+                };
+                Self::type_settings_form_schema(pt)
+            }
+
+            /// Returns a sample/default JSON for type settings of the given plugin type.
+            pub fn type_settings_sample(plugin_type: PluginType) -> serde_json::Value {
+                match plugin_type {
+                    $(
+                        PluginType::$variant => {
+                            <$config as ConfigFormSchema>::type_settings_sample()
+                        }
+                    )+
+                    _ => serde_json::Value::Object(serde_json::Map::new()),
+                }
+            }
+
+            /// String-accepting convenience wrapper around [`type_settings_sample`].
+            #[must_use]
+            pub fn type_settings_sample_str(plugin_type: &str) -> serde_json::Value {
+                let Ok(pt) = plugin_type.parse::<PluginType>() else {
+                    return serde_json::Value::Object(serde_json::Map::new());
+                };
+                Self::type_settings_sample(pt)
+            }
+
             /// Returns all plugin types that have the `DiscoverLocalSoftware` capability.
             ///
             /// Uses compile-time `CAPABILITIES` constants — no instantiation needed.

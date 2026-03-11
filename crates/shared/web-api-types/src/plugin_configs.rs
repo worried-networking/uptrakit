@@ -69,6 +69,21 @@ pub struct PluginTypeInfo {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<serde_json::Value>))]
     pub config_form_fields: Vec<FieldDef>,
+    /// Form field definitions for tenant-level type settings.
+    ///
+    /// When non-empty, the Settings page shows a per-type-settings form backed
+    /// by the `plugin_type_settings` table (e.g., APT `discovery_filter`).
+    /// Empty for plugins that have no type-level settings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<serde_json::Value>))]
+    pub type_settings_form_fields: Vec<FieldDef>,
+    /// Sample/default JSON for type settings.
+    #[serde(default, skip_serializing_if = "is_empty_object")]
+    pub type_settings_sample: serde_json::Value,
+}
+
+fn is_empty_object(v: &serde_json::Value) -> bool {
+    matches!(v, serde_json::Value::Object(m) if m.is_empty())
 }
 
 impl Validate for CreatePluginConfigRequest {
@@ -189,6 +204,8 @@ mod tests {
             ],
             sample_config: serde_json::json!({"tracking_mode": "semver_tags"}),
             config_form_fields: vec![],
+            type_settings_form_fields: vec![],
+            type_settings_sample: serde_json::json!({}),
         };
         let json = serde_json::to_string(&info).expect("serialization should succeed");
         let de: PluginTypeInfo =
@@ -213,6 +230,8 @@ mod tests {
             capabilities: vec![PluginCapability::ControllerSideFetchReleases],
             sample_config: serde_json::json!({}),
             config_form_fields: vec![],
+            type_settings_form_fields: vec![],
+            type_settings_sample: serde_json::json!({}),
         };
         let json = serde_json::to_string(&info).expect("serialization should succeed");
         assert!(

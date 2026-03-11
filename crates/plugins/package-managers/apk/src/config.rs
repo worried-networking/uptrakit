@@ -55,6 +55,26 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ApkConfig {
                 .with_help_text("Which packages to discover during autodiscovery"),
         ]
     }
+
+    fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
+    {
+        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
+        vec![
+            FieldDef::new("discovery_filter", "Discovery Filter")
+                .with_type(FieldType::Select)
+                .with_options(vec![
+                    SelectOption::new("all", "All installed packages"),
+                    SelectOption::new("world", "Explicitly installed packages (world file)"),
+                ])
+                .with_help_text("Which packages to discover during autodiscovery"),
+        ]
+    }
+
+    fn type_settings_sample() -> serde_json::Value {
+        serde_json::json!({
+            "discovery_filter": "all"
+        })
+    }
 }
 
 impl ApkConfig {
