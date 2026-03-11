@@ -13,6 +13,7 @@ use uptrakit_plugin_infrastructure_core::{
 use uptrakit_plugin_infrastructure_proxmox::{ProxmoxConfig, ProxmoxPlugin};
 use uptrakit_plugin_package_manager_apk::{ApkConfig, ApkPlugin};
 use uptrakit_plugin_package_manager_apt::{AptConfig, AptPlugin};
+use uptrakit_plugin_package_manager_cargo::{CargoConfig, CargoPlugin};
 use uptrakit_plugin_package_manager_dnf::{DnfConfig, DnfPlugin};
 use uptrakit_plugin_package_manager_homebrew::{HomebrewConfig, HomebrewPlugin};
 use uptrakit_plugin_package_manager_mas::{MasConfig, MasPlugin};
@@ -508,6 +509,7 @@ register_plugins! {
     PackageManagerPkg             => { config: PkgConfig,                  plugin: PkgPlugin },
     PackageManagerApk             => { config: ApkConfig,                  plugin: ApkPlugin },
     PackageManagerSnap            => { config: SnapConfig,                 plugin: SnapPlugin },
+    PackageManagerCargo           => { config: CargoConfig,               plugin: CargoPlugin },
     GenericShell                  => { config: ShellConfig,                plugin: ShellPlugin },
     InfrastructureProxmox         => {
         config: ProxmoxConfig,
@@ -1628,6 +1630,132 @@ mod tests {
         assert!(
             types.contains(&PluginType::PackageManagerSnap),
             "Snap plugin should be in discovery_plugins()"
+        );
+    }
+
+    // ── Cargo plugin tests ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn create_plugin_cargo() {
+        let config = serde_json::json!({});
+        let plugin = PluginRegistry::create_plugin(
+            PluginType::PackageManagerCargo,
+            &config,
+            test_executor(),
+        )
+        .await;
+        assert!(plugin.is_ok());
+    }
+
+    #[tokio::test]
+    async fn create_plugin_cargo_with_include_prereleases() {
+        let config = serde_json::json!({"include_prereleases": true});
+        let plugin = PluginRegistry::create_plugin(
+            PluginType::PackageManagerCargo,
+            &config,
+            test_executor(),
+        )
+        .await;
+        assert!(plugin.is_ok());
+    }
+
+    #[test]
+    fn validate_cargo_config_default() {
+        let config = serde_json::json!({});
+        assert!(PluginRegistry::validate_config(PluginType::PackageManagerCargo, &config).is_ok());
+    }
+
+    #[test]
+    fn validate_cargo_config_empty_registry_url_fails() {
+        let config = serde_json::json!({"registry_url": ""});
+        assert!(PluginRegistry::validate_config(PluginType::PackageManagerCargo, &config).is_err());
+    }
+
+    #[tokio::test]
+    async fn cargo_plugin_capabilities() {
+        let config = serde_json::json!({});
+        let plugin = PluginRegistry::create_plugin(
+            PluginType::PackageManagerCargo,
+            &config,
+            test_executor(),
+        )
+        .await
+        .unwrap();
+        assert!(plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
+        ));
+        assert!(plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility
+        ));
+        assert!(plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::ControllerSideFetchReleases
+        ));
+    }
+
+    #[test]
+    fn mask_config_secrets_cargo_is_noop() {
+        let config = serde_json::json!({"include_prereleases": true});
+        let masked = PluginRegistry::mask_config_secrets(PluginType::PackageManagerCargo, &config);
+        assert_eq!(masked, config);
+    }
+
+    #[test]
+    fn validate_package_identifier_cargo_valid() {
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::PackageManagerCargo, "ripgrep")
+                .is_ok()
+        );
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::PackageManagerCargo,
+                "cargo-nextest"
+            )
+            .is_ok()
+        );
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::PackageManagerCargo, "_helper")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_package_identifier_cargo_leading_digit_fails() {
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::PackageManagerCargo, "1crate")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn validate_package_identifier_cargo_dot_fails() {
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::PackageManagerCargo,
+                "my.crate"
+            )
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn cargo_has_no_sudo_commands() {
+        let entries = PluginRegistry::all_required_sudo_commands().await;
+        let cargo_entry = entries
+            .iter()
+            .find(|(pt, _)| *pt == PluginType::PackageManagerCargo);
+        // Cargo install requires no sudo — either no entry or an empty entry list.
+        assert!(
+            cargo_entry.is_none() || cargo_entry.is_some_and(|(_, cmds)| cmds.is_empty()),
+            "Cargo plugin should not require any sudo commands"
+        );
+    }
+
+    #[test]
+    fn discovery_plugins_includes_cargo() {
+        let types = PluginRegistry::discovery_plugins();
+        assert!(
+            types.contains(&PluginType::PackageManagerCargo),
+            "Cargo plugin should be in discovery_plugins()"
         );
     }
 }
