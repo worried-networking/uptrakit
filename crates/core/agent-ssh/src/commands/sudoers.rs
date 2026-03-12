@@ -145,6 +145,40 @@ pub async fn resolve_command_path(
 /// list still strips dangerous vars like `LD_PRELOAD` before they reach the
 /// privileged process. Only set `needs_setenv` when the plugin invokes that
 /// command with [`CommandSpec::with_env`] combined with `.privileged()`.
+///
+/// ## Command argument escaping
+///
+/// Plugin declarations and infrastructure sync results provide command specs in
+/// normal command-token form (for example `apt-get -o KEY=value upgrade *`).
+/// Before writing sudoers lines, this module escapes the subset of characters
+/// that `sudoers(5)` treats specially inside command arguments: `,`, `:`, `=`,
+/// `\`, and a leading `^`. Wildcard characters remain unescaped so existing
+/// sudoers matching semantics are preserved, including wildcard tokens that
+/// appear in the middle of the argument list.
+fn escape_sudoers_arg_token(token: &str) -> String {
+    if token == "*" {
+        return token.to_string();
+    }
+
+    let mut out = String::with_capacity(token.len());
+    for (idx, ch) in token.chars().enumerate() {
+        let needs_escape = matches!(ch, ',' | ':' | '=' | '\\') || (idx == 0 && ch == '^');
+        if needs_escape {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn render_sudoers_command_spec(command_spec: &str) -> String {
+    command_spec
+        .split_whitespace()
+        .map(escape_sudoers_arg_token)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub fn generate_sudoers_content(username: &str, content: &SudoersContent) -> String {
     let mut out = String::new();
     out.push_str("# Managed by Uptrakit - DO NOT EDIT MANUALLY\n");
@@ -161,9 +195,10 @@ pub fn generate_sudoers_content(username: &str, content: &SudoersContent) -> Str
                     entry.command_path, entry.explanation
                 ));
                 let setenv = if entry.needs_setenv { "SETENV: " } else { "" };
+                let rendered_command = render_sudoers_command_spec(&entry.command_path);
                 out.push_str(&format!(
                     "{username} ALL=(root) NOPASSWD: {setenv}{}\n",
-                    entry.command_path
+                    rendered_command
                 ));
             }
         }
@@ -375,7 +410,7 @@ mod tests {
         assert!(text.contains("uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get update *"));
         assert!(text.contains("uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get install *"));
         assert!(text.contains(
-            "uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get -o Dir::Etc::Preferences=/tmp/uptrakit-apt-batch.pref upgrade *"
+            "uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get -o Dir\\:\\:Etc\\:\\:Preferences\\=/tmp/uptrakit-apt-batch.pref upgrade *"
         ));
         // Should have 3 sudoers lines (one per entry)
         let entry_count = text
@@ -405,5 +440,43 @@ mod tests {
         assert!(text.contains("deploy ALL=(root) NOPASSWD: /usr/bin/pacman -Sy"));
         assert!(text.contains("deploy ALL=(root) NOPASSWD: /usr/bin/pacman -S --noconfirm *"));
         assert!(!text.contains("SETENV:"));
+    }
+
+    #[test]
+    fn escape_sudoers_arg_token_escapes_sudoers_special_chars() {
+        assert_eq!(
+            escape_sudoers_arg_token("Dir::Etc::Preferences=/tmp/uptrakit-apt-batch.pref"),
+            "Dir\\:\\:Etc\\:\\:Preferences\\=/tmp/uptrakit-apt-batch.pref"
+        );
+        assert_eq!(escape_sudoers_arg_token("^caret"), "\\^caret");
+        assert_eq!(escape_sudoers_arg_token(r"foo\bar"), r"foo\\bar");
+    }
+
+    #[test]
+    fn render_sudoers_command_spec_preserves_wildcards_in_middle() {
+        assert_eq!(
+            render_sudoers_command_spec("/usr/sbin/qm guest cmd * network-get-interfaces"),
+            "/usr/sbin/qm guest cmd * network-get-interfaces"
+        );
+        assert_eq!(
+            render_sudoers_command_spec("/usr/sbin/pct exec *"),
+            "/usr/sbin/pct exec *"
+        );
+    }
+
+    #[test]
+    fn generate_sudoers_specific_commands_escapes_literal_tokens() {
+        let content = SudoersContent::SpecificCommands(vec![ResolvedSudoCommand {
+            command_path:
+                "/usr/bin/apt-get -o Dir::Etc::Preferences=/tmp/uptrakit-apt-batch.pref upgrade *"
+                    .to_string(),
+            explanation: "Batch upgrade requires root".to_string(),
+            needs_setenv: true,
+        }]);
+        let text = generate_sudoers_content("uptrakit", &content);
+
+        assert!(text.contains(
+            "uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get -o Dir\\:\\:Etc\\:\\:Preferences\\=/tmp/uptrakit-apt-batch.pref upgrade *"
+        ));
     }
 }

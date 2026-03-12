@@ -226,7 +226,11 @@ pub struct BootstrapInfraResult {
 /// return sudo requirements without depending on agent-ssh types.
 #[derive(Debug, Clone)]
 pub struct InfraResolvedSudo {
-    /// Absolute path (possibly with wildcards) for the sudoers entry.
+    /// Absolute command spec for the sudoers entry.
+    ///
+    /// The string is expressed in normal command-token form; the SSH agent
+    /// escapes sudoers-special characters when rendering the file while
+    /// preserving wildcard tokens such as `*`.
     pub command_path: String,
     /// Human-readable explanation for audit/documentation.
     pub explanation: String,

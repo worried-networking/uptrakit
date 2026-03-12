@@ -168,8 +168,11 @@ pub struct SudoCommandEntry {
     /// sudoers entry (e.g. `"start *"` → `/usr/bin/systemctl start *`).
     ///
     /// Use this to restrict the allowed subcommands/arguments without needing a
-    /// helper script. The suffix is appended verbatim after a space separator.
-    /// When `None`, the sudoers entry permits any arguments.
+    /// helper script. The suffix is appended as whitespace-delimited command
+    /// tokens after a space separator. The SSH agent escapes sudoers-special
+    /// characters when rendering the drop-in file while preserving wildcard
+    /// tokens such as `*` anywhere in the argument list. When `None`, the
+    /// sudoers entry permits any arguments.
     pub args_suffix: Option<Cow<'static, str>>,
     /// When `true`, the sudoers entry is generated with the `SETENV:` tag, which
     /// allows the agent to pass inline `NAME=VALUE` env var assignments before

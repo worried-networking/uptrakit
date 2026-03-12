@@ -301,8 +301,10 @@ fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
   The bootstrap and `sync` commands resolve the absolute path on the target host via
   `command -v <name>`.
 - `args_suffix` optionally restricts the sudoers entry to specific subcommands (e.g.
-  `Some("stop *")` → `/usr/bin/systemctl stop *`). Use this instead of a helper script
-  when positional argument matching is sufficient.
+  `Some("stop *")` → `/usr/bin/systemctl stop *`). The suffix is written as normal
+  command tokens; the SSH agent escapes sudoers-special characters when rendering the
+  file while preserving wildcard tokens such as `*` anywhere in the argument list. Use
+  this instead of a helper script when positional argument matching is sufficient.
 - `explanation` is shown as a comment in the generated sudoers file and in CLI output. Keep it
   concise and factual.
 - Return an empty `vec![]` (the default) when your plugin never needs elevated privileges.

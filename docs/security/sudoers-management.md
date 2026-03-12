@@ -187,14 +187,14 @@ sudoers argument matching is positional — `stop *` does not match `disable mys
 
 Each registered plugin declares which commands it needs root access for, and how restricted
 those commands are. The table below documents the exact sudoers patterns generated for each
-plugin. The `*` wildcard as the **last** argument matches zero or more additional arguments —
-positional matching in sudoers means it does **not** match an earlier subcommand position.
+plugin. Wildcards participate in sudoers' normal positional argument matching, so they can
+appear in the middle or at the end of a command spec.
 
 | Plugin | Sudoers pattern | Notes |
 | --- | --- | --- |
 | **APT** | `SETENV: /usr/bin/apt-get update *` | Index refresh; `SETENV:` required for `DEBIAN_FRONTEND=noninteractive` |
 | **APT** | `SETENV: /usr/bin/apt-get install *` | Single-package install |
-| **APT** | `SETENV: /usr/bin/apt-get -o Dir::Etc::Preferences=/tmp/uptrakit-apt-batch.pref upgrade *` | Batch upgrade via pinned preferences file; uses `upgrade` (not `install`) to preserve apt manual/auto marks |
+| **APT** | `SETENV: /usr/bin/apt-get -o Dir\:\:Etc\:\:Preferences\=/tmp/uptrakit-apt-batch.pref upgrade *` | Batch upgrade via pinned preferences file; uses `upgrade` (not `install`) to preserve apt manual/auto marks |
 | **APK** | `/usr/sbin/apk update` | Index refresh; no wildcard needed |
 | **APK** | `/usr/sbin/apk add *` | Package installation |
 | **Pacman** | `/usr/bin/pacman -Sy` | Database sync; no wildcard |
@@ -219,8 +219,9 @@ positional matching in sudoers means it does **not** match an earlier subcommand
 
 ### `*` wildcard semantics
 
-In sudoers, a trailing `*` matches zero or more **space-separated tokens** at that position
-and beyond. Positional matching means the subcommand token is fixed:
+In sudoers, `*` participates in shell-style wildcard matching across the concatenated command
+argument string. Uptrakit uses bare `*` tokens to allow flexible matching at a specific
+position in the command spec while keeping the surrounding tokens fixed.
 
 ```text
 # Allows: apt-get install vim   apt-get install vim=2.0   apt-get install vim curl
@@ -228,9 +229,16 @@ and beyond. Positional matching means the subcommand token is fixed:
 uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get install *
 ```
 
+Wildcards can also appear in the middle of the argument list when later tokens must stay
+fixed. For example:
+
+```text
+uptrakit ALL=(root) NOPASSWD: /usr/sbin/qm guest cmd * network-get-interfaces
+```
+
 Note that `*` in sudoers **does match `/`**, which is why helper scripts are preferred when
-argument values influence file paths. For subcommand-only restriction (no path arguments
-from user input), `args_suffix` with `*` is safe.
+argument values influence file paths. For subcommand-only restriction or bounded wildcard
+slots, `args_suffix` with `*` is safe.
 
 ## The `--allow-all` fallback
 
@@ -324,13 +332,17 @@ uptrakit-agent-ssh host sync my-server --dry-run
 <username> ALL=(root) NOPASSWD: [SETENV: ]<absolute-path>[<args-suffix>]
 ```
 
-When a plugin sets `args_suffix`, the resolved path includes the suffix verbatim:
+When a plugin sets `args_suffix`, the resolved path includes the suffix verbatim in comments,
+and the generated sudoers rule escapes the sudoers-special characters that appear in literal
+argument tokens:
 
 ```text
 # /usr/bin/apt-get update *: Package index refresh requires root privileges
 uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get update *
 # /usr/bin/apt-get install *: Package installation requires root privileges
 uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get install *
+# /usr/bin/apt-get -o Dir::Etc::Preferences=/tmp/uptrakit-apt-batch.pref upgrade *: Batch package upgrade (pinned versions) requires root privileges
+uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get -o Dir\:\:Etc\:\:Preferences\=/tmp/uptrakit-apt-batch.pref upgrade *
 ```
 
 `SETENV:` is included only when the plugin sets `needs_setenv = true` (currently the three `apt-get` entries).

@@ -403,8 +403,9 @@ first, or re-run bootstrap with `--allow-all` to fall back to `NOPASSWD: ALL`.
 ### "sudoers validation failed"
 
 The generated sudoers file did not pass `visudo -cf` validation. This is
-unexpected and may indicate a non-standard sudoers configuration on the remote
-host. Check `/etc/sudoers` and `/etc/sudoers.d/` for syntax errors.
+unexpected. Check `/etc/sudoers` and `/etc/sudoers.d/` for syntax errors, and
+inspect the generated drop-in for unescaped sudoers-special characters in
+literal arguments (for example `:` or `=` inside fixed command arguments).
 
 ### Accumulating keys after repeated bootstraps
 
