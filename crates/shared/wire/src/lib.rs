@@ -644,6 +644,7 @@ mod tests {
             renewal_window_hours: 6,
             ca_bundle_hash: "abc123".to_string(),
             capabilities: BTreeSet::new(),
+            report_page_limits: ReportPageLimits::default(),
             shutdown_timeout: Some(std::time::Duration::from_secs(120)),
             ping_interval: std::time::Duration::from_secs(300),
             tenant_id: None,
@@ -663,6 +664,7 @@ mod tests {
             renewal_window_hours: 6,
             ca_bundle_hash: "abc123def".to_string(),
             capabilities: BTreeSet::new(),
+            report_page_limits: ReportPageLimits::default(),
             shutdown_timeout: None,
             ping_interval: std::time::Duration::from_secs(15),
             tenant_id: None,
@@ -671,6 +673,26 @@ mod tests {
         assert!(json.contains(r#""type":"service_settings"#));
         assert!(!json.contains("shutdown_timeout_seconds"));
         assert!(json.contains(r#""ping_interval":15"#));
+        let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn service_settings_serializes_non_default_report_page_limits() {
+        let msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
+            renewal_window_hours: 6,
+            ca_bundle_hash: "abc123".to_string(),
+            capabilities: BTreeSet::new(),
+            report_page_limits: ReportPageLimits {
+                report_hosts: 100,
+                ..ReportPageLimits::default()
+            },
+            shutdown_timeout: None,
+            ping_interval: std::time::Duration::from_secs(300),
+            tenant_id: None,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""report_page_limits":{"report_hosts":100"#));
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -686,6 +708,7 @@ mod tests {
                 renewal_window_hours: 12,
                 ca_bundle_hash: "def456".to_string(),
                 capabilities: BTreeSet::new(),
+                report_page_limits: ReportPageLimits::default(),
                 shutdown_timeout: Some(std::time::Duration::from_secs(60)),
                 ping_interval: std::time::Duration::from_secs(300),
                 tenant_id: None,
@@ -704,6 +727,7 @@ mod tests {
                 renewal_window_hours: 6,
                 ca_bundle_hash: "abc".to_string(),
                 capabilities: BTreeSet::new(),
+                report_page_limits: ReportPageLimits::default(),
                 shutdown_timeout: None,
                 ping_interval: std::time::Duration::from_secs(300),
                 tenant_id: None,
@@ -717,6 +741,7 @@ mod tests {
             renewal_window_hours: 6,
             ca_bundle_hash: String::new(),
             capabilities: BTreeSet::new(),
+            report_page_limits: ReportPageLimits::default(),
             shutdown_timeout: None,
             ping_interval: std::time::Duration::from_secs(42),
             tenant_id: None,
@@ -2093,6 +2118,7 @@ mod tests {
                 ]
                 .into_iter()
                 .collect(),
+                report_page_limits: ReportPageLimits::default(),
                 shutdown_timeout: Some(std::time::Duration::from_secs(120)),
                 ping_interval: std::time::Duration::from_secs(300),
                 tenant_id: Some(TEST_UUID_1),

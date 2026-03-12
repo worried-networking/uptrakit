@@ -22,7 +22,7 @@ use crate::envelope::ReportPagination;
 use crate::limits::PAGINATION_SIZE_THRESHOLD;
 use crate::messages::ServiceMessage;
 use crate::payloads::{
-    BatchUpdateResultPayload, DiscoveryResultsPayload, ReportHostsPayload,
+    BatchUpdateResultPayload, DiscoveryResultsPayload, ReportHostsPayload, ReportPageLimits,
     VersionCheckResultsPayload,
 };
 
@@ -43,6 +43,9 @@ pub trait Paginatable: Serialize + Sized {
 
     /// Wrap the payload into a [`ServiceMessage`].
     fn into_message(self) -> ServiceMessage;
+
+    /// Maximum number of items allowed on a single page for this payload type.
+    fn max_items_per_page(limits: &ReportPageLimits) -> usize;
 }
 
 impl Paginatable for DiscoveryResultsPayload {
@@ -62,6 +65,10 @@ impl Paginatable for DiscoveryResultsPayload {
     fn into_message(self) -> ServiceMessage {
         ServiceMessage::DiscoveryResults(self)
     }
+
+    fn max_items_per_page(limits: &ReportPageLimits) -> usize {
+        limits.discovery_results as usize
+    }
 }
 
 impl Paginatable for VersionCheckResultsPayload {
@@ -77,6 +84,10 @@ impl Paginatable for VersionCheckResultsPayload {
 
     fn into_message(self) -> ServiceMessage {
         ServiceMessage::VersionCheckResults(self)
+    }
+
+    fn max_items_per_page(limits: &ReportPageLimits) -> usize {
+        limits.version_check_results as usize
     }
 }
 
@@ -98,6 +109,10 @@ impl Paginatable for ReportHostsPayload {
     fn into_message(self) -> ServiceMessage {
         ServiceMessage::ReportHosts(self)
     }
+
+    fn max_items_per_page(limits: &ReportPageLimits) -> usize {
+        limits.report_hosts as usize
+    }
 }
 
 impl Paginatable for BatchUpdateResultPayload {
@@ -116,6 +131,10 @@ impl Paginatable for BatchUpdateResultPayload {
 
     fn into_message(self) -> ServiceMessage {
         ServiceMessage::BatchUpdateResult(self)
+    }
+
+    fn max_items_per_page(limits: &ReportPageLimits) -> usize {
+        limits.batch_update_results as usize
     }
 }
 
@@ -143,10 +162,12 @@ pub struct PayloadPage<P> {
 /// Returns `Err` if serialization fails.
 pub fn paginate_payload<P: Paginatable>(
     payload: P,
+    limits: &ReportPageLimits,
 ) -> Result<Vec<PayloadPage<P>>, serde_json::Error> {
+    let max_items_per_page = P::max_items_per_page(limits);
     // Fast path: check full payload size first.
     let full_json = serde_json::to_string(&payload)?;
-    if full_json.len() <= PAGINATION_SIZE_THRESHOLD {
+    if full_json.len() <= PAGINATION_SIZE_THRESHOLD && payload.items().len() <= max_items_per_page {
         return Ok(vec![PayloadPage {
             payload,
             pagination: None,
@@ -180,7 +201,9 @@ pub fn paginate_payload<P: Paginatable>(
         // +1 for the comma separator in the JSON array.
         let item_cost = item_json_len + 1;
 
-        if !current_page.is_empty() && current_size + item_cost > budget {
+        let page_full_by_size = !current_page.is_empty() && current_size + item_cost > budget;
+        let page_full_by_count = current_page.len() >= max_items_per_page;
+        if page_full_by_size || page_full_by_count {
             // Current page is full, start a new one.
             pages.push(std::mem::take(&mut current_page));
             current_size = 0;
@@ -244,7 +267,7 @@ mod tests {
             host_machine_id: "machine-1".to_string(),
             results: vec![make_discovery_result("small")],
         };
-        let pages = paginate_payload(payload).unwrap();
+        let pages = paginate_payload(payload, &ReportPageLimits::default()).unwrap();
         assert_eq!(pages.len(), 1);
         assert!(pages[0].pagination.is_none());
     }
@@ -266,7 +289,7 @@ mod tests {
             "test payload should exceed threshold, was {full_size}"
         );
 
-        let pages = paginate_payload(payload).unwrap();
+        let pages = paginate_payload(payload, &ReportPageLimits::default()).unwrap();
         assert!(pages.len() > 1, "should have multiple pages");
 
         // All pages should have the same report_id.
@@ -293,7 +316,7 @@ mod tests {
         let payload = VersionCheckResultsPayload {
             results: Vec::new(),
         };
-        let pages = paginate_payload(payload).unwrap();
+        let pages = paginate_payload(payload, &ReportPageLimits::default()).unwrap();
         assert_eq!(pages.len(), 1);
         assert!(pages[0].pagination.is_none());
     }
@@ -311,8 +334,35 @@ mod tests {
             })
             .collect();
         let payload = VersionCheckResultsPayload { results };
-        let pages = paginate_payload(payload).unwrap();
+        let pages = paginate_payload(payload, &ReportPageLimits::default()).unwrap();
         let total_items: usize = pages.iter().map(|p| p.payload.results.len()).sum();
         assert_eq!(total_items, 5000);
+    }
+
+    #[test]
+    fn payload_respects_item_count_limit_even_when_under_size_threshold() {
+        let payload = VersionCheckResultsPayload {
+            results: (0..5)
+                .map(|i| VersionCheckResult {
+                    software_item_id: Uuid::new_v4(),
+                    installed_version: Some(format!("1.0.{i}")),
+                    latest_version: Some(format!("2.0.{i}")),
+                    error: None,
+                    host_software_item_id: None,
+                    update_category: uptrakit_shared_types::UpdateCategory::Unknown,
+                })
+                .collect(),
+        };
+        let limits = ReportPageLimits {
+            version_check_results: 2,
+            ..ReportPageLimits::default()
+        };
+
+        let pages = paginate_payload(payload, &limits).unwrap();
+
+        assert_eq!(pages.len(), 3);
+        assert_eq!(pages[0].payload.results.len(), 2);
+        assert_eq!(pages[1].payload.results.len(), 2);
+        assert_eq!(pages[2].payload.results.len(), 1);
     }
 }

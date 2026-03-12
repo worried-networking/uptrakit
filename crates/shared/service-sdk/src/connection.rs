@@ -14,7 +14,8 @@ use serde::Deserialize;
 use tokio_rustls::TlsConnector;
 use uptrakit_internal_wire::{
     CURRENT_PROTOCOL_VERSION, Capability, CloseReason, ControllerEnvelope, ControllerMessage,
-    IncomingSeq, OutgoingSeq, Paginatable, ServiceMessage, paginate::paginate_payload,
+    IncomingSeq, OutgoingSeq, Paginatable, ReportPageLimits, ServiceMessage,
+    paginate::paginate_payload,
 };
 
 use crate::error::{EnrollmentError, ProtocolError, Result};
@@ -48,6 +49,7 @@ pub struct ControllerConnection {
     in_seq: IncomingSeq,
     close_reason: Option<CloseReason>,
     agreed_capabilities: BTreeSet<Capability>,
+    report_page_limits: ReportPageLimits,
 }
 
 impl ControllerConnection {
@@ -71,6 +73,7 @@ impl ControllerConnection {
             in_seq: IncomingSeq::new(),
             close_reason: None,
             agreed_capabilities: BTreeSet::new(),
+            report_page_limits: ReportPageLimits::default(),
         })
     }
 
@@ -219,6 +222,16 @@ impl ControllerConnection {
         self.agreed_capabilities = caps;
     }
 
+    /// Returns the current per-page report limits from the latest `ServiceSettings`.
+    pub fn report_page_limits(&self) -> &ReportPageLimits {
+        &self.report_page_limits
+    }
+
+    /// Sets the per-page report limits from `ServiceSettings`.
+    pub(crate) fn set_report_page_limits(&mut self, limits: ReportPageLimits) {
+        self.report_page_limits = limits;
+    }
+
     /// Send a [`Paginatable`] payload, automatically splitting it into pages
     /// when the serialized size exceeds the pagination threshold.
     ///
@@ -230,7 +243,8 @@ impl ControllerConnection {
     /// controller tracks page arrival and defers only lightweight finalization
     /// (e.g. notification emission) until the final page.
     pub async fn send_paginated<P: Paginatable>(&mut self, payload: P) -> Result<()> {
-        let pages = paginate_payload(payload).context_to::<EnrollmentError>()?;
+        let pages =
+            paginate_payload(payload, &self.report_page_limits).context_to::<EnrollmentError>()?;
         let page_count = pages.len();
 
         for (i, page) in pages.into_iter().enumerate() {

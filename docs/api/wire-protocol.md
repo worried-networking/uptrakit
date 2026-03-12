@@ -677,8 +677,9 @@ All limits are defined in `crates/shared/wire/src/limits.rs`.
 
 1. Serialize the full payload and check its size against `PAGINATION_SIZE_THRESHOLD`.
 2. If under the threshold, send as a single message with no `pagination` field (zero overhead).
-3. If over the threshold, split the payload's primary `Vec` field across pages. Each item
-   (e.g. each `DiscoveryPluginResult`) stays whole -- never split across pages.
+3. Use the latest `ServiceSettingsPayload.report_page_limits` values together with the byte threshold
+   to split the payload's primary `Vec` field across pages. Each item (e.g. each
+   `DiscoveryPluginResult`) stays whole -- never split across pages.
 4. Assign a random `report_id` (UUID v4) and stamp each page with `page` / `total_pages`.
 5. Send each page as a separate WebSocket text frame with its own sequence number.
 
@@ -765,6 +766,7 @@ authenticated connection is established. It carries runtime configuration for th
 | `renewal_window_hours` | `u16` | required | Hours before certificate expiry to initiate renewal |
 | `ca_bundle_hash` | `String` | `#[serde(default)]` | Hash of the current CA bundle for staleness detection |
 | `capabilities` | `BTreeSet<Capability>` | `#[serde(default, skip_serializing_if = "BTreeSet::is_empty")]` | Set of capabilities advertised by the controller; used for capability negotiation |
+| `report_page_limits` | `ReportPageLimits` | `#[serde(default, skip_serializing_if = "ReportPageLimits::is_default")]` | Per-page item-count caps for paginated `report_hosts`, `discovery_results`, `version_check_results`, and `batch_update_result` payloads |
 | `shutdown_timeout_seconds` | `Option<Duration>` | `#[serde(default, skip_serializing_if, with = "option_duration_seconds", rename = "shutdown_timeout_seconds")]` | Max time to wait during shutdown; Rust field is `shutdown_timeout`, serialized as seconds on the wire. Present for agents, absent for MQTT |
 | `tenant_id` | `Option<Uuid>` | `#[serde(default, skip_serializing_if = "Option::is_none")]` | Tenant UUID that this service belongs to; present for tenant-scoped services (agents, SSH agents), absent for system services (MQTT, scheduler) |
 | `ping_interval` | `Duration` | `#[serde(with = "duration_seconds")]` | Controller-managed ping interval; derived from per-service DB override or service-profile default (300s agent/SSH agent, 15s MQTT) |
@@ -772,6 +774,20 @@ authenticated connection is established. It carries runtime configuration for th
 The `ping_interval` field is serialized as a `u32` number of seconds on the wire (e.g. `"ping_interval": 300`)
 using the `duration_seconds` serde module. The controller reads `ping_interval_seconds` from the `services` table
 for each service and falls back to `ServiceProfile` defaults when no override is set.
+
+`report_page_limits` lets the controller define the current per-page item caps that services must apply when
+splitting paginated reports. The current fields are:
+
+| Field | Meaning |
+| --- | --- |
+| `report_hosts` | Max `hosts` entries per `report_hosts` page |
+| `version_check_results` | Max `results` entries per `version_check_results` page |
+| `discovery_results` | Max `results` entries per `discovery_results` page |
+| `batch_update_results` | Max `results` entries per `batch_update_result` page |
+
+Services apply these caps together with the byte threshold. A page must satisfy both constraints. For the initial
+host report, agents wait for the first `service_settings` message before sending `report_hosts`, ensuring the first
+paginated report also uses the controller-provided caps.
 
 ### `duration_seconds` serde module
 

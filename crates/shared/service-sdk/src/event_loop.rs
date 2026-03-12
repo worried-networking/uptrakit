@@ -198,6 +198,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                             .cloned()
                             .collect();
                         conn.set_agreed_capabilities(agreed.clone());
+                        conn.set_report_page_limits(settings.report_page_limits.clone());
                         tracing::debug!(capabilities = ?agreed, "negotiated protocol capabilities");
 
                         let mut loop_state = LoopState {

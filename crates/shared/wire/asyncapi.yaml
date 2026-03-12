@@ -2143,6 +2143,8 @@ components:
             the agreed set as the intersection of this list with its own
             advertised capabilities. Unknown strings are ignored (forward
             compatibility). Omitted when empty.
+        report_page_limits:
+          $ref: "#/components/schemas/reportPageLimits"
         ping_interval:
           type: integer
           format: int32
@@ -2178,6 +2180,47 @@ components:
             tenant-aware provisioning (e.g. PVE API credential naming).
           examples:
             - 11111111-1111-1111-1111-111111111111
+
+    reportPageLimits:
+      type: object
+      required:
+        - report_hosts
+        - version_check_results
+        - discovery_results
+        - batch_update_results
+      properties:
+        report_hosts:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 500
+          description: Maximum `hosts` items allowed in a single `report_hosts` page.
+          examples:
+            - 500
+        version_check_results:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 2000
+          description: Maximum `results` items allowed in a single `version_check_results` page.
+          examples:
+            - 2000
+        discovery_results:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 50
+          description: Maximum `results` items allowed in a single `discovery_results` page.
+          examples:
+            - 50
+        batch_update_results:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 500
+          description: Maximum `results` items allowed in a single `batch_update_result` page.
+          examples:
+            - 500
 
     caBundleUpdatedPayload:
       type: object

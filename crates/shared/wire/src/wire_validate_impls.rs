@@ -6,6 +6,20 @@
 use crate::limits::*;
 use crate::*;
 
+fn validate_report_page_limit(
+    value: u32,
+    max: u32,
+    field: &'static str,
+) -> Result<(), WireValidationError> {
+    if value == 0 || value > max {
+        return Err(WireValidationError {
+            field,
+            message: format!("value is {value}, must be 1..={max}"),
+        });
+    }
+    Ok(())
+}
+
 // ── ServiceMessage dispatcher ─────────────────────────────────────────────────
 
 impl WireValidate for ServiceMessage {
@@ -744,6 +758,33 @@ impl WireValidate for ErrorPayload {
 impl WireValidate for ServiceSettingsPayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.ca_bundle_hash, MAX_SHORT_STRING_LEN, "ca_bundle_hash")?;
+        self.report_page_limits.wire_validate()?;
+        Ok(())
+    }
+}
+
+impl WireValidate for ReportPageLimits {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        validate_report_page_limit(
+            self.report_hosts,
+            MAX_REPORT_HOSTS as u32,
+            "report_page_limits.report_hosts",
+        )?;
+        validate_report_page_limit(
+            self.version_check_results,
+            MAX_VERSION_CHECK_RESULTS as u32,
+            "report_page_limits.version_check_results",
+        )?;
+        validate_report_page_limit(
+            self.discovery_results,
+            MAX_DISCOVERY_PLUGIN_RESULTS as u32,
+            "report_page_limits.discovery_results",
+        )?;
+        validate_report_page_limit(
+            self.batch_update_results,
+            MAX_BATCH_UPDATE_RESULTS as u32,
+            "report_page_limits.batch_update_results",
+        )?;
         Ok(())
     }
 }
@@ -1694,5 +1735,39 @@ mod tests {
             hint: Some("x".repeat(MAX_MEDIUM_STRING_LEN + 1)),
         });
         assert!(msg.wire_validate().is_err());
+    }
+
+    #[test]
+    fn service_settings_report_page_limits_validate() {
+        let msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
+            renewal_window_hours: 6,
+            ca_bundle_hash: "hash".to_string(),
+            capabilities: std::collections::BTreeSet::new(),
+            report_page_limits: ReportPageLimits::default(),
+            shutdown_timeout: None,
+            ping_interval: std::time::Duration::from_secs(30),
+            tenant_id: None,
+        });
+
+        assert!(msg.wire_validate().is_ok());
+    }
+
+    #[test]
+    fn service_settings_reject_zero_report_page_limit() {
+        let msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
+            renewal_window_hours: 6,
+            ca_bundle_hash: "hash".to_string(),
+            capabilities: std::collections::BTreeSet::new(),
+            report_page_limits: ReportPageLimits {
+                report_hosts: 0,
+                ..ReportPageLimits::default()
+            },
+            shutdown_timeout: None,
+            ping_interval: std::time::Duration::from_secs(30),
+            tenant_id: None,
+        });
+
+        let err = msg.wire_validate().unwrap_err();
+        assert_eq!(err.field, "report_page_limits.report_hosts");
     }
 }

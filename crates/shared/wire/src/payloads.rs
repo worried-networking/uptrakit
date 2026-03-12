@@ -178,6 +178,13 @@ pub struct ServiceSettingsPayload {
     /// with its own capabilities, considering only typed (known) variants.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub capabilities: BTreeSet<Capability>,
+    /// Per-page item-count limits for paginated service-to-controller reports.
+    ///
+    /// Services must honor these limits when splitting large `report_hosts`,
+    /// `discovery_results`, `version_check_results`, and
+    /// `batch_update_result` payloads across pages.
+    #[serde(default, skip_serializing_if = "ReportPageLimits::is_default")]
+    pub report_page_limits: ReportPageLimits,
     /// Maximum time to wait for in-flight operations during shutdown.
     /// Present for agents, absent for MQTT services.
     ///
@@ -201,6 +208,37 @@ pub struct ServiceSettingsPayload {
     /// (e.g. PVE API credential naming).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tenant_id: Option<Uuid>,
+}
+
+/// Per-page item-count limits for paginated report payloads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportPageLimits {
+    /// Maximum `hosts` items per `report_hosts` page.
+    pub report_hosts: u32,
+    /// Maximum `results` items per `version_check_results` page.
+    pub version_check_results: u32,
+    /// Maximum `results` items per `discovery_results` page.
+    pub discovery_results: u32,
+    /// Maximum `results` items per `batch_update_result` page.
+    pub batch_update_results: u32,
+}
+
+impl ReportPageLimits {
+    /// Returns `true` when all fields match the default wire limits.
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+impl Default for ReportPageLimits {
+    fn default() -> Self {
+        Self {
+            report_hosts: crate::limits::MAX_REPORT_HOSTS as u32,
+            version_check_results: crate::limits::MAX_VERSION_CHECK_RESULTS as u32,
+            discovery_results: crate::limits::MAX_DISCOVERY_PLUGIN_RESULTS as u32,
+            batch_update_results: crate::limits::MAX_BATCH_UPDATE_RESULTS as u32,
+        }
+    }
 }
 
 /// Payload for CA bundle update notification.
