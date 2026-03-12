@@ -152,11 +152,28 @@ impl PluginOps for PluginRegistry {
     }
 
     fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
-        uptrakit_plugin_infrastructure_proxmox::extensions::extension_manifests()
+        #[allow(unused_mut)]
+        let mut manifests =
+            uptrakit_plugin_infrastructure_proxmox::extensions::extension_manifests();
+        #[cfg(feature = "notifications")]
+        {
+            for plugin in self.notification_registry.plugins() {
+                manifests.extend(plugin.extension_manifests());
+            }
+        }
+        manifests
     }
 
     fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
-        uptrakit_plugin_infrastructure_proxmox::extensions::extension_actions()
+        #[allow(unused_mut)]
+        let mut actions = uptrakit_plugin_infrastructure_proxmox::extensions::extension_actions();
+        #[cfg(feature = "notifications")]
+        {
+            for plugin in self.notification_registry.plugins() {
+                actions.extend(plugin.extension_actions());
+            }
+        }
+        actions
     }
 
     fn handle_extension_action<'a>(

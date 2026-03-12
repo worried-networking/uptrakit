@@ -106,8 +106,8 @@ async fn list_channels(
         let config: serde_json::Value =
             serde_json::from_str(ch.config.expose_secret()).unwrap_or_default();
         let masked_config = state
-            .notification_ops
-            .mask_config_secrets(&ch.channel_type, &config);
+            .plugin_ops
+            .notification_mask_config_secrets(&ch.channel_type, &config);
 
         let mut row = serde_json::json!({
             "id": ch.id,

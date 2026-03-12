@@ -4,7 +4,7 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use uptrakit_notification_plugin_registry::NotificationOps;
+use uptrakit_plugin_infrastructure_registry::PluginOps;
 
 use super::events::NotificationEvent;
 
@@ -30,7 +30,7 @@ impl NotificationDispatcher {
     /// Create a new dispatcher and spawn the background processing loop.
     pub fn new(
         db: DatabaseConnection,
-        notification_ops: Arc<dyn NotificationOps>,
+        notification_ops: Arc<dyn PluginOps>,
         callback_base_url: String,
         settings: crate::settings::Settings,
     ) -> Self {
@@ -116,7 +116,7 @@ fn to_plugin_smtp_snapshot(
 #[tracing::instrument(skip_all)]
 async fn dispatch_loop(
     db: DatabaseConnection,
-    notification_ops: Arc<dyn NotificationOps>,
+    notification_ops: Arc<dyn PluginOps>,
     callback_base_url: String,
     settings: crate::settings::Settings,
     mut rx: mpsc::Receiver<NotificationEvent>,
@@ -188,16 +188,17 @@ async fn dispatch_loop(
             };
 
             // Look up channel implementation
-            let channel_impl = match notification_ops.get(&channel_model.channel_type) {
-                Some(c) => c,
-                None => {
-                    tracing::warn!(
-                        channel_type = %channel_model.channel_type,
-                        "no channel implementation for type"
-                    );
-                    continue;
-                }
-            };
+            let channel_impl =
+                match notification_ops.notification_plugin(&channel_model.channel_type) {
+                    Some(c) => c,
+                    None => {
+                        tracing::warn!(
+                            channel_type = %channel_model.channel_type,
+                            "no channel implementation for type"
+                        );
+                        continue;
+                    }
+                };
 
             // Parse config JSON
             let config_json: serde_json::Value =

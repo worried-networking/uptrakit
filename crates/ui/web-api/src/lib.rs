@@ -157,17 +157,12 @@ mod tests {
             controller_id,
         );
 
-        let notification_ops: Arc<dyn uptrakit_notification_plugin_registry::NotificationOps> =
-            Arc::new(
-                uptrakit_notification_plugin_registry::NotificationPluginRegistry::new(
-                    Default::default(),
-                )
-                .expect("notification plugin registry for test"),
-            );
+        let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
+            Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry::new());
 
         let notification_dispatcher = crate::notifications::dispatcher::NotificationDispatcher::new(
             db.clone(),
-            Arc::clone(&notification_ops),
+            Arc::clone(&plugin_ops),
             "https://localhost".to_string(),
             settings.clone(),
         );
@@ -176,7 +171,6 @@ mod tests {
             ca_snapshot: ca_rx,
             ca_key_store,
             ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
-            notification_ops,
             settings,
             cert_signer: Arc::new(NoopCertSigner),
             service_connections,
@@ -206,7 +200,7 @@ mod tests {
             notification_service,
             notification_dispatcher,
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
-            plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry::new()),
+            plugin_ops,
             db,
             credential_sources: ServiceCredentialSources::default(),
             event_broadcaster: crate::event_broadcaster::EventBroadcaster::new(),

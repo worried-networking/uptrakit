@@ -22,18 +22,18 @@ use crate::tenant_db::TenantDb;
 pub async fn create_channel(
     tenant_db: &TenantDb,
     req: &uptrakit_web_api_types::notifications::CreateNotificationChannelRequest,
-    channel_registry: &dyn uptrakit_notification_plugin_registry::NotificationOps,
+    plugin_ops: &dyn uptrakit_plugin_infrastructure_core::PluginOps,
 ) -> ChannelResult<NotificationChannelResponse> {
     // Validate config with channel implementation
     let channel_type_str = req.channel_type.as_str();
-    let channel_impl = channel_registry.get(channel_type_str).ok_or_else(|| {
-        report!(ChannelQueryError::UnsupportedType(
+    if plugin_ops.notification_plugin(channel_type_str).is_none() {
+        return Err(report!(ChannelQueryError::UnsupportedType(
             channel_type_str.to_string()
-        ))
-    })?;
+        )));
+    }
 
-    channel_impl
-        .validate_config(&req.config)
+    plugin_ops
+        .notification_validate_config(channel_type_str, &req.config)
         .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
 
     let config_str = serde_json::to_string(&req.config)
@@ -60,7 +60,7 @@ pub async fn create_channel(
     let result = model.insert(tenant_db.db()).await.context_to()?;
 
     // Return with masked config
-    let masked_config = channel_impl.mask_config_secrets(&req.config);
+    let masked_config = plugin_ops.notification_mask_config_secrets(channel_type_str, &req.config);
     Ok(channel_to_response(result, masked_config))
 }
 
@@ -68,7 +68,7 @@ pub async fn create_channel(
 pub async fn list_channels(
     tenant_db: &TenantDb,
     params: &PaginationParams,
-    channel_registry: &dyn uptrakit_notification_plugin_registry::NotificationOps,
+    plugin_ops: &dyn uptrakit_plugin_infrastructure_core::PluginOps,
 ) -> ChannelResult<PaginatedResponse<NotificationChannelResponse>> {
     let resolved = params.resolve();
     let total = tenant_db
@@ -89,7 +89,7 @@ pub async fn list_channels(
     let items = channels
         .into_iter()
         .map(|ch| {
-            let masked = mask_channel_config(&ch, channel_registry);
+            let masked = mask_channel_config(&ch, plugin_ops);
             channel_to_response(ch, masked)
         })
         .collect();
@@ -101,7 +101,7 @@ pub async fn list_channels(
 pub async fn get_channel(
     tenant_db: &TenantDb,
     id: Uuid,
-    channel_registry: &dyn uptrakit_notification_plugin_registry::NotificationOps,
+    plugin_ops: &dyn uptrakit_plugin_infrastructure_core::PluginOps,
 ) -> ChannelResult<Option<NotificationChannelResponse>> {
     let channel = tenant_db
         .find_by_id::<notification_channel::Entity, _>(id)
@@ -110,7 +110,7 @@ pub async fn get_channel(
         .context_to()?;
 
     Ok(channel.map(|ch| {
-        let masked = mask_channel_config(&ch, channel_registry);
+        let masked = mask_channel_config(&ch, plugin_ops);
         channel_to_response(ch, masked)
     }))
 }
@@ -120,7 +120,7 @@ pub async fn update_channel(
     tenant_db: &TenantDb,
     id: Uuid,
     req: &uptrakit_web_api_types::notifications::UpdateNotificationChannelRequest,
-    channel_registry: &dyn uptrakit_notification_plugin_registry::NotificationOps,
+    plugin_ops: &dyn uptrakit_plugin_infrastructure_core::PluginOps,
 ) -> ChannelResult<Option<NotificationChannelResponse>> {
     let existing = tenant_db
         .find_by_id::<notification_channel::Entity, _>(id)
@@ -140,11 +140,9 @@ pub async fn update_channel(
     }
     if let Some(config) = &req.config {
         // Validate with channel impl
-        if let Some(channel_impl) = channel_registry.get(&existing.channel_type) {
-            channel_impl
-                .validate_config(config)
-                .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
-        }
+        plugin_ops
+            .notification_validate_config(&existing.channel_type, config)
+            .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
         let config_str = serde_json::to_string(config)
             .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
         let encrypted_config = uptrakit_crypto::EncryptedString::new(
@@ -159,7 +157,7 @@ pub async fn update_channel(
     }
 
     let result = active.update(tenant_db.db()).await.context_to()?;
-    let masked = mask_channel_config(&result, channel_registry);
+    let masked = mask_channel_config(&result, plugin_ops);
     Ok(Some(channel_to_response(result, masked)))
 }
 
@@ -445,13 +443,16 @@ fn channel_to_response(
 
 fn mask_channel_config(
     channel: &notification_channel::Model,
-    registry: &dyn uptrakit_notification_plugin_registry::NotificationOps,
+    plugin_ops: &dyn uptrakit_plugin_infrastructure_core::PluginOps,
 ) -> serde_json::Value {
     let config: serde_json::Value =
         serde_json::from_str(channel.config.expose_secret()).unwrap_or_default();
 
-    if let Some(channel_impl) = registry.get(&channel.channel_type) {
-        channel_impl.mask_config_secrets(&config)
+    if plugin_ops
+        .notification_plugin(&channel.channel_type)
+        .is_some()
+    {
+        plugin_ops.notification_mask_config_secrets(&channel.channel_type, &config)
     } else {
         // Unknown channel type -- mask all values
         serde_json::json!({})

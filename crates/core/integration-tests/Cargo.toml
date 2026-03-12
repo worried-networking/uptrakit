@@ -18,7 +18,7 @@ uuid = { workspace = true, features = ["v7"] }
 
 # Reverse proxy integration test helpers
 uptrakit-web-api = { workspace = true, features = ["db-sqlite"] }
-uptrakit-notification-plugin-registry = { workspace = true, features = ["webhook"] }
+uptrakit-plugin-infrastructure-registry = { workspace = true }
 uptrakit-crypto = { workspace = true, features = ["testing"] }
 axum = { workspace = true }
 axum-server = { workspace = true }
