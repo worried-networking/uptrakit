@@ -167,6 +167,11 @@ reads the `ping_interval` field (a `Duration` set by the controller per-service)
 first actual ping fires after one full interval. If a subsequent `ServiceSettings` message arrives with a
 different interval, the timer is replaced.
 
+The SDK also stores `ServiceSettingsPayload.report_page_limits` on the connection before invoking
+`handler.on_settings()`. Services that send paginated reports during startup should do that work from
+`on_settings()` rather than `on_connected()`, so the very first paginated send uses the controller-provided
+per-page limits.
+
 This design means the ping interval is fully controller-managed. The `ServiceHandler` trait no longer
 exposes a `ping_interval()` method. The controller derives the interval from a per-service database
 override (`services.ping_interval_seconds`) or falls back to `ServiceProfile`-based defaults (300s for

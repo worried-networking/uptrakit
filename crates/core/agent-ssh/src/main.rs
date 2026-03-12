@@ -164,6 +164,9 @@ struct SshAgentHandler {
     extension_proxy: std::sync::Arc<uptrakit_service_sdk::ServiceExtensionProxy>,
     /// Registry of agent-side infrastructure plugins.
     infra_registry: std::sync::Arc<uptrakit_plugin_infrastructure_registry::AgentInfraRegistry>,
+    /// Ensures the initial `ReportHosts` runs only after the first
+    /// `ServiceSettings` so pagination honors controller-provided limits.
+    pending_initial_host_report: bool,
 }
 
 impl SshAgentHandler {
@@ -212,7 +215,7 @@ impl ServiceHandler for SshAgentHandler {
 
     async fn on_connected(
         &mut self,
-        conn: &mut ControllerConnection,
+        _conn: &mut ControllerConnection,
         identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
         // Store identity state for extension use.
@@ -225,38 +228,9 @@ impl ServiceHandler for SshAgentHandler {
             use base64::Engine as _;
             base64::engine::general_purpose::STANDARD.encode(&bytes)
         });
-
-        // DB is initialized at startup (in main) before the event loop starts.
-        let local_db = self.local_db.as_ref().ok_or_else(|| {
-            report!(LoopError::Other(
-                "local_db not initialized: this is a programming error".to_string()
-            ))
-        })?;
-
-        // Report enrolled hosts to controller (full SSH-based report).
-        client::report_enrolled_hosts(local_db, conn, &self.pool).await;
-
-        // Initialize the host snapshot AFTER reporting so any machine_id
-        // updates written by report_enrolled_hosts are captured.
-        self.host_snapshot = match host_ops::list_host_snapshots(local_db).await {
-            Ok(snapshot) => snapshot,
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "failed to initialize host snapshot; dynamic reload will trigger \
-                     a full re-report on the first tick"
-                );
-                Vec::new()
-            }
-        };
-
-        // Start (or restart) the reload ticker.  First tick fires
-        // HOST_RELOAD_INTERVAL after connect so we do not double-report
-        // immediately after the initial report_enrolled_hosts.
-        let start = tokio::time::Instant::now() + HOST_RELOAD_INTERVAL;
-        let mut ticker = tokio::time::interval_at(start, HOST_RELOAD_INTERVAL);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        self.reload_ticker = Some(ticker);
+        self.pending_initial_host_report = true;
+        self.host_snapshot.clear();
+        self.reload_ticker = None;
 
         Ok(())
     }
@@ -481,6 +455,35 @@ impl ServiceHandler for SshAgentHandler {
         settings: &uptrakit_internal_wire::ServiceSettingsPayload,
         conn: &mut ControllerConnection,
     ) {
+        if self.pending_initial_host_report {
+            let Some(local_db) = self.local_db.as_ref() else {
+                tracing::warn!(
+                    "local_db not initialized during on_settings; skipping initial SSH host report"
+                );
+                return;
+            };
+
+            client::report_enrolled_hosts(local_db, conn, &self.pool).await;
+
+            self.host_snapshot = match host_ops::list_host_snapshots(local_db).await {
+                Ok(snapshot) => snapshot,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "failed to initialize host snapshot; dynamic reload will trigger \
+                         a full re-report on the first tick"
+                    );
+                    Vec::new()
+                }
+            };
+
+            let start = tokio::time::Instant::now() + HOST_RELOAD_INTERVAL;
+            let mut ticker = tokio::time::interval_at(start, HOST_RELOAD_INTERVAL);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            self.reload_ticker = Some(ticker);
+            self.pending_initial_host_report = false;
+        }
+
         // Store tenant_id for PVE credential provisioning and persist it
         // to service.json so CLI commands can read it without connecting to
         // the controller.
@@ -1336,6 +1339,7 @@ async fn main() {
         bg_tx,
         extension_proxy: std::sync::Arc::new(uptrakit_service_sdk::ServiceExtensionProxy::new()),
         infra_registry,
+        pending_initial_host_report: false,
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
         "uptrakit-agent-ssh",

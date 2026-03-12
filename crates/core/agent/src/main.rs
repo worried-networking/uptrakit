@@ -3,7 +3,6 @@ mod client;
 mod host_info;
 
 use clap::Parser;
-use rootcause::prelude::*;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,7 +10,7 @@ use std::sync::Arc;
 use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::{Capability, ControllerMessage, ReportHostsPayload, ServiceMessage};
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
+    ControllerConnection, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
     ShutdownCause, default_resolve_shutdown,
 };
 
@@ -51,6 +50,9 @@ struct AgentHandler {
     /// Sending end of the background-result channel, cloned into each spawned
     /// background task.
     bg_tx: tokio::sync::mpsc::Sender<ServiceMessage>,
+    /// Initial host report captured on connect and sent after `ServiceSettings`
+    /// arrives so pagination honors controller-provided per-page limits.
+    pending_initial_report: Option<ReportHostsPayload>,
 }
 
 #[async_trait::async_trait]
@@ -63,24 +65,40 @@ impl ServiceHandler for AgentHandler {
 
     async fn on_connected(
         &mut self,
-        conn: &mut ControllerConnection,
+        _conn: &mut ControllerConnection,
         _identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
         let host_info = crate::host_info::collect_host_info();
         // Capture and store the machine_id for use in on_message() validation.
         self.machine_id = host_info.machine_id.clone();
-        conn.send_auto_paginate(ServiceMessage::ReportHosts(ReportHostsPayload {
+        self.pending_initial_report = Some(ReportHostsPayload {
             hosts: vec![host_info],
             agent_version: env!("CARGO_PKG_VERSION").to_string(),
             capabilities: agent_capabilities(),
-        }))
-        .await
-        .context_to::<LoopError>()?;
-        tracing::debug!(
-            "sent ReportHosts with agent_version={}",
-            env!("CARGO_PKG_VERSION")
-        );
+        });
         Ok(())
+    }
+
+    async fn on_settings(
+        &mut self,
+        _settings: &uptrakit_internal_wire::ServiceSettingsPayload,
+        conn: &mut ControllerConnection,
+    ) {
+        let Some(payload) = self.pending_initial_report.take() else {
+            return;
+        };
+
+        if let Err(e) = conn
+            .send_auto_paginate(ServiceMessage::ReportHosts(payload))
+            .await
+        {
+            tracing::warn!(error = %e, "failed to send initial ReportHosts message");
+        } else {
+            tracing::debug!(
+                "sent ReportHosts with agent_version={}",
+                env!("CARGO_PKG_VERSION")
+            );
+        }
     }
 
     async fn on_message(
@@ -406,6 +424,7 @@ async fn main() {
         executor: client::make_executor(),
         bg_rx,
         bg_tx,
+        pending_initial_report: None,
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
         "uptrakit-agent",
