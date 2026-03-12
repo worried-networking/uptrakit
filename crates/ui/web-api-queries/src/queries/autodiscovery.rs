@@ -344,6 +344,7 @@ async fn process_plugin_result(
             package_identifier: &item.package_identifier,
             name: &item.name,
             installed_version: &item.installed_version,
+            featured: item.featured,
             qualifier: item.qualifier.as_deref(),
             plugin_package_identifier: item.plugin_package_identifier.as_deref(),
         };
@@ -378,6 +379,7 @@ struct DiscoveredItemInfo<'a> {
     package_identifier: &'a str,
     name: &'a str,
     installed_version: &'a str,
+    featured: bool,
     /// Qualifier for the `host_software_items` row (e.g. Docker container name).
     /// `None` = unqualified (default for non-Docker items).
     qualifier: Option<&'a str>,
@@ -447,6 +449,7 @@ async fn process_targets_discovery(
             package_identifier: pkg_id,
             name: item.name,
             installed_version: item.installed_version,
+            featured: item.featured,
             qualifier: item.qualifier,
             plugin_package_identifier: item.plugin_package_identifier,
         };
@@ -677,7 +680,7 @@ async fn find_or_create_software_item(
             id: Set(new_id),
             tenant_id: Set(tenant_id),
             name: Set(name.to_string()),
-            featured: Set(false),
+            featured: Set(item.featured),
             icon_url: Set(None),
             last_checked_at: Set(None),
             created_at: Set(now),
@@ -1154,6 +1157,7 @@ mod tests {
             package_identifier: "curl",
             name: "curl",
             installed_version: "8.0.0",
+            featured: false,
             qualifier: None,
             plugin_package_identifier: None,
         };
@@ -1190,7 +1194,7 @@ mod tests {
         );
         assert!(
             !active_items[0].featured,
-            "new discovery items must not be featured"
+            "new discovery items should preserve plugin-provided featured=false"
         );
 
         let new_link_count = HostSoftwareItemPlugin::find()
@@ -1227,6 +1231,7 @@ mod tests {
             package_identifier: "wget",
             name: "wget",
             installed_version: "2.0.0",
+            featured: false,
             qualifier: None,
             plugin_package_identifier: None,
         };
@@ -1306,6 +1311,7 @@ mod tests {
             package_identifier: "wget",
             name: "wget",
             installed_version: "2.0.0",
+            featured: false,
             qualifier: None,
             plugin_package_identifier: None,
         };
@@ -1382,6 +1388,7 @@ mod tests {
             package_identifier: "wget",
             name: "wget",
             installed_version: "2.0.0",
+            featured: false,
             qualifier: None,
             plugin_package_identifier: None,
         };
@@ -1463,6 +1470,64 @@ mod tests {
             plugin_links.len(),
             3,
             "expected three role-based plugin links"
+        );
+    }
+
+    #[tokio::test]
+    async fn target_based_github_preserves_featured_true_on_initial_creation() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+
+        let result = DiscoveryPluginResult {
+            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
+            plugin_config_id: None,
+            error: None,
+            discoveries: vec![WireDiscoveredSoftware {
+                package_identifier: "booklore".to_string(),
+                name: "BookLore".to_string(),
+                installed_version: "1.18.5".to_string(),
+                targets: vec![DiscoveryTarget {
+                    plugin_type: PluginType::ReleasesGithub,
+                    plugin_config: serde_json::json!({
+                        "owner": "BookLore",
+                        "repo": "BookLore",
+                        "tag_strip_prefix": "v",
+                        "include_prereleases": false,
+                        "asset_patterns": [],
+                    }),
+                    plugin_config_name: "BookLore/BookLore".to_string(),
+                    roles: all_roles(),
+                    package_identifier: None,
+                    config_override: None,
+                    execution_site: None,
+                }],
+                extra: None,
+                featured: true,
+                qualifier: None,
+                plugin_package_identifier: None,
+            }],
+        };
+
+        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
+            .await
+            .expect("process_plugin_result");
+
+        let item = SoftwareItem::find()
+            .filter(software_item::Column::TenantId.eq(tenant_id))
+            .filter(software_item::Column::Name.eq("BookLore"))
+            .filter(software_item::Column::DeactivatedAt.is_null())
+            .one(&db)
+            .await
+            .expect("query software item")
+            .expect("software item should exist");
+        assert!(
+            item.featured,
+            "target-based discovery must preserve featured=true"
         );
     }
 
@@ -1662,6 +1727,113 @@ mod tests {
         for link in &plugin_links {
             assert_eq!(link.package_identifier, "wget");
         }
+    }
+
+    #[tokio::test]
+    async fn config_id_path_preserves_featured_true_on_initial_creation() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
+
+        let result = DiscoveryPluginResult {
+            plugin_type: PluginType::PackageManagerHomebrew,
+            plugin_config_id: Some(pc_id),
+            error: None,
+            discoveries: vec![WireDiscoveredSoftware {
+                package_identifier: "cargo".to_string(),
+                name: "Cargo".to_string(),
+                installed_version: "1.86.0".to_string(),
+                targets: vec![],
+                extra: None,
+                featured: true,
+                qualifier: None,
+                plugin_package_identifier: None,
+            }],
+        };
+
+        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
+            .await
+            .expect("process_plugin_result");
+
+        let item = SoftwareItem::find()
+            .filter(software_item::Column::TenantId.eq(tenant_id))
+            .filter(software_item::Column::Name.eq("Cargo"))
+            .filter(software_item::Column::DeactivatedAt.is_null())
+            .one(&db)
+            .await
+            .expect("query software item")
+            .expect("software item should exist");
+        assert!(
+            item.featured,
+            "plugin-provided featured=true must be preserved"
+        );
+    }
+
+    #[tokio::test]
+    async fn config_id_path_does_not_overwrite_existing_featured_state() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
+
+        let existing_item = software_item::ActiveModel {
+            id: Set(item_id),
+            tenant_id: Set(tenant_id),
+            name: Set("Cargo".to_string()),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        };
+        SoftwareItem::insert(existing_item)
+            .exec(&db)
+            .await
+            .expect("insert software item");
+        insert_host_link(&db, host_id, item_id, pc_id, "cargo").await;
+
+        let result = DiscoveryPluginResult {
+            plugin_type: PluginType::PackageManagerHomebrew,
+            plugin_config_id: Some(pc_id),
+            error: None,
+            discoveries: vec![WireDiscoveredSoftware {
+                package_identifier: "cargo".to_string(),
+                name: "Cargo".to_string(),
+                installed_version: "1.86.0".to_string(),
+                targets: vec![],
+                extra: None,
+                featured: true,
+                qualifier: None,
+                plugin_package_identifier: None,
+            }],
+        };
+
+        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
+            .await
+            .expect("process_plugin_result");
+
+        let item = SoftwareItem::find_by_id(item_id)
+            .one(&db)
+            .await
+            .expect("query software item")
+            .expect("software item should exist");
+        assert!(
+            !item.featured,
+            "rediscovery must not overwrite an existing featured choice"
+        );
     }
 
     /// Target-based ignore rules work correctly: items on the ignore list
