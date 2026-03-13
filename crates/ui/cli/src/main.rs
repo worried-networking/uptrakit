@@ -111,6 +111,11 @@ enum Commands {
         #[command(subcommand)]
         command: PluginConfigsCommands,
     },
+    /// Manage per-plugin-type default settings
+    PluginTypeSettings {
+        #[command(subcommand)]
+        command: PluginTypeSettingsCommands,
+    },
     /// Manage enrollment tokens
     EnrollmentTokens {
         #[command(subcommand)]
@@ -1435,6 +1440,30 @@ enum DiscoveryAllowlistCommands {
     Remove {
         /// Entry UUID
         id: Uuid,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PluginTypeSettingsCommands {
+    /// List all plugin-type-level settings
+    List,
+    /// Show plugin-type-level settings for a specific plugin type
+    Show {
+        /// Plugin type (e.g. releases_github)
+        plugin_type: String,
+    },
+    /// Create or update plugin-type-level settings for a specific plugin type
+    Set {
+        /// Plugin type (e.g. releases_github)
+        plugin_type: String,
+        /// Settings as a JSON object string
+        #[arg(long)]
+        config: String,
+    },
+    /// Delete plugin-type-level settings for a specific plugin type
+    Reset {
+        /// Plugin type (e.g. releases_github)
+        plugin_type: String,
     },
 }
 
@@ -3261,6 +3290,68 @@ async fn run(cli: Cli) -> error::Result<()> {
                 let resp = commands::discovery_allowlist::tenant_remove(
                     commands::discovery_allowlist::RemoveTenantParams {
                         id: &id,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+        },
+        Commands::PluginTypeSettings { command } => match command {
+            PluginTypeSettingsCommands::List => {
+                let resp = commands::plugin_type_settings::list(
+                    commands::plugin_type_settings::ListParams {
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            PluginTypeSettingsCommands::Show { plugin_type } => {
+                let resp = commands::plugin_type_settings::show(
+                    commands::plugin_type_settings::ShowParams {
+                        plugin_type: &plugin_type,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            PluginTypeSettingsCommands::Set {
+                plugin_type,
+                config,
+            } => {
+                let config: serde_json::Value = serde_json::from_str(&config).map_err(|e| {
+                    report!(error::CliError::Other(format!(
+                        "invalid JSON for --config: {e}"
+                    )))
+                })?;
+                let resp = commands::plugin_type_settings::set(
+                    commands::plugin_type_settings::SetParams {
+                        plugin_type: &plugin_type,
+                        config,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            PluginTypeSettingsCommands::Reset { plugin_type } => {
+                let resp = commands::plugin_type_settings::reset(
+                    commands::plugin_type_settings::ResetParams {
+                        plugin_type: &plugin_type,
                         server: cli.server.as_deref(),
                         token: cli.token.as_deref(),
                         insecure,
@@ -5475,6 +5566,82 @@ mod tests {
                 assert_eq!(id, uuid(PC_UUID));
             }
             _ => panic!("expected PluginConfigs Discover"),
+        }
+    }
+
+    #[test]
+    fn parse_plugin_type_settings_list() {
+        let args = Cli::try_parse_from(["uptrakit", "plugin-type-settings", "list"])
+            .expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::PluginTypeSettings {
+                command: PluginTypeSettingsCommands::List
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_plugin_type_settings_show() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "plugin-type-settings",
+            "show",
+            "releases_github",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::PluginTypeSettings {
+                command: PluginTypeSettingsCommands::Show { plugin_type },
+            }) => {
+                assert_eq!(plugin_type, "releases_github");
+            }
+            _ => panic!("expected PluginTypeSettings Show"),
+        }
+    }
+
+    #[test]
+    fn parse_plugin_type_settings_set() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "plugin-type-settings",
+            "set",
+            "releases_github",
+            "--config",
+            r#"{"poll_interval_secs":300}"#,
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::PluginTypeSettings {
+                command:
+                    PluginTypeSettingsCommands::Set {
+                        plugin_type,
+                        config,
+                    },
+            }) => {
+                assert_eq!(plugin_type, "releases_github");
+                assert_eq!(config, r#"{"poll_interval_secs":300}"#);
+            }
+            _ => panic!("expected PluginTypeSettings Set"),
+        }
+    }
+
+    #[test]
+    fn parse_plugin_type_settings_reset() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "plugin-type-settings",
+            "reset",
+            "releases_github",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::PluginTypeSettings {
+                command: PluginTypeSettingsCommands::Reset { plugin_type },
+            }) => {
+                assert_eq!(plugin_type, "releases_github");
+            }
+            _ => panic!("expected PluginTypeSettings Reset"),
         }
     }
 

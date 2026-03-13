@@ -393,6 +393,28 @@ uptrakit plugin-configs discover <PLUGIN_CONFIG_ID>
 
 See also: [Plugin Configurations](plugin-configs.md), [Autodiscovery](autodiscovery.md).
 
+## Plugin Type Settings
+
+Manage per-plugin-type default settings that apply across all plugin configurations of that type.
+These settings allow you to configure plugin-type-level defaults such as polling intervals or
+page limits.
+
+```sh
+# List all configured plugin-type settings
+uptrakit plugin-type-settings list
+
+# Show settings for a specific plugin type
+uptrakit plugin-type-settings show releases_github
+
+# Create or update settings for a plugin type
+uptrakit plugin-type-settings set releases_github --config '{"poll_interval_secs":300}'
+
+# Delete (reset) settings for a plugin type
+uptrakit plugin-type-settings reset releases_github
+```
+
+See also: [Plugin Configurations](plugin-configs.md).
+
 ## Discovery Allowlist
 
 Control which plugin types participate in automatic host discovery. By default, all

@@ -12,6 +12,7 @@ pub mod host_tags;
 pub mod hosts;
 pub mod notifications;
 pub mod plugin_configs;
+pub mod plugin_type_settings;
 pub mod scheduler;
 pub mod services;
 pub mod settings;
