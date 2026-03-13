@@ -490,41 +490,84 @@ pub(super) async fn handle_version_check_results(
 
         let software_item_id = result.software_item_id;
 
-        let matching_rows = host_software_item::Entity::find()
-            .filter(host_software_item::Column::HostId.is_in(host_ids.clone()))
-            .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
-            .filter(host_software_item::Column::DeactivatedAt.is_null())
-            .all(state.db())
-            .await;
-
-        let matching_rows = match matching_rows {
-            Ok(rows) => rows,
-            Err(e) => {
+        // Resolve the rows to update.
+        //
+        // Targeted path: `host_software_item_id` is present (all current agents
+        // set it). Use the explicit ID, guarded by `host_ids` so a rogue service
+        // cannot touch rows belonging to other services.
+        //
+        // Legacy fallback: `host_software_item_id` is absent (old agent versions).
+        // Fall back to matching by (host_ids, software_item_id) and warn.
+        let matching_rows: Vec<host_software_item::Model> =
+            if let Some(hsi_id) = result.host_software_item_id {
+                match host_software_item::Entity::find_by_id(hsi_id)
+                    .filter(host_software_item::Column::HostId.is_in(host_ids.clone()))
+                    .filter(host_software_item::Column::DeactivatedAt.is_null())
+                    .one(state.db())
+                    .await
+                {
+                    Ok(Some(row)) => vec![row],
+                    Ok(None) => {
+                        tracing::debug!(
+                            %software_item_id,
+                            host_software_item_id = %hsi_id,
+                            "targeted host_software_item not found or not owned by this service"
+                        );
+                        vec![]
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            %software_item_id,
+                            host_software_item_id = %hsi_id,
+                            "failed to look up targeted host_software_item"
+                        );
+                        vec![]
+                    }
+                }
+            } else {
+                // Legacy path: scan all hosts linked to this service.
                 tracing::warn!(
-                    error = %e,
-                    software_item_id = %software_item_id,
-                    "failed to look up host_software_items"
+                    %service_id,
+                    %software_item_id,
+                    "VersionCheckResult missing host_software_item_id; \
+                     falling back to host_ids scan (cross-host contamination risk)"
                 );
-                continue;
-            }
-        };
+                match host_software_item::Entity::find()
+                    .filter(host_software_item::Column::HostId.is_in(host_ids.clone()))
+                    .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
+                    .filter(host_software_item::Column::DeactivatedAt.is_null())
+                    .all(state.db())
+                    .await
+                {
+                    Ok(rows) => rows,
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            %software_item_id,
+                            "failed to look up host_software_items"
+                        );
+                        vec![]
+                    }
+                }
+            };
 
         if matching_rows.is_empty() {
             continue;
         }
 
         let matching_host_ids: Vec<uuid::Uuid> = matching_rows.iter().map(|r| r.host_id).collect();
+        let matching_ids: Vec<uuid::Uuid> = matching_rows.iter().map(|r| r.id).collect();
 
-        // Record one representative (host_id, software_item_id) pair per result
+        // Record one (host_id, software_item_id) pair per result
         // so we can emit VersionCheckCompleted events after DB writes complete.
         if let Some(&first_host_id) = matching_host_ids.first() {
             completed_pairs.push((first_host_id, software_item_id));
         }
 
-        // Build and run the update across all matched host_software_item rows.
+        // Build and run the targeted update, filtered by primary key.
         let mut update = host_software_item::Entity::update_many()
-            .filter(host_software_item::Column::HostId.is_in(matching_host_ids.clone()))
-            .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id));
+            .filter(host_software_item::Column::Id.is_in(matching_ids.clone()));
         update = update.col_expr(
             host_software_item::Column::UpdateCategory,
             sea_orm::sea_query::Expr::value(result.update_category.to_string()),
@@ -554,8 +597,8 @@ pub(super) async fn handle_version_check_results(
         if let Err(e) = update.exec(state.db()).await {
             tracing::warn!(
                 error = %e,
-                software_item_id = %software_item_id,
-                host_count = matching_host_ids.len(),
+                %software_item_id,
+                row_count = matching_ids.len(),
                 "failed to update host_software_items"
             );
         }
@@ -882,4 +925,244 @@ pub(super) async fn handle_report_plugin_config(
     };
 
     ProcessorResponse::reply(resp)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    use super::*;
+    use sea_orm::{ActiveModelTrait, Set};
+    use uptrakit_internal_wire::{VersionCheckResult, VersionCheckResultsPayload};
+    use uptrakit_shared_db::entity::{
+        host, host_software_item, service, service_host, software_item,
+    };
+
+    use crate::test_harness::{build_test_state, insert_default_tenant, setup_migrated_db};
+
+    // ── Fixture helpers ───────────────────────────────────────────────────
+
+    async fn insert_service(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: uuid::Uuid,
+    ) -> service::Model {
+        let id = uuid::Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        service::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set(format!("svc-{}", &id.to_string()[..8])),
+            friendly_name: Set(format!("Service {}", &id.to_string()[..8])),
+            ip_address: Set(None),
+            status: Set(service::ServiceStatus::Approved),
+            enrollment_secret_hash: Set(format!("secret-{id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert service")
+    }
+
+    async fn insert_host(db: &sea_orm::DatabaseConnection, tenant_id: uuid::Uuid) -> host::Model {
+        let id = uuid::Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        host::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(format!("machine-{id}")),
+            hostname: Set(format!("host-{id}")),
+            friendly_name: Set(format!("Host {id}")),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host")
+    }
+
+    async fn link_service_host(
+        db: &sea_orm::DatabaseConnection,
+        service_id: uuid::Uuid,
+        host_id: uuid::Uuid,
+    ) {
+        let now = time::OffsetDateTime::now_utc();
+        service_host::ActiveModel {
+            service_id: Set(service_id),
+            host_id: Set(host_id),
+            linked_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("link service_host");
+    }
+
+    async fn insert_software_item(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: uuid::Uuid,
+    ) -> software_item::Model {
+        let id = uuid::Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        software_item::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            name: Set(format!("App-{}", &id.to_string()[..8])),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert software_item")
+    }
+
+    async fn insert_host_software_item(
+        db: &sea_orm::DatabaseConnection,
+        host_id: uuid::Uuid,
+        software_item_id: uuid::Uuid,
+    ) -> host_software_item::Model {
+        let id = uuid::Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        host_software_item::ActiveModel {
+            id: Set(id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(None),
+            installed_version: Set(None),
+            installed_version_detected_at: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host_software_item")
+    }
+
+    // ── Tests ─────────────────────────────────────────────────────────────
+
+    /// When `host_software_item_id` is set in the result, only the targeted row
+    /// is updated. The other host's row for the same software item is unchanged.
+    #[tokio::test]
+    async fn version_check_results_targeted_update_isolates_correct_row() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+
+        let svc = insert_service(&db, tenant_id).await;
+        let host1 = insert_host(&db, tenant_id).await;
+        let host2 = insert_host(&db, tenant_id).await;
+        link_service_host(&db, svc.id, host1.id).await;
+        link_service_host(&db, svc.id, host2.id).await;
+
+        let sw = insert_software_item(&db, tenant_id).await;
+        let hsi1 = insert_host_software_item(&db, host1.id, sw.id).await;
+        let hsi2 = insert_host_software_item(&db, host2.id, sw.id).await;
+
+        // Send VersionCheckResults targeting hsi1 only.
+        let payload = VersionCheckResultsPayload {
+            results: vec![VersionCheckResult {
+                software_item_id: sw.id,
+                installed_version: Some("2.0.0".to_string()),
+                latest_version: None,
+                error: None,
+                update_category: Default::default(),
+                host_software_item_id: Some(hsi1.id),
+            }],
+        };
+
+        handle_version_check_results(&state, svc.id, &payload).await;
+
+        // hsi1 must reflect the new version.
+        let updated = host_software_item::Entity::find_by_id(hsi1.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert_eq!(updated.installed_version, Some("2.0.0".to_string()));
+
+        // hsi2 must be unchanged (no cross-host contamination).
+        let unchanged = host_software_item::Entity::find_by_id(hsi2.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert_eq!(unchanged.installed_version, None);
+    }
+
+    /// When `host_software_item_id` points to a row belonging to a *different*
+    /// service's host, the update must be rejected (security guard).
+    #[tokio::test]
+    async fn version_check_results_targeted_update_rejects_foreign_hsi_id() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+
+        // Service A owns host_a; service B owns host_b.
+        let svc_a = insert_service(&db, tenant_id).await;
+        let svc_b = insert_service(&db, tenant_id).await;
+        let host_a = insert_host(&db, tenant_id).await;
+        let host_b = insert_host(&db, tenant_id).await;
+        link_service_host(&db, svc_a.id, host_a.id).await;
+        link_service_host(&db, svc_b.id, host_b.id).await;
+
+        let sw = insert_software_item(&db, tenant_id).await;
+        let hsi_a = insert_host_software_item(&db, host_a.id, sw.id).await;
+        let hsi_b = insert_host_software_item(&db, host_b.id, sw.id).await;
+
+        // Service A sends a result pointing at hsi_b (belongs to service B).
+        let payload = VersionCheckResultsPayload {
+            results: vec![VersionCheckResult {
+                software_item_id: sw.id,
+                installed_version: Some("evil".to_string()),
+                latest_version: None,
+                error: None,
+                update_category: Default::default(),
+                host_software_item_id: Some(hsi_b.id),
+            }],
+        };
+
+        handle_version_check_results(&state, svc_a.id, &payload).await;
+
+        // hsi_b must not be modified — the host_ids guard filters it out.
+        let untouched = host_software_item::Entity::find_by_id(hsi_b.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert_eq!(untouched.installed_version, None);
+
+        // hsi_a is also untouched (wrong hsi_id was provided).
+        let untouched_a = host_software_item::Entity::find_by_id(hsi_a.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert_eq!(untouched_a.installed_version, None);
+    }
 }
