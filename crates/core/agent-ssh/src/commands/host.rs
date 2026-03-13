@@ -276,10 +276,6 @@ async fn run_show(db: &sea_orm::DatabaseConnection, name_or_id: &str) -> Result<
             .unwrap_or("unknown")
     );
     println!(
-        "PVE node:        {}",
-        if host.is_pve_node { "yes" } else { "no" }
-    );
-    println!(
         "PVE node name:   {}",
         host.pve_node_name.as_deref().unwrap_or("(not set)")
     );

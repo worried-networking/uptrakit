@@ -1039,7 +1039,6 @@ mod tests {
             sudo_available: None,
             is_root: None,
             sudo_policy: "auto".to_string(),
-            is_pve_node: false,
             pve_plugin_config_id: None,
             pve_node_name: None,
         }

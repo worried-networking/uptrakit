@@ -98,12 +98,6 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default("auto"),
                     )
-                    .col(
-                        ColumnDef::new(SshHostsNew::IsPveNode)
-                            .boolean()
-                            .not_null()
-                            .default(false),
-                    )
                     .col(ColumnDef::new(SshHostsNew::PvePluginConfigId).uuid().null())
                     .col(ColumnDef::new(SshHostsNew::PveNodeName).string().null())
                     .to_owned(),
@@ -120,7 +114,7 @@ impl MigrationTrait for Migration {
                 DatabaseBackend::Sqlite,
                 "SELECT id, name, hostname, port, username, private_key, key_type, \
                  host_key_fingerprint, machine_id, created_at, updated_at, \
-                 sudo_available, is_root, sudo_policy, is_pve_node, \
+                 sudo_available, is_root, sudo_policy, \
                  pve_plugin_config_id, pve_node_name \
                  FROM ssh_hosts",
             ))
@@ -141,8 +135,8 @@ impl MigrationTrait for Migration {
                     ))
                 })?;
 
-                // Column 15: pve_plugin_config_id (nullable TEXT → nullable UUID BLOB)
-                let pve_config_str: Option<String> = Option::<String>::try_get_by_index(row, 15)
+                // Column 14: pve_plugin_config_id (nullable TEXT → nullable UUID BLOB)
+                let pve_config_str: Option<String> = Option::<String>::try_get_by_index(row, 14)
                     .map_err(|e| {
                         DbErr::Custom(format!("failed to read pve_plugin_config_id: {e:?}"))
                     })?;
@@ -187,9 +181,7 @@ impl MigrationTrait for Migration {
                     .map_err(|e| DbErr::Custom(format!("failed to read is_root: {e:?}")))?;
                 let sudo_policy: String = String::try_get_by_index(row, 13)
                     .map_err(|e| DbErr::Custom(format!("failed to read sudo_policy: {e:?}")))?;
-                let is_pve_node: bool = bool::try_get_by_index(row, 14)
-                    .map_err(|e| DbErr::Custom(format!("failed to read is_pve_node: {e:?}")))?;
-                let pve_node_name: Option<String> = Option::<String>::try_get_by_index(row, 16)
+                let pve_node_name: Option<String> = Option::<String>::try_get_by_index(row, 15)
                     .map_err(|e| DbErr::Custom(format!("failed to read pve_node_name: {e:?}")))?;
 
                 // Insert with properly-bound UUID BLOB values.
@@ -211,7 +203,6 @@ impl MigrationTrait for Migration {
                             SshHostsNew::SudoAvailable,
                             SshHostsNew::IsRoot,
                             SshHostsNew::SudoPolicy,
-                            SshHostsNew::IsPveNode,
                             SshHostsNew::PvePluginConfigId,
                             SshHostsNew::PveNodeName,
                         ])
@@ -230,7 +221,6 @@ impl MigrationTrait for Migration {
                             sudo_available.into(),
                             is_root.into(),
                             sudo_policy.into(),
-                            is_pve_node.into(),
                             Expr::val(pve_config_blob),
                             pve_node_name.into(),
                         ])
@@ -287,7 +277,6 @@ enum SshHostsNew {
     SudoAvailable,
     IsRoot,
     SudoPolicy,
-    IsPveNode,
     PvePluginConfigId,
     PveNodeName,
 }

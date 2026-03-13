@@ -434,7 +434,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         }
     }
 
-    let sudoers_content: Option<SudoersContent> = if !resolved.is_empty() {
+    let mut sudoers_content: Option<SudoersContent> = if !resolved.is_empty() {
         Some(SudoersContent::SpecificCommands(resolved))
     } else if params.allow_all {
         tracing::warn!("no plugin commands resolved; using NOPASSWD: ALL (--allow-all)");
@@ -487,6 +487,31 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
                 );
             }
         }
+    }
+
+    // 5c. Append infra-plugin sudo commands (e.g. PVE pct/qm) and re-write
+    //     sudoers if any were returned.  These entries were not available
+    //     during step 5a because infra detection runs after the initial
+    //     sudoers scan.
+    let infra_sudo_cmds: Vec<_> = infra_results
+        .iter()
+        .flat_map(|r| r.sudo_commands.iter())
+        .map(|c| ResolvedSudoCommand {
+            command_path: c.command_path.clone(),
+            explanation: c.explanation.clone(),
+            needs_setenv: c.needs_setenv,
+        })
+        .collect();
+    if !infra_sudo_cmds.is_empty() {
+        let mut base_cmds = match sudoers_content {
+            Some(SudoersContent::SpecificCommands(cmds)) => cmds,
+            _ => Vec::new(),
+        };
+        base_cmds.extend(infra_sudo_cmds);
+        let updated = SudoersContent::SpecificCommands(base_cmds);
+        write_sudoers_file(&executor, &params.target_username, &updated, use_sudo).await?;
+        tracing::info!("updated sudoers with infra-plugin entries (e.g. pct exec, qm guest exec)");
+        sudoers_content = Some(updated);
     }
 
     // 6. DISCONNECT auth session — drop the executor first so the session Arc

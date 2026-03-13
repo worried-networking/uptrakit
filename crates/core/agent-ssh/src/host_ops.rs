@@ -105,7 +105,6 @@ pub async fn add_host(db: &DatabaseConnection, params: AddHostParams) -> Result<
         sudo_available: sea_orm::ActiveValue::NotSet,
         is_root: sea_orm::ActiveValue::NotSet,
         sudo_policy: Set("auto".to_string()),
-        is_pve_node: Set(false),
         pve_plugin_config_id: Set(None),
         pve_node_name: Set(None),
     };

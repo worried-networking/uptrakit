@@ -178,10 +178,13 @@ impl HostLifecyclePlugin for ProxmoxAgentPlugin {
             }),
         });
 
+        let sudo_commands = collect_pve_sudo_commands(executor).await;
+
         Ok(BootstrapInfraResult {
             report_plugin_config: report,
             existing_plugin_config_id: existing_config_id,
             detected: true,
+            sudo_commands,
         })
     }
 

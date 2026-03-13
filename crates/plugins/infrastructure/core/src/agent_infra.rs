@@ -216,6 +216,10 @@ pub struct BootstrapInfraResult {
     pub existing_plugin_config_id: Option<String>,
     /// Whether any infrastructure was detected on this host.
     pub detected: bool,
+    /// Additional sudoers entries the infrastructure requires on this host.
+    ///
+    /// Returned so the bootstrap step can append these after infra detection.
+    pub sudo_commands: Vec<InfraResolvedSudo>,
 }
 
 /// A sudoers entry resolved by an infrastructure plugin during sync.
