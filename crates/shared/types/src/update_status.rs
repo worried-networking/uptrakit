@@ -15,10 +15,11 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(all(test, not(feature = "sea-orm")), derive(strum::EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateStatus {
-    /// The update is in a batch queue and not yet dispatched — waiting for the
-    /// previous item on the same host to complete. This is not an active state
-    /// (no in-progress work on the host), but represents a committed intent to
-    /// update. Terminal states are [`Self::Completed`] and [`Self::Failed`].
+    /// The update is queued and waiting for the host to become free. This
+    /// applies to both batch items waiting for a preceding update on the same
+    /// host, and to single (non-batch) updates triggered when the host already
+    /// had an active update. Not an active state — no in-progress work on the
+    /// host. Terminal states are [`Self::Completed`] and [`Self::Failed`].
     #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "queued"))]
     Queued,
     /// The update is waiting to be dispatched.

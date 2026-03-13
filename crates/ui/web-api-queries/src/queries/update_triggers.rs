@@ -63,10 +63,6 @@ pub enum TriggerUpdateError {
     /// when the partial unique DB index rejects a concurrent INSERT.
     #[error("an update is already pending or in progress")]
     UpdateAlreadyActive,
-    /// Another update (software-item or host-package batch) is already running
-    /// for this host. Wait for it to complete before triggering another.
-    #[error("another update is already in progress for this host")]
-    HostUpdateInProgress,
     /// The plugin config referenced by the role assignment was not found.
     #[error("plugin config not found")]
     PluginConfigNotFound,
@@ -89,8 +85,9 @@ impl_report_conversion!(sea_orm::DbErr => TriggerUpdateError::Database);
 pub struct TriggerUpdateResult {
     /// The newly-created `update_history` record ID.
     pub update_history_id: Uuid,
-    /// Whether the target agent was locally connected at dispatch time.
-    pub agent_connected: bool,
+    /// The initial status of the record. `Queued` when the host already had
+    /// an active update at dispatch time; `Pending` otherwise.
+    pub initial_status: update_history::UpdateStatus,
 }
 
 /// Parameters for [`trigger_update_for_host`].
@@ -355,8 +352,6 @@ pub(crate) async fn load_target_for_dispatch(
 /// - Host exists, is active, and belongs to the tenant.
 /// - Host is assigned to the software item.
 /// - An agent is linked to the host and is approved.
-/// - **No pending/in-progress update exists for this host** (across all update
-///   types: software items and host-package batches).
 /// - The execute_update role plugin is assigned.
 ///
 /// Returns a [`ValidatedUpdateTarget`] containing all loaded data needed for
@@ -369,14 +364,13 @@ pub async fn validate_update_preconditions(
     host_id: Uuid,
     item_id: Uuid,
 ) -> Result<ValidatedUpdateTarget> {
-    // Steps 1–5 and 7 (data loading, no lock check).
-    let target = load_target_for_dispatch(db, tenant_id, host_id, item_id).await?;
+    load_target_for_dispatch(db, tenant_id, host_id, item_id).await
+}
 
-    // 6. Combined per-host lock check: reject if any active update exists for
-    //    this host in either `update_history` (software items) OR
-    //    `host_package_update_history` (host package batches).
-    //    This enforces the invariant: at most one update runs per host at a time.
-    let sw_active = UpdateHistory::find()
+/// Returns `true` if a `Pending` or `InProgress` update already exists for
+/// the given host (across all software items and batches).
+pub async fn has_active_update_for_host(db: &DatabaseConnection, host_id: Uuid) -> Result<bool> {
+    let count = UpdateHistory::find()
         .filter(update_history::Column::HostId.eq(host_id))
         .filter(update_history::Column::Status.is_in([
             update_history::UpdateStatus::Pending,
@@ -385,12 +379,7 @@ pub async fn validate_update_preconditions(
         .count(db)
         .await
         .context_to()?;
-
-    if sw_active > 0 {
-        bail!(TriggerUpdateError::HostUpdateInProgress);
-    }
-
-    Ok(target)
+    Ok(count > 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -561,10 +550,25 @@ pub async fn dispatch_update_to_agent(
 // Convenience wrapper
 // ---------------------------------------------------------------------------
 
+/// Returns `true` when the database error looks like a unique-constraint
+/// violation on `uix_update_history_host_active`.
+fn is_unique_constraint_violation(e: &rootcause::Report<TriggerUpdateError>) -> bool {
+    if let TriggerUpdateError::Database(db_err) = e.current_context() {
+        let msg = db_err.to_string();
+        // SQLite: "UNIQUE constraint failed: ..."
+        // PostgreSQL: "duplicate key value violates unique constraint ..."
+        return msg.contains("UNIQUE constraint failed")
+            || msg.contains("duplicate key value violates unique constraint");
+    }
+    false
+}
+
 /// Core update-trigger logic shared by the REST handler and the MQTT WS handler.
 ///
-/// Validates preconditions, creates a Pending `update_history` record, and
-/// dispatches the `ExecuteUpdate` message to the agent — all in one call.
+/// Validates preconditions, then either inserts a `Pending` record and
+/// dispatches immediately (when the host is free), or inserts a `Queued`
+/// record (when the host already has an active update). The caller can inspect
+/// `TriggerUpdateResult::initial_status` to distinguish the two cases.
 ///
 /// For batch operations, call the three layers independently instead.
 ///
@@ -595,7 +599,42 @@ pub async fn trigger_update_for_host(
             &execute_update_plugin.config,
         );
 
-    let update_history_id = create_update_history_record(
+    // Check if the host already has an active (Pending/InProgress) update.
+    let host_busy = has_active_update_for_host(db, params.host_id).await?;
+
+    if host_busy {
+        // Insert as Queued — do not dispatch until the active update completes.
+        let update_history_id = create_update_history_record(
+            db,
+            &CreateUpdateRecordParams {
+                tenant_id: params.tenant_id,
+                host_id: params.host_id,
+                item_id: params.item_id,
+                host_software_item_id: Some(target.hsi_link.id),
+                to_version: &params.to_version,
+                from_version: target.hsi_link.installed_version.clone(),
+                actor_type: params.actor_type,
+                actor_id: params.actor_id,
+                update_category: &target.hsi_link.update_category,
+                batch_id: None,
+                initial_status: update_history::UpdateStatus::Queued,
+                interactive: resolved_interactive,
+            },
+        )
+        .await?;
+        tracing::info!(
+            update_id = %update_history_id,
+            host_id = %params.host_id,
+            "host has an active update — new update queued"
+        );
+        return Ok(TriggerUpdateResult {
+            update_history_id,
+            initial_status: update_history::UpdateStatus::Queued,
+        });
+    }
+
+    // Attempt to insert as Pending.
+    let pending_insert = create_update_history_record(
         db,
         &CreateUpdateRecordParams {
             tenant_id: params.tenant_id,
@@ -612,23 +651,57 @@ pub async fn trigger_update_for_host(
             interactive: resolved_interactive,
         },
     )
-    .await?;
+    .await;
 
-    let agent_connected = dispatch_update_to_agent(
-        notifier,
-        &target,
-        DispatchUpdateParams {
-            update_history_id,
-            to_version: params.to_version,
-            release_info: params.release_info,
-            interactive: params.interactive,
-        },
-    )
-    .await?;
+    let (update_history_id, initial_status) = match pending_insert {
+        Ok(id) => (id, update_history::UpdateStatus::Pending),
+        Err(e) if is_unique_constraint_violation(&e) => {
+            // Concurrent Pending INSERT from another controller won the race.
+            // Re-insert as Queued so this update is not lost.
+            tracing::debug!(
+                host_id = %params.host_id,
+                "concurrent Pending INSERT detected (unique constraint); re-inserting as Queued"
+            );
+            let id = create_update_history_record(
+                db,
+                &CreateUpdateRecordParams {
+                    tenant_id: params.tenant_id,
+                    host_id: params.host_id,
+                    item_id: params.item_id,
+                    host_software_item_id: Some(target.hsi_link.id),
+                    to_version: &params.to_version,
+                    from_version: target.hsi_link.installed_version.clone(),
+                    actor_type: params.actor_type,
+                    actor_id: params.actor_id,
+                    update_category: &target.hsi_link.update_category,
+                    batch_id: None,
+                    initial_status: update_history::UpdateStatus::Queued,
+                    interactive: resolved_interactive,
+                },
+            )
+            .await?;
+            (id, update_history::UpdateStatus::Queued)
+        }
+        Err(e) => return Err(e),
+    };
+
+    if matches!(initial_status, update_history::UpdateStatus::Pending) {
+        dispatch_update_to_agent(
+            notifier,
+            &target,
+            DispatchUpdateParams {
+                update_history_id,
+                to_version: params.to_version,
+                release_info: params.release_info,
+                interactive: params.interactive,
+            },
+        )
+        .await?;
+    }
 
     Ok(TriggerUpdateResult {
         update_history_id,
-        agent_connected,
+        initial_status,
     })
 }
 
@@ -764,12 +837,23 @@ mod tests {
         QueryFilter, Set,
     };
     use time::OffsetDateTime;
+    use uptrakit_internal_wire::ControllerMessage;
     use uptrakit_shared_db::entity::{
         host, host_software_item, host_software_item_plugin, plugin_config, service, service_host,
         software_item, tenant, update_history,
     };
     use uptrakit_shared_types::ServiceStatus;
     use uuid::Uuid;
+
+    /// A no-op notifier for tests — always returns `true` (agent locally connected).
+    struct NoopNotifier;
+
+    #[async_trait::async_trait]
+    impl crate::notifier::ServiceNotifier for NoopNotifier {
+        async fn send_to_service(&self, _service_id: &Uuid, _msg: ControllerMessage) -> bool {
+            true
+        }
+    }
 
     async fn setup_db() -> DatabaseConnection {
         let db = Database::connect("sqlite::memory:").await.unwrap();
@@ -1089,11 +1173,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn validate_preconditions_update_already_active_same_item() {
-        // A Pending update for the same (host, item) pair must be rejected.
+    async fn trigger_update_queued_when_host_busy() {
+        // When a Pending update already exists for the host, trigger_update_for_host
+        // must insert a Queued record and return initial_status: Queued.
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
         let now = OffsetDateTime::now_utc();
+
+        // Insert a Pending update for the host (simulates an active update).
         update_history::ActiveModel {
             id: Set(Uuid::now_v7()),
             tenant_id: Set(f.tenant_id),
@@ -1117,22 +1204,146 @@ mod tests {
         .insert(&db)
         .await
         .unwrap();
-        let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
-        assert!(matches!(
-            result.unwrap_err().current_context(),
-            TriggerUpdateError::HostUpdateInProgress
-        ));
+
+        let result = trigger_update_for_host(
+            &db,
+            &NoopNotifier,
+            TriggerUpdateParams {
+                tenant_id: f.tenant_id,
+                item_id: f.item_id,
+                host_id: f.host_id,
+                to_version: "1.2.0".to_string(),
+                actor_type: ActorType::User,
+                actor_id: "user-1",
+                release_info: None,
+                interactive: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            matches!(result.initial_status, update_history::UpdateStatus::Queued),
+            "expected Queued, got {:?}",
+            result.initial_status
+        );
+
+        // Verify the record is in the DB with status Queued.
+        let record = UpdateHistory::find_by_id(result.update_history_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.status, update_history::UpdateStatus::Queued);
+        assert!(record.batch_id.is_none());
     }
 
     #[tokio::test]
-    async fn validate_preconditions_host_update_in_progress_different_item() {
-        // A Pending update for a DIFFERENT item on the same host must also be rejected.
+    async fn trigger_update_pending_when_host_free() {
+        // When no active update exists, trigger_update_for_host inserts Pending.
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+
+        let result = trigger_update_for_host(
+            &db,
+            &NoopNotifier,
+            TriggerUpdateParams {
+                tenant_id: f.tenant_id,
+                item_id: f.item_id,
+                host_id: f.host_id,
+                to_version: "1.1.0".to_string(),
+                actor_type: ActorType::User,
+                actor_id: "user-1",
+                release_info: None,
+                interactive: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            matches!(result.initial_status, update_history::UpdateStatus::Pending),
+            "expected Pending, got {:?}",
+            result.initial_status
+        );
+    }
+
+    #[tokio::test]
+    async fn has_active_update_returns_true_for_pending() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
         let now = OffsetDateTime::now_utc();
 
-        // Insert a second software item (not assigned to the host — that doesn't
-        // matter for the lock check which is host-scoped).
+        update_history::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(f.tenant_id),
+            host_id: Set(f.host_id),
+            software_item_id: Set(f.item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(None),
+            to_version: Set(Some("1.1.0".to_string())),
+            status: Set(update_history::UpdateStatus::Pending),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            started_at: Set(Some(now)),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("feature".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        assert!(has_active_update_for_host(&db, f.host_id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn has_active_update_returns_false_when_only_queued() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let now = OffsetDateTime::now_utc();
+
+        update_history::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(f.tenant_id),
+            host_id: Set(f.host_id),
+            software_item_id: Set(f.item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(None),
+            to_version: Set(Some("1.1.0".to_string())),
+            status: Set(update_history::UpdateStatus::Queued),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            started_at: Set(Some(now)),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("feature".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        assert!(!has_active_update_for_host(&db, f.host_id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn validate_preconditions_host_update_in_progress_different_item_placeholder() {
+        // Regression: validate_update_preconditions no longer rejects when
+        // a Pending update exists for a different item on the same host.
+        // That case is now handled by trigger_update_for_host (queued instead of 409).
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let now = OffsetDateTime::now_utc();
+
+        // Insert a second software item (not assigned to the host).
         let other_item_id = Uuid::now_v7();
         uptrakit_shared_db::entity::software_item::ActiveModel {
             id: Set(other_item_id),
@@ -1174,12 +1385,13 @@ mod tests {
         .await
         .unwrap();
 
-        // Triggering an update for f.item_id on the same host must be rejected.
+        // validate_update_preconditions no longer checks the host lock —
+        // it should now succeed (the lock check was removed).
         let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
-        assert!(matches!(
-            result.unwrap_err().current_context(),
-            TriggerUpdateError::HostUpdateInProgress
-        ));
+        assert!(
+            result.is_ok(),
+            "expected Ok after removing host lock check; got: {result:?}"
+        );
     }
 
     #[tokio::test]

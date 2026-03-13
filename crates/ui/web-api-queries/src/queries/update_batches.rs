@@ -30,7 +30,7 @@ use uuid::Uuid;
 use crate::notifier::ServiceNotifier;
 use crate::queries::update_triggers::{
     CreateUpdateRecordParams, DispatchUpdateParams, TriggerUpdateError, ValidatedUpdateTarget,
-    load_target_for_dispatch,
+    has_active_update_for_host, load_target_for_dispatch,
 };
 use crate::queries::update_types::{ActorType, BatchType};
 use crate::tenant_db::TenantDb;
@@ -363,27 +363,40 @@ pub async fn create_batch(
     };
     batch_record.insert(&txn).await.context_to()?;
 
-    // Determine the initial status for each item inside the transaction loop.
-    // The FIRST item per host is inserted as `Pending` and will be dispatched
-    // immediately after commit. Subsequent items for the same host are inserted
-    // as `Queued` and will be promoted to `Pending` (via CAS) by
-    // `dispatch_next_in_batch` as preceding items complete.
-    //
-    // This ensures the partial unique index
-    // `uix_update_history_host_active` (status IN ('pending', 'in_progress'))
-    // is never violated by the batch insertion.
-    let mut first_per_host: HashSet<Uuid> = HashSet::new();
+    // Determine initial status per host:
+    // - If the host already has an active (Pending/InProgress) update outside
+    //   this batch, ALL items on that host start as Queued.
+    // - Among hosts that are free, only the first item per host is Pending;
+    //   subsequent items on the same host are Queued.
+    let mut externally_busy_hosts: HashSet<Uuid> = HashSet::new();
+    for (candidate, _) in &validated {
+        if !externally_busy_hosts.contains(&candidate.host_id) {
+            let busy = has_active_update_for_host(db, candidate.host_id)
+                .await
+                .unwrap_or(false);
+            if busy {
+                externally_busy_hosts.insert(candidate.host_id);
+            }
+        }
+    }
 
-    // Collect (history_id, is_first) pairs inside the transaction, then dispatch
-    // first-per-host items after commit.
+    let mut first_per_free_host: HashSet<Uuid> = HashSet::new();
+
+    // Collect (history_id, should_dispatch) pairs inside the transaction, then
+    // dispatch eligible items after commit.
     let mut history_ids: Vec<(Uuid, bool)> = Vec::with_capacity(validated.len());
     for (candidate, target) in &validated {
-        let is_first = first_per_host.insert(candidate.host_id);
-        let initial_status = if is_first {
-            update_history::UpdateStatus::Pending
-        } else {
-            update_history::UpdateStatus::Queued
-        };
+        let (initial_status, should_dispatch) =
+            if externally_busy_hosts.contains(&candidate.host_id) {
+                (update_history::UpdateStatus::Queued, false)
+            } else {
+                let is_first = first_per_free_host.insert(candidate.host_id);
+                if is_first {
+                    (update_history::UpdateStatus::Pending, true)
+                } else {
+                    (update_history::UpdateStatus::Queued, false)
+                }
+            };
         let update_history_id = super::update_triggers::create_update_history_record(
             &txn,
             &CreateUpdateRecordParams {
@@ -402,17 +415,19 @@ pub async fn create_batch(
             },
         )
         .await?;
-        history_ids.push((update_history_id, is_first));
+        history_ids.push((update_history_id, should_dispatch));
     }
 
     txn.commit().await.context_to()?;
 
-    // Dispatch only the first-per-host (Pending) items — Queued items wait for
+    // Dispatch only Pending items — Queued items wait for
     // dispatch_next_in_batch to promote them.
     let mut updates: Vec<BatchUpdateItem> = Vec::new();
 
-    for ((candidate, target), (update_history_id, is_first)) in validated.iter().zip(history_ids) {
-        let trigger_status = if is_first {
+    for ((candidate, target), (update_history_id, should_dispatch)) in
+        validated.iter().zip(history_ids)
+    {
+        let trigger_status = if should_dispatch {
             let connected = super::update_triggers::dispatch_update_to_agent(
                 notifier,
                 target,
@@ -430,8 +445,7 @@ pub async fn create_batch(
                 TriggerUpdateStatus::Queued
             }
         } else {
-            // Subsequent items for the same host are queued; they will be
-            // dispatched sequentially as earlier items complete.
+            // Host busy or subsequent item — queued for sequential dispatch.
             TriggerUpdateStatus::Queued
         };
 
@@ -468,29 +482,27 @@ pub struct BatchCompletionInfo {
     pub failed_count: i64,
 }
 
-/// Called after an update completes in a batch. Dispatches the next queued
-/// update for the same host within the batch (via CAS), and checks if the
-/// batch is done.
+/// Dispatches the next `Queued` update for the given host, across all batches
+/// and non-batch updates (FIFO by `id`).
 ///
-/// **Multi-controller safety:** The transition `Queued → Pending` is performed
-/// atomically with a CAS UPDATE that includes the current status as a filter.
-/// If another controller already promoted the same row, `rows_affected == 0`
-/// and this call skips dispatch without double-dispatching.
+/// **Multi-controller safety:** Uses the same CAS pattern as
+/// [`dispatch_next_in_batch`] — the `Queued → Pending` transition is
+/// performed atomically. If another controller already promoted the row,
+/// `rows_affected == 0` and the call exits without double-dispatching.
 ///
-/// Returns `Some(BatchCompletionInfo)` if the batch just transitioned to a
-/// terminal status, so the caller can dispatch a notification event.
-#[tracing::instrument(skip_all, fields(%batch_id, %host_id))]
-pub async fn dispatch_next_in_batch(
+/// This is called:
+/// 1. After a non-batch update completes on a host.
+/// 2. By [`dispatch_next_in_batch`] to dequeue the next item (which may
+///    belong to a different batch or to no batch at all).
+#[tracing::instrument(skip_all, fields(%host_id))]
+pub async fn dispatch_next_queued_for_host(
     db: &DatabaseConnection,
     notifier: &dyn ServiceNotifier,
-    batch_id: Uuid,
     host_id: Uuid,
     tenant_id: Uuid,
-) -> std::result::Result<Option<BatchCompletionInfo>, rootcause::Report<TriggerUpdateError>> {
-    // Find the next Queued update in this batch for this host (ordered by id).
-    // We look for Queued (not Pending) because Pending means already dispatched.
+) -> std::result::Result<(), rootcause::Report<TriggerUpdateError>> {
+    // Find the oldest Queued update for this host (any batch or no batch).
     let next = UpdateHistory::find()
-        .filter(update_history::Column::BatchId.eq(batch_id))
         .filter(update_history::Column::HostId.eq(host_id))
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
         .order_by_asc(update_history::Column::Id)
@@ -499,14 +511,11 @@ pub async fn dispatch_next_in_batch(
         .context_to()?;
 
     let Some(next_record) = next else {
-        // No queued items remain for this host — check if the whole batch is done.
-        return maybe_complete_batch(db, batch_id, tenant_id).await;
+        return Ok(());
     };
 
-    // Atomically promote Queued → Pending (CAS). The partial unique index on
-    // (host_id) WHERE status IN ('pending', 'in_progress') enforces at DB level
-    // that only one active row per host exists. If another controller already
-    // promoted this row, rows_affected == 0 and we skip dispatch.
+    // CAS: Queued → Pending. The partial unique index on (host_id) WHERE
+    // status IN ('pending', 'in_progress') prevents double-dispatch.
     let cas_result = UpdateHistory::update_many()
         .filter(update_history::Column::Id.eq(next_record.id))
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
@@ -519,17 +528,14 @@ pub async fn dispatch_next_in_batch(
         .context_to()?;
 
     if cas_result.rows_affected == 0 {
-        // Another controller already dispatched this item; skip.
         tracing::debug!(
             update_id = %next_record.id,
-            batch_id = %batch_id,
-            "CAS missed: another controller already dispatched this queued item, skipping"
+            %host_id,
+            "CAS missed: another controller already promoted this queued item, skipping"
         );
-        return maybe_complete_batch(db, batch_id, tenant_id).await;
+        return Ok(());
     }
 
-    // Load dispatch data using load_target_for_dispatch — no lock check here
-    // because the CAS already handled concurrency.
     match load_target_for_dispatch(
         db,
         tenant_id,
@@ -546,7 +552,7 @@ pub async fn dispatch_next_in_batch(
                     update_history_id: next_record.id,
                     to_version: next_record.to_version.unwrap_or_default(),
                     release_info: None,
-                    interactive: false,
+                    interactive: next_record.interactive,
                 },
             )
             .await;
@@ -554,11 +560,10 @@ pub async fn dispatch_next_in_batch(
         Err(e) => {
             tracing::warn!(
                 update_id = %next_record.id,
-                batch_id = %batch_id,
+                %host_id,
                 error = %e,
-                "failed to load dispatch data for next batch update, marking as failed"
+                "failed to load dispatch data for next queued update, marking as failed"
             );
-            // Mark the update as failed so the batch can progress.
             let mut active: update_history::ActiveModel = next_record.into();
             active.status = Set(update_history::UpdateStatus::Failed);
             active.completed_at = Set(Some(OffsetDateTime::now_utc()));
@@ -567,7 +572,33 @@ pub async fn dispatch_next_in_batch(
         }
     }
 
-    // Check if all items in the batch are terminal.
+    Ok(())
+}
+
+/// Called after an update completes in a batch. Dispatches the next queued
+/// update for the same host (FIFO across all batches and non-batch updates),
+/// and checks if the batch is done.
+///
+/// **Multi-controller safety:** Delegates to [`dispatch_next_queued_for_host`]
+/// which performs the `Queued → Pending` CAS atomically. If another controller
+/// already promoted the same row, dispatch is skipped without double-dispatching.
+///
+/// Returns `Some(BatchCompletionInfo)` if the batch just transitioned to a
+/// terminal status, so the caller can dispatch a notification event.
+#[tracing::instrument(skip_all, fields(%batch_id, %host_id))]
+pub async fn dispatch_next_in_batch(
+    db: &DatabaseConnection,
+    notifier: &dyn ServiceNotifier,
+    batch_id: Uuid,
+    host_id: Uuid,
+    tenant_id: Uuid,
+) -> std::result::Result<Option<BatchCompletionInfo>, rootcause::Report<TriggerUpdateError>> {
+    // Dispatch the next queued update for this host (FIFO across all batches
+    // and non-batch updates). This supersedes the previous batch-scoped query
+    // so that a queued non-batch update is not skipped when a batch completes.
+    dispatch_next_queued_for_host(db, notifier, host_id, tenant_id).await?;
+
+    // Check if all items in this batch are now in a terminal state.
     maybe_complete_batch(db, batch_id, tenant_id).await
 }
 
