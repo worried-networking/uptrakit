@@ -96,12 +96,13 @@ async fn handle_bootstrap_proxmox_guest(
     }
 
     // 2. Fetch all unmatched guests (one proxy call).
+    //    Pass per_page=1000 to avoid pagination truncation (same as list-discovered-guests).
     let guests_data = match ctx
         .action_invoker
         .invoke(
             "proxmox.hosts",
             "list-all-unmatched",
-            serde_json::Value::Object(serde_json::Map::new()),
+            json!({ "per_page": 1000 }),
         )
         .await
     {
@@ -120,8 +121,9 @@ async fn handle_bootstrap_proxmox_guest(
         }
     };
 
+    // The list-all-unmatched response uses "items", not "options".
     let options = guests_data
-        .get("options")
+        .get("items")
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
