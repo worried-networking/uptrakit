@@ -1,10 +1,13 @@
 <script lang="ts">
 	import type { ActionDef, ApiSubmitDef } from '$lib/types';
 	import { invokeExtensionAction, apiSubmitRequest } from '$lib/api';
+	import { getUser } from '$lib/auth.svelte';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import SchemaForm from './SchemaForm.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { hasPermissionValue } from '$lib/types';
+	import { renderApiSubmitTemplate } from '$lib/utils';
 
 	let {
 		extensionId,
@@ -27,31 +30,7 @@
 	let showModal: boolean = $state(false);
 	let showConfirm: boolean = $state(false);
 	let loading: boolean = $state(false);
-
-	/** Recursively substitute `{{field:coercion}}` placeholders in a JSON body template. */
-	function applyTemplate(template: unknown, values: Record<string, unknown>): unknown {
-		if (typeof template === 'string') {
-			const match = template.match(/^\{\{(\w+)(?::(\w+))?\}\}$/);
-			if (!match) return template;
-			const [, fieldName, coercion] = match;
-			const raw = String(values[fieldName] ?? '');
-			if (coercion === 'bool') return raw === 'true';
-			if (coercion === 'number') return Number(raw);
-			if (coercion === 'csv_array')
-				return raw
-					.split(',')
-					.map((s) => s.trim())
-					.filter(Boolean);
-			return raw;
-		}
-		if (Array.isArray(template)) return template.map((item) => applyTemplate(item, values));
-		if (template !== null && typeof template === 'object') {
-			return Object.fromEntries(
-				Object.entries(template as Record<string, unknown>).map(([k, v]) => [k, applyTemplate(v, values)])
-			);
-		}
-		return template;
-	}
+	let pendingParams: Record<string, unknown> | null = $state(null);
 
 	/**
 	 * Collect the set of field keys marked as `sensitive` in the action's form UI.
@@ -73,7 +52,7 @@
 			if (action.api_submit) {
 				// Direct REST submit bypasses the extension proxy; no sensitive param routing.
 				const def: ApiSubmitDef = action.api_submit;
-				const body = applyTemplate(def.body, merged) as Record<string, unknown>;
+				const body = renderApiSubmitTemplate(def.body, merged) as Record<string, unknown>;
 				result = await apiSubmitRequest(def.path, def.method, body);
 			} else {
 				// Separate sensitive field values from regular params before sending.
@@ -107,6 +86,7 @@
 	}
 
 	function handleClick() {
+		if (!hasPermissionValue(getUser(), action.permission)) return;
 		if (action.ui) {
 			showModal = true;
 		} else if (action.destructive) {
@@ -127,11 +107,14 @@
 
 	let btnClass = $derived(size === 'sm' ? 'btn btn-sm text-xs' : 'btn');
 	let presetClass = $derived(action.destructive ? 'preset-filled-error-500' : 'preset-filled-primary-500');
+	let canInvoke = $derived(hasPermissionValue(getUser(), action.permission));
 </script>
 
-<button class="{btnClass} {presetClass}" disabled={loading} onclick={handleClick}>
-	{loading ? 'Processing...' : action.label}
-</button>
+{#if canInvoke}
+	<button class="{btnClass} {presetClass}" disabled={loading} onclick={handleClick}>
+		{loading ? 'Processing...' : action.label}
+	</button>
+{/if}
 
 {#if showModal && action.ui?.type === 'form'}
 	<Modal
@@ -143,7 +126,14 @@
 	>
 		<SchemaForm
 			fields={action.ui.fields}
-			onsubmit={invoke}
+			onsubmit={async (values) => {
+				if (action.destructive) {
+					pendingParams = values;
+					showConfirm = true;
+					return;
+				}
+				await invoke(values);
+			}}
 			{loading}
 			{extensionId}
 			{serviceId}
@@ -161,10 +151,13 @@
 		confirmLabel={action.label}
 		onconfirm={() => {
 			showConfirm = false;
-			void invoke();
+			const params = pendingParams;
+			pendingParams = null;
+			void invoke(params ?? {});
 		}}
 		oncancel={() => {
 			showConfirm = false;
+			pendingParams = null;
 		}}
 	/>
 {/if}

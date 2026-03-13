@@ -2,7 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import type { SystemAlert } from '$lib/types';
 	import { onMount } from 'svelte';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import {
 		getUser,
@@ -15,7 +15,7 @@
 	import { getThemeMode, setThemeMode, initTheme, type ThemeMode } from '$lib/theme.svelte';
 	import { getSystemAlerts } from '$lib/api';
 	import { getIsOnline } from '$lib/stores/network.svelte';
-	import { Permission } from '$lib/types';
+	import { Permission, hasPermissionValue } from '$lib/types';
 	import { loadExtensions, clearExtensions, getPageExtensions } from '$lib/extensions.svelte';
 	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
 	import '../app.css';
@@ -56,17 +56,17 @@
 	$effect(() => {
 		if (getLoading()) return;
 
-		const path = $page.url.pathname;
+		const path = page.url.pathname;
 		const isPublic = publicRoutes.has(path);
 
 		if (!getUser() && !isPublic) {
-			goto('/login?redirect=' + encodeURIComponent(path + $page.url.search));
+			goto('/login?redirect=' + encodeURIComponent(path + page.url.search));
 		}
 	});
 
 	$effect(() => {
 		if (getUser()?.permissions.includes(Permission.ManageGlobalSettings)) {
-			fetchAlerts();
+			void fetchAlerts();
 		}
 	});
 
@@ -120,15 +120,17 @@
 					return perms.some((p) => getUser()?.permissions.includes(p));
 				})
 				.map((item) => ({ href: item.href, label: item.label, priority: item.priority })),
-			...getPageExtensions().map((ext) => ({
-				href: `/extensions/${ext.id}`,
-				label: ext.label,
-				priority: ext.priority
-			}))
+			...getPageExtensions()
+				.filter((ext) => hasPermissionValue(getUser(), ext.required_permission))
+				.map((ext) => ({
+					href: `/extensions/${ext.id}`,
+					label: ext.label,
+					priority: ext.priority
+				}))
 		].sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label))
 	);
 
-	let showSidebar = $derived(getUser() && !publicRoutes.has($page.url.pathname));
+	let showSidebar = $derived(getUser() && !publicRoutes.has(page.url.pathname));
 </script>
 
 {#if getLoading()}
@@ -199,7 +201,7 @@
 			>
 				<span>Your session has expired.</span>
 				<a
-					href="/login?redirect={encodeURIComponent($page.url.pathname + $page.url.search)}"
+					href="/login?redirect={encodeURIComponent(page.url.pathname + page.url.search)}"
 					class="underline font-semibold hover:no-underline">Log in</a
 				>
 				<button
@@ -223,10 +225,10 @@
 								<li>
 									<a
 										href={item.href}
-										class="block rounded-md px-3 py-2 text-sm font-medium {$page.url.pathname === item.href ||
+										class="block rounded-md px-3 py-2 text-sm font-medium {page.url.pathname === item.href ||
 										(item.href !== '/' &&
-											$page.url.pathname.startsWith(item.href + '/') &&
-											!navItems.some((other) => other.href !== item.href && $page.url.pathname === other.href))
+											page.url.pathname.startsWith(item.href + '/') &&
+											!navItems.some((other) => other.href !== item.href && page.url.pathname === other.href))
 											? 'preset-tonal-primary'
 											: 'hover:bg-surface-200 dark:hover:bg-surface-800'}"
 									>
@@ -244,7 +246,7 @@
 				<ToastNotifications alerts={visibleAlerts} onDismiss={dismissAlert} />
 
 				<div class="container mx-auto max-w-5xl p-4">
-					{#if getUser() || publicRoutes.has($page.url.pathname)}
+					{#if getUser() || publicRoutes.has(page.url.pathname)}
 						{@render children()}
 					{/if}
 				</div>

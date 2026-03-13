@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import {
@@ -12,7 +12,7 @@
 		deleteSoftwareItem,
 		unassignHostFromSoftwareItem
 	} from '$lib/api';
-	import { formatDate, formatVersion, isValidLogoUrl } from '$lib/utils';
+	import { formatDate, formatVersion, isValidExternalUrl, isValidLogoUrl } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -26,7 +26,7 @@
 	import { Permission, hasAnyPermission } from '$lib/types';
 	import type { AttestationStatus, SoftwareItemDetailResponse, SoftwareItemHostSummary } from '$lib/types';
 
-	const id = $derived($page.params.id as string);
+	const id = $derived(page.params.id as string);
 
 	let item: SoftwareItemDetailResponse | null = $state(null);
 	let loading: boolean = $state(true);
@@ -708,7 +708,7 @@
 
 		{#if updateModal}
 			{@const meta = getReleaseMeta(updateModal.host)}
-			{#if meta?.release_url}
+			{#if meta?.release_url && isValidExternalUrl(meta.release_url)}
 				<p class="text-sm">
 					<a href={meta.release_url} target="_blank" rel="noopener noreferrer" class="text-primary-500 hover:underline"
 						>View release page ↗</a
@@ -752,7 +752,7 @@
 					{/if}
 				</p>
 			</div>
-			{#if releaseNotesModal.meta.release_url}
+			{#if releaseNotesModal.meta.release_url && isValidExternalUrl(releaseNotesModal.meta.release_url)}
 				<a
 					href={releaseNotesModal.meta.release_url}
 					target="_blank"

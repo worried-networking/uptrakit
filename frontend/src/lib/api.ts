@@ -756,7 +756,10 @@ export function deleteSoftwareIgnore(id: string): Promise<void> {
 
 // Software items - update
 export async function updateSoftwareItem(id: string, data: UpdateSoftwareItemRequest): Promise<SoftwareItemResponse> {
-	return request<SoftwareItemResponse>(`/software-items/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+	return request<SoftwareItemResponse>(`/software-items/${encodeURIComponent(id)}`, {
+		method: 'PUT',
+		body: JSON.stringify(data)
+	});
 }
 
 // Software items - trigger update on a specific host
@@ -765,10 +768,13 @@ export async function triggerSoftwareUpdate(
 	hostId: string,
 	req: TriggerUpdateRequest
 ): Promise<TriggerUpdateResponse> {
-	return request<TriggerUpdateResponse>(`/software-items/${itemId}/hosts/${hostId}/update`, {
-		method: 'POST',
-		body: JSON.stringify(req)
-	});
+	return request<TriggerUpdateResponse>(
+		`/software-items/${encodeURIComponent(itemId)}/hosts/${encodeURIComponent(hostId)}/update`,
+		{
+			method: 'POST',
+			body: JSON.stringify(req)
+		}
+	);
 }
 
 // Software items - check versions on a specific host
@@ -776,9 +782,10 @@ export async function checkSoftwareItemVersionsHost(
 	itemId: string,
 	hostId: string
 ): Promise<TriggerVersionCheckResponse> {
-	return request<TriggerVersionCheckResponse>(`/software-items/${itemId}/hosts/${hostId}/check-versions`, {
-		method: 'POST'
-	});
+	return request<TriggerVersionCheckResponse>(
+		`/software-items/${encodeURIComponent(itemId)}/hosts/${encodeURIComponent(hostId)}/check-versions`,
+		{ method: 'POST' }
+	);
 }
 
 // Update history
@@ -800,7 +807,7 @@ export async function listUpdateHistory(opts?: {
 }
 
 export async function getUpdateHistoryEntry(id: string): Promise<UpdateHistoryResponse> {
-	return request<UpdateHistoryResponse>(`/update-history/${id}`);
+	return request<UpdateHistoryResponse>(`/update-history/${encodeURIComponent(id)}`);
 }
 
 // Scheduler tasks
@@ -809,23 +816,28 @@ export async function listSchedulerTasks(): Promise<ScheduledTaskResponse[]> {
 }
 
 export async function getSchedulerTask(id: string): Promise<ScheduledTaskResponse> {
-	return request<ScheduledTaskResponse>(`/scheduler/tasks/${id}`);
+	return request<ScheduledTaskResponse>(`/scheduler/tasks/${encodeURIComponent(id)}`);
 }
 
 export async function updateSchedulerTask(
 	id: string,
 	data: UpdateScheduledTaskRequest
 ): Promise<ScheduledTaskResponse> {
-	return request<ScheduledTaskResponse>(`/scheduler/tasks/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+	return request<ScheduledTaskResponse>(`/scheduler/tasks/${encodeURIComponent(id)}`, {
+		method: 'PUT',
+		body: JSON.stringify(data)
+	});
 }
 
 export async function triggerSchedulerTask(id: string): Promise<TriggerScheduledTaskResponse> {
-	return request<TriggerScheduledTaskResponse>(`/scheduler/tasks/${id}/trigger`, { method: 'POST' });
+	return request<TriggerScheduledTaskResponse>(`/scheduler/tasks/${encodeURIComponent(id)}/trigger`, {
+		method: 'POST'
+	});
 }
 
 // Plugin configs - CRUD
 export async function getPluginConfig(id: string): Promise<PluginConfigResponse> {
-	return request<PluginConfigResponse>(`/plugin-configs/${id}`);
+	return request<PluginConfigResponse>(`/plugin-configs/${encodeURIComponent(id)}`);
 }
 
 export async function createPluginConfig(data: CreatePluginConfigRequest): Promise<PluginConfigResponse> {
@@ -833,15 +845,18 @@ export async function createPluginConfig(data: CreatePluginConfigRequest): Promi
 }
 
 export async function updatePluginConfig(id: string, data: UpdatePluginConfigRequest): Promise<PluginConfigResponse> {
-	return request<PluginConfigResponse>(`/plugin-configs/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+	return request<PluginConfigResponse>(`/plugin-configs/${encodeURIComponent(id)}`, {
+		method: 'PUT',
+		body: JSON.stringify(data)
+	});
 }
 
 export async function deletePluginConfig(id: string): Promise<void> {
-	return requestVoid(`/plugin-configs/${id}`, { method: 'DELETE' });
+	return requestVoid(`/plugin-configs/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export async function triggerPluginConfigDiscovery(id: string): Promise<TriggerDiscoveryResponse> {
-	return request<TriggerDiscoveryResponse>(`/plugin-configs/${id}/discover`, { method: 'POST' });
+	return request<TriggerDiscoveryResponse>(`/plugin-configs/${encodeURIComponent(id)}/discover`, { method: 'POST' });
 }
 
 // API tokens
@@ -854,7 +869,7 @@ export async function createApiToken(data: CreateApiTokenRequest): Promise<Creat
 }
 
 export async function revokeApiToken(id: string): Promise<void> {
-	return requestVoid(`/auth/api-tokens/${id}`, { method: 'DELETE' });
+	return requestVoid(`/auth/api-tokens/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 // CA rotation
@@ -1146,11 +1161,11 @@ export function createNotificationRule(data: {
 }
 
 export function updateNotificationRule(id: string, data: Record<string, unknown>): Promise<NotificationRuleResponse> {
-	return request(`/notifications/rules/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+	return request(`/notifications/rules/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 
 export function deleteNotificationRule(id: string): Promise<void> {
-	return request(`/notifications/rules/${id}`, { method: 'DELETE' });
+	return request(`/notifications/rules/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export function listNotificationLog(page = 1, perPage = 50): Promise<PaginatedResponse<NotificationLogEntry>> {

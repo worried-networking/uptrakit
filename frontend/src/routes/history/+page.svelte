@@ -3,7 +3,13 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
-	import { listUpdateHistory, triggerSoftwareUpdate, getSoftwareItems, getUpdateHistoryEntry } from '$lib/api';
+	import {
+		listUpdateHistory,
+		triggerSoftwareUpdate,
+		getSoftwareItems,
+		getUpdateHistoryEntry,
+		getSoftwareItem
+	} from '$lib/api';
 	import { formatDate, formatVersion, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
@@ -47,6 +53,7 @@
 	// Trigger update modal state
 	let showTriggerModal: boolean = $state(false);
 	let softwareItems: SoftwareItemResponse[] = $state([]);
+	let selectedItemHosts: { host_id: string; label: string }[] = $state([]);
 	let selectedItemId: string = $state('');
 	let selectedHostId: string = $state('');
 	let targetVersion: string = $state('');
@@ -214,6 +221,7 @@
 		try {
 			const res = await getSoftwareItems(1, 100);
 			softwareItems = res.items;
+			selectedItemHosts = [];
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to load software items');
 			showTriggerModal = false;
@@ -222,7 +230,31 @@
 
 	function closeTriggerModal() {
 		showTriggerModal = false;
+		selectedItemHosts = [];
 	}
+
+	$effect(() => {
+		if (!showTriggerModal || !selectedItemId) {
+			selectedItemHosts = [];
+			return;
+		}
+
+		void (async () => {
+			try {
+				const detail = await getSoftwareItem(selectedItemId);
+				selectedItemHosts = detail.hosts.map((host) => ({
+					host_id: host.host_id,
+					label: host.friendly_name || host.hostname
+				}));
+				if (selectedHostId && !detail.hosts.some((host) => host.host_id === selectedHostId)) {
+					selectedHostId = '';
+				}
+			} catch (error) {
+				selectedItemHosts = [];
+				showError(error instanceof Error ? error.message : 'Failed to load hosts for the selected software item.');
+			}
+		})();
+	});
 
 	async function handleTrigger() {
 		if (!selectedItemId || !selectedHostId || !targetVersion.trim() || triggering) return;
@@ -419,12 +451,10 @@
 					<span>Host</span>
 					<select class="select" bind:value={selectedHostId}>
 						<option value="">— select —</option>
-						<!-- hosts are loaded via software item detail; for now let user enter host UUID -->
+						{#each selectedItemHosts as host (host.host_id)}
+							<option value={host.host_id}>{host.label}</option>
+						{/each}
 					</select>
-					<p class="text-xs text-surface-500 mt-1">
-						Host selection requires loading the software item detail. Enter the host UUID manually if needed.
-					</p>
-					<input class="input mt-1" type="text" placeholder="Host UUID" bind:value={selectedHostId} />
 				</label>
 			{/if}
 

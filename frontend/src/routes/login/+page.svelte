@@ -10,7 +10,7 @@
 	} from '$lib/auth.svelte';
 	import { getAuthMethods } from '$lib/api';
 	import { goto } from '$app/navigation';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import type { AuthMethodsResponse } from '$lib/types';
 	import { isValidLogoUrl, safeRedirect as safeRedirectFn } from '$lib/utils';
 	import { getIsOnline } from '$lib/stores/network.svelte';
@@ -29,6 +29,7 @@
 	let registrationCode = $state('');
 	let registrationTokenInput = $state('');
 	let hasRedirected = false;
+	let processedOidcCode: string | null = null;
 
 	$effect(() => {
 		if (getUser() && !hasRedirected) {
@@ -38,11 +39,12 @@
 	});
 
 	$effect(() => {
-		const params = $page.url.searchParams;
+		const params = page.url.searchParams;
 
 		// Handle OIDC exchange code callback
 		const oidcCode = params.get('oidc_code');
-		if (oidcCode) {
+		if (oidcCode && processedOidcCode !== oidcCode) {
+			processedOidcCode = oidcCode;
 			handleOidcCallback(oidcCode)
 				.then(() => goto(safeRedirect()))
 				.catch((err) => {
@@ -64,14 +66,14 @@
 				oidc_token_exchange_failed: 'Authentication failed during token exchange',
 				oidc_token_validation_failed: 'Failed to validate authentication token'
 			};
-			error = errorMessages[oidcError] || `Authentication error: ${oidcError}`;
+			error = errorMessages[oidcError] || 'Authentication failed. Please try again.';
 			return;
 		}
 
 		// Handle OIDC registration token requirement.
 		// The registration_code is passed via hash fragment (not query string)
 		// to prevent it from appearing in server-side access logs.
-		const hash = $page.url.hash.slice(1); // drop leading '#'
+		const hash = page.url.hash.slice(1); // drop leading '#'
 		const hashParams = new URLSearchParams(hash);
 		if (hashParams.get('registration_token_required') === 'true') {
 			registrationTokenRequired = true;
@@ -82,7 +84,7 @@
 		// Handle account linking
 		if (params.get('link_required') === 'true') {
 			linkRequired = true;
-			linkToken = params.get('link_token') || '';
+			linkToken = hashParams.get('link_token') || params.get('link_token') || '';
 			linkEmail = params.get('email') || '';
 			linkProviderId = params.get('link_provider_id') || '';
 		}
@@ -101,7 +103,7 @@
 	});
 
 	function safeRedirect(): string {
-		return safeRedirectFn($page.url.searchParams.get('redirect'));
+		return safeRedirectFn(page.url.searchParams.get('redirect'));
 	}
 
 	async function onSubmit(e: SubmitEvent) {

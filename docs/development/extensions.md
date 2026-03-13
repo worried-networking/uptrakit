@@ -106,7 +106,7 @@ Internally tagged with `"type"`. Four variants:
 | Variant | Fields | Description |
 | --- | --- | --- |
 | `data_table` | `columns`, `data_action`, `row_actions`, `primary_actions`, `context_selector`, `default_per_page` | Table with data fetching and pagination |
-| `form` | `fields` | Input form |
+| `form` | `fields`, `pre_load_action` | Input form |
 | `key_value` | `data_action` | Read-only key-value display |
 | `actions` | `actions` | List of actions (used with `context_menu_group` placement) |
 
@@ -142,6 +142,25 @@ The `add_action` may carry `api_submit` to route form submission directly to a R
 endpoint instead of through the extension proxy. After a successful add, the frontend
 refreshes the options list and auto-selects the newly created item (if the response includes
 the field named by `api_submit.response_id_field`).
+
+#### Standalone `form` UI submit convention
+
+`ExtensionUi::Form` is a standalone page/panel form, not an action button form. To make it
+submittable in the frontend, register a matching save action in the extension's action
+catalogue:
+
+- Prefer `get_<name>` as the `pre_load_action` and `save_<name>` as the submit action.
+- If there is no preload step, use `save` or `submit`.
+- The save action may be a normal extension action or an `api_submit` action.
+
+Current frontend resolution order for standalone forms:
+
+1. If `pre_load_action` is `get_<name>`, use `save_<name>`.
+2. Otherwise use an action named `save` or `submit`.
+3. Otherwise, if exactly one `save_*` action exists, use that action.
+
+If no matching save action exists, the form is rendered as unavailable instead of silently
+dropping submissions.
 
 #### Pagination
 
@@ -239,9 +258,9 @@ ActionDef::new("approve-match", "Approve Match")
 
 #### Destructive action confirmation
 
-When an `ActionDef` has `destructive: true` and no `ui` (no form), the frontend
-shows a confirmation dialog before invoking the action. The `confirm_entity_field`
-specifies which row data field to use as the entity name in the dialog message.
+When an `ActionDef` has `destructive: true`, the frontend shows a confirmation dialog before
+invoking the action, including form-backed actions. The `confirm_entity_field` specifies
+which row data field to use as the entity name in the dialog message.
 
 If `confirm_entity_field` is not set or the field value is empty, "this item" is
 used as a fallback.
@@ -328,6 +347,12 @@ first-class action buttons without duplicating logic in an extension handler.
 | `"{{enabled:bool}}"` | `bool` | `"true"` → `true`, anything else → `false` |
 | `"{{count:number}}"` | `number` | String parsed as JSON number |
 | `"{{tags:csv_array}}"` | `csv_array` | Comma-split, trimmed, empty-filtered JSON array |
+
+Template rendering rules enforced by the frontend:
+
+- Unknown `{{field}}` placeholders are rejected as configuration errors.
+- `number` coercion must produce a finite number.
+- `csv_array` is capped at 100 entries to avoid oversized payload generation.
 
 Example — create a plugin config on form submit:
 

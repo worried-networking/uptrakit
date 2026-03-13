@@ -3,9 +3,11 @@ import {
 	copyToClipboard,
 	formatDate,
 	formatVersion,
+	isValidExternalUrl,
 	isValidLogoUrl,
 	parseUrlPage,
 	parseUrlParam,
+	renderApiSubmitTemplate,
 	safeRedirect
 } from './utils';
 
@@ -42,6 +44,22 @@ describe('isValidLogoUrl', () => {
 
 	it('rejects a malformed URL', () => {
 		expect(isValidLogoUrl('not a url at all')).toBe(false);
+	});
+});
+
+// ── isValidExternalUrl ──────────────────────────────────────────────────────
+
+describe('isValidExternalUrl', () => {
+	it('accepts https URLs', () => {
+		expect(isValidExternalUrl('https://example.com/release')).toBe(true);
+	});
+
+	it('accepts http URLs', () => {
+		expect(isValidExternalUrl('http://example.com/release')).toBe(true);
+	});
+
+	it('rejects javascript URLs', () => {
+		expect(isValidExternalUrl('javascript:alert(1)')).toBe(false);
 	});
 });
 
@@ -224,5 +242,42 @@ describe('copyToClipboard', () => {
 		vi.mocked(navigator.clipboard.writeText).mockRejectedValue(new Error('denied'));
 		const result = await copyToClipboard('hello');
 		expect(result).toBe(false);
+	});
+});
+
+// ── renderApiSubmitTemplate ─────────────────────────────────────────────────
+
+describe('renderApiSubmitTemplate', () => {
+	it('renders nested placeholders with coercions', () => {
+		const template = {
+			name: '{{name}}',
+			enabled: '{{enabled:bool}}',
+			count: '{{count:number}}',
+			tags: '{{tags:csv_array}}'
+		};
+
+		expect(
+			renderApiSubmitTemplate(template, {
+				name: 'example',
+				enabled: 'true',
+				count: '42',
+				tags: 'alpha, beta ,, gamma'
+			})
+		).toEqual({
+			name: 'example',
+			enabled: true,
+			count: 42,
+			tags: ['alpha', 'beta', 'gamma']
+		});
+	});
+
+	it('rejects missing fields', () => {
+		expect(() => renderApiSubmitTemplate('{{missing}}', {})).toThrow('Unknown form field "missing"');
+	});
+
+	it('rejects invalid numbers', () => {
+		expect(() => renderApiSubmitTemplate('{{count:number}}', { count: 'abc' })).toThrow(
+			'Field "count" must be a valid number'
+		);
 	});
 });

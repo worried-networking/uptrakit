@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy, onMount } from 'svelte';
 	import { listSystemEnrollmentTokens, createSystemEnrollmentToken, revokeSystemEnrollmentToken } from '$lib/api';
 	import type {
 		SystemEnrollmentTokenResponse,
@@ -7,6 +8,7 @@
 		CreateSystemEnrollmentTokenRequest
 	} from '$lib/types';
 	import { copyToClipboard, formatDate } from '$lib/utils';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	let {
 		onSuccess,
@@ -21,12 +23,22 @@
 	let showCreateDialog: boolean = $state(false);
 	let createdToken: SystemEnrollmentTokenCreatedResponse | null = $state(null);
 	let copied: boolean = $state(false);
+	let confirmRevokeId: string | null = $state(null);
+	let copyResetTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 
 	// Create form fields
 	let newName: string = $state('');
 	let newMaxUses: string = $state('');
 	let newExpiresIn: string = $state('');
 	let creating: boolean = $state(false);
+
+	onMount(() => {
+		void loadTokens();
+	});
+
+	onDestroy(() => {
+		if (copyResetTimeout) clearTimeout(copyResetTimeout);
+	});
 
 	async function loadTokens() {
 		loading = true;
@@ -87,8 +99,10 @@
 	async function handleCopy() {
 		if (createdToken && (await copyToClipboard(createdToken.token))) {
 			copied = true;
-			setTimeout(() => {
+			if (copyResetTimeout) clearTimeout(copyResetTimeout);
+			copyResetTimeout = setTimeout(() => {
 				copied = false;
+				copyResetTimeout = null;
 			}, 2000);
 		}
 	}
@@ -128,7 +142,7 @@
 
 <div class="card mb-6 p-6">
 	<div class="mb-4 flex items-center justify-between">
-		<h2 class="h3">System Services</h2>
+		<h2 class="h3">System Enrollment Tokens</h2>
 		<div class="flex gap-2">
 			{#if tokens === null}
 				<button class="btn preset-filled-primary-500" onclick={loadTokens} disabled={loading}>
@@ -227,7 +241,7 @@
 							<td>{formatDate(token.created_at)}</td>
 							<td>
 								{#if status === 'active'}
-									<button class="btn btn-sm preset-filled-error-500" onclick={() => handleRevoke(token.id)}>
+									<button class="btn btn-sm preset-filled-error-500" onclick={() => (confirmRevokeId = token.id)}>
 										Revoke
 									</button>
 								{/if}
@@ -246,3 +260,20 @@
 		<p class="text-surface-600 dark:text-surface-400">No system enrollment tokens configured.</p>
 	{/if}
 </div>
+
+{#if confirmRevokeId}
+	<ConfirmDialog
+		title="Revoke System Enrollment Token"
+		messagePrefix="Are you sure you want to revoke"
+		entityName="this system enrollment token"
+		confirmLabel="Revoke"
+		onconfirm={() => {
+			const tokenId = confirmRevokeId;
+			confirmRevokeId = null;
+			if (tokenId) void handleRevoke(tokenId);
+		}}
+		oncancel={() => {
+			confirmRevokeId = null;
+		}}
+	/>
+{/if}

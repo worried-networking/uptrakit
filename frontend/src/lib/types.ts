@@ -53,6 +53,12 @@ export function hasAnyPermission(user: User | null | undefined, ...perms: Permis
 	return perms.some((p) => user.permissions.includes(p));
 }
 
+export function hasPermissionValue(user: User | null | undefined, permission?: string | null): boolean {
+	if (!permission) return true;
+	if (!user) return false;
+	return user.permissions.includes(permission as Permission);
+}
+
 export interface User {
 	id: string;
 	email: string;
@@ -940,7 +946,7 @@ export type ExtensionUi =
 			/** Default number of items per page. When absent, defaults to 20. */
 			default_per_page?: number;
 	  }
-	| { type: 'form'; fields: FieldDef[] }
+	| { type: 'form'; fields: FieldDef[]; pre_load_action?: string }
 	| { type: 'key_value'; data_action: string }
 	| { type: 'actions'; actions: string[] };
 

@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { getUser, getLoading } from '$lib/auth.svelte';
 	import { approveDeviceAuth } from '$lib/api';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 
 	let error = $state('');
 	let success = $state(false);
 	let approving = $state(false);
 
 	const DEVICE_CODE_PATTERN = /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
-	let rawCode = $derived($page.url.searchParams.get('code') || '');
+	let rawCode = $derived(page.url.searchParams.get('code') || '');
 	let code = $derived(DEVICE_CODE_PATTERN.test(rawCode) ? rawCode : '');
 	let invalidCode = $derived(rawCode !== '' && code === '');
 	let isLoggedIn = $derived(!!getUser());

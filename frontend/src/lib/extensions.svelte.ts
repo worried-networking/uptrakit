@@ -1,4 +1,4 @@
-import type { ExtensionResponse } from './types';
+import type { ActionDef, ExtensionResponse } from './types';
 import { listExtensions } from './api';
 import { SvelteMap } from 'svelte/reactivity';
 
@@ -31,6 +31,24 @@ export function clearExtensions(): void {
 
 export function getPageExtensions(): ExtensionResponse[] {
 	return extensions.filter((e) => e.placement.type === 'page');
+}
+
+export function resolveExtensionFormAction(extension: ExtensionResponse): ActionDef | undefined {
+	if (extension.ui.type !== 'form') return undefined;
+
+	const actions = extension.actions ?? [];
+	const preLoadAction = extension.ui.pre_load_action;
+	if (preLoadAction?.startsWith('get_')) {
+		const inferredSaveAction = `save_${preLoadAction.slice(4)}`;
+		const match = actions.find((action) => action.action_id === inferredSaveAction);
+		if (match) return match;
+	}
+
+	const exactMatch = actions.find((action) => action.action_id === 'save' || action.action_id === 'submit');
+	if (exactMatch) return exactMatch;
+
+	const saveActions = actions.filter((action) => action.action_id.startsWith('save_'));
+	return saveActions.length === 1 ? saveActions[0] : undefined;
 }
 
 export function getPanelExtensions(targetPage: string): ExtensionResponse[] {
