@@ -78,11 +78,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn capabilities_is_empty() {
+    async fn capabilities_match_expected() {
         let config = ProxmoxConfig::default();
         let plugin = ProxmoxPlugin::new(config, test_executor())
             .await
             .expect("create");
-        assert!(plugin.capabilities().is_empty());
+        assert_eq!(plugin.capabilities(), ProxmoxPlugin::CAPABILITIES);
     }
 }
