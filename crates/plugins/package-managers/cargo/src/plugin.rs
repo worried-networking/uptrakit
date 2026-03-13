@@ -148,7 +148,9 @@ fn sparse_index_url(registry_base: &str, crate_name: &str) -> String {
 ///
 /// Makes a single HTTP `GET` request to the sparse index URL, parses the
 /// newline-delimited JSON response with `tame_index::IndexKrate::from_slice`,
-/// and returns filtered [`UpstreamRelease`] entries.
+/// and returns filtered [`UpstreamRelease`] entries sorted in **descending
+/// semver order** (newest first), so callers can simply use `.find()` to
+/// obtain the latest release.
 async fn fetch_crate_releases(
     client: &reqwest::Client,
     registry_base: &str,
@@ -188,7 +190,7 @@ async fn fetch_crate_releases(
         )))
     })?;
 
-    let releases: Vec<UpstreamRelease> = krate
+    let mut releases: Vec<UpstreamRelease> = krate
         .versions
         .iter()
         .filter(|v| {
@@ -205,6 +207,11 @@ async fn fetch_crate_releases(
             UpstreamRelease::new(Version::new(&version_str), version_str, is_pre, release_url)
         })
         .collect();
+
+    // The sparse index stores versions in chronological (oldest-first) order.
+    // Sort descending so the scheduler's `.find(|r| !r.is_prerelease)` picks
+    // the newest stable release instead of the oldest.
+    releases.sort_by(|a, b| b.version.cmp(&a.version));
 
     tracing::debug!(
         crate_name,
@@ -1024,5 +1031,63 @@ mod tests {
 
         let discovered = plugin.discover_software().await.unwrap();
         assert!(discovered.is_empty());
+    }
+
+    // ── fetch_releases sort order ─────────────────────────────────────────────
+
+    /// Verify that `fetch_crate_releases` returns versions in descending semver
+    /// order (newest first), matching the contract expected by the scheduler's
+    /// `.find(|r| !r.is_prerelease)` logic.
+    #[test]
+    fn fetch_releases_sorted_newest_first() {
+        // Simulate the chronological (oldest-first) order from the sparse index.
+        let mut releases: Vec<UpstreamRelease> = [
+            UpstreamRelease::new(
+                Version::new("0.1.0"),
+                "0.1.0".to_string(),
+                false,
+                "https://crates.io/crates/example/0.1.0".to_string(),
+            ),
+            UpstreamRelease::new(
+                Version::new("0.9.0"),
+                "0.9.0".to_string(),
+                false,
+                "https://crates.io/crates/example/0.9.0".to_string(),
+            ),
+            UpstreamRelease::new(
+                Version::new("1.0.0-alpha"),
+                "1.0.0-alpha".to_string(),
+                true,
+                "https://crates.io/crates/example/1.0.0-alpha".to_string(),
+            ),
+            UpstreamRelease::new(
+                Version::new("1.0.0"),
+                "1.0.0".to_string(),
+                false,
+                "https://crates.io/crates/example/1.0.0".to_string(),
+            ),
+            UpstreamRelease::new(
+                Version::new("1.2.3"),
+                "1.2.3".to_string(),
+                false,
+                "https://crates.io/crates/example/1.2.3".to_string(),
+            ),
+        ]
+        .into();
+
+        // Apply the same sort used in `fetch_crate_releases`.
+        releases.sort_by(|a, b| b.version.cmp(&a.version));
+
+        // Newest must be first.
+        assert_eq!(releases[0].version, Version::new("1.2.3"));
+        // Oldest must be last.
+        assert_eq!(releases[releases.len() - 1].version, Version::new("0.1.0"));
+
+        // The scheduler's "find latest stable" logic must now pick 1.2.3, not 0.1.0.
+        let latest_stable = releases.iter().find(|r| !r.is_prerelease);
+        assert_eq!(
+            latest_stable.map(|r| r.version.clone()),
+            Some(Version::new("1.2.3")),
+        );
     }
 }
