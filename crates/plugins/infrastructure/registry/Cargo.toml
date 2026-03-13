@@ -11,6 +11,11 @@ publish = false
 default = ["daemon"]
 daemon = ["uptrakit-plugin-releases-docker/daemon"]
 ssh = ["daemon", "uptrakit-plugin-releases-docker/ssh"]
+migrations = [
+    "uptrakit-plugin-infrastructure-core/migrations",
+    "uptrakit-plugin-infrastructure-proxmox/migrations",
+    "dep:sea-orm-migration",
+]
 agent-infra = [
     "uptrakit-plugin-infrastructure-core/agent-infra",
     "uptrakit-plugin-infrastructure-proxmox/agent-infra",
@@ -52,6 +57,7 @@ uptrakit-notification-plugin-core = { workspace = true }
 uptrakit-notification-plugin-registry = { workspace = true, optional = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+sea-orm-migration = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

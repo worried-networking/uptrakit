@@ -18,8 +18,14 @@ pub struct ProxmoxPlugin {
 impl ProxmoxPlugin {
     /// Compile-time capabilities for the Proxmox VE plugin.
     ///
-    /// This plugin has no agent-side capabilities — it operates entirely on
-    /// the controller via extension actions.
+    /// The controller-side plugin owns controller database migrations for
+    /// the `proxmox_host_mappings` table. It has no agent-side capabilities —
+    /// it operates entirely on the controller via extension actions.
+    #[cfg(feature = "migrations")]
+    pub const CAPABILITIES: &'static [PluginCapability] = &[PluginCapability::ControllerMigrations];
+
+    /// Compile-time capabilities for the Proxmox VE plugin (without migrations).
+    #[cfg(not(feature = "migrations"))]
     pub const CAPABILITIES: &'static [PluginCapability] = &[];
 
     /// Create a new Proxmox VE plugin instance.
@@ -40,6 +46,11 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
     {
         fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
             Self::CAPABILITIES.to_vec()
+        }
+
+        #[cfg(feature = "migrations")]
+        fn controller_migrations(&self) -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
+            crate::controller_migration::migrations()
         }
     }
 );

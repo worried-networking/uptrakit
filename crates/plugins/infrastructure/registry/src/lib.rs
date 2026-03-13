@@ -48,6 +48,19 @@ pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};
 #[cfg(feature = "notifications")]
 pub use uptrakit_notification_plugin_registry::NotificationRegistryConfig;
 
+/// Return all controller-side database migrations contributed by plugins.
+///
+/// The controller's migration runner appends these after the core migrations
+/// from `crates/shared/db` so that plugin-owned tables are created after the
+/// core schema is in place. Each migration has a unique name tracked in
+/// `seaql_migrations`, so already-applied migrations are skipped.
+#[cfg(feature = "migrations")]
+pub fn all_controller_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
+    let mut migrations = Vec::new();
+    migrations.extend(uptrakit_plugin_infrastructure_proxmox::controller_migration::migrations());
+    migrations
+}
+
 /// Create a list of all known agent-side infrastructure plugins.
 ///
 /// Returns `Arc<dyn PluginBase>` instances that implement the infrastructure

@@ -6985,6 +6985,7 @@ dependencies = [
  "futures-util",
  "rootcause",
  "sea-orm",
+ "sea-orm-migration",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",

@@ -24,7 +24,6 @@ mod m20260307_000001_split_version_check;
 mod m20260307_000002_manage_commands_permission;
 mod m20260308_000001_system_services_permissions;
 mod m20260308_000002_fix_permission_uuid_storage;
-mod m20260308_000003_proxmox_hm_pagination_indexes;
 mod m20260309_000001_fix_permission_created_at_format;
 mod m20260309_000002_simplify_autodiscovery_ignores;
 mod m20260309_000003_host_tags;
@@ -38,8 +37,6 @@ mod m20260312_000001_system_enrollment_tokens;
 mod m20260312_000002_discover_host_packages_task;
 mod m20260312_000003_plugin_type_settings;
 mod m20260313_000001_per_host_update_locking;
-mod m20260314_000001_proxmox_host_mapping;
-mod m20260315_000001_proxmox_hm_machine_id;
 mod m20260316_000001_host_machine_id_partial_unique;
 mod m20260317_000001_fix_hosts_count_desync;
 mod m20260318_000001_host_software_item_qualifier;
@@ -82,11 +79,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260312_000002_discover_host_packages_task::Migration),
             Box::new(m20260313_000001_per_host_update_locking::Migration),
             Box::new(m20260305_000002_service_app_name::Migration),
-            Box::new(m20260314_000001_proxmox_host_mapping::Migration),
-            Box::new(m20260315_000001_proxmox_hm_machine_id::Migration),
             Box::new(m20260316_000001_host_machine_id_partial_unique::Migration),
             Box::new(m20260317_000001_fix_hosts_count_desync::Migration),
-            Box::new(m20260308_000003_proxmox_hm_pagination_indexes::Migration),
             Box::new(m20260318_000001_host_software_item_qualifier::Migration),
             Box::new(m20260318_000002_cron_to_interval::Migration),
             Box::new(m20260309_000002_simplify_autodiscovery_ignores::Migration),
@@ -102,7 +96,7 @@ impl MigratorTrait for Migrator {
     }
 }
 
-/// Run all pending migrations.
+/// Run all pending core migrations (without plugin-contributed migrations).
 ///
 /// All migrations are executed inside a single database transaction so that
 /// every DDL statement runs on the same physical connection. Without this,
@@ -114,11 +108,62 @@ impl MigratorTrait for Migrator {
 ///
 /// For PostgreSQL, `sea-orm-migration` wraps the run in a transaction
 /// internally; our outer `begin`/`commit` becomes a harmless extra savepoint.
+///
+/// For the controller, prefer [`run_migrations_with_plugins`] to also include
+/// plugin-contributed migrations.
 pub async fn run_migrations(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
     use sea_orm::TransactionTrait;
     let txn = db.begin().await?;
     Migrator::up(&txn, None).await?;
     txn.commit().await
+}
+
+/// Run all pending migrations, including plugin-contributed ones.
+///
+/// Core and plugin migrations are combined into a single migrator so that
+/// SeaORM sees the complete migration list and does not error on "missing"
+/// entries. All are executed inside a single transaction.
+pub async fn run_migrations_with_plugins(
+    db: &DatabaseConnection,
+    plugin_migrations: Vec<Box<dyn MigrationTrait>>,
+) -> Result<(), sea_orm::DbErr> {
+    use sea_orm::TransactionTrait;
+    let txn = db.begin().await?;
+    CombinedMigrator::set(plugin_migrations);
+    CombinedMigrator::up(&txn, None).await?;
+    CombinedMigrator::clear();
+    txn.commit().await
+}
+
+/// Dynamic migrator that combines core + plugin migrations into one list.
+///
+/// SeaORM's `MigratorTrait` requires a static `fn migrations()`, so we use a
+/// thread-local to pass the plugin migrations at runtime and combine them
+/// with the core migrations from [`Migrator`].
+struct CombinedMigrator;
+
+std::thread_local! {
+    static PLUGIN_MIGRATIONS: std::cell::RefCell<Vec<Box<dyn MigrationTrait>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+impl CombinedMigrator {
+    fn set(migrations: Vec<Box<dyn MigrationTrait>>) {
+        PLUGIN_MIGRATIONS.with(|m| *m.borrow_mut() = migrations);
+    }
+
+    fn clear() {
+        PLUGIN_MIGRATIONS.with(|m| m.borrow_mut().clear());
+    }
+}
+
+#[async_trait::async_trait]
+impl MigratorTrait for CombinedMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        let mut all = Migrator::migrations();
+        PLUGIN_MIGRATIONS.with(|m| all.extend(m.borrow_mut().drain(..)));
+        all
+    }
 }
 
 #[cfg(test)]
@@ -132,10 +177,10 @@ mod tests {
     use crate::entity::{
         audit_log, crl_cache, data_encryption_key, global_setting, host_discovery_allowlist,
         host_software_item, host_tag, host_tag_assignment, notification_channel, notification_log,
-        notification_rule, plugin_config, plugin_type_setting, proxmox_host_mapping,
-        revoked_token_jti, revoked_token_user, role_permission, service, software_ignore,
-        software_item, system_audit_log, system_enrollment_token, system_service,
-        system_service_certificate, tenant_discovery_allowlist, update_batch, update_history,
+        notification_rule, plugin_config, plugin_type_setting, revoked_token_jti,
+        revoked_token_user, role_permission, service, software_ignore, software_item,
+        system_audit_log, system_enrollment_token, system_service, system_service_certificate,
+        tenant_discovery_allowlist, update_batch, update_history,
     };
 
     /// Simulate the "existing database" upgrade scenario:
@@ -204,12 +249,6 @@ mod tests {
 
         // Verify system_enrollment_tokens table exists.
         system_enrollment_token::Entity::find()
-            .count(&db)
-            .await
-            .unwrap();
-
-        // Verify proxmox_host_mappings table exists.
-        proxmox_host_mapping::Entity::find()
             .count(&db)
             .await
             .unwrap();

@@ -17,6 +17,8 @@ pub mod agent;
 pub mod api_types;
 pub mod client;
 pub mod config;
+#[cfg(feature = "migrations")]
+pub mod controller_migration;
 pub mod discovery;
 pub mod error;
 pub mod extensions;

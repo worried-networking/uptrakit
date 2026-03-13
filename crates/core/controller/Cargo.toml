@@ -35,7 +35,7 @@ uptrakit-shared-types = { workspace = true }
 uptrakit-command = { workspace = true }
 uptrakit-notification-plugin-registry = { workspace = true, features = ["webhook"] }
 uptrakit-plugin-infrastructure-core = { workspace = true }
-uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["notifications"] }
+uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["notifications", "migrations"] }
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "sync", "time"] }
 axum = { workspace = true }
