@@ -1073,7 +1073,7 @@ pub async fn check_versions(
             name: item.name.clone(),
             detect_version,
             fetch_releases,
-            host_software_item_id: None,
+            host_software_item_id: Some(link.id),
         };
 
         let msg = uptrakit_internal_wire::ControllerMessage::CheckVersions(
@@ -1163,7 +1163,7 @@ pub async fn check_versions_host(
     };
 
     // Verify host is assigned
-    let _link = match item_queries::load_host_assignment(tenant_db.db(), host_id, item_id).await {
+    let link = match item_queries::load_host_assignment(tenant_db.db(), host_id, item_id).await {
         Some(l) => l,
         None => {
             return error_response(
@@ -1324,7 +1324,7 @@ pub async fn check_versions_host(
         name: item.name.clone(),
         detect_version,
         fetch_releases,
-        host_software_item_id: None,
+        host_software_item_id: Some(link.id),
     };
 
     let msg = uptrakit_internal_wire::ControllerMessage::CheckVersions(

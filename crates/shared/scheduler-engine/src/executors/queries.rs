@@ -21,6 +21,12 @@ pub(crate) struct AgentAssignmentRow {
     pub(crate) software_item_name: String,
     pub(crate) plugin_type: String,
     pub(crate) package_identifier: String,
+    /// FK pointing to the specific `host_software_items.id` row this plugin
+    /// assignment belongs to. Used to populate
+    /// `VersionCheckAssignment::host_software_item_id` so that the controller
+    /// can route results back to the correct row when a service manages
+    /// multiple hosts (e.g. SSH agent: one service → N remote hosts).
+    pub(crate) host_software_item_id: Uuid,
     /// Profile config from `plugin_configs.config`. NULL when `plugin_config_id`
     /// is NULL (package manager assignments after type settings migration).
     pub(crate) profile_config: Option<serde_json::Value>,
@@ -66,6 +72,10 @@ pub(crate) async fn query_agent_assignment_rows(
         .column_as(
             host_software_item_plugin::Column::Config,
             "assignment_config",
+        )
+        .column_as(
+            host_software_item_plugin::Column::HostSoftwareItemId,
+            "host_software_item_id",
         )
         .column_as(
             host_software_item_plugin::Column::ExecutionSite,

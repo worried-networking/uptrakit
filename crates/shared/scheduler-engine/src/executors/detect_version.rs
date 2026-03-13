@@ -96,7 +96,7 @@ impl DetectVersionExecutor {
                         name: row.software_item_name.clone(),
                         detect_version: None,
                         fetch_releases: None,
-                        host_software_item_id: None,
+                        host_software_item_id: Some(row.host_software_item_id),
                     });
 
             item.detect_version = Some(assignment);
