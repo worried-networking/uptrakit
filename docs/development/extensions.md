@@ -464,14 +464,14 @@ FieldDef::new("host_id", "Host")
 The frontend calls the specified extension action and expects the response `data` to contain
 an `options` array of `{ "value": "...", "label": "..." }` objects.
 
-**Example — PVE host picker:**
+**Example — discovered guest picker:**
 
 ```rust
-FieldDef::new("pve_host_id", "PVE Host")
-    .with_type(FieldType::Select)
+FieldDef::new("discovered_guests", "Discovered Guests")
+    .with_type(FieldType::MultiSelect)
     .required()
     .with_select_source(SelectSource::Action {
-        action_id: "list-pve-hosts".to_string(),
+        action_id: "list-discovered-guests".to_string(),
     })
 ```
 

@@ -1,13 +1,13 @@
 # Proxmox Bootstrap Privileges
 
 This document describes the privilege chain required for the Proxmox VE
-bootstrap flow (the `bootstrap-proxmox` extension action) and the
+bootstrap flow (the `bootstrap-proxmox-guest` extension action) and the
 controller-side discovery via the PVE REST API.
 
 ## PVE node privileges (SSH user)
 
-The `bootstrap-proxmox` action connects to an already-bootstrapped PVE node
-via SSH and executes commands inside guests via `pct exec` (LXC) or
+The `bootstrap-proxmox-guest` action connects to an already-bootstrapped PVE
+node via SSH and executes commands inside guests via `pct exec` (LXC) or
 `qm guest exec` (QEMU). This requires **root access** on the PVE node
 because `pct` and `qm` are privileged commands.
 

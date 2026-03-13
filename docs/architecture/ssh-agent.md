@@ -17,7 +17,7 @@ The SSH agent is feature-complete for version checks and updates. The implementa
 - Ed25519 keypair generation for automated key deployment
 - A `host bootstrap` command that automates remote host setup (user creation, key deployment, sudoers configuration)
 - A `host sync` command that regenerates sudoers entries, detects PVE node name, and verifies PVE privileges
-- A `bootstrap-proxmox` extension action that bootstraps SSH hosts inside Proxmox VE guests
+- A `bootstrap-proxmox-guest` extension action that bootstraps discovered Proxmox VE guests
   (LXC/QEMU) via `pct exec`/`qm guest exec` through an already-bootstrapped PVE node
 - Per-host sudo state tracking (`is_root`, `sudo_available`, `sudo_policy`) in the local database
 - Runtime `SudoAwareCommandExecutor` wrapping that applies `sudo` based on stored host context — no hard-coded `sudo` in plugin commands
@@ -235,24 +235,27 @@ For detailed usage and troubleshooting, see
 
 ### Proxmox Guest Bootstrap
 
-The `bootstrap-proxmox` extension action bootstraps SSH hosts inside Proxmox VE guests without
-requiring direct SSH access to the guest. Instead, it uses an already-bootstrapped PVE node as
-a gateway.
+The `bootstrap-proxmox-guest` extension action bootstraps SSH hosts inside Proxmox VE guests
+without requiring direct SSH access to the guest. It resolves the appropriate PVE node
+automatically from the controller's Proxmox plugin discovery data and uses that node as a
+gateway.
 
 ```text
-1. LOAD PVE HOST from local DB (must be marked is_pve_node = true)
-2. CONNECT TO PVE NODE via SSH (using stored credentials)
-3. CREATE PveGuestExecutor (wraps SSH session + vmid + guest_type)
-4. GENERATE Ed25519 KEYPAIR
-5. REMOTE SETUP INSIDE GUEST (via pct exec / qm guest exec)
+1. QUERY PROXMOX PLUGIN for unmatched guests (via ServiceExtensionProxy)
+2. RESOLVE PVE HOST from local DB by matching (pve_node_name, pve_plugin_config_id)
+3. CONNECT TO PVE NODE via SSH (using stored credentials)
+4. CREATE PveGuestExecutor (wraps SSH session + vmid + guest_type)
+5. GENERATE Ed25519 KEYPAIR
+6. REMOTE SETUP INSIDE GUEST (via pct exec / qm guest exec)
    - Create user (useradd --create-home --shell /bin/sh)
    - Detect home directory (getent passwd)
    - Deploy authorized_keys with restrictions
    - Resolve plugin sudo commands
    - Write /etc/sudoers.d/uptrakit-<username>
-6. GET GUEST IP (hostname -I for LXC, network-get-interfaces for QEMU)
-7. VERIFY SSH (connect directly to guest IP with deployed key)
-8. SAVE TO DATABASE (hostname = guest IP, port = 22)
+7. GET GUEST IP (hostname -I for LXC, network-get-interfaces for QEMU)
+8. VERIFY SSH (connect directly to guest IP with deployed key)
+9. SAVE TO DATABASE (hostname = guest IP, port = 22)
+10. DEFER MATCH via proxmox_pending_matches table (resolved on next ReportHosts)
 ```
 
 The `PveGuestExecutor` implements `RemoteExecutor` (from `uptrakit-command`) and delegates each
@@ -282,8 +285,8 @@ the agent performs a **cluster deduplication check** before creating credentials
 
 The tenant ID is received via `ServiceSettingsPayload.tenant_id` from the controller.
 
-This enables the `bootstrap-proxmox` action to appear in the UI with the PVE node available
-as a gateway option.
+This enables the `bootstrap-proxmox-guest` action to auto-resolve PVE nodes as gateways
+from the controller's discovered guest data.
 
 ## Sudo Context and Dynamic Execution
 
@@ -670,8 +673,8 @@ crates/core/agent-ssh/
     │                    # report_hosts_after_config_change() — all wrap SshCommandExecutor with
     │                    # SudoAwareCommandExecutor
     ├── extension.rs     # UI extension: manifest builder, action dispatch (list-hosts, bootstrap,
-    │                    # remove-host, bootstrap-proxmox, list-pve-hosts, list-discovered-guests,
-    │                    # bootstrap-proxmox-guest), ECIES decryption of sensitive params,
+    │                    # remove-host, list-discovered-guests, bootstrap-proxmox-guest),
+    │                    # ECIES decryption of sensitive params,
     │                    # ServiceExtensionProxy invocation helpers
     ├── error.rs         # Error types (rootcause + thiserror)
     ├── ssh_config.rs    # SSH config resolution (~/.ssh/config defaults for User, Port, HostName)
@@ -813,8 +816,6 @@ handler's `on_extension_response` method calls `proxy.complete()` to deliver the
 | `bootstrap` | primary_action (form) | 120s | Bootstrap a new remote host |
 | `sync-host` | row_action (form) | 120s | Sync host: update sudoers, detect PVE node name, verify PVE privileges; optional auth override |
 | `remove-host` | row_action (destructive) | 30s | Remove a host from local DB |
-| `list-pve-hosts` | select_source (action) | 10s | List PVE-marked hosts for select dropdown |
-| `bootstrap-proxmox` | primary_action (form) | 120s | Bootstrap a guest inside a Proxmox VE node |
 | `list-discovered-guests` | select_source (action) | 15s | List unmatched Proxmox guests (via ServiceExtensionProxy) |
 | `bootstrap-proxmox-guest` | primary_action (form) | 120s | Bootstrap a discovered Proxmox guest with auto-matching |
 
@@ -849,18 +850,16 @@ See [Extensions Security](../security/extensions.md) for the trust model and
 - **`bootstrap`**: Spawned as a background task via the `bg_tx` channel. The
   `ExtensionResponse` is sent asynchronously when the task completes. The extension proxy's
   120-second timeout handles the case where the task runs too long.
-- **`bootstrap-proxmox`**: Spawned as a background task. Connects to the PVE node via SSH,
-  executes commands inside the guest via `pct exec` (LXC) or `qm guest exec` (QEMU), verifies
-  SSH connectivity, and saves the host.
 - **`list-discovered-guests`**: Invokes `proxmox.hosts/list-all-unmatched` via
   `ServiceExtensionProxy`. Returns empty options if the Proxmox plugin is not installed.
 - **`bootstrap-proxmox-guest`**: Spawned as a background task. Resolves guest metadata
   from the Proxmox plugin via `ServiceExtensionProxy`, auto-detects the PVE host by
   matching `(pve_node_name, pve_plugin_config_id)` in the local DB, auto-fills the
   hostname from the guest's Proxmox hostname (with user override), bootstraps the guest
-  (same as `bootstrap-proxmox`), then auto-matches the Proxmox host mapping via
-  `proxmox.hosts/match`. Hosts must have been synced (via `host sync` or bootstrap) to
-  populate `pve_node_name` for matching to succeed.
+  via `pct exec` (LXC) or `qm guest exec` (QEMU), then defers the Proxmox host mapping
+  match via the `proxmox_pending_matches` table (resolved on the next `ReportHosts`).
+  Hosts must have been synced (via `host sync` or bootstrap) to populate `pve_node_name`
+  for matching to succeed.
 
 ### CLI usage
 
