@@ -204,12 +204,20 @@ pub struct SoftwareItemHostSummary {
 }
 
 /// Summary of a plugin role assignment on a host-software pair (read-only).
+///
+/// When the assignment was created via autodiscovery (package managers),
+/// `plugin_config_id` and `plugin_config_name` are `None` — the plugin type
+/// is read directly from the HSIP row's `plugin_type` column.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostPluginRoleSummary {
     pub role: PluginRole,
-    pub plugin_config_id: Uuid,
-    pub plugin_config_name: String,
+    /// `None` for autodiscovered package-manager assignments (no stored config).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_config_id: Option<Uuid>,
+    /// `None` when `plugin_config_id` is `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_config_name: Option<String>,
     pub plugin_type: String,
     pub package_identifier: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

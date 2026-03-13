@@ -584,10 +584,12 @@ mod tests {
                 qualifier: None,
                 plugins: vec![HostPluginRoleSummary {
                     role: PluginRole::DetectVersion,
-                    plugin_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
-                        .parse::<Uuid>()
-                        .unwrap(),
-                    plugin_config_name: "Default Config".to_string(),
+                    plugin_config_id: Some(
+                        "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
+                            .parse::<Uuid>()
+                            .unwrap(),
+                    ),
+                    plugin_config_name: Some("Default Config".to_string()),
                     plugin_type: "releases_github".to_string(),
                     package_identifier: "nodejs/node".to_string(),
                     config_override: None,
@@ -643,10 +645,12 @@ mod tests {
                 qualifier: None,
                 plugins: vec![HostPluginRoleSummary {
                     role: PluginRole::DetectVersion,
-                    plugin_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
-                        .parse::<Uuid>()
-                        .unwrap(),
-                    plugin_config_name: "Homebrew".to_string(),
+                    plugin_config_id: Some(
+                        "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
+                            .parse::<Uuid>()
+                            .unwrap(),
+                    ),
+                    plugin_config_name: Some("Homebrew".to_string()),
                     plugin_type: "package_manager_homebrew".to_string(),
                     package_identifier: "curl".to_string(),
                     config_override: None,

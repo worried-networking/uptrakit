@@ -268,43 +268,34 @@ pub(super) async fn deliver_pending_updates(
             );
             continue;
         };
-        let Some(exec_pc_id) = exec_assignment.plugin_config_id else {
-            tracing::warn!(
-                update_id = %update_record.id,
-                "execute_update plugin has no plugin_config_id, skipping"
-            );
-            continue;
-        };
-        let Some(exec_config) = configs_map.get(&exec_pc_id) else {
-            tracing::warn!(
-                update_id = %update_record.id,
-                plugin_config_id = %exec_pc_id,
-                "execute_update plugin config not found or deactivated, skipping"
-            );
-            continue;
-        };
+        let exec_config = exec_assignment
+            .plugin_config_id
+            .and_then(|pc_id| configs_map.get(&pc_id));
 
-        let execute_update_plugin = match build_plugin_assignment(exec_assignment, exec_config) {
-            Some(a) => a,
-            None => {
-                tracing::warn!(
-                    update_id = %update_record.id,
-                    "unknown plugin type for execute_update, skipping pending update"
-                );
-                continue;
-            }
-        };
+        let execute_update_plugin =
+            match build_plugin_assignment_nullable(exec_assignment, exec_config) {
+                Some(a) => a,
+                None => {
+                    tracing::warn!(
+                        update_id = %update_record.id,
+                        "unknown plugin type for execute_update, skipping pending update"
+                    );
+                    continue;
+                }
+            };
 
         // Resolve optional detect_version assignment.
         let detect_key = (update_record.host_id, item.id, "detect_version".to_string());
-        let detect_version_plugin = assignments_map
-            .get(&detect_key)
-            .and_then(|a| configs_map.get(&a.plugin_config_id?).map(|c| (a, c)))
-            .and_then(|(a, c)| build_plugin_assignment(a, c));
+        let detect_version_plugin = assignments_map.get(&detect_key).and_then(|a| {
+            let c = a.plugin_config_id.and_then(|pc_id| configs_map.get(&pc_id));
+            build_plugin_assignment_nullable(a, c)
+        });
 
         // Resolve hooks from the execute_update plugin config + per-role override.
         let resolved_hooks = uptrakit_update_hooks::resolve_hooks(
-            &exec_config.config,
+            exec_config
+                .map(|c| &c.config)
+                .unwrap_or(&serde_json::Value::Object(Default::default())),
             exec_assignment.config.as_ref(),
         );
 
@@ -326,7 +317,8 @@ pub(super) async fn deliver_pending_updates(
         let fetch_key = (update_record.host_id, item.id, "fetch_releases".to_string());
         let fetch_config = assignments_map
             .get(&fetch_key)
-            .and_then(|a| configs_map.get(&a.plugin_config_id?))
+            .and_then(|a| a.plugin_config_id)
+            .and_then(|pc_id| configs_map.get(&pc_id))
             .map(|c| &c.config);
         let release_info = crate::queries::update_triggers::enrich_release_info_with_attestation(
             None,
@@ -1116,18 +1108,28 @@ pub(super) async fn handle_batch_update_result(
 // Role-based plugin helpers
 // ---------------------------------------------------------------------------
 
-/// Build a [`PluginAssignment`] from a role plugin row and its plugin config.
+/// Build a [`PluginAssignment`] from a role plugin row and its optional config.
+///
+/// When `config` is `None` (no stored `plugin_config` linked to the assignment),
+/// the plugin type is read from `assignment.plugin_type` and the effective config
+/// is built from the assignment-level override alone.
 ///
 /// Returns `None` if the plugin type string cannot be deserialized.
-fn build_plugin_assignment(
+fn build_plugin_assignment_nullable(
     assignment: &host_software_item_plugin::Model,
-    config: &plugin_config::Model,
+    config: Option<&plugin_config::Model>,
 ) -> Option<PluginAssignment> {
+    let plugin_type_str = config
+        .map(|c| c.plugin_type.clone())
+        .unwrap_or_else(|| assignment.plugin_type.clone());
     let plugin_type: uptrakit_internal_wire::PluginType =
-        serde_json::from_value(serde_json::Value::String(config.plugin_type.clone())).ok()?;
+        serde_json::from_value(serde_json::Value::String(plugin_type_str)).ok()?;
 
-    let merged_config =
-        uptrakit_update_hooks::merge_config(&config.config, assignment.config.as_ref());
+    let merged_config = uptrakit_update_hooks::resolve_effective_config(
+        None,
+        config.map(|c| &c.config),
+        assignment.config.as_ref(),
+    );
 
     Some(PluginAssignment {
         plugin_type,

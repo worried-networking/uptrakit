@@ -333,17 +333,21 @@ async fn load_item_hosts(
                 .get(&link.id)
                 .map(|rows| {
                     rows.iter()
-                        .filter_map(|pr| {
-                            let pc = plugin_configs.get(&pr.plugin_config_id?)?;
-                            Some(HostPluginRoleSummary {
+                        .map(|pr| {
+                            let pc = pr
+                                .plugin_config_id
+                                .and_then(|pc_id| plugin_configs.get(&pc_id));
+                            HostPluginRoleSummary {
                                 role: PluginRole::from(pr.role.clone()),
-                                plugin_config_id: pc.id,
-                                plugin_config_name: pc.name.clone(),
-                                plugin_type: pc.plugin_type.clone(),
+                                plugin_config_id: pc.map(|c| c.id),
+                                plugin_config_name: pc.map(|c| c.name.clone()),
+                                plugin_type: pc
+                                    .map(|c| c.plugin_type.clone())
+                                    .unwrap_or_else(|| pr.plugin_type.clone()),
                                 package_identifier: pr.package_identifier.clone(),
                                 config_override: pr.config.clone(),
                                 execution_site: pr.execution_site.clone(),
-                            })
+                            }
                         })
                         .collect()
                 })
@@ -1441,8 +1445,8 @@ mod tests {
             qualifier: None,
             plugins: vec![HostPluginRoleSummary {
                 role: PluginRole::FetchReleases,
-                plugin_config_id: uuid::Uuid::now_v7(),
-                plugin_config_name: "GitHub Releases".to_string(),
+                plugin_config_id: Some(uuid::Uuid::now_v7()),
+                plugin_config_name: Some("GitHub Releases".to_string()),
                 plugin_type: "releases_github".to_string(),
                 package_identifier: "redis/redis".to_string(),
                 config_override: Some(serde_json::json!({"asset_patterns": ["redis.*linux"]})),

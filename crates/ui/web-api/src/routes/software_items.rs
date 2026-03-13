@@ -932,16 +932,22 @@ pub async fn check_versions(
         plugin_by_host_role.insert((pa.host_id, pa.role.clone()), pa);
     }
 
-    // Helper to build a PluginAssignment from a plugin row and its config.
+    // Helper to build a PluginAssignment from a plugin row and its (optional) config.
     let build_assignment =
         |plugin: &host_software_item_plugin::Model| -> Option<uptrakit_internal_wire::PluginAssignment> {
-            let config_model = configs.get(&plugin.plugin_config_id?)?;
+            let config_model = plugin
+                .plugin_config_id
+                .and_then(|pc_id| configs.get(&pc_id));
+            let plugin_type_str = config_model
+                .map(|c| c.plugin_type.clone())
+                .unwrap_or_else(|| plugin.plugin_type.clone());
             let plugin_type: uptrakit_internal_wire::PluginType = serde_json::from_value(
-                serde_json::Value::String(config_model.plugin_type.clone()),
+                serde_json::Value::String(plugin_type_str),
             )
             .ok()?;
-            let merged = uptrakit_update_hooks::merge_config(
-                &config_model.config,
+            let merged = uptrakit_update_hooks::resolve_effective_config(
+                None,
+                config_model.map(|c| &c.config),
                 plugin.config.as_ref(),
             );
             Some(uptrakit_internal_wire::PluginAssignment {
@@ -953,25 +959,32 @@ pub async fn check_versions(
 
     // Phase 1: Collect controller-side fetch_releases jobs, deduplicated by
     // (plugin_config_id, package_identifier).
-    let mut controller_job_map: HashMap<(Uuid, String), ControllerFetchJob> = HashMap::new();
+    let mut controller_job_map: HashMap<(String, String), ControllerFetchJob> = HashMap::new();
     for pa in plugin_assignments
         .iter()
         .filter(|pa| pa.role == "fetch_releases")
     {
-        let Some(pa_pc_id) = pa.plugin_config_id else {
+        let config_model = pa.plugin_config_id.and_then(|pc_id| configs.get(&pc_id));
+        let plugin_type_str = config_model
+            .map(|c| c.plugin_type.clone())
+            .unwrap_or_else(|| pa.plugin_type.clone());
+        let Ok(plugin_type) =
+            serde_json::from_value::<PluginType>(serde_json::Value::String(plugin_type_str))
+        else {
             continue;
         };
-        let Some(config_model) = configs.get(&pa_pc_id) else {
-            continue;
-        };
-        let Ok(plugin_type) = serde_json::from_value::<PluginType>(serde_json::Value::String(
-            config_model.plugin_type.clone(),
-        )) else {
-            continue;
-        };
-        let merged = uptrakit_update_hooks::merge_config(&config_model.config, pa.config.as_ref());
+        let merged = uptrakit_update_hooks::resolve_effective_config(
+            None,
+            config_model.map(|c| &c.config),
+            pa.config.as_ref(),
+        );
         if is_controller_fetch_site(&pa.execution_site, &plugin_type, &merged) {
-            let key = (pa_pc_id, pa.package_identifier.clone());
+            // Use (plugin_config_id OR plugin_type, package_identifier) as dedup key.
+            let dedup_key = pa
+                .plugin_config_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| pa.plugin_type.clone());
+            let key = (dedup_key, pa.package_identifier.clone());
             controller_job_map
                 .entry(key)
                 .or_insert_with(|| ControllerFetchJob {
@@ -1016,13 +1029,17 @@ pub async fn check_versions(
         let fetch_releases = plugin_by_host_role
             .get(&(link.host_id, "fetch_releases".to_string()))
             .and_then(|p| {
-                let config_model = configs.get(&p.plugin_config_id?)?;
-                let plugin_type: PluginType = serde_json::from_value(serde_json::Value::String(
-                    config_model.plugin_type.clone(),
-                ))
-                .ok()?;
-                let merged =
-                    uptrakit_update_hooks::merge_config(&config_model.config, p.config.as_ref());
+                let config_model = p.plugin_config_id.and_then(|pc_id| configs.get(&pc_id));
+                let plugin_type_str = config_model
+                    .map(|c| c.plugin_type.clone())
+                    .unwrap_or_else(|| p.plugin_type.clone());
+                let plugin_type: PluginType =
+                    serde_json::from_value(serde_json::Value::String(plugin_type_str)).ok()?;
+                let merged = uptrakit_update_hooks::resolve_effective_config(
+                    None,
+                    config_model.map(|c| &c.config),
+                    p.config.as_ref(),
+                );
                 // Skip assignments that ran (or will run) controller-side.
                 if is_controller_fetch_site(&p.execution_site, &plugin_type, &merged) {
                     None
@@ -1199,28 +1216,42 @@ pub async fn check_versions_host(
     let mut controller_fetch_jobs: Vec<ControllerFetchJob> = Vec::new();
 
     for plugin in &role_plugins {
-        let Some(plugin_pc_id) = plugin.plugin_config_id else {
+        let config = match plugin.plugin_config_id {
+            Some(pc_id) => match find_raw_active_config(&tenant_db, pc_id).await {
+                Ok(Some(c)) => Some(c),
+                Ok(None) => {
+                    tracing::warn!(
+                        plugin_config_id = %pc_id,
+                        "plugin config not found or deactivated, skipping role assignment"
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    tracing::error!(
+                        plugin_config_id = %pc_id,
+                        error = %e,
+                        "DB error loading plugin config, skipping role assignment"
+                    );
+                    continue;
+                }
+            },
+            None => None,
+        };
+        let plugin_type_str = config
+            .as_ref()
+            .map(|c| c.plugin_type.clone())
+            .unwrap_or_else(|| plugin.plugin_type.clone());
+        let Ok(plugin_type) =
+            serde_json::from_value::<PluginType>(serde_json::Value::String(plugin_type_str))
+        else {
+            tracing::error!("Unknown plugin type: {}", plugin.plugin_type);
             continue;
         };
-        let config = match find_raw_active_config(&tenant_db, plugin_pc_id).await {
-            Ok(Some(c)) => c,
-            Ok(None) => continue,
-            Err(e) => {
-                tracing::error!(
-                    plugin_config_id = %plugin_pc_id,
-                    error = %e,
-                    "DB error loading plugin config, skipping role assignment"
-                );
-                continue;
-            }
-        };
-        let Ok(plugin_type) = serde_json::from_value::<PluginType>(serde_json::Value::String(
-            config.plugin_type.clone(),
-        )) else {
-            tracing::error!("Unknown plugin type: {}", config.plugin_type);
-            continue;
-        };
-        let merged = uptrakit_update_hooks::merge_config(&config.config, plugin.config.as_ref());
+        let merged = uptrakit_update_hooks::resolve_effective_config(
+            None,
+            config.as_ref().map(|c| &c.config),
+            plugin.config.as_ref(),
+        );
         let pa = uptrakit_internal_wire::PluginAssignment {
             plugin_type: plugin_type.clone(),
             package_identifier: plugin.package_identifier.clone(),

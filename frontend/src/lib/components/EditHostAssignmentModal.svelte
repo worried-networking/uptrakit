@@ -61,7 +61,7 @@
 			const existing = existingPlugins.find((p) => p.role === role);
 			result[role] = existing
 				? {
-						plugin_config_id: existing.plugin_config_id,
+						plugin_config_id: existing.plugin_config_id ?? '',
 						package_identifier: existing.package_identifier,
 						execution_site: existing.execution_site || 'auto',
 						config_override_text: existing.config_override ? JSON.stringify(existing.config_override, null, 2) : '',

@@ -402,8 +402,8 @@ export interface PaginatedResponse<T> {
 
 export interface HostPluginRoleSummary {
 	role: string;
-	plugin_config_id: string;
-	plugin_config_name: string;
+	plugin_config_id: string | null;
+	plugin_config_name: string | null;
 	plugin_type: string;
 	package_identifier: string;
 	config_override: Record<string, unknown> | null;
