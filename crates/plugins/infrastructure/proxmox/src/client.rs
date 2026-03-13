@@ -3,6 +3,8 @@
 use std::time::Duration;
 
 use rootcause::prelude::*;
+use std::sync::Arc;
+use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
 use crate::api_types::*;
 use crate::config::ProxmoxConfig;
@@ -24,12 +26,19 @@ impl ProxmoxClient {
             node_filter = ?config.node_filter,
             "creating Proxmox API client"
         );
+        if !config.verify_tls {
+            tracing::warn!(
+                api_url = %config.api_url,
+                "Proxmox TLS verification is disabled; connection is vulnerable to MitM attacks"
+            );
+        }
 
         let auth_header = format!("PVEAPIToken={}", config.api_token.expose_secret());
 
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(60))
+            .dns_resolver(Arc::new(SsrfSafeResolver::permissive()))
             .danger_accept_invalid_certs(!config.verify_tls)
             .build()
             .map_err(|e| {

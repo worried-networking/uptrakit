@@ -58,7 +58,12 @@ Controller
 - Connect timeout: 10 seconds
 - Request timeout: 60 seconds
 - TLS verification: configurable (`verify_tls`, default `true`)
+- DNS resolution: `SsrfSafeResolver::permissive()` because Proxmox is intentionally a
+  self-hosted/private-network control plane
 - All responses unwrap the `{"data": T}` wrapper
+
+When `verify_tls = false`, the client emits a warning at construction time. This setting is
+intended only for controlled bootstrap scenarios with self-signed certificates.
 
 ### Endpoints Used
 
