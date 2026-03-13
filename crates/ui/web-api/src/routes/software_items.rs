@@ -749,10 +749,11 @@ pub async fn trigger_update(
     .await
     {
         Ok(result) => {
-            let status = if result.agent_connected {
-                TriggerUpdateStatus::Pending
-            } else {
-                TriggerUpdateStatus::Queued
+            let status = match result.initial_status {
+                uptrakit_shared_db::entity::update_history::UpdateStatus::Pending => {
+                    TriggerUpdateStatus::Pending
+                }
+                _ => TriggerUpdateStatus::Queued,
             };
             // Push updated software states immediately so that any connected
             // MQTT/HA entity transitions to `in_progress: true`.
@@ -788,10 +789,6 @@ pub async fn trigger_update(
                 TriggerUpdateError::UpdateAlreadyActive => error_response(
                     StatusCode::CONFLICT,
                     "An update is already pending or in progress",
-                ),
-                TriggerUpdateError::HostUpdateInProgress => error_response(
-                    StatusCode::CONFLICT,
-                    "Another update is already in progress for this host",
                 ),
                 TriggerUpdateError::NoExecuteUpdatePlugin => error_response(
                     StatusCode::BAD_REQUEST,

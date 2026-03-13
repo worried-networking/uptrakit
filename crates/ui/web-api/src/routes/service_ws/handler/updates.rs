@@ -748,6 +748,9 @@ pub(super) async fn handle_update_result(
         emit_batch_progress_event(state, batch_id, event).await;
 
         dispatch_next_batch_update(state, service_id, batch_id, record.host_id).await;
+    } else {
+        // Non-batch update completed: dispatch the next queued update for this host.
+        dispatch_next_queued_update(state, service_id, record.host_id).await;
     }
 
     // Emit AdminEvent::UpdateCompleted so the /software page SSE subscribers
@@ -920,6 +923,40 @@ async fn dispatch_next_batch_update(
                 "failed to dispatch next batch update or update batch status"
             );
         }
+    }
+}
+
+/// Dispatch the next queued update for the given host after a non-batch
+/// update completes.
+///
+/// Resolves the service's tenant_id, calls `dispatch_next_queued_for_host`,
+/// and logs any errors without failing the calling handler.
+async fn dispatch_next_queued_update(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    host_id: uuid::Uuid,
+) {
+    let tenant_id = match service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(svc)) => svc.tenant_id,
+        _ => return,
+    };
+
+    if let Err(e) = crate::queries::update_batches::dispatch_next_queued_for_host(
+        state.db(),
+        &state.notification_service,
+        host_id,
+        tenant_id,
+    )
+    .await
+    {
+        tracing::warn!(
+            %host_id,
+            error = %e,
+            "failed to dispatch next queued update for host"
+        );
     }
 }
 

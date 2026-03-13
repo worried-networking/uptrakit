@@ -688,10 +688,6 @@ fn trigger_error_to_response(report: rootcause::Report<TriggerUpdateError>) -> R
             StatusCode::CONFLICT,
             "An update is already pending or in progress",
         ),
-        TriggerUpdateError::HostUpdateInProgress => error_response(
-            StatusCode::CONFLICT,
-            "Another update is already in progress for this host",
-        ),
         TriggerUpdateError::NoExecuteUpdatePlugin => error_response(
             StatusCode::BAD_REQUEST,
             "No execute_update plugin assigned for this host",

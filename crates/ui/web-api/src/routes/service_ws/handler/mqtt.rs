@@ -320,7 +320,7 @@ pub(super) async fn handle_mqtt_trigger_update(
                 software_item_id = %payload.software_item_id,
                 host_id = %payload.host_id,
                 mqtt_client_id = %payload.mqtt_client_id,
-                agent_connected = result.agent_connected,
+                queued = matches!(result.initial_status, uptrakit_shared_db::entity::update_history::UpdateStatus::Queued),
                 "MQTT-triggered update dispatched"
             );
             // Push updated software states immediately so that the MQTT/HA
