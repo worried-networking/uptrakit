@@ -313,6 +313,48 @@ enum Hosts {
     Id,
 }
 
+// ── Migration: add lower(proxmox_name) sort index ───────────────────────────
+
+/// Add a functional index on `lower(proxmox_name)` to `proxmox_host_mappings`
+/// so that case-insensitive name sorting uses an index scan rather than a
+/// full-table sort.
+pub struct AddProxmoxHmLowerNameIndex;
+
+impl MigrationName for AddProxmoxHmLowerNameIndex {
+    fn name(&self) -> &str {
+        "m20260322_000001_proxmox_hm_lower_name_index"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for AddProxmoxHmLowerNameIndex {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // sea_query Index::create() does not support expression columns
+        // (functional indexes); raw SQL required. MySQL 8+ requires double
+        // parens around the expression per its CREATE INDEX syntax.
+        let sql = if manager.get_database_backend() == sea_orm::DatabaseBackend::MySql {
+            "CREATE INDEX idx_proxmox_host_mappings_lower_name \
+             ON proxmox_host_mappings ((lower(proxmox_name)))"
+        } else {
+            "CREATE INDEX idx_proxmox_host_mappings_lower_name \
+             ON proxmox_host_mappings (lower(proxmox_name))"
+        };
+        manager.get_connection().execute_unprepared(sql).await?;
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_index(
+                Index::drop()
+                    .name("idx_proxmox_host_mappings_lower_name")
+                    .table(ProxmoxHostMappings::Table)
+                    .to_owned(),
+            )
+            .await
+    }
+}
+
 /// Return all controller-side migrations owned by the Proxmox plugin.
 ///
 /// Migration names are hardcoded to match the original names from when
@@ -323,5 +365,6 @@ pub fn migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
         Box::new(CreateProxmoxHostMappings),
         Box::new(AddProxmoxHmMachineId),
         Box::new(AddProxmoxHmPaginationIndexes),
+        Box::new(AddProxmoxHmLowerNameIndex),
     ]
 }
