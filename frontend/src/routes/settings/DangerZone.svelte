@@ -54,16 +54,18 @@
 	}
 </script>
 
-<div class="card mb-6 border-2 border-error-500 p-6">
-	<h2 class="h3 mb-2 text-error-500">Danger Zone</h2>
-	<p class="mb-4 text-surface-600 dark:text-surface-400">
-		Permanently delete all hosts, software items, plugin configurations, host tags, and update history. This action
-		cannot be undone. Services, users, enrollment tokens, and settings are preserved.
-	</p>
-	<button class="btn preset-filled-error-500" onclick={openDialog} disabled={!getIsOnline()}> Reset Data </button>
-	{#if !getIsOnline()}
-		<span class="text-warning-500 text-sm ml-2">Offline</span>
-	{/if}
+<div class="danger-zone-wrap mb-6">
+	<div class="card danger-zone-card border-2 border-error-500 p-6">
+		<h2 class="h3 mb-2 text-error-500">Danger Zone</h2>
+		<p class="mb-4 text-surface-600 dark:text-surface-400">
+			Permanently delete all hosts, software items, plugin configurations, host tags, and update history. This action
+			cannot be undone. Services, users, enrollment tokens, and settings are preserved.
+		</p>
+		<button class="btn preset-filled-error-500" onclick={openDialog} disabled={!getIsOnline()}> Reset Data </button>
+		{#if !getIsOnline()}
+			<span class="text-warning-500 text-sm ml-2">Offline</span>
+		{/if}
+	</div>
 </div>
 
 {#if showDialog}
@@ -129,3 +131,25 @@
 		{/snippet}
 	</Modal>
 {/if}
+
+<style>
+	/* Hazard tape rendered as a thin ring around the card border */
+	.danger-zone-wrap {
+		background-image: repeating-linear-gradient(-45deg, #1c1100 0px, #1c1100 10px, #f59e0b 10px, #f59e0b 20px);
+		border-radius: var(--radius-container);
+		padding: 3px;
+	}
+
+	:global(.dark) .danger-zone-wrap {
+		background-image: repeating-linear-gradient(-45deg, #0a0500 0px, #0a0500 10px, #92400e 10px, #92400e 20px);
+	}
+
+	/* Solid card interior — subtle error tint keeps the danger feel without obscuring text */
+	.danger-zone-card {
+		background-color: color-mix(in srgb, rgb(239 68 68) 6%, white);
+	}
+
+	:global(.dark) .danger-zone-card {
+		background-color: color-mix(in srgb, rgb(239 68 68) 8%, #1a1a1a);
+	}
+</style>
