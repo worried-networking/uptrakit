@@ -28,6 +28,7 @@
 	import ExtensionTabContent from '$lib/components/extensions/ExtensionTabContent.svelte';
 	import NotificationRulesSettings from './NotificationRulesSettings.svelte';
 	import NotificationLogView from './NotificationLogView.svelte';
+	import DangerZone from './DangerZone.svelte';
 
 	// ── Permissions ─────────────────────────────────────────────────────
 	const canManageSettings = $derived(
@@ -328,6 +329,10 @@
 					<p>{enrollmentTokenError}</p>
 					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
 				</aside>
+			{/if}
+
+			{#if canManageGlobalSettings}
+				<DangerZone onSuccess={showSuccess} onError={showError} />
 			{/if}
 		</div>
 

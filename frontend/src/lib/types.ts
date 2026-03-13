@@ -1059,3 +1059,22 @@ export interface NotificationLogEntry {
 	created_at: string;
 	delivered_at: string | null;
 }
+
+// ── Reset Data ────────────────────────────────────────────────────────
+
+export interface ResetDataRequest {
+	confirm: string;
+}
+
+export interface ResetDeletedCounts {
+	hosts: number;
+	software_items: number;
+	plugin_configs: number;
+	host_tags: number;
+	update_history: number;
+	update_batches: number;
+}
+
+export interface ResetDataResponse {
+	deleted: ResetDeletedCounts;
+}

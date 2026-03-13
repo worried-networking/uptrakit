@@ -84,7 +84,9 @@ import type {
 	HostTagSummary,
 	NotificationChannelSummary,
 	NotificationRuleResponse,
-	NotificationLogEntry
+	NotificationLogEntry,
+	ResetDataRequest,
+	ResetDataResponse
 } from './types';
 
 const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
@@ -1193,4 +1195,10 @@ export function deleteNotificationRule(id: string): Promise<void> {
 
 export function listNotificationLog(page = 1, perPage = 50): Promise<PaginatedResponse<NotificationLogEntry>> {
 	return request(`/notifications/log?page=${page}&per_page=${perPage}`);
+}
+
+// ── Reset Data ────────────────────────────────────────────────────────
+
+export function resetData(data: ResetDataRequest): Promise<ResetDataResponse> {
+	return request('/settings/reset-data', { method: 'POST', body: JSON.stringify(data) });
 }
