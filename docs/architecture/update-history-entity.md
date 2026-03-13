@@ -28,7 +28,8 @@ Records are immutable — once created they are not modified or soft-deleted.
 
 Indexes: `idx_update_history_host_id`, `idx_update_history_software_item_id`,
 `idx_update_history_status`, `idx_update_history_host_software_item` (composite),
-`idx_uh_batch_id`, `uix_update_history_host_active` (unique partial on `host_id WHERE status IN ('pending','in_progress')`).
+`idx_uh_batch_id`, `uix_update_history_host_active` (unique partial on `host_id WHERE status IN ('pending','in_progress')`),
+`idx_update_history_host_queued` (partial on `(host_id, id) WHERE status = 'queued'` — supports FIFO dispatch query).
 
 ### `update_batches`
 
@@ -63,41 +64,50 @@ The `UpdateStatus` enum is defined in two places:
 
 | Variant | String | Meaning | Terminal? | Active lock? |
 | :------ | :----- | :------ | :-------: | :----------: |
-| `Queued` | `queued` | Batch item waiting for preceding host item to complete | No | No |
+| `Queued` | `queued` | Waiting for host to become free (batch or single update) | No | No |
 | `Pending` | `pending` | Dispatched; agent not yet started | No | **Yes** |
 | `InProgress` | `in_progress` | Agent executing the update | No | **Yes** |
 | `Completed` | `completed` | Update succeeded | Yes | No |
 | `Failed` | `failed` | Update failed | Yes | No |
 
-**Active lock** means the row counts toward the per-host lock (i.e. no further update may be triggered
-for that host while such a row exists). The partial unique index `uix_update_history_host_active`
-covers exactly these two statuses.
+**Active lock** means the row counts toward the per-host lock (i.e. no further update may be
+triggered for that host while such a row exists). The partial unique index
+`uix_update_history_host_active` covers exactly these two statuses.
 
-## Per-host update locking
+## Per-host update queue
 
 At most one active (`Pending` or `InProgress`) update may run on a host at any time.
+When a second update is triggered while the host is busy, it is **queued** instead of rejected.
 All update types (individual software item updates and batch updates) share the same
-`update_history` table and the same per-host lock.
+`update_history` table and the same per-host queue.
 
-Enforcement layers:
+### Single (non-batch) update queueing
 
-1. **Application check** — `validate_update_preconditions` counts active rows in
-   `update_history` before inserting a new record. Returns
-   `TriggerUpdateError::HostUpdateInProgress` (HTTP 409) if the count is non-zero.
-2. **DB constraint** — the partial unique index `uix_update_history_host_active` on
-   `(host_id) WHERE status IN ('pending', 'in_progress')` rejects a concurrent INSERT that
-   races past the application check (multi-controller deployments).
+When `trigger_update_for_host` is called and the host already has an active update:
+
+1. `has_active_update_for_host` detects the busy state (counts `Pending`/`InProgress` rows).
+2. The new record is inserted as `Queued` and the caller receives `initial_status: Queued`.
+3. No dispatch is sent to the agent.
+4. When the active update completes, `handle_update_result` calls `dispatch_next_queued_update`,
+   which invokes `dispatch_next_queued_for_host` to promote the oldest `Queued` row to `Pending`
+   using a CAS UPDATE: `WHERE id = ? AND status = 'queued'`.
+
+**Race condition safety:** If two controllers simultaneously observe a free host and both attempt
+to insert as `Pending`, the partial unique index `uix_update_history_host_active` will reject one
+INSERT. The losing controller detects the constraint violation and re-inserts as `Queued`.
 
 ### Batch sequential dispatch
 
 When a batch contains multiple items for the same host:
 
-- The **first item** per host is inserted as `Pending` and dispatched immediately.
-- **Subsequent items** are inserted as `Queued` (excluded from the unique index) so the INSERT
-  succeeds without violating the per-host constraint.
-- When the preceding item completes, `dispatch_next_in_batch` promotes the next `Queued` row to
-  `Pending` using a CAS UPDATE: `WHERE id = ? AND status = 'queued'`. If another controller
-  already promoted the row, `rows_affected == 0` and dispatch is skipped — preventing double-dispatch.
+- The **first item** per host is inserted as `Pending` and dispatched immediately — unless the
+  host already had an active update from outside the batch, in which case all items start `Queued`.
+- **Subsequent items** on a free host are inserted as `Queued` (excluded from the unique index).
+- When an item completes, `dispatch_next_in_batch` calls `dispatch_next_queued_for_host` to
+  promote the oldest `Queued` row for that host — whether it belongs to this batch, another
+  batch, or is a non-batch update. This ensures global FIFO ordering per host.
+- The CAS promotes `Queued → Pending`. If another controller already promoted the row,
+  `rows_affected == 0` and dispatch is skipped — preventing double-dispatch.
 
 ## Tenant scoping
 
