@@ -522,6 +522,43 @@ Use `spawn_background` for any operation that:
 Operations that stream output (like `ExecuteUpdate`) continue to use the existing
 `InFlightUpdate` / `UpdateEvent` pattern with a dedicated output channel.
 
+## Non-blocking write path
+
+The `ControllerConnection` uses a split-stream architecture to prevent write operations
+from blocking the event loop. At construction time the WebSocket stream is split into
+read and write halves (`WsRead` / `WsSink` type aliases in `ws.rs`). A background writer
+task owns the write half and drains a bounded MPSC channel
+(`WRITE_CHANNEL_CAPACITY = 128`).
+
+### Write operations
+
+| Method | Behavior |
+| --- | --- |
+| `send(msg)` | Serialize → push `OutboundFrame::Text` to channel. Checks `write_error` flag first. |
+| `send_best_effort(msg)` | Serialize → `try_send()` to channel. Non-blocking; drops message silently if channel is full. |
+| `send_paginated(msg, limits)` | Paginate → push all pages to channel. Serialization only, no I/O blocking. |
+| `recv()` | Read from `SplitStream`. On WS Ping, pushes `Pong` to write channel. Checks `write_error` on each receive. |
+| `close()` | Push `Close` frame to channel, await writer task completion. |
+
+### Error signaling
+
+The writer task sets an `Arc<AtomicBool>` (`write_error`) on any WebSocket write failure.
+`send()` and `recv()` check this flag and return `TransientNetwork` errors, allowing the
+event loop to detect writer failures and reconnect.
+
+### `OutboundFrame` enum
+
+```rust
+enum OutboundFrame {
+    Text(String),
+    Pong(Vec<u8>),
+    Close,
+}
+```
+
+The writer task applies `SEND_TIMEOUT` (30 seconds) per write and exits on `Close` or
+channel closure.
+
 ## Related documentation
 
 - [Services and Operations](../api/services-operations.md) — shared startup flow and API operations

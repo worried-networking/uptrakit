@@ -973,6 +973,32 @@ The `ServiceHandler::SERVICE_TYPE` constant has been removed from the service SD
 `force_disconnect()` cancels the session's `CancellationToken` and removes the connection entry,
 used by deactivate/reject/merge routes for immediate WebSocket session termination.
 
+#### Background message processing
+
+Each authenticated WebSocket connection spawns a `MessageProcessor` task
+(`crates/ui/web-api/src/routes/service_ws/handler/mod.rs`). The main loop reads
+the WebSocket stream and handles fast-path messages inline (Ping→Pong, Disconnecting,
+rate limiting, unknown messages). All other messages are forwarded to the processor
+via a bounded MPSC channel (`PROCESSOR_CHANNEL_CAPACITY = 32`). The processor
+dispatches handlers sequentially (preserving message ordering) and returns
+`ProcessorResponse` values through a response channel (`RESPONSE_CHANNEL_CAPACITY = 32`).
+The main loop serializes replies with `out_seq` (keeping sequence number ownership
+in one place) and writes them to the sink.
+
+This architecture decouples DB-heavy handler work from the WebSocket read loop,
+preventing slow handlers from blocking message reception and ping/pong keepalives.
+
+Handlers return `ProcessorResponse` (defined in `handler/messages.rs`) instead of
+writing directly to the sink. `ProcessorResponse` contains a `Vec<ControllerMessage>`
+of replies and a `ProcessorAction` (Continue, Break, or CloseWithReason). Shared
+mutable state (`linked_host_ids`) uses `Arc<parking_lot::Mutex<HashSet<Uuid>>>`.
+
+The service SDK (`crates/shared/service-sdk/src/connection.rs`) uses a complementary
+split-stream architecture: the WebSocket is split into read/write halves, with a
+background writer task draining a bounded channel (`WRITE_CHANNEL_CAPACITY = 128`).
+`send()` serializes and pushes to the channel (non-blocking), `send_best_effort()`
+uses `try_send()` (drop on full), and error signaling uses `Arc<AtomicBool>`.
+
 #### Controller events
 
 The `controller_events` DB table has been dropped. Cross-controller event routing now uses NATS JetStream
@@ -1076,9 +1102,13 @@ The frontend filters services by capability instead of type and displays `servic
 | `crates/shared/db/src/entity/enrollment_token.rs` | `enrollment_tokens` SeaORM entity |
 | `crates/ui/web-api/src/routes/enrollment_tokens.rs` | Enrollment token REST endpoints |
 | `crates/ui/web-api-queries/src/queries/enrollment_tokens.rs` | Enrollment token DB queries |
-| `crates/shared/service-sdk/src/connection.rs` | `agreed_capabilities` field + accessors |
+| `crates/shared/service-sdk/src/connection.rs` | Split-stream WS architecture: `OutboundFrame`, background writer task, `send()`/`send_best_effort()`/`recv()`/`close()`, `agreed_capabilities` field + accessors |
 | `crates/shared/service-sdk/src/event_loop.rs` | Capability intersection in `ServiceSettings` handler |
-| `crates/ui/web-api/src/routes/service_ws/protocol.rs` | `controller_capabilities()`, `ServiceSettingsPayload` construction |
+| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` | `MessageProcessor`, `ProcessorMessage`, `handle_authenticated_loop` (spawns processor, 4-arm select) |
+| `crates/ui/web-api/src/routes/service_ws/handler/messages.rs` | `ProcessorResponse`, `ProcessorAction`, common message handlers |
+| `crates/ui/web-api/src/routes/service_ws/handler/updates.rs` | Update lifecycle handlers (return `ProcessorResponse`) |
+| `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs` | MQTT-specific handlers (return `ProcessorResponse`) |
+| `crates/ui/web-api/src/routes/service_ws/protocol.rs` | `controller_capabilities()`, `ServiceSettingsPayload` construction, `CertIdentity` (Clone) |
 | `crates/ui/web-api/src/nats_transport.rs` | NATS JetStream transport (feature-gated) |
 | `crates/ui/web-api/src/event_delivery.rs` | Shared delivery routing logic |
 | `crates/shared/wire/asyncapi.yaml` | Schema for `capabilities` arrays in messages |

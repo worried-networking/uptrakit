@@ -692,7 +692,7 @@ All limits are defined in `crates/shared/wire/src/limits.rs`.
 
 ### How It Works
 
-**Sender side (`ControllerConnection::send_auto_paginate`):**
+**Sender side (`ControllerConnection::send_paginated`):**
 
 1. Serialize the full payload and check its size against `PAGINATION_SIZE_THRESHOLD`.
 2. If under the threshold, send as a single message with no `pagination` field (zero overhead).
@@ -700,7 +700,10 @@ All limits are defined in `crates/shared/wire/src/limits.rs`.
    to split the payload's primary `Vec` field across pages. Each item (e.g. each
    `DiscoveryPluginResult`) stays whole -- never split across pages.
 4. Assign a random `report_id` (UUID v4) and stamp each page with `page` / `total_pages`.
-5. Send each page as a separate WebSocket text frame with its own sequence number.
+5. Each page is serialized and pushed to the write channel as an `OutboundFrame::Text`. The
+   background writer task sends each frame as a separate WebSocket text frame with its own
+   sequence number. This is non-blocking for the caller — serialization runs inline but
+   actual I/O is deferred to the writer task.
 
 **Controller side (`ReportTracker`):**
 

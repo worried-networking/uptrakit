@@ -465,11 +465,14 @@ The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared 
 - **Enrollment**: WebSocket-based enrollment with certificate issuance.
 - **Identity**: Service identity state management (service ID, enrollment secret, certificate, private key).
 - **TLS/CA**: TLS connector builders (server-only and mTLS), CA bootstrap (cached, file, PKI endpoint, TOFU, system trust), CA staleness checks.
-- **ControllerConnection**: Shared authenticated WebSocket connection with envelope serialization, sequence validation, Ping/Pong handling, and
-  close-frame reason tracking. Used by all services regardless of capability set. Sequence validation is performed before
-  full message deserialization to ensure unrecognized messages do not cause sequence mismatches. The `send_auto_paginate`
-  method automatically splits large report payloads (discovery results, version checks, host reports, batch updates) into
-  pages when they exceed the 768 KB pagination threshold.
+- **ControllerConnection**: Shared authenticated WebSocket connection with split-stream architecture: the WebSocket is
+  split into read/write halves, with a background writer task draining a bounded channel (`WRITE_CHANNEL_CAPACITY = 128`).
+  `send()` serializes and pushes to the channel (non-blocking), `send_best_effort()` uses `try_send()` (drop on full),
+  and error signaling uses `Arc<AtomicBool>`. Envelope serialization, sequence validation, Ping/Pong handling, and
+  close-frame reason tracking are built in. Used by all services regardless of capability set. Sequence validation is
+  performed before full message deserialization to ensure unrecognized messages do not cause sequence mismatches. The
+  `send_paginated` method automatically splits large report payloads (discovery results, version checks, host reports,
+  batch updates) into pages when they exceed the controller-provided per-page limits.
 - **CertificateRenewalHandler**: Handles certificate lifecycle messages (`CaBundleUpdated`, `RequestCertRenewal`, `Certificate`) automatically in the
   event loop. Also provides shared renewal timer helpers (`create_renewal_sleep`, `update_renewal_schedule`, `compute_renewal_delay`).
 - **Backoff**: Exponential backoff with jitter for reconnection delays.
