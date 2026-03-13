@@ -318,6 +318,17 @@ pub async fn request_certificate_ws(
 
                     match envelope.message {
                         ControllerMessage::Certificate(payload) => return Ok(payload),
+                        ControllerMessage::Approved(payload) => {
+                            tracing::debug!(
+                                service_id = %payload.service_id,
+                                "received approved message while waiting for certificate"
+                            );
+                            continue;
+                        }
+                        ControllerMessage::Pong(_) => {
+                            tracing::trace!("received pong while waiting for certificate");
+                            continue;
+                        }
                         ControllerMessage::Error(err) => {
                             bail!(EnrollmentError::Protocol(ProtocolError::Enrollment(format!(
                                 "{}: {}",

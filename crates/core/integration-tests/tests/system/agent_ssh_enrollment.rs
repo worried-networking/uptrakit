@@ -12,7 +12,9 @@ async fn agent_ssh_enrolls_with_token() {
 
     let mut client = ApiClient::new(controller.host_port());
     client.wait_for_ready(Duration::from_secs(30)).await;
-    client.register_and_login().await;
+    client
+        .register_and_login_with_token(controller.registration_token())
+        .await;
 
     // Start agent-ssh — it enrolls with the regular enrollment token.
     let _agent_ssh = ServiceContainer::start_agent_ssh(&network, controller.container_name()).await;

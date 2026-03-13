@@ -13,7 +13,9 @@ async fn agent_enrolls_with_token() {
 
     let mut client = ApiClient::new(controller.host_port());
     client.wait_for_ready(Duration::from_secs(30)).await;
-    client.register_and_login().await;
+    client
+        .register_and_login_with_token(controller.registration_token())
+        .await;
 
     // Start an agent — it will enroll via the bootstrap token.
     let _agent = ServiceContainer::start_agent(&network, controller.container_name()).await;

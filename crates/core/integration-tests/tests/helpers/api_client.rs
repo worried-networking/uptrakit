@@ -81,9 +81,8 @@ impl ApiClient {
         }
     }
 
-    /// Register a test user and log in, storing the access token for
-    /// subsequent authenticated requests.
-    pub async fn register_and_login(&mut self) {
+    /// Register a test user and log in, optionally supplying a registration token.
+    pub async fn register_and_login_with_token(&mut self, registration_token: Option<&str>) {
         // Register
         let register_resp = self
             .client
@@ -92,7 +91,8 @@ impl ApiClient {
                 "email": "test@example.com",
                 "first_name": "Test",
                 "last_name": "User",
-                "password": "SecureTestPassword123"
+                "password": "SecureTestPassword123",
+                "registration_token": registration_token,
             }))
             .send()
             .await

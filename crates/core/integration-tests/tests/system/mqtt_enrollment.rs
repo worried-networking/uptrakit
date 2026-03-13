@@ -12,7 +12,9 @@ async fn mqtt_enrolls_as_system_service() {
 
     let mut client = ApiClient::new(controller.host_port());
     client.wait_for_ready(Duration::from_secs(30)).await;
-    client.register_and_login().await;
+    client
+        .register_and_login_with_token(controller.registration_token())
+        .await;
 
     // Start the MQTT service — it enrolls with the system enrollment token.
     let _mqtt = ServiceContainer::start_mqtt(&network, controller.container_name()).await;

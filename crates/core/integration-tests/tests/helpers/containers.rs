@@ -25,15 +25,21 @@ const SYSTEM_ENROLLMENT_TOKEN: &str = "test-system-token-do-not-use-in-prod";
 
 /// Controller HTTPS port inside the container.
 const CONTROLLER_PORT: u16 = 8443;
+/// NATS port inside the sidecar container.
+const NATS_PORT: u16 = 4222;
 
 /// A running controller container with its mapped host port.
 pub struct ControllerContainer {
+    /// Sidecar NATS container required by system services with `nats_access`.
+    _nats_container: testcontainers::ContainerAsync<GenericImage>,
     /// The underlying testcontainers handle. Dropping this stops the container.
-    _container: testcontainers::ContainerAsync<GenericImage>,
+    _controller_container: testcontainers::ContainerAsync<GenericImage>,
     /// Host port mapped to the controller's HTTPS port.
     host_port: u16,
     /// Container name used for DNS resolution on the Docker network.
     container_name: String,
+    /// One-time first-user registration token printed by the controller on startup.
+    registration_token: Option<String>,
 }
 
 impl ControllerContainer {
@@ -42,10 +48,24 @@ impl ControllerContainer {
     /// The controller is configured with:
     /// - `--allow-plaintext-secrets` (no master key required)
     /// - `--https-addr [::]:8443`
+    /// - A JetStream-enabled NATS sidecar for system services
     /// - Bootstrap enrollment tokens with high max-uses and long TTL
     ///
     /// Waits for the "HTTPS server listening on" log message before returning.
     pub async fn start(network: &str) -> Self {
+        let nats_name = format!("nats-{}", uuid::Uuid::now_v7());
+        let nats_container = GenericImage::new("nats", "latest")
+            .with_wait_for(WaitFor::Log(
+                LogWaitStrategy::stdout_or_stderr("Server is ready").with_times(1),
+            ))
+            .with_cmd(vec!["-js".to_string()])
+            .with_network(network)
+            .with_container_name(&nats_name)
+            .with_hostname(&nats_name)
+            .start()
+            .await
+            .expect("start nats container");
+
         let container_name = format!("controller-{}", uuid::Uuid::now_v7());
 
         // GenericImage methods (with_exposed_port, with_wait_for) must be called
@@ -54,13 +74,15 @@ impl ControllerContainer {
         let container = GenericImage::new(TEST_IMAGE, TEST_IMAGE_TAG)
             .with_exposed_port(CONTROLLER_PORT.tcp())
             .with_wait_for(WaitFor::Log(
-                LogWaitStrategy::stderr("HTTPS server listening on").with_times(1),
+                LogWaitStrategy::stdout_or_stderr("HTTPS server listening on").with_times(1),
             ))
             .with_cmd(vec![
                 "uptrakit-controller".to_string(),
                 "--allow-plaintext-secrets".to_string(),
                 "--https-addr".to_string(),
                 "[::]:8443".to_string(),
+                "--nats-url".to_string(),
+                format!("nats://{nats_name}:{NATS_PORT}"),
                 "--bootstrap-enrollment-token".to_string(),
                 ENROLLMENT_TOKEN.to_string(),
                 "--bootstrap-enrollment-token-max-uses".to_string(),
@@ -76,6 +98,7 @@ impl ControllerContainer {
             ])
             .with_network(network)
             .with_container_name(&container_name)
+            .with_hostname(&container_name)
             .start()
             .await
             .expect("start controller container");
@@ -85,10 +108,17 @@ impl ControllerContainer {
             .await
             .expect("get controller mapped port");
 
+        let registration_token =
+            container.stderr_to_vec().await.ok().and_then(|stderr| {
+                parse_initial_registration_token(&String::from_utf8_lossy(&stderr))
+            });
+
         Self {
-            _container: container,
+            _nats_container: nats_container,
+            _controller_container: container,
             host_port,
             container_name,
+            registration_token,
         }
     }
 
@@ -100,6 +130,11 @@ impl ControllerContainer {
     /// The container name (used for DNS resolution by other containers).
     pub fn container_name(&self) -> &str {
         &self.container_name
+    }
+
+    /// The initial first-user registration token, if the controller printed one.
+    pub fn registration_token(&self) -> Option<&str> {
+        self.registration_token.as_deref()
     }
 }
 
@@ -144,7 +179,7 @@ impl ServiceContainer {
     pub async fn start_agent_ssh(network: &str, controller_name: &str) -> Self {
         let container = GenericImage::new(TEST_IMAGE, TEST_IMAGE_TAG)
             .with_wait_for(WaitFor::Log(
-                LogWaitStrategy::stderr("enrollment complete, certificate saved to disk")
+                LogWaitStrategy::stdout_or_stderr("enrollment complete, certificate saved to disk")
                     .with_times(1),
             ))
             .with_cmd(vec![
@@ -181,7 +216,7 @@ impl ServiceContainer {
     ) -> Self {
         let container = GenericImage::new(TEST_IMAGE, TEST_IMAGE_TAG)
             .with_wait_for(WaitFor::Log(
-                LogWaitStrategy::stderr("enrollment complete, certificate saved to disk")
+                LogWaitStrategy::stdout_or_stderr("enrollment complete, certificate saved to disk")
                     .with_times(1),
             ))
             .with_cmd(vec![
@@ -205,4 +240,23 @@ impl ServiceContainer {
 /// Generate a unique Docker network name for a test run.
 pub fn test_network_name() -> String {
     format!("uptrakit-test-{}", uuid::Uuid::now_v7())
+}
+
+fn parse_initial_registration_token(stderr: &str) -> Option<String> {
+    let mut lines = stderr.lines();
+    while let Some(line) = lines.next() {
+        if !line.contains("No users found. Use this one-time registration token:") {
+            continue;
+        }
+
+        for candidate in lines.by_ref() {
+            let token = candidate.trim();
+            if token.is_empty() || token.chars().all(|ch| ch == '=') {
+                continue;
+            }
+            return Some(token.to_string());
+        }
+    }
+
+    None
 }

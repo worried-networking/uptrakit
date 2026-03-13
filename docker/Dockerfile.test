@@ -55,7 +55,7 @@ COPY --from=planner /app/recipe.json recipe.json
 # Cook controller deps with its non-default feature set first (ensures rust-embed etc. are cached)
 RUN cargo chef cook --release --recipe-path recipe.json \
     -p uptrakit-controller --no-default-features \
-    --features embed-frontend,db-sqlite,oidc,interactive,embedded-scheduler
+    --features embed-frontend,db-sqlite,oidc,interactive,embedded-scheduler,nats
 # Cook remaining workspace deps with default features (agent, scheduler, mqtt, etc.)
 RUN cargo chef cook --release --recipe-path recipe.json
 
@@ -66,7 +66,7 @@ COPY --from=frontend-builder /app/frontend/build /app/frontend/build
 # Build all binaries in one pass — the controller gets embed-frontend so
 # the health check endpoint works without an external static dir.
 RUN cargo build --release \
-    -p uptrakit-controller --no-default-features --features embed-frontend,db-sqlite,oidc,interactive,embedded-scheduler && \
+    -p uptrakit-controller --no-default-features --features embed-frontend,db-sqlite,oidc,interactive,embedded-scheduler,nats && \
     cargo build --release \
     -p uptrakit-agent \
     -p uptrakit-agent-ssh \
