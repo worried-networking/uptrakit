@@ -269,7 +269,7 @@ the same image are grouped under this single software item.
 
 ### Auto-created plugin config
 
-In discover-all mode, a single **`"Docker"`** plugin config (empty config `{}`) is created once
+During discovery, a single **`"Docker"`** plugin config (empty config `{}`) is created once
 per tenant and shared across all discovered items on all hosts. Individual containers carry their
 qualifier in the `host_software_item.qualifier` field, not in the plugin config.
 

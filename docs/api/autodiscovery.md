@@ -283,7 +283,7 @@ configs.
 
 ### Homebrew discovery targets
 
-The Homebrew plugin in discover-all mode (no pre-existing config) emits per-item targets:
+The Homebrew plugin always emits per-item discovery targets:
 
 | Package type | `DiscoveryTarget` emitted |
 | --- | --- |

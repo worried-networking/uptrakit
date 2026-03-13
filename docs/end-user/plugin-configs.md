@@ -308,7 +308,7 @@ on FreeBSD, TrueNAS SCALE, OPNsense, pfSense, and DragonFly BSD.
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `discovery_filter` | No | Controls which packages are surfaced during autodiscovery. `"all"` (default) — all installed packages. `"manual"` — only packages the user explicitly installed (auto-install flag `0`). Omitting this field (or sending `{}`) puts the plugin in discover-all mode so the controller can auto-create the config. |
+| `discovery_filter` | No | Controls which packages are surfaced during autodiscovery. `"all"` (default) — all installed packages. `"manual"` — only packages the user explicitly installed (auto-install flag `0`). |
 
 **Package identifier format:** The FreeBSD package name (e.g., `curl`, `nginx`, `python39`,
 `php82-extensions`, `p5-Net-SSLeay`).
@@ -391,12 +391,10 @@ controller-side from the [crates.io sparse registry index](https://index.crates.
 `cargo-nextest`). Crate names are 1–64 characters, must start with an ASCII letter or underscore,
 and may only contain `[A-Za-z0-9_-]`.
 
-**Discovery behaviour:** When the Cargo plugin runs with a default empty config (`{}`), it
-operates in _discover-all mode_: it calls `cargo install --list` and emits one `DiscoveryTarget`
-per installed crate. The controller auto-creates a shared plugin config named `"cargo install"`
-with an empty config object. Setting `include_prereleases: true` or providing a custom
-`registry_url` disables discover-all mode; the plugin then only tracks items explicitly assigned
-to it.
+**Discovery behaviour:** The Cargo plugin calls `cargo install --list` and emits one
+`DiscoveryTarget` per installed crate. The controller auto-creates a shared plugin config named
+`"cargo install"` with an empty config object. `include_prereleases` and `registry_url` are
+configured as tenant-level type settings (not per-config fields).
 
 **No `sudo` required.** `cargo install` writes to `~/.cargo/bin` under the agent user account.
 No privilege escalation is needed.

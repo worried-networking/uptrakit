@@ -102,7 +102,7 @@ The attention detector is a heuristic timer:
 
 `execute_update_interactive()` in `uptrakit-agent-core` uses a `ForwardingInteractiveExecutor`
 wrapper to promote the plugin's first `execute()` call to `execute_interactive()` without
-changing the `Plugin` trait:
+changing the `PluginOps` trait:
 
 1. `execute_update_interactive` creates a `oneshot` channel and wraps the real executor in
    `ForwardingInteractiveExecutor`.

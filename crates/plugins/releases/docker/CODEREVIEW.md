@@ -70,10 +70,9 @@ No security issues found.
 
 ### Strengths
 
-- `src/config.rs` -- 30+ test cases covering validation, `is_discover_all_mode` for all six
-  config fields, `resolved_tracked_tag` fallback behaviour, serialization round-trips,
-  `DockerAuth` both variants including masking and secret restore, and backward compatibility
-  with removed semver fields.
+- `src/config.rs` -- 20+ test cases covering validation,
+  `resolved_tracked_tag` fallback behaviour, serialization round-trips,
+  `DockerAuth` both variants including masking and secret restore.
 - `src/image_ref.rs` -- Round-trip parsing tests cover every image reference format the plugin
   supports, including edge cases like `localhost` addresses and port-qualified registries.
 - `src/auth.rs:187-335` -- Comprehensive auth tests covering parameter extraction from
@@ -192,9 +191,8 @@ No consistency issues found.
 - `src/docker_client.rs:109-167` -- `NoopDockerClient` provides clear error messages explaining
   that the `daemon` feature is required, making it immediately obvious when a misconfigured
   binary tries to perform daemon operations.
-- `src/config.rs:529-543` -- `old_semver_fields_silently_ignored_on_deserialize` test ensures
-  backward compatibility with configs stored in the database before the semver tracking mode was
-  removed.
+- `src/config.rs` -- `old_semver_fields_silently_ignored_on_deserialize` test ensures
+  legacy configs with removed semver fields deserialize cleanly.
 - `src/plugin.rs:36-48` -- The `DockerPlugin` struct documents the purpose of the `_proxy_handle`
   field, including its RAII lifecycle and when it is populated.
 

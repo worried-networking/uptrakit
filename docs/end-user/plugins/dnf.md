@@ -55,10 +55,9 @@ DNF does not use `/var/run/reboot-required`. The `PostUpdateHook` capability is
 {}
 ```
 
-When the config is `{}` the plugin runs in **discover-all mode**: it discovers every
-package reported by `rpm -qa` and emits `DiscoveryTarget` values so the controller can
-auto-create the plugin config on the first run. Subsequent runs use the auto-created
-config ID.
+When the config is `{}` the plugin discovers every package reported by `rpm -qa` and emits
+`DiscoveryTarget` values so the controller can auto-create the plugin config on the first run.
+Subsequent runs use the auto-created config ID.
 
 **Restrict to user-installed packages:**
 

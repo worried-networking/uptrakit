@@ -53,9 +53,9 @@ non-fatal and does not mark the update as failed.
 {}
 ```
 
-When the config is `{}` the plugin runs in **discover-all mode**: it discovers every package
-reported by `dpkg` and emits `DiscoveryTarget` values so the controller can auto-create the
-plugin config on the first run. Subsequent runs use the auto-created config ID.
+When the config is `{}` the plugin discovers every package reported by `dpkg` and emits
+`DiscoveryTarget` values so the controller can auto-create the plugin config on the first run.
+Subsequent runs use the auto-created config ID.
 
 **Restrict to manually-installed packages:**
 

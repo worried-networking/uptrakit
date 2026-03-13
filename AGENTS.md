@@ -19,7 +19,7 @@ Key components:
 - **Agents**: lightweight daemons on each managed host; outbound-only secure WebSocket to the controller; local version
   detection and update execution via sudo allowlists.
 - **Plugins**: first-party extension modules that detect, report, and update software; each crate implements the
-  `Plugin` trait and is registered in `uptrakit-plugin-infrastructure-registry`.
+  `PluginBase` trait (and optionally `PluginOps`) and is registered in `uptrakit-plugin-infrastructure-registry`.
 
 For full project context, see [README.md](README.md). For contribution rules, see [CONTRIBUTING.md](CONTRIBUTING.md).
 For system design and technology choices, see [ARCHITECTURE.md](ARCHITECTURE.md). For security policy and cryptographic
@@ -89,7 +89,7 @@ uptrakit/
 │   │   │   ├── pkg/                    # uptrakit-plugin-package-manager-pkg                    (lib)  — BSD pkg (pkgng) plugin for FreeBSD, TrueNAS SCALE, OPNsense, pfSense, DragonFly BSD; discovery via `pkg query -a "%n\t%v"` (all) or `pkg query -a "%a\t%n\t%v"` filtered by auto-flag==0 (manual); version detection via `pkg query "%v" <name>`; upstream version via `pkg rquery "%v" <name>` (local repo DB); updates via `sudo pkg install -y <name>`; index refresh via `sudo pkg update -q`; implements DetectHostCompatibility (checks `which pkg`); native batch_detect_installed_version (single `pkg query -a` call, filtered in memory) + batch_fetch_releases (single `pkg rquery "%n\t%v"` call); no PostUpdateHook; needs_setenv=false
 │   │   │   ├── apk/                    # uptrakit-plugin-package-manager-apk                    (lib)  — APK (Alpine Linux) plugin; discovery via `apk list --installed` (all mode) or `/etc/apk/world` (world mode); version detection via `apk info -v`; latest version via `apk version`; updates via `sudo apk add <pkg>=<ver>`; implements DetectHostCompatibility (checks `which apk`) and RefreshPackageIndex (`sudo apk update`); package_identifier = Alpine package name (lowercase+digits+._+-, min 2 chars, max 100 chars, no `..`); native batch_detect_installed_version + batch_fetch_releases (single `apk info -v` / `apk version` call for all packages)
 │   │   │   ├── snap/                   # uptrakit-plugin-package-manager-snap                   (lib)  — Snap (snapd) plugin for Linux; agent-side only; discovery via `snap list` (excludes system snaps: core*, snapd, bare); version detection via `snap list <name>`; batch_detect_installed_version via single `snap list` parsed into map; release fetch via `snap info <name>` (channels: section parsing); updates via `sudo snap refresh <name>` (optional --channel=); native execute_batch_update (single `snap refresh name1 name2 ...`); implements DetectHostCompatibility (checks `which snap`); package_identifier = snap name (lowercase, digits, hyphens, 2-40 chars); requires sudo for refresh; no package index refresh step (snapd manages cache internally)
-│   │   │   └── cargo/                  # uptrakit-plugin-package-manager-cargo                  (lib)  — Cargo install plugin; tracks Rust binaries installed via `cargo install`; discovery + version detection via `cargo install --list` (parse non-indented `<name> v<version>:` headers); ControllerSideFetchReleases via crates.io sparse index (`https://index.crates.io/{prefix}/{name}`, `tame-index` for URL/parsing); batch_fetch_releases bounded to 10 concurrent requests via `buffer_unordered(10)`; updates via `cargo install <name> --version <ver>` (no sudo, installs to `~/.cargo/bin`); implements DetectHostCompatibility (checks `which cargo` exit code); package_identifier = crate name (1–64 chars, starts with letter/underscore, `[A-Za-z0-9_-]`); is_discover_all_mode() when config is default `{}`; custom registry_url uses SsrfSafeResolver::permissive(), default uses SsrfSafeResolver::new()
+│   │   │   └── cargo/                  # uptrakit-plugin-package-manager-cargo                  (lib)  — Cargo install plugin; tracks Rust binaries installed via `cargo install`; discovery + version detection via `cargo install --list` (parse non-indented `<name> v<version>:` headers); ControllerSideFetchReleases via crates.io sparse index (`https://index.crates.io/{prefix}/{name}`, `tame-index` for URL/parsing); batch_fetch_releases bounded to 10 concurrent requests via `buffer_unordered(10)`; updates via `cargo install <name> --version <ver>` (no sudo, installs to `~/.cargo/bin`); implements DetectHostCompatibility (checks `which cargo` exit code); package_identifier = crate name (1–64 chars, starts with letter/underscore, `[A-Za-z0-9_-]`); DiscoveryTarget always emitted; type_settings_form_schema() for include_prereleases and registry_url; custom registry_url uses SsrfSafeResolver::permissive(), default uses SsrfSafeResolver::new()
 │   │   ├── notifications/
 │   │   │   ├── core/                   # uptrakit-notification-plugin-core       (lib)  — NotificationPlugin trait (deliver, validate_config, mask_config_secrets, extension_manifests, extension_actions), DeliveryMessage, MessageAction, NotificationPluginError, escape_html()
 │   │   │   ├── webhook/               # uptrakit-notification-plugin-webhook    (lib)  — Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing)
@@ -524,26 +524,22 @@ for user review. Key invariants:
    The PHS plugin config itself (`discovery_proxmox_helper_scripts`, always `{}`) is retained as an anchor for
    discovery runs but never linked directly to `SoftwareItem` host assignments.
 
-   **Homebrew** in discover-all mode (no pre-existing config) emits per-item `DiscoveryTarget` values
+   **Homebrew** always emits per-item `DiscoveryTarget` values
    with `plugin_type: PackageManagerHomebrew` and config `{"package_type": "formula"}` or `{"package_type": "cask"}`,
-   plus display names `"Homebrew (Formulae)"` and `"Homebrew (Casks)"`. When running with an existing
-   config, targets are empty and the controller uses the config-ID path.
+   plus display names `"Homebrew (Formulae)"` and `"Homebrew (Casks)"`.
 
-   **Docker** uses `DockerConfig::is_discover_all_mode()` to decide whether to emit targets.
-   When the plugin is invoked without a pre-existing config (all config fields at defaults — i.e.
-   the server sent `plugin_config_id: None` with `config: {}`), each discovered item emits one
-   `DiscoveryTarget` with `plugin_type: ReleasesDocker`, config `{}`, name `"Docker"`, and all
-   three roles.  When a real config is present (`plugin_config_id: Some(_)`), targets are empty and
-   the controller uses the config-ID path.
+   **Docker** always emits one `DiscoveryTarget` per discovered item with `plugin_type: ReleasesDocker`,
+   config `{}`, name `"Docker"`, and all three roles.
 
-   **APT** uses `AptConfig::is_discover_all_mode()` (true when `discovery_filter` is `None`,
-   i.e. the default empty config `{}`) to decide whether to emit targets. When
-   `plugin_config_id: None` with `config: {}`, each discovered item discovers **all** installed
-   dpkg packages and emits one `DiscoveryTarget` with `plugin_type: PackageManagerApt`, config
-   `{}`, name `"APT"`, and all three roles. When a real config is present (`plugin_config_id:
-   Some(_)`) with `discovery_filter: "all"` or `discovery_filter: "manual"`, targets are empty
-   and items use the config-ID path. (`discovery_filter: "manual"` restricts discovery to packages
-   reported by `apt-mark showmanual`.)
+   **APT** always emits one `DiscoveryTarget` per discovered item with `plugin_type: PackageManagerApt`,
+   config `{}`, name `"APT"`, and all three roles. (`discovery_filter` in type settings controls whether
+   discovery reports all installed packages or only manually-installed ones.)
+
+   **Cargo** always emits one `DiscoveryTarget` per discovered crate with `plugin_type: PackageManagerCargo`,
+   config `{}`, name `"cargo install"`, and all three roles.
+
+   **Snap** always emits one `DiscoveryTarget` per discovered snap with `plugin_type: PackageManagerSnap`,
+   config `{}`, name `"Snap"`, and all three roles.
 
    The `extra` field on `DiscoveredSoftware` is purely informational metadata (e.g. Docker's
    `{"containers": ["web-server"]}`) — the controller never interprets it for config synthesis.

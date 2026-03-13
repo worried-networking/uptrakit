@@ -1,7 +1,7 @@
 # Plugin Development Guidelines
 
 Plugins are first-party extension modules that detect, report, and update software on managed hosts.
-Each plugin crate implements the `Plugin` trait and is registered in `uptrakit-plugin-infrastructure-registry`. This
+Each plugin crate implements the `PluginBase` trait (and optionally `PluginOps`) and is registered in `uptrakit-plugin-infrastructure-registry`. This
 document describes the full lifecycle and conventions for building and extending plugins.
 
 When adding or changing a plugin, document the full lifecycle:
@@ -28,7 +28,7 @@ representations are: `releases_github`, `releases_gitlab`, `releases_forgejo`, `
 ## Plugin Capabilities
 
 The `PluginCapability` enum defines optional features a plugin may support. Plugins declare their
-capabilities by implementing `capabilities() -> Vec<PluginCapability>` on the `Plugin` trait. All
+capabilities by implementing `capabilities() -> Vec<PluginCapability>` on the `PluginBase` trait. All
 other trait methods have default no-op implementations; plugins override only what they support.
 
 | Capability | Trait method | Description |
@@ -279,7 +279,7 @@ and guidance on implementing custom executors.
 ### Declaring privileged commands with `required_sudo_commands()`
 
 If your plugin needs passwordless `sudo` to run certain commands, implement
-`required_sudo_commands()` on the `Plugin` trait:
+`required_sudo_commands()` on the `PluginBase` trait:
 
 ```rust
 use uptrakit_plugin_infrastructure_core::SudoCommandEntry;
@@ -395,8 +395,8 @@ Plugin crates:
 Checklist for adding a new first-party plugin:
 
 1. **Create crate** — add a new crate under `crates/plugins/` (e.g. `crates/plugins/my-plugin/`).
-2. **Implement `Plugin` trait** — implement `plugin_type()`, `capabilities()`, and all relevant
-   optional methods.
+2. **Implement `PluginBase` trait** — implement `plugin_type()`, `capabilities()`, and all relevant
+   optional methods. Implement `PluginOps` for runtime operations (discover, detect, fetch, update).
 3. **Declare capabilities** — include only the `PluginCapability` variants your plugin actually
    supports. Avoid declaring capabilities the plugin does not implement.
 4. **Register in `PluginRegistry`** — add a single entry to the `register_plugins!` macro invocation
@@ -765,7 +765,7 @@ This flag controls how the controller presents the discovered item in the UI:
 - **`featured: false`** -- the item appears as part of aggregated per-host package summaries.
   The `plugin_config_id` and `package_identifier` are stored directly on the
   `host_software_items` junction row. Use this for package managers that discover large numbers
-  of system packages (APT, Homebrew, npm in discover-all mode).
+  of system packages (APT, Homebrew, npm, Cargo, Snap).
 
 All discovered items are created immediately with `enabled: true` -- there is no pending state
 or approval workflow.
@@ -785,9 +785,11 @@ DiscoveredSoftware {
 
 | Plugin | Mode | Featured |
 | :--- | :--- | :--- |
-| APT | discover-all | `false` |
-| Homebrew | discover-all (no pre-existing config) | `false` |
-| npm | discover-all | `false` |
+| APT | all modes | `false` |
+| Homebrew | all modes | `false` |
+| npm | all modes | `false` |
+| Cargo | all modes | `false` |
+| Snap | all modes | `false` |
 | Docker | all modes | `true` |
 | Proxmox Helper Scripts | all modes | `true` |
 
@@ -842,8 +844,8 @@ DiscoveredSoftware {
 
 - Your plugin discovers software that should be managed by a different plugin type (e.g. PHS
   discovers GitHub-managed apps).
-- Your plugin is running in discover-all mode without a pre-existing config and needs the controller
-  to auto-create named configs (e.g. Homebrew emitting `"Homebrew (Formulae)"` / `"Homebrew (Casks)"`).
+- Your plugin needs the controller to auto-create named configs (e.g. Homebrew emitting
+  `"Homebrew (Formulae)"` / `"Homebrew (Casks)"`). All package manager plugins always emit targets.
 
 **When to leave targets empty:**
 

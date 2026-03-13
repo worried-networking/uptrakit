@@ -12,11 +12,11 @@ a richer capability model including host compatibility detection and per-plugin 
 
 The plugin system is composed of:
 
-- **`uptrakit-plugin-infrastructure-core`** (`crates/plugins/infrastructure/core/`) — the `Plugin` trait, `PluginCapability` enum,
+- **`uptrakit-plugin-infrastructure-core`** (`crates/plugins/infrastructure/core/`) — the `PluginBase` and `PluginOps` traits, `PluginCapability` enum,
   and supporting types (`HostCompatibility`, `UpdateHookContext`, `PreUpdateHookResult`,
   `SecretMasking`).
 - **First-party plugin crates** (`crates/plugins/*/`) — one crate per plugin type, each implementing
-  the `Plugin` trait.
+  the `PluginBase` trait (and optionally `PluginOps` for runtime operations).
 - **`uptrakit-plugin-infrastructure-registry`** (`crates/plugins/infrastructure/registry/`) — centralized dispatch and validation
   using the `register_plugins!` macro.
 
@@ -177,7 +177,7 @@ The `PluginCapability` enum defines the optional behaviors a plugin may support:
 | `PostUpdateHook` | Plugin can run logic after an update via `post_update_hook()`; non-fatal. |
 | `ControllerSideFetchReleases` | Plugin's `fetch_releases()` does not require local system state and can run on the controller instead of the agent. See [Execution Site Decision Logic](#execution-site-decision-logic). |
 
-Each capability maps to an optional method on the `Plugin` trait. Plugins that do not implement a
+Each capability maps to an optional method on the `PluginOps` trait. Plugins that do not implement a
 method should not declare the corresponding capability, and vice versa.
 
 ### `ControllerSideFetchReleases` Capability
@@ -234,7 +234,7 @@ To add a new capability to the plugin system:
 
 1. Add a new variant to the `PluginCapability` enum in `crates/plugins/infrastructure/core/src/traits.rs`.
    Mark the enum `#[non_exhaustive]` (already the case).
-2. Add the corresponding method to the `Plugin` trait with a default no-op implementation.
+2. Add the corresponding method to the `PluginOps` trait with a default no-op implementation.
 3. Define any new input/output types (e.g. `MyHookContext`, `MyHookResult`) in
    `crates/plugins/infrastructure/core/src/`.
 4. Implement the new method in the plugin crates that should support it.

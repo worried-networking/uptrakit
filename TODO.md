@@ -81,13 +81,11 @@ All foundation work is done. Summary of what was delivered:
     `list` shows all plugin types with active type settings. `show <plugin_type>` displays the
     current settings. `update <plugin_type> --config '{...}'` upserts. `reset <plugin_type>`
     deletes the tenant-level override.
-- [x] Cleanup: remove deprecated discovery fields from plugin config structs after migration period
+- [x] Cleanup: simplify plugin config discovery fields
   - **Category**: Plugins / Tech Debt | **Impact**: Low | **Effort**: Low
-  - `discovery_filter` (APT, DNF, Pacman, Pkg, APK) and `package_type` (Homebrew) are now
-    non-optional fields with `#[serde(default)]`. The `Option<XxxDiscoveryFilter>` fallback
-    pattern and `is_discover_all_mode()` guards have been removed. `DiscoveryTarget` values are
-    always emitted so the controller can find-or-create the plugin config. Homebrew adds a new
-    `Both` variant (default) replacing `None`.
+  - All plugins always emit `DiscoveryTarget` values. Per-plugin-type settings (e.g.
+    `discovery_filter`, `package_type`) are configured as tenant-level type settings
+    via `type_settings_form_schema()`.
 
 ______________________________________________________________________
 
