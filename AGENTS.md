@@ -175,6 +175,7 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 | `notifications-email` | No | Email notification plugin via SMTP (enabled transitively via `notifications-all`). Propagates to `uptrakit-web-api/notifications-email`. |
 | `interactive` | Yes | Interactive (PTY-based) update sessions with stdin forwarding. Propagates to `uptrakit-web-api/interactive`. Adds the interactive WebSocket endpoint and `InteractiveSessionRegistry`. See [Interactive Updates](docs/development/interactive-updates.md). |
 | `zeroconf` | Yes | mDNS/DNS-SD zero-configuration advertising. Enables the `--zeroconf` CLI flag and the advertiser module. Uses the `mdns-sd` crate. See [Zeroconf Discovery](docs/development/zeroconf-discovery.md). |
+| `reset-data` | Yes | Destructive data reset endpoint (`POST /api/v1/settings/reset-data`). Propagates to `uptrakit-web-api/reset-data`. Requires `CanManageGlobalSettings` permission and `confirm: "RESET"` in the request body. Broadcasts `ResetData` to connected services after clearing tenant data. |
 
 ### Web-API feature flags
 
@@ -187,6 +188,7 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 | `db-mysql` | No | MySQL backend. Propagates to `uptrakit-web-api-queries/db-mysql`. |
 | `db-all` | No | All database backends. Propagates to `uptrakit-web-api-queries/db-all`. |
 | `interactive` | No | Interactive update WebSocket endpoint (`/api/v1/update-history/{id}/interactive`), `InteractiveSessionRegistry`. Propagates to `uptrakit-command/interactive` via `uptrakit-agent-core`. |
+| `reset-data` | No | Registers the `POST /api/v1/settings/reset-data` route and the transactional data-reset query logic. No additional dependencies. |
 
 ### Build profiles
 
@@ -918,9 +920,11 @@ Each service declares a `BTreeSet<Capability>` at enrollment time. The set is pe
 | `MasterKeyAccess` | `master_key_access` | -- | -- | -- | yes | yes |
 | `CaManagement` | `ca_management` | -- | -- | -- | -- | yes |
 | `InteractiveUpdates` | `interactive_updates` | yes | yes | -- | -- | yes |
+| `ResetData` | `reset_data` | -- | yes | -- | -- | yes |
 | `Other(String)` | *(unknown)* | -- | -- | -- | -- | -- |
 
 The `interactive` Cargo feature is now a default feature on all three binary crates (agent, agent-ssh, controller).
+The `reset-data` Cargo feature is a default feature on the controller and agent-ssh crates.
 
 `Other(String)` is a forward-compat catch-all received from newer peers; it never participates in intersection
 (`Capability::is_known()` returns `false` for it).

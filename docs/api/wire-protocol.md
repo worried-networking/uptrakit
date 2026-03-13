@@ -94,10 +94,10 @@ entirely (`LoopOutcome::Shutdown`), while `server_restarting` causes it to recon
 ### Agent-specific (controller -> service)
 
 `check_versions`, `execute_update`, `discover_software`, `execute_batch_update`,
-`set_update_freeze`, `update_stdin_data`
+`set_update_freeze`, `update_stdin_data`, `reset_data`
 
 Both the regular agent and the SSH agent receive `check_versions`, `execute_update`, `discover_software`,
-`execute_batch_update`, and `update_stdin_data` messages.
+`execute_batch_update`, `update_stdin_data`, and `reset_data` messages.
 The `host_machine_id` field in each payload determines which host the operation targets
 (see [`host_machine_id` Field](#host_machine_id-field)).
 
@@ -408,6 +408,25 @@ direct WebSocket connection between the controller and the agent.
 
 The controller only sends this message to agents that advertise the `InteractiveUpdates`
 capability. See [Interactive Updates](interactive-updates.md) for the full flow.
+
+#### `reset_data` payload
+
+Broadcast by the controller to all connected services with the `ResetData` capability after
+the controller has cleared all tenant-scoped data from the database. Services should truncate
+their local data stores (e.g. SSH agent clears its host list and Proxmox state). The message
+carries no payload beyond the standard envelope fields.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 7,
+  "type": "reset_data"
+}
+```
+
+This message is session-targeted and is **not** NATS-publishable. Only sent to services
+that advertise the `ResetData` capability. The feature is gated behind the `reset-data`
+compile-time feature flag on the controller, web-api, and agent-ssh crates.
 
 #### `stdin_attention` payload (service to controller)
 
@@ -848,19 +867,22 @@ The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incomp
 | `CaManagement` | `ca_management` | Service can request CA certificate rotation. Requires `system_service`. |
 | `UiExtensions` | `ui_extensions` | Service has UI extensions to register via `extension_register`. The controller gates `extension_register` processing on this capability. See [UI Extension Architecture](../architecture/ui-extensions.md). |
 | `InteractiveUpdates` | `interactive_updates` | Service supports interactive (PTY-based) update sessions with stdin forwarding. Only advertised when compiled with the `interactive` feature. The controller gates `update_stdin_data` and `interactive: true` on this capability. See [Interactive Updates](interactive-updates.md). |
+| `ResetData` | `reset_data` | Service supports the reset-data protocol: truncates local data stores when the controller broadcasts a data reset. Only advertised when compiled with the `reset-data` feature. |
 | `Other(String)` | *(any unknown string)* | Forward-compatible catch-all. Never participates in intersection. |
 
 ### Advertised Sets per Component
 
-| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `mqtt_bridge` | `ssh_remote` | `system_service` | `scheduler` | `database_access` | `nats_access` | `master_key_access` | `ca_management` | `ui_extensions` | `interactive_updates` |
-| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Controller | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Agent | ✓ | ✓ | ✓ | — | — | — | — | — | — | — | — | — | ✓\* |
-| SSH Agent | ✓ | ✓ | ✓ | — | ✓ | — | — | — | — | — | — | ✓ | ✓\* |
-| MQTT Bridge | — | — | ✓ | ✓ | — | ✓ | — | — | — | — | — | — | — |
-| External Scheduler | — | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `mqtt_bridge` | `ssh_remote` | `system_service` | `scheduler` | `database_access` | `nats_access` | `master_key_access` | `ca_management` | `ui_extensions` | `interactive_updates` | `reset_data` |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Controller | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Agent | ✓ | ✓ | ✓ | — | — | — | — | — | — | — | — | — | ✓\* | — |
+| SSH Agent | ✓ | ✓ | ✓ | — | ✓ | — | — | — | — | — | — | ✓ | ✓\* | ✓\*\* |
+| MQTT Bridge | — | — | ✓ | ✓ | — | ✓ | — | — | — | — | — | — | — | — |
+| External Scheduler | — | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | — |
 
 \* Only when compiled with the `interactive` Cargo feature.
+
+\*\* Only when compiled with the `reset-data` Cargo feature.
 
 The controller advertises all known capabilities so every service can compute its agreed set regardless of its type.
 

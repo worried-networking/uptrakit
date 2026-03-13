@@ -78,3 +78,31 @@ GitHub Releases are optionally verified against
 the controller checks at fetch time and the agent independently re-verifies before
 install. The `require_attestation` option blocks updates that lack a valid attestation.
 See [GitHub Actions Attestation Verification](github-attestation.md) for full details.
+
+## Destructive Operations
+
+### Data Reset
+
+The `POST /api/v1/settings/reset-data` endpoint irreversibly deletes all tenant-scoped data
+(hosts, software items, plugin configs, host tags, update history, update batches, notification
+channels/rules/logs, discovery allowlists, and more). Multiple safeguards prevent accidental
+invocation:
+
+- **Compile-time feature gate**: the endpoint is only available when the `reset-data` Cargo
+  feature is enabled on `uptrakit-web-api` (propagated from `uptrakit-controller`). It is
+  enabled by default but can be excluded from production builds.
+- **Permission check**: requires the `CanManageGlobalSettings` permission, the most privileged
+  settings-level permission in the RBAC model.
+- **Explicit confirmation**: the request body must contain `confirm: "RESET"` (case-sensitive).
+  Any other value is rejected with HTTP 400.
+- **Transactional execution**: all deletions run in a single database transaction; a failure
+  at any step rolls back the entire operation.
+- **Service notification**: after the database is cleared, the controller broadcasts
+  `ControllerMessage::ResetData` to all connected services with the `ResetData` capability
+  so they can truncate their local data stores (e.g. SSH agent host list).
+- **Audit trail**: the operation is recorded in the audit log and emits a `DataReset` admin
+  SSE event.
+
+This endpoint does **not** delete users, roles, permissions, API tokens, enrollment tokens,
+services, certificates, or global/system-level settings. It only removes tenant-scoped
+operational data.

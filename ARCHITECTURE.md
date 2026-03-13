@@ -119,6 +119,7 @@ Each service sends a `BTreeSet<Capability>` in its `EnrollPayload` during enroll
 | `NatsAccess` | `nats_access` | Service requires NATS connection details |
 | `MasterKeyAccess` | `master_key_access` | Service requires the master encryption key |
 | `CaManagement` | `ca_management` | Service can request CA certificate rotation |
+| `ResetData` | `reset_data` | Supports reset-data protocol: truncates local data on controller broadcast |
 
 ### ServiceProfile (derived, never stored)
 

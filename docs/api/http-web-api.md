@@ -77,6 +77,8 @@ Access tokens are short-lived, refresh tokens rotate on each use, and logout add
   The URL is stored encrypted at rest. The response returns the masked URL with password replaced by `***`.
   Changes take effect after a controller restart (hot-reload not supported). See
   [Settings Runtime — NATS settings](settings-runtime.md#nats-settings-feature-nats) for full details.
+- POST `/api/v1/settings/reset-data` *(feature: `reset-data`)* — destructive reset of all tenant-scoped
+  data (requires `CanManageGlobalSettings`). See [Reset Data](#reset-data) below.
 
 Settings persist in the `settings` table and are reconciled with CLI arguments following priority rules defined in
 [docs/api/settings-runtime.md](settings-runtime.md). Runtime changes propagate immediately via a `tokio::sync::watch` channel (`SettingsSnapshot`).
@@ -203,6 +205,51 @@ Types are defined in `crates/shared/web-api-types/src/services.rs`:
 | --- | --- |
 | `crates/ui/web-api/src/routes/services.rs` | Route handler (`update_service`) |
 | `crates/shared/web-api-types/src/services.rs` | Request/response types |
+
+## Reset Data
+
+`POST /api/v1/settings/reset-data` *(feature: `reset-data`)* -- irreversibly deletes all tenant-scoped data
+including hosts, software items, plugin configs, host tags, update history, update batches, notification
+channels/rules/logs, discovery allowlists, proxmox host mappings, software ignore rules, and plugin type
+settings. The operation runs in a single database transaction. After the database is cleared, the controller
+broadcasts `ControllerMessage::ResetData` to all connected services with the `ResetData` capability (e.g. SSH
+agents clear their local host list and Proxmox state) and emits a `DataReset` admin SSE event.
+
+**Permission**: `CanManageGlobalSettings`.
+
+**Request body**:
+
+```json
+{
+  "confirm": "RESET"
+}
+```
+
+The `confirm` field must be exactly `"RESET"` (case-sensitive). Any other value returns `400`.
+
+**Response** (`200`):
+
+```json
+{
+  "deleted": {
+    "hosts": 5,
+    "software_items": 10,
+    "plugin_configs": 3,
+    "host_tags": 2,
+    "update_history": 100,
+    "update_batches": 4
+  }
+}
+```
+
+**Feature gate**: the endpoint is only compiled when the `reset-data` Cargo feature is enabled on
+`uptrakit-web-api` (propagated from `uptrakit-controller`). It is enabled by default.
+
+| File | Purpose |
+| --- | --- |
+| `crates/ui/web-api/src/routes/settings_reset.rs` | Route handler |
+| `crates/ui/web-api-queries/src/queries/reset_data.rs` | Query logic (FK-safe transactional deletion) |
+| `crates/shared/web-api-types/src/settings_reset.rs` | Request/response types |
 
 ## Multi-Tenancy
 
