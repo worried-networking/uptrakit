@@ -153,13 +153,6 @@ pub async fn run_proxmox_bootstrap(
             )))
         })?;
 
-    if !pve_host.is_pve_node {
-        bail!(Error::InvalidInput(format!(
-            "host '{}' is not a PVE node",
-            pve_host.name
-        )));
-    }
-
     // Check name uniqueness.
     let existing = host_ops::find_host(&db, &params.name).await?;
     if existing.is_some() {
