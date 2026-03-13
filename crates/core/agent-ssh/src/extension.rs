@@ -165,9 +165,8 @@ fn bootstrap_action() -> ActionDef {
                     "SSH target in [user@]host[:port] format. Default user: root, port: 22.",
                 ),
             FieldDef::new("name", "Host Name")
-                .required()
                 .with_placeholder("my-server")
-                .with_help_text("Friendly name for identification."),
+                .with_help_text("Optional. Defaults to the hostname from the SSH target."),
             FieldDef::new("auth_method", "Auth Method")
                 .with_type(FieldType::Select)
                 .required()
@@ -700,10 +699,12 @@ async fn run_bootstrap_action(args: BootstrapActionArgs<'_>) -> ExtensionRespons
         Err(e) => return make_error_response(request_id, &format!("invalid target: {e}")),
     };
 
-    let name = match params.get("name").and_then(|v| v.as_str()) {
-        Some(n) => n.to_string(),
-        None => return make_error_response(request_id, "missing required field 'name'"),
-    };
+    let name = params
+        .get("name")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| parsed_target.hostname.clone());
 
     let auth_method = params
         .get("auth_method")
