@@ -25,7 +25,7 @@ use uptrakit_shared_macros::impl_report_conversion;
 // ---------------------------------------------------------------------------
 
 /// Maximum number of incoming WebSocket messages per connection per second.
-pub(crate) const WS_MESSAGE_RATE_LIMIT: u32 = 50;
+pub(crate) const WS_MESSAGE_RATE_LIMIT: u32 = 200;
 /// Window for WebSocket message rate limiting.
 pub(crate) const WS_MESSAGE_RATE_WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
 
