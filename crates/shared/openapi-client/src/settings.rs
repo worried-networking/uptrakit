@@ -17,6 +17,7 @@ use uptrakit_web_api_types::settings_combined::{
 use uptrakit_web_api_types::settings_network::{
     NetworkSettingsResponse, UpdateNetworkSettingsRequest,
 };
+use uptrakit_web_api_types::settings_reset::{ResetDataRequest, ResetDataResponse};
 
 impl UptrakitClient {
     /// Get combined global settings (network, system services, MQTT limit, optional NATS).
@@ -92,6 +93,12 @@ impl UptrakitClient {
     /// Renew the server TLS certificate.
     pub async fn renew_server_certificate(&self) -> Result<RenewServerCertResponse> {
         self.post_empty(crate::paths::settings::RENEW_SERVER_CERT)
+            .await
+    }
+
+    /// Reset all tenant-scoped data.
+    pub async fn reset_data(&self, req: &ResetDataRequest) -> Result<ResetDataResponse> {
+        self.post_json(crate::paths::settings::RESET_DATA, req)
             .await
     }
 }

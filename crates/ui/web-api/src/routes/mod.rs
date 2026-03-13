@@ -39,6 +39,8 @@ pub mod settings_mqtt;
 #[cfg(feature = "nats")]
 pub mod settings_nats;
 pub mod settings_network;
+#[cfg(feature = "reset-data")]
+pub mod settings_reset;
 pub mod settings_smtp;
 pub mod settings_zeroconf;
 pub mod software_items;

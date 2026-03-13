@@ -20,6 +20,7 @@ db-all = ["db-sqlite", "db-postgres", "db-mysql"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-web-api-queries/db-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-web-api-queries/db-postgres"]
 db-mysql = ["sea-orm/sqlx-mysql", "uptrakit-web-api-queries/db-mysql"]
+reset-data = []
 
 [dependencies]
 async-stream = { workspace = true }

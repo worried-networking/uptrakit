@@ -72,6 +72,8 @@ pub enum AdminEvent {
     HostTagDeleted { id: Uuid },
     /// Tag assignments changed on a host.
     HostTagsChanged { host_id: Uuid },
+    /// All tenant data was reset (hosts, software items, etc. deleted).
+    DataReset,
 }
 
 impl AdminEvent {
@@ -97,6 +99,7 @@ impl AdminEvent {
             Self::HostTagUpdated { .. } => "host_tag_updated",
             Self::HostTagDeleted { .. } => "host_tag_deleted",
             Self::HostTagsChanged { .. } => "host_tags_changed",
+            Self::DataReset => "data_reset",
         }
     }
 }
@@ -144,6 +147,7 @@ mod tests {
             AdminEvent::HostTagUpdated { id },
             AdminEvent::HostTagDeleted { id },
             AdminEvent::HostTagsChanged { host_id: id },
+            AdminEvent::DataReset,
         ]
     }
 
@@ -229,7 +233,7 @@ mod tests {
     fn event_name_count_matches_variant_count() {
         // If a new variant is added without updating event_name(), this
         // test will fail because all_variants() won't include it.
-        assert_eq!(all_variants().len(), 16);
+        assert_eq!(all_variants().len(), 17);
     }
 
     #[test]

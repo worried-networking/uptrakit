@@ -56,6 +56,8 @@ pub enum AdminSseEvent {
     SystemServiceStatusChanged { id: Uuid, status: String },
     /// A scheduled task completed execution.
     SchedulerTaskCompleted { task_id: Uuid },
+    /// All tenant data was reset.
+    DataReset,
     /// An unrecognised event type from a newer server version.
     Unknown { event_type: String, data: String },
 }
@@ -236,6 +238,7 @@ fn parse_typed_event(event: RawSseEvent) -> std::result::Result<AdminSseEvent, S
             let p: Payload = serde_json::from_str(&event.data)?;
             Ok(AdminSseEvent::SchedulerTaskCompleted { task_id: p.task_id })
         }
+        "data_reset" => Ok(AdminSseEvent::DataReset),
         _ => Ok(AdminSseEvent::Unknown {
             event_type: event.event_type,
             data: event.data,
@@ -409,6 +412,13 @@ mod tests {
             result,
             AdminSseEvent::SchedulerTaskCompleted { .. }
         ));
+    }
+
+    #[test]
+    fn parse_data_reset() {
+        let event = make_event("data_reset", "{}");
+        let result = parse_typed_event(event).unwrap();
+        assert!(matches!(result, AdminSseEvent::DataReset));
     }
 
     #[test]

@@ -300,6 +300,8 @@ pub(crate) mod settings {
     pub(crate) const ROTATE_CA: &str = "/api/v1/global-settings/ca/rotate";
     /// `POST /api/v1/settings/renew-server-certificate`
     pub(crate) const RENEW_SERVER_CERT: &str = "/api/v1/settings/renew-server-certificate";
+    /// `POST /api/v1/settings/reset-data`
+    pub(crate) const RESET_DATA: &str = "/api/v1/settings/reset-data";
 }
 
 pub(crate) mod settings_smtp {

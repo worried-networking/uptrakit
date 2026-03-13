@@ -8,9 +8,10 @@ repository.workspace = true
 version.workspace = true
 
 [features]
-default = ["zeroconf", "interactive"]
+default = ["zeroconf", "interactive", "reset-data"]
 zeroconf = ["uptrakit-service-sdk/zeroconf"]
 interactive = ["uptrakit-command/interactive", "uptrakit-agent-core/interactive"]
+reset-data = []
 
 [dependencies]
 base64 = { workspace = true }

@@ -33,6 +33,7 @@ use uptrakit_openapi_client::types::settings_nats::{
 use uptrakit_openapi_client::types::settings_network::{
     NetworkSettingsResponse, UpdateNetworkSettingsRequest,
 };
+use uptrakit_openapi_client::types::settings_reset::{ResetDataRequest, ResetDataResponse};
 use uptrakit_openapi_client::types::settings_smtp::{
     SmtpSettingsResponse, UpdateSmtpSettingsRequest,
 };
@@ -306,6 +307,20 @@ impl HumanOutput for OidcProviderResponse {
         out.push_str(&format!("Active:           {}\n", self.is_active));
         out.push_str(&format!("Created:          {}\n", self.created_at));
         out.push_str(&format!("Updated:          {}\n", self.updated_at));
+        out
+    }
+}
+
+impl HumanOutput for ResetDataResponse {
+    fn to_human_string(&self) -> String {
+        let d = &self.deleted;
+        let mut out = String::from("Data reset completed:\n");
+        out.push_str(&format!("  Hosts deleted:          {}\n", d.hosts));
+        out.push_str(&format!("  Software items deleted: {}\n", d.software_items));
+        out.push_str(&format!("  Plugin configs deleted: {}\n", d.plugin_configs));
+        out.push_str(&format!("  Host tags deleted:      {}\n", d.host_tags));
+        out.push_str(&format!("  Update history deleted: {}\n", d.update_history));
+        out.push_str(&format!("  Update batches deleted: {}\n", d.update_batches));
         out
     }
 }
@@ -933,6 +948,20 @@ pub async fn nats_clear(
     client.update_nats_settings(&req).await.context_to()
 }
 
+/// Reset all tenant-scoped data.
+pub async fn reset_data(
+    server: Option<&str>,
+    token: Option<&str>,
+    insecure: bool,
+    request_timeout: Option<std::time::Duration>,
+) -> Result<ResetDataResponse> {
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
+    let req = ResetDataRequest {
+        confirm: "RESET".to_string(),
+    };
+    client.reset_data(&req).await.context_to()
+}
+
 /// Show system alerts.
 pub async fn alerts(
     server: Option<&str>,
@@ -951,7 +980,27 @@ mod tests {
     use super::*;
     use uptrakit_openapi_client::types::enrollment_tokens::EnrollmentTokensSummary;
     use uptrakit_openapi_client::types::registration::RegistrationMode;
+    use uptrakit_openapi_client::types::settings_reset::ResetDeletedCounts;
     use uptrakit_openapi_client::types::system_alerts::{AlertSeverity, SystemAlert};
+
+    #[test]
+    fn reset_data_human_output() {
+        let resp = ResetDataResponse {
+            deleted: ResetDeletedCounts {
+                hosts: 5,
+                software_items: 10,
+                plugin_configs: 3,
+                host_tags: 2,
+                update_history: 100,
+                update_batches: 4,
+            },
+        };
+        let s = resp.to_human_string();
+        assert!(s.contains("Data reset completed"), "header missing");
+        assert!(s.contains("5"), "hosts count missing");
+        assert!(s.contains("10"), "software_items count missing");
+        assert!(s.contains("100"), "update_history count missing");
+    }
 
     #[test]
     fn deleted_output_human() {

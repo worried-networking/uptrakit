@@ -386,6 +386,9 @@ pub(crate) fn ssh_agent_capabilities() -> BTreeSet<Capability> {
     if cfg!(feature = "interactive") {
         caps.insert(Capability::InteractiveUpdates);
     }
+    if cfg!(feature = "reset-data") {
+        caps.insert(Capability::ResetData);
+    }
     caps
 }
 

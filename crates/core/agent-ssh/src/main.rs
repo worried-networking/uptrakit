@@ -362,6 +362,60 @@ impl ServiceHandler for SshAgentHandler {
                 }
                 Ok(None)
             }
+            ControllerMessage::ResetData => {
+                if cfg!(feature = "reset-data") {
+                    tracing::info!("received ResetData: truncating local data stores");
+                    use sea_orm::{ConnectionTrait, EntityTrait, TransactionTrait};
+                    match db.begin().await {
+                        Ok(txn) => {
+                            // Delete in FK-safe order:
+                            // 1. pending_proxmox_matches (references ssh_hosts)
+                            if let Err(e) =
+                                crate::db::entity::pending_proxmox_match::Entity::delete_many()
+                                    .exec(&txn)
+                                    .await
+                            {
+                                tracing::error!(error = %e, "failed to truncate pending_proxmox_matches");
+                            }
+                            // 2. proxmox_host_state (references ssh_hosts; entity owned by
+                            //    the proxmox plugin crate, so use raw SQL)
+                            if let Err(e) = txn
+                                .execute_unprepared("DELETE FROM proxmox_host_state")
+                                .await
+                            {
+                                tracing::error!(error = %e, "failed to truncate proxmox_host_state");
+                            }
+                            // 3. ssh_hosts
+                            if let Err(e) = crate::db::entity::ssh_host::Entity::delete_many()
+                                .exec(&txn)
+                                .await
+                            {
+                                tracing::error!(error = %e, "failed to truncate ssh_hosts");
+                            }
+                            match txn.commit().await {
+                                Ok(()) => {
+                                    tracing::info!("local data stores truncated successfully");
+                                    // Clear in-memory state so the agent does not
+                                    // keep stale host references.
+                                    self.host_snapshot.clear();
+                                    self.last_update_per_host.clear();
+                                }
+                                Err(e) => {
+                                    tracing::error!(error = %e, "failed to commit ResetData transaction");
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "failed to begin ResetData transaction");
+                        }
+                    }
+                } else {
+                    tracing::warn!(
+                        "received ResetData but reset-data feature is disabled; ignoring"
+                    );
+                }
+                Ok(None)
+            }
             _ => {
                 tracing::debug!("ignoring unrecognized message in authenticated loop");
                 Ok(None)

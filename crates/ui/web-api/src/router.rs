@@ -367,6 +367,19 @@ struct ZeroconfApiDoc;
 )]
 struct NatsApiDoc;
 
+/// Reset-data OpenAPI paths and schemas, merged conditionally.
+#[cfg(feature = "reset-data")]
+#[derive(OpenApi)]
+#[openapi(
+    paths(crate::routes::settings_reset::reset_data),
+    components(schemas(
+        uptrakit_web_api_types::settings_reset::ResetDataRequest,
+        uptrakit_web_api_types::settings_reset::ResetDataResponse,
+        uptrakit_web_api_types::settings_reset::ResetDeletedCounts,
+    ))
+)]
+struct ResetDataApiDoc;
+
 /// OIDC-specific OpenAPI paths and schemas, merged conditionally.
 #[cfg(feature = "oidc")]
 #[derive(OpenApi)]
@@ -709,6 +722,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         crate::routes::settings_zeroconf::update_zeroconf_settings
     ));
 
+    // Reset data
+    #[cfg(feature = "reset-data")]
+    let auth_routes = auth_routes.routes(routes!(crate::routes::settings_reset::reset_data));
+
     // NATS settings
     #[cfg(feature = "nats")]
     let auth_routes = auth_routes.routes(routes!(
@@ -768,6 +785,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let openapi = {
         let mut openapi = openapi;
         openapi.merge(NatsApiDoc::openapi());
+        openapi
+    };
+
+    #[cfg(feature = "reset-data")]
+    let openapi = {
+        let mut openapi = openapi;
+        openapi.merge(ResetDataApiDoc::openapi());
         openapi
     };
 

@@ -8,7 +8,7 @@ repository.workspace = true
 version.workspace = true
 
 [features]
-default = ["db-sqlite", "oidc", "zeroconf", "interactive", "notifications-all", "embedded-scheduler", "embed-frontend"]
+default = ["db-sqlite", "oidc", "zeroconf", "interactive", "notifications-all", "embedded-scheduler", "embed-frontend", "reset-data"]
 embedded-scheduler = ["dep:uptrakit-scheduler-engine"]
 zeroconf = ["dep:mdns-sd"]
 oidc = ["uptrakit-web-api/oidc", "uptrakit-scheduler-engine?/oidc"]
@@ -24,6 +24,7 @@ notifications-email = ["uptrakit-web-api/notifications-email"]
 notifications-all = ["notifications-telegram", "notifications-email", "uptrakit-web-api/notifications-all"]
 embed-frontend = ["dep:rust-embed"]
 journald = ["uptrakit-audit-log/journald", "dep:tracing-journald"]
+reset-data = ["uptrakit-web-api/reset-data"]
 
 [dependencies]
 uptrakit-internal-wire = { workspace = true }

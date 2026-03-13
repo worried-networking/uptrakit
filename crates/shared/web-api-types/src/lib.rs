@@ -46,6 +46,7 @@ pub mod settings_ca;
 pub mod settings_combined;
 pub mod settings_mqtt;
 pub mod settings_network;
+pub mod settings_reset;
 pub mod system_services;
 pub use masked_url::MaskedUrl;
 pub mod settings_nats;

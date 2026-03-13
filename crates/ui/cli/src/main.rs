@@ -939,6 +939,12 @@ enum SettingsCommands {
         #[command(subcommand)]
         command: NatsCommands,
     },
+    /// Reset all tenant-scoped data (hosts, software items, plugin configs, etc.)
+    ResetData {
+        /// Confirm the destructive operation (required)
+        #[arg(long)]
+        confirm: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -3014,6 +3020,22 @@ async fn run(cli: Cli) -> error::Result<()> {
                     );
                 }
             },
+            SettingsCommands::ResetData { confirm } => {
+                if !confirm {
+                    eprintln!(
+                        "Error: You must pass --confirm to reset all data. This action is irreversible."
+                    );
+                    std::process::exit(1);
+                }
+                let resp = commands::settings::reset_data(
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
         },
         Commands::PluginConfigs { command } => match command {
             PluginConfigsCommands::List { page, per_page } => {
@@ -5282,6 +5304,30 @@ mod tests {
                 command: SettingsCommands::Nats {
                     command: NatsCommands::Clear
                 }
+            })
+        ));
+    }
+
+    #[test]
+    fn settings_reset_data_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "settings", "reset-data", "--confirm"])
+            .expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::Settings {
+                command: SettingsCommands::ResetData { confirm: true }
+            })
+        ));
+    }
+
+    #[test]
+    fn settings_reset_data_without_confirm_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "settings", "reset-data"]).expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::Settings {
+                command: SettingsCommands::ResetData { confirm: false }
             })
         ));
     }
