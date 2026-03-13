@@ -440,6 +440,21 @@ export interface PluginTypeInfo {
 	sample_config: Record<string, unknown>;
 	/** Form field definitions for this plugin type. Empty for plugins with no configurable fields. */
 	config_form_fields?: FieldDef[];
+	/** Form field definitions for type-level settings. Empty for types with no configurable type settings. */
+	type_settings_form_fields?: FieldDef[];
+	/** Sample/default type settings JSON for this plugin type. */
+	type_settings_sample?: Record<string, unknown>;
+}
+
+export interface PluginTypeSettingsResponse {
+	plugin_type: string;
+	config: Record<string, unknown>;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface UpsertPluginTypeSettingsRequest {
+	config: Record<string, unknown>;
 }
 
 export interface PluginConfigResponse {

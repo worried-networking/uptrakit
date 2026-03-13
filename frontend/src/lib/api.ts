@@ -72,6 +72,7 @@ import type {
 	SystemEnrollmentTokenCreatedResponse,
 	SystemEnrollmentTokenResponse,
 	PluginTypeInfo,
+	PluginTypeSettingsResponse,
 	AuditLogEntry,
 	AuditLogListParams,
 	ExtensionResponse,
@@ -663,6 +664,28 @@ export function revokeSystemEnrollmentToken(id: string): Promise<void> {
 /** Fetch all known plugin types with display names and capabilities from the registry. */
 export function listPluginTypes(): Promise<PluginTypeInfo[]> {
 	return request<PluginTypeInfo[]>('/plugin-types');
+}
+
+export function listPluginTypeSettings(): Promise<PluginTypeSettingsResponse[]> {
+	return request<PluginTypeSettingsResponse[]>('/plugin-type-settings');
+}
+
+export function getPluginTypeSettings(pluginType: string): Promise<PluginTypeSettingsResponse> {
+	return request<PluginTypeSettingsResponse>(`/plugin-type-settings/${encodeURIComponent(pluginType)}`);
+}
+
+export function upsertPluginTypeSettings(
+	pluginType: string,
+	config: Record<string, unknown>
+): Promise<PluginTypeSettingsResponse> {
+	return request<PluginTypeSettingsResponse>(`/plugin-type-settings/${encodeURIComponent(pluginType)}`, {
+		method: 'PUT',
+		body: JSON.stringify({ config })
+	});
+}
+
+export function deletePluginTypeSettings(pluginType: string): Promise<void> {
+	return requestVoid(`/plugin-type-settings/${encodeURIComponent(pluginType)}`, { method: 'DELETE' });
 }
 
 export function getPluginConfigs(page?: number, perPage?: number): Promise<PaginatedResponse<PluginConfigResponse>> {
