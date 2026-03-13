@@ -27,6 +27,8 @@ use super::LoopAction;
 use super::discovery::trigger_discovery_for_agent_host;
 use super::renewal::{sign_renewal_csr, sign_renewal_csr_system};
 use super::updates::load_linked_host_ids;
+use uptrakit_web_api_types::events::AdminEvent;
+
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
@@ -471,6 +473,10 @@ pub(super) async fn handle_version_check_results(
         }
     };
 
+    // Collect (host_id, software_item_id) pairs for successful results so we
+    // can emit VersionCheckCompleted SSE events after the DB work is done.
+    let mut completed_pairs: Vec<(uuid::Uuid, uuid::Uuid)> = Vec::new();
+
     for result in &payload.results {
         if result.error.is_some() {
             tracing::debug!(
@@ -508,6 +514,12 @@ pub(super) async fn handle_version_check_results(
         }
 
         let matching_host_ids: Vec<uuid::Uuid> = matching_rows.iter().map(|r| r.host_id).collect();
+
+        // Record one representative (host_id, software_item_id) pair per result
+        // so we can emit VersionCheckCompleted events after DB writes complete.
+        if let Some(&first_host_id) = matching_host_ids.first() {
+            completed_pairs.push((first_host_id, software_item_id));
+        }
 
         // Build and run the update across all matched host_software_item rows.
         let mut update = host_software_item::Entity::update_many()
@@ -613,6 +625,23 @@ pub(super) async fn handle_version_check_results(
             .notification_service
             .push_software_states_for_tenant(state.db(), svc.tenant_id)
             .await;
+    }
+
+    // Emit AdminEvent::VersionCheckCompleted for each (host, software_item) pair
+    // so the /software page SSE subscribers can refresh.
+    if let Some(tenant_id) = svc_tenant_id {
+        for (host_id, software_item_id) in completed_pairs {
+            state
+                .event_broadcaster
+                .send(
+                    tenant_id,
+                    AdminEvent::VersionCheckCompleted {
+                        host_id,
+                        software_item_id,
+                    },
+                )
+                .await;
+        }
     }
 
     ProcessorResponse::cont()

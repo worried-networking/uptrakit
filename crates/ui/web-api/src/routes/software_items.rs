@@ -128,6 +128,7 @@ fn is_controller_fetch_site(
 async fn run_controller_fetch_jobs(
     db: &sea_orm::DatabaseConnection,
     notification_service: &crate::notification_service::NotificationService,
+    event_broadcaster: &crate::event_broadcaster::EventBroadcaster,
     tenant_id: Uuid,
     jobs: Vec<ControllerFetchJob>,
 ) -> u32 {
@@ -139,6 +140,7 @@ async fn run_controller_fetch_jobs(
     let now = OffsetDateTime::now_utc();
     let mut succeeded = 0u32;
     let mut updated_item_ids: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+    let mut completed_pairs: Vec<(Uuid, Uuid)> = Vec::new();
 
     for job in &jobs {
         let plugin = match PluginRegistry::create_plugin(
@@ -239,6 +241,7 @@ async fn run_controller_fetch_jobs(
                 }
                 Ok(_) => {
                     updated_item_ids.insert(*software_item_id);
+                    completed_pairs.push((*host_id, *software_item_id));
                 }
             }
         }
@@ -261,6 +264,20 @@ async fn run_controller_fetch_jobs(
         notification_service
             .push_software_states_for_tenant(db, tenant_id)
             .await;
+
+        // Emit AdminEvent::VersionCheckCompleted for each updated pair so the
+        // /software page SSE subscribers refresh when controller-side fetches complete.
+        for (host_id, software_item_id) in completed_pairs {
+            event_broadcaster
+                .send(
+                    tenant_id,
+                    AdminEvent::VersionCheckCompleted {
+                        host_id,
+                        software_item_id,
+                    },
+                )
+                .await;
+        }
     }
 
     succeeded
@@ -1002,6 +1019,7 @@ pub async fn check_versions(
     let controller_checks_run = run_controller_fetch_jobs(
         tenant_db.db(),
         &state.notification_service,
+        &state.event_broadcaster,
         tenant_db.tenant_id,
         controller_job_map.into_values().collect(),
     )
@@ -1279,6 +1297,7 @@ pub async fn check_versions_host(
     let controller_checks_run = run_controller_fetch_jobs(
         tenant_db.db(),
         &state.notification_service,
+        &state.event_broadcaster,
         tenant_db.tenant_id,
         controller_fetch_jobs,
     )

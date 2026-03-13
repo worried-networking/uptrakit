@@ -712,7 +712,7 @@ pub(super) async fn handle_update_result(
     }
 
     // Push updated software states to MQTT services.
-    if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
+    let svc_tenant_id = if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
         .one(state.db())
         .await
     {
@@ -720,7 +720,10 @@ pub(super) async fn handle_update_result(
             .notification_service
             .push_software_states_for_tenant(state.db(), svc.tenant_id)
             .await;
-    }
+        Some(svc.tenant_id)
+    } else {
+        None
+    };
 
     // If this update is part of a batch, emit batch progress events and
     // dispatch the next pending update for this host.
@@ -745,6 +748,28 @@ pub(super) async fn handle_update_result(
         emit_batch_progress_event(state, batch_id, event).await;
 
         dispatch_next_batch_update(state, service_id, batch_id, record.host_id).await;
+    }
+
+    // Emit AdminEvent::UpdateCompleted so the /software page SSE subscribers
+    // refresh the software list when an update finishes.
+    if let Some(tenant_id) = svc_tenant_id {
+        let status_str = match payload.status {
+            UpdateFinalStatus::Completed => "completed",
+            UpdateFinalStatus::Failed => "failed",
+            _ => "failed",
+        };
+        state
+            .event_broadcaster
+            .send(
+                tenant_id,
+                AdminEvent::UpdateCompleted {
+                    update_history_id: payload.update_history_id,
+                    host_id: record.host_id,
+                    software_item_id: record.software_item_id,
+                    status: status_str.to_string(),
+                },
+            )
+            .await;
     }
 
     // Dispatch notification event for update result.

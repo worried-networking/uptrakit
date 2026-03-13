@@ -110,7 +110,8 @@
 			unsubscribers.push(
 				subscribeToEvent('software_item_updated', () => loadAll(currentPage, true)),
 				subscribeToEvent('software_item_created', () => loadAll(currentPage, true)),
-				subscribeToEvent('version_check_completed', () => loadAll(currentPage, true))
+				subscribeToEvent('version_check_completed', () => loadAll(currentPage, true)),
+				subscribeToEvent('update_completed', () => loadAll(currentPage, true))
 			);
 			refreshInterval = setInterval(() => {
 				if (document.visibilityState === 'visible') loadAll(currentPage, true);
