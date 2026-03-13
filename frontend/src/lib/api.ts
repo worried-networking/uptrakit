@@ -768,15 +768,15 @@ export function getSoftwareIgnores(
 	if (page != null) params.set('page', String(page));
 	if (perPage != null) params.set('per_page', String(perPage));
 	const query = params.toString();
-	return request(`/software-ignores${query ? `?${query}` : ''}`);
+	return request(`/autodiscovery/ignores${query ? `?${query}` : ''}`);
 }
 
 export function createSoftwareIgnore(req: CreateSoftwareIgnoreRequest): Promise<SoftwareIgnoreResponse> {
-	return request('/software-ignores', { method: 'POST', body: JSON.stringify(req) });
+	return request('/autodiscovery/ignores', { method: 'POST', body: JSON.stringify(req) });
 }
 
 export function deleteSoftwareIgnore(id: string): Promise<void> {
-	return requestVoid(`/software-ignores/${encodeURIComponent(id)}`, { method: 'DELETE' });
+	return requestVoid(`/autodiscovery/ignores/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 // Software items - update
@@ -992,7 +992,7 @@ export function batchHosts(action: string, ids: string[]): Promise<BatchActionRe
 }
 
 export function batchSoftwareIgnores(action: string, ids: string[]): Promise<BatchActionResponse> {
-	return request('/software-ignores/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
+	return request('/autodiscovery/ignores/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
 }
 
 export function batchPluginConfigs(action: string, ids: string[]): Promise<BatchActionResponse> {

@@ -675,7 +675,7 @@ for user review. Key invariants:
 | `crates/shared/db/src/entity/software_ignore.rs` | SeaORM entity for ignore rules |
 | `crates/shared/agent-core/src/client.rs` | `run_discover_software()` / `spawn_background()` agent-side discovery logic |
 | `crates/ui/web-api-queries/src/queries/autodiscovery.rs` | DB helpers + `process_discovery_results()` |
-| `crates/ui/web-api/src/routes/software_ignores.rs` | Ignore list CRUD routes |
+| `crates/ui/web-api/src/routes/autodiscovery.rs` | Ignore list CRUD routes (at `/autodiscovery/ignores/*`) |
 | `crates/ui/web-api/src/routes/service_ws/handler/discovery.rs` | `trigger_discovery_for_agent_host()` helper — applies allowlist before dispatching |
 | `crates/shared/db/src/entity/tenant_discovery_allowlist.rs` | SeaORM entity for tenant-wide discovery allowlist |
 | `crates/shared/db/src/entity/host_discovery_allowlist.rs` | SeaORM entity for per-host discovery allowlist |
@@ -1119,7 +1119,7 @@ for component details.
 | `crates/ui/web-api/src/routes/system_services.rs` | `batch_system_services` handler |
 | `crates/ui/web-api/src/routes/software_items.rs` | `batch_software_items` handler |
 | `crates/ui/web-api/src/routes/hosts.rs` | `batch_hosts` handler |
-| `crates/ui/web-api/src/routes/software_ignores.rs` | `batch_software_ignores` handler |
+| `crates/ui/web-api/src/routes/autodiscovery.rs` | `batch_software_ignores` handler |
 | `crates/ui/web-api/src/routes/plugin_configs.rs` | `batch_plugin_configs` handler |
 | `crates/shared/openapi-client/src/paths.rs` | `BATCH` path constants for all resources |
 | `crates/shared/extension-framework/src/lib.rs` | `ActionDef.batch_action` field |
