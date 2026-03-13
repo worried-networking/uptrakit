@@ -91,6 +91,11 @@ impl NotificationPluginRegistry {
     pub fn supported_types(&self) -> Vec<&'static str> {
         self.plugins.keys().copied().collect()
     }
+
+    /// Return all registered notification plugin instances.
+    pub fn plugins(&self) -> impl Iterator<Item = &Arc<dyn NotificationPlugin>> {
+        self.plugins.values()
+    }
 }
 
 /// Abstraction over the notification plugin registry operations needed by

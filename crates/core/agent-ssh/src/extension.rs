@@ -18,8 +18,8 @@ use uptrakit_internal_wire::extension::{
     ExtensionRequestPayload, ExtensionResponsePayload, ExtensionTargeting, ExtensionUi, FieldDef,
     FieldType, FormDef, SelectOption, TableColumn,
 };
+use uptrakit_plugin_infrastructure_core::PluginBase;
 use uptrakit_plugin_infrastructure_core::agent_infra::{InfraActionInvoker, InfraPluginContext};
-use uptrakit_plugin_infrastructure_registry::AgentInfraRegistry;
 use uptrakit_service_sdk::ControllerConnection;
 use uptrakit_shared_types::Permission;
 
@@ -39,7 +39,7 @@ pub const EXTENSION_ID: &str = "ssh-agent.hosts";
 /// Action fields (`row_actions`, `primary_actions`) contain action ID strings
 /// that reference entries in the action library returned by [`build_actions`].
 /// `infra_primary_actions` are additional primary action IDs contributed by
-/// infrastructure plugins (via [`AgentInfraRegistry::all_primary_action_ids`]).
+/// infrastructure plugins (via [`PluginBase::primary_action_ids`]).
 pub fn build_manifest(infra_primary_actions: &[String]) -> ExtensionManifest {
     let mut primary_actions = vec!["bootstrap".to_string()];
     primary_actions.extend(infra_primary_actions.iter().cloned());
@@ -74,10 +74,16 @@ pub fn build_manifest(infra_primary_actions: &[String]) -> ExtensionManifest {
 /// Build the register payload including the manifest and encryption key.
 pub fn build_register_payload(
     encryption_public_key: Option<String>,
-    infra_registry: &AgentInfraRegistry,
+    infra_plugins: &[Arc<dyn PluginBase>],
 ) -> ExtensionRegisterPayload {
-    let infra_primary_actions = infra_registry.all_primary_action_ids();
-    let infra_manifests = infra_registry.all_extension_manifests();
+    let infra_primary_actions: Vec<String> = infra_plugins
+        .iter()
+        .flat_map(|p| p.primary_action_ids())
+        .collect();
+    let infra_manifests: Vec<ExtensionManifest> = infra_plugins
+        .iter()
+        .flat_map(|p| p.extension_manifests())
+        .collect();
 
     let mut manifests = vec![build_manifest(&infra_primary_actions)];
     manifests.extend(infra_manifests);
@@ -90,7 +96,7 @@ pub fn build_register_payload(
 }
 
 /// Build the action library for registration via `ExtensionActionsRegister`.
-pub fn build_actions(infra_registry: &AgentInfraRegistry) -> Vec<ActionDef> {
+pub fn build_actions(infra_plugins: &[Arc<dyn PluginBase>]) -> Vec<ActionDef> {
     let mut actions = vec![
         ActionDef::new("remove-host", "Remove Host")
             .with_permission(Permission::UpdateHosts)
@@ -101,7 +107,7 @@ pub fn build_actions(infra_registry: &AgentInfraRegistry) -> Vec<ActionDef> {
         sync_host_action(),
         bootstrap_action(),
     ];
-    actions.extend(infra_registry.all_extension_actions());
+    actions.extend(infra_plugins.iter().flat_map(|p| p.extension_actions()));
     actions
 }
 
@@ -215,7 +221,7 @@ pub struct ExtensionContext<'a> {
     pub tenant_id: Option<uuid::Uuid>,
     pub bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
     pub extension_proxy: &'a Arc<uptrakit_service_sdk::ServiceExtensionProxy>,
-    pub infra_registry: Arc<AgentInfraRegistry>,
+    pub infra_plugins: Arc<Vec<Arc<dyn PluginBase>>>,
 }
 
 // ── InfraActionInvoker implementation ────────────────────────────────
@@ -263,7 +269,7 @@ fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionCo
     let state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
     let proxy = std::sync::Arc::clone(ctx.extension_proxy);
-    let infra_registry = std::sync::Arc::clone(&ctx.infra_registry);
+    let infra_plugins = std::sync::Arc::clone(&ctx.infra_plugins);
     let service_id = ctx.service_id;
     let tenant_id = ctx.tenant_id;
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
@@ -298,8 +304,11 @@ fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionCo
         };
 
         let mut response: Option<ExtensionResponsePayload> = None;
-        for plugin in infra_registry.plugins() {
-            if let Some(resp) = plugin.handle_extension_action(&plugin_ctx, &request).await {
+        for plugin in infra_plugins.iter() {
+            if let Some(resp) = plugin
+                .handle_service_extension_action(&plugin_ctx, &request)
+                .await
+            {
                 response = Some(resp);
                 break;
             }

@@ -312,25 +312,24 @@ async fn run(args: cli::Args) -> Result<()> {
         uptrakit_web_api::auth::token_denylist::TokenDenylist::new_with_db(db_conn.clone()),
     );
 
-    let notification_registry_config =
-        uptrakit_notification_plugin_registry::NotificationRegistryConfig {
-            allow_private_urls: args.allow_private_notification_urls,
-        };
-    let notification_ops: Arc<dyn uptrakit_notification_plugin_registry::NotificationOps> =
-        Arc::new(
-            uptrakit_notification_plugin_registry::NotificationPluginRegistry::new(
-                notification_registry_config,
-            )
-            .context_transform(|_| {
-                AppError::Config("failed to build notification plugin registry".to_string())
-            })?,
-        );
+    // Build plugin_ops (with notification support). Must be created before the
+    // notification dispatcher so it can serve as the notification channel registry.
+    let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(
+        uptrakit_plugin_infrastructure_registry::PluginRegistry::with_notifications(
+            uptrakit_plugin_infrastructure_registry::NotificationRegistryConfig {
+                allow_private_urls: args.allow_private_notification_urls,
+            },
+        )
+        .context_transform(|_| {
+            AppError::Config("failed to build plugin registry with notifications".to_string())
+        })?,
+    );
 
     let callback_base_url = format!("https://{}", reconciled.https_addr);
     let notification_dispatcher =
         uptrakit_web_api::notifications::dispatcher::NotificationDispatcher::new(
             db_conn.clone(),
-            Arc::clone(&notification_ops),
+            Arc::clone(&plugin_ops),
             callback_base_url,
             settings.clone(),
         );
@@ -431,22 +430,15 @@ async fn run(args: cli::Args) -> Result<()> {
         }
     };
 
-    // Build plugin_ops and seed the extension registry with plugin-provided manifests.
-    let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
-        Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry);
+    // Seed the extension registry with plugin-provided manifests (including
+    // notification plugin extensions aggregated by the unified plugin_ops).
     let extension_manifests = plugin_ops.extension_manifests();
     let extension_actions = plugin_ops.extension_actions();
-
-    // Notification extensions (only enabled plugins produce manifests).
-    let notification_manifests = notification_ops.extension_manifests();
-    let notification_actions = notification_ops.extension_actions();
 
     let extension_registry = Arc::new(
         uptrakit_web_api::extension_registry::ExtensionRegistry::new(
             extension_manifests,
             extension_actions,
-            notification_manifests,
-            notification_actions,
         ),
     );
 
@@ -469,7 +461,6 @@ async fn run(args: cli::Args) -> Result<()> {
         .controller_id(controller_id)
         .notification_service(notification_service)
         .notification_dispatcher(notification_dispatcher)
-        .notification_ops(notification_ops)
         .token_denylist(token_denylist)
         .credential_sources(credential_sources)
         .batch_progress_broadcaster(batch_progress_broadcaster)

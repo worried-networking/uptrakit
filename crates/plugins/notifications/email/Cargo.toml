@@ -18,6 +18,7 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 uptrakit-extension-framework = { workspace = true }
 uptrakit-notification-plugin-core = { workspace = true }
+uptrakit-plugin-infrastructure-core = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

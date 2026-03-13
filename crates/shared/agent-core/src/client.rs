@@ -491,8 +491,13 @@ async fn batch_update_inner(
             }
         }
 
-        // Execute batch update
-        let results = match plugin.execute_batch_update(&items, &output_tx).await {
+        // Execute batch update via UpdateExecutorPlugin subtrait
+        let updater = plugin.as_update_executor().ok_or_else(|| {
+            let msg = "plugin does not implement UpdateExecutorPlugin";
+            tracing::error!(msg);
+            msg.to_string()
+        })?;
+        let results = match updater.execute_batch_update(&items, &output_tx).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!(error = %e, "batch update execution failed");
@@ -647,19 +652,9 @@ async fn discover_software_inner(
                     }
                 }
                 Ok(plugin) => {
-                    use uptrakit_plugin_infrastructure_registry::PluginCapability;
-                    if !plugin.has_capability(PluginCapability::DiscoverLocalSoftware) {
-                        tracing::warn!(
-                            plugin_type = %assignment.plugin_type,
-                            "plugin does not support DiscoverLocalSoftware; skipping"
-                        );
-                        DiscoveryPluginResult {
-                            plugin_config_id: assignment.plugin_config_id,
-                            plugin_type: assignment.plugin_type.clone(),
-                            discoveries: vec![],
-                            error: Some("plugin does not support software discovery".to_string()),
-                        }
-                    } else {
+                    // Use the subtrait accessor — if None, the plugin doesn't
+                    // implement DiscoveryPlugin and we skip it with an error.
+                    if let Some(discovery) = plugin.as_discovery() {
                         // Run a host-compatibility check before discovery.
                         //
                         // Plugins that declare `DetectHostCompatibility` are asked
@@ -672,9 +667,9 @@ async fn discover_software_inner(
                         // If the check itself errors, we proceed with discovery
                         // (fail-open) and log a warning.
                         let is_compatible = if plugin
-                            .has_capability(PluginCapability::DetectHostCompatibility)
+                            .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility)
                         {
-                            match plugin.detect_host_compatibility().await {
+                            match discovery.detect_host_compatibility().await {
                                 Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Incompatible(reason)) => {
                                     tracing::debug!(
                                         plugin_type = %assignment.plugin_type,
@@ -705,7 +700,7 @@ async fn discover_software_inner(
                                 error: None,
                             }
                         } else {
-                            match plugin.discover_software().await {
+                            match discovery.discover_software().await {
                                 Ok(discoveries) => {
                                     tracing::info!(
                                         plugin_type = %assignment.plugin_type,
@@ -733,6 +728,17 @@ async fn discover_software_inner(
                                     }
                                 }
                             }
+                        }
+                    } else {
+                        tracing::warn!(
+                            plugin_type = %assignment.plugin_type,
+                            "plugin does not implement DiscoveryPlugin; skipping"
+                        );
+                        DiscoveryPluginResult {
+                            plugin_config_id: assignment.plugin_config_id,
+                            plugin_type: assignment.plugin_type.clone(),
+                            discoveries: vec![],
+                            error: Some("plugin does not support software discovery".to_string()),
                         }
                     }
                 }

@@ -19,9 +19,9 @@ db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres", "uptra
 db-mysql = ["sea-orm/sqlx-mysql", "uptrakit-shared-db/db-mysql", "uptrakit-web-api/db-mysql"]
 interactive = ["uptrakit-web-api/interactive"]
 nats = ["uptrakit-web-api/nats"]
-notifications-telegram = ["uptrakit-web-api/notifications-telegram"]
-notifications-email = ["uptrakit-web-api/notifications-email"]
-notifications-all = ["notifications-telegram", "notifications-email", "uptrakit-web-api/notifications-all"]
+notifications-telegram = ["uptrakit-web-api/notifications-telegram", "uptrakit-plugin-infrastructure-registry/notifications-telegram"]
+notifications-email = ["uptrakit-web-api/notifications-email", "uptrakit-plugin-infrastructure-registry/notifications-email"]
+notifications-all = ["notifications-telegram", "notifications-email", "uptrakit-web-api/notifications-all", "uptrakit-plugin-infrastructure-registry/notifications-webhook"]
 embed-frontend = ["dep:rust-embed"]
 journald = ["uptrakit-audit-log/journald", "dep:tracing-journald"]
 reset-data = ["uptrakit-web-api/reset-data"]
@@ -36,7 +36,7 @@ uptrakit-shared-types = { workspace = true }
 uptrakit-command = { workspace = true }
 uptrakit-notification-plugin-registry = { workspace = true, features = ["webhook"] }
 uptrakit-plugin-infrastructure-core = { workspace = true }
-uptrakit-plugin-infrastructure-registry = { workspace = true }
+uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["notifications", "migrations"] }
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "sync", "time"] }
 axum = { workspace = true }

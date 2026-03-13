@@ -188,7 +188,22 @@ pub async fn batch_check_versions(
                     }
                 };
 
-                let results = match plugin.batch_detect_installed_version(&batch_items).await {
+                let detector = match plugin.as_version_detector() {
+                    Some(d) => d,
+                    None => {
+                        let err = format!(
+                            "plugin {} does not implement VersionDetectorPlugin",
+                            group.plugin_type
+                        );
+                        return group
+                            .items
+                            .iter()
+                            .map(|(idx, _)| (*idx, (None::<String>, Some(err.clone()))))
+                            .collect::<Vec<_>>();
+                    }
+                };
+
+                let results = match detector.batch_detect_installed_version(&batch_items).await {
                     Ok(r) => r,
                     Err(e) => {
                         tracing::warn!(
@@ -251,16 +266,18 @@ pub async fn batch_check_versions(
         .await
         {
             Ok(plugin) if plugin.has_capability(PluginCapability::RefreshPackageIndex) => {
-                tracing::info!(
-                    plugin_type = %plugin_type,
-                    "refreshing package index"
-                );
-                if let Err(e) = plugin.refresh_package_index().await {
-                    tracing::warn!(
+                if let Some(pkg_index) = plugin.as_package_index() {
+                    tracing::info!(
                         plugin_type = %plugin_type,
-                        error = %e,
-                        "failed to refresh package index"
+                        "refreshing package index"
                     );
+                    if let Err(e) = pkg_index.refresh_package_index().await {
+                        tracing::warn!(
+                            plugin_type = %plugin_type,
+                            error = %e,
+                            "failed to refresh package index"
+                        );
+                    }
                 }
             }
             Ok(_) => {}
@@ -315,7 +332,27 @@ pub async fn batch_check_versions(
                     }
                 };
 
-                let results = match plugin.batch_fetch_releases(&batch_items).await {
+                let fetcher = match plugin.as_release_fetcher() {
+                    Some(f) => f,
+                    None => {
+                        let err = format!(
+                            "plugin {} does not implement ReleaseFetcherPlugin",
+                            group.plugin_type
+                        );
+                        return group
+                            .items
+                            .iter()
+                            .map(|(idx, _)| {
+                                (
+                                    *idx,
+                                    (None::<String>, UpdateCategory::Unknown, Some(err.clone())),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                    }
+                };
+
+                let results = match fetcher.batch_fetch_releases(&batch_items).await {
                     Ok(r) => r,
                     Err(e) => {
                         tracing::warn!(
@@ -484,9 +521,16 @@ async fn detect_installed(
             .await
             .map_err(|e| e.to_string())?;
 
+    let detector = plugin.as_version_detector().ok_or_else(|| {
+        format!(
+            "plugin {} does not implement VersionDetectorPlugin",
+            assignment.plugin_type
+        )
+    })?;
+
     let pkg = &assignment.package_identifier;
     match run_with_retry("detect_installed_version", MAX_RETRIES, || {
-        Box::pin(plugin.detect_installed_version(pkg))
+        Box::pin(detector.detect_installed_version(pkg))
     })
     .await
     {
@@ -527,9 +571,16 @@ async fn fetch_latest(
             .await
             .map_err(|e| e.to_string())?;
 
+    let fetcher = plugin.as_release_fetcher().ok_or_else(|| {
+        format!(
+            "plugin {} does not implement ReleaseFetcherPlugin",
+            assignment.plugin_type
+        )
+    })?;
+
     let pkg = &assignment.package_identifier;
     let releases = match run_with_retry("fetch_releases", MAX_RETRIES, || {
-        Box::pin(plugin.fetch_releases(pkg))
+        Box::pin(fetcher.fetch_releases(pkg))
     })
     .await
     {

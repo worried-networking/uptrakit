@@ -14,9 +14,13 @@ use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    AttestationStatus, OutputStreamType, Plugin, PluginCapability, PluginError, PluginType,
-    ReleaseAsset, ReleaseInfo, SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
+    AttestationStatus, OutputStreamType, PluginCapability, PluginError, ReleaseAsset, ReleaseInfo,
+    SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
 };
+
+// Subtrait imports needed by tests (via `use super::*`) to resolve method calls.
+#[cfg(test)]
+use uptrakit_plugin_infrastructure_core::{PluginBase, UpdateExecutorPlugin};
 
 use crate::api_types::{AttestationsApiResponse, GitHubApiError, GitHubAsset, GitHubRelease};
 use crate::config::GitHubConfig;
@@ -422,16 +426,61 @@ fn parse_link_next(headers: &reqwest::header::HeaderMap) -> Option<String> {
     })
 }
 
+// ── PluginBase + subtrait implementations ────────────────────────────────
+
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    GitHubPlugin,
+    GitHubConfig,
+    "releases_github",
+    {
+        fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
+        fn required_sudo_commands(
+            &self,
+        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
+            // Declare all commands that any GitHub releases config could need.
+            // Sync runs with empty config (install_path=None, pre/post=None), so
+            // conditional checks would silently omit entries. Declaring them
+            // unconditionally ensures `host sync` always produces a complete
+            // sudoers file regardless of what is in the stored config.
+            //
+            // `install` — copies release assets to the target path.
+            // `systemctl stop/start *` — restricted to two safe subcommands so
+            //   the agent can manage service lifecycle without blanket systemctl.
+            vec![
+                SudoCommandEntry::new(
+                    "install",
+                    "Install downloaded GitHub release assets to the target path",
+                ),
+                SudoCommandEntry::new(
+                    "systemctl",
+                    "Stop services before GitHub release asset installation",
+                )
+                .with_args_suffix(Cow::Borrowed("stop *")),
+                SudoCommandEntry::new(
+                    "systemctl",
+                    "Start services after GitHub release asset installation",
+                )
+                .with_args_suffix(Cow::Borrowed("start *")),
+            ]
+        }
+
+        fn as_release_fetcher(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
+            Some(self)
+        }
+        fn as_update_executor(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
+            Some(self)
+        }
+    }
+);
+
 #[async_trait]
-impl Plugin for GitHubPlugin {
-    fn plugin_type(&self) -> PluginType {
-        PluginType::ReleasesGithub
-    }
-
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        Self::CAPABILITIES
-    }
-
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for GitHubPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(
         &self,
@@ -534,7 +583,10 @@ impl Plugin for GitHubPlugin {
 
         Ok(upstream_releases)
     }
+}
 
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for GitHubPlugin {
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
@@ -817,34 +869,6 @@ impl Plugin for GitHubPlugin {
         send_output(output_tx, &summary, OutputStreamType::Stdout).await;
 
         Ok(summary)
-    }
-
-    fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        // Declare all commands that any GitHub releases config could need.
-        // Sync runs with empty config (install_path=None, pre/post=None), so
-        // conditional checks would silently omit entries. Declaring them
-        // unconditionally ensures `host sync` always produces a complete
-        // sudoers file regardless of what is in the stored config.
-        //
-        // `install` — copies release assets to the target path.
-        // `systemctl stop/start *` — restricted to two safe subcommands so
-        //   the agent can manage service lifecycle without blanket systemctl.
-        vec![
-            SudoCommandEntry::new(
-                "install",
-                "Install downloaded GitHub release assets to the target path",
-            ),
-            SudoCommandEntry::new(
-                "systemctl",
-                "Stop services before GitHub release asset installation",
-            )
-            .with_args_suffix(Cow::Borrowed("stop *")),
-            SudoCommandEntry::new(
-                "systemctl",
-                "Start services after GitHub release asset installation",
-            )
-            .with_args_suffix(Cow::Borrowed("start *")),
-        ]
     }
 }
 

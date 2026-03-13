@@ -11,10 +11,19 @@ publish = false
 default = ["daemon"]
 daemon = ["uptrakit-plugin-releases-docker/daemon"]
 ssh = ["daemon", "uptrakit-plugin-releases-docker/ssh"]
+migrations = [
+    "uptrakit-plugin-infrastructure-core/migrations",
+    "uptrakit-plugin-infrastructure-proxmox/migrations",
+    "dep:sea-orm-migration",
+]
 agent-infra = [
     "uptrakit-plugin-infrastructure-core/agent-infra",
     "uptrakit-plugin-infrastructure-proxmox/agent-infra",
 ]
+notifications = ["dep:uptrakit-notification-plugin-registry"]
+notifications-webhook = ["notifications", "uptrakit-notification-plugin-registry/webhook"]
+notifications-telegram = ["notifications", "uptrakit-notification-plugin-registry/telegram"]
+notifications-email = ["notifications", "uptrakit-notification-plugin-registry/email"]
 
 [dependencies]
 uptrakit-shared-types = { workspace = true }
@@ -44,8 +53,11 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
+uptrakit-notification-plugin-core = { workspace = true }
+uptrakit-notification-plugin-registry = { workspace = true, optional = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+sea-orm-migration = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

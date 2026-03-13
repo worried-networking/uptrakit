@@ -263,6 +263,54 @@ impl NotificationPlugin for TelegramPlugin {
     }
 }
 
+// ── PluginBase + NotificationTransportPlugin ────────────────────────────────
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::PluginBase for TelegramPlugin {
+    fn plugin_type_id(&self) -> &str {
+        "telegram"
+    }
+
+    fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+        vec![uptrakit_plugin_infrastructure_core::PluginCapability::NotificationDelivery]
+    }
+
+    fn validate_config(&self, config: &serde_json::Value) -> std::result::Result<(), String> {
+        NotificationPlugin::validate_config(self, config).map_err(|e| e.to_string())
+    }
+
+    fn mask_config_secrets(&self, config: &serde_json::Value) -> serde_json::Value {
+        NotificationPlugin::mask_config_secrets(self, config)
+    }
+
+    fn restore_config_secrets(
+        &self,
+        incoming: &serde_json::Value,
+        stored: &serde_json::Value,
+    ) -> serde_json::Value {
+        NotificationPlugin::restore_config_secrets(self, incoming, stored)
+    }
+
+    fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
+        NotificationPlugin::extension_manifests(self)
+    }
+
+    fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
+        NotificationPlugin::extension_actions(self)
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::NotificationTransportPlugin for TelegramPlugin {
+    fn channel_type(&self) -> &'static str {
+        NotificationPlugin::channel_type(self)
+    }
+
+    async fn deliver(&self, config: &serde_json::Value, message: &DeliveryMessage) -> Result<()> {
+        NotificationPlugin::deliver(self, config, message).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

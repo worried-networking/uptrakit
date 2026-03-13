@@ -1,7 +1,8 @@
 //! Agent-side Proxmox infrastructure plugin.
 //!
-//! This module provides the [`AgentInfraPlugin`] implementation for Proxmox VE,
-//! encapsulating all PVE-specific logic that runs inside the SSH agent.
+//! This module provides the [`PluginBase`](uptrakit_plugin_infrastructure_core::PluginBase)
+//! and subtrait implementations for Proxmox VE, encapsulating all PVE-specific
+//! logic that runs inside the SSH agent.
 
 pub mod db_ops;
 pub mod entity;

@@ -12,8 +12,9 @@ use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec,
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchUpdateItem, BatchUpdateResult, DiscoveredSoftware,
-    HostCompatibility, OutputStreamType, Plugin, PluginCapability, PluginError, PluginType,
-    ReleaseInfo, Result, SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
+    DiscoveryPlugin, HostCompatibility, OutputStreamType, PluginCapability, PluginError,
+    PluginType, ReleaseFetcherPlugin, ReleaseInfo, Result, SudoCommandEntry, UpdateExecutorPlugin,
+    UpdateOutputLine, UpstreamRelease, Version, VersionDetectorPlugin,
 };
 use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
@@ -358,23 +359,104 @@ impl NpmPlugin {
     }
 }
 
-#[async_trait]
-impl Plugin for NpmPlugin {
-    fn plugin_type(&self) -> PluginType {
+// ── PluginBase + subtrait implementations ────────────────────────────────
+
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    NpmPlugin,
+    NpmConfig,
+    "package_manager_npm",
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
+        fn required_sudo_commands(
+            &self,
+        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
+            // `install -g *` covers both `npm install -g PKG@VER` and
+            // batch `npm install -g PKG1@VER1 PKG2@VER2 ...`.
+            vec![
+                SudoCommandEntry::new("npm", "Global npm package installation requires root")
+                    .with_args_suffix(Cow::Borrowed("install -g *")),
+            ]
+        }
+
+        fn as_discovery(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
+            Some(self)
+        }
+        fn as_version_detector(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
+            Some(self)
+        }
+        fn as_release_fetcher(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
+            Some(self)
+        }
+        fn as_update_executor(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
+            Some(self)
+        }
+    }
+);
+
+impl NpmPlugin {
+    /// Returns the plugin type for this instance.
+    pub fn plugin_type(&self) -> PluginType {
         PluginType::PackageManagerNpm
     }
+}
 
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        Self::CAPABILITIES
-    }
+#[async_trait]
+impl DiscoveryPlugin for NpmPlugin {
+    #[tracing::instrument(skip_all)]
+    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
+        tracing::info!("discovering globally installed npm packages");
 
-    fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        // `install -g *` covers both `npm install -g PKG@VER` and
-        // batch `npm install -g PKG1@VER1 PKG2@VER2 ...`.
-        vec![
-            SudoCommandEntry::new("npm", "Global npm package installation requires root")
-                .with_args_suffix(Cow::Borrowed("install -g *")),
-        ]
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec(
+                "npm",
+                [
+                    "list".to_string(),
+                    "-g".to_string(),
+                    "--depth=0".to_string(),
+                    "--json".to_string(),
+                ],
+            ))
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "npm list -g failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            bail!(PluginError::CommandFailed(cmd_output.exit_code));
+        }
+
+        let all_packages = Self::parse_npm_list_all(&cmd_output.output);
+
+        let packages: Vec<DiscoveredSoftware> = all_packages
+            .into_iter()
+            .filter(|(name, _)| !SYSTEM_NPM_PACKAGES.contains(&name.as_str()))
+            .map(|(name, version)| DiscoveredSoftware {
+                package_identifier: name.clone(),
+                name,
+                installed_version: version,
+                targets: vec![],
+                extra: None,
+                qualifier: None,
+                plugin_package_identifier: None,
+                featured: false,
+            })
+            .collect();
+
+        tracing::debug!(count = packages.len(), "npm software discovery complete");
+        Ok(packages)
     }
 
     #[tracing::instrument(skip_all)]
@@ -388,7 +470,10 @@ impl Plugin for NpmPlugin {
             Err(_) => Ok(HostCompatibility::Incompatible("npm not found".to_string())),
         }
     }
+}
 
+#[async_trait]
+impl VersionDetectorPlugin for NpmPlugin {
     #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
@@ -425,6 +510,84 @@ impl Plugin for NpmPlugin {
         Ok(version.map(|v| Version::new(&v)))
     }
 
+    /// Detect installed versions for multiple packages using a single `npm list -g` call.
+    ///
+    /// Runs:
+    /// ```text
+    /// npm list -g --depth=0 --json
+    /// ```
+    ///
+    /// Fetches all globally installed packages in one subprocess call and filters
+    /// the results in memory. This is more efficient than per-package calls when
+    /// checking many packages.
+    ///
+    /// If the command fails (non-zero exit or process error), all items are treated
+    /// as not installed rather than erroring — consistent with the single-item
+    /// `detect_installed_version` behaviour.
+    #[tracing::instrument(skip_all)]
+    async fn batch_detect_installed_version(
+        &self,
+        items: &[BatchDetectItem],
+    ) -> Result<Vec<BatchDetectResult>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Validate all identifiers up front.
+        for item in items {
+            self.require_package_identifier(&item.package_identifier)?;
+        }
+
+        tracing::debug!(
+            count = items.len(),
+            "batch detecting npm installed versions"
+        );
+
+        // Run a single `npm list -g --depth=0 --json` without a package filter.
+        // npm exits non-zero when there are peer-dep issues; treat any failure as
+        // "not installed" for all items (consistent with the single-item behaviour).
+        let all_packages: HashMap<String, String> = match self
+            .executor
+            .execute_quiet(&CommandSpec::exec(
+                "npm",
+                [
+                    "list".to_string(),
+                    "-g".to_string(),
+                    "--depth=0".to_string(),
+                    "--json".to_string(),
+                ],
+            ))
+            .await
+        {
+            Ok(output) => Self::parse_npm_list_all(&output.output)
+                .into_iter()
+                .collect(),
+            Err(_) => {
+                tracing::debug!(
+                    "npm list -g returned non-zero; treating all packages as not installed"
+                );
+                HashMap::new()
+            }
+        };
+
+        let results = items
+            .iter()
+            .map(|item| {
+                BatchDetectResult::new(
+                    item.package_identifier.clone(),
+                    all_packages.get(&item.package_identifier).map(Version::new),
+                    None,
+                )
+            })
+            .collect();
+
+        tracing::debug!(count = items.len(), "npm batch version detection complete");
+        Ok(results)
+    }
+}
+
+#[async_trait]
+impl ReleaseFetcherPlugin for NpmPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
@@ -503,7 +666,10 @@ impl Plugin for NpmPlugin {
             "npm registry request failed after retries".to_string()
         })));
     }
+}
 
+#[async_trait]
+impl UpdateExecutorPlugin for NpmPlugin {
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
@@ -610,134 +776,12 @@ impl Plugin for NpmPlugin {
 
         Ok(results)
     }
-
-    #[tracing::instrument(skip_all)]
-    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
-        tracing::info!("discovering globally installed npm packages");
-
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "npm",
-                [
-                    "list".to_string(),
-                    "-g".to_string(),
-                    "--depth=0".to_string(),
-                    "--json".to_string(),
-                ],
-            ))
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "npm list -g failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
-
-        let all_packages = Self::parse_npm_list_all(&cmd_output.output);
-
-        let packages: Vec<DiscoveredSoftware> = all_packages
-            .into_iter()
-            .filter(|(name, _)| !SYSTEM_NPM_PACKAGES.contains(&name.as_str()))
-            .map(|(name, version)| DiscoveredSoftware {
-                package_identifier: name.clone(),
-                name,
-                installed_version: version,
-                targets: vec![],
-                extra: None,
-                qualifier: None,
-                plugin_package_identifier: None,
-                featured: false,
-            })
-            .collect();
-
-        tracing::debug!(count = packages.len(), "npm software discovery complete");
-        Ok(packages)
-    }
-
-    /// Detect installed versions for multiple packages using a single `npm list -g` call.
-    ///
-    /// Runs:
-    /// ```text
-    /// npm list -g --depth=0 --json
-    /// ```
-    ///
-    /// Fetches all globally installed packages in one subprocess call and filters
-    /// the results in memory. This is more efficient than per-package calls when
-    /// checking many packages.
-    ///
-    /// If the command fails (non-zero exit or process error), all items are treated
-    /// as not installed rather than erroring — consistent with the single-item
-    /// `detect_installed_version` behaviour.
-    #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Validate all identifiers up front.
-        for item in items {
-            self.require_package_identifier(&item.package_identifier)?;
-        }
-
-        tracing::debug!(
-            count = items.len(),
-            "batch detecting npm installed versions"
-        );
-
-        // Run a single `npm list -g --depth=0 --json` without a package filter.
-        // npm exits non-zero when there are peer-dep issues; treat any failure as
-        // "not installed" for all items (consistent with the single-item behaviour).
-        let all_packages: HashMap<String, String> = match self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "npm",
-                [
-                    "list".to_string(),
-                    "-g".to_string(),
-                    "--depth=0".to_string(),
-                    "--json".to_string(),
-                ],
-            ))
-            .await
-        {
-            Ok(output) => Self::parse_npm_list_all(&output.output)
-                .into_iter()
-                .collect(),
-            Err(_) => {
-                tracing::debug!(
-                    "npm list -g returned non-zero; treating all packages as not installed"
-                );
-                HashMap::new()
-            }
-        };
-
-        let results = items
-            .iter()
-            .map(|item| {
-                BatchDetectResult::new(
-                    item.package_identifier.clone(),
-                    all_packages.get(&item.package_identifier).map(Version::new),
-                    None,
-                )
-            })
-            .collect();
-
-        tracing::debug!(count = items.len(), "npm batch version detection complete");
-        Ok(results)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::{CommandOutput, LocalCommandExecutor};
+    use uptrakit_plugin_infrastructure_core::{CommandOutput, LocalCommandExecutor, PluginBase};
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)

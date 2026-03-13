@@ -8,9 +8,13 @@ use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType,
-    Plugin, PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result,
-    SudoCommandEntry, UpdateCategory, UpdateHookContext, UpdateOutputLine, UpstreamRelease,
-    Version,
+    PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, UpdateCategory,
+    UpdateOutputLine, UpstreamRelease, Version,
+};
+// Subtrait imports — needed so `use super::*` in tests brings these methods into scope.
+#[cfg(test)]
+use uptrakit_plugin_infrastructure_core::{
+    DiscoveryPlugin, PluginBase, ReleaseFetcherPlugin, VersionDetectorPlugin,
 };
 
 use crate::config::{DnfConfig, DnfDiscoveryFilter};
@@ -96,6 +100,11 @@ struct CheckUpdateEntry {
 }
 
 impl DnfPlugin {
+    /// Returns the plugin type for this instance.
+    pub fn plugin_type(&self) -> PluginType {
+        PluginType::PackageManagerDnf
+    }
+
     /// Compile-time capabilities for the DNF plugin.
     pub const CAPABILITIES: &'static [PluginCapability] = &[
         PluginCapability::DiscoverLocalSoftware,
@@ -223,67 +232,55 @@ impl DnfPlugin {
     }
 }
 
+// ── PluginBase + subtrait implementations ────────────────────────────────
+
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    DnfPlugin,
+    DnfConfig,
+    "package_manager_dnf",
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
+        fn required_sudo_commands(
+            &self,
+        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
+            vec![uptrakit_plugin_infrastructure_core::SudoCommandEntry::new(
+                "dnf",
+                "Package installation and index refresh require root privileges",
+            )]
+        }
+
+        fn as_discovery(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
+            Some(self)
+        }
+        fn as_version_detector(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
+            Some(self)
+        }
+        fn as_release_fetcher(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
+            Some(self)
+        }
+        fn as_package_index(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::PackageIndexPlugin> {
+            Some(self)
+        }
+        fn as_update_executor(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
+            Some(self)
+        }
+    }
+);
+
 #[async_trait]
-impl Plugin for DnfPlugin {
-    fn plugin_type(&self) -> PluginType {
-        PluginType::PackageManagerDnf
-    }
-
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        Self::CAPABILITIES
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        match self
-            .executor
-            .execute_quiet(&CommandSpec::exec("which", ["dnf".to_string()]))
-            .await
-        {
-            Ok(_) => Ok(HostCompatibility::Compatible),
-            Err(_) => Ok(HostCompatibility::Incompatible("dnf not found".to_string())),
-        }
-    }
-
-    async fn post_update_hook(
-        &self,
-        _ctx: &UpdateHookContext,
-        _output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<()> {
-        // DNF does not use /var/run/reboot-required; no post-update hook needed.
-        Ok(())
-    }
-
-    fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        vec![SudoCommandEntry::new(
-            "dnf",
-            "Package installation and index refresh require root privileges",
-        )]
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn refresh_package_index(&self) -> Result<()> {
-        tracing::info!("refreshing DNF package index");
-        let cmd_output = self
-            .executor
-            .execute_quiet(
-                &CommandSpec::exec("dnf", ["makecache".to_string(), "-q".to_string()]).privileged(),
-            )
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "dnf makecache failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
-
-        tracing::info!("DNF package index refreshed");
-        Ok(())
-    }
-
+impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DnfPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::info!("discovering DNF-managed software");
@@ -384,6 +381,21 @@ impl Plugin for DnfPlugin {
     }
 
     #[tracing::instrument(skip_all)]
+    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
+        match self
+            .executor
+            .execute_quiet(&CommandSpec::exec("which", ["dnf".to_string()]))
+            .await
+        {
+            Ok(_) => Ok(HostCompatibility::Compatible),
+            Err(_) => Ok(HostCompatibility::Incompatible("dnf not found".to_string())),
+        }
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DnfPlugin {
+    #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "detecting DNF installed version");
@@ -423,6 +435,81 @@ impl Plugin for DnfPlugin {
         }
     }
 
+    /// Detect installed versions for multiple packages using a single `rpm -qa` call.
+    ///
+    /// Runs:
+    /// ```text
+    /// rpm -qa pkg1 pkg2 pkg3 --queryformat '%{NAME}\t%{VERSION}-%{RELEASE}\n'
+    /// ```
+    ///
+    /// The exit code may be non-zero when any package is not found; packages that
+    /// *are* found still appear in stdout. Packages absent from stdout are treated
+    /// as not installed (`None` with no error).
+    #[tracing::instrument(skip_all)]
+    async fn batch_detect_installed_version(
+        &self,
+        items: &[BatchDetectItem],
+    ) -> Result<Vec<BatchDetectResult>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Validate all identifiers up front.
+        for item in items {
+            validate_identifier(&item.package_identifier)
+                .map_err(|e| report!(PluginError::Configuration(e)))?;
+        }
+
+        let mut args: Vec<String> = vec![
+            "-qa".to_string(),
+            "--queryformat".to_string(),
+            "%{NAME}\\t%{VERSION}-%{RELEASE}\\n".to_string(),
+        ];
+        for item in items {
+            args.push(item.package_identifier.clone());
+        }
+
+        tracing::debug!(
+            count = items.len(),
+            "batch detecting DNF installed versions"
+        );
+
+        // Non-zero exit is expected when any package is unknown; ignore it.
+        let stdout = match self
+            .executor
+            .execute_quiet(&CommandSpec::exec("rpm", args))
+            .await
+        {
+            Ok(o) => o.output,
+            Err(e) => {
+                let error_str = format!("rpm -qa failed: {e}");
+                return Ok(items
+                    .iter()
+                    .map(|item| {
+                        BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
+                    })
+                    .collect());
+            }
+        };
+
+        let rpm_map: HashMap<String, String> =
+            Self::parse_rpm_output(&stdout).into_iter().collect();
+
+        let results = items
+            .iter()
+            .map(|item| {
+                let installed_version = rpm_map.get(&item.package_identifier).map(Version::new);
+                BatchDetectResult::new(item.package_identifier.clone(), installed_version, None)
+            })
+            .collect();
+
+        tracing::debug!(count = items.len(), "DNF batch version detection complete");
+        Ok(results)
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for DnfPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
@@ -483,6 +570,130 @@ impl Plugin for DnfPlugin {
         }
     }
 
+    /// Fetch available releases for multiple packages using a single `dnf check-update` call.
+    ///
+    /// Runs:
+    /// ```text
+    /// dnf check-update --quiet pkg1 pkg2 pkg3
+    /// ```
+    ///
+    /// - Exit code 0: all packages are up to date (empty result per package).
+    /// - Exit code 100: updates available (parse output per package).
+    /// - Exit code 1: error.
+    #[tracing::instrument(skip_all)]
+    async fn batch_fetch_releases(
+        &self,
+        items: &[BatchFetchItem],
+    ) -> Result<Vec<BatchFetchResult>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Validate all identifiers up front.
+        for item in items {
+            validate_identifier(&item.package_identifier)
+                .map_err(|e| report!(PluginError::Configuration(e)))?;
+        }
+
+        let mut args = vec!["check-update".to_string(), "--quiet".to_string()];
+        for item in items {
+            args.push(item.package_identifier.clone());
+        }
+
+        tracing::debug!(
+            count = items.len(),
+            "batch fetching DNF releases via dnf check-update"
+        );
+
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec("dnf", args))
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "dnf check-update failed: {e}"
+                )))
+            })?;
+
+        match cmd_output.exit_code {
+            0 => {
+                // All packages up to date — return empty releases for each.
+                let results = items
+                    .iter()
+                    .map(|item| BatchFetchResult::empty(item.package_identifier.clone()))
+                    .collect();
+                return Ok(results);
+            }
+            100 => {
+                // Updates available — parse output.
+            }
+            code => bail!(PluginError::CommandFailed(code)),
+        }
+
+        let parsed = Self::parse_check_update_output_batch(&cmd_output.output);
+
+        let results = items
+            .iter()
+            .map(|item| {
+                let Some(entry) = parsed.get(&item.package_identifier) else {
+                    return BatchFetchResult::empty(item.package_identifier.clone());
+                };
+
+                let category = if entry.repo.to_ascii_lowercase().contains("security") {
+                    Some(UpdateCategory::Security)
+                } else {
+                    None
+                };
+
+                BatchFetchResult::found(
+                    item.package_identifier.clone(),
+                    vec![{
+                        let mut r = UpstreamRelease::new(
+                            Version::new(&entry.version),
+                            entry.version.clone(),
+                            false,
+                            "",
+                        );
+                        r.category = category;
+                        r
+                    }],
+                )
+            })
+            .collect();
+
+        tracing::debug!(count = items.len(), "DNF batch fetch complete");
+        Ok(results)
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for DnfPlugin {
+    #[tracing::instrument(skip_all)]
+    async fn refresh_package_index(&self) -> Result<()> {
+        tracing::info!("refreshing DNF package index");
+        let cmd_output = self
+            .executor
+            .execute_quiet(
+                &CommandSpec::exec("dnf", ["makecache".to_string(), "-q".to_string()]).privileged(),
+            )
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "dnf makecache failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            bail!(PluginError::CommandFailed(cmd_output.exit_code));
+        }
+
+        tracing::info!("DNF package index refreshed");
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for DnfPlugin {
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
@@ -603,173 +814,6 @@ impl Plugin for DnfPlugin {
             })
             .collect();
 
-        Ok(results)
-    }
-
-    /// Detect installed versions for multiple packages using a single `rpm -qa` call.
-    ///
-    /// Runs:
-    /// ```text
-    /// rpm -qa pkg1 pkg2 pkg3 --queryformat '%{NAME}\t%{VERSION}-%{RELEASE}\n'
-    /// ```
-    ///
-    /// The exit code may be non-zero when any package is not found; packages that
-    /// *are* found still appear in stdout. Packages absent from stdout are treated
-    /// as not installed (`None` with no error).
-    #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Validate all identifiers up front.
-        for item in items {
-            validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
-        }
-
-        let mut args: Vec<String> = vec![
-            "-qa".to_string(),
-            "--queryformat".to_string(),
-            "%{NAME}\\t%{VERSION}-%{RELEASE}\\n".to_string(),
-        ];
-        for item in items {
-            args.push(item.package_identifier.clone());
-        }
-
-        tracing::debug!(
-            count = items.len(),
-            "batch detecting DNF installed versions"
-        );
-
-        // Non-zero exit is expected when any package is unknown; ignore it.
-        let stdout = match self
-            .executor
-            .execute_quiet(&CommandSpec::exec("rpm", args))
-            .await
-        {
-            Ok(o) => o.output,
-            Err(e) => {
-                let error_str = format!("rpm -qa failed: {e}");
-                return Ok(items
-                    .iter()
-                    .map(|item| {
-                        BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
-                    })
-                    .collect());
-            }
-        };
-
-        let rpm_map: HashMap<String, String> =
-            Self::parse_rpm_output(&stdout).into_iter().collect();
-
-        let results = items
-            .iter()
-            .map(|item| {
-                let installed_version = rpm_map.get(&item.package_identifier).map(Version::new);
-                BatchDetectResult::new(item.package_identifier.clone(), installed_version, None)
-            })
-            .collect();
-
-        tracing::debug!(count = items.len(), "DNF batch version detection complete");
-        Ok(results)
-    }
-
-    /// Fetch available releases for multiple packages using a single `dnf check-update` call.
-    ///
-    /// Runs:
-    /// ```text
-    /// dnf check-update --quiet pkg1 pkg2 pkg3
-    /// ```
-    ///
-    /// - Exit code 0: all packages are up to date (empty result per package).
-    /// - Exit code 100: updates available (parse output per package).
-    /// - Exit code 1: error.
-    #[tracing::instrument(skip_all)]
-    async fn batch_fetch_releases(
-        &self,
-        items: &[BatchFetchItem],
-    ) -> Result<Vec<BatchFetchResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Validate all identifiers up front.
-        for item in items {
-            validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
-        }
-
-        let mut args = vec!["check-update".to_string(), "--quiet".to_string()];
-        for item in items {
-            args.push(item.package_identifier.clone());
-        }
-
-        tracing::debug!(
-            count = items.len(),
-            "batch fetching DNF releases via dnf check-update"
-        );
-
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec("dnf", args))
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "dnf check-update failed: {e}"
-                )))
-            })?;
-
-        match cmd_output.exit_code {
-            0 => {
-                // All packages up to date — return empty releases for each.
-                let results = items
-                    .iter()
-                    .map(|item| BatchFetchResult::empty(item.package_identifier.clone()))
-                    .collect();
-                return Ok(results);
-            }
-            100 => {
-                // Updates available — parse output.
-            }
-            code => bail!(PluginError::CommandFailed(code)),
-        }
-
-        let parsed = Self::parse_check_update_output_batch(&cmd_output.output);
-
-        let results = items
-            .iter()
-            .map(|item| {
-                let Some(entry) = parsed.get(&item.package_identifier) else {
-                    return BatchFetchResult::empty(item.package_identifier.clone());
-                };
-
-                let category = if entry.repo.to_ascii_lowercase().contains("security") {
-                    Some(UpdateCategory::Security)
-                } else {
-                    None
-                };
-
-                BatchFetchResult::found(
-                    item.package_identifier.clone(),
-                    vec![{
-                        let mut r = UpstreamRelease::new(
-                            Version::new(&entry.version),
-                            entry.version.clone(),
-                            false,
-                            "",
-                        );
-                        r.category = category;
-                        r
-                    }],
-                )
-            })
-            .collect();
-
-        tracing::debug!(count = items.len(), "DNF batch fetch complete");
         Ok(results)
     }
 }

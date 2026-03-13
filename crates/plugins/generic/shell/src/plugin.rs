@@ -7,7 +7,8 @@ use uptrakit_plugin_infrastructure_core::command::{
 };
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    OutputStreamType, Plugin, PluginError, PluginType, ReleaseInfo, UpdateOutputLine, Version,
+    OutputStreamType, PluginCapability, PluginError, ReleaseInfo, Result, UpdateOutputLine,
+    UpstreamRelease, Version,
 };
 
 use crate::config::ShellConfig;
@@ -41,17 +42,39 @@ impl ShellPlugin {
     }
 }
 
-#[async_trait]
-impl Plugin for ShellPlugin {
-    fn plugin_type(&self) -> PluginType {
-        PluginType::GenericShell
-    }
+// ── PluginBase + subtrait implementations ────────────────────────────────
 
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    ShellPlugin,
+    ShellConfig,
+    "generic_shell",
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
+
+        fn as_version_detector(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
+            Some(self)
+        }
+        fn as_release_fetcher(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
+            Some(self)
+        }
+        fn as_update_executor(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
+            Some(self)
+        }
+    }
+);
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for ShellPlugin {
     #[tracing::instrument(skip_all)]
-    async fn detect_installed_version(
-        &self,
-        package_identifier: &str,
-    ) -> uptrakit_plugin_infrastructure_core::Result<Option<Version>> {
+    async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         let Some(ref cmd_template) = self.config.version_command else {
             return Ok(None);
         };
@@ -77,7 +100,19 @@ impl Plugin for ShellPlugin {
 
         Ok(version)
     }
+}
 
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for ShellPlugin {
+    async fn fetch_releases(&self, _package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
+        Err(rootcause::report!(PluginError::Configuration(
+            "fetch_releases not supported by this plugin".to_string()
+        )))
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for ShellPlugin {
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
@@ -85,7 +120,7 @@ impl Plugin for ShellPlugin {
         to_version: &str,
         release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> uptrakit_plugin_infrastructure_core::Result<String> {
+    ) -> Result<String> {
         let Some(ref cmd_template) = self.config.update_command else {
             bail!(PluginError::Configuration(
                 "execute_update is not configured: update_command is absent".to_string()
@@ -125,7 +160,9 @@ impl Plugin for ShellPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::{LocalCommandExecutor, ReleaseInfo};
+    use uptrakit_plugin_infrastructure_core::{
+        LocalCommandExecutor, ReleaseInfo, UpdateExecutorPlugin, VersionDetectorPlugin,
+    };
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)

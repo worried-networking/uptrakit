@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use uptrakit_plugin_infrastructure_core::{
-    Plugin, PluginCapability, PluginType, command::CommandExecutor,
-};
+use uptrakit_plugin_infrastructure_core::{PluginCapability, command::CommandExecutor};
 
 use crate::config::ProxmoxConfig;
 
@@ -21,8 +18,14 @@ pub struct ProxmoxPlugin {
 impl ProxmoxPlugin {
     /// Compile-time capabilities for the Proxmox VE plugin.
     ///
-    /// This plugin has no agent-side capabilities — it operates entirely on
-    /// the controller via extension actions.
+    /// The controller-side plugin owns controller database migrations for
+    /// the `proxmox_host_mappings` table. It has no agent-side capabilities —
+    /// it operates entirely on the controller via extension actions.
+    #[cfg(feature = "migrations")]
+    pub const CAPABILITIES: &'static [PluginCapability] = &[PluginCapability::ControllerMigrations];
+
+    /// Compile-time capabilities for the Proxmox VE plugin (without migrations).
+    #[cfg(not(feature = "migrations"))]
     pub const CAPABILITIES: &'static [PluginCapability] = &[];
 
     /// Create a new Proxmox VE plugin instance.
@@ -34,21 +37,28 @@ impl ProxmoxPlugin {
     }
 }
 
-#[async_trait]
-impl Plugin for ProxmoxPlugin {
-    fn plugin_type(&self) -> PluginType {
-        PluginType::InfrastructureProxmox
-    }
+// ── PluginBase implementation ────────────────────────────────────────────
 
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        Self::CAPABILITIES
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    ProxmoxPlugin,
+    ProxmoxConfig,
+    "infrastructure_proxmox",
+    {
+        fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
+
+        #[cfg(feature = "migrations")]
+        fn controller_migrations(&self) -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
+            crate::controller_migration::migrations()
+        }
     }
-}
+);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::{LocalCommandExecutor, SecretString};
+    use uptrakit_plugin_infrastructure_core::{LocalCommandExecutor, PluginBase, SecretString};
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)
@@ -64,15 +74,15 @@ mod tests {
         let plugin = ProxmoxPlugin::new(config, test_executor())
             .await
             .expect("create");
-        assert_eq!(plugin.plugin_type(), PluginType::InfrastructureProxmox);
+        assert_eq!(plugin.plugin_type_id(), "infrastructure_proxmox");
     }
 
     #[tokio::test]
-    async fn capabilities_is_empty() {
+    async fn capabilities_match_expected() {
         let config = ProxmoxConfig::default();
         let plugin = ProxmoxPlugin::new(config, test_executor())
             .await
             .expect("create");
-        assert!(plugin.capabilities().is_empty());
+        assert_eq!(plugin.capabilities(), ProxmoxPlugin::CAPABILITIES);
     }
 }

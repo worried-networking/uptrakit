@@ -327,10 +327,14 @@ async fn detect_current_version(
 ///
 /// Plugin-level hooks run adjacent to `execute_update`:
 /// ```text
-/// plugin.pre_update_hook(ctx, tx)   ← abort if !should_proceed
-/// plugin.execute_update(...)         ← the actual update
-/// plugin.post_update_hook(ctx, tx)   ← errors logged at WARN, non-fatal
+/// hooks.pre_update_hook(ctx, tx)   ← abort if !should_proceed (skipped if not implemented)
+/// executor.execute_update(...)      ← the actual update (required)
+/// hooks.post_update_hook(ctx, tx)   ← errors logged at WARN, non-fatal (skipped if not implemented)
 /// ```
+///
+/// The plugin is obtained via `PluginRegistry::create_plugin()` which returns `Box<dyn PluginBase>`.
+/// Subtrait accessors are used to obtain `UpdateExecutorPlugin` (required) and
+/// `UpdateHooksPlugin` (optional).
 #[tracing::instrument(skip_all, fields(plugin_type = %payload.execute_update_plugin.plugin_type))]
 async fn execute_plugin_update(
     payload: &ExecuteUpdatePayload,
@@ -341,6 +345,14 @@ async fn execute_plugin_update(
     let plugin = PluginRegistry::create_plugin(eu.plugin_type.clone(), &eu.config, executor)
         .await
         .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
+
+    let update_executor = plugin.as_update_executor().ok_or_else(|| {
+        report!(UpdateError::InstallFailed(format!(
+            "plugin {} does not implement UpdateExecutorPlugin",
+            eu.plugin_type
+        )))
+    })?;
+    let update_hooks = plugin.as_update_hooks();
 
     let hook_ctx = UpdateHookContext::new(
         eu.package_identifier.clone(),
@@ -365,10 +377,10 @@ async fn execute_plugin_update(
         (plugin_tx, bridge_handle)
     };
 
-    // --- Pre-update hook ---
-    {
+    // --- Pre-update hook (only if the plugin implements UpdateHooksPlugin) ---
+    if let Some(hooks) = update_hooks {
         let (plugin_tx, bridge_handle) = make_bridge(output_tx);
-        let pre_result = plugin
+        let pre_result = hooks
             .pre_update_hook(&hook_ctx, &plugin_tx)
             .await
             .map_err(|e| {
@@ -401,7 +413,7 @@ async fn execute_plugin_update(
 
     // --- Execute update ---
     let (plugin_tx, bridge_handle) = make_bridge(output_tx);
-    let update_result = plugin
+    let update_result = update_executor
         .execute_update(
             &eu.package_identifier,
             &payload.to_version,
@@ -424,10 +436,10 @@ async fn execute_plugin_update(
     let _ = bridge_handle.await;
     let update_output = update_result?;
 
-    // --- Post-update hook ---
-    {
+    // --- Post-update hook (only if the plugin implements UpdateHooksPlugin) ---
+    if let Some(hooks) = update_hooks {
         let (plugin_tx, bridge_handle) = make_bridge(output_tx);
-        let post_result = plugin.post_update_hook(&hook_ctx, &plugin_tx).await;
+        let post_result = hooks.post_update_hook(&hook_ctx, &plugin_tx).await;
         drop(plugin_tx);
         let _ = bridge_handle.await;
 

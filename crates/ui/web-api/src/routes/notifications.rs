@@ -11,7 +11,7 @@ use axum::{
 };
 use serde::Deserialize;
 use std::sync::Arc;
-use uptrakit_notification_plugin_registry::DeliveryMessage;
+use uptrakit_notification_plugin_core::DeliveryMessage;
 use uptrakit_web_api_types::pagination::PaginationParams;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
@@ -66,7 +66,7 @@ pub async fn create_channel(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    match notif_queries::create_channel(&tenant_db, &body, &*state.notification_ops).await {
+    match notif_queries::create_channel(&tenant_db, &body, &*state.plugin_ops).await {
         Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
         Err(report) => match report.current_context() {
             ChannelQueryError::UnsupportedType(t) => error_response(
@@ -108,7 +108,7 @@ pub async fn list_channels(
     CanViewNotifications(_user): CanViewNotifications,
     Query(params): Query<PaginationParams>,
 ) -> Response {
-    match notif_queries::list_channels(&tenant_db, &params, &*state.notification_ops).await {
+    match notif_queries::list_channels(&tenant_db, &params, &*state.plugin_ops).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
             tracing::error!(error = ?e, "failed to list notification channels");
@@ -141,7 +141,7 @@ pub async fn get_channel(
     CanViewNotifications(_user): CanViewNotifications,
     Path(channel_id): Path<Uuid>,
 ) -> Response {
-    match notif_queries::get_channel(&tenant_db, channel_id, &*state.notification_ops).await {
+    match notif_queries::get_channel(&tenant_db, channel_id, &*state.plugin_ops).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Channel not found"),
         Err(e) => {
@@ -182,9 +182,7 @@ pub async fn update_channel(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    match notif_queries::update_channel(&tenant_db, channel_id, &body, &*state.notification_ops)
-        .await
-    {
+    match notif_queries::update_channel(&tenant_db, channel_id, &body, &*state.plugin_ops).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Channel not found"),
         Err(report) => match report.current_context() {
@@ -288,7 +286,10 @@ pub async fn test_channel(
         };
 
     // Look up channel implementation
-    let channel_impl = match state.notification_ops.get(&channel_model.channel_type) {
+    let channel_impl = match state
+        .plugin_ops
+        .notification_plugin(&channel_model.channel_type)
+    {
         Some(c) => c,
         None => {
             return error_response(

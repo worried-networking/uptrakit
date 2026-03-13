@@ -33,6 +33,24 @@ pub enum PluginCapability {
     /// an explicit opt-in to controller-side execution. The user can override
     /// via `execution_site` on the plugin assignment.
     ControllerSideFetchReleases,
+    /// Plugin can detect the installed version of a software package.
+    VersionDetection,
+    /// Plugin can fetch upstream releases for a software package.
+    ReleaseFetching,
+    /// Plugin can execute updates for a software package.
+    UpdateExecution,
+    /// Plugin can deliver notifications via a transport channel.
+    NotificationDelivery,
+    /// Plugin manages infrastructure host lifecycle (bootstrap, sync).
+    HostLifecycle,
+    /// Plugin receives host report callbacks from the agent.
+    HostReport,
+    /// Plugin provides guest execution capabilities (e.g. run commands inside VMs/containers).
+    GuestExec,
+    /// Plugin contributes service-side (agent-local) database migrations.
+    ServiceMigrations,
+    /// Plugin contributes controller-side database migrations.
+    ControllerMigrations,
 }
 
 #[cfg(test)]
@@ -68,6 +86,21 @@ mod tests {
             (
                 PluginCapability::ControllerSideFetchReleases,
                 "controller_side_fetch_releases",
+            ),
+            (PluginCapability::VersionDetection, "version_detection"),
+            (PluginCapability::ReleaseFetching, "release_fetching"),
+            (PluginCapability::UpdateExecution, "update_execution"),
+            (
+                PluginCapability::NotificationDelivery,
+                "notification_delivery",
+            ),
+            (PluginCapability::HostLifecycle, "host_lifecycle"),
+            (PluginCapability::HostReport, "host_report"),
+            (PluginCapability::GuestExec, "guest_exec"),
+            (PluginCapability::ServiceMigrations, "service_migrations"),
+            (
+                PluginCapability::ControllerMigrations,
+                "controller_migrations",
             ),
         ];
         for (cap, expected) in cases {

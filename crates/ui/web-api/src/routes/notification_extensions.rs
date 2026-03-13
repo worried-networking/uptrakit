@@ -1,9 +1,11 @@
 //! Generic notification extension data action handler + SMTP settings handler.
 //!
-//! This module handles extension actions dispatched by the
-//! [`ExtensionOwner::Notification`] variant. It extracts the channel type
-//! from the extension ID (`notifications.<type>` → `<type>`) and performs
-//! generic operations without transport-specific knowledge.
+//! This module handles extension actions for notification plugins. Notification
+//! extensions are registered as `ExtensionOwner::Plugin` and identified by
+//! the `notifications.` prefix in their extension ID. The dispatch route
+//! checks this prefix and delegates here. It extracts the channel type from
+//! the extension ID (`notifications.<type>` → `<type>`) and performs generic
+//! operations without transport-specific knowledge.
 
 use std::sync::Arc;
 
@@ -104,8 +106,8 @@ async fn list_channels(
         let config: serde_json::Value =
             serde_json::from_str(ch.config.expose_secret()).unwrap_or_default();
         let masked_config = state
-            .notification_ops
-            .mask_config_secrets(&ch.channel_type, &config);
+            .plugin_ops
+            .notification_mask_config_secrets(&ch.channel_type, &config);
 
         let mut row = serde_json::json!({
             "id": ch.id,

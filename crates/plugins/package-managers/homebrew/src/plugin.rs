@@ -6,10 +6,14 @@ use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec,
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
-    BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType,
-    Plugin, PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result,
-    UpdateOutputLine, UpstreamRelease, Version,
+    BatchUpdateResult, DiscoveredSoftware, DiscoveryPlugin, DiscoveryTarget, HostCompatibility,
+    OutputStreamType, PackageIndexPlugin, PluginCapability, PluginError, PluginRole, PluginType,
+    ReleaseFetcherPlugin, ReleaseInfo, Result, UpdateExecutorPlugin, UpdateOutputLine,
+    UpstreamRelease, Version, VersionDetectorPlugin,
 };
+
+#[cfg(test)]
+use uptrakit_plugin_infrastructure_core::PluginBase;
 
 use crate::config::{HomebrewConfig, HomebrewPackageType};
 
@@ -323,51 +327,42 @@ impl HomebrewPlugin {
     }
 }
 
+// ── PluginBase + subtrait implementations ────────────────────────────────
+
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    HomebrewPlugin,
+    HomebrewConfig,
+    "package_manager_homebrew",
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
+
+        fn as_discovery(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
+            Some(self)
+        }
+        fn as_version_detector(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
+            Some(self)
+        }
+        fn as_release_fetcher(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
+            Some(self)
+        }
+        fn as_update_executor(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
+            Some(self)
+        }
+    }
+);
+
 #[async_trait]
-impl Plugin for HomebrewPlugin {
-    fn plugin_type(&self) -> PluginType {
-        PluginType::PackageManagerHomebrew
-    }
-
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        Self::CAPABILITIES
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        match self
-            .executor
-            .execute_quiet(&CommandSpec::exec("which", ["brew".to_string()]))
-            .await
-        {
-            Ok(_) => Ok(HostCompatibility::Compatible),
-            Err(_) => Ok(HostCompatibility::Incompatible(
-                "brew not found".to_string(),
-            )),
-        }
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn refresh_package_index(&self) -> Result<()> {
-        tracing::info!("refreshing Homebrew package index");
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec("brew", ["update".to_string()]))
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "brew update failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
-
-        tracing::info!("Homebrew package index refreshed");
-        Ok(())
-    }
-
+impl DiscoveryPlugin for HomebrewPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         let cmd_output = self
@@ -421,6 +416,23 @@ impl Plugin for HomebrewPlugin {
     }
 
     #[tracing::instrument(skip_all)]
+    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
+        match self
+            .executor
+            .execute_quiet(&CommandSpec::exec("which", ["brew".to_string()]))
+            .await
+        {
+            Ok(_) => Ok(HostCompatibility::Compatible),
+            Err(_) => Ok(HostCompatibility::Incompatible(
+                "brew not found".to_string(),
+            )),
+        }
+    }
+}
+
+#[async_trait]
+impl VersionDetectorPlugin for HomebrewPlugin {
+    #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "detecting installed Homebrew version");
@@ -455,160 +467,6 @@ impl Plugin for HomebrewPlugin {
             .map(|v| Version::new(&v));
         tracing::debug!(version = ?version, "Homebrew version detection result");
         Ok(version)
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
-        self.require_package_identifier(package_identifier)?;
-        tracing::debug!(package = %package_identifier, "fetching Homebrew releases");
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "brew",
-                [
-                    "info".to_string(),
-                    "--json=v2".to_string(),
-                    package_identifier.to_string(),
-                ],
-            ))
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "brew info failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
-
-        let json: serde_json::Value = serde_json::from_str(&cmd_output.output).map_err(|e| {
-            report!(PluginError::PluginInternal(format!(
-                "failed to parse brew info JSON: {e}"
-            )))
-        })?;
-
-        let Some(version_str) =
-            Self::parse_latest_version(&json, package_identifier, self.is_cask())
-        else {
-            return Ok(vec![]);
-        };
-
-        let homepage = if self.is_cask() {
-            json.get("casks")
-                .and_then(|c| c.as_array())
-                .and_then(|arr| arr.first())
-                .and_then(|c| c.get("homepage"))
-                .and_then(|h| h.as_str())
-                .unwrap_or("")
-        } else {
-            json.get("formulae")
-                .and_then(|f| f.as_array())
-                .and_then(|arr| arr.first())
-                .and_then(|f| f.get("homepage"))
-                .and_then(|h| h.as_str())
-                .unwrap_or("")
-        };
-
-        let releases = vec![{
-            let mut r = UpstreamRelease::new(Version::new(&version_str), version_str, false, "");
-            r.release_url = homepage.to_string();
-            r
-        }];
-        tracing::debug!(count = releases.len(), "Homebrew releases fetched");
-        Ok(releases)
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn execute_update(
-        &self,
-        package_identifier: &str,
-        _to_version: &str,
-        _release_info: Option<&ReleaseInfo>,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
-        self.require_package_identifier(package_identifier)?;
-        let pkg = package_identifier;
-        let mut output = String::new();
-
-        let args: Vec<String> = if self.is_cask() {
-            vec!["upgrade".to_string(), "--cask".to_string(), pkg.to_string()]
-        } else {
-            vec!["upgrade".to_string(), pkg.to_string()]
-        };
-
-        tracing::debug!(package = %pkg, "running brew upgrade");
-        send_output(
-            output_tx,
-            &format!("Running: brew {}", args.join(" ")),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        output.push_str(&format!("Running: brew {}\n", args.join(" ")));
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("brew", args), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-        output.push_str(&cmd_output.output);
-
-        Ok(output)
-    }
-
-    /// Execute batch updates using a single `brew upgrade pkg1 pkg2 ...` command.
-    #[tracing::instrument(skip_all)]
-    async fn execute_batch_update(
-        &self,
-        items: &[BatchUpdateItem],
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<Vec<BatchUpdateResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        for item in items {
-            self.require_package_identifier(&item.package_identifier)?;
-        }
-
-        let mut args: Vec<String> = vec!["upgrade".to_string()];
-        if self.is_cask() {
-            args.push("--cask".to_string());
-        }
-        for item in items {
-            args.push(item.package_identifier.clone());
-        }
-
-        let display_cmd = format!("brew {}", args.join(" "));
-        send_output(
-            output_tx,
-            &format!(
-                "Batch updating {} packages\nRunning: {display_cmd}",
-                items.len()
-            ),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        let mut output = format!("Running: {display_cmd}\n");
-
-        tracing::debug!(count = items.len(), "running brew batch upgrade");
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("brew", args), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-        output.push_str(&cmd_output.output);
-
-        let success = cmd_output.exit_code == 0;
-        let results = items
-            .iter()
-            .map(|item| {
-                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
-            })
-            .collect();
-
-        Ok(results)
     }
 
     /// Detect installed versions for multiple packages using a single `brew info` call.
@@ -689,6 +547,71 @@ impl Plugin for HomebrewPlugin {
             "Homebrew batch version detection complete"
         );
         Ok(results)
+    }
+}
+
+#[async_trait]
+impl ReleaseFetcherPlugin for HomebrewPlugin {
+    #[tracing::instrument(skip_all)]
+    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
+        self.require_package_identifier(package_identifier)?;
+        tracing::debug!(package = %package_identifier, "fetching Homebrew releases");
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec(
+                "brew",
+                [
+                    "info".to_string(),
+                    "--json=v2".to_string(),
+                    package_identifier.to_string(),
+                ],
+            ))
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "brew info failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            bail!(PluginError::CommandFailed(cmd_output.exit_code));
+        }
+
+        let json: serde_json::Value = serde_json::from_str(&cmd_output.output).map_err(|e| {
+            report!(PluginError::PluginInternal(format!(
+                "failed to parse brew info JSON: {e}"
+            )))
+        })?;
+
+        let Some(version_str) =
+            Self::parse_latest_version(&json, package_identifier, self.is_cask())
+        else {
+            return Ok(vec![]);
+        };
+
+        let homepage = if self.is_cask() {
+            json.get("casks")
+                .and_then(|c| c.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|c| c.get("homepage"))
+                .and_then(|h| h.as_str())
+                .unwrap_or("")
+        } else {
+            json.get("formulae")
+                .and_then(|f| f.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|f| f.get("homepage"))
+                .and_then(|h| h.as_str())
+                .unwrap_or("")
+        };
+
+        let releases = vec![{
+            let mut r = UpstreamRelease::new(Version::new(&version_str), version_str, false, "");
+            r.release_url = homepage.to_string();
+            r
+        }];
+        tracing::debug!(count = releases.len(), "Homebrew releases fetched");
+        Ok(releases)
     }
 
     /// Fetch available releases for multiple packages using a single `brew info` call.
@@ -781,6 +704,125 @@ impl Plugin for HomebrewPlugin {
             .collect();
 
         tracing::debug!(count = items.len(), "Homebrew batch fetch complete");
+        Ok(results)
+    }
+}
+
+#[async_trait]
+impl PackageIndexPlugin for HomebrewPlugin {
+    #[tracing::instrument(skip_all)]
+    async fn refresh_package_index(&self) -> Result<()> {
+        tracing::info!("refreshing Homebrew package index");
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec("brew", ["update".to_string()]))
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "brew update failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            bail!(PluginError::CommandFailed(cmd_output.exit_code));
+        }
+
+        tracing::info!("Homebrew package index refreshed");
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl UpdateExecutorPlugin for HomebrewPlugin {
+    #[tracing::instrument(skip_all)]
+    async fn execute_update(
+        &self,
+        package_identifier: &str,
+        _to_version: &str,
+        _release_info: Option<&ReleaseInfo>,
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<String> {
+        self.require_package_identifier(package_identifier)?;
+        let pkg = package_identifier;
+        let mut output = String::new();
+
+        let args: Vec<String> = if self.is_cask() {
+            vec!["upgrade".to_string(), "--cask".to_string(), pkg.to_string()]
+        } else {
+            vec!["upgrade".to_string(), pkg.to_string()]
+        };
+
+        tracing::debug!(package = %pkg, "running brew upgrade");
+        send_output(
+            output_tx,
+            &format!("Running: brew {}", args.join(" ")),
+            OutputStreamType::Stdout,
+        )
+        .await;
+        output.push_str(&format!("Running: brew {}\n", args.join(" ")));
+
+        let cmd_output = self
+            .executor
+            .execute(&CommandSpec::exec("brew", args), output_tx)
+            .await
+            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
+        output.push_str(&cmd_output.output);
+
+        Ok(output)
+    }
+
+    /// Execute batch updates using a single `brew upgrade pkg1 pkg2 ...` command.
+    #[tracing::instrument(skip_all)]
+    async fn execute_batch_update(
+        &self,
+        items: &[BatchUpdateItem],
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<Vec<BatchUpdateResult>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        for item in items {
+            self.require_package_identifier(&item.package_identifier)?;
+        }
+
+        let mut args: Vec<String> = vec!["upgrade".to_string()];
+        if self.is_cask() {
+            args.push("--cask".to_string());
+        }
+        for item in items {
+            args.push(item.package_identifier.clone());
+        }
+
+        let display_cmd = format!("brew {}", args.join(" "));
+        send_output(
+            output_tx,
+            &format!(
+                "Batch updating {} packages\nRunning: {display_cmd}",
+                items.len()
+            ),
+            OutputStreamType::Stdout,
+        )
+        .await;
+        let mut output = format!("Running: {display_cmd}\n");
+
+        tracing::debug!(count = items.len(), "running brew batch upgrade");
+
+        let cmd_output = self
+            .executor
+            .execute(&CommandSpec::exec("brew", args), output_tx)
+            .await
+            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
+        output.push_str(&cmd_output.output);
+
+        let success = cmd_output.exit_code == 0;
+        let results = items
+            .iter()
+            .map(|item| {
+                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
+            })
+            .collect();
+
         Ok(results)
     }
 }

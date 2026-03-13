@@ -9,8 +9,14 @@ use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType,
-    Plugin, PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result,
-    SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
+    PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry,
+    UpdateOutputLine, UpstreamRelease, Version,
+};
+
+// Subtrait imports needed by tests (via `use super::*`) to resolve method calls.
+#[cfg(test)]
+use uptrakit_plugin_infrastructure_core::{
+    DiscoveryPlugin, PluginBase, ReleaseFetcherPlugin, VersionDetectorPlugin,
 };
 
 use crate::config::{PacmanConfig, PacmanDiscoveryFilter};
@@ -200,62 +206,59 @@ impl PacmanPlugin {
     }
 }
 
+// ── PluginBase + subtrait implementations ────────────────────────────────
+
+uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
+    PacmanPlugin,
+    PacmanConfig,
+    "package_manager_pacman",
+    {
+        fn capabilities(&self) -> Vec<PluginCapability> {
+            Self::CAPABILITIES.to_vec()
+        }
+        fn required_sudo_commands(
+            &self,
+        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
+            vec![
+                // `-Sy` matches the exact refresh call (no extra args).
+                SudoCommandEntry::new("pacman", "Package database sync requires root privileges")
+                    .with_args_suffix(Cow::Borrowed("-Sy")),
+                // `-S --noconfirm *` covers single and batch installs.
+                SudoCommandEntry::new("pacman", "Package installation requires root privileges")
+                    .with_args_suffix(Cow::Borrowed("-S --noconfirm *")),
+            ]
+        }
+
+        fn as_discovery(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
+            Some(self)
+        }
+        fn as_version_detector(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
+            Some(self)
+        }
+        fn as_release_fetcher(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
+            Some(self)
+        }
+        fn as_package_index(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::PackageIndexPlugin> {
+            Some(self)
+        }
+        fn as_update_executor(
+            &self,
+        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
+            Some(self)
+        }
+    }
+);
+
 #[async_trait]
-impl Plugin for PacmanPlugin {
-    fn plugin_type(&self) -> PluginType {
-        PluginType::PackageManagerPacman
-    }
-
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        Self::CAPABILITIES
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        match self
-            .executor
-            .execute_quiet(&CommandSpec::exec("which", ["pacman".to_string()]))
-            .await
-        {
-            Ok(_) => Ok(HostCompatibility::Compatible),
-            Err(_) => Ok(HostCompatibility::Incompatible(
-                "pacman not found".to_string(),
-            )),
-        }
-    }
-
-    fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        vec![
-            // `-Sy` matches the exact refresh call (no extra args).
-            SudoCommandEntry::new("pacman", "Package database sync requires root privileges")
-                .with_args_suffix(Cow::Borrowed("-Sy")),
-            // `-S --noconfirm *` covers single and batch installs.
-            SudoCommandEntry::new("pacman", "Package installation requires root privileges")
-                .with_args_suffix(Cow::Borrowed("-S --noconfirm *")),
-        ]
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn refresh_package_index(&self) -> Result<()> {
-        tracing::info!("refreshing Pacman package database");
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec("pacman", ["-Sy".to_string()]).privileged())
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "pacman -Sy failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
-
-        tracing::info!("Pacman package database refreshed");
-        Ok(())
-    }
-
+impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for PacmanPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::info!("discovering Pacman-managed software");
@@ -316,6 +319,23 @@ impl Plugin for PacmanPlugin {
     }
 
     #[tracing::instrument(skip_all)]
+    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
+        match self
+            .executor
+            .execute_quiet(&CommandSpec::exec("which", ["pacman".to_string()]))
+            .await
+        {
+            Ok(_) => Ok(HostCompatibility::Compatible),
+            Err(_) => Ok(HostCompatibility::Incompatible(
+                "pacman not found".to_string(),
+            )),
+        }
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for PacmanPlugin {
+    #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "detecting Pacman installed version");
@@ -354,6 +374,84 @@ impl Plugin for PacmanPlugin {
         }
     }
 
+    /// Detect installed versions for multiple packages using a single
+    /// `pacman -Q` call.
+    ///
+    /// Runs:
+    /// ```text
+    /// pacman -Q pkg1 pkg2 pkg3
+    /// ```
+    ///
+    /// The exit code is intentionally ignored: `pacman -Q` exits non-zero when
+    /// any requested package is not installed, but packages that *are* installed
+    /// still appear in stdout. Packages absent from stdout are treated as not
+    /// installed (`None` with no error).
+    #[tracing::instrument(skip_all)]
+    async fn batch_detect_installed_version(
+        &self,
+        items: &[BatchDetectItem],
+    ) -> Result<Vec<BatchDetectResult>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Validate all identifiers up front.
+        for item in items {
+            validate_identifier(&item.package_identifier)
+                .map_err(|e| report!(PluginError::Configuration(e)))?;
+        }
+
+        let mut args = vec!["-Q".to_string()];
+        for item in items {
+            args.push(item.package_identifier.clone());
+        }
+
+        tracing::debug!(
+            count = items.len(),
+            "batch detecting Pacman installed versions"
+        );
+
+        // Non-zero exit is expected when any package is unknown; ignore it.
+        let stdout = match self
+            .executor
+            .execute_quiet(&CommandSpec::exec("pacman", args))
+            .await
+        {
+            Ok(o) => o.output,
+            Err(e) => {
+                // pacman completely failed (e.g., not found on PATH).
+                let error_str = format!("pacman -Q failed: {e}");
+                return Ok(items
+                    .iter()
+                    .map(|item| {
+                        BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
+                    })
+                    .collect());
+            }
+        };
+
+        // Parse output into a map for O(1) lookup.
+        let query_map: HashMap<String, String> =
+            Self::parse_query_output(&stdout).into_iter().collect();
+
+        let results = items
+            .iter()
+            .map(|item| {
+                let installed_version = query_map.get(&item.package_identifier).map(Version::new);
+                BatchDetectResult::new(item.package_identifier.clone(), installed_version, None)
+            })
+            .collect();
+
+        tracing::debug!(
+            count = items.len(),
+            "Pacman batch version detection complete"
+        );
+        Ok(results)
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for PacmanPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
@@ -401,6 +499,114 @@ impl Plugin for PacmanPlugin {
         )])
     }
 
+    /// Fetch available releases for multiple packages using a single
+    /// `pacman -Si` call.
+    ///
+    /// Runs:
+    /// ```text
+    /// pacman -Si pkg1 pkg2 pkg3
+    /// ```
+    ///
+    /// Output blocks (one per package) are separated by blank lines. Only
+    /// packages present in the output have releases; absent packages have
+    /// empty releases. The exit code is intentionally ignored because
+    /// `pacman -Si` exits non-zero when any package is not in the repos.
+    #[tracing::instrument(skip_all)]
+    async fn batch_fetch_releases(
+        &self,
+        items: &[BatchFetchItem],
+    ) -> Result<Vec<BatchFetchResult>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Validate all identifiers up front.
+        for item in items {
+            validate_identifier(&item.package_identifier)
+                .map_err(|e| report!(PluginError::Configuration(e)))?;
+        }
+
+        let mut args = vec!["-Si".to_string()];
+        for item in items {
+            args.push(item.package_identifier.clone());
+        }
+
+        tracing::debug!(
+            count = items.len(),
+            "batch fetching Pacman releases via pacman -Si"
+        );
+
+        // Non-zero exit is expected when any package is not in repos; ignore it.
+        let stdout = match self
+            .executor
+            .execute_quiet(&CommandSpec::exec("pacman", args))
+            .await
+        {
+            Ok(o) => o.output,
+            Err(e) => {
+                let error_str = format!("pacman -Si failed: {e}");
+                return Ok(items
+                    .iter()
+                    .map(|item| {
+                        BatchFetchResult::error(item.package_identifier.clone(), error_str.clone())
+                    })
+                    .collect());
+            }
+        };
+
+        let parsed = Self::parse_si_output_batch(&stdout);
+
+        let results = items
+            .iter()
+            .map(|item| {
+                let Some(version) = parsed.get(&item.package_identifier) else {
+                    // Package not found in any configured repository.
+                    return BatchFetchResult::empty(item.package_identifier.clone());
+                };
+
+                BatchFetchResult::found(
+                    item.package_identifier.clone(),
+                    vec![UpstreamRelease::new(
+                        Version::new(version),
+                        version.clone(),
+                        false,
+                        "",
+                    )],
+                )
+            })
+            .collect();
+
+        tracing::debug!(count = items.len(), "Pacman batch fetch complete");
+        Ok(results)
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for PacmanPlugin {
+    #[tracing::instrument(skip_all)]
+    async fn refresh_package_index(&self) -> Result<()> {
+        tracing::info!("refreshing Pacman package database");
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec("pacman", ["-Sy".to_string()]).privileged())
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "pacman -Sy failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            bail!(PluginError::CommandFailed(cmd_output.exit_code));
+        }
+
+        tracing::info!("Pacman package database refreshed");
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for PacmanPlugin {
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
@@ -527,162 +733,6 @@ impl Plugin for PacmanPlugin {
             })
             .collect();
 
-        Ok(results)
-    }
-
-    /// Detect installed versions for multiple packages using a single
-    /// `pacman -Q` call.
-    ///
-    /// Runs:
-    /// ```text
-    /// pacman -Q pkg1 pkg2 pkg3
-    /// ```
-    ///
-    /// The exit code is intentionally ignored: `pacman -Q` exits non-zero when
-    /// any requested package is not installed, but packages that *are* installed
-    /// still appear in stdout. Packages absent from stdout are treated as not
-    /// installed (`None` with no error).
-    #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Validate all identifiers up front.
-        for item in items {
-            validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
-        }
-
-        let mut args = vec!["-Q".to_string()];
-        for item in items {
-            args.push(item.package_identifier.clone());
-        }
-
-        tracing::debug!(
-            count = items.len(),
-            "batch detecting Pacman installed versions"
-        );
-
-        // Non-zero exit is expected when any package is unknown; ignore it.
-        let stdout = match self
-            .executor
-            .execute_quiet(&CommandSpec::exec("pacman", args))
-            .await
-        {
-            Ok(o) => o.output,
-            Err(e) => {
-                // pacman completely failed (e.g., not found on PATH).
-                let error_str = format!("pacman -Q failed: {e}");
-                return Ok(items
-                    .iter()
-                    .map(|item| {
-                        BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
-                    })
-                    .collect());
-            }
-        };
-
-        // Parse output into a map for O(1) lookup.
-        let query_map: HashMap<String, String> =
-            Self::parse_query_output(&stdout).into_iter().collect();
-
-        let results = items
-            .iter()
-            .map(|item| {
-                let installed_version = query_map.get(&item.package_identifier).map(Version::new);
-                BatchDetectResult::new(item.package_identifier.clone(), installed_version, None)
-            })
-            .collect();
-
-        tracing::debug!(
-            count = items.len(),
-            "Pacman batch version detection complete"
-        );
-        Ok(results)
-    }
-
-    /// Fetch available releases for multiple packages using a single
-    /// `pacman -Si` call.
-    ///
-    /// Runs:
-    /// ```text
-    /// pacman -Si pkg1 pkg2 pkg3
-    /// ```
-    ///
-    /// Output blocks (one per package) are separated by blank lines. Only
-    /// packages present in the output have releases; absent packages have
-    /// empty releases. The exit code is intentionally ignored because
-    /// `pacman -Si` exits non-zero when any package is not in the repos.
-    #[tracing::instrument(skip_all)]
-    async fn batch_fetch_releases(
-        &self,
-        items: &[BatchFetchItem],
-    ) -> Result<Vec<BatchFetchResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Validate all identifiers up front.
-        for item in items {
-            validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
-        }
-
-        let mut args = vec!["-Si".to_string()];
-        for item in items {
-            args.push(item.package_identifier.clone());
-        }
-
-        tracing::debug!(
-            count = items.len(),
-            "batch fetching Pacman releases via pacman -Si"
-        );
-
-        // Non-zero exit is expected when any package is not in repos; ignore it.
-        let stdout = match self
-            .executor
-            .execute_quiet(&CommandSpec::exec("pacman", args))
-            .await
-        {
-            Ok(o) => o.output,
-            Err(e) => {
-                let error_str = format!("pacman -Si failed: {e}");
-                return Ok(items
-                    .iter()
-                    .map(|item| {
-                        BatchFetchResult::error(item.package_identifier.clone(), error_str.clone())
-                    })
-                    .collect());
-            }
-        };
-
-        let parsed = Self::parse_si_output_batch(&stdout);
-
-        let results = items
-            .iter()
-            .map(|item| {
-                let Some(version) = parsed.get(&item.package_identifier) else {
-                    // Package not found in any configured repository.
-                    return BatchFetchResult::empty(item.package_identifier.clone());
-                };
-
-                BatchFetchResult::found(
-                    item.package_identifier.clone(),
-                    vec![UpstreamRelease::new(
-                        Version::new(version),
-                        version.clone(),
-                        false,
-                        "",
-                    )],
-                )
-            })
-            .collect();
-
-        tracing::debug!(count = items.len(), "Pacman batch fetch complete");
         Ok(results)
     }
 }

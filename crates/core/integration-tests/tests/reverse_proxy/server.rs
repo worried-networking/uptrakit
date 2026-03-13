@@ -187,17 +187,12 @@ async fn build_state(
         controller_id,
     );
 
-    let notification_ops: Arc<dyn uptrakit_notification_plugin_registry::NotificationOps> =
-        Arc::new(
-            uptrakit_notification_plugin_registry::NotificationPluginRegistry::new(
-                Default::default(),
-            )
-            .expect("notification plugin registry for test"),
-        );
+    let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
+        Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry::new());
     let notification_dispatcher =
         uptrakit_web_api::notifications::dispatcher::NotificationDispatcher::new(
             db.clone(),
-            Arc::clone(&notification_ops),
+            Arc::clone(&plugin_ops),
             "https://localhost".to_string(),
             settings.clone(),
         );
@@ -222,8 +217,8 @@ async fn build_state(
         .default_tenant_id(uuid::Uuid::nil())
         .controller_id(controller_id)
         .notification_service(notification_service)
-        .notification_ops(notification_ops)
         .notification_dispatcher(notification_dispatcher)
+        .plugin_ops(plugin_ops)
         .token_denylist(Arc::new(
             uptrakit_web_api::auth::token_denylist::TokenDenylist::new(),
         ));

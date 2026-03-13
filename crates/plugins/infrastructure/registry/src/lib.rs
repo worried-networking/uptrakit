@@ -24,8 +24,9 @@
 //!     executor,
 //! )?;
 //!
-//! // Fetch releases (owner/repo is the package_identifier, not config)
-//! let releases = plugin.fetch_releases("octocat/hello-world").await?;
+//! // Fetch releases via subtrait accessor
+//! let fetcher = plugin.as_release_fetcher().expect("plugin supports fetching");
+//! let releases = fetcher.fetch_releases("octocat/hello-world").await?;
 //! ```
 
 pub mod error;
@@ -36,25 +37,42 @@ pub use registry::PluginRegistry;
 
 // Re-export commonly used types for plugin crate convenience
 pub use uptrakit_plugin_infrastructure_core::{
-    Plugin, PluginCapability, SudoCommandEntry, SudoHelperScript,
+    PluginBase, PluginCapability, SudoCommandEntry, SudoHelperScript,
 };
 pub use uptrakit_shared_types::PluginType;
 
 // Re-export executor types for downstream convenience
 pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};
 
-// Re-export agent-infra types when the feature is enabled.
-#[cfg(feature = "agent-infra")]
-pub use uptrakit_plugin_infrastructure_core::agent_infra::AgentInfraRegistry;
+// Re-export notification types when the feature is enabled.
+#[cfg(feature = "notifications")]
+pub use uptrakit_notification_plugin_registry::NotificationRegistryConfig;
 
-/// Create an [`AgentInfraRegistry`] populated with all known infrastructure plugins.
+/// Return all controller-side database migrations contributed by plugins.
+///
+/// The controller's migration runner appends these after the core migrations
+/// from `crates/shared/db` so that plugin-owned tables are created after the
+/// core schema is in place. Each migration has a unique name tracked in
+/// `seaql_migrations`, so already-applied migrations are skipped.
+#[cfg(feature = "migrations")]
+pub fn all_controller_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
+    let mut migrations = Vec::new();
+    migrations.extend(uptrakit_plugin_infrastructure_proxmox::controller_migration::migrations());
+    migrations
+}
+
+/// Create a list of all known agent-side infrastructure plugins.
+///
+/// Returns `Arc<dyn PluginBase>` instances that implement the infrastructure
+/// subtraits (`HostLifecyclePlugin`, `HostReportPlugin`, `GuestExecPlugin`).
+/// The agent uses subtrait accessors (e.g. `as_host_lifecycle()`) to call
+/// specific plugin hooks.
 #[cfg(feature = "agent-infra")]
-pub fn create_agent_infra_registry() -> AgentInfraRegistry {
-    let mut registry = AgentInfraRegistry::new();
-    registry.register(std::sync::Arc::new(
+pub fn create_agent_infra_plugins()
+-> Vec<std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::PluginBase>> {
+    vec![std::sync::Arc::new(
         uptrakit_plugin_infrastructure_proxmox::agent::ProxmoxAgentPlugin::new(),
-    ));
-    registry
+    )]
 }
 
 // Re-export `PluginOps` trait and associated types from `infrastructure-core`.
@@ -147,11 +165,28 @@ impl PluginOps for PluginRegistry {
     }
 
     fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
-        uptrakit_plugin_infrastructure_proxmox::extensions::extension_manifests()
+        #[allow(unused_mut)]
+        let mut manifests =
+            uptrakit_plugin_infrastructure_proxmox::extensions::extension_manifests();
+        #[cfg(feature = "notifications")]
+        {
+            for plugin in self.notification_registry.plugins() {
+                manifests.extend(plugin.extension_manifests());
+            }
+        }
+        manifests
     }
 
     fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
-        uptrakit_plugin_infrastructure_proxmox::extensions::extension_actions()
+        #[allow(unused_mut)]
+        let mut actions = uptrakit_plugin_infrastructure_proxmox::extensions::extension_actions();
+        #[cfg(feature = "notifications")]
+        {
+            for plugin in self.notification_registry.plugins() {
+                actions.extend(plugin.extension_actions());
+            }
+        }
+        actions
     }
 
     fn handle_extension_action<'a>(
@@ -168,5 +203,81 @@ impl PluginOps for PluginRegistry {
         >,
     > {
         PluginRegistry::handle_extension_action(ctx, extension_id, action_id, params)
+    }
+
+    fn notification_plugin(
+        &self,
+        _channel_type: &str,
+    ) -> Option<std::sync::Arc<dyn uptrakit_notification_plugin_core::NotificationPlugin>> {
+        #[cfg(feature = "notifications")]
+        {
+            self.notification_registry.get(_channel_type)
+        }
+        #[cfg(not(feature = "notifications"))]
+        {
+            None
+        }
+    }
+
+    fn notification_supported_types(&self) -> Vec<&'static str> {
+        #[cfg(feature = "notifications")]
+        {
+            self.notification_registry.supported_types()
+        }
+        #[cfg(not(feature = "notifications"))]
+        {
+            vec![]
+        }
+    }
+
+    fn notification_validate_config(
+        &self,
+        _channel_type: &str,
+        _config: &serde_json::Value,
+    ) -> uptrakit_notification_plugin_core::Result<()> {
+        #[cfg(feature = "notifications")]
+        {
+            let Some(plugin) = self.notification_registry.get(_channel_type) else {
+                return Err(rootcause::report!(
+                    uptrakit_notification_plugin_core::NotificationPluginError::InvalidConfig(
+                        format!("unknown channel type: {_channel_type}")
+                    )
+                ));
+            };
+            plugin.validate_config(_config)
+        }
+        #[cfg(not(feature = "notifications"))]
+        {
+            Ok(())
+        }
+    }
+
+    fn notification_mask_config_secrets(
+        &self,
+        _channel_type: &str,
+        config: &serde_json::Value,
+    ) -> serde_json::Value {
+        #[cfg(feature = "notifications")]
+        {
+            if let Some(plugin) = self.notification_registry.get(_channel_type) {
+                return plugin.mask_config_secrets(config);
+            }
+        }
+        config.clone()
+    }
+
+    fn notification_restore_config_secrets(
+        &self,
+        _channel_type: &str,
+        incoming: &serde_json::Value,
+        _stored: &serde_json::Value,
+    ) -> serde_json::Value {
+        #[cfg(feature = "notifications")]
+        {
+            if let Some(plugin) = self.notification_registry.get(_channel_type) {
+                return plugin.restore_config_secrets(incoming, _stored);
+            }
+        }
+        incoming.clone()
     }
 }
