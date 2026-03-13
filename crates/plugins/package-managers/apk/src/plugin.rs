@@ -338,30 +338,24 @@ impl Plugin for ApkPlugin {
                     bail!(PluginError::CommandFailed(list_output.exit_code));
                 }
 
-                let emit_targets = self.config.is_discover_all_mode();
-
                 let packages: Vec<DiscoveredSoftware> = list_output
                     .output
                     .lines()
                     .filter_map(parse_apk_list_line)
                     .map(|(name, version)| {
-                        let targets = if emit_targets {
-                            vec![DiscoveryTarget {
-                                plugin_type: PluginType::PackageManagerApk,
-                                plugin_config: serde_json::json!({}),
-                                plugin_config_name: "APK".to_string(),
-                                roles: vec![
-                                    PluginRole::DetectVersion,
-                                    PluginRole::FetchReleases,
-                                    PluginRole::ExecuteUpdate,
-                                ],
-                                package_identifier: None,
-                                config_override: None,
-                                execution_site: None,
-                            }]
-                        } else {
-                            vec![]
-                        };
+                        let targets = vec![DiscoveryTarget {
+                            plugin_type: PluginType::PackageManagerApk,
+                            plugin_config: serde_json::json!({}),
+                            plugin_config_name: "APK".to_string(),
+                            roles: vec![
+                                PluginRole::DetectVersion,
+                                PluginRole::FetchReleases,
+                                PluginRole::ExecuteUpdate,
+                            ],
+                            package_identifier: None,
+                            config_override: None,
+                            execution_site: None,
+                        }];
                         DiscoveredSoftware {
                             package_identifier: name.clone(),
                             name,
@@ -428,11 +422,24 @@ impl Plugin for ApkPlugin {
                     .iter()
                     .filter_map(|name| {
                         let version = version_map.get(name)?.clone();
+                        let targets = vec![DiscoveryTarget {
+                            plugin_type: PluginType::PackageManagerApk,
+                            plugin_config: serde_json::json!({}),
+                            plugin_config_name: "APK".to_string(),
+                            roles: vec![
+                                PluginRole::DetectVersion,
+                                PluginRole::FetchReleases,
+                                PluginRole::ExecuteUpdate,
+                            ],
+                            package_identifier: None,
+                            config_override: None,
+                            execution_site: None,
+                        }];
                         Some(DiscoveredSoftware {
                             package_identifier: name.clone(),
                             name: name.clone(),
                             installed_version: version,
-                            targets: vec![],
+                            targets,
                             extra: None,
                             qualifier: None,
                             plugin_package_identifier: None,
@@ -895,7 +902,7 @@ mod tests {
     fn make_plugin_world(world_output: &str, info_output: &str, version_output: &str) -> ApkPlugin {
         ApkPlugin {
             config: ApkConfig {
-                discovery_filter: Some(ApkDiscoveryFilter::World),
+                discovery_filter: ApkDiscoveryFilter::World,
             },
             executor: Arc::new(MockApkExecutor::new(
                 "",
@@ -1156,11 +1163,10 @@ openssl>=3.0
 
     #[tokio::test]
     async fn discover_software_emits_discovery_target_in_all_mode() {
-        // Default config (is_discover_all_mode = true) → targets emitted
+        // Targets are always emitted regardless of filter.
         let plugin = make_plugin_all(SAMPLE_LIST, SAMPLE_INFO, SAMPLE_VERSION);
         let discovered = plugin.discover_software().await.expect("discover");
         assert!(!discovered.is_empty());
-        // Every item should have one target
         for item in &discovered {
             assert_eq!(item.targets.len(), 1, "item '{}' missing target", item.name);
             assert_eq!(item.targets[0].plugin_type, PluginType::PackageManagerApk);
@@ -1169,11 +1175,11 @@ openssl>=3.0
     }
 
     #[tokio::test]
-    async fn discover_software_explicit_all_no_targets() {
-        // Explicit Some(All) → config-ID path, no targets
+    async fn discover_software_explicit_all_emits_targets() {
+        // Explicit All filter → targets still emitted.
         let plugin = ApkPlugin {
             config: ApkConfig {
-                discovery_filter: Some(ApkDiscoveryFilter::All),
+                discovery_filter: ApkDiscoveryFilter::All,
             },
             executor: Arc::new(MockApkExecutor::new(
                 SAMPLE_LIST,
@@ -1185,9 +1191,10 @@ openssl>=3.0
         let discovered = plugin.discover_software().await.expect("discover");
         assert_eq!(discovered.len(), 3);
         for item in &discovered {
-            assert!(
-                item.targets.is_empty(),
-                "item '{}' should have no targets",
+            assert_eq!(
+                item.targets.len(),
+                1,
+                "item '{}' should have one target",
                 item.name
             );
         }

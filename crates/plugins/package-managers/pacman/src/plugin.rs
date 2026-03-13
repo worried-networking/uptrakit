@@ -282,34 +282,22 @@ impl Plugin for PacmanPlugin {
 
         let all_packages = Self::parse_query_output(&cmd_output.output);
 
-        // When the plugin was invoked without a pre-existing plugin config
-        // (config is at its default / `{}`), emit a DiscoveryTarget so the
-        // controller can auto-create a default "Pacman" plugin config and the
-        // role assignments.  When a real config exists, the server sends
-        // plugin_config_id and items are handled via the config-ID path (no
-        // targets needed).
-        let emit_targets = self.config.is_discover_all_mode();
-
         let packages: Vec<DiscoveredSoftware> = all_packages
             .into_iter()
             .map(|(name, version)| {
-                let targets = if emit_targets {
-                    vec![DiscoveryTarget {
-                        plugin_type: PluginType::PackageManagerPacman,
-                        plugin_config: serde_json::json!({}),
-                        plugin_config_name: "Pacman".to_string(),
-                        roles: vec![
-                            PluginRole::DetectVersion,
-                            PluginRole::FetchReleases,
-                            PluginRole::ExecuteUpdate,
-                        ],
-                        package_identifier: None,
-                        config_override: None,
-                        execution_site: None,
-                    }]
-                } else {
-                    vec![]
-                };
+                let targets = vec![DiscoveryTarget {
+                    plugin_type: PluginType::PackageManagerPacman,
+                    plugin_config: serde_json::json!({}),
+                    plugin_config_name: "Pacman".to_string(),
+                    roles: vec![
+                        PluginRole::DetectVersion,
+                        PluginRole::FetchReleases,
+                        PluginRole::ExecuteUpdate,
+                    ],
+                    package_identifier: None,
+                    config_override: None,
+                    execution_site: None,
+                }];
                 DiscoveredSoftware {
                     package_identifier: name.clone(),
                     name,
@@ -1127,7 +1115,8 @@ mod tests {
     // ── discover_software target emission ────────────────────────────────────
 
     #[tokio::test]
-    async fn discover_software_emits_targets_when_default_config() {
+    async fn discover_software_emits_targets() {
+        // Targets are always emitted regardless of filter.
         let executor = RoutedOutputExecutor::with_routes(vec![("pacman", "nginx 1.26.3-1\n")]);
         let plugin = PacmanPlugin::new(PacmanConfig::default(), executor)
             .await
@@ -1161,11 +1150,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discover_software_no_targets_when_explicit_all_filter() {
+    async fn discover_software_emits_targets_with_explicit_all_filter() {
         let executor = RoutedOutputExecutor::with_routes(vec![("pacman", "nginx 1.26.3-1\n")]);
         let plugin = PacmanPlugin::new(
             PacmanConfig {
-                discovery_filter: Some(PacmanDiscoveryFilter::All),
+                discovery_filter: PacmanDiscoveryFilter::All,
             },
             executor,
         )
@@ -1174,18 +1163,19 @@ mod tests {
 
         let discoveries = plugin.discover_software().await.expect("discover");
         assert_eq!(discoveries.len(), 1);
-        assert!(
-            discoveries[0].targets.is_empty(),
-            "explicit config must not emit targets (config-ID path)"
+        assert_eq!(
+            discoveries[0].targets.len(),
+            1,
+            "explicit All filter must still emit targets"
         );
     }
 
     #[tokio::test]
-    async fn discover_software_no_targets_when_explicit_filter() {
+    async fn discover_software_emits_targets_with_explicit_filter() {
         let executor = RoutedOutputExecutor::with_routes(vec![("pacman", "nginx 1.26.3-1\n")]);
         let plugin = PacmanPlugin::new(
             PacmanConfig {
-                discovery_filter: Some(PacmanDiscoveryFilter::Explicit),
+                discovery_filter: PacmanDiscoveryFilter::Explicit,
             },
             executor,
         )
@@ -1195,9 +1185,10 @@ mod tests {
         let discoveries = plugin.discover_software().await.expect("discover");
         assert_eq!(discoveries.len(), 1);
         assert_eq!(discoveries[0].package_identifier, "nginx");
-        assert!(
-            discoveries[0].targets.is_empty(),
-            "explicit filter with pre-existing config must not emit targets"
+        assert_eq!(
+            discoveries[0].targets.len(),
+            1,
+            "explicit filter must still emit targets"
         );
     }
 

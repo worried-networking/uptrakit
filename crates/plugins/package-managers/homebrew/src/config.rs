@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
 use uptrakit_plugin_infrastructure_core::SecretMasking;
 
-/// Homebrew package type: formula (CLI tools, libraries) or cask (GUI applications).
+/// Homebrew package type: formula (CLI tools, libraries), cask (GUI applications), or both.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HomebrewPackageType {
-    /// Standard Homebrew formula (default).
+    /// Track both formulae and casks (default).
     #[default]
+    Both,
+    /// Standard Homebrew formula (CLI tools, libraries).
     Formula,
     /// Homebrew cask (macOS GUI application).
     Cask,
@@ -17,34 +19,28 @@ pub enum HomebrewPackageType {
 /// No secrets — the `package_identifier` in `SoftwareItem` is the formula/cask
 /// name (e.g., `wget`, `firefox`).
 ///
-/// When `package_type` is `None`, the plugin discovers all installed packages
-/// (both formulae and casks) and annotates each with
+/// When `package_type` is `Both` (the default), the plugin discovers all
+/// installed packages (formulae and casks) and annotates each with
 /// `extra = {"package_type": "formula"}` or `extra = {"package_type": "cask"}`.
-/// This is used during autodiscovery when no pre-existing plugin config exists.
 ///
-/// When `package_type` is set, only that type is discovered (the existing
-/// version-tracking behaviour).
+/// When `package_type` is `Formula` or `Cask`, only that type is discovered.
+///
+/// A [`DiscoveryTarget`] is always emitted so the controller can
+/// find-or-create the plugin config and role assignments.
+///
+/// [`DiscoveryTarget`]: uptrakit_plugin_infrastructure_core::DiscoveryTarget
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HomebrewConfig {
-    /// Whether to track formulae, casks, or both (`None` = discover all).
+    /// Whether to track formulae, casks, or both.
     #[serde(default)]
-    pub package_type: Option<HomebrewPackageType>,
+    pub package_type: HomebrewPackageType,
 }
 
 impl SecretMasking for HomebrewConfig {}
 
 impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for HomebrewConfig {
     fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
-        vec![
-            FieldDef::new("package_type", "Package Type")
-                .with_type(FieldType::Select)
-                .with_options(vec![
-                    SelectOption::new("formula", "Formula (CLI tools, libraries)"),
-                    SelectOption::new("cask", "Cask (GUI applications)"),
-                ])
-                .with_help_text("Track formulae, casks, or leave blank to discover both"),
-        ]
+        vec![]
     }
 
     fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
@@ -54,10 +50,11 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for HomebrewConfig {
             FieldDef::new("package_type", "Package Type")
                 .with_type(FieldType::Select)
                 .with_options(vec![
+                    SelectOption::new("both", "Both (formulae and casks)"),
                     SelectOption::new("formula", "Formula (CLI tools, libraries)"),
                     SelectOption::new("cask", "Cask (GUI applications)"),
                 ])
-                .with_help_text("Track formulae, casks, or leave blank to discover both"),
+                .with_help_text("Track formulae, casks, or both"),
         ]
     }
 
@@ -93,43 +90,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_config_is_none() {
+    fn default_config_is_both() {
         let config = HomebrewConfig::default();
-        assert_eq!(config.package_type, None);
+        assert_eq!(config.package_type, HomebrewPackageType::Both);
     }
 
     #[test]
-    fn deserialize_empty_object() {
+    fn deserialize_empty_object_gives_both() {
         let config: HomebrewConfig = serde_json::from_str("{}").expect("deserialize");
-        assert_eq!(config.package_type, None);
+        assert_eq!(config.package_type, HomebrewPackageType::Both);
+    }
+
+    #[test]
+    fn deserialize_both() {
+        let config: HomebrewConfig =
+            serde_json::from_str(r#"{"package_type": "both"}"#).expect("deserialize");
+        assert_eq!(config.package_type, HomebrewPackageType::Both);
     }
 
     #[test]
     fn deserialize_formula() {
         let config: HomebrewConfig =
             serde_json::from_str(r#"{"package_type": "formula"}"#).expect("deserialize");
-        assert_eq!(config.package_type, Some(HomebrewPackageType::Formula));
+        assert_eq!(config.package_type, HomebrewPackageType::Formula);
     }
 
     #[test]
     fn deserialize_cask() {
         let config: HomebrewConfig =
             serde_json::from_str(r#"{"package_type": "cask"}"#).expect("deserialize");
-        assert_eq!(config.package_type, Some(HomebrewPackageType::Cask));
+        assert_eq!(config.package_type, HomebrewPackageType::Cask);
     }
 
     #[test]
-    fn deserialize_null_package_type() {
-        let config: HomebrewConfig =
-            serde_json::from_str(r#"{"package_type": null}"#).expect("deserialize");
-        assert_eq!(config.package_type, None);
-    }
-
-    #[test]
-    fn serialization_roundtrip_none() {
-        let config = HomebrewConfig { package_type: None };
+    fn serialization_roundtrip_both() {
+        let config = HomebrewConfig {
+            package_type: HomebrewPackageType::Both,
+        };
         let json = serde_json::to_value(&config).expect("serialize");
-        // None serializes as null with #[serde(default)]
+        assert_eq!(json["package_type"], "both");
         let deserialized: HomebrewConfig = serde_json::from_value(json).expect("deserialize");
         assert_eq!(deserialized, config);
     }
@@ -137,7 +136,7 @@ mod tests {
     #[test]
     fn serialization_roundtrip_formula() {
         let config = HomebrewConfig {
-            package_type: Some(HomebrewPackageType::Formula),
+            package_type: HomebrewPackageType::Formula,
         };
         let json = serde_json::to_value(&config).expect("serialize");
         assert_eq!(json["package_type"], "formula");
@@ -148,7 +147,7 @@ mod tests {
     #[test]
     fn serialization_roundtrip_cask() {
         let config = HomebrewConfig {
-            package_type: Some(HomebrewPackageType::Cask),
+            package_type: HomebrewPackageType::Cask,
         };
         let json = serde_json::to_value(&config).expect("serialize");
         assert_eq!(json["package_type"], "cask");
@@ -165,7 +164,7 @@ mod tests {
     #[test]
     fn validate_accepts_cask_config() {
         let config = HomebrewConfig {
-            package_type: Some(HomebrewPackageType::Cask),
+            package_type: HomebrewPackageType::Cask,
         };
         assert!(config.validate().is_ok());
     }

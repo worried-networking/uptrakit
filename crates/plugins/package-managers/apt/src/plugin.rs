@@ -390,14 +390,6 @@ impl Plugin for AptPlugin {
             AptDiscoveryFilter::All => None,
         };
 
-        // When the plugin was invoked without a pre-existing plugin config
-        // (config is at its default / `{}`), emit a DiscoveryTarget so the
-        // controller can auto-create a default "APT" plugin config and the
-        // role assignments.  When a real config exists (e.g.
-        // discovery_filter: "all"), the server sends plugin_config_id and
-        // the items are handled via the config-ID path (no targets needed).
-        let emit_targets = self.config.is_discover_all_mode();
-
         // Step 3: Filter by the manual set (if applicable) and build results.
         let packages: Vec<DiscoveredSoftware> = all_packages
             .into_iter()
@@ -407,23 +399,19 @@ impl Plugin for AptPlugin {
                     .is_none_or(|set| set.contains(name.as_str()))
             })
             .map(|(name, version)| {
-                let targets = if emit_targets {
-                    vec![DiscoveryTarget {
-                        plugin_type: PluginType::PackageManagerApt,
-                        plugin_config: serde_json::json!({}),
-                        plugin_config_name: "APT".to_string(),
-                        roles: vec![
-                            PluginRole::DetectVersion,
-                            PluginRole::FetchReleases,
-                            PluginRole::ExecuteUpdate,
-                        ],
-                        package_identifier: None,
-                        config_override: None,
-                        execution_site: None,
-                    }]
-                } else {
-                    vec![]
-                };
+                let targets = vec![DiscoveryTarget {
+                    plugin_type: PluginType::PackageManagerApt,
+                    plugin_config: serde_json::json!({}),
+                    plugin_config_name: "APT".to_string(),
+                    roles: vec![
+                        PluginRole::DetectVersion,
+                        PluginRole::FetchReleases,
+                        PluginRole::ExecuteUpdate,
+                    ],
+                    package_identifier: None,
+                    config_override: None,
+                    execution_site: None,
+                }];
                 DiscoveredSoftware {
                     package_identifier: name.clone(),
                     name,
@@ -1384,9 +1372,8 @@ mod tests {
     // ── discover_software target emission ─────────────────────────────────────
 
     #[tokio::test]
-    async fn discover_software_emits_targets_when_default_config() {
-        // Default config (discovery_filter: None) → discover-all mode.
-        // Effective filter is All, so only dpkg-query is called (no apt-mark).
+    async fn discover_software_emits_targets() {
+        // Targets are always emitted regardless of filter.
         let executor = RoutedOutputExecutor::with_routes(vec![("dpkg-query", "nginx\t1.24.0\n")]);
         let plugin = AptPlugin::new(AptConfig::default(), executor)
             .await
@@ -1421,13 +1408,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discover_software_no_targets_when_explicit_all_filter() {
-        // discovery_filter: Some(All) → pre-existing config → config-ID path → no targets.
-        // Only dpkg-query is called (no apt-mark for the "all" filter).
+    async fn discover_software_emits_targets_with_explicit_all_filter() {
+        // discovery_filter: All → targets always emitted.
         let executor = RoutedOutputExecutor::with_routes(vec![("dpkg-query", "nginx\t1.24.0\n")]);
         let plugin = AptPlugin::new(
             AptConfig {
-                discovery_filter: Some(AptDiscoveryFilter::All),
+                discovery_filter: AptDiscoveryFilter::All,
             },
             executor,
         )
@@ -1436,23 +1422,23 @@ mod tests {
 
         let discoveries = plugin.discover_software().await.expect("discover");
         assert_eq!(discoveries.len(), 1);
-        assert!(
-            discoveries[0].targets.is_empty(),
-            "explicit config must not emit targets (config-ID path)"
+        assert_eq!(
+            discoveries[0].targets.len(),
+            1,
+            "explicit All filter must still emit targets"
         );
     }
 
     #[tokio::test]
-    async fn discover_software_no_targets_when_manual_filter() {
-        // discovery_filter: Some(Manual) → pre-existing config → config-ID path →
-        // no targets. apt-mark showmanual narrows the package list.
+    async fn discover_software_emits_targets_with_manual_filter() {
+        // discovery_filter: Manual → apt-mark narrows packages; targets always emitted.
         let executor = RoutedOutputExecutor::with_routes(vec![
             ("dpkg-query", "nginx\t1.24.0\npython3\t3.11.0\n"),
             ("apt-mark", "nginx\n"), // only nginx is manually installed
         ]);
         let plugin = AptPlugin::new(
             AptConfig {
-                discovery_filter: Some(AptDiscoveryFilter::Manual),
+                discovery_filter: AptDiscoveryFilter::Manual,
             },
             executor,
         )
@@ -1462,9 +1448,10 @@ mod tests {
         let discoveries = plugin.discover_software().await.expect("discover");
         assert_eq!(discoveries.len(), 1);
         assert_eq!(discoveries[0].package_identifier, "nginx");
-        assert!(
-            discoveries[0].targets.is_empty(),
-            "manual filter with pre-existing config must not emit targets"
+        assert_eq!(
+            discoveries[0].targets.len(),
+            1,
+            "manual filter must still emit targets"
         );
     }
 

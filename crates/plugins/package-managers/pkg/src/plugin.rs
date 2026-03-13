@@ -198,8 +198,6 @@ impl Plugin for PkgPlugin {
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::info!("discovering BSD pkg-managed software");
 
-        let emit_targets = self.config.is_discover_all_mode();
-
         let packages: Vec<DiscoveredSoftware> = match self.config.effective_filter() {
             PkgDiscoveryFilter::All => {
                 // Query all installed packages.
@@ -222,7 +220,7 @@ impl Plugin for PkgPlugin {
 
                 Self::parse_pkg_query_line(&cmd_output.output)
                     .into_iter()
-                    .map(|(name, version)| build_discovered(name, version, emit_targets))
+                    .map(|(name, version)| build_discovered(name, version))
                     .collect()
             }
             PkgDiscoveryFilter::Manual => {
@@ -251,7 +249,7 @@ impl Plugin for PkgPlugin {
                 Self::parse_pkg_query_with_auto_line(&cmd_output.output)
                     .into_iter()
                     .filter(|(auto_flag, _, _)| auto_flag == "0")
-                    .map(|(_, name, version)| build_discovered(name, version, emit_targets))
+                    .map(|(_, name, version)| build_discovered(name, version))
                     .collect()
             }
         };
@@ -608,24 +606,20 @@ impl Plugin for PkgPlugin {
 }
 
 /// Build a [`DiscoveredSoftware`] entry for a package.
-fn build_discovered(name: String, version: String, emit_targets: bool) -> DiscoveredSoftware {
-    let targets = if emit_targets {
-        vec![DiscoveryTarget {
-            plugin_type: PluginType::PackageManagerPkg,
-            plugin_config: serde_json::json!({}),
-            plugin_config_name: "BSD pkg".to_string(),
-            roles: vec![
-                PluginRole::DetectVersion,
-                PluginRole::FetchReleases,
-                PluginRole::ExecuteUpdate,
-            ],
-            package_identifier: None,
-            config_override: None,
-            execution_site: None,
-        }]
-    } else {
-        vec![]
-    };
+fn build_discovered(name: String, version: String) -> DiscoveredSoftware {
+    let targets = vec![DiscoveryTarget {
+        plugin_type: PluginType::PackageManagerPkg,
+        plugin_config: serde_json::json!({}),
+        plugin_config_name: "BSD pkg".to_string(),
+        roles: vec![
+            PluginRole::DetectVersion,
+            PluginRole::FetchReleases,
+            PluginRole::ExecuteUpdate,
+        ],
+        package_identifier: None,
+        config_override: None,
+        execution_site: None,
+    }];
     DiscoveredSoftware {
         package_identifier: name.clone(),
         name,

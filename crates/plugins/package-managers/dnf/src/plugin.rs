@@ -344,8 +344,6 @@ impl Plugin for DnfPlugin {
             DnfDiscoveryFilter::All => None,
         };
 
-        let emit_targets = self.config.is_discover_all_mode();
-
         // Step 3: Filter by user-installed set (if applicable) and build results.
         let packages: Vec<DiscoveredSoftware> = all_packages
             .into_iter()
@@ -355,23 +353,19 @@ impl Plugin for DnfPlugin {
                     .is_none_or(|set| set.contains(name.as_str()))
             })
             .map(|(name, version)| {
-                let targets = if emit_targets {
-                    vec![DiscoveryTarget {
-                        plugin_type: PluginType::PackageManagerDnf,
-                        plugin_config: serde_json::json!({}),
-                        plugin_config_name: "DNF".to_string(),
-                        roles: vec![
-                            PluginRole::DetectVersion,
-                            PluginRole::FetchReleases,
-                            PluginRole::ExecuteUpdate,
-                        ],
-                        package_identifier: None,
-                        config_override: None,
-                        execution_site: None,
-                    }]
-                } else {
-                    vec![]
-                };
+                let targets = vec![DiscoveryTarget {
+                    plugin_type: PluginType::PackageManagerDnf,
+                    plugin_config: serde_json::json!({}),
+                    plugin_config_name: "DNF".to_string(),
+                    roles: vec![
+                        PluginRole::DetectVersion,
+                        PluginRole::FetchReleases,
+                        PluginRole::ExecuteUpdate,
+                    ],
+                    package_identifier: None,
+                    config_override: None,
+                    execution_site: None,
+                }];
                 DiscoveredSoftware {
                     package_identifier: name.clone(),
                     name,
@@ -1167,7 +1161,8 @@ mod tests {
     // ── discover_software ────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn discover_software_emits_targets_in_discover_all_mode() {
+    async fn discover_software_emits_targets() {
+        // Targets are always emitted regardless of filter.
         let rpm_output = "nginx\t1.24.0-1.fc40\ncurl\t8.0.1-1.fc40\n";
         let executor = RoutedOutputExecutor::with_routes(vec![("rpm", rpm_output, 0)]);
         let plugin = DnfPlugin::new(DnfConfig::default(), executor)
@@ -1182,16 +1177,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discover_software_no_targets_with_explicit_config() {
+    async fn discover_software_emits_targets_with_explicit_all_filter() {
         let rpm_output = "nginx\t1.24.0-1.fc40\n";
         let executor = RoutedOutputExecutor::with_routes(vec![("rpm", rpm_output, 0)]);
         let config = DnfConfig {
-            discovery_filter: Some(DnfDiscoveryFilter::All),
+            discovery_filter: DnfDiscoveryFilter::All,
         };
         let plugin = DnfPlugin::new(config, executor).await.unwrap();
         let result = plugin.discover_software().await.unwrap();
         assert_eq!(result.len(), 1);
-        assert!(result[0].targets.is_empty());
+        assert_eq!(
+            result[0].targets.len(),
+            1,
+            "explicit All filter must still emit targets"
+        );
     }
 
     // ── batch_detect_installed_version ───────────────────────────────────
