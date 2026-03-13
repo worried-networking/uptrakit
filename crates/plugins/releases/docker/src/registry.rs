@@ -53,34 +53,57 @@ impl RegistryClient {
 
     /// Get the manifest digest for a specific tag.
     ///
-    /// Uses a HEAD request to read the `Docker-Content-Digest` header.
+    /// Attempts HEAD first (no body transfer). Falls back to GET if HEAD returns
+    /// 403, because some registries (notably GHCR for public packages) reject HEAD
+    /// but accept GET with the same authentication token.
     pub async fn get_manifest_digest(
         &self,
         registry: &str,
         repository: &str,
         tag: &str,
     ) -> Result<String> {
-        let base_url = format!("https://{registry}/v2");
-        let url = format!("{base_url}/{repository}/manifests/{tag}");
+        let url = format!("https://{registry}/v2/{repository}/manifests/{tag}");
         tracing::debug!(url = %url, tag = %tag, "fetching manifest digest");
 
-        let digest = self.authenticated_head(&url).await?;
-        tracing::debug!(digest = %digest, tag = %tag, "fetched manifest digest");
-        Ok(digest)
+        match self
+            .authenticated_request(reqwest::Method::HEAD, &url)
+            .await
+        {
+            Ok(digest) => {
+                tracing::debug!(digest = %digest, tag = %tag, "fetched manifest digest via HEAD");
+                Ok(digest)
+            }
+            Err(err) if is_forbidden_response(&err) => {
+                // Some registries (e.g. GHCR for public packages) return 403 on
+                // HEAD requests but accept GET with the same authentication token.
+                // Fall back to GET transparently so version checks succeed.
+                tracing::debug!(
+                    url = %url,
+                    tag = %tag,
+                    "HEAD returned 403; retrying with GET"
+                );
+                let digest = self
+                    .authenticated_request(reqwest::Method::GET, &url)
+                    .await?;
+                tracing::debug!(digest = %digest, tag = %tag, "fetched manifest digest via GET");
+                Ok(digest)
+            }
+            Err(err) => Err(err),
+        }
     }
 
-    /// Perform an authenticated HEAD request with 401 retry.
+    /// Perform an authenticated request (HEAD or GET) with 401 retry.
     /// Returns the `Docker-Content-Digest` header value.
-    async fn authenticated_head(&self, url: &str) -> Result<String> {
+    async fn authenticated_request(&self, method: reqwest::Method, url: &str) -> Result<String> {
         if let Some(token) = self.auth.cached_bearer_token() {
             let response = self
                 .client
-                .head(url)
+                .request(method.clone(), url)
                 .header(reqwest::header::ACCEPT, MANIFEST_ACCEPT)
                 .bearer_auth(&token)
                 .send()
                 .await
-                .context_transform(|e| DockerError::Request(format!("HEAD failed: {e}")))?;
+                .context_transform(|e| DockerError::Request(format!("{method} failed: {e}")))?;
 
             if response.status() != reqwest::StatusCode::UNAUTHORIZED {
                 return self.extract_digest(response).await;
@@ -90,11 +113,11 @@ impl RegistryClient {
 
         let response = self
             .client
-            .head(url)
+            .request(method.clone(), url)
             .header(reqwest::header::ACCEPT, MANIFEST_ACCEPT)
             .send()
             .await
-            .context_transform(|e| DockerError::Request(format!("HEAD failed: {e}")))?;
+            .context_transform(|e| DockerError::Request(format!("{method} failed: {e}")))?;
 
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
             let www_auth = response
@@ -108,12 +131,14 @@ impl RegistryClient {
 
             let retry_response = self
                 .client
-                .head(url)
+                .request(method.clone(), url)
                 .header(reqwest::header::ACCEPT, MANIFEST_ACCEPT)
                 .bearer_auth(&token)
                 .send()
                 .await
-                .context_transform(|e| DockerError::Request(format!("HEAD retry failed: {e}")))?;
+                .context_transform(|e| {
+                    DockerError::Request(format!("{method} retry failed: {e}"))
+                })?;
 
             return self.extract_digest(retry_response).await;
         }
@@ -121,7 +146,10 @@ impl RegistryClient {
         self.extract_digest(response).await
     }
 
-    /// Extract the `Docker-Content-Digest` header from a HEAD response.
+    /// Extract the `Docker-Content-Digest` header from a manifest response.
+    ///
+    /// Works for both HEAD and GET responses; the header is present in both
+    /// per the OCI Distribution Specification.
     async fn extract_digest(&self, response: reqwest::Response) -> Result<String> {
         let status = response.status();
 
@@ -132,7 +160,7 @@ impl RegistryClient {
         if !status.is_success() {
             bail!(DockerError::ApiError {
                 status,
-                message: format!("manifest HEAD returned {status}"),
+                message: format!("manifest request returned {status}"),
             });
         }
 
@@ -149,6 +177,14 @@ impl RegistryClient {
     }
 }
 
+/// Returns `true` if the error represents a 403 Forbidden API response.
+fn is_forbidden_response(err: &Report<DockerError>) -> bool {
+    matches!(
+        err.current_context(),
+        DockerError::ApiError { status, .. } if *status == reqwest::StatusCode::FORBIDDEN
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +192,29 @@ mod tests {
     #[test]
     fn client_creation_succeeds() {
         assert!(RegistryClient::new(None).is_ok());
+    }
+
+    #[test]
+    fn is_forbidden_response_true_for_403() {
+        let err = report!(DockerError::ApiError {
+            status: reqwest::StatusCode::FORBIDDEN,
+            message: "manifest request returned 403 Forbidden".to_string(),
+        });
+        assert!(is_forbidden_response(&err));
+    }
+
+    #[test]
+    fn is_forbidden_response_false_for_404() {
+        let err = report!(DockerError::ApiError {
+            status: reqwest::StatusCode::NOT_FOUND,
+            message: "not found".to_string(),
+        });
+        assert!(!is_forbidden_response(&err));
+    }
+
+    #[test]
+    fn is_forbidden_response_false_for_non_api_error() {
+        let err = report!(DockerError::Request("connection failed".to_string()));
+        assert!(!is_forbidden_response(&err));
     }
 }
