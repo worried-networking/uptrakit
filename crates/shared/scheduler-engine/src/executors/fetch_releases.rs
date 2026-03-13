@@ -7,7 +7,7 @@ use tokio::task::JoinSet;
 
 use rootcause::prelude::*;
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect,
+    ColumnTrait, Condition, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect,
     RelationTrait, prelude::Expr,
 };
 use time::OffsetDateTime;
@@ -78,10 +78,13 @@ const MAX_CONCURRENT_CONTROLLER_FETCHES: usize = 10;
 struct ControllerFetchRow {
     host_id: Uuid,
     software_item_id: Uuid,
-    plugin_config_id: Uuid,
+    /// NULL for package manager assignments that use `plugin_type_settings`
+    /// rather than per-config rows. LEFT JOIN propagates NULL here.
+    plugin_config_id: Option<Uuid>,
     package_identifier: String,
     plugin_type: String,
-    profile_config: serde_json::Value,
+    /// NULL when `plugin_config_id` is NULL (package manager rows have no config row).
+    profile_config: Option<serde_json::Value>,
     assignment_config: Option<serde_json::Value>,
     execution_site: String,
 }
@@ -158,17 +161,25 @@ impl FetchReleasesExecutor {
         let noop_executor: Arc<dyn CommandExecutor> = Arc::new(NoopCommandExecutor);
 
         // ── 1. Build groups map ───────────────────────────────────────────
-        // Group rows by plugin_config_id only. All packages sharing the same plugin
-        // config are batched into a single batch_fetch_releases call instead of N
-        // individual fetch_releases calls. The first row's assignment_config is used
+        // Group rows by plugin_config_id. For package manager types that have
+        // plugin_config_id = NULL (they use plugin_type_settings instead of
+        // per-config rows), use the plugin_type string as the group key so
+        // that npm, cargo, apt, etc. are each batched separately.
+        //
+        // All packages sharing the same group key are passed to a single
+        // batch_fetch_releases call. The first row's assignment_config is used
         // as a representative merge for plugin instantiation.
-        let mut groups: HashMap<Uuid, PhaseAGroup> = HashMap::new();
+        let mut groups: HashMap<String, PhaseAGroup> = HashMap::new();
 
         for row in &rows {
-            let entry = groups.entry(row.plugin_config_id).or_insert_with(|| {
+            let group_key = match row.plugin_config_id {
+                Some(id) => id.to_string(),
+                None => format!("__type__{}", row.plugin_type),
+            };
+            let entry = groups.entry(group_key).or_insert_with(|| {
                 let merged_config = uptrakit_update_hooks::resolve_effective_config(
                     None, // type_settings not loaded in scheduler query yet
-                    Some(&row.profile_config),
+                    row.profile_config.as_ref(),
                     row.assignment_config.as_ref(),
                 );
                 PhaseAGroup {
@@ -452,7 +463,9 @@ impl FetchReleasesExecutor {
                 host_software_item_plugin::Column::PackageIdentifier,
                 "package_identifier",
             )
-            .column_as(plugin_config::Column::PluginType, "plugin_type")
+            // plugin_type is read from the denormalized HSIP column because
+            // plugin_config_id may be NULL for package manager assignments.
+            .column_as(host_software_item_plugin::Column::PluginType, "plugin_type")
             .column_as(plugin_config::Column::Config, "profile_config")
             .column_as(
                 host_software_item_plugin::Column::Config,
@@ -466,16 +479,28 @@ impl FetchReleasesExecutor {
                 JoinType::InnerJoin,
                 host_software_item_plugin::Relation::SoftwareItem.def(),
             )
+            // LEFT JOIN: plugin_config_id is NULL for package manager assignments
+            // that rely on plugin_type_settings (npm, cargo, apt, homebrew, etc.).
+            // INNER JOIN would silently exclude all of them.
             .join(
-                JoinType::InnerJoin,
+                JoinType::LeftJoin,
                 host_software_item_plugin::Relation::PluginConfig.def(),
             )
             .filter(host_software_item_plugin::Column::Role.eq("fetch_releases"))
             .filter(host_software_item_plugin::Column::ExecutionSite.ne("agent"))
             .filter(software_item::Column::TenantId.eq(tenant_id))
             .filter(software_item::Column::DeactivatedAt.is_null())
-            .filter(plugin_config::Column::Enabled.eq(true))
-            .filter(plugin_config::Column::DeactivatedAt.is_null())
+            // Accept rows where plugin_config_id is NULL (package managers) OR
+            // where the linked config is enabled and not deactivated.
+            .filter(
+                Condition::any()
+                    .add(host_software_item_plugin::Column::PluginConfigId.is_null())
+                    .add(
+                        Condition::all()
+                            .add(plugin_config::Column::Enabled.eq(true))
+                            .add(plugin_config::Column::DeactivatedAt.is_null()),
+                    ),
+            )
             .into_model::<ControllerFetchRow>()
             .all(&self.db)
             .await
