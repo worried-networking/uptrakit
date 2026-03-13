@@ -104,7 +104,12 @@ pub async fn list_hosts(
     let base_query = tenant_db
         .find::<host::Entity>()
         .filter(host::Column::DeactivatedAt.is_null())
-        .order_by_desc(host::Column::CreatedAt);
+        .order_by(
+            sea_orm::sea_query::Func::lower(sea_orm::sea_query::Expr::col(
+                host::Column::FriendlyName,
+            )),
+            sea_orm::sea_query::Order::Asc,
+        );
 
     let total = base_query.clone().count(tenant_db.db()).await?;
 

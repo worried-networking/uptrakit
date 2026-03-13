@@ -149,7 +149,10 @@ pub async fn list_hosts_paginated(
     page: u64,
     per_page: u64,
 ) -> Result<PaginatedHosts> {
-    let base_query = Entity::find().order_by_asc(Column::Name);
+    let base_query = Entity::find().order_by(
+        sea_orm::sea_query::Func::lower(sea_orm::sea_query::Expr::col(Column::Name)),
+        sea_orm::sea_query::Order::Asc,
+    );
 
     let total = base_query.clone().count(db).await.context_to::<Error>()?;
 

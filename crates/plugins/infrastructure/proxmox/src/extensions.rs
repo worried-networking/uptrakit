@@ -266,7 +266,12 @@ async fn handle_list(
     }
 
     let base_query = base_query
-        .order_by_asc(proxmox_host_mapping::Column::ProxmoxName)
+        .order_by(
+            sea_orm::sea_query::Func::lower(sea_orm::sea_query::Expr::col(
+                proxmox_host_mapping::Column::ProxmoxName,
+            )),
+            sea_orm::sea_query::Order::Asc,
+        )
         .order_by_asc(proxmox_host_mapping::Column::ProxmoxVmid);
 
     let total = base_query
@@ -560,7 +565,12 @@ async fn handle_list_all_unmatched(
     let base_query = proxmox_host_mapping::Entity::find()
         .filter(proxmox_host_mapping::Column::TenantId.eq(tenant_id))
         .filter(proxmox_host_mapping::Column::HostId.is_null())
-        .order_by_asc(proxmox_host_mapping::Column::ProxmoxName)
+        .order_by(
+            sea_orm::sea_query::Func::lower(sea_orm::sea_query::Expr::col(
+                proxmox_host_mapping::Column::ProxmoxName,
+            )),
+            sea_orm::sea_query::Order::Asc,
+        )
         .order_by_asc(proxmox_host_mapping::Column::ProxmoxVmid);
 
     let total = base_query
