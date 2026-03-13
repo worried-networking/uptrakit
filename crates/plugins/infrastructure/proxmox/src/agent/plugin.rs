@@ -443,10 +443,27 @@ async fn create_or_reuse_pve_credentials(
                     return (None, Some(config_id));
                 }
                 Ok(None) => {
-                    tracing::warn!(
-                        "no local PVE host has a plugin config ID to reuse; configure the Proxmox plugin manually"
+                    tracing::info!(
+                        "PVE user exists for this tenant but no local plugin config found; \
+                         regenerating API token"
                     );
-                    return (None, None);
+                    match pve_setup::regenerate_pve_api_token(executor, &tid).await {
+                        Ok(creds) => {
+                            tracing::info!(
+                                api_url = %creds.api_url,
+                                pve_user = %pve_setup::pve_user_realm(&tid),
+                                "PVE API token regenerated"
+                            );
+                            return (Some(creds), None);
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "failed to regenerate PVE API token; configure the Proxmox plugin manually"
+                            );
+                            return (None, None);
+                        }
+                    }
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "failed to look up existing PVE hosts");

@@ -324,6 +324,55 @@ pub async fn create_pve_api_credentials(
     Ok(PveCredentials { api_url, api_token })
 }
 
+/// Remove any existing Uptrakit PVE API token and create a fresh one.
+///
+/// Called when the PVE user already exists for this tenant but the local agent
+/// has no plugin config (e.g. after a re-install). The old token is removed
+/// first so that `pveum user token add` does not fail with "already exists".
+///
+/// Returns the new [`PveCredentials`] that should be reported to the controller
+/// so it can create or update the plugin config entry.
+pub async fn regenerate_pve_api_token(
+    executor: &dyn RemoteExecutor,
+    tenant_id: &uuid::Uuid,
+) -> Result<PveCredentials> {
+    let user_realm = pve_user_realm(tenant_id);
+
+    // Step 1: Remove the existing token (best-effort — ignore errors).
+    let remove_cmd =
+        format!("pveum user token remove '{user_realm}' {PVE_TOKEN_NAME} 2>&1 || true");
+    executor
+        .exec_command(&remove_cmd)
+        .await
+        .context_to::<ProxmoxError>()?;
+
+    // Step 2: Create the token again.
+    let create_token_cmd = format!(
+        "pveum user token add '{user_realm}' {PVE_TOKEN_NAME} --privsep=0 --output-format json"
+    );
+    let token_result = executor
+        .exec_command(&create_token_cmd)
+        .await
+        .context_to::<ProxmoxError>()?;
+
+    if token_result.exit_code != 0 {
+        bail!(ProxmoxError::Plugin(format!(
+            "pveum token add failed (exit {}): {}",
+            token_result.exit_code,
+            token_result.stderr.trim()
+        )));
+    }
+
+    let token_value = parse_token_value(&token_result.stdout)?;
+
+    // Step 3: Resolve the API URL.
+    let api_url = resolve_pve_api_url(executor).await?;
+
+    let api_token = format!("{user_realm}!{PVE_TOKEN_NAME}={token_value}");
+
+    Ok(PveCredentials { api_url, api_token })
+}
+
 /// Parse the token value from `pveum user token add --output-format json` output.
 ///
 /// Expected format: `{"full-tokenid":"user@pve!uptrakit","info":{"privsep":"0"},"value":"SECRET"}`
