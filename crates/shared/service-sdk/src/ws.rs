@@ -40,6 +40,13 @@ const APPROVAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 pub type WsStream =
     tokio_tungstenite::WebSocketStream<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>;
 
+/// Write half of a split [`WsStream`].
+pub type WsSink =
+    futures_util::stream::SplitSink<WsStream, tokio_tungstenite::tungstenite::Message>;
+
+/// Read half of a split [`WsStream`].
+pub type WsRead = futures_util::stream::SplitStream<WsStream>;
+
 /// Connect TCP → TLS → WebSocket upgrade, with optional Authorization header.
 ///
 /// When `service_id` is `Some`, it is appended as a `service_id` query

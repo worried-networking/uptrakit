@@ -4,14 +4,34 @@
 //! envelope serialization, sequence validation, and WebSocket frame handling.
 //! Both the agent and the MQTT service use this type for their authenticated
 //! event loops.
+//!
+//! ## Non-blocking write path
+//!
+//! The WebSocket stream is split into read and write halves at construction.
+//! A dedicated writer task drains a bounded channel (`WRITE_CHANNEL_CAPACITY`),
+//! performing the actual I/O with a per-write timeout (`SEND_TIMEOUT`).
+//!
+//! `send()` and `send_paginated()` serialize the message and push the
+//! resulting text frame into the channel — no I/O block on the caller side.
+//! `send_best_effort()` uses `try_send()` so it never blocks even if the
+//! channel is full.
+//!
+//! If the writer encounters an I/O error, it sets an `Arc<AtomicBool>` flag.
+//! Subsequent `send()` and `recv()` calls check this flag and return an error
+//! immediately rather than queuing into a dead channel.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use rootcause::prelude::*;
 use serde::Deserialize;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tokio_rustls::TlsConnector;
+use tokio_tungstenite::tungstenite::Message;
 use uptrakit_internal_wire::{
     CURRENT_PROTOCOL_VERSION, Capability, CloseReason, ControllerEnvelope, ControllerMessage,
     IncomingSeq, OutgoingSeq, Paginatable, ReportPageLimits, ServiceMessage,
@@ -19,15 +39,32 @@ use uptrakit_internal_wire::{
 };
 
 use crate::error::{EnrollmentError, ProtocolError, Result};
-use crate::ws::{WsStream, connect_ws, is_peer_closed, log_close_frame};
+use crate::ws::{WsRead, WsSink, connect_ws, is_peer_closed, log_close_frame};
 
 /// Maximum time to wait for a single WebSocket write to complete.
 ///
 /// If the controller stops consuming data (e.g. after a restart), the TCP
 /// send buffer fills and writes block indefinitely. This timeout bounds
-/// the worst-case hang to 30 seconds, after which the connection is treated
-/// as dead and the agent reconnects.
+/// the worst-case hang to 30 seconds, after which the writer task sets the
+/// error flag and exits.
 const SEND_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Bounded channel capacity for outbound frames.
+///
+/// 128 slots allow paginated reports (typically ≤20 pages) and bursty
+/// status messages to queue without blocking the caller, while still
+/// applying back-pressure if the network cannot keep up.
+const WRITE_CHANNEL_CAPACITY: usize = 128;
+
+/// An outbound frame queued for the writer task.
+enum OutboundFrame {
+    /// A WebSocket text frame (serialized JSON envelope).
+    Text(String),
+    /// A WebSocket pong response to a controller ping.
+    Pong(Vec<u8>),
+    /// Graceful WebSocket close.
+    Close,
+}
 
 /// Minimal envelope used to extract protocol version and sequence number before
 /// full deserialization. This lets us validate both fields and advance the
@@ -43,8 +80,18 @@ struct EnvelopeHeader {
 ///
 /// Handles envelope wrapping, sequence validation, and WebSocket frame
 /// processing (Ping/Pong, Close frames, peer-closed detection).
+///
+/// The write path is fully non-blocking: serialized frames are pushed into
+/// a bounded channel and drained by a dedicated writer task.
 pub struct ControllerConnection {
-    ws: WsStream,
+    /// Read half of the split WebSocket stream.
+    read: WsRead,
+    /// Channel sender for outbound frames (drained by the writer task).
+    write_tx: mpsc::Sender<OutboundFrame>,
+    /// Signals that the writer task encountered an I/O error.
+    write_error: Arc<AtomicBool>,
+    /// Handle to the writer task (joined on close).
+    writer_handle: Option<JoinHandle<()>>,
     out_seq: OutgoingSeq,
     in_seq: IncomingSeq,
     close_reason: Option<CloseReason>,
@@ -55,8 +102,7 @@ pub struct ControllerConnection {
 impl ControllerConnection {
     /// Connect TCP -> TLS -> WebSocket to the controller.
     ///
-    /// Reuses the shared [`connect_ws`] from `ws.rs`. Pass `auth_header` for
-    /// bearer-token connections during enrollment resume.
+    /// Splits the stream into read and write halves and spawns the writer task.
     pub async fn connect(
         host: &str,
         port: u16,
@@ -64,11 +110,19 @@ impl ControllerConnection {
         auth_header: Option<&str>,
     ) -> Result<Self> {
         tracing::debug!(host, port, "connecting to controller");
-        // Authenticated connections use mTLS identity — no service_id query param needed.
         let ws = connect_ws(host, port, tls_connector, auth_header, None).await?;
         tracing::debug!("WebSocket connection established");
+
+        let (sink, read) = ws.split();
+        let (write_tx, write_rx) = mpsc::channel(WRITE_CHANNEL_CAPACITY);
+        let write_error = Arc::new(AtomicBool::new(false));
+        let writer_handle = tokio::spawn(writer_task(sink, write_rx, Arc::clone(&write_error)));
+
         Ok(Self {
-            ws,
+            read,
+            write_tx,
+            write_error,
+            writer_handle: Some(writer_handle),
             out_seq: OutgoingSeq::new(),
             in_seq: IncomingSeq::new(),
             close_reason: None,
@@ -80,21 +134,20 @@ impl ControllerConnection {
     /// Send a [`ServiceMessage`] to the controller.
     ///
     /// Wraps the message in a [`ServiceEnvelope`](uptrakit_internal_wire::ServiceEnvelope)
-    /// with the next sequence number, serializes to JSON, and sends as a
-    /// WebSocket text frame.
+    /// with the next sequence number, serializes to JSON, and pushes the text
+    /// frame into the write channel. The actual WebSocket write happens
+    /// asynchronously in the writer task.
     #[tracing::instrument(skip_all)]
     pub async fn send(&mut self, msg: ServiceMessage) -> Result<()> {
-        use tokio_tungstenite::tungstenite::Message;
-
-        tracing::trace!("sending message to controller");
+        self.check_write_error()?;
         let envelope = self
             .out_seq
             .wrap_service(msg, uptrakit_internal_wire::current_trace_context());
         let json = serde_json::to_string(&envelope).context_to::<EnrollmentError>()?;
-        tokio::time::timeout(SEND_TIMEOUT, self.ws.send(Message::Text(json.into())))
+        self.write_tx
+            .send(OutboundFrame::Text(json))
             .await
-            .map_err(|_| report!(EnrollmentError::Protocol(ProtocolError::SendTimeout)))?
-            .context_to::<EnrollmentError>()?;
+            .map_err(|_| report!(EnrollmentError::Protocol(ProtocolError::SendTimeout)))?;
         Ok(())
     }
 
@@ -103,76 +156,34 @@ impl ControllerConnection {
     /// Returns `Ok(None)` on clean close or peer-closed.
     ///
     /// Automatically:
-    /// - Responds to WebSocket `Ping` with `Pong`
+    /// - Responds to WebSocket `Ping` with `Pong` (via the write channel)
     /// - Skips `Pong` and `Frame` messages
     /// - Stores close frame reason (accessible via [`close_reason`](Self::close_reason))
     /// - Validates incoming sequence numbers
+    /// - Checks the writer error flag on each iteration
     #[tracing::instrument(skip_all)]
     pub async fn recv(&mut self) -> Result<Option<ControllerMessage>> {
-        use tokio_tungstenite::tungstenite::Message;
-
         loop {
-            match self.ws.next().await {
+            // Check writer health before blocking on read.
+            self.check_write_error()?;
+
+            match self.read.next().await {
                 Some(Ok(Message::Text(text))) => {
-                    // Extract and validate protocol version and sequence number
-                    // first, before attempting to deserialize the full message.
-                    // This ensures the counter stays in sync even when the
-                    // payload contains an unknown variant.
-                    let header: EnvelopeHeader =
-                        serde_json::from_str(&text).context_to::<EnrollmentError>()?;
-                    if header.protocol_version != CURRENT_PROTOCOL_VERSION {
-                        bail!(EnrollmentError::Protocol(ProtocolError::VersionMismatch {
-                            expected: CURRENT_PROTOCOL_VERSION,
-                            received: header.protocol_version,
-                        }));
-                    }
-                    if let Err(e) = self.in_seq.validate(header.seq) {
-                        bail!(EnrollmentError::Protocol(ProtocolError::Enrollment(
-                            format!("sequence validation failed: {e}")
-                        )));
-                    }
-                    let envelope: ControllerEnvelope = match serde_json::from_str(&text) {
-                        Ok(env) => env,
-                        Err(e) => {
-                            tracing::debug!("ignoring unrecognized controller message: {e}");
-                            continue;
-                        }
-                    };
-                    tracing::trace!(msg_type = ?envelope.message, "received message from controller");
-                    return Ok(Some(envelope.message));
+                    return self.decode_text_message(&text);
                 }
                 Some(Ok(Message::Binary(data))) => {
-                    let header: EnvelopeHeader =
-                        serde_json::from_slice(&data).context_to::<EnrollmentError>()?;
-                    if header.protocol_version != CURRENT_PROTOCOL_VERSION {
-                        bail!(EnrollmentError::Protocol(ProtocolError::VersionMismatch {
-                            expected: CURRENT_PROTOCOL_VERSION,
-                            received: header.protocol_version,
-                        }));
-                    }
-                    if let Err(e) = self.in_seq.validate(header.seq) {
-                        bail!(EnrollmentError::Protocol(ProtocolError::Enrollment(
-                            format!("sequence validation failed: {e}")
-                        )));
-                    }
-                    let envelope: ControllerEnvelope = match serde_json::from_slice(&data) {
-                        Ok(env) => env,
-                        Err(e) => {
-                            tracing::debug!("ignoring unrecognized controller binary message: {e}");
-                            continue;
-                        }
-                    };
-                    tracing::trace!(msg_type = ?envelope.message, "received message from controller");
-                    return Ok(Some(envelope.message));
+                    return self.decode_binary_message(&data);
                 }
                 Some(Ok(Message::Ping(data))) => {
                     tracing::trace!("received ping from controller");
-                    tokio::time::timeout(SEND_TIMEOUT, self.ws.send(Message::Pong(data)))
-                        .await
-                        .map_err(|_| {
-                            report!(EnrollmentError::Protocol(ProtocolError::SendTimeout))
-                        })?
-                        .context_to::<EnrollmentError>()?;
+                    // Push pong through the write channel (non-blocking).
+                    if self
+                        .write_tx
+                        .try_send(OutboundFrame::Pong(data.to_vec()))
+                        .is_err()
+                    {
+                        tracing::warn!("write channel full, dropping pong");
+                    }
                     continue;
                 }
                 Some(Ok(Message::Pong(_))) => continue,
@@ -236,13 +247,14 @@ impl ControllerConnection {
     /// when the serialized size exceeds the pagination threshold.
     ///
     /// Small payloads are sent as a single message with no pagination metadata
-    /// (zero overhead). Large payloads are split into pages, each sent as a
-    /// separate WebSocket frame with pagination metadata attached.
+    /// (zero overhead). Large payloads are split into pages, each pushed as a
+    /// separate text frame into the write channel.
     ///
-    /// Each page is a complete, independently processable message. The
-    /// controller tracks page arrival and defers only lightweight finalization
-    /// (e.g. notification emission) until the final page.
+    /// Serialization happens on the caller's task; only the channel push is
+    /// async. This means even large paginated payloads do not block the caller
+    /// on network I/O.
     pub async fn send_paginated<P: Paginatable>(&mut self, payload: P) -> Result<()> {
+        self.check_write_error()?;
         let pages =
             paginate_payload(payload, &self.report_page_limits).context_to::<EnrollmentError>()?;
         let page_count = pages.len();
@@ -256,28 +268,23 @@ impl ControllerConnection {
             );
             let json = serde_json::to_string(&envelope).context_to::<EnrollmentError>()?;
 
-            if let Err(e) = tokio::time::timeout(
-                SEND_TIMEOUT,
-                self.ws
-                    .send(tokio_tungstenite::tungstenite::Message::Text(json.into())),
-            )
-            .await
-            .map_err(|_| report!(EnrollmentError::Protocol(ProtocolError::SendTimeout)))
-            {
+            if let Err(e) = self.write_tx.send(OutboundFrame::Text(json)).await {
                 tracing::error!(
                     page = i + 1,
                     total_pages = page_count,
                     error = %e,
-                    "failed to send paginated message page"
+                    "failed to enqueue paginated message page"
                 );
-                return Err(e);
+                return Err(report!(EnrollmentError::Protocol(
+                    ProtocolError::SendTimeout
+                )));
             }
 
             if page_count > 1 {
                 tracing::debug!(
                     page = i + 1,
                     total_pages = page_count,
-                    "sent paginated message page"
+                    "enqueued paginated message page"
                 );
             }
         }
@@ -303,29 +310,150 @@ impl ControllerConnection {
         }
     }
 
-    /// Send a [`ServiceMessage`] on a best-effort basis.
+    /// Send a [`ServiceMessage`] on a best-effort basis (non-blocking).
     ///
-    /// Logs a warning on failure instead of propagating the error. Useful for
-    /// status/output messages where a send failure should not terminate the
-    /// connection loop.
+    /// Uses `try_send()` to push the frame into the write channel without
+    /// blocking. If the channel is full or the writer has errored, the message
+    /// is silently dropped with a warning log.
     pub async fn send_best_effort(&mut self, msg: ServiceMessage) {
-        if let Err(e) = self.send(msg).await {
-            tracing::warn!(error = %e, "best-effort send failed");
+        if self.write_error.load(Ordering::Relaxed) {
+            tracing::warn!("best-effort send skipped: writer has errored");
+            return;
+        }
+        let envelope = self
+            .out_seq
+            .wrap_service(msg, uptrakit_internal_wire::current_trace_context());
+        let json = match serde_json::to_string(&envelope) {
+            Ok(j) => j,
+            Err(e) => {
+                tracing::warn!(error = %e, "best-effort send: serialization failed");
+                return;
+            }
+        };
+        if let Err(e) = self.write_tx.try_send(OutboundFrame::Text(json)) {
+            tracing::warn!(error = %e, "best-effort send failed (channel full or closed)");
         }
     }
 
-    /// Graceful WebSocket close (best-effort, tolerates peer-closed).
+    /// Graceful WebSocket close.
+    ///
+    /// Pushes a `Close` frame into the write channel and waits for the writer
+    /// task to finish. Tolerates a dead writer (error flag already set).
     pub async fn close(&mut self) -> Result<()> {
-        match self.ws.close(None).await {
-            Ok(()) => {
-                tracing::info!("websocket closed gracefully");
-                Ok(())
-            }
-            Err(e) if is_peer_closed(&e) => {
-                tracing::info!("websocket already closed by peer");
-                Ok(())
-            }
-            Err(e) => Err(e).context_to::<EnrollmentError>()?,
+        // Push close frame (best-effort — writer may already be dead).
+        let _ = self.write_tx.send(OutboundFrame::Close).await;
+        // Wait for the writer task to finish.
+        if let Some(handle) = self.writer_handle.take() {
+            let _ = handle.await;
+        }
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Internal helpers
+    // ------------------------------------------------------------------
+
+    /// Check the writer error flag and return an error if set.
+    fn check_write_error(&self) -> Result<()> {
+        if self.write_error.load(Ordering::Relaxed) {
+            Err(report!(EnrollmentError::Protocol(
+                ProtocolError::SendTimeout
+            )))
+        } else {
+            Ok(())
         }
     }
+
+    /// Decode a text WebSocket message into a [`ControllerMessage`].
+    fn decode_text_message(&mut self, text: &str) -> Result<Option<ControllerMessage>> {
+        let header: EnvelopeHeader = serde_json::from_str(text).context_to::<EnrollmentError>()?;
+        self.validate_header(&header)?;
+        let envelope: ControllerEnvelope = match serde_json::from_str(text) {
+            Ok(env) => env,
+            Err(e) => {
+                tracing::debug!("ignoring unrecognized controller message: {e}");
+                return Ok(None);
+            }
+        };
+        tracing::trace!(msg_type = ?envelope.message, "received message from controller");
+        Ok(Some(envelope.message))
+    }
+
+    /// Decode a binary WebSocket message into a [`ControllerMessage`].
+    fn decode_binary_message(&mut self, data: &[u8]) -> Result<Option<ControllerMessage>> {
+        let header: EnvelopeHeader =
+            serde_json::from_slice(data).context_to::<EnrollmentError>()?;
+        self.validate_header(&header)?;
+        let envelope: ControllerEnvelope = match serde_json::from_slice(data) {
+            Ok(env) => env,
+            Err(e) => {
+                tracing::debug!("ignoring unrecognized controller binary message: {e}");
+                return Ok(None);
+            }
+        };
+        tracing::trace!(msg_type = ?envelope.message, "received message from controller");
+        Ok(Some(envelope.message))
+    }
+
+    /// Validate the protocol version and sequence number from a message header.
+    fn validate_header(&mut self, header: &EnvelopeHeader) -> Result<()> {
+        if header.protocol_version != CURRENT_PROTOCOL_VERSION {
+            bail!(EnrollmentError::Protocol(ProtocolError::VersionMismatch {
+                expected: CURRENT_PROTOCOL_VERSION,
+                received: header.protocol_version,
+            }));
+        }
+        if let Err(e) = self.in_seq.validate(header.seq) {
+            bail!(EnrollmentError::Protocol(ProtocolError::Enrollment(
+                format!("sequence validation failed: {e}")
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Background task that drains the write channel and sends frames to the
+/// WebSocket sink.
+///
+/// On I/O error or timeout, sets the `write_error` flag and exits. The
+/// connection's `recv()` and `send()` methods check this flag and surface
+/// the error to the caller.
+async fn writer_task(
+    mut sink: WsSink,
+    mut rx: mpsc::Receiver<OutboundFrame>,
+    write_error: Arc<AtomicBool>,
+) {
+    while let Some(frame) = rx.recv().await {
+        let result = match frame {
+            OutboundFrame::Text(json) => {
+                tokio::time::timeout(SEND_TIMEOUT, sink.send(Message::Text(json.into()))).await
+            }
+            OutboundFrame::Pong(data) => {
+                tokio::time::timeout(SEND_TIMEOUT, sink.send(Message::Pong(data.into()))).await
+            }
+            OutboundFrame::Close => {
+                // Best-effort close — ignore errors (peer may have already gone).
+                let _ = sink.close().await;
+                return;
+            }
+        };
+
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                if !is_peer_closed(&e) {
+                    tracing::error!(error = %e, "writer task: WebSocket send failed");
+                }
+                write_error.store(true, Ordering::Relaxed);
+                return;
+            }
+            Err(_) => {
+                tracing::error!("writer task: WebSocket send timed out after {SEND_TIMEOUT:?}");
+                write_error.store(true, Ordering::Relaxed);
+                return;
+            }
+        }
+    }
+    // Channel closed (connection dropped) — clean up.
+    let _ = sink.close().await;
 }
