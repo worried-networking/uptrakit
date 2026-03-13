@@ -215,16 +215,6 @@ and maintainability.
 
 #### Issues
 
-**[MEDIUM]** The sibling `uptrakit-plugin-infrastructure-proxmox` crate's API client
-(`client.rs:29-38`) is missing `SsrfSafeResolver` entirely. Since the Proxmox VE API is
-intentionally a private-network service, `SsrfSafeResolver::permissive()` is the appropriate
-resolver. See umbrella `plugins/CODEREVIEW.md` finding S1 for the full recommendation.
-
 ### Dimension: Coding Standards
 
 #### Issues
-
-**[MEDIUM]** The sibling `uptrakit-plugin-infrastructure-proxmox` API client omits the SSRF
-resolver, deviating from the project standard that all plugins building `reqwest::Client` must
-set `.dns_resolver(...)`. The PHS plugin itself is compliant (line 116). See umbrella
-`plugins/CODEREVIEW.md` finding S1 for the full recommendation.

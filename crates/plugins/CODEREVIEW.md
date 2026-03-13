@@ -251,18 +251,6 @@ Recommendation: add `Copy` to both derive lists.~~ *(Fixed: `Copy` added to both
 
 #### Security
 
-**[MEDIUM] S1 — `uptrakit-plugin-infrastructure-proxmox` (`client.rs:29-38`) — Missing `dns_resolver` on Proxmox HTTP client**
-
-The Proxmox VE HTTP client builds `reqwest::Client` with no `dns_resolver` override. The project standard requires `SsrfSafeResolver` on all plugins that accept user-controlled URLs. If the plugin is extended to fetch URLs sourced from Proxmox API responses (e.g., helper-script download URLs), this becomes a live SSRF vector.
-
-Recommendation: add `.dns_resolver(Arc::new(SsrfSafeResolver::permissive()))` to the Proxmox `reqwest::Client::builder()`. (`permissive()` is appropriate here because Proxmox is a self-hosted control plane that may be on a private network.)
-
-**[LOW] S3 — `uptrakit-plugin-infrastructure-proxmox` (`client.rs:33`) — No warning logged when `verify_tls = false`**
-
-When `verify_tls` is set to `false`, the client is constructed silently. Users who configure this for self-signed certificates receive no visibility that TLS verification is disabled, which exposes the Proxmox control plane to MitM attacks without any log-level indication.
-
-Recommendation: emit `tracing::warn!("Proxmox TLS verification is disabled; connection is vulnerable to MitM attacks")` at client construction time when `verify_tls` is false.
-
 #### Extensibility
 
 **[MEDIUM] E1 — `uptrakit-plugin-infrastructure-registry` (`registry.rs:455-469`) — Fragile string-prefix dispatch for plugin extensions**

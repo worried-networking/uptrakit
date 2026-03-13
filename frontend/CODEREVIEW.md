@@ -50,33 +50,17 @@ Several route files combine data fetching, SSE subscriptions, multiple modals, c
 
 `src/lib/components/AssignToHostModal.svelte` fetches hosts with `getHosts(1, 200)` and plugin configs with `getPluginConfigs(1, 500)`. If either collection exceeds these limits, the modal silently shows an incomplete list with no indication that results are truncated. In large deployments users could silently miss hosts or configs that exist. The `SchemaForm` component already implements proper paginated fetching with a `do...while` loop, demonstrating the pattern is known in this codebase.
 
-**ARCH-03 — Mixed `$app/stores` and `$app/state` usage**
-
-Six files import `page` from the deprecated `$app/stores` instead of `$app/state` (Svelte 5 API): `+layout.svelte`, `login/+page.svelte`, `+error.svelte`, `software/[id]/+page.svelte`, `extensions/[id]/+page.svelte`, `device/+page.svelte`. All other detail pages use `$app/state`. The dual access pattern (`$page.url` vs `page.url`) makes grep-based refactoring unreliable. See also [STD-S1](#std-s1--appstores-import-instead-of-appstate-6-files).
-
 **ARCH-04 — `getCredentialWarnings` duplicated verbatim in two route files**
 
 `src/routes/services/+page.svelte` lines 129-144 and `src/routes/system-services/+page.svelte` lines 129-144 contain identical functions. Any new capability requires updating both files. Should be extracted to `src/lib/utils.ts`.
-
-**ARCH-05 — Missing `encodeURIComponent` on path parameters in ~13 API functions**
-
-In `src/lib/api.ts`, approximately 13 functions interpolate `id` parameters directly into URL paths without `encodeURIComponent()`. Every other update/delete function in the same file applies it. Affected functions include `updateSoftwareItem`, `triggerSoftwareUpdate`, `checkSoftwareItemVersionsHost`, `getUpdateHistoryEntry`, `getSchedulerTask`, `updateSchedulerTask`, `triggerSchedulerTask`, `getPluginConfig`, `updatePluginConfig`, `deletePluginConfig`, `triggerPluginConfigDiscovery`, `discardPluginConfigDiscovered`, `revokeApiToken`. While harmless today with UUID IDs, this inconsistency creates a latent path traversal risk if ID formats change. See also [SEC-06](#sec-06--medium-missing-encodeURIComponent-on-path-parameters).
 
 **ARCH-06 — SSE stream-reading logic duplicated**
 
 `src/lib/sse.ts` contains two nearly identical stream-reading loops (`readSseStream` and `readAdminEventStream`) with the same buffering, line splitting, event field accumulation, and `parseSseEvent` call. A wire format change must be applied to both independently. Similarly, `connectOutputStream` and `connectEventStream` duplicate the connection setup, error handling, and exponential backoff reconnection pattern.
 
-**ARCH-07 — `SystemServicesSettings.svelte` heading mislabelled**
-
-`src/routes/settings/SystemServicesSettings.svelte` displays `<h2>System Services</h2>` but actually manages system enrollment tokens. The component name, heading, and content are misaligned. Users see "System Services" but are managing enrollment tokens.
-
 **ARCH-08 — Root page (`/`) has no content**
 
 `src/routes/+page.svelte` renders only a greeting card. After login users land on a page that provides no actionable information. There is no redirect to a meaningful dashboard route.
-
-**ARCH-09 — History page trigger modal requires manual UUID entry**
-
-`src/routes/history/+page.svelte` contains the comment `// Host selection requires loading the software item detail. Enter the host UUID manually if needed.` — users must type a raw host UUID by hand. This is unfinished developer-workaround UX left in a user-facing interface.
 
 **ARCH-10 — Audit log tab default ignores user permissions**
 
@@ -150,14 +134,6 @@ Any unhandled error in any route page navigates to the root error page, losing a
 
 `ActionButton.svelte:57-61` calls `apiSubmitRequest(def.path, def.method, body)` where `path` and `method` come from the server-returned extension manifest. `SchemaForm.svelte:49-65` calls `apiGet(f.select_source.path)` for the same reason. A compromised or tenant-controlled manifest can cause the frontend to make authenticated API calls to any same-origin endpoint with attacker-controlled bodies — including destructive ones like CA rotation or host deactivation. This is an intentional architectural trade-off but the trust model is undocumented.
 
-**SEC-02 — Medium: `ActionButton` template substitution does not validate field values**
-
-`ActionButton.svelte:28-50` `applyTemplate()` has three issues: (1) `csv_array` coercion splits on commas with no element count limit — a user can submit thousands of commas generating an oversized array; (2) `number` coercion produces `NaN` for non-numeric input which serialises to `null` in JSON; (3) unknown placeholder field names silently produce empty strings.
-
-**SEC-03 — Low: OIDC `link_token` passed in URL query parameters**
-
-`login/+page.svelte:83-88` — when account linking is required, `link_token` is placed in the query string and recorded in browser history, server access logs, and potentially `Referer` headers. The `registration_code` for OIDC completion is correctly placed in the URL hash fragment (never sent to the server). The same pattern should be applied to `link_token`.
-
 **SEC-04 — Low: `SchemaForm` `select_source` path is not validated against a prefix allowlist**
 
 `SchemaForm.svelte:49-65` calls `apiGet(path)` where `path` comes directly from the server-supplied manifest. While `apiGet` is same-origin only, an extension can read from sensitive endpoints not intended to populate a select field. The response fields are rendered in option labels and become visible to the user.
@@ -166,29 +142,9 @@ Any unhandled error in any route page navigates to the root error page, losing a
 
 The development proxy disables TLS certificate validation for the `https://localhost:8443` target. This is correct for self-signed dev certs but is undocumented. A developer who points this at a remote host would silently bypass certificate validation.
 
-**SEC-06 — Medium: Missing `encodeURIComponent` on path parameters in multiple API functions**
-
-In `src/lib/api.ts`, approximately 13 functions interpolate `id`, `itemId`, or `hostId` path parameters directly into URL strings without `encodeURIComponent()`. While most IDs are server-generated UUIDs (low practical risk), inconsistent encoding creates a latent path traversal / URL injection risk. Other functions in the same file (e.g., `deleteAutodiscoveryIgnore`, `getHost`) correctly use `encodeURIComponent`. See [ARCH-05](#arch-05--missing-encodeuricomponent-on-path-parameters-in-13-api-functions) for the full list.
-
-**SEC-07 — Medium: Unvalidated `release_url` rendered as clickable href**
-
-In `software/[id]/+page.svelte`, `release_url` from server-stored release metadata is rendered directly as `<a href={meta.release_url}>` without protocol validation. If a malicious plugin source writes a `javascript:` URL into release metadata, clicking the link would execute arbitrary JavaScript. The application already has `isValidLogoUrl()` for validating HTTPS-only image URLs — a similar `isValidExternalUrl()` is absent here.
-
-**SEC-08 — Low: OIDC error parameter reflected with raw interpolation**
-
-In `login/+page.svelte:67`, when `oidc_error` does not match a known key, the raw query parameter value is interpolated: `error = errorMessages[oidcError] || 'Authentication error: ${oidcError}'`. While Svelte auto-escapes (not XSS), attacker-controlled text appears in the UI enabling phishing (e.g., `?oidc_error=Your+session+expired.+Re-enter+password+at+evil.com`). Replace with a generic message.
-
-**SEC-09 — Low: Extension navigation items rendered without `required_permission` check**
-
-In `+layout.svelte`, built-in nav items are filtered by permission, but extension nav items injected via `getPageExtensions().map(...)` skip the `required_permission` check. The extension detail page at `extensions/[id]/+page.svelte` also does not check `required_permission` before rendering content. See also [EXT-13](#ext-13--extension-permission-check-missing-on-page-type-extensions).
-
 **SEC-10 — Low: NATS URL potentially displayed with embedded credentials**
 
 In `settings/global/+page.svelte`, `natsCurrentUrl` is displayed as plaintext. NATS URLs can contain embedded credentials (`nats://user:password@host:4222`). The backend should return a pre-masked URL, or the frontend should mask the password component.
-
-**SEC-11 — Low: Extension page reflects unsanitized extension ID in user-visible text**
-
-In `extensions/[id]/+page.svelte:37`, the `extensionId` from the URL route parameter is rendered in `"The extension "{extensionId}" is not available."`. Svelte auto-escapes (no XSS), but attackers can craft misleading URLs. Consider truncating or omitting the raw ID.
 
 ---
 
@@ -206,18 +162,6 @@ In `extensions/[id]/+page.svelte:37`, the `extensionId` from the URL route param
 - Consistent error catch pattern: `e instanceof Error ? e.message : 'Fallback message'` applied uniformly.
 
 ### Issues
-
-**CQ-01 — High: `extensions/[id]/+page.svelte` form submit handler is a no-op**
-
-`src/routes/extensions/[id]/+page.svelte` renders `<SchemaForm onsubmit={async () => {}} />`. The form renders and accepts input, but submission silently does nothing. Users can fill out the form and click Submit with no feedback and no effect.
-
-**CQ-02 — High: `EnrollmentTokenSettings.svelte` and `SystemServicesSettings.svelte` revoke without confirmation**
-
-Both `handleRevoke()` functions call the revoke API directly on button click with no `ConfirmDialog`. Token revocation is irreversible. The `ConfirmDialog` component exists and is used in peer pages for destructive actions.
-
-**CQ-03 — High: Legacy `$app/stores` import causes incorrect reactivity in Svelte 5**
-
-`software/[id]/+page.svelte:4`, `extensions/[id]/+page.svelte:2`, `device/+page.svelte:4` import `page` from `$app/stores`. Reactive reads inside `$effect` or `$derived` blocks will not correctly track URL changes. `software/[id]/+page.svelte` mixes `$derived($page.params.id)` (store subscription) with rune derivation, which produces subtly different runtime behaviour from the rest of the codebase.
 
 **CQ-04 — Medium: `SchemaForm.svelte` `$effect` resets all user input on referential field change**
 
@@ -259,17 +203,9 @@ Identical function in `services/+page.svelte:129-144` and `system-services/+page
 
 `AuthenticationSettings.svelte` and `RegistrationSettings.svelte` both disable their Save buttons when `!getIsOnline()`. The agent certificate save button does not, producing inconsistent UX for the same failure mode across three panels on the same page.
 
-**CQ-14 — Low: `copied` timeout not cleared on component destroy**
-
-`EnrollmentTokenSettings.svelte` and `SystemServicesSettings.svelte` both use `setTimeout(() => { copied = false; }, 2000)` in `handleCopy` without storing the handle or clearing it in `onDestroy`. If the component is unmounted before 2000 ms, the callback fires against a destroyed component's state.
-
 **CQ-15 — Low: `profile/+page.svelte` uses `navigator.clipboard` directly, bypassing the utility**
 
 `src/lib/utils.ts` exports `copyToClipboard` which handles the `document.execCommand` fallback for non-HTTPS or restricted clipboard contexts. This one call site bypasses the fallback silently.
-
-**CQ-16 — Low: Floating promise `fetchAlerts()` in `+layout.svelte`**
-
-`fetchAlerts()` is called as a bare expression inside an `$effect`. Any synchronous error thrown before its first `await` is silently swallowed. The `void` prefix should be used as in other fire-and-forget calls throughout the codebase.
 
 **CQ-17 — Low: `redundant async` on several `api.ts` functions**
 
@@ -283,10 +219,6 @@ On fetch failure, `loadExtensions` logs to `console.error` and sets `loaded = tr
 
 These two pages duplicate: URL sync `$effect`, filter button rendering, context menu/confirm dialog patterns, `toggleMenu`/`closeMenu`/`requestConfirm`/`cancelConfirm`/`executeConfirmed`/`openPingDialog`/`cancelPingEdit`/`executePingEdit`/`handleWindowClick` functions, and the `confirmLabels` object. The only material differences are the API functions called, the filter type, and the merge dialog (services only). Consider extracting a shared composable or wrapper component.
 
-**CQ-20 — Medium: `SystemServicesSettings.svelte` tokens not loaded on mount**
-
-The component requires the user to click "Load Tokens" to fetch system enrollment tokens. Every other settings sub-component loads its data automatically on mount. This inconsistency forces an extra user action.
-
 **CQ-21 — Medium: No `submitting` guard on `saveOidcProvider` in `OidcProvidersSettings.svelte`**
 
 The Save/Update button is only disabled by `!getIsOnline()`, not by a submitting state. Rapid clicks could create duplicate providers or fire concurrent update requests.
@@ -294,10 +226,6 @@ The Save/Update button is only disabled by `!getIsOnline()`, not by a submitting
 **CQ-22 — Medium: No `submitting` guard on `saveMqttClient` in `MqttClientsSettings.svelte`**
 
 Same issue as CQ-21. The save button is only disabled by `!getIsOnline()`.
-
-**CQ-23 — Medium: `login/+page.svelte` `$effect` fires side effects on every URL parameter change**
-
-The `$effect` depends on `$page.url.searchParams` and `$page.url.hash`. If `oidc_code` is present, it calls `handleOidcCallback` again on every URL change. The code lacks a guard to prevent re-processing the same `oidc_code`. Consider adding an `oidcProcessed` guard flag similar to `hasRedirected`.
 
 **CQ-24 — Medium: `history/+page.svelte` SSE `termRef` captured at connection time may be stale**
 
@@ -602,19 +530,6 @@ No loading indicator, no retry button on failure, no background refresh. Failed 
 
 ### Systemic Issues
 
-**STD-S1 — `$app/stores` import instead of `$app/state` (6 files)**
-
-The following files import `page` from the deprecated `$app/stores` instead of `$app/state`:
-
-- `src/routes/+layout.svelte:5`
-- `src/routes/+error.svelte:2`
-- `src/routes/login/+page.svelte:3`
-- `src/routes/software/[id]/+page.svelte:3`
-- `src/routes/extensions/[id]/+page.svelte:2`
-- `src/routes/device/+page.svelte:4`
-
-The test alias in `vitest.config.ts` stubs `$app/state` but has no corresponding stub for `$app/stores`, making these routes harder to test.
-
 **STD-S2 — `table-container` (Skeleton v3) instead of `table-wrap` (Skeleton v4)**
 
 `EnrollmentTokenSettings.svelte:234` and `SystemServicesSettings.svelte:207` use `class="table-container"`. All other table wrappers in the codebase use `class="table-wrap"` (Skeleton v4). If `table-container` is absent from Skeleton v4's stylesheet, responsive overflow behavior will silently not apply.
@@ -773,10 +688,6 @@ Supported: `text`, `password`, `number`, `textarea`, `select` (static + `rest_ap
 
 All row values render as `String(row[col.key] ?? '')`. There is no way to render a cell as a badge, link, formatted date, boolean indicator, or truncated text. The `TableColumn.sortable` field exists in `types.ts` but is unused.
 
-**EXT-13 — Extension permission check missing on page-type extensions**
-
-`ExtensionManifest` includes `required_permission?: string`, and page extensions are filtered into navigation in `+layout.svelte`, but the permission is never checked. Built-in nav items filter by permission, but extension nav items skip this check. The extension detail page at `extensions/[id]/+page.svelte` also renders content without any permission guard. See also [SEC-09](#sec-09--low-extension-navigation-items-rendered-without-required_permission-check).
-
 **EXT-14 — Action `timeout_seconds` declared but never enforced**
 
 `ActionDef` includes `timeout_seconds?: number`, but `ActionButton.svelte` uses no abort signal or timeout mechanism. Both calls rely on the global 30-second timeout. An extension declaring `timeout_seconds: 300` for a long-running operation would still be cut off at 30 seconds.
@@ -828,21 +739,9 @@ Page placement includes `nav_section: string` intended to group extensions. The 
 
 ### Issues
 
-**CON-01 — High: Broken host select in trigger update modal**
-
-`history/+page.svelte:369-378` — the trigger update modal contains a `<select>` element populated with only an empty default option (no `{#each}` over a hosts list). Below it is a text `<input>` for manual UUID entry as a workaround. The select has no functional purpose.
-
 **CON-02 — High: `AssignToHostModal.svelte` hardcoded page size limits (also ARCH-02)**
 
 Silent truncation at 200 hosts / 500 plugin configs with no indication.
-
-**CON-03 — High: No `ConfirmDialog` on token revoke in `EnrollmentTokenSettings` and `SystemServicesSettings`**
-
-Irreversible actions without confirmation. Consistent with the revoke/destructive pattern established in peer pages which do use `ConfirmDialog`.
-
-**CON-04 — High: `ActionButton` destructive actions have no confirmation**
-
-The `action.destructive` flag changes button styling to error colours but does not trigger a `ConfirmDialog`. Extension-defined destructive actions execute immediately on click.
 
 **CON-05 — Medium: `services/+page.svelte` and `system-services/+page.svelte` use inline error state, no success toasts**
 
@@ -855,10 +754,6 @@ Both pages set `error = e.message` directly for action failures (rendered inline
 **CON-07 — Medium: `EnrollmentTokenSettings` pagination is text-only with no navigation**
 
 Renders "Page X of Y (N total)" as static text with no navigation controls. All other paginated surfaces use `<Pagination>`. Users cannot navigate to additional pages.
-
-**CON-08 — Medium: `SystemServicesSettings.svelte` heading mislabelled "System Services" (also ARCH-07)**
-
-The dedicated system services page (`/system-services`) already uses "System Services". Users in global settings see a second "System Services" section that actually manages enrollment tokens.
 
 **CON-09 — Medium: Filter auto-apply behaviour is inconsistent across pages**
 
@@ -949,10 +844,6 @@ Creates a subtle behavioral difference. The `$effect` pattern creates a new `set
 
 All types in `types.ts` are hand-maintained mirrors of Rust backend types. There is no code generation, no OpenAPI spec consumption, and no runtime validation (`zod` or equivalent) at the API boundary. `request<T>()` is a trusted cast. A backend field rename (e.g. `friendly_name` -> `display_name` in `HostResponse`) breaks at minimum: `types.ts`, `api.ts`, and all consuming route and component files with no automated detection.
 
-**MAINT-02 — High: `$app/stores` deprecation creates a scheduled breaking change (also STD-S1)**
-
-When `$app/stores` is removed from SvelteKit, `+layout.svelte`, `login/+page.svelte`, `software/[id]/+page.svelte`, and `extensions/[id]/+page.svelte` will all break simultaneously. Migration should happen proactively.
-
 **MAINT-03 — High: `AdminEventType` manually mirrors backend SSE event emission**
 
 `sse.ts:184-198` contains a manually-maintained union of event type strings. If the backend adds or renames an event type, the frontend receives an unchecked cast value and subscriptions silently never fire. No automated detection.
@@ -1023,30 +914,23 @@ The OIDC role mapping textarea accepts any valid JSON. `JSON.parse` validates sy
 
 ### Highest-Priority Fixes
 
-| Priority | Issue                                                                | Location                                                          |
-| -------- | -------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Critical | SSE never refreshes token on 401 — loops forever                     | `sse.ts:222-239`                                                  |
-| Critical | SSE does not recover after re-login                                  | `stores/events.svelte.ts:60-74`                                   |
-| Critical | No tests for `sse.ts` reconnection/parsing logic                     | `src/lib/sse.ts`                                                  |
-| High     | Extension form submit is a no-op                                     | `extensions/[id]/+page.svelte`                                    |
-| High     | Token revoke without confirmation                                    | `EnrollmentTokenSettings.svelte`, `SystemServicesSettings.svelte` |
-| High     | `AssignToHostModal` silently truncates at 200/500                    | `AssignToHostModal.svelte`                                        |
-| High     | Audit log tab default ignores user permissions                       | `audit-logs/+page.svelte`                                         |
-| High     | Broken host select in history trigger modal                          | `history/+page.svelte:369-378`                                    |
-| High     | `$app/stores` -> `$app/state` migration (6 files)                    | See STD-S1                                                        |
-| High     | No tests for `events.svelte.ts` subscription lifecycle               | `stores/events.svelte.ts`                                         |
-| High     | Duplicated token management components                               | `EnrollmentTokenSettings`, `SystemServicesSettings`               |
-| High     | Extension permission check missing                                   | `+layout.svelte`, `extensions/[id]/+page.svelte`                  |
-| Medium   | Missing `encodeURIComponent` on ~13 API functions                    | `api.ts`                                                          |
-| Medium   | `SchemaForm` discards user input on referential `fields` change      | `SchemaForm.svelte:34-45`                                         |
-| Medium   | Services/system-services no success toasts, inline error not cleared | `services/+page.svelte`, `system-services/+page.svelte`           |
-| Medium   | `datetime-local` values not converted to RFC 3339                    | `audit-logs/+page.svelte`                                         |
-| Medium   | Output SSE stream replays duplicate lines on reconnect               | `sse.ts:90-113`                                                   |
-| Medium   | `auth.svelte.ts` stuck at loading on network error at startup        | `auth.svelte.ts:45-66`                                            |
-| Medium   | Dynamic Tailwind class construction may be purged from production    | `MqttClientsSettings.svelte`                                      |
-| Medium   | `release_url` rendered as clickable href without protocol validation | `software/[id]/+page.svelte`                                      |
-| Medium   | Multiple save buttons lack double-submit guards                      | Settings components, global settings, login/register              |
-| Medium   | Scheduler page has no data refresh mechanism                         | `scheduler/+page.svelte`                                          |
+| Priority | Issue                                                                | Location                                                |
+| -------- | -------------------------------------------------------------------- | ------------------------------------------------------- |
+| Critical | SSE never refreshes token on 401 — loops forever                     | `sse.ts:222-239`                                        |
+| Critical | SSE does not recover after re-login                                  | `stores/events.svelte.ts:60-74`                         |
+| Critical | No tests for `sse.ts` reconnection/parsing logic                     | `src/lib/sse.ts`                                        |
+| High     | `AssignToHostModal` silently truncates at 200/500                    | `AssignToHostModal.svelte`                              |
+| High     | Audit log tab default ignores user permissions                       | `audit-logs/+page.svelte`                               |
+| High     | No tests for `events.svelte.ts` subscription lifecycle               | `stores/events.svelte.ts`                               |
+| High     | Duplicated token management components                               | `EnrollmentTokenSettings`, `SystemServicesSettings`     |
+| Medium   | `SchemaForm` discards user input on referential `fields` change      | `SchemaForm.svelte:34-45`                               |
+| Medium   | Services/system-services no success toasts, inline error not cleared | `services/+page.svelte`, `system-services/+page.svelte` |
+| Medium   | `datetime-local` values not converted to RFC 3339                    | `audit-logs/+page.svelte`                               |
+| Medium   | Output SSE stream replays duplicate lines on reconnect               | `sse.ts:90-113`                                         |
+| Medium   | `auth.svelte.ts` stuck at loading on network error at startup        | `auth.svelte.ts:45-66`                                  |
+| Medium   | Dynamic Tailwind class construction may be purged from production    | `MqttClientsSettings.svelte`                            |
+| Medium   | Multiple save buttons lack double-submit guards                      | Settings components, global settings, login/register    |
+| Medium   | Scheduler page has no data refresh mechanism                         | `scheduler/+page.svelte`                                |
 
 ### Quick Wins (low effort, high clarity)
 
@@ -1054,7 +938,6 @@ The OIDC role mapping textarea accepts any valid JSON. `JSON.parse` validates sy
 | --------------------------------------------------------------- | ----------------------------------------------------------------- |
 | Move xterm.js to `dependencies`                                 | `package.json`                                                    |
 | Extract `getCredentialWarnings` to `utils.ts`                   | `services/`, `system-services/`                                   |
-| Add `void` to `fetchAlerts()`                                   | `+layout.svelte`                                                  |
 | Replace `console.error` with `showError()`                      | `extensions.svelte.ts:20`                                         |
 | Fix `table-container` -> `table-wrap`                           | `EnrollmentTokenSettings.svelte`, `SystemServicesSettings.svelte` |
 | Add `showError()` to `ServiceSelector` catch block              | `ServiceSelector.svelte:23`                                       |
