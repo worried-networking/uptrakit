@@ -124,7 +124,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
                 (pem.clone(), pubkey, false)
             }
             None => {
-                println!("Generating Ed25519 keypair for target user...");
+                tracing::info!("generating Ed25519 keypair for target user");
                 let (priv_pem, pub_openssh) = ssh_key::generate_ed25519_keypair()?;
                 (priv_pem, pub_openssh, true)
             }
@@ -159,9 +159,11 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         connect_timeout: CONNECT_TIMEOUT,
     };
 
-    println!(
-        "Connecting to {}:{} as '{}'...",
-        params.hostname, port, params.auth_username
+    tracing::info!(
+        hostname = %params.hostname,
+        port,
+        auth_user = %params.auth_username,
+        "connecting to remote host"
     );
 
     let (session, observed_fp) = ssh_transport::connect_and_authenticate(
@@ -177,7 +179,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     let session = Arc::new(session);
 
     if params.host_key_fingerprint.is_none() {
-        println!("Host key (TOFU): {observed_fp}");
+        tracing::debug!(fingerprint = %observed_fp, "accepted host key via TOFU");
     }
 
     // Build a RemoteExecutor for the sudoers/detection functions.
@@ -208,7 +210,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         let user_check = session.exec_command(&cmd).await?;
 
         if user_check.exit_code != 0 {
-            println!("Creating user '{}'...", params.target_username);
+            tracing::info!(user = %params.target_username, "creating user");
             let cmd = cmd_create_user(&params.target_username, use_sudo);
             let create_result = session.exec_command(&cmd).await?;
             if create_result.exit_code != 0 {
@@ -219,10 +221,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
                 )));
             }
         } else {
-            println!(
-                "User '{}' already exists, skipping creation.",
-                params.target_username
-            );
+            tracing::debug!(user = %params.target_username, "user already exists, skipping creation");
         }
     }
 
@@ -238,7 +237,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     }
 
     // 5. DEPLOY authorized_keys.
-    println!("Deploying SSH public key...");
+    tracing::info!("deploying SSH public key");
 
     // 5a. Build the authorized_keys comment.
     //
@@ -292,32 +291,32 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     //     ownership of an account, even for the `uptrakit` user.
     let stale_lines = existing.uptrakit_key_lines.clone();
 
-    // 5e. Print notice for auto-removed (same-service) keys.
+    // 5e. Log notice for auto-removed (same-service) keys.
     if !same_service_lines.is_empty() {
-        println!(
-            "Removing {} key(s) written by this service on a previous bootstrap...",
-            same_service_lines.len()
+        tracing::info!(
+            count = same_service_lines.len(),
+            "removing key(s) written by this service on a previous bootstrap"
         );
         for line in &same_service_lines {
-            println!("  {line}");
+            tracing::debug!(key_line = %line, "removing same-service key");
         }
     }
 
-    // 5f. Print notice for remaining stale keys not covered by auto-removal.
+    // 5f. Log notice for remaining stale keys not covered by auto-removal.
     let remaining_stale: Vec<&String> = stale_lines
         .iter()
         .filter(|l| !same_service_lines.contains(l))
         .collect();
     if !remaining_stale.is_empty() {
-        println!(
-            "NOTE: Found {} Uptrakit-managed key(s) in authorized_keys:",
-            remaining_stale.len()
+        tracing::info!(
+            count = remaining_stale.len(),
+            "found Uptrakit-managed key(s) in authorized_keys"
         );
         for line in &remaining_stale {
-            println!("  {line}");
+            tracing::debug!(key_line = %line, "stale Uptrakit key");
         }
         if !params.remove_stale_keys {
-            println!("      Pass --remove-stale-keys to remove them before writing the new key.");
+            tracing::info!("pass --remove-stale-keys to remove them before writing the new key");
         }
     }
 
@@ -352,15 +351,9 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     } else {
         // Removals required: rewrite the entire file atomically.
         if params.remove_stale_keys && !remaining_stale.is_empty() {
-            let qualifier = if same_service_lines.is_empty() {
-                ""
-            } else {
-                "additional "
-            };
-            println!(
-                "Removing {}{} stale key(s) from authorized_keys...",
-                qualifier,
-                remaining_stale.len()
+            tracing::info!(
+                count = remaining_stale.len(),
+                "removing stale key(s) from authorized_keys"
             );
         }
 
@@ -398,7 +391,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     // Proxmox VE nodes; on Flatcar Linux (read-only /usr/local/bin) they
     // would fail.  The SSH executor is dropped after the call so the session
     // Arc refcount returns to 1 before we call `disconnect_shared`.
-    println!("Configuring sudoers...");
+    tracing::info!("configuring sudoers");
     let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
         as Arc<dyn uptrakit_command::CommandExecutor>;
     let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
@@ -409,7 +402,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
             if let Some(helper) = &entry.helper_script {
                 // Install the helper script then use its known path directly
                 // as the sudoers command — no `command -v` resolution needed.
-                println!("  Installing helper script '{}'...", helper.install_path);
+                tracing::debug!(path = %helper.install_path, "installing helper script");
                 install_helper_script(&executor, helper, use_sudo).await?;
                 resolved.push(ResolvedSudoCommand {
                     command_path: helper.install_path.to_string(),
@@ -444,13 +437,12 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     let sudoers_content: Option<SudoersContent> = if !resolved.is_empty() {
         Some(SudoersContent::SpecificCommands(resolved))
     } else if params.allow_all {
-        println!("  No plugin commands resolved; using NOPASSWD: ALL (--allow-all).");
+        tracing::warn!("no plugin commands resolved; using NOPASSWD: ALL (--allow-all)");
         Some(SudoersContent::AllCommands)
     } else {
-        println!(
-            "  No plugin-specific commands found for this host; no sudoers file will be written."
+        tracing::warn!(
+            "no plugin-specific commands found for this host; no sudoers file will be written"
         );
-        println!("  Install supported tools or re-run with --allow-all.");
         None
     };
 
@@ -480,7 +472,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         {
             Ok(result) => {
                 if result.detected {
-                    println!("Detected infrastructure: {}", plugin.plugin_type());
+                    tracing::info!(plugin = %plugin.plugin_type(), "detected infrastructure");
                 }
                 infra_results.push(result);
             }
@@ -500,7 +492,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     SshSession::disconnect_shared(session).await;
 
     // 7. VERIFY — reconnect as target_username with target key.
-    println!("Verifying connectivity as '{}'...", params.target_username);
+    tracing::info!(user = %params.target_username, "verifying connectivity");
 
     let verify_config = SshConnectionConfig {
         hostname: params.hostname.clone(),
@@ -544,40 +536,29 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     .await?;
 
     // 9. OUTPUT
-    println!();
-    println!("Bootstrap complete for host '{}'.", params.name);
-    println!("  Hostname: {}:{}", params.hostname, params.port);
-    println!("  Target user: {}", params.target_username);
-    println!("  Key type: {key_type}");
-    println!("  Host key: {observed_fp}");
+    tracing::info!(
+        host = %params.name,
+        hostname = %params.hostname,
+        port = params.port,
+        target_user = %params.target_username,
+        key_type = %key_type,
+        host_key = %observed_fp,
+        "bootstrap complete"
+    );
 
     if generated_key {
-        println!();
-        println!(
-            "NOTE: The Ed25519 private key was generated in memory and is \
-             stored only in the encrypted local database. No key file was \
-             written to disk."
+        tracing::info!(
+            "Ed25519 private key generated in memory; stored only in encrypted local database"
         );
     }
 
-    println!();
     if sudoers_content.is_some() {
-        println!(
-            "NOTE: Sudoers file written to /etc/sudoers.d/uptrakit-{}.",
-            params.target_username
-        );
-        println!(
-            "      Run 'uptrakit-agent-ssh host sync {}' to refresh \
-             entries when plugins change.",
-            params.name
+        tracing::info!(
+            sudoers_path = %format!("/etc/sudoers.d/uptrakit-{}", params.target_username),
+            "sudoers file written; run 'host sync' to refresh entries when plugins change"
         );
     } else {
-        println!("NOTE: No sudoers file was written — no compatible plugin commands were found.");
-        println!(
-            "      Run 'uptrakit-agent-ssh host sync {}' after installing \
-             supported tools to configure sudo grants.",
-            params.name
-        );
+        tracing::warn!("no sudoers file written; run 'host sync' after installing supported tools");
     }
 
     Ok(BootstrapResult { infra_results })

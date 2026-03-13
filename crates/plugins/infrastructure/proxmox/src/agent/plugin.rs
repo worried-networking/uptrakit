@@ -93,7 +93,7 @@ impl AgentInfraPlugin for ProxmoxAgentPlugin {
         let is_pve_node = match pve_setup::detect_pve_node(executor).await {
             Ok(detected) => {
                 if detected {
-                    println!("Detected Proxmox VE node.");
+                    tracing::info!("detected Proxmox VE node");
                 }
                 detected
             }
@@ -110,7 +110,7 @@ impl AgentInfraPlugin for ProxmoxAgentPlugin {
         // Detect PVE node name.
         let pve_node_name = match pve_setup::detect_pve_node_name(executor).await {
             Ok(name) => {
-                println!("PVE node name: {name}");
+                tracing::info!(node_name = %name, "detected PVE node name");
                 Some(name)
             }
             Err(e) => {
@@ -378,9 +378,9 @@ async fn create_or_reuse_pve_credentials(
     tenant_id: Option<&str>,
 ) -> (Option<pve_setup::PveCredentials>, Option<String>) {
     let Some(tid_str) = tenant_id else {
-        println!("  Skipping PVE API credential creation: tenant ID not yet available.");
-        println!(
-            "  Ensure the agent has connected to the controller at least once, then re-bootstrap."
+        tracing::warn!(
+            "skipping PVE API credential creation: tenant ID not yet available; \
+             ensure the agent has connected to the controller at least once, then re-bootstrap"
         );
         return (None, None);
     };
@@ -392,20 +392,20 @@ async fn create_or_reuse_pve_credentials(
 
     match pve_setup::check_pve_token_exists(executor, &tid).await {
         Ok(pve_setup::PveTokenStatus::OwnedByTenant(user)) => {
-            println!("  PVE API user '{user}' already exists on this cluster.");
-            println!("  Skipping credential creation.");
+            tracing::info!(pve_user = %user, "PVE API user already exists on this cluster, skipping credential creation");
 
             match db_ops::find_pve_host_with_config(db).await {
                 Ok(Some(host)) => {
                     let config_id = host
                         .pve_plugin_config_id
                         .expect("find_pve_host_with_config only returns hosts with config");
-                    println!("  Reusing plugin config from host '{}'.", host.host_id);
+                    tracing::info!(host_id = %host.host_id, "reusing plugin config from existing PVE host");
                     return (None, Some(config_id));
                 }
                 Ok(None) => {
-                    println!("  Warning: no local PVE host has a plugin config ID to reuse.");
-                    println!("  Configure the Proxmox plugin manually in the controller UI.");
+                    tracing::warn!(
+                        "no local PVE host has a plugin config ID to reuse; configure the Proxmox plugin manually"
+                    );
                     return (None, None);
                 }
                 Err(e) => {
@@ -415,8 +415,7 @@ async fn create_or_reuse_pve_credentials(
             }
         }
         Ok(pve_setup::PveTokenStatus::OwnedByOtherTenant(user)) => {
-            println!("  PVE API user '{user}' exists and belongs to a different tenant.");
-            println!("  This cluster has already been claimed. Skipping credential creation.");
+            tracing::warn!(pve_user = %user, "PVE API user belongs to a different tenant; skipping credential creation");
             return (None, None);
         }
         Ok(pve_setup::PveTokenStatus::NotFound) => {
@@ -427,20 +426,21 @@ async fn create_or_reuse_pve_credentials(
         }
     }
 
-    println!("Creating PVE API credentials...");
+    tracing::info!("creating PVE API credentials");
     match pve_setup::create_pve_api_credentials(executor, &tid).await {
         Ok(creds) => {
-            println!("  API URL: {}", creds.api_url);
-            println!(
-                "  API token created for {}",
-                pve_setup::pve_user_realm(&tid)
+            tracing::info!(
+                api_url = %creds.api_url,
+                pve_user = %pve_setup::pve_user_realm(&tid),
+                "PVE API token created"
             );
             (Some(creds), None)
         }
         Err(e) => {
-            tracing::warn!(error = %e, "failed to create PVE API credentials");
-            println!("  Warning: could not create PVE API credentials automatically: {e}");
-            println!("  You can configure them manually in the Proxmox plugin settings.");
+            tracing::warn!(
+                error = %e,
+                "failed to create PVE API credentials; configure them manually in the Proxmox plugin settings"
+            );
             (None, None)
         }
     }

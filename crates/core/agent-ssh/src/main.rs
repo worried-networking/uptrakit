@@ -1460,7 +1460,7 @@ fn init_tracing(own_module: &str, verbosity: u8) {
     }
 
     let directive = match verbosity {
-        0 => format!("{own_module}=info"),
+        0 => "uptrakit=info".to_string(),
         1 => format!("{own_module}=debug"),
         2 => "uptrakit=debug".to_string(),
         _ => "uptrakit=trace".to_string(),
