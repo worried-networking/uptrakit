@@ -2,6 +2,8 @@
 	import type { FieldDef, SelectOption } from '$lib/types';
 	import { apiGet, invokeExtensionAction } from '$lib/api';
 	import { showError } from '$lib/notifications.svelte';
+	import { SvelteSet } from 'svelte/reactivity';
+	import CheckboxList from '$lib/components/CheckboxList.svelte';
 
 	let {
 		fields,
@@ -24,8 +26,8 @@
 	} = $props();
 
 	let values: Record<string, string> = $state({});
-	// Separate state for multi_select fields — stores selected values as string[].
-	let multiValues: Record<string, string[]> = $state({});
+	// Separate state for multi_select fields — stores selected values as SvelteSet<string>.
+	let multiSets: Record<string, SvelteSet<string>> = $state({});
 	let dynamicOptions: Record<string, SelectOption[]> = $state({});
 	let loadingOptions: Record<string, boolean> = $state({});
 
@@ -39,11 +41,11 @@
 
 	$effect(() => {
 		const initial: Record<string, string> = {};
-		const initialMulti: Record<string, string[]> = {};
+		const initialMulti: Record<string, SvelteSet<string>> = {};
 		const rowData = extraParams._row as Record<string, unknown> | undefined;
 		for (const f of fields) {
 			if (f.field_type === 'multi_select') {
-				initialMulti[f.key] = [];
+				initialMulti[f.key] = new SvelteSet<string>();
 			} else if (rowData && rowData[f.key] != null) {
 				initial[f.key] = String(rowData[f.key]);
 			} else {
@@ -51,7 +53,7 @@
 			}
 		}
 		values = initial;
-		multiValues = initialMulti;
+		multiSets = initialMulti;
 
 		// Pre-load action: invoke an extension action on form open to populate field values.
 		if (preLoadAction && extensionId) {
@@ -155,14 +157,6 @@
 		return field.visible_when.values.includes(controlValue);
 	}
 
-	function toggleMultiValue(fieldKey: string, optionValue: string, checked: boolean) {
-		const current = multiValues[fieldKey] ?? [];
-		multiValues = {
-			...multiValues,
-			[fieldKey]: checked ? [...current, optionValue] : current.filter((v) => v !== optionValue)
-		};
-	}
-
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
 		// Coerce values to the correct types expected by the backend:
@@ -173,7 +167,7 @@
 		const coerced: Record<string, unknown> = {};
 		for (const f of fields) {
 			if (f.field_type === 'multi_select') {
-				coerced[f.key] = JSON.stringify(multiValues[f.key] ?? []);
+				coerced[f.key] = JSON.stringify([...(multiSets[f.key] ?? [])]);
 			} else {
 				const raw = values[f.key];
 				if (f.field_type === 'toggle') {
@@ -236,27 +230,10 @@
 						{#if opts.length === 0}
 							<p class="text-sm text-surface-500">No options available.</p>
 						{:else}
-							<div
-								class="max-h-48 overflow-y-auto rounded-container-token border border-surface-300-600-token p-2 space-y-1"
-							>
-								{#each opts as opt (opt.value)}
-									{@const checked = (multiValues[field.key] ?? []).includes(opt.value)}
-									<label
-										class="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-surface-100-800-token"
-									>
-										<input
-											type="checkbox"
-											{checked}
-											onchange={(e) => toggleMultiValue(field.key, opt.value, (e.target as HTMLInputElement).checked)}
-											class="checkbox"
-										/>
-										<span class="text-sm">{opt.label}</span>
-									</label>
-								{/each}
-							</div>
-							<p class="mt-1 text-xs text-surface-500">
-								{(multiValues[field.key] ?? []).length} selected
-							</p>
+							<CheckboxList
+								items={opts.map((o) => ({ value: o.value, label: o.label }))}
+								selected={multiSets[field.key]}
+							/>
 						{/if}
 					{/if}
 				</div>

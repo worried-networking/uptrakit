@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import Modal from '$lib/components/Modal.svelte';
+	import CheckboxList from '$lib/components/CheckboxList.svelte';
+	import type { CheckboxListItem } from '$lib/components/CheckboxList.svelte';
 	import {
 		getSoftwareItem,
 		getHosts,
@@ -80,13 +82,9 @@
 		}
 	});
 
-	function toggleHost(hostId: string) {
-		if (selectedIds.has(hostId)) {
-			selectedIds.delete(hostId);
-		} else {
-			selectedIds.add(hostId);
-		}
-	}
+	const hostItems = $derived<CheckboxListItem[]>(
+		allHosts.map((h) => ({ value: h.id, label: h.friendly_name, sublabel: h.hostname }))
+	);
 
 	async function submit() {
 		if (submitting) return;
@@ -148,26 +146,7 @@
 			<p class="text-sm">No hosts are registered yet. Hosts appear once an approved agent reports from a machine.</p>
 		</aside>
 	{:else}
-		<ul class="overflow-y-auto space-y-1 flex-1 min-h-0">
-			{#each allHosts as host (host.id)}
-				<li>
-					<label
-						class="flex items-center gap-3 rounded-md px-3 py-2 cursor-pointer hover:bg-surface-100 dark:hover:bg-surface-800"
-					>
-						<input
-							class="checkbox"
-							type="checkbox"
-							checked={selectedIds.has(host.id)}
-							onchange={() => toggleHost(host.id)}
-						/>
-						<span class="flex-1 min-w-0">
-							<span class="block font-medium truncate">{host.friendly_name}</span>
-							<span class="block text-xs text-surface-500 truncate">{host.hostname}</span>
-						</span>
-					</label>
-				</li>
-			{/each}
-		</ul>
+		<CheckboxList items={hostItems} selected={selectedIds} maxHeight="max-h-64" />
 
 		{#if toAdd.length > 0}
 			<div class="space-y-3 border-t border-surface-200 dark:border-surface-700 pt-3">

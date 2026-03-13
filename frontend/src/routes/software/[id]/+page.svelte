@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
@@ -21,6 +22,8 @@
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
 	import EditHostAssignmentModal from '$lib/components/EditHostAssignmentModal.svelte';
 	import AssignToHostModal from '$lib/components/AssignToHostModal.svelte';
+	import CheckboxList from '$lib/components/CheckboxList.svelte';
+	import type { CheckboxListItem } from '$lib/components/CheckboxList.svelte';
 	import { connectInteractiveSession } from '$lib/interactive';
 	import type { InteractiveConnectionState } from '$lib/interactive';
 	import { Permission, hasAnyPermission } from '$lib/types';
@@ -59,8 +62,20 @@
 	let updateAllModal: boolean = $state(false);
 	let updateAllDetail: SoftwareItemDetailResponse | null = $state(null);
 	let updateAllLoading: boolean = $state(false);
-	let updateAllSelectedHostIds: Set<string> = $state(new Set());
+	const updateAllSelectedHostIds = new SvelteSet<string>();
 	let updateAllTriggering: boolean = $state(false);
+	const updateAllHostItems = $derived.by<CheckboxListItem[]>(() => {
+		const hosts: SoftwareItemHostSummary[] = updateAllDetail?.hosts ?? [];
+		return hosts.map((h) => {
+			const upToDate = !h.update_available;
+			return {
+				value: h.host_id,
+				label: h.friendly_name || h.hostname,
+				sublabel: upToDate ? 'Already up to date' : `${h.installed_version ?? 'unknown'} → ${h.latest_version}`,
+				disabled: upToDate
+			};
+		});
+	});
 
 	// Assign to Host modal state
 	let showAssignModal: boolean = $state(false);
@@ -364,12 +379,15 @@
 		if (!item) return;
 		updateAllModal = true;
 		updateAllDetail = null;
-		updateAllSelectedHostIds = new Set();
+		updateAllSelectedHostIds.clear();
 		updateAllLoading = true;
 		try {
 			const detail = await getSoftwareItem(item.id);
 			updateAllDetail = detail;
-			updateAllSelectedHostIds = new Set(detail.hosts.filter((h) => h.update_available).map((h) => h.host_id));
+			updateAllSelectedHostIds.clear();
+			for (const h of detail.hosts.filter((h) => h.update_available)) {
+				updateAllSelectedHostIds.add(h.host_id);
+			}
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to load host details.');
 			updateAllModal = false;
@@ -893,40 +911,7 @@
 			<p class="text-sm text-surface-500 mb-2">
 				Select the hosts to update. Hosts that are already up to date cannot be selected.
 			</p>
-			<ul class="space-y-2">
-				{#each updateAllDetail.hosts as host (host.host_id)}
-					{@const upToDate = !host.update_available}
-					<li class="flex items-start gap-3 {upToDate ? 'opacity-50' : ''}">
-						<input
-							type="checkbox"
-							class="checkbox mt-0.5"
-							disabled={upToDate}
-							checked={updateAllSelectedHostIds.has(host.host_id)}
-							onchange={(e) => {
-								const next = new Set(updateAllSelectedHostIds);
-								if ((e.target as HTMLInputElement).checked) {
-									next.add(host.host_id);
-								} else {
-									next.delete(host.host_id);
-								}
-								updateAllSelectedHostIds = next;
-							}}
-						/>
-						<div class="flex-1 min-w-0">
-							<p class="text-sm font-medium truncate">
-								{host.friendly_name || host.hostname}
-							</p>
-							{#if upToDate}
-								<p class="text-xs text-surface-400">Already up to date</p>
-							{:else}
-								<p class="text-xs text-surface-500">
-									{host.installed_version ?? 'unknown'} → {host.latest_version}
-								</p>
-							{/if}
-						</div>
-					</li>
-				{/each}
-			</ul>
+			<CheckboxList items={updateAllHostItems} selected={updateAllSelectedHostIds} />
 		{/if}
 		{#snippet footer()}
 			<button class="btn preset-tonal-surface" onclick={() => (updateAllModal = false)}> Cancel </button>

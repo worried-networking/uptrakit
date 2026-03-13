@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
@@ -35,6 +36,8 @@
 		SoftwareItemResponse
 	} from '$lib/types';
 	import TagBadge from '$lib/components/TagBadge.svelte';
+	import CheckboxList from '$lib/components/CheckboxList.svelte';
+	import type { CheckboxListItem } from '$lib/components/CheckboxList.svelte';
 
 	const id = $derived(page.params.id as string);
 
@@ -64,7 +67,10 @@
 	// Tags state
 	let allTags: HostTagResponse[] = $state([]);
 	let showSetTagsModal: boolean = $state(false);
-	let selectedTagIds: string[] = $state([]);
+	const selectedTagIds = new SvelteSet<string>();
+	const tagItems = $derived<CheckboxListItem[]>(
+		allTags.map((t) => ({ value: t.id, label: t.name, sublabel: t.description ?? undefined, color: t.color }))
+	);
 
 	// Assigned software state
 	let assignedSoftware: SoftwareItemResponse[] = $state([]);
@@ -185,23 +191,16 @@
 
 	function openSetTagsModal() {
 		if (!host) return;
-		selectedTagIds = host.tags.map((t) => t.id);
+		selectedTagIds.clear();
+		for (const t of host.tags) selectedTagIds.add(t.id);
 		showSetTagsModal = true;
-	}
-
-	function toggleTagSelection(tagId: string) {
-		if (selectedTagIds.includes(tagId)) {
-			selectedTagIds = selectedTagIds.filter((id) => id !== tagId);
-		} else {
-			selectedTagIds = [...selectedTagIds, tagId];
-		}
 	}
 
 	async function executeSetTags() {
 		if (!host || submitting) return;
 		submitting = true;
 		try {
-			const updatedTags = await setHostTags(host.id, { tag_ids: selectedTagIds });
+			const updatedTags = await setHostTags(host.id, { tag_ids: [...selectedTagIds] });
 			host = { ...host, tags: updatedTags };
 			showSetTagsModal = false;
 			showSuccess('Tags updated');
@@ -684,25 +683,7 @@
 			</p>
 		{:else}
 			<p class="mb-3 text-sm text-surface-500">Select the tags to assign to this host.</p>
-			<div class="space-y-2 max-h-64 overflow-y-auto">
-				{#each allTags as tag (tag.id)}
-					<label
-						class="flex items-center gap-3 rounded-md px-3 py-2 hover:bg-surface-100 dark:hover:bg-surface-800 cursor-pointer"
-					>
-						<input
-							type="checkbox"
-							class="checkbox"
-							checked={selectedTagIds.includes(tag.id)}
-							onchange={() => toggleTagSelection(tag.id)}
-						/>
-						<span class="inline-block h-3 w-3 rounded-full flex-shrink-0" style="background-color: {tag.color}"></span>
-						<span class="text-sm font-medium">{tag.name}</span>
-						{#if tag.description}
-							<span class="text-xs text-surface-500">{tag.description}</span>
-						{/if}
-					</label>
-				{/each}
-			</div>
+			<CheckboxList items={tagItems} selected={selectedTagIds} maxHeight="max-h-64" showCounter={false} />
 		{/if}
 		{#snippet footer()}
 			<button class="btn preset-tonal-surface" onclick={() => (showSetTagsModal = false)}>Cancel</button>
