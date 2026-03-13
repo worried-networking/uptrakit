@@ -352,7 +352,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for CargoPlugin {
                 let targets = vec![DiscoveryTarget {
                     plugin_type: PluginType::PackageManagerCargo,
                     plugin_config: serde_json::json!({}),
-                    plugin_config_name: "cargo install".to_string(),
+                    plugin_config_name: "cargo".to_string(),
                     roles: vec![
                         PluginRole::DetectVersion,
                         PluginRole::FetchReleases,
@@ -999,7 +999,7 @@ mod tests {
         for item in &discovered {
             assert_eq!(item.targets.len(), 1);
             assert_eq!(item.targets[0].plugin_type, PluginType::PackageManagerCargo);
-            assert_eq!(item.targets[0].plugin_config_name, "cargo install");
+            assert_eq!(item.targets[0].plugin_config_name, "cargo");
         }
     }
 

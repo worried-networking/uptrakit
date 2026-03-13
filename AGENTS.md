@@ -536,7 +536,10 @@ for user review. Key invariants:
    discovery reports all installed packages or only manually-installed ones.)
 
    **Cargo** always emits one `DiscoveryTarget` per discovered crate with `plugin_type: PackageManagerCargo`,
-   config `{}`, name `"cargo install"`, and all three roles.
+   config `{}`, name `"cargo"`, and all three roles.
+
+   **npm** always emits one `DiscoveryTarget` per discovered package with `plugin_type: PackageManagerNpm`,
+   config `{}`, name `"npm"`, and all three roles.
 
    **Snap** always emits one `DiscoveryTarget` per discovered snap with `plugin_type: PackageManagerSnap`,
    config `{}`, name `"Snap"`, and all three roles.

@@ -12,9 +12,10 @@ use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec,
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchUpdateItem, BatchUpdateResult, DiscoveredSoftware,
-    DiscoveryPlugin, HostCompatibility, OutputStreamType, PluginCapability, PluginError,
-    PluginType, ReleaseFetcherPlugin, ReleaseInfo, Result, SudoCommandEntry, UpdateExecutorPlugin,
-    UpdateOutputLine, UpstreamRelease, Version, VersionDetectorPlugin,
+    DiscoveryPlugin, DiscoveryTarget, HostCompatibility, OutputStreamType, PluginCapability,
+    PluginError, PluginRole, PluginType, ReleaseFetcherPlugin, ReleaseInfo, Result,
+    SudoCommandEntry, UpdateExecutorPlugin, UpdateOutputLine, UpstreamRelease, Version,
+    VersionDetectorPlugin,
 };
 use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
@@ -443,15 +444,30 @@ impl DiscoveryPlugin for NpmPlugin {
         let packages: Vec<DiscoveredSoftware> = all_packages
             .into_iter()
             .filter(|(name, _)| !SYSTEM_NPM_PACKAGES.contains(&name.as_str()))
-            .map(|(name, version)| DiscoveredSoftware {
-                package_identifier: name.clone(),
-                name,
-                installed_version: version,
-                targets: vec![],
-                extra: None,
-                qualifier: None,
-                plugin_package_identifier: None,
-                featured: false,
+            .map(|(name, version)| {
+                let targets = vec![DiscoveryTarget {
+                    plugin_type: PluginType::PackageManagerNpm,
+                    plugin_config: serde_json::json!({}),
+                    plugin_config_name: "npm".to_string(),
+                    roles: vec![
+                        PluginRole::DetectVersion,
+                        PluginRole::FetchReleases,
+                        PluginRole::ExecuteUpdate,
+                    ],
+                    package_identifier: None,
+                    config_override: None,
+                    execution_site: None,
+                }];
+                DiscoveredSoftware {
+                    package_identifier: name.clone(),
+                    name,
+                    installed_version: version,
+                    targets,
+                    extra: None,
+                    qualifier: None,
+                    plugin_package_identifier: None,
+                    featured: false,
+                }
             })
             .collect();
 
@@ -1110,6 +1126,42 @@ mod tests {
         let json = serde_json::json!({});
         let releases = plugin.parse_registry_response(&json, "n8n");
         assert!(releases.is_empty());
+    }
+
+    // ── discover_software ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn discover_software_always_emits_targets() {
+        let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"}}}"#;
+        let plugin = NpmPlugin::new(
+            NpmConfig::default(),
+            FixedOutputExecutor::with_output(json, 0),
+        )
+        .await
+        .expect("create");
+        let discovered = plugin.discover_software().await.expect("ok");
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].targets.len(), 1);
+        assert_eq!(
+            discovered[0].targets[0].plugin_type,
+            PluginType::PackageManagerNpm
+        );
+        assert_eq!(discovered[0].targets[0].plugin_config_name, "npm");
+        assert_eq!(discovered[0].targets[0].roles.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn discover_software_excludes_system_packages() {
+        let json = r#"{"dependencies":{"npm":{"version":"10.0.0"},"n8n":{"version":"1.18.0"}}}"#;
+        let plugin = NpmPlugin::new(
+            NpmConfig::default(),
+            FixedOutputExecutor::with_output(json, 0),
+        )
+        .await
+        .expect("create");
+        let discovered = plugin.discover_software().await.expect("ok");
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].name, "n8n");
     }
 
     // ── capabilities ──────────────────────────────────────────────────────────
