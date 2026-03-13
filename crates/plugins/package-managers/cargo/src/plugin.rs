@@ -227,7 +227,7 @@ async fn fetch_crate_releases(
 /// - **Version detection**: `cargo install --list` -- single call, looked up in the map.
 /// - **Release fetching**: crates.io sparse index (`https://index.crates.io`) -- controller-side,
 ///   bounded parallel HTTP lookups via `buffer_unordered(10)`.
-/// - **Updates**: `cargo install <crate> --version <ver>` -- no `sudo` needed.
+/// - **Updates**: `cargo install <crate> --version <ver> --locked` (default) -- no `sudo` needed.
 ///
 /// A [`DiscoveryTarget`] is always emitted per installed crate so the controller
 /// can find-or-create plugin config and role assignments.
@@ -570,17 +570,27 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for CargoPlugin {
     ) -> Result<String> {
         self.require_package_identifier(package_identifier)?;
 
-        let args = vec![
+        let mut args = vec![
             "install".to_string(),
             package_identifier.to_string(),
             "--version".to_string(),
             to_version.to_string(),
         ];
+        if self.config.use_locked {
+            args.push("--locked".to_string());
+        }
 
-        let display_cmd = format!(
-            "cargo install {} --version {}",
-            package_identifier, to_version
-        );
+        let display_cmd = if self.config.use_locked {
+            format!(
+                "cargo install {} --version {} --locked",
+                package_identifier, to_version
+            )
+        } else {
+            format!(
+                "cargo install {} --version {}",
+                package_identifier, to_version
+            )
+        };
         tracing::debug!(
             package = %package_identifier,
             to_version = %to_version,
@@ -1011,6 +1021,7 @@ mod tests {
             CargoConfig {
                 include_prereleases: true,
                 registry_url: None,
+                use_locked: true,
             },
             make_executor(output, 0),
         )

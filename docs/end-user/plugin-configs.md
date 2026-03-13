@@ -386,6 +386,7 @@ controller-side from the [crates.io sparse registry index](https://index.crates.
 | --- | --- | --- |
 | `include_prereleases` | No | Include pre-release versions (e.g. `1.0.0-alpha.1`, `2.0.0-beta`) when checking for updates. Defaults to `false` — only stable releases are reported. |
 | `registry_url` | No | Custom sparse Cargo registry index URL. Omit to use the default crates.io sparse index (`https://index.crates.io`). Set this for private registries (e.g. `https://my-registry.example.com`). |
+| `use_locked` | No | Pass `--locked` to `cargo install`, using the exact dependency versions from the crate's `Cargo.lock`. Required by some crates (e.g. `cargo-nextest`) that use a `locked-tripwire` dependency. Set to `false` only for crates that do not ship a `Cargo.lock`. Defaults to `true`. |
 
 **Package identifier format:** The crate name as published on crates.io (e.g. `ripgrep`, `bat`,
 `cargo-nextest`). Crate names are 1–64 characters, must start with an ASCII letter or underscore,
