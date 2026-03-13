@@ -221,8 +221,9 @@ async fn fetch_crate_releases(
 /// - **Release fetching**: crates.io sparse index (`https://index.crates.io`) -- controller-side,
 ///   bounded parallel HTTP lookups via `buffer_unordered(10)`.
 /// - **Updates**: `cargo install <crate> --version <ver>` -- no `sudo` needed.
-/// - **Discover-all mode**: active when the config is the default `{}` (no registry override,
-///   no prerelease filter). Emits one [`DiscoveryTarget`] per installed crate.
+///
+/// A [`DiscoveryTarget`] is always emitted per installed crate so the controller
+/// can find-or-create plugin config and role assignments.
 pub struct CargoPlugin {
     config: CargoConfig,
     executor: Arc<dyn CommandExecutor>,
@@ -336,29 +337,24 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for CargoPlugin {
             bail!(PluginError::CommandFailed(cmd_output.exit_code));
         }
 
-        let emit_targets = self.config.is_discover_all_mode();
         let installed = parse_cargo_install_list(&cmd_output.output);
 
         let packages: Vec<DiscoveredSoftware> = installed
             .into_iter()
             .map(|(name, version)| {
-                let targets = if emit_targets {
-                    vec![DiscoveryTarget {
-                        plugin_type: PluginType::PackageManagerCargo,
-                        plugin_config: serde_json::json!({}),
-                        plugin_config_name: "cargo install".to_string(),
-                        roles: vec![
-                            PluginRole::DetectVersion,
-                            PluginRole::FetchReleases,
-                            PluginRole::ExecuteUpdate,
-                        ],
-                        package_identifier: None,
-                        config_override: None,
-                        execution_site: None,
-                    }]
-                } else {
-                    vec![]
-                };
+                let targets = vec![DiscoveryTarget {
+                    plugin_type: PluginType::PackageManagerCargo,
+                    plugin_config: serde_json::json!({}),
+                    plugin_config_name: "cargo install".to_string(),
+                    roles: vec![
+                        PluginRole::DetectVersion,
+                        PluginRole::FetchReleases,
+                        PluginRole::ExecuteUpdate,
+                    ],
+                    package_identifier: None,
+                    config_override: None,
+                    execution_site: None,
+                }];
                 DiscoveredSoftware {
                     package_identifier: name.clone(),
                     name,
@@ -984,7 +980,7 @@ mod tests {
     // ── discover_software ─────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn discover_software_emits_targets_in_discover_all_mode() {
+    async fn discover_software_always_emits_targets() {
         use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         let output = "bat v0.24.0:\n    bat\nripgrep v14.1.1:\n    rg\n";
         let plugin = CargoPlugin::new(CargoConfig::default(), make_executor(output, 0))
@@ -993,7 +989,6 @@ mod tests {
 
         let discovered = plugin.discover_software().await.unwrap();
         assert_eq!(discovered.len(), 2);
-        // In discover-all mode, each item gets one discovery target.
         for item in &discovered {
             assert_eq!(item.targets.len(), 1);
             assert_eq!(item.targets[0].plugin_type, PluginType::PackageManagerCargo);
@@ -1002,7 +997,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discover_software_no_targets_with_explicit_config() {
+    async fn discover_software_emits_targets_with_explicit_config() {
         use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         let output = "bat v0.24.0:\n    bat\n";
         let plugin = CargoPlugin::new(
@@ -1017,26 +1012,7 @@ mod tests {
 
         let discovered = plugin.discover_software().await.unwrap();
         assert_eq!(discovered.len(), 1);
-        assert!(discovered[0].targets.is_empty());
-    }
-
-    #[tokio::test]
-    async fn discover_software_no_targets_with_custom_registry() {
-        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
-        let output = "bat v0.24.0:\n    bat\n";
-        let plugin = CargoPlugin::new(
-            CargoConfig {
-                include_prereleases: false,
-                registry_url: Some("https://my.registry.example.com".to_string()),
-            },
-            make_executor(output, 0),
-        )
-        .await
-        .unwrap();
-
-        let discovered = plugin.discover_software().await.unwrap();
-        assert_eq!(discovered.len(), 1);
-        assert!(discovered[0].targets.is_empty());
+        assert_eq!(discovered[0].targets.len(), 1);
     }
 
     #[tokio::test]

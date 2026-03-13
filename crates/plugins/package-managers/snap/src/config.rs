@@ -57,13 +57,12 @@ fn validate_channel(channel: &str) -> std::result::Result<(), String> {
 /// The `channel` field controls which Snap channel is tracked for version detection
 /// and updates:
 ///
-/// - `None` (default, serialises to `{}`) — the server sent an empty config
-///   because no pre-existing Snap plugin config exists yet. The plugin discovers
-///   all installed snaps and emits [`DiscoveryTarget`] values so the controller
-///   can auto-create the plugin config and role assignments.  The effective channel
-///   used for releases lookups is `"latest/stable"`.
+/// - `None` (default, serialises to `{}`) — uses `"latest/stable"` for release lookups.
 /// - `Some("latest/stable")` — explicitly track the `latest/stable` channel.
 /// - `Some("1.0/stable")` — track a specific track (for software with versioned tracks).
+///
+/// A [`DiscoveryTarget`] is always emitted per installed snap so the controller
+/// can find-or-create plugin config and role assignments.
 ///
 /// [`DiscoveryTarget`]: uptrakit_plugin_infrastructure_core::DiscoveryTarget
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,15 +79,7 @@ impl SecretMasking for SnapConfig {}
 
 impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for SnapConfig {
     fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
-        vec![
-            FieldDef::new("channel", "Channel")
-                .with_type(FieldType::Text)
-                .with_help_text(
-                    "Snap channel to track (e.g. latest/stable, 1.0/stable, edge). \
-                     Defaults to latest/stable.",
-                ),
-        ]
+        vec![]
     }
 
     fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
@@ -138,18 +129,6 @@ impl SnapConfig {
         Ok(())
     }
 
-    /// Returns `true` when the config is at its default — i.e. it was produced
-    /// by deserialising an empty JSON object `{}` with no explicit `channel` key.
-    ///
-    /// The server sends an empty config with `plugin_config_id: None` when no
-    /// pre-existing Snap plugin config exists for the tenant. `discover_software()`
-    /// uses this to decide whether to emit
-    /// [`uptrakit_plugin_infrastructure_core::DiscoveryTarget`] values so the
-    /// controller can auto-create the default plugin config and role assignments.
-    pub(crate) fn is_discover_all_mode(&self) -> bool {
-        self.channel.is_none()
-    }
-
     /// Returns the effective channel to use for release queries.
     ///
     /// `None` (default config) behaves as `"latest/stable"`.
@@ -161,21 +140,6 @@ impl SnapConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── is_discover_all_mode ──────────────────────────────────────────────────
-
-    #[test]
-    fn is_discover_all_mode_true_for_default_config() {
-        assert!(SnapConfig::default().is_discover_all_mode());
-    }
-
-    #[test]
-    fn is_discover_all_mode_false_for_explicit_channel() {
-        let config = SnapConfig {
-            channel: Some("latest/stable".to_string()),
-        };
-        assert!(!config.is_discover_all_mode());
-    }
 
     // ── effective_channel ─────────────────────────────────────────────────────
 

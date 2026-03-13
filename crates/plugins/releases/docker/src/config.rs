@@ -275,29 +275,6 @@ impl DockerConfig {
     pub(crate) fn resolved_tracked_tag<'a>(&'a self, image_tag: &'a str) -> &'a str {
         self.tracked_tag.as_deref().unwrap_or(image_tag)
     }
-
-    /// Returns `true` when the config is at all defaults — i.e. it was
-    /// produced by deserializing an empty JSON object `{}`.
-    ///
-    /// The server sends an empty config with `plugin_config_id: None` when no
-    /// pre-existing Docker plugin config exists for the tenant. `discover_software()`
-    /// uses this to decide whether to emit [`uptrakit_plugin_infrastructure_core::DiscoveryTarget`]
-    /// values so the controller can auto-create the default plugin config and
-    /// role assignments.  When a real config is present the server sends
-    /// `plugin_config_id: Some(_)` and the items are processed via the
-    /// config-ID path (no targets needed).
-    pub(crate) fn is_discover_all_mode(&self) -> bool {
-        self.docker_host.is_none()
-            && self.ssh_key_path.is_none()
-            && self.auth.is_none()
-            && self.tracked_tag.is_none()
-            && self.compose_restart.is_none()
-            && self.post_pull_command.is_none()
-            && self.container_runtime == ContainerRuntime::Auto
-            && self.tls.is_none()
-            && self.include_labels.is_empty()
-            && self.exclude_labels.is_empty()
-    }
 }
 
 impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for DockerConfig {
@@ -414,65 +391,6 @@ impl SecretMasking for DockerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── is_discover_all_mode ──────────────────────────────────────────────────
-
-    #[test]
-    fn is_discover_all_mode_true_for_default_config() {
-        assert!(DockerConfig::default().is_discover_all_mode());
-    }
-
-    #[test]
-    fn is_discover_all_mode_false_when_docker_host_set() {
-        let config = DockerConfig {
-            docker_host: Some("tcp://host:2375".to_string()),
-            ..Default::default()
-        };
-        assert!(!config.is_discover_all_mode());
-    }
-
-    #[test]
-    fn is_discover_all_mode_false_when_auth_set() {
-        let config = DockerConfig {
-            auth: Some(DockerAuth::Basic {
-                username: "user".to_string(),
-                password: SecretString::new("pass".to_string()),
-            }),
-            ..Default::default()
-        };
-        assert!(!config.is_discover_all_mode());
-    }
-
-    #[test]
-    fn is_discover_all_mode_false_when_tracked_tag_set() {
-        let config = DockerConfig {
-            tracked_tag: Some("stable".to_string()),
-            ..Default::default()
-        };
-        assert!(!config.is_discover_all_mode());
-    }
-
-    #[test]
-    fn is_discover_all_mode_false_when_compose_restart_set() {
-        let config = DockerConfig {
-            compose_restart: Some(ComposeRestartConfig {
-                compose_file: None,
-                service: None,
-                working_dir: None,
-            }),
-            ..Default::default()
-        };
-        assert!(!config.is_discover_all_mode());
-    }
-
-    #[test]
-    fn is_discover_all_mode_false_when_post_pull_command_set() {
-        let config = DockerConfig {
-            post_pull_command: Some("systemctl restart myapp".to_string()),
-            ..Default::default()
-        };
-        assert!(!config.is_discover_all_mode());
-    }
 
     // ── validate ─────────────────────────────────────────────────────────────
 
@@ -811,24 +729,6 @@ mod tests {
         assert!(config.validate().is_ok());
     }
 
-    #[test]
-    fn is_discover_all_mode_false_when_include_labels_set() {
-        let mut config = DockerConfig::default();
-        config
-            .include_labels
-            .insert("app".to_string(), "myapp".to_string());
-        assert!(!config.is_discover_all_mode());
-    }
-
-    #[test]
-    fn is_discover_all_mode_false_when_exclude_labels_set() {
-        let mut config = DockerConfig::default();
-        config
-            .exclude_labels
-            .insert("env".to_string(), "dev".to_string());
-        assert!(!config.is_discover_all_mode());
-    }
-
     // ── DockerTlsConfig validation ───────────────────────────────────────────
 
     #[test]
@@ -874,29 +774,7 @@ mod tests {
         assert!(config.validate().is_ok());
     }
 
-    #[test]
-    fn is_discover_all_mode_false_when_tls_set() {
-        let config = DockerConfig {
-            tls: Some(DockerTlsConfig {
-                ca_cert_path: Some("/etc/ca.pem".to_string()),
-                client_cert_path: None,
-                client_key_path: None,
-            }),
-            ..Default::default()
-        };
-        assert!(!config.is_discover_all_mode());
-    }
-
     // ── ContainerRuntime ──────────────────────────────────────────────────────
-
-    #[test]
-    fn is_discover_all_mode_false_when_container_runtime_set() {
-        let config = DockerConfig {
-            container_runtime: ContainerRuntime::Docker,
-            ..Default::default()
-        };
-        assert!(!config.is_discover_all_mode());
-    }
 
     #[test]
     fn container_runtime_default_is_auto() {
@@ -947,6 +825,8 @@ mod tests {
         });
         let config: DockerConfig = serde_json::from_value(json).expect("deserialize");
         // Falls back to all defaults because semver fields are ignored
-        assert!(config.is_discover_all_mode());
+        assert!(config.docker_host.is_none());
+        assert!(config.auth.is_none());
+        assert!(config.tracked_tag.is_none());
     }
 }

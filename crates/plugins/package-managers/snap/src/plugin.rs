@@ -276,10 +276,8 @@ impl DiscoveryPlugin for SnapPlugin {
     /// Runs `snap list` and returns all user-installed snaps, excluding known
     /// system/infrastructure snaps (`core*`, `snapd`, `bare`).
     ///
-    /// In discover-all mode (default config `{}`), emits one [`DiscoveryTarget`]
-    /// per snap so the controller can auto-create a default Snap plugin config and
-    /// role assignments. When a real config is present (channel explicitly set),
-    /// no targets are emitted — the config-ID path is used instead.
+    /// Always emits one [`DiscoveryTarget`] per snap so the controller can
+    /// find-or-create a Snap plugin config and role assignments.
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::info!("discovering Snap-managed software");
@@ -298,31 +296,25 @@ impl DiscoveryPlugin for SnapPlugin {
             bail!(PluginError::CommandFailed(cmd_output.exit_code));
         }
 
-        let emit_targets = self.config.is_discover_all_mode();
-
         let packages: Vec<DiscoveredSoftware> = cmd_output
             .output
             .lines()
             .filter_map(parse_snap_list_line)
             .filter(|(name, _)| !SYSTEM_SNAPS.contains(&name.as_str()))
             .map(|(name, version)| {
-                let targets = if emit_targets {
-                    vec![DiscoveryTarget {
-                        plugin_type: PluginType::PackageManagerSnap,
-                        plugin_config: serde_json::json!({}),
-                        plugin_config_name: "Snap".to_string(),
-                        roles: vec![
-                            PluginRole::DetectVersion,
-                            PluginRole::FetchReleases,
-                            PluginRole::ExecuteUpdate,
-                        ],
-                        package_identifier: None,
-                        config_override: None,
-                        execution_site: None,
-                    }]
-                } else {
-                    vec![]
-                };
+                let targets = vec![DiscoveryTarget {
+                    plugin_type: PluginType::PackageManagerSnap,
+                    plugin_config: serde_json::json!({}),
+                    plugin_config_name: "Snap".to_string(),
+                    roles: vec![
+                        PluginRole::DetectVersion,
+                        PluginRole::FetchReleases,
+                        PluginRole::ExecuteUpdate,
+                    ],
+                    package_identifier: None,
+                    config_override: None,
+                    execution_site: None,
+                }];
                 DiscoveredSoftware {
                     package_identifier: name.clone(),
                     name,
@@ -913,12 +905,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discover_software_emits_targets_in_discover_all_mode() {
+    async fn discover_software_always_emits_targets() {
         let snap_list_output = "Name    Version   Rev    Tracking         Publisher  Notes\n\
                                 vlc     3.0.20    2359   latest/stable    videolan   -\n";
 
         let executor = make_executor(snap_list_output, 0);
-        // Default config → discover-all mode.
         let plugin = SnapPlugin::new(SnapConfig::default(), executor)
             .await
             .unwrap();
@@ -933,12 +924,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discover_software_no_targets_with_explicit_config() {
+    async fn discover_software_emits_targets_with_explicit_config() {
         let snap_list_output = "Name    Version   Rev    Tracking         Publisher  Notes\n\
                                 vlc     3.0.20    2359   latest/stable    videolan   -\n";
 
         let executor = make_executor(snap_list_output, 0);
-        // Explicit channel → config-ID path, no targets.
         let plugin = SnapPlugin::new(
             SnapConfig {
                 channel: Some("latest/stable".to_string()),
@@ -950,7 +940,7 @@ mod tests {
 
         let discovered = plugin.discover_software().await.unwrap();
         assert_eq!(discovered.len(), 1);
-        assert!(discovered[0].targets.is_empty());
+        assert_eq!(discovered[0].targets.len(), 1);
     }
 
     // ── detect_installed_version ──────────────────────────────────────────────

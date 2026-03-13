@@ -377,13 +377,8 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
             uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(e.to_string())
         })?;
 
-        // When the plugin was invoked without a pre-existing plugin config
-        // (config is all-defaults / `{}`), emit a DiscoveryTarget so the
-        // controller can auto-create a default "Docker" plugin config and
-        // the role assignments.  When a real config exists, the server
-        // sends plugin_config_id and the items are handled via the
-        // config-ID path (no targets needed).
-        let emit_targets = self.config.is_discover_all_mode();
+        // Always emit a DiscoveryTarget so the controller can find-or-create
+        // a "Docker" plugin config and the role assignments.
 
         // Inspect each unique image ref only once.  Multiple containers using
         // the same image share the same digest, so there is no point calling
@@ -478,23 +473,19 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
             // can target the specific container.
             let plugin_pkg_id = format!("{}#{}", ir.full_ref, container_name);
 
-            let targets = if emit_targets {
-                vec![DiscoveryTarget {
-                    plugin_type: PluginType::ReleasesDocker,
-                    plugin_config: json!({}),
-                    plugin_config_name: "Docker".to_string(),
-                    roles: vec![
-                        PluginRole::DetectVersion,
-                        PluginRole::FetchReleases,
-                        PluginRole::ExecuteUpdate,
-                    ],
-                    package_identifier: None,
-                    config_override: None,
-                    execution_site: None,
-                }]
-            } else {
-                vec![]
-            };
+            let targets = vec![DiscoveryTarget {
+                plugin_type: PluginType::ReleasesDocker,
+                plugin_config: json!({}),
+                plugin_config_name: "Docker".to_string(),
+                roles: vec![
+                    PluginRole::DetectVersion,
+                    PluginRole::FetchReleases,
+                    PluginRole::ExecuteUpdate,
+                ],
+                package_identifier: None,
+                config_override: None,
+                execution_site: None,
+            }];
 
             discoveries.push(DiscoveredSoftware {
                 package_identifier: pkg_id,
@@ -1571,7 +1562,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discover_software_no_targets_when_custom_config() {
+    async fn discover_software_emits_targets_with_custom_config() {
         let mock = Arc::new(MockDockerClient {
             inspect_result: Some("sha256:abc123".to_string()),
             containers: vec![LocalContainerInfo {
@@ -1581,7 +1572,7 @@ mod tests {
             }],
             ..Default::default()
         });
-        // Non-default config (docker_host set) → config-ID path → no targets.
+        // Custom config still emits targets.
         let config = DockerConfig {
             docker_host: Some("unix:///var/run/docker.sock".to_string()),
             ..Default::default()
@@ -1590,10 +1581,7 @@ mod tests {
         let discoveries = plugin.discover_software().await.unwrap();
 
         assert_eq!(discoveries.len(), 1);
-        assert!(
-            discoveries[0].targets.is_empty(),
-            "customized config must not emit targets (config-ID path)"
-        );
+        assert_eq!(discoveries[0].targets.len(), 1);
     }
 
     // ── execute_update — container-qualified identifiers ──────────────────────

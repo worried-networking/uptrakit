@@ -8,15 +8,9 @@ use uptrakit_plugin_infrastructure_core::SecretMasking;
 /// No secrets — the `package_identifier` in `SoftwareItem` is the crate name
 /// (e.g., `ripgrep`, `bat`, `cargo-nextest`).
 ///
-/// - `{}` (default): plugin operates in discover-all mode. It discovers all
-///   crates installed via `cargo install` and emits [`DiscoveryTarget`] values so
-///   the controller can auto-create the plugin config and role assignments. The
-///   effective registry index used for release lookups is the crates.io sparse index
-///   (`https://index.crates.io`).
-/// - Explicit `include_prereleases: true` or `registry_url`: pins the plugin to
-///   specific behavior and opts out of discover-all mode.
-///
-/// [`DiscoveryTarget`]: uptrakit_plugin_infrastructure_core::DiscoveryTarget
+/// The default config (`{}`) uses the crates.io sparse index for release lookups.
+/// Set `include_prereleases: true` to include pre-release versions, or set
+/// `registry_url` to use a custom/private sparse registry index.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CargoConfig {
     /// Include pre-release crate versions (versions containing `-` in their
@@ -46,6 +40,11 @@ impl SecretMasking for CargoConfig {}
 
 impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for CargoConfig {
     fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
+        vec![]
+    }
+
+    fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
+    {
         use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
         vec![
             FieldDef::new("include_prereleases", "Include pre-releases")
@@ -61,6 +60,10 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for CargoConfig {
                      (https://index.crates.io). Set for private registries.",
                 ),
         ]
+    }
+
+    fn type_settings_sample() -> serde_json::Value {
+        serde_json::json!({})
     }
 }
 
@@ -92,16 +95,6 @@ impl CargoConfig {
         Ok(())
     }
 
-    /// Returns `true` when the config is at its default — i.e. it was produced
-    /// by deserialising an empty JSON object `{}` with no explicit fields.
-    ///
-    /// In discover-all mode, `discover_software()` emits
-    /// [`uptrakit_plugin_infrastructure_core::DiscoveryTarget`] values so the
-    /// controller can auto-create the default plugin config and role assignments.
-    pub(crate) fn is_discover_all_mode(&self) -> bool {
-        self.registry_url.is_none() && !self.include_prereleases
-    }
-
     /// Returns the effective sparse registry index base URL.
     ///
     /// `None` (default config) uses the crates.io sparse index.
@@ -117,31 +110,6 @@ use crate::error::CargoError;
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── is_discover_all_mode ──────────────────────────────────────────────────
-
-    #[test]
-    fn is_discover_all_mode_true_for_default_config() {
-        assert!(CargoConfig::default().is_discover_all_mode());
-    }
-
-    #[test]
-    fn is_discover_all_mode_false_when_include_prereleases() {
-        let config = CargoConfig {
-            include_prereleases: true,
-            registry_url: None,
-        };
-        assert!(!config.is_discover_all_mode());
-    }
-
-    #[test]
-    fn is_discover_all_mode_false_when_registry_url_set() {
-        let config = CargoConfig {
-            include_prereleases: false,
-            registry_url: Some("https://my-registry.example.com".to_string()),
-        };
-        assert!(!config.is_discover_all_mode());
-    }
 
     // ── effective_registry_url ────────────────────────────────────────────────
 
