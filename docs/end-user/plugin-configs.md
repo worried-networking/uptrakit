@@ -433,8 +433,9 @@ Examples of type settings:
 | `package_manager_pkg` | `discovery_filter` | `all` (default) or `manual` |
 | `package_manager_apk` | `discovery_filter` | `all` (default) or `world` |
 
-Type settings are managed via the REST API (`/api/v1/plugin-type-settings`). When no type
-settings are configured for a plugin type, built-in defaults apply.
+Type settings are managed via the **Settings → Plugin Configs → Type Defaults** section in the
+web UI, or directly via the REST API (`/api/v1/plugin-type-settings`). When no type settings are
+configured for a plugin type, built-in defaults apply.
 
 **How type settings interact with plugin configs:** When computing the effective configuration
 for a plugin operation, the system merges three layers (broadest to narrowest):
@@ -446,6 +447,28 @@ for a plugin operation, the system merges three layers (broadest to narrowest):
 Fields in a narrower layer override the same field from a broader layer. This means you can
 set a tenant-wide `discovery_filter` in type settings and override it for a specific plugin
 config or host assignment if needed.
+
+### Managing Type Defaults in the Web UI
+
+Navigate to **Settings → Plugin Configs**. The **Type Defaults** section appears below the
+Discovery Allowlist and lists all plugin types that support configurable type-level settings.
+
+Each row shows:
+
+- The **plugin type** identifier.
+- The **current settings** stored for that type, or "Default" if no overrides have been saved.
+- **Edit** and **Reset** buttons (visible to users with manage permissions).
+
+**Editing type defaults:**
+
+1. Click **Edit** on the plugin type row.
+2. Fill in the fields shown in the form (same field types as plugin config forms: text, select, toggle, etc.).
+3. Click **Save**. The settings take effect on the next version check cycle for all plugin configs of that type.
+
+**Resetting type defaults:**
+
+Click **Reset** on a plugin type row to delete the stored overrides and revert to built-in defaults.
+A confirmation dialog appears before the reset is applied.
 
 ## Role-Based Host Assignments
 
