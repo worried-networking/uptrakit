@@ -1544,7 +1544,7 @@ mod tests {
     #[test]
     fn select_source_action_roundtrip() {
         let source = SelectSource::Action {
-            action_id: "list-pve-hosts".to_string(),
+            action_id: "list-discovered-guests".to_string(),
         };
         let json = serde_json::to_string(&source).expect("serialize should succeed");
         assert!(json.contains(r#""type":"action""#));
