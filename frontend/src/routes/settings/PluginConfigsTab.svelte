@@ -11,7 +11,10 @@
 		addDiscoveryAllowlistEntry,
 		deleteDiscoveryAllowlistEntry,
 		listPluginTypes,
-		batchPluginConfigs
+		batchPluginConfigs,
+		listPluginTypeSettings,
+		upsertPluginTypeSettings,
+		deletePluginTypeSettings
 	} from '$lib/api';
 	import { formatDate } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
@@ -25,6 +28,7 @@
 		PluginConfigResponse,
 		TenantDiscoveryAllowlistEntry,
 		PluginTypeInfo,
+		PluginTypeSettingsResponse,
 		FieldDef,
 		SelectOption,
 		BatchActionResponse
@@ -58,6 +62,16 @@
 	let allowlistForm = $state({ plugin_type: '' });
 	let allowlistDeleteConfirm: { id: string; plugin_type: string } | null = $state(null);
 
+	// Plugin type settings state
+	let typeSettings: PluginTypeSettingsResponse[] = $state([]);
+	let typeSettingsLoading: boolean = $state(true);
+	let editingTypeSettingsType: string | null = $state(null);
+	let showTypeSettingsModal: boolean = $state(false);
+	let typeSettingsFormValues: Record<string, string> = $state({});
+	let typeSettingsResetConfirm: string | null = $state(null);
+
+	const typeSettingsPluginTypes = $derived(pluginTypes.filter((t) => (t.type_settings_form_fields ?? []).length > 0));
+
 	// Batch state — plugin configs
 	let configSelectedIds = new SvelteSet<string>();
 	let configBatchConfirmAction: string | null = $state(null);
@@ -73,6 +87,7 @@
 			loadPluginTypes();
 			loadConfigs();
 			loadAllowlist();
+			loadTypeSettings();
 		}
 	});
 
@@ -104,6 +119,17 @@
 			showError(e instanceof Error ? e.message : 'Failed to load discovery allowlist');
 		} finally {
 			allowlistLoading = false;
+		}
+	}
+
+	async function loadTypeSettings() {
+		typeSettingsLoading = true;
+		try {
+			typeSettings = await listPluginTypeSettings();
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to load plugin type settings');
+		} finally {
+			typeSettingsLoading = false;
 		}
 	}
 
@@ -191,9 +217,9 @@
 
 	let formValues: Record<string, string> = $state({});
 
-	function isFieldVisible(field: FieldDef): boolean {
+	function isFieldVisible(field: FieldDef, values: Record<string, string> = formValues): boolean {
 		if (!field.visible_when) return true;
-		const controlValue = formValues[field.visible_when.field] ?? '';
+		const controlValue = values[field.visible_when.field] ?? '';
 		return field.visible_when.values.includes(controlValue);
 	}
 
@@ -326,6 +352,62 @@
 			showError(e instanceof Error ? e.message : 'Failed to delete plugin configs');
 		} finally {
 			configBatchSubmitting = false;
+		}
+	}
+
+	function getTypeSettingsFields(pluginType: string): FieldDef[] {
+		const t = pluginTypes.find((pt) => pt.plugin_type === pluginType);
+		return t?.type_settings_form_fields ?? [];
+	}
+
+	function getTypeSettingsConfig(pluginType: string): Record<string, unknown> | null {
+		return typeSettings.find((s) => s.plugin_type === pluginType)?.config ?? null;
+	}
+
+	function openEditTypeSettings(pluginType: string) {
+		editingTypeSettingsType = pluginType;
+		const fields = getTypeSettingsFields(pluginType);
+		const existing = getTypeSettingsConfig(pluginType);
+		const t = pluginTypes.find((pt) => pt.plugin_type === pluginType);
+		const sample = t?.type_settings_sample ?? {};
+		typeSettingsFormValues = flattenConfig(existing ?? sample, fields);
+		showTypeSettingsModal = true;
+	}
+
+	function closeTypeSettingsModal() {
+		showTypeSettingsModal = false;
+		editingTypeSettingsType = null;
+	}
+
+	async function saveTypeSettings() {
+		if (!editingTypeSettingsType) return;
+		const fields = getTypeSettingsFields(editingTypeSettingsType);
+		const config = unflattenConfig(typeSettingsFormValues, fields);
+		try {
+			const updated = await upsertPluginTypeSettings(editingTypeSettingsType, config);
+			const idx = typeSettings.findIndex((s) => s.plugin_type === editingTypeSettingsType);
+			if (idx >= 0) {
+				typeSettings = typeSettings.map((s) => (s.plugin_type === editingTypeSettingsType ? updated : s));
+			} else {
+				typeSettings = [...typeSettings, updated];
+			}
+			showSuccess('Type settings saved.');
+			closeTypeSettingsModal();
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to save type settings');
+		}
+	}
+
+	async function executeResetTypeSettings() {
+		if (!typeSettingsResetConfirm) return;
+		const pluginType = typeSettingsResetConfirm;
+		typeSettingsResetConfirm = null;
+		try {
+			await deletePluginTypeSettings(pluginType);
+			typeSettings = typeSettings.filter((s) => s.plugin_type !== pluginType);
+			showSuccess('Type settings reset to defaults.');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to reset type settings');
 		}
 	}
 
@@ -540,6 +622,65 @@
 	</div>
 {/if}
 
+<!-- Type Defaults -->
+{#if typeSettingsPluginTypes.length > 0}
+	<div class="mt-10 mb-4 flex items-center justify-between">
+		<h2 class="h4">Type Defaults</h2>
+	</div>
+	<p class="text-sm text-surface-500 mb-4">
+		Tenant-wide default settings for plugin types. These defaults apply to all instances of the plugin type unless
+		overridden by a specific plugin config or per-host assignment.
+	</p>
+
+	{#if typeSettingsLoading}
+		<p class="text-center py-4">Loading...</p>
+	{:else}
+		<div class="table-wrap">
+			<table class="table">
+				<thead>
+					<tr>
+						<th>Plugin Type</th>
+						<th>Current Settings</th>
+						{#if canManage}<th class="w-36">Actions</th>{/if}
+					</tr>
+				</thead>
+				<tbody>
+					{#each typeSettingsPluginTypes as t (t.plugin_type)}
+						{@const existing = getTypeSettingsConfig(t.plugin_type)}
+						<tr>
+							<td><span class="badge preset-tonal">{t.plugin_type}</span></td>
+							<td>
+								{#if existing}
+									<code class="text-xs">{JSON.stringify(existing)}</code>
+								{:else}
+									<span class="text-surface-400 text-sm">Default</span>
+								{/if}
+							</td>
+							{#if canManage}
+								<td>
+									<div class="flex gap-1 flex-wrap">
+										<button class="btn btn-sm preset-tonal" onclick={() => openEditTypeSettings(t.plugin_type)}>
+											Edit
+										</button>
+										{#if existing}
+											<button
+												class="btn btn-sm preset-tonal-error"
+												onclick={() => (typeSettingsResetConfirm = t.plugin_type)}
+											>
+												Reset
+											</button>
+										{/if}
+									</div>
+								</td>
+							{/if}
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
+	{/if}
+{/if}
+
 <!-- Plugin config modal -->
 {#if showConfigModal}
 	<Modal
@@ -720,5 +861,93 @@
 		confirmClass="preset-filled-error-500"
 		onconfirm={executeDeleteAllowlistEntry}
 		oncancel={() => (allowlistDeleteConfirm = null)}
+	/>
+{/if}
+
+<!-- Type settings modal -->
+{#if showTypeSettingsModal && editingTypeSettingsType}
+	{@const tsFields = getTypeSettingsFields(editingTypeSettingsType)}
+	{@const tsType = pluginTypes.find((t) => t.plugin_type === editingTypeSettingsType)}
+	<Modal
+		title="Edit Type Defaults — {tsType?.display_name ?? editingTypeSettingsType}"
+		onclose={closeTypeSettingsModal}
+		maxWidth="max-w-2xl max-h-[90vh] overflow-y-auto"
+	>
+		<div class="space-y-3">
+			{#each tsFields as field (field.key)}
+				{#if isFieldVisible(field, typeSettingsFormValues)}
+					<div>
+						<label for="ts-{field.key}" class="mb-1 block text-sm font-medium">
+							{field.label}
+							{#if field.required}<span class="text-error-500">*</span>{/if}
+						</label>
+						{#if field.field_type === 'textarea'}
+							<textarea
+								id="ts-{field.key}"
+								bind:value={typeSettingsFormValues[field.key]}
+								placeholder={field.placeholder}
+								required={field.required}
+								class="textarea font-mono text-sm w-full"
+								rows="3"
+							></textarea>
+						{:else if field.field_type === 'select'}
+							<select
+								id="ts-{field.key}"
+								bind:value={typeSettingsFormValues[field.key]}
+								required={field.required}
+								class="select w-full"
+							>
+								<option value="">— select —</option>
+								{#each resolvedOptions(field) as opt (opt.value)}
+									<option value={opt.value}>{opt.label}</option>
+								{/each}
+							</select>
+						{:else if field.field_type === 'toggle'}
+							<label class="flex items-center gap-2">
+								<input
+									type="checkbox"
+									id="ts-{field.key}"
+									checked={typeSettingsFormValues[field.key] === 'true'}
+									onchange={(e) => {
+										typeSettingsFormValues[field.key] = String((e.target as HTMLInputElement).checked);
+									}}
+									class="checkbox"
+								/>
+								<span class="text-sm">{field.help_text ?? ''}</span>
+							</label>
+						{:else}
+							<input
+								id="ts-{field.key}"
+								type={field.field_type === 'password' ? 'password' : 'text'}
+								bind:value={typeSettingsFormValues[field.key]}
+								placeholder={field.placeholder}
+								required={field.required}
+								class="input w-full"
+							/>
+						{/if}
+						{#if field.help_text && field.field_type !== 'toggle'}
+							<p class="mt-1 text-xs text-surface-500">{field.help_text}</p>
+						{/if}
+					</div>
+				{/if}
+			{/each}
+		</div>
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={closeTypeSettingsModal}>Cancel</button>
+			<button class="btn preset-filled-primary-500" onclick={saveTypeSettings}>Save</button>
+		{/snippet}
+	</Modal>
+{/if}
+
+{#if typeSettingsResetConfirm}
+	{@const tsType = pluginTypes.find((t) => t.plugin_type === typeSettingsResetConfirm)}
+	<ConfirmDialog
+		title="Reset Type Defaults"
+		messagePrefix="Reset type settings for"
+		entityName={tsType?.display_name ?? typeSettingsResetConfirm}
+		confirmLabel="Reset"
+		confirmClass="preset-filled-error-500"
+		onconfirm={executeResetTypeSettings}
+		oncancel={() => (typeSettingsResetConfirm = null)}
 	/>
 {/if}
