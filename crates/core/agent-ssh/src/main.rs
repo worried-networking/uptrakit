@@ -163,7 +163,8 @@ struct SshAgentHandler {
     /// Proxmox plugin's `list-all-unmatched` for discovered guest bootstrap).
     extension_proxy: std::sync::Arc<uptrakit_service_sdk::ServiceExtensionProxy>,
     /// Registry of agent-side infrastructure plugins.
-    infra_registry: std::sync::Arc<uptrakit_plugin_infrastructure_registry::AgentInfraRegistry>,
+    infra_plugins:
+        std::sync::Arc<Vec<std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::PluginBase>>>,
     /// Ensures the initial `ReportHosts` runs only after the first
     /// `ServiceSettings` so pagination honors controller-provided limits.
     pending_initial_host_report: bool,
@@ -339,14 +340,15 @@ impl ServiceHandler for SshAgentHandler {
                         {
                             let config_id = *config_id_str;
                             let request_id = payload.request_id.clone();
-                            for plugin in self.infra_registry.plugins() {
-                                if let Err(e) = plugin
-                                    .on_plugin_config_reported(db, config_id, &request_id)
-                                    .await
+                            for plugin in self.infra_plugins.iter() {
+                                if let Some(report) = plugin.as_host_report()
+                                    && let Err(e) = report
+                                        .on_plugin_config_reported(db, config_id, &request_id)
+                                        .await
                                 {
                                     tracing::warn!(
                                         error = %e,
-                                        plugin_type = %plugin.plugin_type(),
+                                        plugin_type = %plugin.plugin_type_id(),
                                         "plugin on_plugin_config_reported failed"
                                     );
                                 }
@@ -513,7 +515,7 @@ impl ServiceHandler for SshAgentHandler {
         {
             let register_payload = extension::build_register_payload(
                 self.encryption_public_key.clone(),
-                &self.infra_registry,
+                &self.infra_plugins,
             );
             if let Err(e) = conn
                 .send(uptrakit_internal_wire::ServiceMessage::ExtensionRegister(
@@ -526,7 +528,7 @@ impl ServiceHandler for SshAgentHandler {
 
             // Register the action library (separate from manifests).
             let actions_payload = uptrakit_internal_wire::extension::ExtensionActionsPayload::new(
-                extension::build_actions(&self.infra_registry),
+                extension::build_actions(&self.infra_plugins),
             );
             if let Err(e) = conn
                 .send(
@@ -569,7 +571,7 @@ impl ServiceHandler for SshAgentHandler {
             tenant_id: self.tenant_id,
             bg_tx: &self.bg_tx,
             extension_proxy: &self.extension_proxy,
-            infra_registry: std::sync::Arc::clone(&self.infra_registry),
+            infra_plugins: std::sync::Arc::clone(&self.infra_plugins),
         };
         extension::handle_extension_request(request, &ctx, conn).await;
 
@@ -763,7 +765,7 @@ impl SshAgentHandler {
             let db = db.clone();
             let proxy = std::sync::Arc::clone(&self.extension_proxy);
             let bg_tx = self.bg_tx.clone();
-            let infra_registry = std::sync::Arc::clone(&self.infra_registry);
+            let infra_plugins = std::sync::Arc::clone(&self.infra_plugins);
             let state_dir = self.state_dir.clone();
             let tenant_id_str = self.tenant_id.map(|t| t.to_string());
             let service_id = self.service_id;
@@ -780,11 +782,13 @@ impl SshAgentHandler {
                     guest_bootstrap:
                         &crate::commands::bootstrap_proxmox::NoopGuestBootstrapExecutor,
                 };
-                for plugin in infra_registry.plugins() {
-                    if let Err(e) = plugin.on_post_report_hosts(&ctx).await {
+                for plugin in infra_plugins.iter() {
+                    if let Some(report) = plugin.as_host_report()
+                        && let Err(e) = report.on_post_report_hosts(&ctx).await
+                    {
                         tracing::warn!(
                             error = %e,
-                            plugin_type = %plugin.plugin_type(),
+                            plugin_type = %plugin.plugin_type_id(),
                             "plugin on_post_report_hosts failed"
                         );
                     }
@@ -1317,8 +1321,8 @@ async fn main() {
 
     let freeze_file_path = state_dir.join("update-freeze");
 
-    let infra_registry =
-        std::sync::Arc::new(uptrakit_plugin_infrastructure_registry::create_agent_infra_registry());
+    let infra_plugins =
+        std::sync::Arc::new(uptrakit_plugin_infrastructure_registry::create_agent_infra_plugins());
 
     let mut handler = SshAgentHandler {
         local_db: Some(local_db),
@@ -1338,7 +1342,7 @@ async fn main() {
         bg_rx,
         bg_tx,
         extension_proxy: std::sync::Arc::new(uptrakit_service_sdk::ServiceExtensionProxy::new()),
-        infra_registry,
+        infra_plugins,
         pending_initial_host_report: false,
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(

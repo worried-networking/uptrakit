@@ -154,6 +154,20 @@ pub trait PluginBase: Send + Sync {
         vec![]
     }
 
+    /// Handle a service-side extension action request.
+    ///
+    /// Infrastructure plugins override this to handle their UI-driven actions
+    /// (e.g., Proxmox guest list, bootstrap). Returns `Some(response)` if
+    /// handled, `None` to let the agent try the next plugin.
+    #[cfg(feature = "agent-infra")]
+    async fn handle_service_extension_action(
+        &self,
+        _ctx: &crate::agent_infra::InfraPluginContext<'_>,
+        _request: &uptrakit_extension_framework::ExtensionRequestPayload,
+    ) -> Option<uptrakit_extension_framework::ExtensionResponsePayload> {
+        None
+    }
+
     // ── Migrations ───────────────────────────────────────────────────────
 
     /// Return service-side (agent-local) database migrations.

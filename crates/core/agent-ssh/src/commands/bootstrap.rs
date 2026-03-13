@@ -14,7 +14,7 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{
     BootstrapInfraResult, GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult,
     InfraActionInvoker, InfraPluginContext,
 };
-use uptrakit_plugin_infrastructure_registry::{PluginRegistry, create_agent_infra_registry};
+use uptrakit_plugin_infrastructure_registry::{PluginRegistry, create_agent_infra_plugins};
 
 use crate::commands::sudoers::{
     ResolvedSudoCommand, SudoersContent, detect_is_root, install_helper_script,
@@ -451,7 +451,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     }
 
     // 5b. RUN INFRA PLUGIN DETECTION
-    let infra_registry = create_agent_infra_registry();
+    let infra_plugins = create_agent_infra_plugins();
     let noop_invoker = NoopInfraActionInvoker;
     let noop_bootstrap = NoopGuestBootstrap;
     let tenant_id_str = params.tenant_id.map(|t| t.to_string());
@@ -465,21 +465,24 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         guest_bootstrap: &noop_bootstrap,
     };
     let mut infra_results: Vec<BootstrapInfraResult> = Vec::new();
-    for plugin in infra_registry.plugins() {
-        match plugin
+    for plugin in &infra_plugins {
+        let Some(lifecycle) = plugin.as_host_lifecycle() else {
+            continue;
+        };
+        match lifecycle
             .on_host_bootstrapped(&infra_ctx, &executor, params.host_id, &params.name)
             .await
         {
             Ok(result) => {
                 if result.detected {
-                    tracing::info!(plugin = %plugin.plugin_type(), "detected infrastructure");
+                    tracing::info!(plugin = %plugin.plugin_type_id(), "detected infrastructure");
                 }
                 infra_results.push(result);
             }
             Err(e) => {
                 tracing::debug!(
                     error = %e,
-                    plugin = %plugin.plugin_type(),
+                    plugin = %plugin.plugin_type_id(),
                     "infrastructure detection failed, skipping"
                 );
             }

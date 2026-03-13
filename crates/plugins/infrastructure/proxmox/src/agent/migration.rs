@@ -1,7 +1,7 @@
 //! Agent-local database migrations for the Proxmox infrastructure plugin.
 //!
 //! These migrations are contributed to the SSH agent's migration set via
-//! [`AgentInfraPlugin::migrations()`].
+//! [`PluginBase::service_migrations()`](uptrakit_plugin_infrastructure_core::PluginBase::service_migrations).
 
 use sea_orm_migration::prelude::*;
 

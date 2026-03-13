@@ -43,9 +43,9 @@ impl MigratorTrait for Migrator {
         //   migrates PVE state from legacy `ssh_hosts` columns if present.
         // `CreateProxmoxPendingMatches`  — creates `proxmox_pending_matches`,
         //   migrates data from the legacy `pending_proxmox_matches` table.
-        migrations.extend(
-            uptrakit_plugin_infrastructure_registry::create_agent_infra_registry().all_migrations(),
-        );
+        for plugin in uptrakit_plugin_infrastructure_registry::create_agent_infra_plugins() {
+            migrations.extend(plugin.service_migrations());
+        }
 
         migrations
     }

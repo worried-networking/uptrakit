@@ -1,8 +1,8 @@
-//! Agent-side infrastructure plugin extension point.
+//! Agent-side infrastructure plugin types.
 //!
-//! Infrastructure plugins (e.g. Proxmox) can implement [`AgentInfraPlugin`] to
-//! hook into the SSH agent's lifecycle without the agent knowing about the
-//! specific infrastructure.  The trait covers:
+//! Provides context, callback, and result types used by infrastructure plugins
+//! (via [`PluginBase`](crate::PluginBase) subtraits) that hook into the SSH
+//! agent's lifecycle:
 //!
 //! - **Bootstrap detection** — detect infrastructure after a host is bootstrapped.
 //! - **Sync** — refresh infrastructure state during host sync.
@@ -10,7 +10,7 @@
 //! - **Post-ReportHosts callbacks** — deferred operations after hosts are
 //!   registered on the controller.
 //! - **Plugin config response** — react to `ReportPluginConfigResponse`.
-//! - **Migrations** — contribute agent-local DB tables.
+//! - **Guest execution** — run commands inside infrastructure guests.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -19,12 +19,7 @@ use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use uptrakit_command::{CommandExecutor, RemoteExecutor};
-use uptrakit_extension_framework::{
-    ActionDef, ExtensionManifest, ExtensionRequestPayload, ExtensionResponsePayload,
-};
-
-use crate::SudoCommandEntry;
-use crate::error::Result;
+use uptrakit_extension_framework::ExtensionResponsePayload;
 
 // ── Guest bootstrap callback ─────────────────────────────────────────────────
 
@@ -245,183 +240,4 @@ pub struct SyncInfraResult {
     pub summary_lines: Vec<String>,
     /// Additional sudoers entries the infrastructure requires on this host.
     pub sudo_commands: Vec<InfraResolvedSudo>,
-}
-
-// ── Trait ─────────────────────────────────────────────────────────────────────
-
-/// Extension point for infrastructure plugins that hook into the SSH agent.
-///
-/// Each infrastructure plugin (e.g. Proxmox) implements this trait to integrate
-/// with the SSH agent's bootstrap, sync, extension, and post-report lifecycle
-/// without the agent knowing about the specific infrastructure.
-#[async_trait]
-pub trait AgentInfraPlugin: Send + Sync + 'static {
-    /// Plugin type identifier (e.g. `"infrastructure_proxmox"`).
-    fn plugin_type(&self) -> &str;
-
-    /// Return SeaORM migrations for plugin-owned agent-local tables.
-    ///
-    /// The SSH agent runs these alongside its own migrations at startup.
-    fn migrations(&self) -> Vec<Box<dyn sea_orm_migration::MigrationTrait>>;
-
-    /// Return additional extension manifests to register with the controller.
-    ///
-    /// These are merged into the SSH agent's extension registration payload.
-    fn extension_manifests(&self) -> Vec<ExtensionManifest>;
-
-    /// Return additional action definitions to register.
-    fn extension_actions(&self) -> Vec<ActionDef>;
-
-    /// Return action IDs that should appear in the SSH hosts data table's
-    /// `primary_actions` list.
-    fn primary_action_ids(&self) -> Vec<String>;
-
-    /// Return required sudo command declarations for the plugin itself.
-    ///
-    /// These are used by the plugin registry's
-    /// `all_required_sudo_commands()` aggregation. Infrastructure-specific
-    /// sudo needs that depend on the remote host state (e.g. whether
-    /// `/usr/sbin/pct` exists) should be returned from
-    /// [`on_host_synced`](Self::on_host_synced) via
-    /// [`SyncInfraResult::sudo_commands`] instead.
-    fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        vec![]
-    }
-
-    /// Detect infrastructure during host bootstrap.
-    ///
-    /// Called after the standard bootstrap completes (user creation, key
-    /// deployment, sudoers). The `executor` is connected to the bootstrapped
-    /// host.
-    async fn on_host_bootstrapped(
-        &self,
-        ctx: &InfraPluginContext<'_>,
-        executor: &dyn uptrakit_command::RemoteExecutor,
-        host_id: uuid::Uuid,
-        host_name: &str,
-    ) -> Result<BootstrapInfraResult>;
-
-    /// Sync infrastructure state during host sync.
-    ///
-    /// Called during `sync-host` for hosts where this plugin previously
-    /// detected infrastructure.
-    async fn on_host_synced(
-        &self,
-        ctx: &InfraPluginContext<'_>,
-        executor: &dyn uptrakit_command::RemoteExecutor,
-        host_id: uuid::Uuid,
-    ) -> Result<SyncInfraResult>;
-
-    /// Check whether this plugin has infrastructure state for the given host.
-    ///
-    /// Used by the agent to decide whether to call [`on_host_synced`](Self::on_host_synced).
-    async fn has_infra_state(&self, db: &DatabaseConnection, host_id: uuid::Uuid) -> bool;
-
-    /// Handle a plugin-owned extension action.
-    ///
-    /// Return `Some(response)` if this plugin handles the action, or `None` to
-    /// let the agent try the next plugin.
-    async fn handle_extension_action(
-        &self,
-        ctx: &InfraPluginContext<'_>,
-        request: &ExtensionRequestPayload,
-    ) -> Option<ExtensionResponsePayload>;
-
-    /// Called after `ReportHosts` has been sent to the controller.
-    ///
-    /// Plugins can drain deferred operations here (e.g. pending host-mapping
-    /// matches that require the host to exist on the controller).
-    async fn on_post_report_hosts(&self, ctx: &InfraPluginContext<'_>) -> Result<()>;
-
-    /// Called when the controller responds to a `ReportPluginConfig` request
-    /// that originated from this plugin's [`on_host_bootstrapped`](Self::on_host_bootstrapped).
-    async fn on_plugin_config_reported(
-        &self,
-        db: &DatabaseConnection,
-        plugin_config_id: uuid::Uuid,
-        request_id: &str,
-    ) -> Result<()>;
-
-    /// Return a [`GuestExecProvider`] for executing commands inside infrastructure
-    /// guests via this plugin, or `None` if the plugin does not support guest exec.
-    fn guest_exec_provider(&self) -> Option<Arc<dyn GuestExecProvider>> {
-        None
-    }
-}
-
-// ── Registry ─────────────────────────────────────────────────────────────────
-
-/// Registry of agent-side infrastructure plugins.
-///
-/// The SSH agent creates this at startup via the plugin registry crate and
-/// interacts with infrastructure plugins exclusively through this registry.
-pub struct AgentInfraRegistry {
-    plugins: Vec<Arc<dyn AgentInfraPlugin>>,
-}
-
-impl AgentInfraRegistry {
-    /// Create an empty registry.
-    pub fn new() -> Self {
-        Self {
-            plugins: Vec::new(),
-        }
-    }
-
-    /// Register an infrastructure plugin.
-    pub fn register(&mut self, plugin: Arc<dyn AgentInfraPlugin>) {
-        self.plugins.push(plugin);
-    }
-
-    /// Return a reference to all registered plugins.
-    pub fn plugins(&self) -> &[Arc<dyn AgentInfraPlugin>] {
-        &self.plugins
-    }
-
-    /// Collect all migrations from all registered plugins.
-    pub fn all_migrations(&self) -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
-        self.plugins.iter().flat_map(|p| p.migrations()).collect()
-    }
-
-    /// Collect all extension manifests from all registered plugins.
-    pub fn all_extension_manifests(&self) -> Vec<ExtensionManifest> {
-        self.plugins
-            .iter()
-            .flat_map(|p| p.extension_manifests())
-            .collect()
-    }
-
-    /// Collect all action definitions from all registered plugins.
-    pub fn all_extension_actions(&self) -> Vec<ActionDef> {
-        self.plugins
-            .iter()
-            .flat_map(|p| p.extension_actions())
-            .collect()
-    }
-
-    /// Collect all primary action IDs from all registered plugins.
-    pub fn all_primary_action_ids(&self) -> Vec<String> {
-        self.plugins
-            .iter()
-            .flat_map(|p| p.primary_action_ids())
-            .collect()
-    }
-
-    /// Find the plugin that handles a given action ID in an extension request.
-    pub fn find_action_handler(&self) -> &[Arc<dyn AgentInfraPlugin>] {
-        &self.plugins
-    }
-
-    /// Return the [`GuestExecProvider`] from the plugin matching `plugin_type`, if any.
-    pub fn guest_exec_provider_for(&self, plugin_type: &str) -> Option<Arc<dyn GuestExecProvider>> {
-        self.plugins
-            .iter()
-            .find(|p| p.plugin_type() == plugin_type)
-            .and_then(|p| p.guest_exec_provider())
-    }
-}
-
-impl Default for AgentInfraRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
 }

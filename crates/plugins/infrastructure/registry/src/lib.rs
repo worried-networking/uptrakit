@@ -44,22 +44,22 @@ pub use uptrakit_shared_types::PluginType;
 // Re-export executor types for downstream convenience
 pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};
 
-// Re-export agent-infra types when the feature is enabled.
-#[cfg(feature = "agent-infra")]
-pub use uptrakit_plugin_infrastructure_core::agent_infra::AgentInfraRegistry;
-
 // Re-export notification types when the feature is enabled.
 #[cfg(feature = "notifications")]
 pub use uptrakit_notification_plugin_registry::NotificationRegistryConfig;
 
-/// Create an [`AgentInfraRegistry`] populated with all known infrastructure plugins.
+/// Create a list of all known agent-side infrastructure plugins.
+///
+/// Returns `Arc<dyn PluginBase>` instances that implement the infrastructure
+/// subtraits (`HostLifecyclePlugin`, `HostReportPlugin`, `GuestExecPlugin`).
+/// The agent uses subtrait accessors (e.g. `as_host_lifecycle()`) to call
+/// specific plugin hooks.
 #[cfg(feature = "agent-infra")]
-pub fn create_agent_infra_registry() -> AgentInfraRegistry {
-    let mut registry = AgentInfraRegistry::new();
-    registry.register(std::sync::Arc::new(
+pub fn create_agent_infra_plugins()
+-> Vec<std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::PluginBase>> {
+    vec![std::sync::Arc::new(
         uptrakit_plugin_infrastructure_proxmox::agent::ProxmoxAgentPlugin::new(),
-    ));
-    registry
+    )]
 }
 
 // Re-export `PluginOps` trait and associated types from `infrastructure-core`.

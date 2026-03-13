@@ -9,8 +9,8 @@
 //! for executing commands inside PVE guests and bootstrapping PVE API credentials.
 //!
 //! The `agent` module (behind the `agent-infra` feature) provides the
-//! [`AgentInfraPlugin`](uptrakit_plugin_infrastructure_core::agent_infra::AgentInfraPlugin)
-//! implementation that hooks into the SSH agent's lifecycle.
+//! [`PluginBase`](uptrakit_plugin_infrastructure_core::PluginBase) and subtrait
+//! implementations that hook into the SSH agent's lifecycle.
 
 #[cfg(feature = "agent-infra")]
 pub mod agent;

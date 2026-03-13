@@ -16,7 +16,7 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{
     GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult, InfraActionInvoker,
     InfraPluginContext,
 };
-use uptrakit_plugin_infrastructure_registry::{PluginRegistry, create_agent_infra_registry};
+use uptrakit_plugin_infrastructure_registry::{PluginRegistry, create_agent_infra_plugins};
 
 use crate::commands::sudoers::{
     self, ResolvedSudoCommand, SudoersContent, detect_is_root, detect_sudo_available,
@@ -265,7 +265,7 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
     }
 
     // Ask infra plugins for additional sudo commands required by this host.
-    let infra_registry = create_agent_infra_registry();
+    let infra_plugins = create_agent_infra_plugins();
     let noop_invoker = NoopInfraActionInvoker;
     let noop_bootstrap = NoopGuestBootstrap;
     let tenant_id_str = args.tenant_id.map(|t| t.to_string());
@@ -278,9 +278,15 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
         action_invoker: &noop_invoker,
         guest_bootstrap: &noop_bootstrap,
     };
-    for plugin in infra_registry.plugins() {
-        if plugin.has_infra_state(db, host.id).await {
-            match plugin.on_host_synced(&infra_ctx, &executor, host.id).await {
+    for plugin in &infra_plugins {
+        let Some(lifecycle) = plugin.as_host_lifecycle() else {
+            continue;
+        };
+        if lifecycle.has_infra_state(db, host.id).await {
+            match lifecycle
+                .on_host_synced(&infra_ctx, &executor, host.id)
+                .await
+            {
                 Ok(sync_result) => {
                     for cmd in sync_result.sudo_commands {
                         resolved.push(ResolvedSudoCommand {
@@ -294,7 +300,7 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
                     }
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, plugin = %plugin.plugin_type(), "infra plugin sync failed");
+                    tracing::warn!(error = %e, plugin = %plugin.plugin_type_id(), "infra plugin sync failed");
                 }
             }
         }
@@ -546,7 +552,7 @@ pub async fn run_for_extension(
     let mut summary = Vec::new();
 
     // Ask infra plugins for additional sudo commands required by this host.
-    let infra_registry = create_agent_infra_registry();
+    let infra_plugins = create_agent_infra_plugins();
     let noop_invoker = NoopInfraActionInvoker;
     let noop_bootstrap = NoopGuestBootstrap;
     let tenant_id_str = tenant_id.map(|t| t.to_string());
@@ -559,9 +565,15 @@ pub async fn run_for_extension(
         action_invoker: &noop_invoker,
         guest_bootstrap: &noop_bootstrap,
     };
-    for plugin in infra_registry.plugins() {
-        if plugin.has_infra_state(db, host.id).await {
-            match plugin.on_host_synced(&infra_ctx, &executor, host.id).await {
+    for plugin in &infra_plugins {
+        let Some(lifecycle) = plugin.as_host_lifecycle() else {
+            continue;
+        };
+        if lifecycle.has_infra_state(db, host.id).await {
+            match lifecycle
+                .on_host_synced(&infra_ctx, &executor, host.id)
+                .await
+            {
                 Ok(sync_result) => {
                     for cmd in sync_result.sudo_commands {
                         resolved.push(ResolvedSudoCommand {
@@ -571,11 +583,11 @@ pub async fn run_for_extension(
                         });
                     }
                     for line in sync_result.summary_lines {
-                        summary.push(format!("{}: {line}", plugin.plugin_type()));
+                        summary.push(format!("{}: {line}", plugin.plugin_type_id()));
                     }
                 }
                 Err(e) => {
-                    summary.push(format!("{}: sync failed ({e})", plugin.plugin_type()));
+                    summary.push(format!("{}: sync failed ({e})", plugin.plugin_type_id()));
                 }
             }
         }

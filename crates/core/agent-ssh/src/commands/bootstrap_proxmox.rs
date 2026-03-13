@@ -199,10 +199,13 @@ pub async fn run_proxmox_bootstrap(
     let pve_executor: Arc<dyn RemoteExecutor> =
         Arc::new(SshRemoteExecutor::new(Arc::clone(&session)));
 
-    // 3. CREATE GUEST EXECUTORS via the infra registry
-    let infra_registry = uptrakit_plugin_infrastructure_registry::create_agent_infra_registry();
-    let guest_exec_provider = infra_registry
-        .guest_exec_provider_for("infrastructure_proxmox")
+    // 3. CREATE GUEST EXECUTORS via infra plugins
+    let infra_plugins = uptrakit_plugin_infrastructure_registry::create_agent_infra_plugins();
+    let guest_exec_provider = infra_plugins
+        .iter()
+        .find(|p| p.plugin_type_id() == "infrastructure_proxmox")
+        .and_then(|p| p.as_guest_exec())
+        .and_then(|g| g.guest_exec_provider())
         .ok_or_else(|| {
             report!(Error::InvalidInput(
                 "no GuestExecProvider found for infrastructure_proxmox".to_string()

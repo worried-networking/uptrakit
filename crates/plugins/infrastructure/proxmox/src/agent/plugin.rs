@@ -1,8 +1,9 @@
-//! [`AgentInfraPlugin`] implementation for Proxmox VE.
+//! Proxmox VE agent infrastructure plugin.
 //!
-//! Encapsulates all PVE-specific logic that was previously inlined in the SSH
-//! agent crate: bootstrap detection, credential creation, host sync, extension
-//! actions, and deferred post-ReportHosts matching.
+//! Implements [`PluginBase`] and infrastructure subtraits (`HostLifecyclePlugin`,
+//! `HostReportPlugin`, `GuestExecPlugin`) for PVE-specific agent logic:
+//! bootstrap detection, credential creation, host sync, extension actions,
+//! and deferred post-ReportHosts matching.
 
 use std::sync::Arc;
 
@@ -12,14 +13,13 @@ use sea_orm::DatabaseConnection;
 use serde_json::json;
 use uptrakit_command::RemoteExecutor;
 use uptrakit_plugin_infrastructure_core::agent_infra::{
-    AgentInfraPlugin, BootstrapInfraResult, GuestExecProvider, InfraPluginContext,
-    InfraResolvedSudo, PluginConfigReport, SyncInfraResult,
+    BootstrapInfraResult, GuestExecProvider, InfraPluginContext, InfraResolvedSudo,
+    PluginConfigReport, SyncInfraResult,
 };
 use uptrakit_plugin_infrastructure_core::error::{PluginError, Result};
 
 use uptrakit_extension_framework::{
-    ActionDef, ActionUi, ExtensionManifest, ExtensionRequestPayload, ExtensionResponsePayload,
-    FieldDef, FieldType, FormDef, SelectOption, SelectSource,
+    ActionDef, ActionUi, FieldDef, FieldType, FormDef, SelectOption, SelectSource,
 };
 
 use crate::pve_setup;
@@ -42,34 +42,45 @@ impl Default for ProxmoxAgentPlugin {
     }
 }
 
+// ── PluginBase + subtrait implementations ────────────────────────────────────
+
+use uptrakit_plugin_infrastructure_core::PluginBase;
+use uptrakit_plugin_infrastructure_core::PluginCapability;
+use uptrakit_plugin_infrastructure_core::{GuestExecPlugin, HostLifecyclePlugin, HostReportPlugin};
+
 #[async_trait]
-impl AgentInfraPlugin for ProxmoxAgentPlugin {
-    fn plugin_type(&self) -> &str {
+impl PluginBase for ProxmoxAgentPlugin {
+    fn plugin_type_id(&self) -> &str {
         "infrastructure_proxmox"
     }
 
-    fn migrations(&self) -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
+    fn capabilities(&self) -> Vec<PluginCapability> {
         vec![
-            Box::new(super::migration::CreateProxmoxHostState),
-            Box::new(super::migration::CreateProxmoxPendingMatches),
+            PluginCapability::HostLifecycle,
+            PluginCapability::HostReport,
+            PluginCapability::GuestExec,
+            PluginCapability::ServiceMigrations,
         ]
     }
 
-    fn extension_manifests(&self) -> Vec<ExtensionManifest> {
+    fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
         // The Proxmox plugin does not register its own top-level extension
         // manifest — it contributes actions to the SSH agent's existing
         // `ssh-agent.hosts` manifest via `primary_action_ids`.
         vec![]
     }
 
-    fn extension_actions(&self) -> Vec<ActionDef> {
+    fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
         vec![
-            ActionDef::new("list-pve-hosts", "List PVE Hosts")
+            uptrakit_extension_framework::ActionDef::new("list-pve-hosts", "List PVE Hosts")
                 .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
                 .with_timeout(10),
-            ActionDef::new("list-discovered-guests", "List Discovered Guests")
-                .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
-                .with_timeout(15),
+            uptrakit_extension_framework::ActionDef::new(
+                "list-discovered-guests",
+                "List Discovered Guests",
+            )
+            .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
+            .with_timeout(15),
             bootstrap_proxmox_action(),
             bootstrap_proxmox_guest_action(),
         ]
@@ -82,6 +93,37 @@ impl AgentInfraPlugin for ProxmoxAgentPlugin {
         ]
     }
 
+    #[cfg(feature = "migrations")]
+    fn service_migrations(&self) -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
+        vec![
+            Box::new(super::migration::CreateProxmoxHostState),
+            Box::new(super::migration::CreateProxmoxPendingMatches),
+        ]
+    }
+
+    async fn handle_service_extension_action(
+        &self,
+        ctx: &InfraPluginContext<'_>,
+        request: &uptrakit_extension_framework::ExtensionRequestPayload,
+    ) -> Option<uptrakit_extension_framework::ExtensionResponsePayload> {
+        extension_actions::handle_action(ctx, request).await
+    }
+
+    fn as_host_lifecycle(&self) -> Option<&dyn HostLifecyclePlugin> {
+        Some(self)
+    }
+
+    fn as_host_report(&self) -> Option<&dyn HostReportPlugin> {
+        Some(self)
+    }
+
+    fn as_guest_exec(&self) -> Option<&dyn GuestExecPlugin> {
+        Some(self)
+    }
+}
+
+#[async_trait]
+impl HostLifecyclePlugin for ProxmoxAgentPlugin {
     async fn on_host_bootstrapped(
         &self,
         ctx: &InfraPluginContext<'_>,
@@ -264,15 +306,10 @@ impl AgentInfraPlugin for ProxmoxAgentPlugin {
             .flatten()
             .is_some_and(|s| s.is_pve_node)
     }
+}
 
-    async fn handle_extension_action(
-        &self,
-        ctx: &InfraPluginContext<'_>,
-        request: &ExtensionRequestPayload,
-    ) -> Option<ExtensionResponsePayload> {
-        extension_actions::handle_action(ctx, request).await
-    }
-
+#[async_trait]
+impl HostReportPlugin for ProxmoxAgentPlugin {
     async fn on_post_report_hosts(&self, ctx: &InfraPluginContext<'_>) -> Result<()> {
         let pending = db_ops::drain_pending_matches(ctx.db)
             .await
@@ -334,12 +371,6 @@ impl AgentInfraPlugin for ProxmoxAgentPlugin {
         Ok(())
     }
 
-    fn guest_exec_provider(&self) -> Option<Arc<dyn GuestExecProvider>> {
-        Some(Arc::new(
-            super::guest_exec_adapter::ProxmoxGuestExecProvider,
-        ))
-    }
-
     async fn on_plugin_config_reported(
         &self,
         db: &DatabaseConnection,
@@ -368,103 +399,12 @@ impl AgentInfraPlugin for ProxmoxAgentPlugin {
     }
 }
 
-// ── PluginBase + subtrait implementations ────────────────────────────────────
-
-use uptrakit_plugin_infrastructure_core::PluginBase;
-use uptrakit_plugin_infrastructure_core::PluginCapability;
-use uptrakit_plugin_infrastructure_core::{GuestExecPlugin, HostLifecyclePlugin, HostReportPlugin};
-
-#[async_trait]
-impl PluginBase for ProxmoxAgentPlugin {
-    fn plugin_type_id(&self) -> &str {
-        "infrastructure_proxmox"
-    }
-
-    fn capabilities(&self) -> Vec<PluginCapability> {
-        vec![
-            PluginCapability::HostLifecycle,
-            PluginCapability::HostReport,
-            PluginCapability::GuestExec,
-            PluginCapability::ServiceMigrations,
-        ]
-    }
-
-    fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
-        AgentInfraPlugin::extension_manifests(self)
-    }
-
-    fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
-        AgentInfraPlugin::extension_actions(self)
-    }
-
-    fn primary_action_ids(&self) -> Vec<String> {
-        AgentInfraPlugin::primary_action_ids(self)
-    }
-
-    #[cfg(feature = "migrations")]
-    fn service_migrations(&self) -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
-        AgentInfraPlugin::migrations(self)
-    }
-
-    fn as_host_lifecycle(&self) -> Option<&dyn HostLifecyclePlugin> {
-        Some(self)
-    }
-
-    fn as_host_report(&self) -> Option<&dyn HostReportPlugin> {
-        Some(self)
-    }
-
-    fn as_guest_exec(&self) -> Option<&dyn GuestExecPlugin> {
-        Some(self)
-    }
-}
-
-#[async_trait]
-impl HostLifecyclePlugin for ProxmoxAgentPlugin {
-    async fn on_host_bootstrapped(
-        &self,
-        ctx: &InfraPluginContext<'_>,
-        executor: &dyn RemoteExecutor,
-        host_id: uuid::Uuid,
-        host_name: &str,
-    ) -> Result<BootstrapInfraResult> {
-        AgentInfraPlugin::on_host_bootstrapped(self, ctx, executor, host_id, host_name).await
-    }
-
-    async fn on_host_synced(
-        &self,
-        ctx: &InfraPluginContext<'_>,
-        executor: &dyn RemoteExecutor,
-        host_id: uuid::Uuid,
-    ) -> Result<SyncInfraResult> {
-        AgentInfraPlugin::on_host_synced(self, ctx, executor, host_id).await
-    }
-
-    async fn has_infra_state(&self, db: &DatabaseConnection, host_id: uuid::Uuid) -> bool {
-        AgentInfraPlugin::has_infra_state(self, db, host_id).await
-    }
-}
-
-#[async_trait]
-impl HostReportPlugin for ProxmoxAgentPlugin {
-    async fn on_post_report_hosts(&self, ctx: &InfraPluginContext<'_>) -> Result<()> {
-        AgentInfraPlugin::on_post_report_hosts(self, ctx).await
-    }
-
-    async fn on_plugin_config_reported(
-        &self,
-        db: &DatabaseConnection,
-        plugin_config_id: uuid::Uuid,
-        request_id: &str,
-    ) -> Result<()> {
-        AgentInfraPlugin::on_plugin_config_reported(self, db, plugin_config_id, request_id).await
-    }
-}
-
 #[async_trait]
 impl GuestExecPlugin for ProxmoxAgentPlugin {
     fn guest_exec_provider(&self) -> Option<Arc<dyn GuestExecProvider>> {
-        AgentInfraPlugin::guest_exec_provider(self)
+        Some(Arc::new(
+            super::guest_exec_adapter::ProxmoxGuestExecProvider,
+        ))
     }
 }
 
