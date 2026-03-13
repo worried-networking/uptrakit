@@ -82,15 +82,18 @@ impl GuestBootstrapParams {
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct GuestBootstrapResult {
-    /// The hostname/IP of the bootstrapped guest.
-    pub guest_ip: String,
+    /// The hostname or IP address of the bootstrapped guest.
+    ///
+    /// Prefer a fully-qualified domain name (FQDN) when one can be reliably
+    /// confirmed for the guest. Falls back to the raw IP address.
+    pub hostname: String,
 }
 
 impl GuestBootstrapResult {
     /// Create a new [`GuestBootstrapResult`].
-    pub fn new(guest_ip: impl Into<String>) -> Self {
+    pub fn new(hostname: impl Into<String>) -> Self {
         Self {
-            guest_ip: guest_ip.into(),
+            hostname: hostname.into(),
         }
     }
 }

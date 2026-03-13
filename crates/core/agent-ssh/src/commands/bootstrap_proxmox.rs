@@ -54,8 +54,11 @@ pub struct ProxmoxBootstrapParams {
 
 /// Result of a successful Proxmox guest bootstrap.
 pub struct ProxmoxBootstrapResult {
-    /// The hostname/IP of the guest (for the DB entry).
-    pub guest_ip: String,
+    /// The hostname or IP address of the guest (for the DB entry).
+    ///
+    /// Contains the FQDN when one can be confirmed via reverse DNS, otherwise
+    /// the raw IP address returned by the PVE API.
+    pub hostname: String,
 }
 
 /// A [`GuestBootstrapExecutor`] that always returns an error.
@@ -114,7 +117,7 @@ impl GuestBootstrapExecutor for AgentGuestBootstrapExecutor {
             .await
             .map(|r| {
                 uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapResult::new(
-                    r.guest_ip,
+                    r.hostname,
                 )
             })
             .map_err(|e| e.to_string())
@@ -485,6 +488,8 @@ pub async fn run_proxmox_bootstrap(
             params.target_username
         )));
     }
+
+    let hostname = try_detect_fqdn(&verify_session, &guest_ip).await;
     verify_session.disconnect().await;
 
     // Drop executors before disconnecting so the session Arc has a single
@@ -503,7 +508,7 @@ pub async fn run_proxmox_bootstrap(
         AddHostParams {
             host_id: params.host_id,
             name: params.name.clone(),
-            hostname: guest_ip.clone(),
+            hostname: hostname.clone(),
             port: 22,
             username: params.target_username.clone(),
             encrypted_key,
@@ -516,9 +521,104 @@ pub async fn run_proxmox_bootstrap(
     tracing::info!(
         host_id = %params.host_id,
         name = %params.name,
-        guest_ip = %guest_ip,
+        %hostname,
         "Proxmox guest bootstrap complete"
     );
 
-    Ok(ProxmoxBootstrapResult { guest_ip })
+    Ok(ProxmoxBootstrapResult { hostname })
+}
+
+/// Attempt to resolve a fully-qualified domain name (FQDN) for a guest.
+///
+/// Steps:
+/// 1. Runs `hostname -f` on the already-authenticated SSH session to obtain
+///    the guest's self-reported FQDN.
+/// 2. Collects **all** IP addresses assigned to the guest via `hostname -I`
+///    (space-separated; falls back to the single `ip` argument on failure).
+/// 3. Performs a forward DNS lookup for the FQDN and checks whether **any**
+///    resolved address matches **any** of the guest's own IPs.
+///
+/// This handles containers/VMs with multiple network interfaces where the PVE
+/// API may report only one IP while the FQDN resolves to a different interface.
+///
+/// Returns the FQDN on success or the original `ip` string on any failure.
+async fn try_detect_fqdn(session: &SshSession, ip: &str) -> String {
+    // Step 1: Obtain FQDN from the guest.
+    let fqdn_result = match session
+        .exec_command("hostname -f 2>/dev/null || hostname 2>/dev/null")
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::debug!(error = %e, "hostname command failed; keeping IP as hostname");
+            return ip.to_string();
+        }
+    };
+
+    let fqdn = fqdn_result.stdout.trim().to_string();
+
+    // Must be non-empty and contain a dot (i.e. be a proper FQDN, not a bare
+    // hostname or an IP literal).
+    if fqdn.is_empty() || !fqdn.contains('.') || fqdn.parse::<std::net::IpAddr>().is_ok() {
+        tracing::debug!(
+            fqdn = %fqdn,
+            "hostname output is not a valid FQDN; keeping IP as hostname"
+        );
+        return ip.to_string();
+    }
+
+    // Step 2: Collect all IPs assigned to the guest.
+    //
+    // `hostname -I` prints all addresses separated by spaces.  We fall back to
+    // the single IP returned by the PVE API if the command fails or returns
+    // nothing useful.
+    let guest_addrs: std::collections::HashSet<std::net::IpAddr> = {
+        let mut addrs = std::collections::HashSet::new();
+
+        if let Ok(r) = session.exec_command("hostname -I 2>/dev/null").await {
+            for token in r.stdout.split_whitespace() {
+                if let Ok(a) = token.parse::<std::net::IpAddr>() {
+                    addrs.insert(a);
+                }
+            }
+        }
+
+        // Always include the PVE-reported IP as a fallback.
+        if let Ok(a) = ip.parse::<std::net::IpAddr>() {
+            addrs.insert(a);
+        }
+
+        addrs
+    };
+
+    // Step 3: Forward-confirm the FQDN via DNS.
+    let lookup_target = format!("{fqdn}:0");
+    match tokio::net::lookup_host(lookup_target).await {
+        Ok(mut resolved) => {
+            let confirmed = resolved.any(|sa| guest_addrs.contains(&sa.ip()));
+            if confirmed {
+                tracing::info!(
+                    fqdn = %fqdn,
+                    ip,
+                    "FQDN confirmed via forward DNS; using FQDN as hostname"
+                );
+                fqdn
+            } else {
+                tracing::debug!(
+                    fqdn = %fqdn,
+                    ip,
+                    "FQDN did not resolve to any of the guest's IPs; keeping IP as hostname"
+                );
+                ip.to_string()
+            }
+        }
+        Err(e) => {
+            tracing::debug!(
+                error = %e,
+                fqdn = %fqdn,
+                "DNS lookup for FQDN failed; keeping IP as hostname"
+            );
+            ip.to_string()
+        }
+    }
 }

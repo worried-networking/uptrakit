@@ -159,14 +159,14 @@ async fn handle_bootstrap_proxmox(
         Ok(result) => {
             tracing::info!(
                 %host_id,
-                guest_ip = %result.guest_ip,
+                hostname = %result.hostname,
                 "Proxmox guest bootstrap completed successfully"
             );
             make_success_response(
                 request_id,
                 json!({
                     "host_id": host_id.to_string(),
-                    "guest_ip": result.guest_ip,
+                    "hostname": result.hostname,
                 }),
             )
         }
@@ -537,7 +537,7 @@ async fn handle_bootstrap_proxmox_guest(
                     Ok(result) => {
                         tracing::info!(
                             %host_id,
-                            guest_ip = %result.guest_ip,
+                            hostname = %result.hostname,
                             mapping_id = %mapping_id,
                             "discovered guest bootstrap completed"
                         );
@@ -567,7 +567,7 @@ async fn handle_bootstrap_proxmox_guest(
                             "mapping_id": mapping_id,
                             "name": name,
                             "host_id": host_id.to_string(),
-                            "guest_ip": result.guest_ip,
+                            "hostname": result.hostname,
                             "status": "ok",
                         })
                     }
