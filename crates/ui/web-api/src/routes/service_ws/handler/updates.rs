@@ -23,7 +23,8 @@ use uptrakit_shared_db::entity::{
     software_item, update_history, update_output_line,
 };
 
-use super::{HandlerError, HandlerResult, LoopAction, MAX_UPDATE_OUTPUT_BYTES};
+use super::messages::ProcessorResponse;
+use super::{HandlerError, HandlerResult, MAX_UPDATE_OUTPUT_BYTES};
 use crate::AppState;
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
 use crate::routes::service_ws::protocol::serialize_controller_msg;
@@ -60,8 +61,9 @@ pub(super) async fn validate_update_ownership(
     db: &sea_orm::DatabaseConnection,
     service_id: uuid::Uuid,
     update_history_id: uuid::Uuid,
-    linked_host_ids: &HashSet<uuid::Uuid>,
+    linked_host_ids: impl std::borrow::Borrow<HashSet<uuid::Uuid>>,
 ) -> HandlerResult<update_history::Model> {
+    let linked_host_ids = linked_host_ids.borrow();
     let record = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(update_history_id)
         .one(db)
         .await
@@ -372,8 +374,9 @@ pub(super) async fn handle_update_started(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     payload: &UpdateStartedPayload,
-    linked_host_ids: &HashSet<uuid::Uuid>,
-) -> LoopAction {
+    linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+) -> ProcessorResponse {
+    let linked_host_ids = linked_host_ids.lock().clone();
     tracing::info!(
         update_id = %payload.update_history_id,
         from_version = ?payload.from_version,
@@ -388,7 +391,7 @@ pub(super) async fn handle_update_started(
     .await
     {
         Ok(r) => r,
-        Err(_) => return LoopAction::Continue,
+        Err(_) => return ProcessorResponse::cont(),
     };
     let record_batch_id = record.batch_id;
     let record_host_id = record.host_id;
@@ -468,7 +471,7 @@ pub(super) async fn handle_update_started(
         .await;
     }
 
-    LoopAction::Continue
+    ProcessorResponse::cont()
 }
 
 // ---------------------------------------------------------------------------
@@ -482,8 +485,9 @@ pub(super) async fn handle_update_output(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     payload: &UpdateOutputPayload,
-    linked_host_ids: &HashSet<uuid::Uuid>,
-) -> LoopAction {
+    linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+) -> ProcessorResponse {
+    let linked_host_ids = linked_host_ids.lock().clone();
     tracing::trace!(
         update_id = %payload.update_history_id,
         stream = ?payload.stream,
@@ -493,12 +497,12 @@ pub(super) async fn handle_update_output(
         state.db(),
         service_id,
         payload.update_history_id,
-        linked_host_ids,
+        &linked_host_ids,
     )
     .await
     .is_err()
     {
-        return LoopAction::Continue;
+        return ProcessorResponse::cont();
     }
 
     let output_line = payload.output.clone();
@@ -518,7 +522,7 @@ pub(super) async fn handle_update_output(
             update_id = %payload.update_history_id,
             "failed to update output bytes"
         );
-        return LoopAction::Continue;
+        return ProcessorResponse::cont();
     };
 
     if updated.rows_affected == 0 {
@@ -526,7 +530,7 @@ pub(super) async fn handle_update_output(
             update_id = %payload.update_history_id,
             "update output exceeded {MAX_UPDATE_OUTPUT_BYTES} byte cap, dropping"
         );
-        return LoopAction::Continue;
+        return ProcessorResponse::cont();
     }
 
     let line_id = uuid::Uuid::now_v7();
@@ -560,7 +564,7 @@ pub(super) async fn handle_update_output(
         )
         .await;
 
-    LoopAction::Continue
+    ProcessorResponse::cont()
 }
 
 // ---------------------------------------------------------------------------
@@ -574,8 +578,9 @@ pub(super) async fn handle_update_result(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     payload: UpdateResultPayload,
-    linked_host_ids: &HashSet<uuid::Uuid>,
-) -> LoopAction {
+    linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+) -> ProcessorResponse {
+    let linked_host_ids = linked_host_ids.lock().clone();
     tracing::info!(
         update_id = %payload.update_history_id,
         status = ?payload.status,
@@ -591,7 +596,7 @@ pub(super) async fn handle_update_result(
     .await
     {
         Ok(r) => r,
-        Err(_) => return LoopAction::Continue,
+        Err(_) => return ProcessorResponse::cont(),
     };
     let mut active: update_history::ActiveModel = record.clone().into();
     active.status = Set(match payload.status {
@@ -793,7 +798,7 @@ pub(super) async fn handle_update_result(
         }
     }
 
-    LoopAction::Continue
+    ProcessorResponse::cont()
 }
 
 // ---------------------------------------------------------------------------
@@ -985,8 +990,9 @@ pub(super) async fn handle_batch_update_result(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     payload: BatchUpdateResultPayload,
-    linked_host_ids: &HashSet<uuid::Uuid>,
-) -> LoopAction {
+    linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+) -> ProcessorResponse {
+    let linked_host_ids = linked_host_ids.lock().clone();
     tracing::info!(
         batch_id = %payload.batch_id,
         results = payload.results.len(),
@@ -1101,7 +1107,7 @@ pub(super) async fn handle_batch_update_result(
             .await;
     }
 
-    LoopAction::Continue
+    ProcessorResponse::cont()
 }
 
 // ---------------------------------------------------------------------------
@@ -1146,14 +1152,15 @@ pub async fn handle_stdin_attention(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     payload: &uptrakit_internal_wire::StdinAttentionPayload,
-    linked_host_ids: &HashSet<uuid::Uuid>,
-) -> LoopAction {
+    linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+) -> ProcessorResponse {
+    let linked_host_ids = linked_host_ids.lock().clone();
     // Validate that this service owns the update
     if let Err(e) = validate_update_ownership(
         &state.db,
         service_id,
         payload.update_history_id,
-        linked_host_ids,
+        &linked_host_ids,
     )
     .await
     {
@@ -1161,7 +1168,7 @@ pub async fn handle_stdin_attention(
             error = %e,
             "StdinAttention ownership validation failed"
         );
-        return LoopAction::Continue;
+        return ProcessorResponse::cont();
     }
 
     state
@@ -1209,5 +1216,5 @@ pub async fn handle_stdin_attention(
         hint = ?payload.hint,
         "broadcast StdinAttention for update"
     );
-    LoopAction::Continue
+    ProcessorResponse::cont()
 }

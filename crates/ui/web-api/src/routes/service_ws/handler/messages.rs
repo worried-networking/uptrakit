@@ -1,13 +1,14 @@
 //! Common message handlers extracted from the authenticated loop.
 //!
 //! Each function corresponds to one match arm in the main dispatch and returns
-//! a [`LoopAction`] to tell the caller whether to `continue` or `break`.
+//! a [`LoopAction`] plus an optional [`ControllerMessage`] reply. The main
+//! loop is responsible for serializing and writing the reply to the WebSocket
+//! sink.
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
-use futures_util::SinkExt;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
@@ -33,12 +34,67 @@ use crate::routes::agents::{
     find_or_create_host_and_link, revoke_certificate, revoke_system_certificate,
 };
 use crate::routes::service_ws::protocol::{
-    CertIdentity, close_with_reason, record_service_activity, record_system_service_activity,
-    send_pong, serialize_controller_msg,
+    CertIdentity, record_service_activity, record_system_service_activity, send_pong,
 };
 
 // ---------------------------------------------------------------------------
-// handle_ping
+// ProcessorAction
+// ---------------------------------------------------------------------------
+
+/// Action for the main loop after the processor handles a message.
+pub(super) enum ProcessorAction {
+    /// Continue processing messages.
+    Continue,
+    /// Break out of the main loop.
+    Break,
+    /// Send a WebSocket close frame with a reason, then break.
+    CloseWithReason(CloseReason),
+}
+
+/// Response from the message processor to the main loop.
+pub(super) struct ProcessorResponse {
+    /// Optional message to send to the service before executing the action.
+    pub replies: Vec<ControllerMessage>,
+    /// Action for the main loop after sending replies.
+    pub action: ProcessorAction,
+}
+
+impl ProcessorResponse {
+    /// Continue with no reply.
+    pub fn cont() -> Self {
+        Self {
+            replies: Vec::new(),
+            action: ProcessorAction::Continue,
+        }
+    }
+
+    /// Continue with a single reply.
+    pub fn reply(msg: ControllerMessage) -> Self {
+        Self {
+            replies: vec![msg],
+            action: ProcessorAction::Continue,
+        }
+    }
+
+    /// Break with a single reply.
+    pub fn reply_and_break(msg: ControllerMessage) -> Self {
+        Self {
+            replies: vec![msg],
+            action: ProcessorAction::Break,
+        }
+    }
+
+    /// Send a reply and close with a reason.
+    pub fn reply_and_close(msg: ControllerMessage, reason: CloseReason) -> Self {
+        Self {
+            replies: vec![msg],
+            action: ProcessorAction::CloseWithReason(reason),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// handle_ping (stays in main loop — not part of processor)
 // ---------------------------------------------------------------------------
 
 /// Handle a `Ping` message: send pong, record activity, optional MQTT heartbeat.
@@ -86,16 +142,16 @@ pub(super) async fn handle_ping(
 
 /// Handle a `RenewCertificate` message: verify approved, sign renewal CSR,
 /// revoke old cert.
+///
+/// Returns a [`ProcessorResponse`] with the reply message and action.
 #[tracing::instrument(skip_all, fields(%service_id, is_system))]
 pub(super) async fn handle_renew_certificate(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    out_seq: &mut OutgoingSeq,
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     cert: &CertIdentity,
     payload: &uptrakit_internal_wire::RenewCertificatePayload,
     is_system: bool,
-) -> LoopAction {
+) -> ProcessorResponse {
     if is_system {
         // System service renewal path.
         let svc = match sys_svc_entity::Entity::find_by_id(service_id)
@@ -109,14 +165,12 @@ pub(super) async fn handle_renew_certificate(
                 s
             }
             _ => {
-                let err = ControllerMessage::Error(ErrorPayload {
-                    code: ErrorCode::Forbidden,
-                    message: "service is not approved".to_string(),
-                });
-                if let Some(json) = serialize_controller_msg(out_seq, err) {
-                    let _ = sink.send(Message::Text(json.into())).await;
-                }
-                return LoopAction::Break;
+                return ProcessorResponse::reply_and_break(ControllerMessage::Error(
+                    ErrorPayload {
+                        code: ErrorCode::Forbidden,
+                        message: "service is not approved".to_string(),
+                    },
+                ));
             }
         };
 
@@ -130,14 +184,6 @@ pub(super) async fn handle_renew_certificate(
         .await
         {
             Ok(bundle) => {
-                let cert_msg = ControllerMessage::Certificate(CertificatePayload {
-                    cert_pem: bundle.cert_pem,
-                    not_after: bundle.not_after,
-                });
-                if let Some(json) = serialize_controller_msg(out_seq, cert_msg) {
-                    let _ = sink.send(Message::Text(json.into())).await;
-                }
-
                 // Revoke old system service certificate.
                 if let Err(e) =
                     revoke_system_certificate(state.db(), &cert.serial, &cert.ca_fingerprint).await
@@ -166,19 +212,17 @@ pub(super) async fn handle_renew_certificate(
                     old_serial = %cert.serial,
                     "system service certificate renewed, old cert revoked"
                 );
-                let _ = close_with_reason(sink, CloseReason::CertificateRotated).await;
-                LoopAction::Break
-            }
-            Err(e) => {
-                let err = ControllerMessage::Error(ErrorPayload {
-                    code: ErrorCode::CertificateError,
-                    message: e.to_string(),
+
+                let cert_msg = ControllerMessage::Certificate(CertificatePayload {
+                    cert_pem: bundle.cert_pem,
+                    not_after: bundle.not_after,
                 });
-                if let Some(json) = serialize_controller_msg(out_seq, err) {
-                    let _ = sink.send(Message::Text(json.into())).await;
-                }
-                LoopAction::Break
+                ProcessorResponse::reply_and_close(cert_msg, CloseReason::CertificateRotated)
             }
+            Err(e) => ProcessorResponse::reply_and_break(ControllerMessage::Error(ErrorPayload {
+                code: ErrorCode::CertificateError,
+                message: e.to_string(),
+            })),
         }
     } else {
         // Tenant service renewal path.
@@ -192,14 +236,12 @@ pub(super) async fn handle_renew_certificate(
                 s
             }
             _ => {
-                let err = ControllerMessage::Error(ErrorPayload {
-                    code: ErrorCode::Forbidden,
-                    message: "service is not approved".to_string(),
-                });
-                if let Some(json) = serialize_controller_msg(out_seq, err) {
-                    let _ = sink.send(Message::Text(json.into())).await;
-                }
-                return LoopAction::Break;
+                return ProcessorResponse::reply_and_break(ControllerMessage::Error(
+                    ErrorPayload {
+                        code: ErrorCode::Forbidden,
+                        message: "service is not approved".to_string(),
+                    },
+                ));
             }
         };
 
@@ -213,14 +255,6 @@ pub(super) async fn handle_renew_certificate(
         .await
         {
             Ok(bundle) => {
-                let cert_msg = ControllerMessage::Certificate(CertificatePayload {
-                    cert_pem: bundle.cert_pem,
-                    not_after: bundle.not_after,
-                });
-                if let Some(json) = serialize_controller_msg(out_seq, cert_msg) {
-                    let _ = sink.send(Message::Text(json.into())).await;
-                }
-
                 // Revoke old certificate.
                 if let Err(e) = revoke_certificate(
                     state.db(),
@@ -253,19 +287,17 @@ pub(super) async fn handle_renew_certificate(
                     old_serial = %cert.serial,
                     "certificate renewed, old cert revoked"
                 );
-                let _ = close_with_reason(sink, CloseReason::CertificateRotated).await;
-                LoopAction::Break
-            }
-            Err(e) => {
-                let err = ControllerMessage::Error(ErrorPayload {
-                    code: ErrorCode::CertificateError,
-                    message: e.to_string(),
+
+                let cert_msg = ControllerMessage::Certificate(CertificatePayload {
+                    cert_pem: bundle.cert_pem,
+                    not_after: bundle.not_after,
                 });
-                if let Some(json) = serialize_controller_msg(out_seq, err) {
-                    let _ = sink.send(Message::Text(json.into())).await;
-                }
-                LoopAction::Break
+                ProcessorResponse::reply_and_close(cert_msg, CloseReason::CertificateRotated)
             }
+            Err(e) => ProcessorResponse::reply_and_break(ControllerMessage::Error(ErrorPayload {
+                code: ErrorCode::CertificateError,
+                message: e.to_string(),
+            })),
         }
     }
 }
@@ -278,17 +310,11 @@ pub(super) async fn handle_renew_certificate(
 /// trigger discovery, refresh `linked_host_ids`.
 #[tracing::instrument(skip_all, fields(%service_id, host_count = payload.hosts.len()))]
 pub(super) async fn handle_report_hosts(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    out_seq: &mut OutgoingSeq,
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     payload: &ReportHostsPayload,
-    linked_host_ids: &mut HashSet<uuid::Uuid>,
-) -> LoopAction {
-    // Suppress unused-variable warnings -- sink and out_seq are part of the
-    // standard handler signature but not needed for ReportHosts.
-    let _ = (sink, out_seq);
-
+    linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+) -> ProcessorResponse {
     tracing::debug!(
         %service_id,
         capabilities = ?payload.capabilities,
@@ -300,7 +326,7 @@ pub(super) async fn handle_report_hosts(
         .await
     {
         Ok(Some(s)) => s,
-        _ => return LoopAction::Continue,
+        _ => return ProcessorResponse::cont(),
     };
 
     // Update client_version.
@@ -357,16 +383,17 @@ pub(super) async fn handle_report_hosts(
 
     // Refresh cached host IDs.
     if let Ok(ids) = load_linked_host_ids(state.db(), service_id).await {
-        *linked_host_ids = ids;
+        *linked_host_ids.lock() = ids;
     }
 
     // Notify MQTT services that this agent's hosts are online.
-    if !linked_host_ids.is_empty() {
+    let current_ids = linked_host_ids.lock().clone();
+    if !current_ids.is_empty() {
         let now = time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_default();
         let agent_version = payload.agent_version.clone();
-        let updates: Vec<HostConnectivityUpdate> = linked_host_ids
+        let updates: Vec<HostConnectivityUpdate> = current_ids
             .iter()
             .map(|&host_id| {
                 HostConnectivityUpdate::online(
@@ -382,7 +409,7 @@ pub(super) async fn handle_report_hosts(
             .await;
     }
 
-    LoopAction::Continue
+    ProcessorResponse::cont()
 }
 
 // ---------------------------------------------------------------------------
@@ -396,7 +423,7 @@ pub(super) async fn handle_version_check_results(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     payload: &VersionCheckResultsPayload,
-) -> LoopAction {
+) -> ProcessorResponse {
     tracing::debug!(
         %service_id,
         count = payload.results.len(),
@@ -414,7 +441,7 @@ pub(super) async fn handle_version_check_results(
                 error = %e,
                 "failed to look up service hosts"
             );
-            return LoopAction::Continue;
+            return ProcessorResponse::cont();
         }
     };
 
@@ -423,7 +450,7 @@ pub(super) async fn handle_version_check_results(
             %service_id,
             "no hosts linked, skipping version updates"
         );
-        return LoopAction::Continue;
+        return ProcessorResponse::cont();
     }
 
     let now = time::OffsetDateTime::now_utc();
@@ -457,10 +484,6 @@ pub(super) async fn handle_version_check_results(
 
         let software_item_id = result.software_item_id;
 
-        // Query all host_software_item rows for this software item that belong to
-        // this service's hosts in one round-trip. This replaces the old per-host
-        // loop that issued one SELECT per host and logged "not found" for the
-        // many hosts that don't have this software item.
         let matching_rows = host_software_item::Entity::find()
             .filter(host_software_item::Column::HostId.is_in(host_ids.clone()))
             .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
@@ -592,7 +615,7 @@ pub(super) async fn handle_version_check_results(
             .await;
     }
 
-    LoopAction::Continue
+    ProcessorResponse::cont()
 }
 
 // ---------------------------------------------------------------------------
@@ -607,7 +630,7 @@ pub(super) async fn handle_discovery_results(
     payload: DiscoveryResultsPayload,
     pagination: Option<&ReportPagination>,
     report_tracker: &mut ReportTracker,
-) -> LoopAction {
+) -> ProcessorResponse {
     tracing::debug!(
         %service_id,
         host_machine_id = %payload.host_machine_id,
@@ -627,7 +650,7 @@ pub(super) async fn handle_discovery_results(
                     error = %e,
                     "invalid pagination for DiscoveryResults"
                 );
-                return LoopAction::Continue;
+                return ProcessorResponse::cont();
             }
         }
     } else {
@@ -683,9 +706,6 @@ pub(super) async fn handle_discovery_results(
                     "failed to process discovery results"
                 );
             } else {
-                // Emit the notification only on the final page (or for
-                // non-paginated messages). For intermediate pages, accumulate
-                // the count in the tracker.
                 match page_outcome {
                     PageOutcome::Final {
                         accumulated_discovered_count,
@@ -729,7 +749,7 @@ pub(super) async fn handle_discovery_results(
         );
     }
 
-    LoopAction::Continue
+    ProcessorResponse::cont()
 }
 
 // ---------------------------------------------------------------------------
@@ -737,17 +757,15 @@ pub(super) async fn handle_discovery_results(
 // ---------------------------------------------------------------------------
 
 /// Handle a `ReportPluginConfig` message: find or create a plugin config and
-/// send the response back to the service.
+/// return the response message.
 ///
 /// Idempotent: if a config with the same `(tenant_id, plugin_type, name)`
 /// already exists, the existing ID is returned without creating a duplicate.
 pub(super) async fn handle_report_plugin_config(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    out_seq: &mut OutgoingSeq,
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     payload: &ReportPluginConfigPayload,
-) -> LoopAction {
+) -> ProcessorResponse {
     let request_id = payload.request_id.clone();
 
     // Validate the plugin type is known
@@ -768,11 +786,9 @@ pub(super) async fn handle_report_plugin_config(
                 "error": format!("invalid plugin config: {e}"),
             }))
             .expect("ReportPluginConfigResponsePayload JSON is always valid");
-        let resp = ControllerMessage::ReportPluginConfigResponse(resp_payload);
-        if let Some(json) = serialize_controller_msg(out_seq, resp) {
-            let _ = sink.send(Message::Text(json.into())).await;
-        }
-        return LoopAction::Continue;
+        return ProcessorResponse::reply(ControllerMessage::ReportPluginConfigResponse(
+            resp_payload,
+        ));
     }
 
     // Resolve tenant_id from the service
@@ -783,11 +799,11 @@ pub(super) async fn handle_report_plugin_config(
         Ok(Some(svc)) => svc.tenant_id,
         Ok(None) => {
             tracing::warn!(%service_id, "ReportPluginConfig: service not found");
-            return LoopAction::Continue;
+            return ProcessorResponse::cont();
         }
         Err(e) => {
             tracing::warn!(%service_id, error = %e, "ReportPluginConfig: DB error");
-            return LoopAction::Continue;
+            return ProcessorResponse::cont();
         }
     };
 
@@ -810,7 +826,6 @@ pub(super) async fn handle_report_plugin_config(
                 name = %payload.name,
                 "ReportPluginConfig: config created/found"
             );
-            // Use JSON deserialization because the payload is `#[non_exhaustive]`.
             let resp_payload: ReportPluginConfigResponsePayload =
                 serde_json::from_value(serde_json::json!({
                     "request_id": request_id,
@@ -837,9 +852,5 @@ pub(super) async fn handle_report_plugin_config(
         }
     };
 
-    if let Some(json) = serialize_controller_msg(out_seq, resp) {
-        let _ = sink.send(Message::Text(json.into())).await;
-    }
-
-    LoopAction::Continue
+    ProcessorResponse::reply(resp)
 }

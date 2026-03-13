@@ -17,7 +17,7 @@ use uptrakit_internal_wire::{
 };
 use uptrakit_web_api_types::settings_mqtt::MqttClientConnectionStatus as ApiMqttClientConnectionStatus;
 
-use super::LoopAction;
+use super::messages::ProcessorResponse;
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
 use crate::queries::update_types::ActorType;
@@ -212,7 +212,7 @@ pub(super) async fn handle_release_tenants(
     service_id: uuid::Uuid,
     payload: &MqttReleaseTenantsPayload,
     lease_coordinator: Option<&MqttLeaseCoordinator>,
-) -> LoopAction {
+) -> ProcessorResponse {
     // Suppress unused-variable warning -- state is part of the standard
     // handler signature but not directly used here.
     let _ = state;
@@ -234,7 +234,7 @@ pub(super) async fn handle_release_tenants(
         "MQTT service released mqtt clients"
     );
 
-    LoopAction::Continue
+    ProcessorResponse::cont()
 }
 
 // ---------------------------------------------------------------------------
@@ -246,7 +246,7 @@ pub(super) async fn handle_release_tenants(
 pub(super) async fn handle_mqtt_client_status(
     state: &Arc<AppState>,
     payload: &MqttClientStatusPayload,
-) -> LoopAction {
+) -> ProcessorResponse {
     let status = match payload.status {
         WireMqttClientConnectionStatus::Online => ApiMqttClientConnectionStatus::Online,
         WireMqttClientConnectionStatus::Offline => ApiMqttClientConnectionStatus::Offline,
@@ -267,7 +267,7 @@ pub(super) async fn handle_mqtt_client_status(
         );
     }
 
-    LoopAction::Continue
+    ProcessorResponse::cont()
 }
 
 // ---------------------------------------------------------------------------
@@ -278,12 +278,10 @@ pub(super) async fn handle_mqtt_client_status(
 /// update for host.
 #[tracing::instrument(skip_all)]
 pub(super) async fn handle_mqtt_trigger_update(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    out_seq: &mut OutgoingSeq,
     state: &Arc<AppState>,
     payload: &MqttUpdateTriggerPayload,
     mqtt_context: Option<&MqttContext>,
-) -> LoopAction {
+) -> ProcessorResponse {
     // Validate tenant is assigned to this MQTT service.
     let tenant_assigned = mqtt_context
         .map(|mctx| {
@@ -294,14 +292,10 @@ pub(super) async fn handle_mqtt_trigger_update(
         .unwrap_or(false);
 
     if !tenant_assigned {
-        let err_msg = ControllerMessage::Error(ErrorPayload {
+        return ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
             code: ErrorCode::BadRequest,
             message: "tenant not assigned to this MQTT service".to_string(),
-        });
-        if let Some(json) = serialize_controller_msg(out_seq, err_msg) {
-            let _ = sink.send(Message::Text(json.into())).await;
-        }
-        return LoopAction::Continue;
+        }));
     }
 
     match crate::queries::update_triggers::trigger_update_for_host(
@@ -344,17 +338,14 @@ pub(super) async fn handle_mqtt_trigger_update(
                 host_id = %payload.host_id,
                 "MQTT-triggered update failed"
             );
-            let err_msg = ControllerMessage::Error(ErrorPayload {
+            return ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
                 code: ErrorCode::BadRequest,
                 message: err.to_string(),
-            });
-            if let Some(json) = serialize_controller_msg(out_seq, err_msg) {
-                let _ = sink.send(Message::Text(json.into())).await;
-            }
+            }));
         }
     }
 
-    LoopAction::Continue
+    ProcessorResponse::cont()
 }
 
 // ---------------------------------------------------------------------------
@@ -365,12 +356,10 @@ pub(super) async fn handle_mqtt_trigger_update(
 /// all outdated software items on a host.
 #[tracing::instrument(skip_all)]
 pub(super) async fn handle_mqtt_trigger_host_batch_update(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    out_seq: &mut OutgoingSeq,
     state: &Arc<AppState>,
     payload: &MqttTriggerHostBatchUpdatePayload,
     mqtt_context: Option<&MqttContext>,
-) -> LoopAction {
+) -> ProcessorResponse {
     // Validate tenant is assigned to this MQTT service.
     let tenant_assigned = mqtt_context
         .map(|mctx| {
@@ -381,14 +370,10 @@ pub(super) async fn handle_mqtt_trigger_host_batch_update(
         .unwrap_or(false);
 
     if !tenant_assigned {
-        let err_msg = ControllerMessage::Error(ErrorPayload {
+        return ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
             code: ErrorCode::BadRequest,
             message: "tenant not assigned to this MQTT service".to_string(),
-        });
-        if let Some(json) = serialize_controller_msg(out_seq, err_msg) {
-            let _ = sink.send(Message::Text(json.into())).await;
-        }
-        return LoopAction::Continue;
+        }));
     }
 
     // Find outdated items for this host and create a batch.
@@ -413,26 +398,18 @@ pub(super) async fn handle_mqtt_trigger_host_batch_update(
                 host_id = %payload.host_id,
                 "MQTT-triggered host batch update: failed to find outdated items"
             );
-            let err_msg = ControllerMessage::Error(ErrorPayload {
+            return ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
                 code: ErrorCode::BadRequest,
                 message: err.to_string(),
-            });
-            if let Some(json) = serialize_controller_msg(out_seq, err_msg) {
-                let _ = sink.send(Message::Text(json.into())).await;
-            }
-            return LoopAction::Continue;
+            }));
         }
     };
 
     if outdated.is_empty() {
-        let err_msg = ControllerMessage::Error(ErrorPayload {
+        return ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
             code: ErrorCode::BadRequest,
             message: "no outdated items found on this host".to_string(),
-        });
-        if let Some(json) = serialize_controller_msg(out_seq, err_msg) {
-            let _ = sink.send(Message::Text(json.into())).await;
-        }
-        return LoopAction::Continue;
+        }));
     }
 
     let params = crate::queries::update_batches::CreateBatchParams {
@@ -464,13 +441,10 @@ pub(super) async fn handle_mqtt_trigger_host_batch_update(
                     .push_software_states_for_tenant(state.db(), payload.tenant_id)
                     .await;
             } else {
-                let err_msg = ControllerMessage::Error(ErrorPayload {
+                return ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
                     code: ErrorCode::BadRequest,
                     message: "no eligible items for batch update".to_string(),
-                });
-                if let Some(json) = serialize_controller_msg(out_seq, err_msg) {
-                    let _ = sink.send(Message::Text(json.into())).await;
-                }
+                }));
             }
         }
         Err(err) => {
@@ -479,15 +453,12 @@ pub(super) async fn handle_mqtt_trigger_host_batch_update(
                 host_id = %payload.host_id,
                 "MQTT-triggered host batch update failed"
             );
-            let err_msg = ControllerMessage::Error(ErrorPayload {
+            return ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
                 code: ErrorCode::BadRequest,
                 message: err.to_string(),
-            });
-            if let Some(json) = serialize_controller_msg(out_seq, err_msg) {
-                let _ = sink.send(Message::Text(json.into())).await;
-            }
+            }));
         }
     }
 
-    LoopAction::Continue
+    ProcessorResponse::cont()
 }

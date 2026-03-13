@@ -347,6 +347,7 @@ pub(crate) async fn record_system_service_activity(
 /// Certificate identity information extracted from the mTLS handshake.
 ///
 /// Bundled into a struct to keep function signatures under the argument limit.
+#[derive(Clone)]
 pub(crate) struct CertIdentity {
     pub serial: String,
     pub ca_fingerprint: String,
