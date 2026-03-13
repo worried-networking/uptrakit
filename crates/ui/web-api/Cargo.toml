@@ -47,7 +47,7 @@ uptrakit-shared-db = { workspace = true }
 uptrakit-update-hooks = { workspace = true }
 uptrakit-shared-types = { workspace = true, features = ["openapi"] }
 uptrakit-internal-wire = { workspace = true }
-uptrakit-plugin-infrastructure-registry = { workspace = true }
+uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["notifications"] }
 uptrakit-command = { workspace = true }
 rand = { workspace = true }
 client-ip = { workspace = true, features = ["forwarded-header"] }
