@@ -226,14 +226,11 @@ async fn load_plugins(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> Vec<St
         plugin_type: String,
     }
 
-    // Join host_software_item_plugins -> plugin_configs to collect distinct plugin types.
+    // Read plugin_type directly from host_software_item_plugins; no join to plugin_configs
+    // is needed, and an INNER JOIN would silently drop rows where plugin_config_id IS NULL.
     let rows: Vec<PcRow> = HostSoftwareItemPlugin::find()
         .select_only()
-        .column(plugin_config::Column::PluginType)
-        .join(
-            sea_orm::JoinType::InnerJoin,
-            host_software_item_plugin::Relation::PluginConfig.def(),
-        )
+        .column(host_software_item_plugin::Column::PluginType)
         .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
         .into_model::<PcRow>()
         .all(db)
@@ -654,15 +651,13 @@ pub async fn list_software_items(
         .map(|row| (row.software_item_id, row.count as u64))
         .collect();
 
-    // Bulk-load plugin types for all items via JOIN through host_software_item_plugins.
+    // Bulk-load plugin types for all items directly from host_software_item_plugins.
+    // plugin_type is stored on the row itself; no join to plugin_configs is needed, and
+    // an INNER JOIN would silently drop rows where plugin_config_id IS NULL.
     let plugin_type_rows: Vec<ItemPluginType> = HostSoftwareItemPlugin::find()
         .select_only()
         .column(host_software_item_plugin::Column::SoftwareItemId)
-        .column(plugin_config::Column::PluginType)
-        .join(
-            sea_orm::JoinType::InnerJoin,
-            host_software_item_plugin::Relation::PluginConfig.def(),
-        )
+        .column(host_software_item_plugin::Column::PluginType)
         .filter(host_software_item_plugin::Column::SoftwareItemId.is_in(item_ids.clone()))
         .into_model::<ItemPluginType>()
         .all(tenant_db.db())
