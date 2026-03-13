@@ -54,16 +54,18 @@
 	}
 </script>
 
-<div class="card mb-6 border-2 border-error-500 p-6">
-	<h2 class="h3 mb-2 text-error-500">Danger Zone</h2>
-	<p class="mb-4 text-surface-600 dark:text-surface-400">
-		Permanently delete all hosts, software items, plugin configurations, host tags, and update history. This action
-		cannot be undone. Services, users, enrollment tokens, and settings are preserved.
-	</p>
-	<button class="btn preset-filled-error-500" onclick={openDialog} disabled={!getIsOnline()}> Reset Data </button>
-	{#if !getIsOnline()}
-		<span class="text-warning-500 text-sm ml-2">Offline</span>
-	{/if}
+<div class="danger-zone-wrap mb-6">
+	<div class="card border-2 border-error-500 p-6">
+		<h2 class="h3 mb-2 text-error-500">Danger Zone</h2>
+		<p class="mb-4 text-surface-600 dark:text-surface-400">
+			Permanently delete all hosts, software items, plugin configurations, host tags, and update history. This action
+			cannot be undone. Services, users, enrollment tokens, and settings are preserved.
+		</p>
+		<button class="btn preset-filled-error-500" onclick={openDialog} disabled={!getIsOnline()}> Reset Data </button>
+		{#if !getIsOnline()}
+			<span class="text-warning-500 text-sm ml-2">Offline</span>
+		{/if}
+	</div>
 </div>
 
 {#if showDialog}
@@ -129,3 +131,17 @@
 		{/snippet}
 	</Modal>
 {/if}
+
+<style>
+	.danger-zone-wrap {
+		/* Light: amber + near-black — classic hazard tape */
+		background-image: repeating-linear-gradient(-45deg, #1c1100 0px, #1c1100 12px, #f59e0b 12px, #f59e0b 24px);
+		border-radius: var(--radius-container);
+		padding: 0.375rem;
+	}
+
+	/* Dark mode: deeper amber + pitch black — avoids eye-searing brightness */
+	:global(.dark) .danger-zone-wrap {
+		background-image: repeating-linear-gradient(-45deg, #090400 0px, #090400 12px, #b45309 12px, #b45309 24px);
+	}
+</style>
