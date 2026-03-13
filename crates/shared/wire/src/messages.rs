@@ -415,6 +415,12 @@ pub enum ControllerMessage {
     ///
     /// **Security**: session-targeted, NEVER published to NATS.
     UpdateStdinData(UpdateStdinDataPayload),
+    /// Controller → Services: reset all tenant-scoped data.
+    ///
+    /// Broadcast to services with the `ResetData` capability after the
+    /// controller has cleared the database. Services should truncate their
+    /// local data stores (e.g. SSH host list, Proxmox state).
+    ResetData,
     // -- MQTT-specific --
     Registered(MqttRegisteredPayload),
     TenantAssignments(MqttTenantAssignmentsPayload),
@@ -515,6 +521,7 @@ impl ControllerMessage {
                 | ControllerMessage::ExtensionRequest(_)
                 | ControllerMessage::ExtensionResponse(_)
                 | ControllerMessage::UpdateStdinData(_)
+                | ControllerMessage::ResetData
                 | ControllerMessage::Unknown
         )
     }

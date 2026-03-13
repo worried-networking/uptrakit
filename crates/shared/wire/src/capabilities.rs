@@ -105,6 +105,11 @@ pub enum Capability {
     ///
     /// Wire string: `interactive_updates`.
     InteractiveUpdates,
+    /// Service supports the reset-data protocol: truncates local data stores
+    /// when the controller broadcasts a data reset.
+    ///
+    /// Wire string: `reset_data`.
+    ResetData,
     /// Unknown capability from a newer peer; never participates in intersection.
     ///
     /// Provides forward compatibility: a newer peer may advertise capabilities
@@ -130,6 +135,7 @@ impl Capability {
             Self::SystemService => "system_service",
             Self::UiExtensions => "ui_extensions",
             Self::InteractiveUpdates => "interactive_updates",
+            Self::ResetData => "reset_data",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -167,6 +173,7 @@ impl FromStr for Capability {
             "system_service" => Self::SystemService,
             "ui_extensions" => Self::UiExtensions,
             "interactive_updates" => Self::InteractiveUpdates,
+            "reset_data" => Self::ResetData,
             other => {
                 tracing::debug!(capability = other, "received unknown capability from peer");
                 Self::Other(other.to_string())

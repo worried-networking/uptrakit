@@ -837,6 +837,21 @@ operations:
       This message is session-targeted and is NOT NATS-publishable. It is
       only sent to agents that advertise the `InteractiveUpdates` capability.
 
+  receiveResetData:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/resetData"
+    summary: Service receives a data-reset broadcast
+    description: |
+      Broadcast by the controller to all connected services with the
+      `ResetData` capability after the controller has cleared all
+      tenant-scoped data from the database. Services should truncate
+      their local data stores (e.g. SSH host list, Proxmox state).
+
+      This message is session-targeted and is NOT NATS-publishable.
+
   sendStdinAttention:
     action: send
     channel:
@@ -1394,6 +1409,22 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/updateStdinDataPayload"
+
+    resetData:
+      name: reset_data
+      title: Reset Data Message
+      summary: Controller broadcasts a data-reset signal to connected services
+      description: |
+        Sent by the controller after clearing all tenant-scoped data from the
+        database. Services with the `ResetData` capability should truncate
+        their local data stores (e.g. SSH agent clears its host list and
+        Proxmox state). The message carries no payload beyond the standard
+        envelope fields.
+
+        This message is session-targeted and is NOT NATS-publishable.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/resetDataPayload"
 
     stdinAttention:
       name: stdin_attention
@@ -4358,6 +4389,28 @@ components:
             - 2
             - 15
 
+    resetDataPayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Wire protocol version.
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: reset_data
+          description: Message type discriminator
+
     stdinAttentionPayload:
       type: object
       required:
@@ -4524,9 +4577,9 @@ components:
             `software_discovery`, `update_hooks`, `graceful_shutdown`,
             `mqtt_bridge`, `ssh_remote`, `scheduler`, `database_access`,
             `nats_access`, `master_key_access`, `ca_management`,
-            `system_service`, `ui_extensions`, and `interactive_updates`. Unknown
-            strings are stored as forward-compat `Other` variants and are ignored
-            for gating decisions.
+            `system_service`, `ui_extensions`, `interactive_updates`, and
+            `reset_data`. Unknown strings are stored as forward-compat `Other`
+            variants and are ignored for gating decisions.
 
     extensionRegisterPayload:
       type: object

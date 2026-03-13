@@ -2839,6 +2839,19 @@ mod tests {
         assert_eq!(from_str, cap);
     }
 
+    #[test]
+    fn reset_data_capability_roundtrip() {
+        let cap = Capability::ResetData;
+        assert_eq!(cap.as_str(), "reset_data");
+        assert!(cap.is_known());
+        let json = serde_json::to_string(&cap).unwrap();
+        assert_eq!(json, r#""reset_data""#);
+        let parsed: Capability = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, cap);
+        let from_str: Capability = "reset_data".parse().unwrap();
+        assert_eq!(from_str, cap);
+    }
+
     // =========================================================================
     // ServiceCredentials and RequestCaRotation payloads
     // =========================================================================
@@ -3019,6 +3032,25 @@ mod tests {
         assert!(
             msg.is_nats_publishable(),
             "SetUpdateFreeze contains no credentials and should be NATS-publishable"
+        );
+    }
+
+    // ── ResetData tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn reset_data_serialization_roundtrip() {
+        let msg = ControllerMessage::ResetData;
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(json, r#"{"type":"reset_data"}"#);
+        let roundtripped: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(msg, roundtripped);
+    }
+
+    #[test]
+    fn reset_data_is_not_nats_publishable() {
+        assert!(
+            !ControllerMessage::ResetData.is_nats_publishable(),
+            "ResetData is an internal broadcast and must not be published to NATS"
         );
     }
 
