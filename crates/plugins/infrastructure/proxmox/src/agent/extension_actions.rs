@@ -38,12 +38,15 @@ async fn handle_list_discovered_guests(
         .invoke(
             "proxmox.hosts",
             "list-all-unmatched",
-            serde_json::Value::Object(serde_json::Map::new()),
+            json!({ "per_page": 1000 }),
         )
         .await;
 
     match response {
-        Ok(proxy_resp) if proxy_resp.success => make_success_response(request_id, proxy_resp.data),
+        Ok(proxy_resp) if proxy_resp.success => {
+            let options = proxy_resp.data["items"].clone();
+            make_success_response(request_id, json!({ "options": options }))
+        }
         Ok(proxy_resp) => {
             tracing::debug!(
                 error = ?proxy_resp.error,
