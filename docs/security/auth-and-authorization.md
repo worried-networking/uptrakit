@@ -113,35 +113,35 @@ let permissions = get_user_permissions(db, user_id)
 See [Error Handling — Pattern 20](../development/error-handling.md#pattern-20-db-errors-in-authentication-and-authorization-handlers)
 for the full pattern with examples.
 
-## OIDC Link Token URL Exposure
+## OIDC Link Token URL Handling
 
-**Risk level:** Low (accepted)
+**Risk level:** Low
 
 When OIDC account linking is required the backend redirects to
-`/login?link_required=true&link_token=<token>&email=<email>`. The `link_token` is therefore
-visible in:
-
-- The browser address bar
-- Browser history
-- Server access logs
+`/login?link_required=true&email=<email>#link_token=<token>`. The sensitive `link_token`
+is placed in the URL fragment instead of the query string, so it is not sent to the server
+and does not appear in controller access logs or `Referer` headers.
 
 ### Mitigations in place
 
 1. **Single-use, short-lived**: the token is consumed atomically from
    `pending_account_links` on first use and expires server-side within a short window.
-2. **Same-origin redirect**: the redirect is to the same origin (`/login`), so there
+2. **Fragment transport**: the browser keeps the token client-side in the fragment, removing
+   it from server-side request logs and request targets.
+3. **Same-origin redirect**: the redirect is to the same origin (`/login`), so there
    is no cross-origin referrer leakage.
-3. **`Referrer-Policy: no-referrer`** is set on the redirect response in
+4. **`Referrer-Policy: no-referrer`** is set on the redirect response in
    `crates/ui/web-api/src/routes/oidc_auth.rs` so the token URL is not forwarded in
    `Referer` headers when the browser subsequently loads third-party resources.
-4. **User already authenticated**: the token only exists after the user has successfully
+5. **User already authenticated**: the token only exists after the user has successfully
    completed OIDC authentication; it does not grant initial access.
 
 ### Residual risk
 
-The token remains in browser history and server access logs for the lifetime of those
-logs. Operators should ensure access-log retention policies are appropriate for their
-environment.
+The token still appears in the browser address bar and browser history until the user
+leaves or rewrites the page URL. Fragment transport removes server-side logging
+exposure, but a compromised or observed client can still capture the token during its
+validity window.
 
 ## Permissions Model - Detailed
 

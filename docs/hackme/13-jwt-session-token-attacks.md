@@ -40,9 +40,10 @@
 ### Session fixation via OIDC link token
 
 1. The OIDC link token is exposed in the browser URL bar during the account linking
-   flow (`/login?link_required=true&link_token=<token>`).
-2. The attacker captures this URL from browser history, server access logs, or
-   shoulder surfing.
+   flow (`/login?link_required=true&email=<email>#link_token=<token>`).
+2. Because the token is in the fragment, the attacker cannot recover it from server
+   access logs or `Referer` headers, but can still capture it from browser history,
+   screenshots, or shoulder surfing.
 3. The attacker uses the link token to link their OIDC identity to the victim's
    account.
 
@@ -78,8 +79,11 @@
   not plaintext. Database access alone does not yield usable tokens.
 - **Single-use link tokens.** OIDC link tokens are stored as SHA-256 hashes, have
   a 10-minute TTL, and are consumed atomically on first use.
-- **`Referrer-Policy: no-referrer`.** Set on OIDC redirect responses to prevent
-  link token leakage via the `Referer` header.
+- **Fragment transport.** The OIDC link token is delivered in the URL fragment
+  (`#link_token=...`) instead of the query string, so it is not sent to the
+  server and does not appear in request logs.
+- **`Referrer-Policy: no-referrer`.** Set on OIDC redirect responses as
+  defense-in-depth for the post-login page load.
 - **HMAC-SHA256 JWT signing.** The signing key is 64 bytes (512 bits) of CSPRNG
   randomness, stored encrypted in the database.
 
@@ -91,9 +95,10 @@
 - **No rate limit on API token path.** API tokens bypass the auth rate limiter. An
   attacker with a stolen API token can make unlimited requests without triggering rate
   limits.
-- **Link token URL exposure.** The OIDC link token appears in the browser address bar,
-  browser history, and server access logs. Despite `Referrer-Policy` and single-use
-  semantics, the 10-minute window provides an exploitation opportunity.
+- **Link token local exposure.** The OIDC link token still appears in the browser
+  address bar and browser history after the redirect. Fragment transport removes
+  server-side leakage, but the 10-minute window still provides an exploitation
+  opportunity on a compromised or observed client.
 - **Permission staleness window.** After a role change, the user's old permissions
   remain embedded in active JWT tokens for up to 15 minutes. During this window, a
   demoted user retains elevated access, and a promoted user lacks new permissions.

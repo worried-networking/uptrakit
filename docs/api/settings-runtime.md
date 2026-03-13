@@ -98,7 +98,7 @@ returns `true` when mode is `Invite` AND (`is_first_user` OR `require_token_for_
 
 1. OIDC callback detects a new user would be created AND `needs_token_for_oidc()` returns `true`.
 1. OIDC claims are stored in `pending_oidc_registrations` via `OidcRegistrationStore` (10-minute TTL).
-1. User is redirected to `/login?registration_token_required=true&registration_code={code}`.
+1. User is redirected to `/login#registration_token_required=true&registration_code={code}`.
 1. Frontend shows a token input form.
 1. User submits the token to `POST /api/v1/auth/oidc/complete-registration`.
 1. Backend peeks at the pending registration via `get()` (non-destructive), validates the token. If the token is

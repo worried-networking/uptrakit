@@ -531,8 +531,6 @@ pub async fn oidc_callback(
                     return Redirect::to("/login?error=oidc_internal_error").into_response();
                 }
             };
-            let encoded_email =
-                percent_encoding::utf8_percent_encode(&email, percent_encoding::NON_ALPHANUMERIC);
             // Suppress Referer on the link-token redirect so the token URL is not
             // forwarded to any third-party resource loaded by the login page.
             let mut link_headers = HeaderMap::new();
@@ -542,9 +540,7 @@ pub async fn oidc_callback(
             );
             (
                 link_headers,
-                Redirect::to(&format!(
-                    "/login?link_required=true&link_token={link_token}&email={encoded_email}"
-                )),
+                Redirect::to(&build_link_required_redirect(&email, &link_token, None)),
             )
                 .into_response()
         }
@@ -588,8 +584,6 @@ pub async fn oidc_callback(
                     return Redirect::to("/login?error=oidc_internal_error").into_response();
                 }
             };
-            let encoded_email =
-                percent_encoding::utf8_percent_encode(&email, percent_encoding::NON_ALPHANUMERIC);
             // Suppress Referer on the link-token redirect so the token URL is not
             // forwarded to any third-party resource loaded by the login page.
             let mut link_headers = HeaderMap::new();
@@ -599,8 +593,10 @@ pub async fn oidc_callback(
             );
             (
                 link_headers,
-                Redirect::to(&format!(
-                    "/login?link_required=true&link_token={link_token}&email={encoded_email}&link_provider_id={existing_provider_id}"
+                Redirect::to(&build_link_required_redirect(
+                    &email,
+                    &link_token,
+                    Some(existing_provider_id),
                 )),
             )
                 .into_response()
@@ -1205,6 +1201,26 @@ async fn store_pending_link(
     Ok(link_token)
 }
 
+fn build_link_required_redirect(
+    email: &str,
+    link_token: &str,
+    existing_provider_id: Option<Uuid>,
+) -> String {
+    let encoded_email =
+        percent_encoding::utf8_percent_encode(email, percent_encoding::NON_ALPHANUMERIC);
+    let encoded_link_token =
+        percent_encoding::utf8_percent_encode(link_token, percent_encoding::NON_ALPHANUMERIC);
+
+    match existing_provider_id {
+        Some(provider_id) => format!(
+            "/login?link_required=true&email={encoded_email}&link_provider_id={provider_id}#link_token={encoded_link_token}"
+        ),
+        None => format!(
+            "/login?link_required=true&email={encoded_email}#link_token={encoded_link_token}"
+        ),
+    }
+}
+
 fn base_url_from_headers(headers: &HeaderMap) -> Option<String> {
     let origin = headers
         .get("origin")
@@ -1223,8 +1239,9 @@ fn base_url_from_headers(headers: &HeaderMap) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::base_url_from_headers;
+    use super::{base_url_from_headers, build_link_required_redirect};
     use axum::http::{HeaderMap, HeaderValue};
+    use uuid::Uuid;
 
     #[test]
     fn base_url_prefers_origin() {
@@ -1250,5 +1267,24 @@ mod tests {
         let headers = HeaderMap::new();
         let base = base_url_from_headers(&headers);
         assert!(base.is_none());
+    }
+
+    #[test]
+    fn link_redirect_uses_fragment_for_token() {
+        let redirect = build_link_required_redirect("user@example.com", "link/token", None);
+        assert_eq!(
+            redirect,
+            "/login?link_required=true&email=user%40example%2Ecom#link_token=link%2Ftoken"
+        );
+    }
+
+    #[test]
+    fn link_redirect_keeps_provider_id_in_query() {
+        let provider_id = Uuid::nil();
+        let redirect = build_link_required_redirect("user@example.com", "token", Some(provider_id));
+        assert_eq!(
+            redirect,
+            "/login?link_required=true&email=user%40example%2Ecom&link_provider_id=00000000-0000-0000-0000-000000000000#link_token=token"
+        );
     }
 }
