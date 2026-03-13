@@ -19,7 +19,7 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{
 use uptrakit_plugin_infrastructure_core::error::{PluginError, Result};
 
 use uptrakit_extension_framework::{
-    ActionDef, ActionUi, FieldDef, FieldType, FormDef, SelectOption, SelectSource,
+    ActionDef, ActionUi, FieldDef, FieldType, FormDef, SelectSource,
 };
 
 use crate::pve_setup;
@@ -72,25 +72,18 @@ impl PluginBase for ProxmoxAgentPlugin {
 
     fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
         vec![
-            uptrakit_extension_framework::ActionDef::new("list-pve-hosts", "List PVE Hosts")
-                .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
-                .with_timeout(10),
             uptrakit_extension_framework::ActionDef::new(
                 "list-discovered-guests",
                 "List Discovered Guests",
             )
             .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
             .with_timeout(15),
-            bootstrap_proxmox_action(),
             bootstrap_proxmox_guest_action(),
         ]
     }
 
     fn primary_action_ids(&self) -> Vec<String> {
-        vec![
-            "bootstrap-proxmox".to_string(),
-            "bootstrap-proxmox-guest".to_string(),
-        ]
+        vec!["bootstrap-proxmox-guest".to_string()]
     }
 
     #[cfg(feature = "migrations")]
@@ -593,49 +586,6 @@ async fn reconcile_pve_config(
 }
 
 // ── Action definitions ───────────────────────────────────────────────────────
-
-fn bootstrap_proxmox_action() -> ActionDef {
-    ActionDef::new("bootstrap-proxmox", "Bootstrap via Proxmox")
-        .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
-        .with_timeout(120)
-        .with_ui(ActionUi::Form(FormDef::new(vec![
-            FieldDef::new("pve_host_id", "PVE Host")
-                .with_type(FieldType::Select)
-                .required()
-                .with_help_text("PVE node to use as gateway.")
-                .with_select_source(SelectSource::Action {
-                    action_id: "list-pve-hosts".to_string(),
-                }),
-            FieldDef::new("vmid", "Guest VMID")
-                .required()
-                .with_placeholder("100")
-                .with_help_text("VMID of the target container or virtual machine."),
-            FieldDef::new("guest_type", "Guest Type")
-                .with_type(FieldType::Select)
-                .required()
-                .with_default_value("lxc")
-                .with_options(vec![
-                    SelectOption::new("lxc", "LXC Container"),
-                    SelectOption::new("qemu", "QEMU VM"),
-                ]),
-            FieldDef::new("name", "Host Name")
-                .required()
-                .with_placeholder("my-container")
-                .with_help_text("Friendly name for identification."),
-            FieldDef::new("target_username", "Target Username")
-                .with_help_text("User to create/use in the guest.")
-                .with_default_value("uptrakit"),
-            FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
-                .with_type(FieldType::Toggle)
-                .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
-            FieldDef::new("remove_stale_keys", "Remove Stale Keys")
-                .with_type(FieldType::Toggle)
-                .with_help_text(
-                    "Remove existing Uptrakit-managed keys from authorized_keys before \
-                     writing the new entry. Same-service keys are always removed regardless.",
-                ),
-        ])))
-}
 
 fn bootstrap_proxmox_guest_action() -> ActionDef {
     ActionDef::new("bootstrap-proxmox-guest", "Bootstrap Discovered Guest")

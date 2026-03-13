@@ -1,7 +1,6 @@
 //! Extension action handlers for the Proxmox agent infrastructure plugin.
 //!
-//! Handles: `list-pve-hosts`, `list-discovered-guests`, `bootstrap-proxmox`,
-//! `bootstrap-proxmox-guest`.
+//! Handles: `list-discovered-guests`, `bootstrap-proxmox-guest`.
 
 use serde_json::json;
 use uptrakit_extension_framework::{ExtensionRequestPayload, ExtensionResponsePayload};
@@ -17,48 +16,13 @@ pub async fn handle_action(
     request: &ExtensionRequestPayload,
 ) -> Option<ExtensionResponsePayload> {
     match request.action_id.as_str() {
-        "list-pve-hosts" => Some(handle_list_pve_hosts(&request.request_id, ctx).await),
         "list-discovered-guests" => {
             Some(handle_list_discovered_guests(&request.request_id, ctx).await)
-        }
-        "bootstrap-proxmox" => {
-            Some(handle_bootstrap_proxmox(&request.request_id, &request.params, ctx).await)
         }
         "bootstrap-proxmox-guest" => {
             Some(handle_bootstrap_proxmox_guest(&request.request_id, &request.params, ctx).await)
         }
         _ => None,
-    }
-}
-
-// ── list-pve-hosts ───────────────────────────────────────────────────────────
-
-/// List PVE hosts for dynamic select options.
-async fn handle_list_pve_hosts(
-    request_id: &str,
-    ctx: &InfraPluginContext<'_>,
-) -> ExtensionResponsePayload {
-    // We need host names/hostnames from the ssh_hosts table. Since we don't
-    // have direct access to ssh_hosts from the plugin, we query our own
-    // proxmox_host_state table for PVE host_ids and return them.
-    // The agent-ssh wraps this to include host details from its own table.
-    match db_ops::find_pve_hosts(ctx.db).await {
-        Ok(hosts) => {
-            let options: Vec<serde_json::Value> = hosts
-                .into_iter()
-                .map(|h| {
-                    json!({
-                        "value": h.host_id,
-                        "label": h.pve_node_name.unwrap_or_else(|| h.host_id.clone()),
-                    })
-                })
-                .collect();
-            make_success_response(request_id, json!({ "options": options }))
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "failed to list PVE hosts");
-            make_error_response(request_id, "failed to list PVE hosts")
-        }
     }
 }
 
@@ -93,86 +57,6 @@ async fn handle_list_discovered_guests(
                 "list-all-unmatched proxy call failed, returning empty options"
             );
             make_success_response(request_id, json!({ "options": [] }))
-        }
-    }
-}
-
-// ── bootstrap-proxmox ────────────────────────────────────────────────────────
-
-/// Bootstrap a guest via a known PVE host (manual VMID entry).
-async fn handle_bootstrap_proxmox(
-    request_id: &str,
-    params: &serde_json::Value,
-    ctx: &InfraPluginContext<'_>,
-) -> ExtensionResponsePayload {
-    let pve_host_id = match params.get("pve_host_id").and_then(|v| v.as_str()) {
-        Some(id) => id.to_string(),
-        None => return make_error_response(request_id, "missing required field 'pve_host_id'"),
-    };
-
-    let vmid_str = match params.get("vmid").and_then(|v| v.as_str()) {
-        Some(v) => v,
-        None => return make_error_response(request_id, "missing required field 'vmid'"),
-    };
-    let vmid: u32 = match vmid_str.parse() {
-        Ok(v) => v,
-        Err(_) => return make_error_response(request_id, "vmid must be a number"),
-    };
-
-    let guest_type_str = params
-        .get("guest_type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("lxc");
-    match guest_type_str {
-        "lxc" | "qemu" => {}
-        _ => return make_error_response(request_id, "guest_type must be 'lxc' or 'qemu'"),
-    }
-
-    let name = match params.get("name").and_then(|v| v.as_str()) {
-        Some(n) => n.to_string(),
-        None => return make_error_response(request_id, "missing required field 'name'"),
-    };
-
-    let target_username = params
-        .get("target_username")
-        .and_then(|v| v.as_str())
-        .unwrap_or("uptrakit")
-        .to_string();
-
-    let allow_all = param_bool(params, "allow_all");
-    let remove_stale_keys = param_bool(params, "remove_stale_keys");
-    let host_id = uuid::Uuid::now_v7();
-
-    let bootstrap_params = GuestBootstrapParams::new(
-        pve_host_id,
-        vmid,
-        guest_type_str,
-        name,
-        target_username,
-        allow_all,
-        remove_stale_keys,
-        host_id,
-        ctx.service_id,
-    );
-
-    match ctx.guest_bootstrap.bootstrap_guest(bootstrap_params).await {
-        Ok(result) => {
-            tracing::info!(
-                %host_id,
-                hostname = %result.hostname,
-                "Proxmox guest bootstrap completed successfully"
-            );
-            make_success_response(
-                request_id,
-                json!({
-                    "host_id": host_id.to_string(),
-                    "hostname": result.hostname,
-                }),
-            )
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "Proxmox guest bootstrap failed");
-            make_error_response(request_id, &format!("bootstrap failed: {e}"))
         }
     }
 }
