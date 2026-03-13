@@ -17,8 +17,8 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{
 use uptrakit_plugin_infrastructure_registry::{PluginRegistry, create_agent_infra_plugins};
 
 use crate::commands::sudoers::{
-    ResolvedSudoCommand, SudoersContent, detect_is_root, install_helper_script,
-    resolve_command_path, write_sudoers_file,
+    ResolvedSudoCommand, SudoersContent, detect_is_root, ensure_docker_group_membership,
+    install_helper_script, resolve_command_path, write_sudoers_file,
 };
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams};
@@ -224,6 +224,10 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
             tracing::debug!(user = %params.target_username, "user already exists, skipping creation");
         }
     }
+
+    // Configure docker group membership when Docker is installed on the host.
+    println!("Configuring docker group membership...");
+    ensure_docker_group_membership(&executor, &params.target_username, use_sudo).await?;
 
     // Detect home directory.
     let home_cmd = cmd_detect_home(&params.target_username, use_sudo);

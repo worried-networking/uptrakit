@@ -20,7 +20,8 @@ use uptrakit_plugin_infrastructure_registry::{PluginRegistry, create_agent_infra
 
 use crate::commands::sudoers::{
     self, ResolvedSudoCommand, SudoersContent, detect_is_root, detect_sudo_available,
-    install_helper_script, resolve_command_path, write_sudoers_file,
+    ensure_docker_group_membership, install_helper_script, resolve_command_path,
+    write_sudoers_file,
 };
 use crate::db::entity::ssh_host::Model;
 use crate::error::{Error, Result};
@@ -222,6 +223,10 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
     }
 
     let privileged = !is_root;
+
+    // Configure docker group membership when Docker is installed on the host.
+    println!("Configuring docker group membership...");
+    ensure_docker_group_membership(&executor, &host.username, privileged).await?;
 
     // 6. Collect plugin commands + resolve paths + write sudoers.
     let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))

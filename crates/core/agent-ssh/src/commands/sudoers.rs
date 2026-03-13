@@ -207,6 +207,50 @@ pub fn generate_sudoers_content(username: &str, content: &SudoersContent) -> Str
     out
 }
 
+/// Ensure the managed user is a member of the `docker` group when Docker is present.
+///
+/// Steps:
+/// 1. Run `getent group docker` (read-only, no sudo required) to detect Docker.
+/// 2. If the group is absent, log a debug message and return `Ok(())` — non-fatal.
+/// 3. Run `[sudo] usermod -aG docker <username>`.
+/// 4. If `usermod` fails, emit a `tracing::warn!` with the stderr and return
+///    `Ok(())` — also non-fatal (the host may already be a member, or the
+///    command may be missing).
+///
+/// `privileged` mirrors the same flag used by [`write_sudoers_file`]:
+/// `true` when the auth user is non-root and has passwordless sudo, `false`
+/// when the auth user is root.
+pub async fn ensure_docker_group_membership(
+    executor: &dyn RemoteExecutor,
+    username: &str,
+    privileged: bool,
+) -> Result<()> {
+    let check = executor
+        .exec_command("getent group docker")
+        .await
+        .context_to::<Error>()?;
+    if check.exit_code != 0 {
+        tracing::debug!("docker group not found, skipping group membership configuration");
+        return Ok(());
+    }
+
+    let sudo_prefix = if privileged { "sudo " } else { "" };
+    let escaped_username = shell_escape(username);
+    let cmd = format!("{sudo_prefix}usermod -aG docker {escaped_username}");
+    let result = executor.exec_command(&cmd).await.context_to::<Error>()?;
+    if result.exit_code != 0 {
+        tracing::warn!(
+            stderr = result.stderr.trim(),
+            user = username,
+            "failed to add user to docker group (non-fatal)"
+        );
+        return Ok(());
+    }
+
+    tracing::info!(user = username, "added user to docker group");
+    Ok(())
+}
+
 /// Write a sudoers drop-in file for `username` to `/etc/sudoers.d/uptrakit-{username}`,
 /// set permissions to 440, and validate with `visudo -cf`.
 ///
@@ -478,5 +522,133 @@ mod tests {
         assert!(text.contains(
             "uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get -o Dir\\:\\:Etc\\:\\:Preferences\\=/tmp/uptrakit-apt-batch.pref upgrade *"
         ));
+    }
+
+    // ── ensure_docker_group_membership ──────────────────────────────────
+
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    use async_trait::async_trait;
+    use uptrakit_command::RemoteCommandResult;
+
+    /// Scripted mock executor: returns pre-programmed [`RemoteCommandResult`]
+    /// values in FIFO order for each `exec_command` call.
+    struct ScriptedRemoteExecutor {
+        results: Mutex<VecDeque<RemoteCommandResult>>,
+        calls: Mutex<Vec<String>>,
+    }
+
+    impl ScriptedRemoteExecutor {
+        fn new(results: impl IntoIterator<Item = RemoteCommandResult>) -> Self {
+            Self {
+                results: Mutex::new(results.into_iter().collect()),
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn recorded_calls(&self) -> Vec<String> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl RemoteExecutor for ScriptedRemoteExecutor {
+        async fn exec_command(
+            &self,
+            command: &str,
+        ) -> uptrakit_command::Result<RemoteCommandResult> {
+            self.calls.lock().unwrap().push(command.to_string());
+            let result = self
+                .results
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or(RemoteCommandResult {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                });
+            Ok(result)
+        }
+    }
+
+    fn ok_result() -> RemoteCommandResult {
+        RemoteCommandResult {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+        }
+    }
+
+    fn err_result(stderr: &str) -> RemoteCommandResult {
+        RemoteCommandResult {
+            stdout: String::new(),
+            stderr: stderr.to_string(),
+            exit_code: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn docker_group_absent_returns_ok_no_usermod() {
+        // getent exits non-zero → group absent
+        let exec = ScriptedRemoteExecutor::new([err_result("docker: no such group")]);
+
+        let result = ensure_docker_group_membership(&exec, "uptrakit", false).await;
+
+        assert!(result.is_ok());
+        let calls = exec.recorded_calls();
+        assert_eq!(calls.len(), 1, "only getent should be called");
+        assert!(calls[0].contains("getent group docker"));
+    }
+
+    #[tokio::test]
+    async fn docker_group_present_usermod_succeeds() {
+        // getent succeeds, usermod succeeds
+        let exec = ScriptedRemoteExecutor::new([ok_result(), ok_result()]);
+
+        let result = ensure_docker_group_membership(&exec, "uptrakit", false).await;
+
+        assert!(result.is_ok());
+        let calls = exec.recorded_calls();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[0].contains("getent group docker"));
+        assert!(calls[1].contains("usermod -aG docker"));
+        assert!(calls[1].contains("uptrakit"));
+        // non-privileged: no sudo prefix
+        assert!(!calls[1].starts_with("sudo "));
+    }
+
+    #[tokio::test]
+    async fn docker_group_present_usermod_succeeds_privileged() {
+        // getent succeeds, sudo usermod succeeds
+        let exec = ScriptedRemoteExecutor::new([ok_result(), ok_result()]);
+
+        let result = ensure_docker_group_membership(&exec, "uptrakit", true).await;
+
+        assert!(result.is_ok());
+        let calls = exec.recorded_calls();
+        assert_eq!(calls.len(), 2);
+        assert!(
+            calls[1].starts_with("sudo "),
+            "expected sudo prefix: {}",
+            calls[1]
+        );
+        assert!(calls[1].contains("usermod -aG docker"));
+    }
+
+    #[tokio::test]
+    async fn docker_group_present_usermod_fails_returns_ok() {
+        // getent succeeds, usermod fails — must still return Ok (warn-only)
+        let exec = ScriptedRemoteExecutor::new([
+            ok_result(),
+            err_result("usermod: group 'docker' does not exist"),
+        ]);
+
+        let result = ensure_docker_group_membership(&exec, "uptrakit", false).await;
+
+        assert!(result.is_ok(), "usermod failure must be non-fatal");
+        let calls = exec.recorded_calls();
+        assert_eq!(calls.len(), 2);
     }
 }
