@@ -55,7 +55,7 @@
 </script>
 
 <div class="danger-zone-wrap mb-6">
-	<div class="card border-2 border-error-500 p-6">
+	<div class="card danger-zone-card border-2 border-error-500 p-6">
 		<h2 class="h3 mb-2 text-error-500">Danger Zone</h2>
 		<p class="mb-4 text-surface-600 dark:text-surface-400">
 			Permanently delete all hosts, software items, plugin configurations, host tags, and update history. This action
@@ -133,15 +133,23 @@
 {/if}
 
 <style>
+	/* Hazard tape rendered as a thin ring around the card border */
 	.danger-zone-wrap {
-		/* Light: amber + near-black — classic hazard tape */
-		background-image: repeating-linear-gradient(-45deg, #1c1100 0px, #1c1100 12px, #f59e0b 12px, #f59e0b 24px);
+		background-image: repeating-linear-gradient(-45deg, #1c1100 0px, #1c1100 10px, #f59e0b 10px, #f59e0b 20px);
 		border-radius: var(--radius-container);
-		padding: 0.375rem;
+		padding: 3px;
 	}
 
-	/* Dark mode: deeper amber + pitch black — avoids eye-searing brightness */
 	:global(.dark) .danger-zone-wrap {
-		background-image: repeating-linear-gradient(-45deg, #090400 0px, #090400 12px, #b45309 12px, #b45309 24px);
+		background-image: repeating-linear-gradient(-45deg, #0a0500 0px, #0a0500 10px, #92400e 10px, #92400e 20px);
+	}
+
+	/* Solid card interior — subtle error tint keeps the danger feel without obscuring text */
+	.danger-zone-card {
+		background-color: color-mix(in srgb, rgb(239 68 68) 6%, white);
+	}
+
+	:global(.dark) .danger-zone-card {
+		background-color: color-mix(in srgb, rgb(239 68 68) 8%, #1a1a1a);
 	}
 </style>
