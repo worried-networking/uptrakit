@@ -538,6 +538,32 @@ impl ServiceHandler for SshAgentHandler {
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             self.reload_ticker = Some(ticker);
             self.pending_initial_host_report = false;
+
+            // Re-announce any updates that were in-flight before the disconnect.
+            // The controller tracks update state by `UpdateStarted` → `UpdateResult`;
+            // if the WS drops between those two messages the update stays in `pending`
+            // forever. Re-sending `UpdateStarted` on reconnect lets the controller
+            // transition it to `in_progress` correctly before the result arrives.
+            for (host_machine_id, update) in &self.in_flight_updates {
+                #[cfg(feature = "interactive")]
+                let interactive = update.stdin_tx.is_some();
+                #[cfg(not(feature = "interactive"))]
+                let interactive = false;
+
+                tracing::debug!(
+                    %host_machine_id,
+                    update_history_id = %update.update_history_id,
+                    "re-sending UpdateStarted on reconnect for in-flight update"
+                );
+                conn.send_best_effort(uptrakit_internal_wire::ServiceMessage::UpdateStarted(
+                    uptrakit_internal_wire::UpdateStartedPayload {
+                        update_history_id: update.update_history_id,
+                        from_version: None,
+                        interactive,
+                    },
+                ))
+                .await;
+            }
         }
 
         // Store tenant_id for PVE credential provisioning and persist it
