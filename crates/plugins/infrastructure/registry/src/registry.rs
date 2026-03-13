@@ -1781,7 +1781,7 @@ mod tests {
 
     #[test]
     fn mask_config_secrets_cargo_is_noop() {
-        let config = serde_json::json!({"include_prereleases": true});
+        let config = serde_json::json!({"include_prereleases": true, "use_locked": true});
         let masked = PluginRegistry::mask_config_secrets(PluginType::PackageManagerCargo, &config);
         assert_eq!(masked, config);
     }
