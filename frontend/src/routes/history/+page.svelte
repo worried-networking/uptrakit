@@ -137,7 +137,11 @@
 	}
 
 	function isLiveStatus(status: UpdateHistoryStatus): boolean {
-		return status === 'queued' || status === 'pending' || status === 'in_progress';
+		return status === 'in_progress';
+	}
+
+	function isWaitingStatus(status: UpdateHistoryStatus): boolean {
+		return status === 'queued' || status === 'pending';
 	}
 
 	function toggleExpand(id: string) {
@@ -152,7 +156,7 @@
 
 		expandedId = id;
 
-		// If the item is in-progress or pending, connect interactive WS
+		// If the item is in-progress, connect interactive WS
 		const item = items.find((i) => i.id === id);
 		if (item && isLiveStatus(item.status)) {
 			// Defer connection to next tick so the terminal has mounted.
@@ -397,6 +401,12 @@
 												class="h-80"
 												onInput={(data) => (activeStreamId === item.id ? activeWsHandle?.sendInput(data) : undefined)}
 											/>
+										{:else if isWaitingStatus(item.status)}
+											<p class="text-sm text-surface-500">
+												{item.status === 'queued'
+													? 'Queued — waiting for another update on this host to finish.'
+													: 'Pending — waiting for the agent to start the update.'}
+											</p>
 										{:else if item.output}
 											<TerminalOutput output={item.output} class="h-80" />
 										{:else}
