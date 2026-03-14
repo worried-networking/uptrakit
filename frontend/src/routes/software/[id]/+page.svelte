@@ -574,13 +574,13 @@
 										<span class="block text-xs text-surface-500 font-mono">{host.qualifier}</span>
 									{/if}
 									{#if host.plugins.length > 0}
-										<div class="mt-1 space-y-0.5">
+										<div class="mt-1 space-y-0.5 overflow-hidden">
 											{#each host.plugins as p (`${p.plugin_config_id ?? p.plugin_type}_${p.role}`)}
-												<div class="flex items-baseline gap-1 text-xs text-surface-500">
+												<div class="flex min-w-0 items-baseline gap-1 text-xs text-surface-500">
 													<span class="shrink-0 font-semibold">{ROLE_SHORT[p.role] ?? p.role}:</span>
 													<span class="truncate">{p.plugin_config_name ?? p.plugin_type.replace(/_/g, ' ')}</span>
 													{#if p.package_identifier}
-														<span class="shrink-0 opacity-60">({p.package_identifier})</span>
+														<span class="min-w-0 truncate opacity-60">({p.package_identifier})</span>
 													{/if}
 													{#if p.execution_site && p.execution_site !== 'auto'}
 														<span class="badge preset-tonal text-xs shrink-0">{p.execution_site}</span>
