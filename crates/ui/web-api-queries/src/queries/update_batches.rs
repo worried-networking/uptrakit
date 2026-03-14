@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, prelude::*, software_item, update_batch,
-    update_history,
+    update_history, update_output_line,
 };
 use uptrakit_shared_types::BatchStatus;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
@@ -688,6 +688,82 @@ async fn maybe_complete_batch(
         completed_count,
         failed_count,
     }))
+}
+
+// ---------------------------------------------------------------------------
+// Restart recovery
+// ---------------------------------------------------------------------------
+
+/// Mark all `InProgress` update records for the given hosts as `Failed`.
+///
+/// Called during agent reconnect to prevent orphaned in-progress updates when
+/// an agent restarts and loses track of the updates it was executing.
+///
+/// Returns the **pre-update** snapshots of the affected rows so the caller can
+/// close any open SSE streams and dispatch follow-up updates.
+///
+/// The bulk `UPDATE` (with a `status = InProgress` CAS guard) and the
+/// `update_output_line` deletion are wrapped in a single transaction to avoid
+/// partial cleanup states on connection loss.
+#[tracing::instrument(skip_all)]
+pub async fn mark_in_progress_as_failed(
+    db: &DatabaseConnection,
+    host_ids: &[Uuid],
+) -> std::result::Result<Vec<update_history::Model>, rootcause::Report<TriggerUpdateError>> {
+    if host_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Load all InProgress records for these hosts (pre-update snapshot).
+    let records = UpdateHistory::find()
+        .filter(update_history::Column::HostId.is_in(host_ids.to_vec()))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
+        .all(db)
+        .await
+        .context_to()?;
+
+    if records.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let ids: Vec<Uuid> = records.iter().map(|r| r.id).collect();
+    let now = OffsetDateTime::now_utc();
+    let reason = "Update interrupted: agent restarted";
+
+    let txn = db.begin().await.context_to()?;
+
+    // CAS guard: only fail rows that are still InProgress — prevents
+    // double-failing if two controller replicas race on the same host.
+    UpdateHistory::update_many()
+        .filter(update_history::Column::Id.is_in(ids.clone()))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
+        .col_expr(
+            update_history::Column::Status,
+            Expr::value(update_history::UpdateStatus::Failed),
+        )
+        .col_expr(update_history::Column::CompletedAt, Expr::value(Some(now)))
+        .col_expr(
+            update_history::Column::Output,
+            Expr::value(reason.to_string()),
+        )
+        .col_expr(
+            update_history::Column::OutputBytes,
+            Expr::value(reason.len() as i64),
+        )
+        .exec(&txn)
+        .await
+        .context_to()?;
+
+    // Remove streaming output lines that accumulated before the restart.
+    UpdateOutputLine::delete_many()
+        .filter(update_output_line::Column::UpdateHistoryId.is_in(ids))
+        .exec(&txn)
+        .await
+        .context_to()?;
+
+    txn.commit().await.context_to()?;
+
+    Ok(records)
 }
 
 // ---------------------------------------------------------------------------
@@ -1610,5 +1686,164 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(record.status, update_history::UpdateStatus::Pending);
+    }
+
+    // ── mark_in_progress_as_failed ──────────────────────────────────────
+
+    /// Helper: insert a minimal update_history record with the given status.
+    async fn insert_update_record(
+        db: &DatabaseConnection,
+        f: &Fixture,
+        status: update_history::UpdateStatus,
+    ) -> update_history::Model {
+        let now = OffsetDateTime::now_utc();
+        let id = Uuid::now_v7();
+        update_history::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(f.tenant_id),
+            host_id: Set(f.host_id),
+            software_item_id: Set(f.item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(Some("1.0.0".to_string())),
+            to_version: Set(Some("1.1.0".to_string())),
+            status: Set(status),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            started_at: Set(Some(now)),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+    }
+
+    /// A `Pending` record must be left untouched; function returns an empty vec.
+    #[tokio::test]
+    async fn no_in_progress_returns_empty() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let pending = insert_update_record(&db, &f, update_history::UpdateStatus::Pending).await;
+
+        let result = mark_in_progress_as_failed(&db, &[f.host_id]).await.unwrap();
+
+        assert!(
+            result.is_empty(),
+            "expected empty result for no in-progress records"
+        );
+
+        // Pending record must be untouched.
+        let reloaded = UpdateHistory::find_by_id(pending.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reloaded.status, update_history::UpdateStatus::Pending);
+    }
+
+    /// An `InProgress` record must be returned and marked `Failed` in the DB.
+    #[tokio::test]
+    async fn in_progress_marked_failed() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let record = insert_update_record(&db, &f, update_history::UpdateStatus::InProgress).await;
+
+        let result = mark_in_progress_as_failed(&db, &[f.host_id]).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, record.id);
+
+        // DB row must be Failed with correct output and a completed_at.
+        let reloaded = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reloaded.status, update_history::UpdateStatus::Failed);
+        assert_eq!(reloaded.output, "Update interrupted: agent restarted");
+        assert_eq!(
+            reloaded.output_bytes,
+            "Update interrupted: agent restarted".len() as i64
+        );
+        assert!(reloaded.completed_at.is_some(), "completed_at must be set");
+    }
+
+    /// A mix of `InProgress` and `Pending` records across two hosts: only the
+    /// `InProgress` one must be returned and failed; the `Pending` record on
+    /// the second host must be untouched.
+    ///
+    /// A second host is required because the partial unique index on
+    /// `(host_id) WHERE status IN ('pending', 'in_progress')` prevents two
+    /// active records on the same host.
+    #[tokio::test]
+    async fn pending_not_touched() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let in_progress =
+            insert_update_record(&db, &f, update_history::UpdateStatus::InProgress).await;
+
+        // Insert a second host to hold the Pending record.
+        let now = OffsetDateTime::now_utc();
+        let host2_id = host::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(f.tenant_id),
+            machine_id: Set("machine-002".to_string()),
+            hostname: Set("host-002".to_string()),
+            friendly_name: Set("Host 002".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap()
+        .id;
+
+        let f2 = Fixture {
+            tenant_id: f.tenant_id,
+            item_id: f.item_id,
+            host_id: host2_id,
+        };
+        let pending = insert_update_record(&db, &f2, update_history::UpdateStatus::Pending).await;
+
+        let result = mark_in_progress_as_failed(&db, &[f.host_id, host2_id])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "only the in-progress record should be returned"
+        );
+        assert_eq!(result[0].id, in_progress.id);
+
+        // InProgress record is now Failed.
+        let reloaded_ip = UpdateHistory::find_by_id(in_progress.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reloaded_ip.status, update_history::UpdateStatus::Failed);
+
+        // Pending record on host2 is untouched.
+        let reloaded_pending = UpdateHistory::find_by_id(pending.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            reloaded_pending.status,
+            update_history::UpdateStatus::Pending
+        );
     }
 }

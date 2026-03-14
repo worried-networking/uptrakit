@@ -121,6 +121,11 @@ pub(super) async fn deliver_pending_updates(
 
     let host_ids: Vec<uuid::Uuid> = host_links.iter().map(|l| l.host_id).collect();
 
+    // 1b. Fail any in-progress records from a previous agent session so they
+    //     don't stay stuck forever. Any newly-queued follow-up dispatches run
+    //     before the pending query below so promoted items are included.
+    fail_in_progress_on_reconnect(state, service_id, &host_ids).await;
+
     // 2. Query pending update_history records for those hosts.
     //    Ordered by ID (UUIDv7 = chronological) so batch-aware filtering
     //    below picks the oldest pending update per (batch_id, host_id).
@@ -827,6 +832,90 @@ pub(super) async fn handle_update_result(
     }
 
     ProcessorResponse::cont()
+}
+
+// ---------------------------------------------------------------------------
+// Reconnect recovery
+// ---------------------------------------------------------------------------
+
+/// Mark any `InProgress` updates for these hosts as `Failed`, close their SSE
+/// streams, broadcast `UpdateCompleted` events, and dispatch follow-up updates.
+///
+/// Called at the start of `deliver_pending_updates` so that orphaned
+/// in-progress records from a previous agent session are resolved before we
+/// attempt to re-deliver pending items.
+async fn fail_in_progress_on_reconnect(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    host_ids: &[uuid::Uuid],
+) {
+    let records = match crate::queries::update_batches::mark_in_progress_as_failed(
+        state.db(),
+        host_ids,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(
+                %service_id,
+                error = %e,
+                "failed to mark in-progress updates as failed on reconnect"
+            );
+            return;
+        }
+    };
+
+    if records.is_empty() {
+        return;
+    }
+
+    let tenant_id = match service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(svc)) => svc.tenant_id,
+        _ => return,
+    };
+
+    let reason = "Update interrupted: agent restarted".to_string();
+
+    for record in &records {
+        tracing::warn!(
+            update_id = %record.id,
+            host_id = %record.host_id,
+            "in-progress update marked failed due to agent restart"
+        );
+
+        state
+            .update_output_broadcaster
+            .send_completed(record.id, "failed".to_string(), Some(reason.clone()))
+            .await;
+
+        state
+            .event_broadcaster
+            .send(
+                tenant_id,
+                AdminEvent::UpdateCompleted {
+                    update_history_id: record.id,
+                    host_id: record.host_id,
+                    software_item_id: record.software_item_id,
+                    status: "failed".to_string(),
+                },
+            )
+            .await;
+
+        if let Some(batch_id) = record.batch_id {
+            dispatch_next_batch_update(state, service_id, batch_id, record.host_id).await;
+        } else {
+            dispatch_next_queued_update(state, service_id, record.host_id).await;
+        }
+    }
+
+    state
+        .notification_service
+        .push_software_states_for_tenant(state.db(), tenant_id)
+        .await;
 }
 
 // ---------------------------------------------------------------------------
