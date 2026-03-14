@@ -383,7 +383,8 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
         // Inspect each unique image ref only once.  Multiple containers using
         // the same image share the same digest, so there is no point calling
         // the Docker daemon more than once per image.
-        let mut digest_cache: HashMap<String, Option<String>> = HashMap::new();
+        let mut digest_cache: HashMap<String, Option<crate::docker_client::LocalImageDigest>> =
+            HashMap::new();
 
         let mut discoveries = Vec::new();
 
@@ -420,7 +421,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
 
             // Inspect the image once, then reuse the cached result for every
             // subsequent container that references the same image.
-            let digest = match digest_cache.entry(ir.full_ref.clone()) {
+            let digest_info = match digest_cache.entry(ir.full_ref.clone()) {
                 std::collections::hash_map::Entry::Occupied(e) => match e.get().clone() {
                     Some(d) => d,
                     // Already determined: no registry digest (locally built). Skip.
@@ -435,7 +436,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
                                 digest = %d.digest,
                                 "inspected image for discovery"
                             );
-                            Some(d.digest)
+                            Some(d)
                         }
                         Ok(None) => {
                             tracing::debug!(
@@ -453,9 +454,9 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
                             None
                         }
                     };
-                    let digest = outcome.clone();
+                    let digest_opt = outcome.clone();
                     e.insert(outcome);
-                    match digest {
+                    match digest_opt {
                         Some(d) => d,
                         None => continue,
                     }
@@ -473,6 +474,14 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
             // can target the specific container.
             let plugin_pkg_id = format!("{}#{}", ir.full_ref, container_name);
 
+            // Compute platform from the installed image's inspect data.
+            let platform = crate::config::form_platform_string(
+                digest_info.os.as_deref(),
+                digest_info.architecture.as_deref(),
+                digest_info.variant.as_deref(),
+            );
+            let config_override = platform.as_deref().map(|p| json!({"platform": p}));
+
             let targets = vec![DiscoveryTarget {
                 plugin_type: PluginType::ReleasesDocker,
                 plugin_config: json!({}),
@@ -483,14 +492,14 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
                     PluginRole::ExecuteUpdate,
                 ],
                 package_identifier: None,
-                config_override: None,
+                config_override,
                 execution_site: None,
             }];
 
             discoveries.push(DiscoveredSoftware {
                 package_identifier: pkg_id,
                 name,
-                installed_version: digest,
+                installed_version: digest_info.digest,
                 targets,
                 extra: Some(json!({ "container": container_name })),
                 qualifier: Some(container_name.clone()),
@@ -569,6 +578,60 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin
                     image = %ir.image,
                     "detected installed digest"
                 );
+
+                // When a platform is known (from config override or auto-detected from
+                // the local image), compare platform-specific digests to avoid false
+                // positives when only a different platform is updated.
+                let platform = self.config.platform.clone().or_else(|| {
+                    crate::config::form_platform_string(
+                        digest_info.os.as_deref(),
+                        digest_info.architecture.as_deref(),
+                        digest_info.variant.as_deref(),
+                    )
+                });
+
+                if let Some(ref p) = platform {
+                    match self
+                        .registry_client
+                        .get_platform_manifest_digest(&ir.registry, &ir.repository, tag, p)
+                        .await
+                    {
+                        Ok(Some(platform_digest)) => {
+                            tracing::debug!(
+                                platform = %p,
+                                digest = %platform_digest,
+                                image = %ir.image,
+                                "resolved platform-specific digest"
+                            );
+                            return Ok(Some(Version::new(&platform_digest)));
+                        }
+                        Ok(None) => {
+                            // Platform removed from the manifest list.
+                            return Err(
+                                uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(
+                                    crate::error::DockerError::PlatformNotAvailable {
+                                        platform: p.clone(),
+                                        image: ir.image.clone(),
+                                        tag: tag.to_string(),
+                                    }
+                                    .to_string(),
+                                )
+                                .into(),
+                            );
+                        }
+                        Err(e) => {
+                            // Transient registry failure — fall back to the image index digest
+                            // so that a network hiccup does not block version detection.
+                            tracing::warn!(
+                                error = %e,
+                                image = %ir.image,
+                                "failed to fetch platform manifest digest; \
+                                 falling back to image index digest"
+                            );
+                        }
+                    }
+                }
+
                 Ok(Some(Version::new(&digest_info.digest)))
             }
             Ok(None) => Ok(None),
@@ -591,12 +654,16 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin
     ) -> uptrakit_plugin_infrastructure_core::Result<Vec<BatchDetectResult>> {
         use std::collections::HashMap;
 
-        // Inspect each resolved image ref once and cache the outcome.
-        // Key = resolved "image:tag" string (after tracked_tag override).
-        // Value = Ok(Some(digest)) | Ok(None) | Err(message).
-        let mut cache: HashMap<String, std::result::Result<Option<String>, String>> =
-            HashMap::new();
+        // Daemon inspect cache: "image:tag" → Result<Option<LocalImageDigest>, String>.
+        let mut inspect_cache: HashMap<
+            String,
+            std::result::Result<Option<crate::docker_client::LocalImageDigest>, String>,
+        > = HashMap::new();
 
+        // Platform digest cache: "image:tag::platform" → Option<String>.
+        let mut platform_cache: HashMap<String, Option<String>> = HashMap::new();
+
+        // Populate inspect cache.
         for item in items {
             let ir: ImageRef = match item.package_identifier.parse::<ImageRef>() {
                 Ok(r) => r,
@@ -605,17 +672,17 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin
             let tag = self.config.resolved_tracked_tag(&ir.tag);
             let resolved = format!("{}:{tag}", ir.image);
 
-            if cache.contains_key(&resolved) {
+            if inspect_cache.contains_key(&resolved) {
                 continue;
             }
 
             let client = Arc::clone(&*self.docker_client.lock());
             let outcome = match client.inspect_image(&resolved).await {
-                Ok(Some(d)) => Ok(Some(d.digest)),
+                Ok(Some(d)) => Ok(Some(d)),
                 Ok(None) => Ok(None),
                 Err(e) => Err(e.to_string()),
             };
-            cache.insert(resolved, outcome);
+            inspect_cache.insert(resolved, outcome);
         }
 
         let mut results = Vec::with_capacity(items.len());
@@ -633,11 +700,58 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin
             let tag = self.config.resolved_tracked_tag(&ir.tag);
             let resolved = format!("{}:{tag}", ir.image);
 
-            match cache.get(&resolved) {
-                Some(Ok(Some(digest))) => {
+            match inspect_cache.get(&resolved) {
+                Some(Ok(Some(digest_info))) => {
+                    let platform = self.config.platform.clone().or_else(|| {
+                        crate::config::form_platform_string(
+                            digest_info.os.as_deref(),
+                            digest_info.architecture.as_deref(),
+                            digest_info.variant.as_deref(),
+                        )
+                    });
+
+                    if let Some(ref p) = platform {
+                        let cache_key = format!("{resolved}::{p}");
+                        let platform_digest = match platform_cache.entry(cache_key) {
+                            std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
+                            std::collections::hash_map::Entry::Vacant(e) => {
+                                let result = self
+                                    .registry_client
+                                    .get_platform_manifest_digest(
+                                        &ir.registry,
+                                        &ir.repository,
+                                        tag,
+                                        p,
+                                    )
+                                    .await
+                                    .ok()
+                                    .flatten();
+                                e.insert(result.clone());
+                                result
+                            }
+                        };
+
+                        match platform_digest {
+                            Some(pd) => {
+                                results.push(BatchDetectResult::found(
+                                    item.package_identifier.clone(),
+                                    Version::new(&pd),
+                                ));
+                                continue;
+                            }
+                            None => {
+                                // Platform not in manifest list — treat as not found.
+                                results.push(BatchDetectResult::not_found(
+                                    item.package_identifier.clone(),
+                                ));
+                                continue;
+                            }
+                        }
+                    }
+
                     results.push(BatchDetectResult::found(
                         item.package_identifier.clone(),
-                        Version::new(digest),
+                        Version::new(&digest_info.digest),
                     ));
                 }
                 Some(Ok(None)) | None => {
@@ -673,11 +787,35 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for DockerPlugin 
                 })?;
 
         let tag = self.config.resolved_tracked_tag(&ir.tag);
-        let digest = self
-            .registry_client
-            .get_manifest_digest(&ir.registry, &ir.repository, tag)
-            .await
-            .context_to()?;
+
+        let digest = if let Some(ref platform) = self.config.platform {
+            match self
+                .registry_client
+                .get_platform_manifest_digest(&ir.registry, &ir.repository, tag, platform)
+                .await
+                .context_to()?
+            {
+                Some(d) => d,
+                None => {
+                    return Err(
+                        uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(
+                            crate::error::DockerError::PlatformNotAvailable {
+                                platform: platform.clone(),
+                                image: ir.image.clone(),
+                                tag: tag.to_string(),
+                            }
+                            .to_string(),
+                        )
+                        .into(),
+                    );
+                }
+            }
+        } else {
+            self.registry_client
+                .get_manifest_digest(&ir.registry, &ir.repository, tag)
+                .await
+                .context_to()?
+        };
 
         let release_url = ir.web_url(&digest);
         let release = {
@@ -690,6 +828,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for DockerPlugin 
             digest = %digest,
             tag = %tag,
             image = %ir.image,
+            platform = ?self.config.platform,
             "fetched Docker release (digest mode)"
         );
         Ok(vec![release])
@@ -1735,6 +1874,9 @@ mod tests {
                 self.inspect_count.fetch_add(1, Ordering::SeqCst);
                 Ok(Some(crate::docker_client::LocalImageDigest {
                     digest: self.digest.clone(),
+                    os: None,
+                    architecture: None,
+                    variant: None,
                 }))
             }
 
