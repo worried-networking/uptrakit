@@ -507,6 +507,7 @@ export interface SoftwareItemHostSummary {
 	latest_version?: string | null;
 	latest_release_metadata?: Record<string, unknown> | null;
 	update_available: boolean;
+	active_update_history_id?: string | null;
 	last_updated_at: string | null;
 	linked_at: string;
 	plugins: HostPluginRoleSummary[];

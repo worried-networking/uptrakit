@@ -138,6 +138,12 @@
 				}),
 				subscribeToEvent('update_completed', (data) => {
 					if (data.software_item_id === id) loadItem(true);
+				}),
+				subscribeToEvent('update_triggered', (data) => {
+					if (data.software_item_id === id) loadItem(true);
+				}),
+				subscribeToEvent('update_started', (data) => {
+					if (data.software_item_id === id) loadItem(true);
 				})
 			);
 			refreshInterval = setInterval(() => {
@@ -466,6 +472,7 @@
 	}
 
 	function versionStatusLabel(host: SoftwareItemHostSummary): string {
+		if (host.active_update_history_id) return 'In Progress';
 		if (!host.installed_version) return 'Unknown';
 		if (!host.latest_version) return 'Unknown latest';
 		if (host.update_available) return 'Update Available';
@@ -473,6 +480,7 @@
 	}
 
 	function versionStatusClass(host: SoftwareItemHostSummary): string {
+		if (host.active_update_history_id) return 'preset-filled-primary-500';
 		if (!host.installed_version) return 'preset-tonal';
 		if (host.update_available) return 'preset-filled-warning-500';
 		return 'preset-filled-success-500';
@@ -643,11 +651,19 @@
 									{/if}
 								</td>
 								<td>
-									{#if canManage && host.update_available}
+									{#if canManage && (host.update_available || host.active_update_history_id)}
 										<button
 											class="badge {versionStatusClass(host)} cursor-pointer hover:opacity-80"
-											title="Update to {formatVersion(host.latest_version ?? item.latest_version)}"
-											onclick={() => openUpdateModal(host)}
+											title={host.active_update_history_id
+												? 'View update progress'
+												: `Update to ${formatVersion(host.latest_version ?? item.latest_version)}`}
+											onclick={() => {
+												if (host.active_update_history_id) {
+													openLiveModal(host.active_update_history_id, host.hostname);
+												} else {
+													openUpdateModal(host);
+												}
+											}}
 										>
 											{versionStatusLabel(host)}
 										</button>
