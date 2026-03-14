@@ -1521,7 +1521,27 @@ through the crate's public module chain. It is self-selecting:
 - `pub fn foo()` inside a `pub mod bar { … }` that is re-exported from `lib.rs` → **does not fire**
   (the item is genuinely reachable from outside the crate)
 
-No `#![allow(unreachable_pub)]` should appear anywhere in the workspace.
+No `#![allow(unreachable_pub)]` (or any other crate-wide or module-wide `#![allow(...)]`)
+should appear anywhere in the workspace.
+
+#### Using `#[allow(...)]` — policy and requirements
+
+Item-level `#[allow(...)]` is permitted **only** when a lint produces a false positive that
+cannot be resolved structurally. The one approved cause in this codebase is **feature-gating**:
+an item that is used only when a specific Cargo feature is enabled will appear unused or
+unreachable in builds that omit that feature, even though it is correctly public/used in the
+intended build.
+
+```rust
+// ✅ Approved — the field is only read when the "metrics" feature is compiled in.
+// Without the allow, the lint fires on --no-default-features builds.
+#[allow(dead_code)] // used only with feature = "metrics"
+pub counter: u64,
+```
+
+**Every `#[allow(...)]` must be accompanied by a comment** on the same line or the line
+immediately above it explaining precisely why the suppression is necessary. A bare
+`#[allow(...)]` with no explanation is not permitted and will be rejected in review.
 
 ### Concrete examples
 
