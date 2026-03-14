@@ -15,6 +15,7 @@ use uptrakit_internal_wire::{
     MqttReleaseTenantsPayload, MqttTenantConfig, MqttTriggerHostBatchUpdatePayload,
     MqttUpdateTriggerPayload, OutgoingSeq, PingPayload, ServiceMessage,
 };
+use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::settings_mqtt::MqttClientConnectionStatus as ApiMqttClientConnectionStatus;
 
 use super::messages::ProcessorResponse;
@@ -329,6 +330,18 @@ pub(super) async fn handle_mqtt_trigger_update(
             state
                 .notification_service
                 .push_software_states_for_tenant(state.db(), payload.tenant_id)
+                .await;
+            // Notify SSE subscribers so the History page shows the new entry.
+            state
+                .event_broadcaster
+                .send(
+                    payload.tenant_id,
+                    AdminEvent::UpdateTriggered {
+                        update_history_id: result.update_history_id,
+                        host_id: payload.host_id,
+                        software_item_id: payload.software_item_id,
+                    },
+                )
                 .await;
         }
         Err(err) => {

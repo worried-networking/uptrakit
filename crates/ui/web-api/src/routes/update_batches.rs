@@ -20,6 +20,7 @@ use uuid::Uuid;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use uptrakit_shared_db::entity::{host, update_batch, update_history};
 use uptrakit_shared_types::BatchStatus;
+use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::update_batches::{
     HostBatchUpdateRequest, ItemBatchUpdateRequest, UpdateBatchDetailResponse,
     UpdateBatchListQuery, UpdateBatchSummaryResponse,
@@ -119,6 +120,20 @@ pub async fn trigger_host_batch_update(
                 .notification_service
                 .push_software_states_for_tenant(tenant_db.db(), tenant_db.tenant_id)
                 .await;
+            // Notify SSE subscribers for each created update_history entry.
+            for item in &resp.updates {
+                state
+                    .event_broadcaster
+                    .send(
+                        tenant_db.tenant_id,
+                        AdminEvent::UpdateTriggered {
+                            update_history_id: item.update_history_id,
+                            host_id: item.host_id,
+                            software_item_id: item.software_item_id,
+                        },
+                    )
+                    .await;
+            }
             (StatusCode::OK, Json(resp)).into_response()
         }
         Err(report) => trigger_error_to_response(report),
@@ -202,6 +217,20 @@ pub async fn trigger_item_batch_update(
                 .notification_service
                 .push_software_states_for_tenant(tenant_db.db(), tenant_db.tenant_id)
                 .await;
+            // Notify SSE subscribers for each created update_history entry.
+            for item in &resp.updates {
+                state
+                    .event_broadcaster
+                    .send(
+                        tenant_db.tenant_id,
+                        AdminEvent::UpdateTriggered {
+                            update_history_id: item.update_history_id,
+                            host_id: item.host_id,
+                            software_item_id: item.software_item_id,
+                        },
+                    )
+                    .await;
+            }
             (StatusCode::OK, Json(resp)).into_response()
         }
         Err(report) => trigger_error_to_response(report),

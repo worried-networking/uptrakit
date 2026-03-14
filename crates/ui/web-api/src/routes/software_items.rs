@@ -762,6 +762,19 @@ pub async fn trigger_update(
                 .notification_service
                 .push_software_states_for_tenant(tenant_db.db(), tenant_db.tenant_id)
                 .await;
+            // Notify SSE subscribers so the History page shows the new entry
+            // immediately, without waiting for the agent's UpdateStarted message.
+            state
+                .event_broadcaster
+                .send(
+                    tenant_db.tenant_id,
+                    AdminEvent::UpdateTriggered {
+                        update_history_id: result.update_history_id,
+                        host_id,
+                        software_item_id: item_id,
+                    },
+                )
+                .await;
             let resp = TriggerUpdateResponse {
                 update_history_id: result.update_history_id,
                 status,
