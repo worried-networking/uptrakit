@@ -16,6 +16,11 @@
 		"format": "prettier --write .",
 		"format:check": "prettier --check ."
 	},
+	"overrides": {
+		"undici": "^7.24.0",
+		"cookie": "^0.7.0",
+		"flatted": "^3.4.0"
+	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
 		"@playwright/test": "^1.58.2",
