@@ -249,6 +249,14 @@ build environments.
   communication changes, run the system integration tests (requires Docker and pre-built image):
   - `docker build -f docker/Dockerfile.test -t uptrakit-test:latest .`
   - `cargo test -p uptrakit-integration-tests -- --ignored`
+- **At the start of every session**, call `mcp__plugin_sentrux_sentrux__session_start`
+  to capture the current architecture baseline.
+- **At the end of every session** (before the final commit), call
+  `mcp__plugin_sentrux_sentrux__session_end` to compare against the baseline.
+  If any dimension grade has degraded, fix the regression before committing.
+- **Architecture quality must never regress.** A task is not complete if it leaves
+  coupling, cycles, cohesion, duplication, or any other sentrux dimension at a worse
+  grade than the session baseline.
 
 ### Dependency registration
 
