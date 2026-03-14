@@ -6,7 +6,6 @@ use time::OffsetDateTime;
 /// Same schema as the controller's `data_encryption_key` entity.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "data_encryption_keys")]
-#[allow(unreachable_pub)]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
@@ -22,7 +21,6 @@ pub struct Model {
     pub retired_at: Option<OffsetDateTime>,
 }
 
-#[allow(unreachable_pub)]
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 

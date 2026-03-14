@@ -1,7 +1,7 @@
 mod cli;
 mod client;
 mod commands;
-pub(crate) mod db;
+pub mod db;
 mod error;
 mod extension;
 mod host_info;

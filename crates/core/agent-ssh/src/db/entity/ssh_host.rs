@@ -10,11 +10,11 @@ use uptrakit_crypto::EncryptedString;
 
 #[derive(Debug, Error)]
 #[error("invalid SSH key type: expected ed25519, rsa, or ecdsa")]
-pub(crate) struct ParseSshKeyTypeError;
+pub struct ParseSshKeyTypeError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumIter, sea_orm::DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "Text")]
-pub(crate) enum SshKeyType {
+pub enum SshKeyType {
     #[sea_orm(string_value = "ed25519")]
     Ed25519,
     #[sea_orm(string_value = "rsa")]
@@ -56,7 +56,6 @@ impl FromStr for SshKeyType {
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "ssh_hosts")]
-#[allow(unreachable_pub)]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: uuid::Uuid,
@@ -120,7 +119,6 @@ impl Model {
     }
 }
 
-#[allow(unreachable_pub)]
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 
