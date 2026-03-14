@@ -1543,6 +1543,28 @@ pub counter: u64,
 immediately above it explaining precisely why the suppression is necessary. A bare
 `#[allow(...)]` with no explanation is not permitted and will be rejected in review.
 
+**`#[allow(...)]` must be placed at the smallest possible scope.** Do not suppress a lint on a
+function, struct, or module when only a single field, binding, or expression triggers it. Place
+the attribute on that specific item instead:
+
+```rust
+// ❌ Suppresses the lint for the entire function
+#[allow(unused_variables)] // cfg-gated param
+fn handle(ctx: &Context, payload: Payload) {
+    ctx.process();
+}
+
+// ✅ Suppress only the specific binding that is unused
+fn handle(ctx: &Context, #[allow(unused_variables)] payload: Payload) { // cfg-gated param
+    ctx.process();
+}
+
+// ✅ Or use the underscore prefix convention when no attribute is needed at all
+fn handle(ctx: &Context, _payload: Payload) {
+    ctx.process();
+}
+```
+
 ### Concrete examples
 
 ```rust
