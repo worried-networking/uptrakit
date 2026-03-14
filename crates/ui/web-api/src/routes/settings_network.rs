@@ -10,6 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use ipnet::IpNet;
+use sea_orm::ConnectionTrait;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -17,6 +18,70 @@ pub use uptrakit_web_api_types::settings_network::{
     NetworkSettingsResponse, UpdateNetworkSettingsRequest,
 };
 use uptrakit_web_api_types::validation::Validate;
+
+/// Persist a single global setting to the database, returning an error response
+/// on failure. The `setting_name` is used only for the error log message.
+async fn persist_setting(
+    db: &impl ConnectionTrait,
+    key: SettingKey,
+    value: serde_json::Value,
+    setting_name: &str,
+) -> Result<(), Response> {
+    upsert_global_setting(db, key, value).await.map_err(|e| {
+        tracing::error!("Failed to save {setting_name}: {e:?}");
+        error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+    })
+}
+
+/// Convert an empty string to `None`, preserving non-empty values.
+fn empty_to_none(s: &str) -> Option<String> {
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
+
+/// Serialize an `Option<String>` to a JSON value (`null` when `None`).
+fn option_to_json(value: &Option<String>) -> serde_json::Value {
+    match value {
+        Some(v) => serde_json::json!(v),
+        None => serde_json::Value::Null,
+    }
+}
+
+/// Parse a list of proxy strings into validated `IpNet` values.
+fn parse_trusted_proxies(proxies: &[String]) -> Result<Vec<IpNet>, String> {
+    let mut parsed = Vec::with_capacity(proxies.len());
+    for s in proxies {
+        let net = s
+            .parse::<IpNet>()
+            .or_else(|_| s.parse::<std::net::IpAddr>().map(IpNet::from))
+            .map_err(|_| format!("invalid IP or CIDR: {s}"))?;
+        parsed.push(net);
+    }
+    Ok(parsed)
+}
+
+/// Validate a PKI address URL, returning `None` for empty strings or the
+/// normalized (trailing-slash-stripped) URL on success.
+fn validate_pki_addr(url_str: &str) -> Result<Option<String>, String> {
+    if url_str.is_empty() {
+        return Ok(None);
+    }
+    let url = url_str
+        .parse::<url::Url>()
+        .map_err(|e| format!("invalid PKI address URL: {e}"))?;
+    match url.scheme() {
+        "http" | "https" => {}
+        other => {
+            return Err(format!(
+                "unsupported URL scheme: {other} (expected http or https)"
+            ));
+        }
+    }
+    Ok(Some(url_str.trim_end_matches('/').to_string()))
+}
 
 /// Get network settings
 #[utoipa::path(
@@ -76,88 +141,59 @@ pub async fn update_network_settings(
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
     Json(req): Json<UpdateNetworkSettingsRequest>,
 ) -> Response {
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    match update_network_settings_inner(&state, req).await {
+        Ok(resp) | Err(resp) => resp,
     }
+}
+
+async fn update_network_settings_inner(
+    state: &AppState,
+    req: UpdateNetworkSettingsRequest,
+) -> Result<Response, Response> {
+    if let Err(e) = req.validate() {
+        return Err(error_response(StatusCode::BAD_REQUEST, e.to_string()));
+    }
+
+    let db = state.db();
 
     // Validate and apply trusted proxies (runtime-changeable)
     if let Some(ref proxies) = req.trusted_proxies {
-        let mut parsed = Vec::with_capacity(proxies.len());
-        for s in proxies {
-            match s.parse::<IpNet>() {
-                Ok(net) => parsed.push(net),
-                Err(_) => {
-                    // Try bare IP
-                    match s.parse::<std::net::IpAddr>() {
-                        Ok(ip) => parsed.push(IpNet::from(ip)),
-                        Err(_) => {
-                            return error_response(
-                                StatusCode::BAD_REQUEST,
-                                format!("invalid IP or CIDR: {s}"),
-                            );
-                        }
-                    }
-                }
-            }
-        }
+        let parsed = parse_trusted_proxies(proxies)
+            .map_err(|msg| error_response(StatusCode::BAD_REQUEST, msg))?;
         let json_val = serde_json::json!(parsed.iter().map(|n| n.to_string()).collect::<Vec<_>>());
-        if let Err(e) =
-            upsert_global_setting(state.db(), SettingKey::TrustedProxies, json_val).await
-        {
-            tracing::error!("Failed to save trusted_proxies: {e:?}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
+        persist_setting(db, SettingKey::TrustedProxies, json_val, "trusted_proxies").await?;
         state.settings.set_trusted_proxies(parsed).await;
     }
 
     // Validate and apply real_ip_header (runtime-changeable)
     if let Some(ref header) = req.real_ip_header {
-        if let Err(e) = upsert_global_setting(
-            state.db(),
+        persist_setting(
+            db,
             SettingKey::RealIpHeader,
             serde_json::json!(header),
+            "real_ip_header",
         )
-        .await
-        {
-            tracing::error!("Failed to save real_ip_header: {e:?}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
+        .await?;
         state.settings.set_real_ip_header(header.clone()).await;
     }
 
     // Validate and apply sans (runtime-changeable)
     let sans_updated = req.sans.is_some();
     if let Some(ref sans) = req.sans {
-        if let Err(e) =
-            upsert_global_setting(state.db(), SettingKey::Sans, serde_json::json!(sans)).await
-        {
-            tracing::error!("Failed to save sans: {e:?}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
+        persist_setting(db, SettingKey::Sans, serde_json::json!(sans), "sans").await?;
         state.settings.set_sans(sans.clone()).await;
     }
 
     // Validate and apply forwarded_client_cert_info_header (runtime-changeable)
     if let Some(ref header) = req.forwarded_client_cert_info_header {
-        let value = if header.is_empty() {
-            None
-        } else {
-            Some(header.clone())
-        };
-        let json_val = match &value {
-            Some(v) => serde_json::json!(v),
-            None => serde_json::Value::Null,
-        };
-        if let Err(e) = upsert_global_setting(
-            state.db(),
+        let value = empty_to_none(header);
+        persist_setting(
+            db,
             SettingKey::ForwardedClientCertInfoHeader,
-            json_val,
+            option_to_json(&value),
+            "forwarded_client_cert_info_header",
         )
-        .await
-        {
-            tracing::error!("Failed to save forwarded_client_cert_info_header: {e:?}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
+        .await?;
         state
             .settings
             .set_forwarded_client_cert_info_header(value)
@@ -166,104 +202,53 @@ pub async fn update_network_settings(
 
     // Validate and apply forwarded_client_cert_pem_header (runtime-changeable)
     if let Some(ref header) = req.forwarded_client_cert_pem_header {
-        let value = if header.is_empty() {
-            None
-        } else {
-            Some(header.clone())
-        };
-        let json_val = match &value {
-            Some(v) => serde_json::json!(v),
-            None => serde_json::Value::Null,
-        };
-        if let Err(e) = upsert_global_setting(
-            state.db(),
+        let value = empty_to_none(header);
+        persist_setting(
+            db,
             SettingKey::ForwardedClientCertPemHeader,
-            json_val,
+            option_to_json(&value),
+            "forwarded_client_cert_pem_header",
         )
-        .await
-        {
-            tracing::error!("Failed to save forwarded_client_cert_pem_header: {e:?}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
+        .await?;
         state
             .settings
             .set_forwarded_client_cert_pem_header(value)
             .await;
     }
 
-    // Track whether pki_addr changed for the warning
-    let mut pki_addr_changed = false;
-
     // Validate and apply pki_addr (requires CA rotation to fully take effect)
-    if let Some(ref url_str) = req.pki_addr {
-        let value = if url_str.is_empty() {
-            None
-        } else {
-            // Validate URL format
-            match url_str.parse::<url::Url>() {
-                Ok(url) => match url.scheme() {
-                    "http" | "https" => {}
-                    other => {
-                        return error_response(
-                            StatusCode::BAD_REQUEST,
-                            format!("unsupported URL scheme: {other} (expected http or https)"),
-                        );
-                    }
-                },
-                Err(e) => {
-                    return error_response(
-                        StatusCode::BAD_REQUEST,
-                        format!("invalid PKI address URL: {e}"),
-                    );
-                }
-            }
-            Some(url_str.trim_end_matches('/').to_string())
-        };
-
-        // Check if the value actually changed
-        let current = state.settings.pki_addr();
-        if current != value {
-            pki_addr_changed = true;
-        }
-
-        let json_val = match &value {
-            Some(v) => serde_json::json!(v),
-            None => serde_json::Value::Null,
-        };
-        if let Err(e) = upsert_global_setting(state.db(), SettingKey::PkiAddr, json_val).await {
-            tracing::error!("Failed to save pki_addr: {e:?}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
+    let pki_addr_changed = if let Some(ref url_str) = req.pki_addr {
+        let value = validate_pki_addr(url_str)
+            .map_err(|msg| error_response(StatusCode::BAD_REQUEST, msg))?;
+        let changed = state.settings.pki_addr() != value;
+        persist_setting(db, SettingKey::PkiAddr, option_to_json(&value), "pki_addr").await?;
         state.settings.set_pki_addr(value).await;
-    }
+        changed
+    } else {
+        false
+    };
 
-    // Validate and apply https_addr (requires restart — save to DB only)
+    // Validate and apply https_addr (requires restart -- save to DB only)
     if let Some(ref addr_str) = req.https_addr {
-        let addr: SocketAddr = match addr_str.parse() {
-            Ok(a) => a,
-            Err(_) => {
-                return error_response(
-                    StatusCode::BAD_REQUEST,
-                    format!("invalid HTTPS address: {addr_str}"),
-                );
-            }
-        };
-        if let Err(e) = upsert_global_setting(
-            state.db(),
+        let addr: SocketAddr = addr_str.parse().map_err(|_| {
+            error_response(
+                StatusCode::BAD_REQUEST,
+                format!("invalid HTTPS address: {addr_str}"),
+            )
+        })?;
+        persist_setting(
+            db,
             SettingKey::HttpsAddr,
             serde_json::json!(addr.to_string()),
+            "https_addr",
         )
-        .await
-        {
-            tracing::error!("Failed to save https_addr: {e:?}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
+        .await?;
         state.settings.set_https_addr(addr).await;
     }
 
     // Optionally regenerate server certificate when SANs were updated
     let cert_regenerated = if sans_updated && req.regenerate_cert == Some(true) {
-        match super::server_cert::renew_server_certificate_inner(&state).await {
+        match super::server_cert::renew_server_certificate_inner(state).await {
             Ok(_) => {
                 tracing::info!(
                     "server certificate regenerated after SAN update via network settings API"
@@ -272,10 +257,10 @@ pub async fn update_network_settings(
             }
             Err(e) => {
                 tracing::error!(error = %e, "server certificate regeneration failed after SAN update");
-                return error_response(
+                return Err(error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "SANs updated but server certificate regeneration failed",
-                );
+                ));
             }
         }
     } else {
@@ -307,5 +292,5 @@ pub async fn update_network_settings(
         pki_addr_warning: warning,
         cert_regenerated,
     };
-    (StatusCode::OK, Json(response)).into_response()
+    Ok((StatusCode::OK, Json(response)).into_response())
 }
