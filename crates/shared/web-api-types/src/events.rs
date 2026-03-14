@@ -39,6 +39,16 @@ pub enum AdminEvent {
         host_id: Uuid,
         software_item_id: Uuid,
     },
+    /// A software update was created and dispatched to the agent.
+    ///
+    /// Emitted immediately after `trigger_update_for_host` succeeds, before
+    /// the agent confirms start. Allows the History page to show the new
+    /// pending/queued entry in real-time without polling.
+    UpdateTriggered {
+        update_history_id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+    },
     /// A software update started executing.
     UpdateStarted {
         update_history_id: Uuid,
@@ -90,6 +100,7 @@ impl AdminEvent {
             Self::SoftwareItemUpdated { .. } => "software_item_updated",
             Self::SoftwareItemCreated { .. } => "software_item_created",
             Self::VersionCheckCompleted { .. } => "version_check_completed",
+            Self::UpdateTriggered { .. } => "update_triggered",
             Self::UpdateStarted { .. } => "update_started",
             Self::UpdateCompleted { .. } => "update_completed",
             Self::DiscoveryCompleted { .. } => "discovery_completed",
@@ -122,6 +133,11 @@ mod tests {
             AdminEvent::SoftwareItemUpdated { id },
             AdminEvent::SoftwareItemCreated { id },
             AdminEvent::VersionCheckCompleted {
+                host_id: id,
+                software_item_id: id,
+            },
+            AdminEvent::UpdateTriggered {
+                update_history_id: id,
                 host_id: id,
                 software_item_id: id,
             },
@@ -192,6 +208,15 @@ mod tests {
             "version_check_completed"
         );
         assert_eq!(
+            AdminEvent::UpdateTriggered {
+                update_history_id: id,
+                host_id: id,
+                software_item_id: id,
+            }
+            .event_name(),
+            "update_triggered"
+        );
+        assert_eq!(
             AdminEvent::UpdateStarted {
                 update_history_id: id,
                 host_id: id,
@@ -233,7 +258,7 @@ mod tests {
     fn event_name_count_matches_variant_count() {
         // If a new variant is added without updating event_name(), this
         // test will fail because all_variants() won't include it.
-        assert_eq!(all_variants().len(), 17);
+        assert_eq!(all_variants().len(), 18);
     }
 
     #[test]

@@ -1243,3 +1243,24 @@ impl StdinAttentionPayload {
         }
     }
 }
+
+// --- Cross-controller admin event broadcast ---
+
+/// Cross-controller admin event broadcast payload.
+///
+/// Published via NATS to the `controller` subject by any controller instance
+/// when it emits an [`AdminEvent`](uptrakit_web_api_types::events::AdminEvent)
+/// to local SSE subscribers. Receiving controller instances decode the payload
+/// and re-broadcast to their own local SSE subscribers without re-publishing
+/// to NATS (to avoid infinite loops).
+///
+/// `tenant_id = None` means the event targets all tenants (system-wide).
+///
+/// **Safe to publish via NATS** — contains no credential material.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BroadcastAdminEventPayload {
+    /// Target tenant, or `None` for system-wide events.
+    pub tenant_id: Option<Uuid>,
+    /// JSON-serialised `AdminEvent`.
+    pub event_json: String,
+}

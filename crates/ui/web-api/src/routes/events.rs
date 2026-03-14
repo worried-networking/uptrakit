@@ -40,7 +40,8 @@ pub async fn stream_events(
                     match event {
                         Ok(admin_event) => {
                             let event_name = admin_event.event_name();
-                            if let Ok(json) = serde_json::to_string(&admin_event) {
+                            let inner = extract_sse_data(&admin_event);
+                            if let Ok(json) = serde_json::to_string(&inner) {
                                 yield Ok::<_, Infallible>(
                                     Event::default().event(event_name).data(json)
                                 );
@@ -71,4 +72,99 @@ pub async fn stream_events(
     Sse::new(stream)
         .keep_alive(KeepAlive::default().interval(std::time::Duration::from_secs(15)))
         .into_response()
+}
+
+/// Extract the inner JSON object from an externally-tagged `AdminEvent` value.
+///
+/// `AdminEvent` serialises as `{"variant_name": {...inner fields...}}` for struct
+/// variants and as the bare string `"variant_name"` for unit variants (e.g. `DataReset`).
+/// The SSE `event:` line already carries the variant name, so `data:` must hold only
+/// the inner fields.  This function performs that extraction.
+pub(crate) fn extract_sse_data(
+    event: &uptrakit_web_api_types::events::AdminEvent,
+) -> serde_json::Value {
+    match serde_json::to_value(event) {
+        Ok(serde_json::Value::Object(map)) => {
+            let v = map
+                .into_values()
+                .next()
+                .unwrap_or(serde_json::Value::Object(Default::default()));
+            if v.is_null() {
+                serde_json::Value::Object(Default::default())
+            } else {
+                v
+            }
+        }
+        _ => serde_json::Value::Object(Default::default()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uptrakit_web_api_types::events::AdminEvent;
+    use uuid::Uuid;
+
+    #[test]
+    fn sse_data_struct_variant_exposes_inner_fields() {
+        let id = Uuid::nil();
+        let event = AdminEvent::UpdateStarted {
+            update_history_id: id,
+            host_id: id,
+            software_item_id: id,
+            interactive: true,
+        };
+        let data = extract_sse_data(&event);
+        // Must NOT contain the outer "update_started" key.
+        assert!(
+            data.get("update_started").is_none(),
+            "outer key must be absent: {data}"
+        );
+        // Must expose inner fields directly.
+        assert!(
+            data.get("update_history_id").is_some(),
+            "update_history_id missing: {data}"
+        );
+        assert!(data.get("host_id").is_some(), "host_id missing: {data}");
+        assert!(
+            data.get("interactive").is_some(),
+            "interactive missing: {data}"
+        );
+    }
+
+    #[test]
+    fn sse_data_unit_variant_emits_empty_object() {
+        let event = AdminEvent::DataReset;
+        let data = extract_sse_data(&event);
+        assert!(data.is_object(), "expected object, got: {data}");
+        assert_eq!(
+            data.as_object().map(|m| m.len()).unwrap_or(1),
+            0,
+            "expected empty object: {data}"
+        );
+    }
+
+    #[test]
+    fn sse_data_update_triggered_exposes_inner_fields() {
+        let id = Uuid::nil();
+        let event = AdminEvent::UpdateTriggered {
+            update_history_id: id,
+            host_id: id,
+            software_item_id: id,
+        };
+        let data = extract_sse_data(&event);
+        assert!(
+            data.get("update_triggered").is_none(),
+            "outer key must be absent: {data}"
+        );
+        assert!(
+            data.get("update_history_id").is_some(),
+            "update_history_id missing: {data}"
+        );
+        assert!(data.get("host_id").is_some(), "host_id missing: {data}");
+        assert!(
+            data.get("software_item_id").is_some(),
+            "software_item_id missing: {data}"
+        );
+    }
 }

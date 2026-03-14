@@ -33,11 +33,19 @@ pub enum AdminSseEvent {
         host_id: Uuid,
         software_item_id: Uuid,
     },
+    /// A software update was created and dispatched to the agent.
+    UpdateTriggered {
+        update_history_id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+    },
     /// A software update started executing.
     UpdateStarted {
         update_history_id: Uuid,
         host_id: Uuid,
         software_item_id: Uuid,
+        /// Whether the update was dispatched in interactive mode (PTY allocated).
+        interactive: bool,
     },
     /// A software update completed.
     UpdateCompleted {
@@ -185,7 +193,7 @@ fn parse_typed_event(event: RawSseEvent) -> std::result::Result<AdminSseEvent, S
                 software_item_id: p.software_item_id,
             })
         }
-        "update_started" => {
+        "update_triggered" => {
             #[derive(serde::Deserialize)]
             struct Payload {
                 update_history_id: Uuid,
@@ -193,10 +201,27 @@ fn parse_typed_event(event: RawSseEvent) -> std::result::Result<AdminSseEvent, S
                 software_item_id: Uuid,
             }
             let p: Payload = serde_json::from_str(&event.data)?;
+            Ok(AdminSseEvent::UpdateTriggered {
+                update_history_id: p.update_history_id,
+                host_id: p.host_id,
+                software_item_id: p.software_item_id,
+            })
+        }
+        "update_started" => {
+            #[derive(serde::Deserialize)]
+            struct Payload {
+                update_history_id: Uuid,
+                host_id: Uuid,
+                software_item_id: Uuid,
+                #[serde(default)]
+                interactive: bool,
+            }
+            let p: Payload = serde_json::from_str(&event.data)?;
             Ok(AdminSseEvent::UpdateStarted {
                 update_history_id: p.update_history_id,
                 host_id: p.host_id,
                 software_item_id: p.software_item_id,
+                interactive: p.interactive,
             })
         }
         "update_completed" => {
@@ -335,13 +360,46 @@ mod tests {
     }
 
     #[test]
+    fn parse_update_triggered() {
+        let event = make_event(
+            "update_triggered",
+            r#"{"update_history_id":"550e8400-e29b-41d4-a716-446655440001","host_id":"550e8400-e29b-41d4-a716-446655440002","software_item_id":"550e8400-e29b-41d4-a716-446655440003"}"#,
+        );
+        let result = parse_typed_event(event).unwrap();
+        assert!(matches!(result, AdminSseEvent::UpdateTriggered { .. }));
+    }
+
+    #[test]
     fn parse_update_started() {
+        let event = make_event(
+            "update_started",
+            r#"{"update_history_id":"550e8400-e29b-41d4-a716-446655440001","host_id":"550e8400-e29b-41d4-a716-446655440002","software_item_id":"550e8400-e29b-41d4-a716-446655440003","interactive":true}"#,
+        );
+        let result = parse_typed_event(event).unwrap();
+        assert!(matches!(
+            result,
+            AdminSseEvent::UpdateStarted {
+                interactive: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_update_started_without_interactive_defaults_false() {
+        // Older server versions may not send the `interactive` field.
         let event = make_event(
             "update_started",
             r#"{"update_history_id":"550e8400-e29b-41d4-a716-446655440001","host_id":"550e8400-e29b-41d4-a716-446655440002","software_item_id":"550e8400-e29b-41d4-a716-446655440003"}"#,
         );
         let result = parse_typed_event(event).unwrap();
-        assert!(matches!(result, AdminSseEvent::UpdateStarted { .. }));
+        assert!(matches!(
+            result,
+            AdminSseEvent::UpdateStarted {
+                interactive: false,
+                ..
+            }
+        ));
     }
 
     #[test]

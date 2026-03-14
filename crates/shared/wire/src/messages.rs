@@ -6,11 +6,11 @@ use time::UtcDateTime;
 use super::capabilities::ErrorPayload;
 use super::extension;
 use super::payloads::{
-    ApprovedPayload, BatchUpdateResultPayload, CaBundleUpdatedPayload, CertificatePayload,
-    CheckVersionsPayload, DisconnectingPayload, DiscoverSoftwarePayload, DiscoveryResultsPayload,
-    EnrollPayload, EnrolledPayload, ExecuteBatchUpdatePayload, ExecuteUpdatePayload,
-    HostConnectivityUpdatedPayload, MqttClientCreatedPayload, MqttClientStatusPayload,
-    MqttRegisterPayload, MqttRegisteredPayload, MqttReleaseTenantsPayload,
+    ApprovedPayload, BatchUpdateResultPayload, BroadcastAdminEventPayload, CaBundleUpdatedPayload,
+    CertificatePayload, CheckVersionsPayload, DisconnectingPayload, DiscoverSoftwarePayload,
+    DiscoveryResultsPayload, EnrollPayload, EnrolledPayload, ExecuteBatchUpdatePayload,
+    ExecuteUpdatePayload, HostConnectivityUpdatedPayload, MqttClientCreatedPayload,
+    MqttClientStatusPayload, MqttRegisterPayload, MqttRegisteredPayload, MqttReleaseTenantsPayload,
     MqttSoftwareStatesPayload, MqttTenantAssignmentsPayload, MqttTenantConfigUpdatedPayload,
     MqttTenantRevokedPayload, MqttTriggerHostBatchUpdatePayload, MqttUpdateTriggerPayload,
     PingPayload, PongPayload, RejectedPayload, ReportHostsPayload, ReportPluginConfigPayload,
@@ -489,6 +489,16 @@ pub enum ControllerMessage {
     ///
     /// **Safe to publish via NATS** — contains no credential material.
     TokenRevoked(TokenRevokedPayload),
+    /// Cross-controller admin event broadcast.
+    ///
+    /// Published via NATS to the `controller` subject by any controller
+    /// instance when it emits an `AdminEvent` to local SSE subscribers.
+    /// Receiving controller instances decode the payload and re-broadcast
+    /// to their own local SSE subscribers using `send_local` /
+    /// `send_global_local` (without re-publishing to NATS to avoid loops).
+    ///
+    /// **Safe to publish via NATS** — contains no credential material.
+    BroadcastAdminEvent(BroadcastAdminEventPayload),
     /// Unknown message type from a newer controller build.
     ///
     /// Deserialized when the `type` tag does not match any known variant.
