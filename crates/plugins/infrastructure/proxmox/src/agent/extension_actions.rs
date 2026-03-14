@@ -66,7 +66,7 @@ async fn handle_list_discovered_guests(
 
 // ── bootstrap-proxmox-guest ──────────────────────────────────────────────────
 
-/// Bootstrap one or more discovered Proxmox guests (multi-guest, parallel).
+/// Bootstrap one or more discovered Proxmox guests with bounded concurrency.
 async fn handle_bootstrap_proxmox_guest(
     request_id: &str,
     params: &serde_json::Value,
@@ -74,23 +74,8 @@ async fn handle_bootstrap_proxmox_guest(
 ) -> ExtensionResponsePayload {
     const MAX_CONCURRENT_BOOTSTRAPS: usize = 4;
 
-    // 1. Parse selected guest IDs.
-    let discovered_guests: Vec<String> = match params.get("discovered_guests") {
-        Some(serde_json::Value::Array(arr)) => arr
-            .iter()
-            .filter_map(|v| v.as_str().map(str::to_string))
-            .collect(),
-        Some(serde_json::Value::String(s)) => serde_json::from_str::<Vec<String>>(s)
-            .unwrap_or_else(|_| {
-                if s.is_empty() {
-                    vec![]
-                } else {
-                    vec![s.clone()]
-                }
-            }),
-        _ => vec![],
-    };
-
+    // 1. Parse selected guest IDs from the request params.
+    let discovered_guests = parse_discovered_guests(params);
     if discovered_guests.is_empty() {
         return make_error_response(request_id, "no guests selected");
     }
@@ -121,14 +106,13 @@ async fn handle_bootstrap_proxmox_guest(
         }
     };
 
-    // The list-all-unmatched response uses "items", not "options".
     let options = guests_data
         .get("items")
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
 
-    // 3. Load PVE hosts and build (node, config_id) → host_id map.
+    // 3. Load PVE hosts and build (node, config_id) -> host_id map.
     let pve_host_map: std::collections::HashMap<(String, String), String> =
         match db_ops::find_pve_hosts(ctx.db).await {
             Ok(hosts) => hosts
@@ -144,7 +128,7 @@ async fn handle_bootstrap_proxmox_guest(
             }
         };
 
-    // 4. Resolve each guest.
+    // 4. Resolve each guest into bootstrap params, collecting immediate errors.
     let target_username = params
         .get("target_username")
         .and_then(|v| v.as_str())
@@ -157,271 +141,33 @@ async fn handle_bootstrap_proxmox_guest(
     let mut tasks: Vec<(String, String, GuestBootstrapParams)> = Vec::new();
 
     for guest_id in &discovered_guests {
-        let guest = options.iter().find(|o| {
-            o.get("value")
-                .and_then(|v| v.as_str())
-                .is_some_and(|v| v == guest_id)
-        });
-
-        let guest = match guest {
-            Some(g) => g,
-            None => {
-                immediate_errors.push(json!({
-                    "mapping_id": guest_id,
-                    "name": guest_id,
-                    "status": "error",
-                    "error": "guest not found in discovered guests list",
-                }));
-                continue;
-            }
-        };
-
-        let vmid: u32 = match guest.get("proxmox_vmid").and_then(|v| v.as_i64()) {
-            Some(v) if v > 0 => v as u32,
-            _ => {
-                immediate_errors.push(json!({
-                    "mapping_id": guest_id,
-                    "name": guest_id,
-                    "status": "error",
-                    "error": "invalid VMID in discovered guest",
-                }));
-                continue;
-            }
-        };
-
-        let guest_type_str = guest
-            .get("proxmox_type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("lxc");
-        match guest_type_str {
-            "lxc" | "qemu" => {}
-            _ => {
-                immediate_errors.push(json!({
-                    "mapping_id": guest_id,
-                    "name": guest_id,
-                    "status": "error",
-                    "error": "unknown guest type in discovered guest",
-                }));
-                continue;
-            }
+        match validate_and_resolve_guest(
+            guest_id,
+            &options,
+            &pve_host_map,
+            &target_username,
+            allow_all,
+            remove_stale_keys,
+            ctx.service_id,
+        ) {
+            Ok(resolved) => tasks.push(resolved),
+            Err(error_json) => immediate_errors.push(error_json),
         }
-
-        let proxmox_node = match guest.get("proxmox_node").and_then(|v| v.as_str()) {
-            Some(n) => n.to_string(),
-            None => {
-                immediate_errors.push(json!({
-                    "mapping_id": guest_id,
-                    "name": guest_id,
-                    "status": "error",
-                    "error": "missing proxmox_node in discovered guest",
-                }));
-                continue;
-            }
-        };
-
-        let plugin_config_id = match guest.get("plugin_config_id").and_then(|v| v.as_str()) {
-            Some(id) => id.to_string(),
-            None => {
-                immediate_errors.push(json!({
-                    "mapping_id": guest_id,
-                    "name": guest_id,
-                    "status": "error",
-                    "error": "missing plugin_config_id in discovered guest",
-                }));
-                continue;
-            }
-        };
-
-        let pve_host_id = match pve_host_map.get(&(proxmox_node.clone(), plugin_config_id.clone()))
-        {
-            Some(id) => id.clone(),
-            None => {
-                immediate_errors.push(json!({
-                    "mapping_id": guest_id,
-                    "name": guest_id,
-                    "status": "error",
-                    "error": format!(
-                        "no PVE host found for node '{proxmox_node}' with plugin \
-                         config '{plugin_config_id}'; run 'host sync' on PVE hosts first"
-                    ),
-                }));
-                continue;
-            }
-        };
-
-        // Auto-derive name.
-        let name = guest
-            .get("hostname")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .or_else(|| {
-                guest
-                    .get("proxmox_name")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-            })
-            .map(str::to_string)
-            .unwrap_or_else(|| match guest_type_str {
-                "qemu" => format!("vm-{vmid}"),
-                _ => format!("ct-{vmid}"),
-            });
-
-        let host_id = uuid::Uuid::now_v7();
-        tasks.push((
-            guest_id.clone(),
-            name.clone(),
-            GuestBootstrapParams::new(
-                pve_host_id,
-                vmid,
-                guest_type_str,
-                name,
-                target_username.clone(),
-                allow_all,
-                remove_stale_keys,
-                host_id,
-                ctx.service_id,
-            ),
-        ));
     }
 
-    // 5. Run bootstraps in parallel with bounded concurrency.
-    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_BOOTSTRAPS));
-    let mut join_set: tokio::task::JoinSet<serde_json::Value> = tokio::task::JoinSet::new();
-
-    // We need to clone the state_dir for spawned tasks to init their own DB.
-    let state_dir = ctx.state_dir.to_path_buf();
-
-    for (mapping_id, name, bootstrap_params) in tasks {
-        let sem = std::sync::Arc::clone(&semaphore);
-        let host_id = bootstrap_params.host_id;
-        let state_dir = state_dir.clone();
-
-        // We can't pass ctx.guest_bootstrap into spawn directly because it's
-        // not 'static. Instead, we run bootstraps sequentially within the
-        // semaphore-bounded tasks but on the current task.
-        // Actually, GuestBootstrapExecutor is Send+Sync, but the reference
-        // isn't 'static. We need a different approach.
-        // Let's collect params and run them after.
-        join_set.spawn(async move {
-            let _permit = sem.acquire().await.expect("semaphore is never closed");
-            // We'll fill in the result below.
-            json!({
-                "mapping_id": mapping_id,
-                "name": name,
-                "host_id": host_id.to_string(),
-                "state_dir": state_dir.to_string_lossy().to_string(),
-                "status": "pending",
-            })
-        });
-    }
-
-    // Actually, the parallel approach won't work cleanly with the trait object
-    // reference. Let's run sequentially with a semaphore instead.
-    // Drop the join_set and re-do this properly.
-    drop(join_set);
-
-    // Re-resolve tasks for sequential execution.
-    let mut results = immediate_errors;
-
-    // Re-parse tasks.
-    let mut task_params: Vec<(String, String, GuestBootstrapParams)> = Vec::new();
-    for guest_id in &discovered_guests {
-        // Skip guests that already had errors.
-        if results.iter().any(|r| {
-            r.get("mapping_id")
-                .and_then(|v| v.as_str())
-                .is_some_and(|v| v == guest_id)
-        }) {
-            continue;
-        }
-
-        let guest = options.iter().find(|o| {
-            o.get("value")
-                .and_then(|v| v.as_str())
-                .is_some_and(|v| v == guest_id)
-        });
-        let Some(guest) = guest else { continue };
-
-        let vmid = guest
-            .get("proxmox_vmid")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0) as u32;
-        let guest_type_str = guest
-            .get("proxmox_type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("lxc");
-        let proxmox_node = guest
-            .get("proxmox_node")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let plugin_config_id = guest
-            .get("plugin_config_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        let Some(pve_host_id) = pve_host_map.get(&(proxmox_node, plugin_config_id)).cloned() else {
-            continue;
-        };
-
-        let name = guest
-            .get("hostname")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .or_else(|| {
-                guest
-                    .get("proxmox_name")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-            })
-            .map(str::to_string)
-            .unwrap_or_else(|| match guest_type_str {
-                "qemu" => format!("vm-{vmid}"),
-                _ => format!("ct-{vmid}"),
-            });
-
-        let host_id = uuid::Uuid::now_v7();
-        task_params.push((
-            guest_id.clone(),
-            name.clone(),
-            GuestBootstrapParams::new(
-                pve_host_id,
-                vmid,
-                guest_type_str,
-                name,
-                target_username.clone(),
-                allow_all,
-                remove_stale_keys,
-                host_id,
-                ctx.service_id,
-            ),
-        ));
-    }
-
-    // Run with bounded concurrency via semaphore.
-    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_BOOTSTRAPS));
-
-    // Since we can't move the trait object into spawned tasks, we use
-    // `JoinSet` with `spawn_on` won't work either. Instead, use
-    // `tokio::task::JoinSet` with locally-scoped futures via a channel.
-    // The simplest correct approach: collect all params, then spawn tasks
-    // that call back to us. But GuestBootstrapExecutor is Send+Sync...
-    // we just need to Arc-wrap it if possible.
-
-    // Actually, let's just use futures::stream with buffered concurrency.
-    // This avoids the 'static lifetime issue entirely.
+    // 5. Run bootstraps with bounded concurrency via futures stream.
+    //    Using `buffer_unordered` avoids the 'static lifetime requirement
+    //    that `JoinSet::spawn` would impose on the `ctx` reference.
     use futures_util::StreamExt;
 
-    let bootstrap_futures: Vec<_> = task_params
+    let mut results = immediate_errors;
+
+    let bootstrap_futures: Vec<_> = tasks
         .into_iter()
         .map(|(mapping_id, name, params)| {
-            let sem = std::sync::Arc::clone(&semaphore);
             let host_id = params.host_id;
 
             async move {
-                let _permit = sem.acquire().await.expect("semaphore is never closed");
-
                 match ctx.guest_bootstrap.bootstrap_guest(params).await {
                     Ok(result) => {
                         tracing::info!(
@@ -431,7 +177,6 @@ async fn handle_bootstrap_proxmox_guest(
                             "discovered guest bootstrap completed"
                         );
 
-                        // Defer the Proxmox mapping match.
                         if let Err(e) =
                             db_ops::insert_pending_match(ctx.db, &host_id.to_string(), &mapping_id)
                                 .await
@@ -506,6 +251,139 @@ async fn handle_bootstrap_proxmox_guest(
             "failed": failed,
         }),
     )
+}
+
+// ── Guest parsing and validation ─────────────────────────────────────────────
+
+/// Extract the list of guest IDs from the `discovered_guests` request parameter.
+///
+/// Accepts either a JSON array of strings or a single string (which is first
+/// tried as a JSON-encoded array, then treated as a single ID).
+fn parse_discovered_guests(params: &serde_json::Value) -> Vec<String> {
+    match params.get("discovered_guests") {
+        Some(serde_json::Value::Array(arr)) => arr
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+        Some(serde_json::Value::String(s)) => serde_json::from_str::<Vec<String>>(s)
+            .unwrap_or_else(|_| {
+                if s.is_empty() {
+                    vec![]
+                } else {
+                    vec![s.clone()]
+                }
+            }),
+        _ => vec![],
+    }
+}
+
+/// Validate a single guest entry and resolve it into bootstrap parameters.
+///
+/// On success returns `(mapping_id, display_name, GuestBootstrapParams)`.
+/// On failure returns a JSON error object suitable for inclusion in the
+/// results array.
+#[allow(clippy::too_many_arguments)] // mirrors the many fields needed for bootstrap
+fn validate_and_resolve_guest(
+    guest_id: &str,
+    options: &[serde_json::Value],
+    pve_host_map: &std::collections::HashMap<(String, String), String>,
+    target_username: &str,
+    allow_all: bool,
+    remove_stale_keys: bool,
+    service_id: Option<uuid::Uuid>,
+) -> Result<(String, String, GuestBootstrapParams), serde_json::Value> {
+    let guest = options
+        .iter()
+        .find(|o| {
+            o.get("value")
+                .and_then(|v| v.as_str())
+                .is_some_and(|v| v == guest_id)
+        })
+        .ok_or_else(|| guest_error(guest_id, "guest not found in discovered guests list"))?;
+
+    let vmid: u32 = match guest.get("proxmox_vmid").and_then(|v| v.as_i64()) {
+        Some(v) if v > 0 => v as u32,
+        _ => return Err(guest_error(guest_id, "invalid VMID in discovered guest")),
+    };
+
+    let guest_type_str = guest
+        .get("proxmox_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("lxc");
+    if !matches!(guest_type_str, "lxc" | "qemu") {
+        return Err(guest_error(
+            guest_id,
+            "unknown guest type in discovered guest",
+        ));
+    }
+
+    let proxmox_node = guest
+        .get("proxmox_node")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| guest_error(guest_id, "missing proxmox_node in discovered guest"))?
+        .to_string();
+
+    let plugin_config_id = guest
+        .get("plugin_config_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| guest_error(guest_id, "missing plugin_config_id in discovered guest"))?
+        .to_string();
+
+    let pve_host_id = pve_host_map
+        .get(&(proxmox_node.clone(), plugin_config_id.clone()))
+        .ok_or_else(|| {
+            guest_error(
+                guest_id,
+                &format!(
+                    "no PVE host found for node '{proxmox_node}' with plugin \
+                     config '{plugin_config_id}'; run 'host sync' on PVE hosts first"
+                ),
+            )
+        })?
+        .clone();
+
+    let name = guest
+        .get("hostname")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            guest
+                .get("proxmox_name")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+        })
+        .map(str::to_string)
+        .unwrap_or_else(|| match guest_type_str {
+            "qemu" => format!("vm-{vmid}"),
+            _ => format!("ct-{vmid}"),
+        });
+
+    let host_id = uuid::Uuid::now_v7();
+    Ok((
+        guest_id.to_string(),
+        name.clone(),
+        GuestBootstrapParams::new(
+            pve_host_id,
+            vmid,
+            guest_type_str,
+            name,
+            target_username.to_string(),
+            allow_all,
+            remove_stale_keys,
+            host_id,
+            service_id,
+        ),
+    ))
+}
+
+/// Build a standardized guest-level error JSON object.
+fn guest_error(guest_id: &str, error: &str) -> serde_json::Value {
+    json!({
+        "mapping_id": guest_id,
+        "name": guest_id,
+        "status": "error",
+        "error": error,
+    })
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
