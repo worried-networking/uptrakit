@@ -398,23 +398,45 @@ async fn resolve_or_create_oidc_user(
         }
     };
 
-    // For LinkedUser and NewUser, the handler performs DB work within the
-    // transaction and returns `Ok(user_id)` on success so we can commit and
-    // create the exchange redirect, or `Err(response)` on failure.
+    execute_oidc_resolution(
+        state,
+        txn,
+        resolution,
+        provider_id,
+        provider,
+        &sub,
+        &email,
+        first_name,
+        last_name,
+        &additional_claims,
+    )
+    .await
+}
+
+/// Execute the OIDC user resolution match inside the transaction.
+///
+/// Returns the response to send to the client. The caller is responsible for
+/// beginning and committing the transaction.
+#[allow(clippy::too_many_arguments)]
+async fn execute_oidc_resolution(
+    state: &AppState,
+    txn: sea_orm::DatabaseTransaction,
+    resolution: OidcUserResolution,
+    provider_id: Uuid,
+    provider: &oidc_provider::Model,
+    sub: &str,
+    email: &str,
+    first_name: Option<String>,
+    last_name: Option<String>,
+    additional_claims: &serde_json::Value,
+) -> Response {
     match resolution {
         OidcUserResolution::LinkedUser(user_id) => {
-            let user_id = match handle_linked_user(
-                state,
-                &txn,
-                user_id,
-                provider,
-                &additional_claims,
-            )
-            .await
-            {
-                Ok(uid) => uid,
-                Err(response) => return response,
-            };
+            let user_id =
+                match handle_linked_user(state, &txn, user_id, provider, additional_claims).await {
+                    Ok(uid) => uid,
+                    Err(response) => return response,
+                };
             if let Err(e) = txn.commit().await {
                 tracing::error!("Failed to commit OIDC callback transaction: {e}");
                 return Redirect::to("/login?error=oidc_internal_error").into_response();
@@ -423,7 +445,7 @@ async fn resolve_or_create_oidc_user(
         }
         OidcUserResolution::NewUser(user_id) => {
             let user_id =
-                match handle_new_user(state, &txn, user_id, provider, &additional_claims).await {
+                match handle_new_user(state, &txn, user_id, provider, additional_claims).await {
                     Ok(uid) => uid,
                     Err(response) => return response,
                 };
@@ -439,11 +461,11 @@ async fn resolve_or_create_oidc_user(
                 state,
                 provider_id,
                 provider,
-                &sub,
-                &email,
+                sub,
+                email,
                 first_name,
                 last_name,
-                &additional_claims,
+                additional_claims,
                 user_id,
             )
             .await
@@ -457,11 +479,11 @@ async fn resolve_or_create_oidc_user(
                 state,
                 provider_id,
                 provider,
-                &sub,
-                &email,
+                sub,
+                email,
                 first_name,
                 last_name,
-                &additional_claims,
+                additional_claims,
                 user_id,
                 existing_provider_id,
             )
