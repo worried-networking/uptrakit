@@ -11,7 +11,8 @@
 		triggerSoftwareUpdate,
 		updateSoftwareItem,
 		deleteSoftwareItem,
-		unassignHostFromSoftwareItem
+		unassignHostFromSoftwareItem,
+		getUpdateHistoryEntry
 	} from '$lib/api';
 	import { formatDate, formatVersion, isValidExternalUrl, isValidLogoUrl } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -360,6 +361,32 @@
 				},
 				onError: (err) => {
 					showError(`Interactive session error: ${err}`);
+					// The WS failed before any output arrived.
+					// Fetch stored output from the history entry as a fallback
+					// so the terminal still shows what happened.
+					const historyId = liveModal?.updateHistoryId;
+					if (!historyId) return;
+					liveWsState = 'connecting';
+					void (async () => {
+						try {
+							const entry = await getUpdateHistoryEntry(historyId);
+							// Guard: modal may have been closed while awaiting.
+							if (liveModal?.updateHistoryId !== historyId) return;
+							if (entry.output) {
+								liveTerminalRef?.write(entry.output);
+							}
+							if (entry.status === 'completed' || entry.status === 'failed') {
+								liveWsState = 'completed';
+								loadItem(true);
+							} else {
+								liveWsState = 'error';
+							}
+						} catch {
+							if (liveModal?.updateHistoryId === historyId) {
+								liveWsState = 'error';
+							}
+						}
+					})();
 				}
 			});
 		}, 0);
