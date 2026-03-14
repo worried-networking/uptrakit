@@ -1495,3 +1495,83 @@ tracing::warn!(
    observable.
 3. The `warn` level matches the existing convention for security-relevant
    conditions (see [Logging — Log Level Guidelines](logging.md)).
+
+---
+
+## Visibility and Module Boundaries
+
+Rust provides four visibility levels. Use the narrowest level that satisfies the actual
+call-site requirements:
+
+| Scope | Keyword | Use when |
+| --- | --- | --- |
+| Private (default) | *(none)* | Item is only used in the same module |
+| Crate-internal | `pub(crate)` | Item is used across modules/files **within the same crate** |
+| Parent module | `pub(super)` | Item is used only in the parent module |
+| Fully public | `pub` | Item crosses a **crate boundary** (called by another crate) |
+
+### The `unreachable_pub` lint
+
+The workspace enforces this table via the `unreachable_pub` lint (set to `deny` in
+`[workspace.lints.rust]`). The lint fires whenever a `pub` item is **not reachable**
+through the crate's public module chain. It is self-selecting:
+
+- `pub fn foo()` inside a `mod bar { … }` where `bar` is not re-exported → **fires**
+  (downgrade to `pub(crate)` or `pub(super)`)
+- `pub fn foo()` inside a `pub mod bar { … }` that is re-exported from `lib.rs` → **does not fire**
+  (the item is genuinely reachable from outside the crate)
+
+No `#![allow(unreachable_pub)]` should appear anywhere in the workspace.
+
+### Concrete examples
+
+```rust
+// ❌ BEFORE — `pub` inside a private module
+mod queries {
+    pub fn fetch_all(db: &Db) -> Vec<Item> { … }
+}
+
+// ✅ AFTER — narrowed to pub(crate) because the function does not cross a crate boundary
+mod queries {
+    pub(crate) fn fetch_all(db: &Db) -> Vec<Item> { … }
+}
+```
+
+```rust
+// ✅ Correct — pub is justified because another crate calls this
+// lib.rs re-exports the module:  pub mod routes;
+pub mod routes {
+    pub fn health() -> &'static str { "ok" }
+}
+```
+
+```rust
+// ❌ BEFORE — pub helper only used inside the same file
+pub fn build_filter(id: Uuid) -> Condition { … }
+
+// ✅ AFTER
+fn build_filter(id: Uuid) -> Condition { … }   // or pub(crate) if used in a sibling module
+```
+
+### Plugin crate rule
+
+Trait implementation methods are implicitly `pub` when required by the trait — do not
+annotate them with an explicit `pub`. Only freestanding helper functions in plugin
+submodules need visibility tightening:
+
+```rust
+// ✅ Trait impl — no explicit pub needed
+impl ReleasePlugin for GitHubPlugin {
+    async fn fetch_latest(&self) -> Result<Release> { … }
+}
+
+// ✅ Freestanding helper — must use pub(crate) if not part of the public API
+pub(crate) fn parse_semver_tag(tag: &str) -> Option<semver::Version> { … }
+```
+
+### Cross-reference
+
+- [Error Handling](error-handling.md) — public error types follow the same rule: use
+  `pub(crate)` for errors that never cross a crate boundary.
+- [Security](../../security/README.md) — avoid leaking internal types through `pub` that
+  could expose security-sensitive implementation details.
