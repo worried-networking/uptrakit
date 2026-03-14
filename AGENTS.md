@@ -91,11 +91,11 @@ uptrakit/
 │   │   │   ├── snap/                   # uptrakit-plugin-package-manager-snap                   (lib)  — Snap (snapd) plugin for Linux; agent-side only; discovery via `snap list` (excludes system snaps: core*, snapd, bare); version detection via `snap list <name>`; batch_detect_installed_version via single `snap list` parsed into map; release fetch via `snap info <name>` (channels: section parsing); updates via `sudo snap refresh <name>` (optional --channel=); native execute_batch_update (single `snap refresh name1 name2 ...`); implements DetectHostCompatibility (checks `which snap`); package_identifier = snap name (lowercase, digits, hyphens, 2-40 chars); requires sudo for refresh; no package index refresh step (snapd manages cache internally)
 │   │   │   └── cargo/                  # uptrakit-plugin-package-manager-cargo                  (lib)  — Cargo install plugin; tracks Rust binaries installed via `cargo install`; discovery + version detection via `cargo install --list` (parse non-indented `<name> v<version>:` headers); ControllerSideFetchReleases via crates.io sparse index (`https://index.crates.io/{prefix}/{name}`, `tame-index` for URL/parsing); batch_fetch_releases bounded to 10 concurrent requests via `buffer_unordered(10)`; updates via `cargo install <name> --version <ver> --locked` (default, controlled by `use_locked` type setting) (no sudo, installs to `~/.cargo/bin`); implements DetectHostCompatibility (checks `which cargo` exit code); package_identifier = crate name (1–64 chars, starts with letter/underscore, `[A-Za-z0-9_-]`); DiscoveryTarget always emitted; type_settings_form_schema() for include_prereleases, registry_url, and use_locked; custom registry_url uses SsrfSafeResolver::permissive(), default uses SsrfSafeResolver::new()
 │   │   ├── notifications/
-│   │   │   ├── core/                   # uptrakit-notification-plugin-core       (lib)  — NotificationPlugin trait (deliver, validate_config, mask_config_secrets, extension_manifests, extension_actions), DeliveryMessage, MessageAction, NotificationPluginError, escape_html()
+│   │   │   ├── core/                   # uptrakit-notification-plugin-core       (lib)  — DeliveryMessage, MessageAction, NotificationPluginError, escape_html()
 │   │   │   ├── webhook/               # uptrakit-notification-plugin-webhook    (lib)  — Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing)
 │   │   │   ├── telegram/              # uptrakit-notification-plugin-telegram   (lib)  — Telegram plugin with inline keyboard (feature-gated)
 │   │   │   ├── email/                 # uptrakit-notification-plugin-email      (lib)  — Email plugin (SMTP via mail-send, SmtpSettingsSnapshot, merge_smtp_into_config(global, tenant, config)); extension manifests for channel management + global SMTP defaults (feature-gated)
-│   │   │   └── registry/             # uptrakit-notification-plugin-registry   (lib)  — NotificationPluginRegistry, NotificationOps trait, NotificationRegistryConfig; delegates extension_manifests()/extension_actions() to individual plugins; re-exports core types
+│   │   │   # (registry removed — notification plugins now registered in unified PluginRegistry via with_notifications())
 │   │   └── discovery/
 │   │       └── proxmox-helper-scripts/ # uptrakit-plugin-discovery-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/Codeberg/npm/APT upstream; emits ReleasesGithub+GenericShell targets for GitHub-managed items, ReleasesForgejo+GenericShell targets for Codeberg-managed items (api_base_url="https://codeberg.org"; uses Forgejo plugin since Codeberg runs Forgejo), PackageManagerNpm target for npm-managed items, PackageManagerApt target for APT-managed items)
 │   ├── shared/
@@ -1364,12 +1364,12 @@ overflow are dropped with a `tracing::warn!` rather than causing unbounded heap 
 
 | Crate/module | Purpose |
 | --- | --- |
-| `crates/plugins/notifications/core/` | `NotificationPlugin` trait (with `restore_config_secrets` default method), `DeliveryMessage` (`#[non_exhaustive]`, `::new()`), `MessageAction` (`#[non_exhaustive]`, `::new()`), `NotificationPluginError`, `escape_html()` |
-| `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing) |
-| `crates/plugins/notifications/telegram/` | Telegram plugin with inline keyboard |
-| `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`) |
-| `crates/plugins/notifications/registry/` | `NotificationPluginRegistry`, `NotificationOps` trait (includes `restore_config_secrets`, `extension_manifests`, `extension_actions`), `NotificationRegistryConfig`; re-exports core types |
-| `crates/plugins/notifications/registry/src/extensions/` | Per-transport `ExtensionManifest` and `ActionDef` definitions (webhook, telegram, email); only crate with transport-specific UI knowledge |
+| `crates/plugins/infrastructure/core/src/plugin_base.rs` | `PluginBase` trait, `NotificationTransportPlugin` trait |
+| `crates/plugins/notifications/core/` | `DeliveryMessage` (`#[non_exhaustive]`, `::new()`), `MessageAction` (`#[non_exhaustive]`, `::new()`), `NotificationPluginError`, `escape_html()` |
+| `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing); implements `PluginBase` + `NotificationTransportPlugin` |
+| `crates/plugins/notifications/telegram/` | Telegram plugin with inline keyboard; implements `PluginBase` + `NotificationTransportPlugin` |
+| `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`); implements `PluginBase` + `NotificationTransportPlugin` |
+| `crates/plugins/infrastructure/registry/` | Unified `PluginRegistry` with `with_notifications()` builder, `NotificationRegistryConfig`; `notification_transport()` lookup |
 | `crates/ui/web-api/src/routes/notification_extensions.rs` | Generic extension data action handler (channel listing with config flattening) + SMTP settings handler |
 | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, `NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus` enums |
 | `crates/ui/web-api/src/notifications/` | Internal `NotificationEvent`, `NotificationDispatcher`, `message_builder` |
@@ -1382,11 +1382,11 @@ overflow are dropped with a `tracing::warn!` rather than causing unbounded heap 
 
 | Feature | Crate | Default | Notes |
 | --- | --- | --- | --- |
-| `webhook` | notification-plugin-registry | yes | Always compiled |
-| `telegram` | notification-plugin-registry | no | Requires `teloxide-core` |
-| `email` | notification-plugin-registry | no | SMTP via mail-send (rustls) |
-| `notifications-telegram` | web-api, controller | no | Propagated to notification-plugin-registry |
-| `notifications-email` | web-api, controller | no | Propagated to notification-plugin-registry; requires global SMTP settings configured via `PUT /api/v1/settings/smtp` |
+| `webhook` | plugin-infrastructure-registry | yes | Always compiled |
+| `telegram` | plugin-infrastructure-registry | no | Requires `teloxide-core` |
+| `email` | plugin-infrastructure-registry | no | SMTP via mail-send (rustls) |
+| `notifications-telegram` | web-api, controller | no | Propagated to plugin-infrastructure-registry |
+| `notifications-email` | web-api, controller | no | Propagated to plugin-infrastructure-registry; requires global SMTP settings configured via `PUT /api/v1/settings/smtp` |
 
 ### Event types
 
@@ -1423,11 +1423,11 @@ permission model and [User Management API](docs/api/user-management.md) for the 
 ### Adding a new channel
 
 1. Create a new crate under `crates/plugins/notifications/<name>/`
-2. Implement `NotificationPlugin` trait
-3. Register in `NotificationPluginRegistry::new()` behind `#[cfg(feature = "...")]`
-4. Add feature in `crates/plugins/notifications/registry/Cargo.toml`
+2. Implement `PluginBase` + `NotificationTransportPlugin` traits from `uptrakit-plugin-infrastructure-core`
+3. Register in `PluginRegistry::with_notifications()` behind `#[cfg(feature = "...")]`
+4. Add feature in `crates/plugins/infrastructure/registry/Cargo.toml`
 5. Add variant to `NotificationChannelType` enum in web-api-types
-6. Propagate feature: `web-api/Cargo.toml` → `controller/Cargo.toml`
+6. Propagate feature: `web-api/Cargo.toml` -> `controller/Cargo.toml`
 7. HTML-escape all user-controlled values in `body_html` via `uptrakit_notification_plugin_core::escape_html()`
 
 See [Notifications Development](docs/development/notifications.md) for full details.

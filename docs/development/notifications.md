@@ -8,7 +8,7 @@ dispatcher flow, and how to extend the system with new notification plugins.
 The notification subsystem follows a strict plugin-agnostic pipeline:
 
 ```text
-Event producers --> NotificationEvent --> Dispatcher --> match rules --> DeliveryMessage --> NotificationPlugin::deliver()
+Event producers --> NotificationEvent --> Dispatcher --> match rules --> DeliveryMessage --> NotificationTransportPlugin::deliver()
 ```
 
 **Event producers** know nothing about notification plugins. They emit a `NotificationEvent` containing contextual data
@@ -23,11 +23,11 @@ This separation means adding a new notification plugin never requires changes to
 
 | Crate | Path | Purpose |
 | --- | --- | --- |
-| `uptrakit-notification-plugin-core` | `crates/plugins/notifications/core/` | `NotificationPlugin` trait, `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()` |
-| `uptrakit-notification-plugin-webhook` | `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation, header blocklist, HMAC-SHA256 signing) |
-| `uptrakit-notification-plugin-telegram` | `crates/plugins/notifications/telegram/` | Telegram plugin (inline keyboard support) |
-| `uptrakit-notification-plugin-email` | `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`) |
-| `uptrakit-notification-plugin-registry` | `crates/plugins/notifications/registry/` | `NotificationPluginRegistry`, `NotificationOps` trait, re-exports core types |
+| `uptrakit-notification-plugin-core` | `crates/plugins/notifications/core/` | `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()` |
+| `uptrakit-notification-plugin-webhook` | `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation, header blocklist, HMAC-SHA256 signing); implements `PluginBase` + `NotificationTransportPlugin` |
+| `uptrakit-notification-plugin-telegram` | `crates/plugins/notifications/telegram/` | Telegram plugin (inline keyboard support); implements `PluginBase` + `NotificationTransportPlugin` |
+| `uptrakit-notification-plugin-email` | `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`); implements `PluginBase` + `NotificationTransportPlugin` |
+| `uptrakit-plugin-infrastructure-registry` | `crates/plugins/infrastructure/registry/` | Unified `PluginRegistry` stores notification plugins via `with_notifications(config)`; `NotificationRegistryConfig`; consumers use `PluginOps::notification_transport()` |
 | `uptrakit-web-api-types` | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, public enums (`NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus`) |
 | `uptrakit-web-api` | `crates/ui/web-api/src/notifications/` | Dispatcher, internal event types, `message_builder` |
 | `uptrakit-web-api` | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers (CRUD for channels, rules, log) |
@@ -37,9 +37,9 @@ This separation means adding a new notification plugin never requires changes to
 
 | Feature | Crate | Default | Description |
 | --- | --- | --- | --- |
-| `webhook` | `notification-plugin-registry` | yes | Webhook plugin (always available) |
-| `telegram` | `notification-plugin-registry` | no | Telegram plugin with inline keyboard |
-| `email` | `notification-plugin-registry` | no | Email plugin (SMTP via mail-send, async TLS) |
+| `webhook` | `plugin-infrastructure-registry` | yes | Webhook plugin (always available) |
+| `telegram` | `plugin-infrastructure-registry` | no | Telegram plugin with inline keyboard |
+| `email` | `plugin-infrastructure-registry` | no | Email plugin (SMTP via mail-send, async TLS) |
 | `notifications-telegram` | `web-api`, `controller` | no | Propagated feature flag enabling Telegram |
 | `notifications-email` | `web-api`, `controller` | no | Propagated feature flag enabling email |
 | `notifications-all` | `web-api` | no | Enables all optional notification plugins |
@@ -48,22 +48,36 @@ This separation means adding a new notification plugin never requires changes to
 Feature flags are additive and chain through the dependency graph:
 
 ```text
-controller/Cargo.toml           web-api/Cargo.toml                 notification-plugin-registry/Cargo.toml
+controller/Cargo.toml           web-api/Cargo.toml                 plugin-infrastructure-registry/Cargo.toml
   notifications-telegram  --->    notifications-telegram  --->       telegram
   notifications-email     --->    notifications-email     --->       email
 ```
 
-The `web-api` always depends on `notification-plugin-registry` with `default-features = false, features = ["webhook"]`,
+The `web-api` always depends on `plugin-infrastructure-registry` with the `webhook` feature enabled,
 ensuring webhooks are always compiled in.
 
-## `NotificationPlugin` trait
+## `PluginBase` + `NotificationTransportPlugin` traits
 
-Defined in `crates/plugins/notifications/core/src/traits.rs`:
+Notification plugins implement two traits from `uptrakit-plugin-infrastructure-core`:
+
+**`PluginBase`** (defined in `crates/plugins/infrastructure/core/src/plugin_base.rs`):
+
+```rust
+pub trait PluginBase: Send + Sync {
+    fn name(&self) -> &'static str;
+    fn capabilities(&self) -> Vec<PluginCapability>;
+    fn as_notification_transport(&self) -> Option<&dyn NotificationTransportPlugin> {
+        None
+    }
+    // ... other optional downcasting methods
+}
+```
+
+**`NotificationTransportPlugin`** (defined in `crates/plugins/infrastructure/core/src/plugin_base.rs`):
 
 ```rust
 #[async_trait]
-pub trait NotificationPlugin: Send + Sync {
-    fn channel_type(&self) -> &'static str;
+pub trait NotificationTransportPlugin: PluginBase {
     async fn deliver(&self, config: &serde_json::Value, message: &DeliveryMessage) -> Result<()>;
     fn validate_config(&self, config: &serde_json::Value) -> Result<()>;
     #[must_use]
@@ -71,7 +85,11 @@ pub trait NotificationPlugin: Send + Sync {
 }
 ```
 
-The `channel_type()` method returns the string identifier for the plugin (e.g. `"webhook"`, `"telegram"`, `"email"`).
+Each notification plugin implements both traits and overrides `as_notification_transport()` to return `Some(self)`.
+The `name()` method on `PluginBase` returns the channel type string identifier (e.g. `"webhook"`, `"telegram"`, `"email"`).
+
+Consumers look up notification plugins via `PluginOps::notification_transport(channel_type)`, which calls
+`as_notification_transport()` on the matching plugin.
 
 There is no `supports_actions()` method. Each plugin decides independently whether to render `DeliveryMessage.actions`.
 Plugins that do not support interactive elements silently ignore the `actions` field.
@@ -116,30 +134,34 @@ Follow these steps to add a plugin (for example, `slack`):
 ### 1. Create the plugin crate
 
 Create a new crate at `crates/plugins/notifications/slack/` with a `Cargo.toml` depending on
-`uptrakit-notification-plugin-core`:
+`uptrakit-notification-plugin-core` and `uptrakit-plugin-infrastructure-core`:
 
 ```toml
 [package]
 name = "uptrakit-notification-plugin-slack"
 
 [dependencies]
-uptrakit-notification-plugin-core = { path = "../core" }
+uptrakit-notification-plugin-core = { workspace = true }
+uptrakit-plugin-infrastructure-core = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 rootcause = { workspace = true }
 serde_json = { workspace = true }
 ```
 
-### 2. Implement `NotificationPlugin`
+### 2. Implement `PluginBase` + `NotificationTransportPlugin`
 
-Create `crates/plugins/notifications/slack/src/lib.rs` implementing `NotificationPlugin`:
+Create `crates/plugins/notifications/slack/src/lib.rs` implementing both traits:
 
 ```rust
 use async_trait::async_trait;
 use rootcause::prelude::*;
 
 use uptrakit_notification_plugin_core::{
-    DeliveryMessage, NotificationPlugin, NotificationPluginError, Result,
+    DeliveryMessage, NotificationPluginError, Result,
+};
+use uptrakit_plugin_infrastructure_core::{
+    NotificationTransportPlugin, PluginBase, PluginCapability,
 };
 
 pub struct SlackPlugin {
@@ -157,12 +179,22 @@ impl SlackPlugin {
     }
 }
 
-#[async_trait]
-impl NotificationPlugin for SlackPlugin {
-    fn channel_type(&self) -> &'static str {
+impl PluginBase for SlackPlugin {
+    fn name(&self) -> &'static str {
         "slack"
     }
 
+    fn capabilities(&self) -> Vec<PluginCapability> {
+        vec![PluginCapability::NotificationDelivery]
+    }
+
+    fn as_notification_transport(&self) -> Option<&dyn NotificationTransportPlugin> {
+        Some(self)
+    }
+}
+
+#[async_trait]
+impl NotificationTransportPlugin for SlackPlugin {
     async fn deliver(
         &self,
         config: &serde_json::Value,
@@ -191,10 +223,10 @@ Key requirements:
 - Use `report!()` / `bail!()` macros for error creation, never `Report::new()` directly.
 - No `unwrap()` in production code.
 
-### 3. Register in the `NotificationPluginRegistry`
+### 3. Register in the unified `PluginRegistry`
 
-Add a feature flag in `crates/plugins/notifications/registry/Cargo.toml` and register the plugin
-in `NotificationPluginRegistry::new()`:
+Add a feature flag in `crates/plugins/infrastructure/registry/Cargo.toml` and register the plugin
+in the `with_notifications()` builder:
 
 ```toml
 [features]
@@ -206,13 +238,13 @@ slack = ["uptrakit-notification-plugin-slack"]       # <-- new
 all = ["webhook", "telegram", "email", "slack"]      # <-- update
 ```
 
-In `crates/plugins/notifications/registry/src/lib.rs`, add inside `NotificationPluginRegistry::new()`:
+In `crates/plugins/infrastructure/registry/src/registry.rs`, add inside `with_notifications()`:
 
 ```rust
 #[cfg(feature = "slack")]
 {
-    plugins.insert(
-        "slack".to_string(),
+    notification_plugins.insert(
+        "slack",
         Arc::new(uptrakit_notification_plugin_slack::SlackPlugin::new()?),
     );
 }
@@ -228,7 +260,7 @@ In `crates/shared/web-api-types/src/notifications.rs`, add `Slack` to the `Notif
 In `crates/ui/web-api/Cargo.toml`:
 
 ```toml
-notifications-slack = ["uptrakit-notification-plugin-registry/slack"]
+notifications-slack = ["uptrakit-plugin-infrastructure-registry/slack"]
 ```
 
 In `crates/core/controller/Cargo.toml`:
@@ -297,7 +329,7 @@ The dispatcher (`crates/ui/web-api/src/notifications/dispatcher.rs`) runs a fire
 3. Filter by scope: if a rule specifies `host_id`, `software_item_id`, or `plugin_type`, the event must match.
 4. For each matched rule:
    - Load the channel from DB and verify it is enabled.
-   - Look up the plugin implementation from `NotificationPluginRegistry`.
+   - Look up the plugin implementation via `PluginOps::notification_transport(channel_type)`.
    - Parse and decrypt the channel config (`EncryptedString`).
    - Generate `action_token` (UUIDv7) if the event is actionable.
    - Build `DeliveryMessage` via `message_builder::build_delivery_message()`.
@@ -550,7 +582,7 @@ The same merge logic is applied in the `test_channel` route handler
 ## Testing
 
 - **Unit tests** exist in every module: `events.rs`, `message_builder.rs`, and each plugin crate
-  (`webhook`, `telegram`, `email`), `registry`, `notifications.rs` (web-api-types).
+  (`webhook`, `telegram`, `email`), `notifications.rs` (web-api-types).
 - **Plugin tests** use standard `#[test]` for sync methods (`validate_config`, `mask_config_secrets`).
   Use `httpmock` for delivery assertions in async tests. Email delivery tests verify error conversion
   against non-routable SMTP hosts (the test waits up to 60 s for connection timeout).
@@ -564,9 +596,9 @@ The same merge logic is applied in the `test_channel` route handler
 
 | File | Purpose |
 | --- | --- |
-| `crates/plugins/notifications/core/src/traits.rs` | `NotificationPlugin` trait, `DeliveryMessage`, `MessageAction` |
-| `crates/plugins/notifications/core/src/error.rs` | `NotificationPluginError` enum, `Result` type alias |
-| `crates/plugins/notifications/registry/src/lib.rs` | `NotificationPluginRegistry` -- compiled-in plugin lookup, `NotificationOps` trait |
+| `crates/plugins/infrastructure/core/src/plugin_base.rs` | `PluginBase` trait, `NotificationTransportPlugin` trait |
+| `crates/plugins/notifications/core/src/lib.rs` | `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()` |
+| `crates/plugins/infrastructure/registry/src/registry.rs` | Unified `PluginRegistry` with `with_notifications()` builder; `notification_transport()` lookup |
 | `crates/plugins/notifications/webhook/src/lib.rs` | Webhook plugin (HMAC-SHA256 signing) |
 | `crates/plugins/notifications/telegram/src/lib.rs` | Telegram plugin (inline keyboard) |
 | `crates/plugins/notifications/email/src/lib.rs` | Email plugin (SMTP via mail-send, multipart/alternative) |
@@ -586,19 +618,10 @@ tabs without any transport-specific knowledge in the frontend or web API route h
 
 ### Architecture
 
-Each notification plugin defines its own extension manifests and actions via the `NotificationPlugin`
-trait methods `extension_manifests()` and `extension_actions()`. The registry delegates to each
-registered plugin and aggregates the results:
-
-```rust
-// In NotificationPluginRegistry:
-fn extension_manifests(&self) -> Vec<ExtensionManifest> {
-    self.plugins.values().flat_map(|p| p.extension_manifests()).collect()
-}
-fn extension_actions(&self) -> Vec<ActionDef> {
-    self.plugins.values().flat_map(|p| p.extension_actions()).collect()
-}
-```
+Each notification plugin defines its own extension manifests and actions via methods on its
+`PluginBase` implementation. The unified `PluginRegistry` delegates to each registered
+notification plugin and aggregates the results through `PluginOps::extension_manifests()`
+and `PluginOps::extension_actions()`.
 
 This follows the same pattern as the Proxmox plugin: each plugin crate owns its extension
 definitions, keeping transport-specific knowledge co-located with the plugin implementation.

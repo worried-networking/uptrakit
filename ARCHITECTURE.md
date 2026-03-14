@@ -220,24 +220,23 @@ Notification plugins live under `crates/plugins/notifications/` with one crate p
 
 | Crate | Package | Purpose |
 | --- | --- | --- |
-| `core/` | `uptrakit-notification-plugin-core` | `NotificationPlugin` trait, `DeliveryMessage`, `NotificationPluginError`, `escape_html()` |
-| `webhook/` | `uptrakit-notification-plugin-webhook` | Webhook plugin (SSRF-safe DNS, HMAC-SHA256 signatures) |
-| `telegram/` | `uptrakit-notification-plugin-telegram` | Telegram plugin (inline keyboard for actionable notifications) |
-| `email/` | `uptrakit-notification-plugin-email` | Email plugin (SMTP via mail-send) |
-| `registry/` | `uptrakit-notification-plugin-registry` | `NotificationPluginRegistry`, `NotificationOps` trait, `NotificationRegistryConfig` |
+| `core/` | `uptrakit-notification-plugin-core` | `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()` |
+| `webhook/` | `uptrakit-notification-plugin-webhook` | Webhook plugin (SSRF-safe DNS, HMAC-SHA256 signatures); implements `PluginBase` + `NotificationTransportPlugin` |
+| `telegram/` | `uptrakit-notification-plugin-telegram` | Telegram plugin (inline keyboard for actionable notifications); implements `PluginBase` + `NotificationTransportPlugin` |
+| `email/` | `uptrakit-notification-plugin-email` | Email plugin (SMTP via mail-send); implements `PluginBase` + `NotificationTransportPlugin` |
 
-Each plugin is behind its own Cargo feature flag in the registry crate (`webhook` — default on, `telegram`,
-`email`). The `NotificationPluginRegistry` is constructed at startup with all feature-enabled plugins and
-exposed in `AppState` as `notification_ops: Arc<dyn NotificationOps>`.
+Each notification plugin is behind its own Cargo feature flag in the unified `uptrakit-plugin-infrastructure-registry`
+crate (`webhook` -- default on, `telegram`, `email`). Notification plugins are registered in the `PluginRegistry`
+via `with_notifications(config)` and accessed through `PluginOps::notification_transport(channel_type)`.
 
 ### Adding a new notification plugin
 
 1. Create a new crate under `crates/plugins/notifications/<name>/`.
-2. Implement the `NotificationPlugin` trait from `uptrakit-notification-plugin-core`.
-3. Register the plugin in `NotificationPluginRegistry::new()` behind `#[cfg(feature = "...")]`.
-4. Add the feature in `crates/plugins/notifications/registry/Cargo.toml`.
+2. Implement `PluginBase` + `NotificationTransportPlugin` traits from `uptrakit-plugin-infrastructure-core`.
+3. Register the plugin in `PluginRegistry::with_notifications()` behind `#[cfg(feature = "...")]`.
+4. Add the feature in `crates/plugins/infrastructure/registry/Cargo.toml`.
 5. Add the variant to the `NotificationChannelType` enum.
-6. Propagate the feature: `web-api/Cargo.toml` → `controller/Cargo.toml`.
+6. Propagate the feature: `web-api/Cargo.toml` -> `controller/Cargo.toml`.
 
 Supported event types: `update_available`, `update_completed`, `update_failed`, `new_software_discovered`,
 `new_service_enrolled`, `ca_rotated`, `batch_update_completed`, `batch_update_partially_completed`.
@@ -251,8 +250,8 @@ are masked in API responses. Delivery history is recorded in the `notification_l
 
 ### UI extension integration
 
-The registry crate also provides `ExtensionManifest` and `ActionDef` entries for each enabled
-plugin (under `registry/src/extensions/`). These are registered as `ExtensionOwner::Notification`
+The unified plugin registry also provides `ExtensionManifest` and `ActionDef` entries for each enabled
+notification plugin. These are registered as `ExtensionOwner::Notification`
 in the `ExtensionRegistry` at startup, producing per-transport channel management tabs in the
 Settings page. The web API handles notification extension actions generically via
 `notification_extensions::handle()` — it flattens channel config into table rows without any

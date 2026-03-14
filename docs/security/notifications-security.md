@@ -18,9 +18,10 @@ master key lifecycle and `EncryptedString` semantics.
 
 ### Secret masking in API responses
 
-Config secrets are masked in API responses via the `mask_config_secrets()` method on the `NotificationPlugin`
-trait (`crates/plugins/notifications/core/src/traits.rs`). The method carries `#[must_use]`, following the
-same pattern as `PluginRegistry::mask_config_secrets` -- callers must use the masked output.
+Config secrets are masked in API responses via the `mask_config_secrets()` method on the
+`NotificationTransportPlugin` trait (`crates/plugins/infrastructure/core/src/plugin_base.rs`).
+The method carries `#[must_use]`, following the same pattern as `PluginRegistry::mask_config_secrets`
+-- callers must use the masked output.
 
 Masked fields per channel type:
 
@@ -268,13 +269,13 @@ provide defense-in-depth against abuse.
 
 | File | Purpose |
 | --- | --- |
-| `crates/plugins/notifications/core/src/traits.rs` | `NotificationPlugin` trait with `#[must_use]` on `mask_config_secrets` |
+| `crates/plugins/infrastructure/core/src/plugin_base.rs` | `NotificationTransportPlugin` trait with `#[must_use]` on `mask_config_secrets` |
 | `crates/plugins/notifications/webhook/src/lib.rs` | Webhook plugin: HMAC-SHA256 signing, secret masking |
 | `crates/plugins/notifications/telegram/src/lib.rs` | Telegram plugin: bot token masking, webhook secret masking |
 | `crates/plugins/notifications/email/src/lib.rs` | Email plugin: SMTP delivery, no per-channel secrets |
 | `crates/ui/web-api/src/routes/settings_smtp.rs` | Global SMTP settings API: password encrypted at rest, `has_password` masking |
 | `crates/ui/web-api/src/settings.rs` | `SmtpSettingsSnapshot`: masked `Debug`, decrypted password in memory only |
-| `crates/plugins/notifications/registry/src/lib.rs` | `NotificationPluginRegistry` for channel type dispatch |
+| `crates/plugins/infrastructure/registry/src/registry.rs` | Unified `PluginRegistry` with `notification_transport()` for channel type dispatch |
 | `crates/ui/web-api/src/routes/notifications.rs` | API route handlers including `telegram_callback` |
 | `crates/ui/web-api/src/notifications/dispatcher.rs` | Background dispatcher: rule matching, action token generation, delivery |
 | `crates/shared/db/src/entity/notification_channel.rs` | `notification_channels` entity with `EncryptedString` config |

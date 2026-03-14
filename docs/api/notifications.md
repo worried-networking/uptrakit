@@ -583,7 +583,8 @@ Types are defined in `crates/shared/web-api-types/src/notifications.rs`:
 | `crates/ui/web-api/src/routes/notifications.rs` | Route handlers (channels, rules, log, Telegram callback) |
 | `crates/ui/web-api-queries/src/queries/notifications.rs` | Database query helpers and error types |
 | `crates/shared/web-api-types/src/notifications.rs` | Request/response types and enum definitions |
-| `crates/plugins/notifications/core/src/traits.rs` | `NotificationPlugin` trait and `DeliveryMessage` type |
+| `crates/plugins/infrastructure/core/src/plugin_base.rs` | `PluginBase` and `NotificationTransportPlugin` traits |
+| `crates/plugins/notifications/core/src/lib.rs` | `DeliveryMessage`, `NotificationPluginError`, `escape_html()` |
 | `crates/plugins/notifications/webhook/src/lib.rs` | Webhook plugin implementation |
 | `crates/plugins/notifications/telegram/src/lib.rs` | Telegram plugin implementation |
 | `crates/shared/db/src/entity/notification_channel.rs` | SeaORM entity for `notification_channels` table |

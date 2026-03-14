@@ -327,10 +327,9 @@ noted in the 2026-03-10 review section above; this entry confirms the finding fr
 - Consistent plugin error architecture across all notification and infrastructure plugins:
   each crate defines its own error type with `thiserror`, uses `impl_report_conversion!` for
   bidirectional conversion, and follows the `rootcause` framework throughout.
-- `notifications/core/src/traits.rs:44-62` -- `NotificationPlugin` trait is appropriately
-  minimal: three required methods (`channel_type`, `deliver`, `validate_config`) plus one
-  `#[must_use]` method (`mask_config_secrets`). No default implementations that could mask
-  missing functionality.
+- `infrastructure/core/src/plugin_base.rs` -- `NotificationTransportPlugin` trait is appropriately
+  minimal: three required methods (`deliver`, `validate_config`, `mask_config_secrets`) plus the
+  `PluginBase` supertrait. No default implementations that could mask missing functionality.
 - All HTTP-using notification plugins (`webhook`, `telegram`) correctly set
   `.connect_timeout(10s)` and `.timeout(60s)`, satisfying the workspace HTTP client
   requirement.
@@ -349,9 +348,9 @@ Recommendation: replace with a match or `if let` that returns an error for non-o
 
 #### Strengths
 
-- `notifications/core/src/traits.rs:44-62` -- `NotificationPlugin` trait is appropriately
+- `infrastructure/core/src/plugin_base.rs` -- `NotificationTransportPlugin` trait is appropriately
   minimal with three required methods. Adding a new notification channel requires implementing
-  only these three methods plus registering in the notification registry.
+  `PluginBase` + `NotificationTransportPlugin` and registering in the unified `PluginRegistry`.
 
 #### Issues
 
@@ -371,13 +370,13 @@ constructor added.)*
 infrastructure `PluginOps` trait provides both mask and restore operations. Without restore,
 notification channel config updates that include masked sentinel values cannot recover the
 original secrets, requiring the user to re-enter secrets on every config edit.~~ *(Fixed:
-`restore_config_secrets` default method added to `NotificationPlugin` trait; method added to
-`NotificationOps` trait and `NotificationPluginRegistry` impl.)*
+`restore_config_secrets` default method added to `NotificationTransportPlugin` trait;
+notification registry unified into `PluginRegistry`.)*
 
-**[LOW]** `notifications/registry/src/lib.rs:54-78` -- Channel type strings (`"webhook"`,
-`"telegram"`, `"email"`) are repeated as string literals at registration sites and in each
-plugin's `channel_type()` return value. These are not centralized as constants, creating a
-risk of typo-induced mismatches between registration and lookup.
+**[LOW]** Channel type strings (`"webhook"`, `"telegram"`, `"email"`) are repeated as string
+literals at registration sites and in each plugin's `name()` return value. These are not
+centralized as constants, creating a risk of typo-induced mismatches between registration
+and lookup.
 
 **[LOW]** `infrastructure/registry/src/registry.rs:491-504` -- The `register_plugins!` macro
 wildcard arm for unknown `PluginType` variants returns an error but does not emit

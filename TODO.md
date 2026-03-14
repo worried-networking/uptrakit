@@ -538,12 +538,12 @@ progress tracking (SSE), batch notification events, unified software tracking.
 
 Completed: channel-agnostic dispatcher, webhook + Telegram + email plugins, scope-based rule
 matching, notification history, actionable notifications, REST API, CLI, OpenAPI client.
-Plugin architecture under `crates/plugins/notifications/` with `NotificationPlugin` trait.
+Plugin architecture under `crates/plugins/notifications/` with `PluginBase` + `NotificationTransportPlugin` traits.
 
 - [ ] Slack notification plugin
   - **Category**: Notifications | **Impact**: Medium-High | **Effort**: Medium
   - Slack integration via `slack-morphism` or Incoming Webhooks. Create a new crate under
-    `crates/plugins/notifications/slack/` implementing the `NotificationPlugin` trait.
+    `crates/plugins/notifications/slack/` implementing `PluginBase` + `NotificationTransportPlugin`.
 - [ ] Discord notification plugin
   - **Category**: Notifications | **Impact**: Medium | **Effort**: Medium
   - Discord bot or webhook integration via `twilight-http` or simple HTTP POST.

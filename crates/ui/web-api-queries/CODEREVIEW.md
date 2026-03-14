@@ -283,7 +283,7 @@ below. New findings are additive.
 
 | Severity | Location | Finding |
 | --- | --- | --- |
-| **Medium** | `Cargo.toml` | **Query layer depends on `uptrakit-notification-plugin-registry`** with hardcoded `features = ["webhook"]`, pulling `reqwest` and all notification plugin structs into a crate intended as a pure DB abstraction. Five query functions accept `&dyn NotificationOps`. Define a narrower `NotificationConfigValidator` trait in the query crate or in `notification-plugin-core`; pass the concrete `NotificationOps` from the route-handler layer. |
+| **Medium** | `Cargo.toml` | **Query layer depends on the plugin registry** (via `uptrakit-plugin-infrastructure-registry`), pulling notification plugin structs into a crate intended as a pure DB abstraction. Query functions accept `&dyn PluginOps` for notification config validation. Consider defining a narrower `NotificationConfigValidator` trait in the query crate to decouple from the full plugin registry. |
 
 #### Database — Tenant Isolation
 
