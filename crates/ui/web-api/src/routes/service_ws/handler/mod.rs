@@ -197,29 +197,16 @@ impl MessageProcessor {
     }
 
     /// Dispatch a single service message to the appropriate handler.
+    ///
+    /// Messages are grouped by capability gate. Universal messages (available
+    /// to all service types) are handled last.
     async fn dispatch(
         &mut self,
         service_msg: ServiceMessage,
         pagination: Option<ReportPagination>,
     ) -> ProcessorResponse {
         match service_msg {
-            // -------------------------------------------------
-            // RenewCertificate (all capabilities)
-            // -------------------------------------------------
-            ServiceMessage::RenewCertificate(payload) => {
-                messages::handle_renew_certificate(
-                    &self.state,
-                    self.service_id,
-                    &self.cert,
-                    &payload,
-                    self.is_system,
-                )
-                .await
-            }
-
-            // -------------------------------------------------
-            // ReportHosts (requires SoftwareDiscovery)
-            // -------------------------------------------------
+            // -- SoftwareDiscovery capability --
             ServiceMessage::ReportHosts(payload) if self.has_software_discovery => {
                 messages::handle_report_hosts(
                     &self.state,
@@ -229,84 +216,11 @@ impl MessageProcessor {
                 )
                 .await
             }
-
-            // -------------------------------------------------
-            // VersionCheckResults (SoftwareDiscovery AND NOT MqttBridge)
-            // -------------------------------------------------
             ServiceMessage::VersionCheckResults(payload)
                 if self.has_software_discovery && !self.is_mqtt =>
             {
                 messages::handle_version_check_results(&self.state, self.service_id, &payload).await
             }
-
-            // -------------------------------------------------
-            // UpdateStarted (requires UpdateHooks)
-            // -------------------------------------------------
-            ServiceMessage::UpdateStarted(payload) if self.has_update_hooks => {
-                updates::handle_update_started(
-                    &self.state,
-                    self.service_id,
-                    &payload,
-                    &self.linked_host_ids,
-                )
-                .await
-            }
-
-            // -------------------------------------------------
-            // UpdateOutput (requires UpdateHooks)
-            // -------------------------------------------------
-            ServiceMessage::UpdateOutput(payload) if self.has_update_hooks => {
-                updates::handle_update_output(
-                    &self.state,
-                    self.service_id,
-                    &payload,
-                    &self.linked_host_ids,
-                )
-                .await
-            }
-
-            // -------------------------------------------------
-            // UpdateResult (requires UpdateHooks)
-            // -------------------------------------------------
-            ServiceMessage::UpdateResult(payload) if self.has_update_hooks => {
-                updates::handle_update_result(
-                    &self.state,
-                    self.service_id,
-                    payload,
-                    &self.linked_host_ids,
-                )
-                .await
-            }
-
-            // -------------------------------------------------
-            // BatchUpdateResult (requires UpdateHooks)
-            // -------------------------------------------------
-            ServiceMessage::BatchUpdateResult(payload) if self.has_update_hooks => {
-                updates::handle_batch_update_result(
-                    &self.state,
-                    self.service_id,
-                    payload,
-                    &self.linked_host_ids,
-                )
-                .await
-            }
-
-            // -------------------------------------------------
-            // StdinAttention (requires UpdateHooks)
-            // -------------------------------------------------
-            ServiceMessage::StdinAttention(payload) if self.has_update_hooks => {
-                updates::handle_stdin_attention(
-                    &self.state,
-                    self.service_id,
-                    &payload,
-                    &self.linked_host_ids,
-                )
-                .await
-            }
-
-            // -------------------------------------------------
-            // DiscoveryResults (requires SoftwareDiscovery)
-            // -------------------------------------------------
             ServiceMessage::DiscoveryResults(payload) if self.has_software_discovery => {
                 messages::handle_discovery_results(
                     &self.state,
@@ -318,16 +232,54 @@ impl MessageProcessor {
                 .await
             }
 
-            // -------------------------------------------------
-            // ReportPluginConfig (all capabilities)
-            // -------------------------------------------------
-            ServiceMessage::ReportPluginConfig(payload) => {
-                messages::handle_report_plugin_config(&self.state, self.service_id, &payload).await
+            // -- UpdateHooks capability --
+            ServiceMessage::UpdateStarted(payload) if self.has_update_hooks => {
+                updates::handle_update_started(
+                    &self.state,
+                    self.service_id,
+                    &payload,
+                    &self.linked_host_ids,
+                )
+                .await
+            }
+            ServiceMessage::UpdateOutput(payload) if self.has_update_hooks => {
+                updates::handle_update_output(
+                    &self.state,
+                    self.service_id,
+                    &payload,
+                    &self.linked_host_ids,
+                )
+                .await
+            }
+            ServiceMessage::UpdateResult(payload) if self.has_update_hooks => {
+                updates::handle_update_result(
+                    &self.state,
+                    self.service_id,
+                    payload,
+                    &self.linked_host_ids,
+                )
+                .await
+            }
+            ServiceMessage::BatchUpdateResult(payload) if self.has_update_hooks => {
+                updates::handle_batch_update_result(
+                    &self.state,
+                    self.service_id,
+                    payload,
+                    &self.linked_host_ids,
+                )
+                .await
+            }
+            ServiceMessage::StdinAttention(payload) if self.has_update_hooks => {
+                updates::handle_stdin_attention(
+                    &self.state,
+                    self.service_id,
+                    &payload,
+                    &self.linked_host_ids,
+                )
+                .await
             }
 
-            // -------------------------------------------------
-            // ReleaseTenants (requires MqttBridge)
-            // -------------------------------------------------
+            // -- MqttBridge capability --
             ServiceMessage::ReleaseTenants(payload) if self.is_mqtt => {
                 mqtt::handle_release_tenants(
                     &self.state,
@@ -337,25 +289,13 @@ impl MessageProcessor {
                 )
                 .await
             }
-
-            // -------------------------------------------------
-            // MqttClientStatus (requires MqttBridge)
-            // -------------------------------------------------
             ServiceMessage::MqttClientStatus(payload) if self.is_mqtt => {
                 mqtt::handle_mqtt_client_status(&self.state, &payload).await
             }
-
-            // -------------------------------------------------
-            // MqttTriggerUpdate (requires MqttBridge)
-            // -------------------------------------------------
             ServiceMessage::MqttTriggerUpdate(payload) if self.is_mqtt => {
                 mqtt::handle_mqtt_trigger_update(&self.state, &payload, self.mqtt_context.as_ref())
                     .await
             }
-
-            // -------------------------------------------------
-            // MqttTriggerHostBatchUpdate (requires MqttBridge)
-            // -------------------------------------------------
             ServiceMessage::MqttTriggerHostBatchUpdate(payload) if self.is_mqtt => {
                 mqtt::handle_mqtt_trigger_host_batch_update(
                     &self.state,
@@ -365,9 +305,33 @@ impl MessageProcessor {
                 .await
             }
 
-            // -------------------------------------------------
-            // UpdateCapabilities (all capabilities)
-            // -------------------------------------------------
+            // -- UiExtensions capability --
+            ServiceMessage::ExtensionRegister(payload) if self.has_ui_extensions => {
+                self.handle_extension_register(payload).await
+            }
+            ServiceMessage::ExtensionActionsRegister(payload) if self.has_ui_extensions => {
+                self.handle_extension_actions_register(payload)
+            }
+            ServiceMessage::ExtensionResponse(payload) if self.has_ui_extensions => {
+                let request_id = payload.request_id.clone();
+                self.state.extension_proxy.complete(&request_id, payload);
+                ProcessorResponse::cont()
+            }
+            ServiceMessage::ExtensionRequest(payload) if self.has_ui_extensions => {
+                self.handle_extension_request(payload).await
+            }
+
+            // -- Universal messages (all capabilities) --
+            ServiceMessage::RenewCertificate(payload) => {
+                messages::handle_renew_certificate(
+                    &self.state,
+                    self.service_id,
+                    &self.cert,
+                    &payload,
+                    self.is_system,
+                )
+                .await
+            }
             ServiceMessage::UpdateCapabilities(payload) => {
                 upgrade_service_capabilities(
                     self.state.db(),
@@ -379,162 +343,144 @@ impl MessageProcessor {
                 .await;
                 ProcessorResponse::cont()
             }
-
-            // -------------------------------------------------
-            // ExtensionRegister (requires UiExtensions)
-            // -------------------------------------------------
-            ServiceMessage::ExtensionRegister(payload) if self.has_ui_extensions => {
-                if let Err(e) = payload.wire_validate() {
-                    tracing::warn!(
-                        service_id = %self.service_id,
-                        error = %e,
-                        "invalid ExtensionRegister payload"
-                    );
-                    ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
-                        code: ErrorCode::BadRequest,
-                        message: format!("invalid extension manifests: {e}"),
-                    }))
-                } else {
-                    let app_name = self.service_app_name.as_deref().unwrap_or("unknown");
-                    if let Err(e) = self.state.extension_registry.register_service(
-                        self.service_id,
-                        app_name,
-                        payload.manifests,
-                        payload.encryption_public_key,
-                    ) {
-                        tracing::warn!(
-                            service_id = %self.service_id,
-                            error = %e,
-                            "extension registration rejected"
-                        );
-                        ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
-                            code: ErrorCode::BadRequest,
-                            message: e.to_string(),
-                        }))
-                    } else {
-                        tracing::info!(
-                            service_id = %self.service_id,
-                            app_name,
-                            "registered UI extensions"
-                        );
-                        ProcessorResponse::cont()
-                    }
-                }
+            ServiceMessage::ReportPluginConfig(payload) => {
+                messages::handle_report_plugin_config(&self.state, self.service_id, &payload).await
             }
-
-            // -------------------------------------------------
-            // ExtensionActionsRegister (requires UiExtensions)
-            // -------------------------------------------------
-            ServiceMessage::ExtensionActionsRegister(payload) if self.has_ui_extensions => {
-                if let Err(e) = payload.wire_validate() {
-                    tracing::warn!(
-                        service_id = %self.service_id,
-                        error = %e,
-                        "invalid ExtensionActionsRegister payload"
-                    );
-                    ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
-                        code: ErrorCode::BadRequest,
-                        message: format!("invalid extension actions: {e}"),
-                    }))
-                } else {
-                    let app_name = self.service_app_name.as_deref().unwrap_or("unknown");
-                    self.state.extension_registry.register_actions(
-                        self.service_id,
-                        app_name,
-                        payload.actions,
-                    );
-                    tracing::info!(
-                        service_id = %self.service_id,
-                        app_name,
-                        "registered extension actions"
-                    );
-                    ProcessorResponse::cont()
-                }
-            }
-
-            // -------------------------------------------------
-            // ExtensionResponse (requires UiExtensions)
-            // -------------------------------------------------
-            ServiceMessage::ExtensionResponse(payload) if self.has_ui_extensions => {
-                let request_id = payload.request_id.clone();
-                self.state.extension_proxy.complete(&request_id, payload);
-                ProcessorResponse::cont()
-            }
-
-            // -------------------------------------------------
-            // ExtensionRequest: service-initiated extension invocation
-            // -------------------------------------------------
-            ServiceMessage::ExtensionRequest(payload) if self.has_ui_extensions => {
-                let request_id = payload.request_id.clone();
-                tracing::debug!(
-                    service_id = %self.service_id,
-                    request_id = %request_id,
-                    extension_id = %payload.extension_id,
-                    action_id = %payload.action_id,
-                    "service-initiated extension action request"
-                );
-
-                let owner = self
-                    .state
-                    .extension_registry
-                    .find_owner(&payload.extension_id);
-                let response = match owner {
-                    crate::extension_registry::ExtensionOwner::Plugin => {
-                        let ctx = uptrakit_plugin_infrastructure_registry::ExtensionActionContext {
-                            db: self.state.db(),
-                            tenant_id: self.service_tenant_id,
-                        };
-                        match self
-                            .state
-                            .plugin_ops
-                            .handle_extension_action(
-                                &ctx,
-                                &payload.extension_id,
-                                &payload.action_id,
-                                payload.params,
-                            )
-                            .await
-                        {
-                            Ok(data) => {
-                                uptrakit_internal_wire::extension::ExtensionResponsePayload {
-                                    request_id,
-                                    success: true,
-                                    data,
-                                    error: None,
-                                }
-                            }
-                            Err(msg) => {
-                                uptrakit_internal_wire::extension::ExtensionResponsePayload {
-                                    request_id,
-                                    success: false,
-                                    data: serde_json::Value::Null,
-                                    error: Some(msg),
-                                }
-                            }
-                        }
-                    }
-                    _ => {
-                        // Service-to-service proxying not supported for service-initiated requests.
-                        uptrakit_internal_wire::extension::ExtensionResponsePayload {
-                            request_id,
-                            success: false,
-                            data: serde_json::Value::Null,
-                            error: Some("extension not found or not plugin-backed".to_string()),
-                        }
-                    }
-                };
-
-                ProcessorResponse::reply(ControllerMessage::ExtensionResponse(response))
-            }
-
-            // -------------------------------------------------
-            // Wildcard: message not supported for this capability
-            // -------------------------------------------------
             _ => ProcessorResponse::reply_and_break(ControllerMessage::Error(ErrorPayload {
                 code: ErrorCode::BadRequest,
                 message: "message not supported for this service capability".to_string(),
             })),
         }
+    }
+
+    /// Handle an `ExtensionRegister` message: validate and register manifests.
+    async fn handle_extension_register(
+        &self,
+        payload: uptrakit_internal_wire::extension::ExtensionRegisterPayload,
+    ) -> ProcessorResponse {
+        if let Err(e) = payload.wire_validate() {
+            tracing::warn!(
+                service_id = %self.service_id,
+                error = %e,
+                "invalid ExtensionRegister payload"
+            );
+            return ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
+                code: ErrorCode::BadRequest,
+                message: format!("invalid extension manifests: {e}"),
+            }));
+        }
+        let app_name = self.service_app_name.as_deref().unwrap_or("unknown");
+        if let Err(e) = self.state.extension_registry.register_service(
+            self.service_id,
+            app_name,
+            payload.manifests,
+            payload.encryption_public_key,
+        ) {
+            tracing::warn!(
+                service_id = %self.service_id,
+                error = %e,
+                "extension registration rejected"
+            );
+            ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
+                code: ErrorCode::BadRequest,
+                message: e.to_string(),
+            }))
+        } else {
+            tracing::info!(
+                service_id = %self.service_id,
+                app_name,
+                "registered UI extensions"
+            );
+            ProcessorResponse::cont()
+        }
+    }
+
+    /// Handle an `ExtensionActionsRegister` message: validate and register actions.
+    fn handle_extension_actions_register(
+        &self,
+        payload: uptrakit_internal_wire::extension::ExtensionActionsPayload,
+    ) -> ProcessorResponse {
+        if let Err(e) = payload.wire_validate() {
+            tracing::warn!(
+                service_id = %self.service_id,
+                error = %e,
+                "invalid ExtensionActionsRegister payload"
+            );
+            return ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
+                code: ErrorCode::BadRequest,
+                message: format!("invalid extension actions: {e}"),
+            }));
+        }
+        let app_name = self.service_app_name.as_deref().unwrap_or("unknown");
+        self.state
+            .extension_registry
+            .register_actions(self.service_id, app_name, payload.actions);
+        tracing::info!(
+            service_id = %self.service_id,
+            app_name,
+            "registered extension actions"
+        );
+        ProcessorResponse::cont()
+    }
+
+    /// Handle an `ExtensionRequest` message: service-initiated extension action.
+    async fn handle_extension_request(
+        &self,
+        payload: uptrakit_internal_wire::extension::ExtensionRequestPayload,
+    ) -> ProcessorResponse {
+        let request_id = payload.request_id.clone();
+        tracing::debug!(
+            service_id = %self.service_id,
+            request_id = %request_id,
+            extension_id = %payload.extension_id,
+            action_id = %payload.action_id,
+            "service-initiated extension action request"
+        );
+
+        let owner = self
+            .state
+            .extension_registry
+            .find_owner(&payload.extension_id);
+        let response = match owner {
+            crate::extension_registry::ExtensionOwner::Plugin => {
+                let ctx = uptrakit_plugin_infrastructure_registry::ExtensionActionContext {
+                    db: self.state.db(),
+                    tenant_id: self.service_tenant_id,
+                };
+                match self
+                    .state
+                    .plugin_ops
+                    .handle_extension_action(
+                        &ctx,
+                        &payload.extension_id,
+                        &payload.action_id,
+                        payload.params,
+                    )
+                    .await
+                {
+                    Ok(data) => uptrakit_internal_wire::extension::ExtensionResponsePayload {
+                        request_id,
+                        success: true,
+                        data,
+                        error: None,
+                    },
+                    Err(msg) => uptrakit_internal_wire::extension::ExtensionResponsePayload {
+                        request_id,
+                        success: false,
+                        data: serde_json::Value::Null,
+                        error: Some(msg),
+                    },
+                }
+            }
+            _ => uptrakit_internal_wire::extension::ExtensionResponsePayload {
+                request_id,
+                success: false,
+                data: serde_json::Value::Null,
+                error: Some("extension not found or not plugin-backed".to_string()),
+            },
+        };
+
+        ProcessorResponse::reply(ControllerMessage::ExtensionResponse(response))
     }
 }
 
@@ -1498,6 +1444,103 @@ async fn handle_request_certificate(
 // handle_enrolled_loop
 // ---------------------------------------------------------------------------
 
+/// Result of polling the DB for service approval status changes.
+enum ApprovalPollResult {
+    /// Service has been approved; notification sent.
+    Approved,
+    /// Service has been rejected; notification sent, caller should break.
+    Rejected,
+    /// No status change.
+    Unchanged,
+}
+
+/// Poll the database for approval status changes and send the appropriate
+/// WebSocket notification.
+async fn poll_approval_status(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    state: &AppState,
+    service_id: uuid::Uuid,
+    is_system: bool,
+    out_seq: &mut OutgoingSeq,
+) -> ApprovalPollResult {
+    if is_system {
+        if let Ok(Some(s)) = sys_svc_entity::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            return match s.status {
+                sys_svc_entity::SystemServiceStatus::Approved => {
+                    let msg = ControllerMessage::Approved(ApprovedPayload { service_id });
+                    if let Some(json) = serialize_controller_msg(out_seq, msg) {
+                        let _ = sink.send(Message::Text(json.into())).await;
+                    }
+                    ApprovalPollResult::Approved
+                }
+                sys_svc_entity::SystemServiceStatus::Rejected => {
+                    let msg = ControllerMessage::Rejected(RejectedPayload { service_id });
+                    if let Some(json) = serialize_controller_msg(out_seq, msg) {
+                        let _ = sink.send(Message::Text(json.into())).await;
+                    }
+                    ApprovalPollResult::Rejected
+                }
+                _ => ApprovalPollResult::Unchanged,
+            };
+        }
+    } else if let Ok(Some(s)) = service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        return match s.status {
+            service::ServiceStatus::Approved => {
+                let msg = ControllerMessage::Approved(ApprovedPayload { service_id });
+                if let Some(json) = serialize_controller_msg(out_seq, msg) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+                ApprovalPollResult::Approved
+            }
+            service::ServiceStatus::Rejected => {
+                let msg = ControllerMessage::Rejected(RejectedPayload { service_id });
+                if let Some(json) = serialize_controller_msg(out_seq, msg) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+                ApprovalPollResult::Rejected
+            }
+            _ => ApprovalPollResult::Unchanged,
+        };
+    }
+    ApprovalPollResult::Unchanged
+}
+
+/// Clean up after an enrolled loop exits normally (not superseded).
+async fn cleanup_enrolled_session(
+    state: &AppState,
+    service_id: uuid::Uuid,
+    session: &EnrolledSessionState,
+) {
+    if session.cancel_token.is_cancelled() {
+        return;
+    }
+    if session.is_external_scheduler {
+        state.service_connections.unregister(&service_id).await;
+        if !state
+            .service_connections
+            .has_capability_connected(&Capability::Scheduler)
+            .await
+        {
+            state
+                .external_scheduler_connected
+                .store(false, Ordering::Relaxed);
+            tracing::info!(
+                %service_id,
+                "external scheduler disconnected (enrolled); embedded scheduler resuming all tasks"
+            );
+        }
+    } else {
+        state.service_connections.unregister(&service_id).await;
+    }
+    tracing::debug!(%service_id, "enrolled service disconnected");
+}
+
 /// Unified enrolled handler for all service types.
 ///
 /// Handles Ping, RequestCertificate, and polls for approval changes at a
@@ -1644,58 +1687,10 @@ pub(crate) async fn handle_enrolled_loop(
             }
             // Dedicated approval poll at a fixed interval.
             _ = session.approval_poll.tick(), if !session.approved => {
-                if is_system {
-                    if let Ok(Some(s)) = sys_svc_entity::Entity::find_by_id(service_id)
-                        .one(state.db())
-                        .await
-                    {
-                        match s.status {
-                            sys_svc_entity::SystemServiceStatus::Approved => {
-                                session.approved = true;
-                                let msg = ControllerMessage::Approved(ApprovedPayload {
-                                    service_id,
-                                });
-                                if let Some(json) = serialize_controller_msg(out_seq, msg) {
-                                    let _ = sink.send(Message::Text(json.into())).await;
-                                }
-                            }
-                            sys_svc_entity::SystemServiceStatus::Rejected => {
-                                let msg = ControllerMessage::Rejected(RejectedPayload {
-                                    service_id,
-                                });
-                                if let Some(json) = serialize_controller_msg(out_seq, msg) {
-                                    let _ = sink.send(Message::Text(json.into())).await;
-                                }
-                                break;
-                            }
-                            _ => {}
-                        }
-                    }
-                } else if let Ok(Some(s)) = service::Entity::find_by_id(service_id)
-                    .one(state.db())
-                    .await
-                {
-                    match s.status {
-                        service::ServiceStatus::Approved => {
-                            session.approved = true;
-                            let msg = ControllerMessage::Approved(ApprovedPayload {
-                                service_id,
-                            });
-                            if let Some(json) = serialize_controller_msg(out_seq, msg) {
-                                let _ = sink.send(Message::Text(json.into())).await;
-                            }
-                        }
-                        service::ServiceStatus::Rejected => {
-                            let msg = ControllerMessage::Rejected(RejectedPayload {
-                                service_id,
-                            });
-                            if let Some(json) = serialize_controller_msg(out_seq, msg) {
-                                let _ = sink.send(Message::Text(json.into())).await;
-                            }
-                            break;
-                        }
-                        _ => {}
-                    }
+                match poll_approval_status(sink, state, service_id, is_system, out_seq).await {
+                    ApprovalPollResult::Approved => session.approved = true,
+                    ApprovalPollResult::Rejected => break,
+                    ApprovalPollResult::Unchanged => {}
                 }
             }
             _ = session.cancel_token.cancelled() => {
@@ -1707,27 +1702,5 @@ pub(crate) async fn handle_enrolled_loop(
         }
     }
 
-    // Cleanup: unregister unless superseded.
-    if !session.cancel_token.is_cancelled() {
-        if session.is_external_scheduler {
-            // Unregister first so has_capability_connected excludes this service.
-            state.service_connections.unregister(&service_id).await;
-            if !state
-                .service_connections
-                .has_capability_connected(&Capability::Scheduler)
-                .await
-            {
-                state
-                    .external_scheduler_connected
-                    .store(false, Ordering::Relaxed);
-                tracing::info!(
-                    %service_id,
-                    "external scheduler disconnected (enrolled); embedded scheduler resuming all tasks"
-                );
-            }
-        } else {
-            state.service_connections.unregister(&service_id).await;
-        }
-    }
-    tracing::debug!(%service_id, "enrolled service disconnected");
+    cleanup_enrolled_session(state, service_id, &session).await;
 }
