@@ -58,6 +58,15 @@ struct ExtractedOidcClaims {
     additional_claims: serde_json::Value,
 }
 
+/// Validated OIDC callback state: the pending flow, resolved provider, built
+/// client, and redirect URL, ready for code exchange.
+struct ValidatedOidcCallback {
+    flow: crate::auth::oidc_state::PendingOidcFlowData,
+    provider: oidc_provider::Model,
+    client: DiscoveredCoreClient,
+    redirect_url: RedirectUrl,
+}
+
 /// Get available auth methods (public)
 #[utoipa::path(
     get,
@@ -236,13 +245,51 @@ pub async fn oidc_callback(
         _ => return Redirect::to("/login?error=oidc_missing_params").into_response(),
     };
 
+    // Stage 1: Validate state token, load provider, build OIDC client
+    let ValidatedOidcCallback {
+        flow,
+        provider,
+        client,
+        redirect_url,
+    } = match validate_oidc_state(&state, &csrf_state, external_base_url, &headers).await {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
+
+    // Save provider_id before consuming flow fields
+    let provider_id = flow.provider_id;
+
+    // Stage 2: Exchange authorization code for tokens and extract claims
+    let claims =
+        match exchange_code_for_claims(&client, code, flow.pkce_verifier, flow.nonce, redirect_url)
+            .await
+        {
+            Ok(c) => c,
+            Err(response) => return response,
+        };
+
+    // Stage 3: Resolve or create the user, sync roles, and produce the final response
+    resolve_or_create_oidc_user(&state, provider_id, &provider, claims).await
+}
+
+/// Stage 1: Look up the pending OIDC flow by CSRF state, load the associated
+/// provider, resolve the external base URL, and build the OIDC client.
+///
+/// Returns `Err(Response)` with the appropriate redirect on any validation
+/// failure so the caller can propagate it directly.
+async fn validate_oidc_state(
+    state: &AppState,
+    csrf_state: &str,
+    external_base_url: Option<Extension<crate::extract::ExternalBaseUrl>>,
+    headers: &HeaderMap,
+) -> Result<ValidatedOidcCallback, Response> {
     // Retrieve pending flow from database
-    let flow = match state.oidc_flow_store.take(&csrf_state).await {
+    let flow = match state.oidc_flow_store.take(csrf_state).await {
         Ok(Some(f)) => f,
-        Ok(None) => return Redirect::to("/login?error=oidc_state_expired").into_response(),
+        Ok(None) => return Err(Redirect::to("/login?error=oidc_state_expired").into_response()),
         Err(e) => {
             tracing::error!("Failed to retrieve OIDC flow: {e:?}");
-            return Redirect::to("/login?error=oidc_internal_error").into_response();
+            return Err(Redirect::to("/login?error=oidc_internal_error").into_response());
         }
     };
 
@@ -250,31 +297,51 @@ pub async fn oidc_callback(
     let provider =
         match find_active_provider(state.db(), state.default_tenant_id, flow.provider_id).await {
             Some(p) => p,
-            None => return Redirect::to("/login?error=oidc_provider_gone").into_response(),
+            None => {
+                return Err(Redirect::to("/login?error=oidc_provider_gone").into_response());
+            }
         };
 
     let base_url = external_base_url
         .map(|Extension(u)| u.0)
-        .or_else(|| base_url_from_headers(&headers));
+        .or_else(|| base_url_from_headers(headers));
     let base_url = match base_url {
         Some(url) => url,
-        None => return Redirect::to("/login?error=oidc_missing_host").into_response(),
+        None => return Err(Redirect::to("/login?error=oidc_missing_host").into_response()),
     };
     let redirect_url = match RedirectUrl::new(format!("{base_url}/api/v1/auth/oidc/callback")) {
         Ok(url) => url,
         Err(e) => {
             tracing::error!("Invalid OIDC redirect URL during callback: {e}");
-            return Redirect::to("/login?error=oidc_invalid_redirect").into_response();
+            return Err(Redirect::to("/login?error=oidc_invalid_redirect").into_response());
         }
     };
 
     // Build OIDC client via discovery
     let client = match build_oidc_client(&provider, redirect_url.clone()).await {
         Some(c) => c,
-        None => return Redirect::to("/login?error=oidc_discovery_failed").into_response(),
+        None => {
+            return Err(Redirect::to("/login?error=oidc_discovery_failed").into_response());
+        }
     };
 
-    // Exchange code for tokens and extract claims
+    Ok(ValidatedOidcCallback {
+        flow,
+        provider,
+        client,
+        redirect_url,
+    })
+}
+
+/// Stage 3: Check invite-mode registration gating, resolve or create the user
+/// inside a transaction, sync OIDC roles, and produce the final redirect
+/// response.
+async fn resolve_or_create_oidc_user(
+    state: &AppState,
+    provider_id: Uuid,
+    provider: &oidc_provider::Model,
+    claims: ExtractedOidcClaims,
+) -> Response {
     let ExtractedOidcClaims {
         sub,
         email,
@@ -282,12 +349,7 @@ pub async fn oidc_callback(
         first_name,
         last_name,
         additional_claims,
-    } = match exchange_code_for_claims(&client, code, flow.pkce_verifier, flow.nonce, redirect_url)
-        .await
-    {
-        Ok(c) => c,
-        Err(response) => return response,
-    };
+    } = claims;
 
     // Pre-check: if registration mode is Invite and auto_create is enabled,
     // check whether this would create a new user requiring a registration token.
@@ -295,7 +357,7 @@ pub async fn oidc_callback(
     if reg_settings.mode == RegistrationMode::Invite && provider.auto_create_users {
         // Check if an OIDC link already exists for this subject
         let has_link = match UserOidcLink::find()
-            .filter(user_oidc_link::Column::ProviderId.eq(flow.provider_id))
+            .filter(user_oidc_link::Column::ProviderId.eq(provider_id))
             .filter(user_oidc_link::Column::OidcSubject.eq(&sub))
             .count(state.db())
             .await
@@ -334,7 +396,7 @@ pub async fn oidc_callback(
 
                 if reg_settings.needs_token_for_oidc(is_first_user) {
                     // Store pending registration and redirect to token input form
-                    let mapped_roles = extract_mapped_roles(&provider, &additional_claims);
+                    let mapped_roles = extract_mapped_roles(provider, &additional_claims);
                     let code = match generate_secure_token() {
                         Ok(t) => t,
                         Err(e) => {
@@ -350,7 +412,7 @@ pub async fn oidc_callback(
                         .oidc_registration_store
                         .insert(crate::auth::oidc_state::PendingOidcRegistrationParams {
                             registration_code: code.clone(),
-                            provider_id: flow.provider_id,
+                            provider_id,
                             oidc_subject: sub.clone(),
                             email: email.clone(),
                             first_name: first_name.clone(),
@@ -388,7 +450,7 @@ pub async fn oidc_callback(
     let resolution = match resolve_oidc_user(OidcUserParams {
         db: &txn,
         tenant_id: state.default_tenant_id,
-        provider_id: flow.provider_id,
+        provider_id,
         oidc_subject: &sub,
         email: &email,
         first_name: first_name.as_deref(),
@@ -427,7 +489,7 @@ pub async fn oidc_callback(
                 &txn,
                 state.default_tenant_id,
                 user_id,
-                &provider,
+                provider,
                 &additional_claims,
             )
             .await;
@@ -436,7 +498,7 @@ pub async fn oidc_callback(
                 tracing::error!("Failed to commit OIDC callback transaction: {e}");
                 return Redirect::to("/login?error=oidc_internal_error").into_response();
             }
-            create_oidc_exchange_and_redirect(&state, user_id, flow.provider_id).await
+            create_oidc_exchange_and_redirect(state, user_id, provider_id).await
         }
         OidcUserResolution::NewUser(user_id) => {
             // Atomically check if this is the first user (threshold 1 because the
@@ -482,7 +544,7 @@ pub async fn oidc_callback(
                 &txn,
                 state.default_tenant_id,
                 user_id,
-                &provider,
+                provider,
                 &additional_claims,
             )
             .await;
@@ -491,14 +553,14 @@ pub async fn oidc_callback(
                 tracing::error!("Failed to commit OIDC callback transaction: {e}");
                 return Redirect::to("/login?error=oidc_internal_error").into_response();
             }
-            create_oidc_exchange_and_redirect(&state, user_id, flow.provider_id).await
+            create_oidc_exchange_and_redirect(state, user_id, provider_id).await
         }
         OidcUserResolution::LinkViaPasswordRequired { user_id } => {
             // No DB writes needed in this branch, just drop the transaction
             drop(txn);
 
             // Store pending link and redirect to frontend
-            let mapped_roles = extract_mapped_roles(&provider, &additional_claims);
+            let mapped_roles = extract_mapped_roles(provider, &additional_claims);
             let link_token_value = match generate_secure_token() {
                 Ok(t) => t,
                 Err(e) => {
@@ -510,10 +572,10 @@ pub async fn oidc_callback(
                 }
             };
             let link_token = match store_pending_link(
-                &state,
+                state,
                 crate::auth::oidc_state::PendingAccountLinkParams {
                     token: link_token_value,
-                    provider_id: flow.provider_id,
+                    provider_id,
                     oidc_subject: sub,
                     email: email.clone(),
                     user_id,
@@ -551,7 +613,7 @@ pub async fn oidc_callback(
             // No DB writes needed in this branch, just drop the transaction
             drop(txn);
 
-            let mapped_roles = extract_mapped_roles(&provider, &additional_claims);
+            let mapped_roles = extract_mapped_roles(provider, &additional_claims);
             let link_token_value = match generate_secure_token() {
                 Ok(t) => t,
                 Err(e) => {
@@ -563,10 +625,10 @@ pub async fn oidc_callback(
                 }
             };
             let link_token = match store_pending_link(
-                &state,
+                state,
                 crate::auth::oidc_state::PendingAccountLinkParams {
                     token: link_token_value,
-                    provider_id: flow.provider_id,
+                    provider_id,
                     oidc_subject: sub,
                     email: email.clone(),
                     user_id,
