@@ -253,26 +253,7 @@ impl ServiceHandler for SshAgentHandler {
                 Ok(None)
             }
             ControllerMessage::ExecuteUpdate(payload) => {
-                if tokio::fs::try_exists(&self.freeze_file_path)
-                    .await
-                    .unwrap_or(false)
-                {
-                    tracing::warn!(
-                        freeze_file = %self.freeze_file_path.display(),
-                        "update execution is frozen; ignoring ExecuteUpdate message. \
-                         Remove the freeze file to re-enable update execution."
-                    );
-                    return Ok(None);
-                }
-                if let Some(last) = self.last_update_per_host.get(&payload.host_machine_id)
-                    && last.elapsed() < UPDATE_COOLDOWN
-                {
-                    tracing::warn!(
-                        host = %payload.host_machine_id,
-                        cooldown_secs = UPDATE_COOLDOWN.as_secs(),
-                        elapsed_ms = last.elapsed().as_millis() as u64,
-                        "security_audit: update rate limit exceeded; ignoring ExecuteUpdate"
-                    );
+                if !self.is_update_allowed(&payload.host_machine_id).await {
                     return Ok(None);
                 }
                 self.last_update_per_host
@@ -289,26 +270,7 @@ impl ServiceHandler for SshAgentHandler {
                 Ok(None)
             }
             ControllerMessage::ExecuteBatchUpdate(payload) => {
-                if tokio::fs::try_exists(&self.freeze_file_path)
-                    .await
-                    .unwrap_or(false)
-                {
-                    tracing::warn!(
-                        freeze_file = %self.freeze_file_path.display(),
-                        "update execution is frozen; ignoring ExecuteBatchUpdate message. \
-                         Remove the freeze file to re-enable update execution."
-                    );
-                    return Ok(None);
-                }
-                if let Some(last) = self.last_update_per_host.get(&payload.host_machine_id)
-                    && last.elapsed() < UPDATE_COOLDOWN
-                {
-                    tracing::warn!(
-                        host = %payload.host_machine_id,
-                        cooldown_secs = UPDATE_COOLDOWN.as_secs(),
-                        elapsed_ms = last.elapsed().as_millis() as u64,
-                        "security_audit: update rate limit exceeded; ignoring ExecuteBatchUpdate"
-                    );
+                if !self.is_update_allowed(&payload.host_machine_id).await {
                     return Ok(None);
                 }
                 self.last_update_per_host
@@ -330,92 +292,12 @@ impl ServiceHandler for SshAgentHandler {
                 Ok(None)
             }
             ControllerMessage::ReportPluginConfigResponse(payload) => {
-                if payload.success {
-                    if let Some(config_id_str) = &payload.plugin_config_id {
-                        tracing::info!(
-                            request_id = %payload.request_id,
-                            config_id = %config_id_str,
-                            "plugin config reported successfully"
-                        );
-                        {
-                            let config_id = *config_id_str;
-                            let request_id = payload.request_id.clone();
-                            for plugin in self.infra_plugins.iter() {
-                                if let Some(report) = plugin.as_host_report()
-                                    && let Err(e) = report
-                                        .on_plugin_config_reported(db, config_id, &request_id)
-                                        .await
-                                {
-                                    tracing::warn!(
-                                        error = %e,
-                                        plugin_type = %plugin.plugin_type_id(),
-                                        "plugin on_plugin_config_reported failed"
-                                    );
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    tracing::warn!(
-                        request_id = %payload.request_id,
-                        error = ?payload.error,
-                        "plugin config report failed"
-                    );
-                }
+                self.handle_report_plugin_config_response(payload, db).await;
                 Ok(None)
             }
             ControllerMessage::ResetData => {
-                if cfg!(feature = "reset-data") {
-                    tracing::info!("received ResetData: truncating local data stores");
-                    use sea_orm::{ConnectionTrait, EntityTrait, TransactionTrait};
-                    match db.begin().await {
-                        Ok(txn) => {
-                            // Delete in FK-safe order:
-                            // 1. pending_proxmox_matches (references ssh_hosts)
-                            if let Err(e) =
-                                crate::db::entity::pending_proxmox_match::Entity::delete_many()
-                                    .exec(&txn)
-                                    .await
-                            {
-                                tracing::error!(error = %e, "failed to truncate pending_proxmox_matches");
-                            }
-                            // 2. proxmox_host_state (references ssh_hosts; entity owned by
-                            //    the proxmox plugin crate, so use raw SQL)
-                            if let Err(e) = txn
-                                .execute_unprepared("DELETE FROM proxmox_host_state")
-                                .await
-                            {
-                                tracing::error!(error = %e, "failed to truncate proxmox_host_state");
-                            }
-                            // 3. ssh_hosts
-                            if let Err(e) = crate::db::entity::ssh_host::Entity::delete_many()
-                                .exec(&txn)
-                                .await
-                            {
-                                tracing::error!(error = %e, "failed to truncate ssh_hosts");
-                            }
-                            match txn.commit().await {
-                                Ok(()) => {
-                                    tracing::info!("local data stores truncated successfully");
-                                    // Clear in-memory state so the agent does not
-                                    // keep stale host references.
-                                    self.host_snapshot.clear();
-                                    self.last_update_per_host.clear();
-                                }
-                                Err(e) => {
-                                    tracing::error!(error = %e, "failed to commit ResetData transaction");
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!(error = %e, "failed to begin ResetData transaction");
-                        }
-                    }
-                } else {
-                    tracing::warn!(
-                        "received ResetData but reset-data feature is disabled; ignoring"
-                    );
-                }
+                let db = db.clone();
+                self.handle_reset_data(&db).await;
                 Ok(None)
             }
             _ => {
@@ -762,6 +644,157 @@ impl ServiceHandler for SshAgentHandler {
 }
 
 impl SshAgentHandler {
+    /// Returns `true` if the update is allowed to proceed.
+    async fn is_update_allowed(&self, host_machine_id: &str) -> bool {
+        if tokio::fs::try_exists(&self.freeze_file_path)
+            .await
+            .unwrap_or(false)
+        {
+            tracing::warn!(
+                freeze_file = %self.freeze_file_path.display(),
+                "update execution is frozen; ignoring update message. \
+                 Remove the freeze file to re-enable update execution."
+            );
+            return false;
+        }
+        if let Some(last) = self.last_update_per_host.get(host_machine_id)
+            && last.elapsed() < UPDATE_COOLDOWN
+        {
+            tracing::warn!(
+                host = %host_machine_id,
+                cooldown_secs = UPDATE_COOLDOWN.as_secs(),
+                elapsed_ms = last.elapsed().as_millis() as u64,
+                "security_audit: update rate limit exceeded; ignoring update"
+            );
+            return false;
+        }
+        true
+    }
+
+    async fn handle_report_plugin_config_response(
+        &self,
+        payload: uptrakit_internal_wire::ReportPluginConfigResponsePayload,
+        db: &sea_orm::DatabaseConnection,
+    ) {
+        if payload.success {
+            if let Some(config_id_str) = &payload.plugin_config_id {
+                tracing::info!(
+                    request_id = %payload.request_id,
+                    config_id = %config_id_str,
+                    "plugin config reported successfully"
+                );
+                {
+                    let config_id = *config_id_str;
+                    let request_id = payload.request_id.clone();
+                    for plugin in self.infra_plugins.iter() {
+                        if let Some(report) = plugin.as_host_report()
+                            && let Err(e) = report
+                                .on_plugin_config_reported(db, config_id, &request_id)
+                                .await
+                        {
+                            tracing::warn!(
+                                error = %e,
+                                plugin_type = %plugin.plugin_type_id(),
+                                "plugin on_plugin_config_reported failed"
+                            );
+                        }
+                    }
+                }
+            }
+        } else {
+            tracing::warn!(
+                request_id = %payload.request_id,
+                error = ?payload.error,
+                "plugin config report failed"
+            );
+        }
+    }
+
+    async fn handle_reset_data(&mut self, db: &sea_orm::DatabaseConnection) {
+        if cfg!(feature = "reset-data") {
+            tracing::info!("received ResetData: truncating local data stores");
+            use sea_orm::{ConnectionTrait, EntityTrait, TransactionTrait};
+            match db.begin().await {
+                Ok(txn) => {
+                    // Delete in FK-safe order:
+                    // 1. pending_proxmox_matches (references ssh_hosts)
+                    if let Err(e) = crate::db::entity::pending_proxmox_match::Entity::delete_many()
+                        .exec(&txn)
+                        .await
+                    {
+                        tracing::error!(error = %e, "failed to truncate pending_proxmox_matches");
+                    }
+                    // 2. proxmox_host_state (references ssh_hosts; entity owned by
+                    //    the proxmox plugin crate, so use raw SQL)
+                    if let Err(e) = txn
+                        .execute_unprepared("DELETE FROM proxmox_host_state")
+                        .await
+                    {
+                        tracing::error!(error = %e, "failed to truncate proxmox_host_state");
+                    }
+                    // 3. ssh_hosts
+                    if let Err(e) = crate::db::entity::ssh_host::Entity::delete_many()
+                        .exec(&txn)
+                        .await
+                    {
+                        tracing::error!(error = %e, "failed to truncate ssh_hosts");
+                    }
+                    match txn.commit().await {
+                        Ok(()) => {
+                            tracing::info!("local data stores truncated successfully");
+                            // Clear in-memory state so the agent does not
+                            // keep stale host references.
+                            self.host_snapshot.clear();
+                            self.last_update_per_host.clear();
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "failed to commit ResetData transaction");
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to begin ResetData transaction");
+                }
+            }
+        } else {
+            tracing::warn!("received ResetData but reset-data feature is disabled; ignoring");
+        }
+    }
+
+    fn spawn_post_report_hooks(&self, db: sea_orm::DatabaseConnection) {
+        let proxy = std::sync::Arc::clone(&self.extension_proxy);
+        let bg_tx = self.bg_tx.clone();
+        let infra_plugins = std::sync::Arc::clone(&self.infra_plugins);
+        let state_dir = self.state_dir.clone();
+        let tenant_id = self.tenant_id;
+        let service_id = self.service_id;
+        let private_key_der = self.private_key_der.clone();
+        tokio::spawn(async move {
+            let action_invoker = crate::extension::InfraActionInvokerImpl::new(&proxy, &bg_tx);
+            let tenant_id_str = tenant_id.map(|t| t.to_string());
+            let ctx = uptrakit_plugin_infrastructure_core::agent_infra::InfraPluginContext {
+                db: &db,
+                tenant_id: tenant_id_str.as_deref(),
+                service_id,
+                state_dir: &state_dir,
+                private_key_der: private_key_der.as_deref(),
+                action_invoker: &action_invoker,
+                guest_bootstrap: &crate::commands::bootstrap_proxmox::NoopGuestBootstrapExecutor,
+            };
+            for plugin in infra_plugins.iter() {
+                if let Some(report) = plugin.as_host_report()
+                    && let Err(e) = report.on_post_report_hosts(&ctx).await
+                {
+                    tracing::warn!(
+                        error = %e,
+                        plugin_type = %plugin.plugin_type_id(),
+                        "plugin on_post_report_hosts failed"
+                    );
+                }
+            }
+        });
+    }
+
     /// React to a host-config reload tick.
     ///
     /// Queries the current `ssh_hosts` snapshot, diffs it against the stored
@@ -842,38 +875,7 @@ impl SshAgentHandler {
         // response — calling invoke_proxy_action inline here would deadlock
         // because on_service_event cannot poll bg_rx while it is blocked.
         if let Some(db) = self.local_db.as_ref() {
-            let db = db.clone();
-            let proxy = std::sync::Arc::clone(&self.extension_proxy);
-            let bg_tx = self.bg_tx.clone();
-            let infra_plugins = std::sync::Arc::clone(&self.infra_plugins);
-            let state_dir = self.state_dir.clone();
-            let tenant_id_str = self.tenant_id.map(|t| t.to_string());
-            let service_id = self.service_id;
-            let private_key_der = self.private_key_der.clone();
-            tokio::spawn(async move {
-                let action_invoker = crate::extension::InfraActionInvokerImpl::new(&proxy, &bg_tx);
-                let ctx = uptrakit_plugin_infrastructure_core::agent_infra::InfraPluginContext {
-                    db: &db,
-                    tenant_id: tenant_id_str.as_deref(),
-                    service_id,
-                    state_dir: &state_dir,
-                    private_key_der: private_key_der.as_deref(),
-                    action_invoker: &action_invoker,
-                    guest_bootstrap:
-                        &crate::commands::bootstrap_proxmox::NoopGuestBootstrapExecutor,
-                };
-                for plugin in infra_plugins.iter() {
-                    if let Some(report) = plugin.as_host_report()
-                        && let Err(e) = report.on_post_report_hosts(&ctx).await
-                    {
-                        tracing::warn!(
-                            error = %e,
-                            plugin_type = %plugin.plugin_type_id(),
-                            "plugin on_post_report_hosts failed"
-                        );
-                    }
-                }
-            });
+            self.spawn_post_report_hooks(db.clone());
         }
     }
 }
