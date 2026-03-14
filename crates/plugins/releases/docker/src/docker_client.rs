@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use rootcause::prelude::*;
 #[cfg(feature = "daemon")]
-use std::collections::HashSet;
+use std::collections::HashMap;
 #[cfg(feature = "daemon")]
 use uptrakit_plugin_infrastructure_core::OutputStreamType;
 use uptrakit_plugin_infrastructure_core::UpdateOutputLine;
@@ -349,8 +349,7 @@ impl DockerClient for BollardDockerClient {
             credentials,
         );
 
-        let mut output = String::new();
-        let mut seen = HashSet::new();
+        let mut tracker = PullProgressTracker::new();
 
         while let Some(item) = stream.next().await {
             let info = item.context_to::<DockerError>()?;
@@ -361,20 +360,13 @@ impl DockerClient for BollardDockerClient {
                 bail!(DockerError::PullFailed(msg.to_string()));
             }
 
-            if !is_new_progress_event(&mut seen, info.id.as_deref(), info.status.as_deref()) {
-                continue;
-            }
-
-            let line = format_progress_line(info.id.as_deref(), info.status.as_deref(), None);
-            if !line.is_empty() {
-                send_output(output_tx, &line, OutputStreamType::Stdout).await;
-                output.push_str(&line);
-                output.push('\n');
+            if let Some(frame) = tracker.handle_event(&info) {
+                send_output(output_tx, &frame, OutputStreamType::Stdout).await;
             }
         }
 
         tracing::debug!("Docker image pull stream completed");
-        Ok(output)
+        Ok(tracker.into_clean_output())
     }
 
     async fn inspect_image(&self, full_ref: &str) -> Result<Option<LocalImageDigest>> {
@@ -600,26 +592,9 @@ fn map_auth_to_credentials(image: &str, auth: &DockerAuth) -> bollard::auth::Doc
     }
 }
 
-/// Returns `true` when this `(id, status)` combination has not been seen before.
-///
-/// Events without an `id` (e.g. `"Pulling from library/nginx"`) always pass
-/// through because they are one-off status messages, not per-layer progress.
-/// Events without a `status` are also let through unconditionally.
-#[cfg(feature = "daemon")]
-fn is_new_progress_event(
-    seen: &mut HashSet<(String, String)>,
-    id: Option<&str>,
-    status: Option<&str>,
-) -> bool {
-    match (id, status) {
-        (Some(id), Some(status)) => seen.insert((id.to_string(), status.to_string())),
-        _ => true,
-    }
-}
-
 /// Format a single pull-progress event as `"{id}: {status} {progress}"`,
 /// omitting any empty components.
-#[cfg(feature = "daemon")]
+#[cfg(all(test, feature = "daemon"))]
 fn format_progress_line(id: Option<&str>, status: Option<&str>, progress: Option<&str>) -> String {
     let status = status.unwrap_or("").trim();
     let progress = progress.unwrap_or("").trim();
@@ -644,6 +619,268 @@ fn format_progress_line(id: Option<&str>, status: Option<&str>, progress: Option
         _ => status_progress,
     }
 }
+
+/// Format a byte count as a human-readable string (B, KB, MB, GB).
+#[cfg(feature = "daemon")]
+fn format_bytes(bytes: i64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = 1024.0 * 1024.0;
+    const GB: f64 = 1024.0 * 1024.0 * 1024.0;
+
+    let b = bytes as f64;
+    if b >= GB {
+        format!("{:.2}GB", b / GB)
+    } else if b >= MB {
+        format!("{:.2}MB", b / MB)
+    } else if b >= KB {
+        format!("{:.2}KB", b / KB)
+    } else {
+        format!("{bytes}B")
+    }
+}
+
+/// Build a progress bar string like `[======>                       ]`.
+///
+/// `width` is the number of characters inside the brackets.
+#[cfg(feature = "daemon")]
+fn format_progress_bar(current: i64, total: i64, width: usize) -> String {
+    if total <= 0 {
+        return format!("[{}]", " ".repeat(width));
+    }
+    let ratio = (current as f64 / total as f64).clamp(0.0, 1.0);
+    let filled = (ratio * width as f64).round() as usize;
+    let filled = filled.min(width);
+
+    let mut bar = String::with_capacity(width + 2);
+    bar.push('[');
+    if filled > 0 {
+        // filled - 1 chars of '=' then '>'
+        for _ in 0..filled.saturating_sub(1) {
+            bar.push('=');
+        }
+        bar.push('>');
+    }
+    for _ in filled..width {
+        bar.push(' ');
+    }
+    bar.push(']');
+    bar
+}
+
+// ── Pull progress tracker ────────────────────────────────────────────────────
+
+/// Minimum interval between ANSI frame emissions for progress-only updates.
+#[cfg(feature = "daemon")]
+const MIN_FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// Width of the progress bar (characters inside brackets).
+#[cfg(feature = "daemon")]
+const BAR_WIDTH: usize = 30;
+
+/// Terminal statuses that are always emitted immediately (no throttle).
+#[cfg(feature = "daemon")]
+const TERMINAL_STATUSES: &[&str] = &[
+    "Pull complete",
+    "Already exists",
+    "Download complete",
+    "Verifying Checksum",
+    "Extracting",
+];
+
+/// Per-layer state tracked during a Docker pull operation.
+#[cfg(feature = "daemon")]
+struct LayerState {
+    status: String,
+    current: i64,
+    total: i64,
+}
+
+/// Tracks Docker pull progress events and produces ANSI escape sequences for
+/// in-place terminal redrawing, mimicking `docker pull` output.
+///
+/// One-off messages (no layer ID) are emitted as plain lines.
+/// Layer events are collected and rendered as a block of lines that is
+/// redrawn in-place using cursor-up + line-clear sequences.
+///
+/// The output travels through MPSC → WebSocket → DB → SSE → xterm.js,
+/// which natively handles the ANSI sequences.
+#[cfg(feature = "daemon")]
+struct PullProgressTracker {
+    /// Layer IDs in the order they first appeared.
+    layer_order: Vec<String>,
+    /// Current state per layer.
+    layer_state: HashMap<String, LayerState>,
+    /// Number of terminal lines currently occupied by the layer block.
+    displayed_lines: usize,
+    /// Timestamp of the last emitted ANSI frame (for throttling).
+    last_frame_at: Option<tokio::time::Instant>,
+    /// One-off messages accumulated for clean output.
+    messages: Vec<String>,
+}
+
+#[cfg(feature = "daemon")]
+impl PullProgressTracker {
+    fn new() -> Self {
+        Self {
+            layer_order: Vec::new(),
+            layer_state: HashMap::new(),
+            displayed_lines: 0,
+            last_frame_at: None,
+            messages: Vec::new(),
+        }
+    }
+
+    /// Process a single Docker pull event and return an ANSI frame to emit,
+    /// or `None` if the event was throttled.
+    fn handle_event(&mut self, info: &bollard::models::CreateImageInfo) -> Option<String> {
+        let status = info.status.as_deref().unwrap_or("").trim();
+        let id = info.id.as_deref().map(str::trim);
+
+        match id {
+            None | Some("") => self.handle_message(status),
+            Some(layer_id) => self.handle_layer_event(layer_id, status, &info.progress_detail),
+        }
+    }
+
+    /// Handle a one-off message (no layer ID).
+    fn handle_message(&mut self, status: &str) -> Option<String> {
+        if status.is_empty() {
+            return None;
+        }
+
+        let mut out = String::new();
+
+        // If we have displayed layer lines, move cursor below the block first.
+        if self.displayed_lines > 0 {
+            out.push('\n');
+            self.displayed_lines = 0;
+        }
+
+        out.push_str(status);
+        out.push('\n');
+
+        self.messages.push(status.to_string());
+        Some(out)
+    }
+
+    /// Handle a per-layer event and optionally build an ANSI frame.
+    fn handle_layer_event(
+        &mut self,
+        layer_id: &str,
+        status: &str,
+        progress_detail: &Option<bollard::models::ProgressDetail>,
+    ) -> Option<String> {
+        if status.is_empty() {
+            return None;
+        }
+
+        // Track this layer if new.
+        if !self.layer_state.contains_key(layer_id) {
+            self.layer_order.push(layer_id.to_string());
+        }
+
+        let (current, total) = progress_detail
+            .as_ref()
+            .map(|d| (d.current.unwrap_or(0), d.total.unwrap_or(0)))
+            .unwrap_or((0, 0));
+
+        let previous_status = self
+            .layer_state
+            .get(layer_id)
+            .map(|s| s.status.clone())
+            .unwrap_or_default();
+
+        self.layer_state.insert(
+            layer_id.to_string(),
+            LayerState {
+                status: status.to_string(),
+                current,
+                total,
+            },
+        );
+
+        let status_changed = previous_status != status;
+        let is_terminal = TERMINAL_STATUSES
+            .iter()
+            .any(|s| status.eq_ignore_ascii_case(s));
+
+        // Throttle: always emit on status change or terminal status;
+        // otherwise rate-limit progress-only updates.
+        if !status_changed
+            && !is_terminal
+            && let Some(last) = self.last_frame_at
+            && last.elapsed() < MIN_FRAME_INTERVAL
+        {
+            return None;
+        }
+
+        let frame = self.build_frame();
+        self.last_frame_at = Some(tokio::time::Instant::now());
+        Some(frame)
+    }
+
+    /// Build an ANSI frame that redraws all layer lines in-place.
+    fn build_frame(&mut self) -> String {
+        let layer_count = self.layer_order.len();
+        let mut out = String::with_capacity(layer_count * 80);
+
+        // Move cursor up to the first layer line (overwrite previous frame).
+        if self.displayed_lines > 0 {
+            write!(out, "\x1b[{}A", self.displayed_lines).ok();
+        }
+
+        for layer_id in &self.layer_order {
+            if let Some(state) = self.layer_state.get(layer_id) {
+                // \r = carriage return, \x1b[2K = clear entire line
+                out.push_str("\r\x1b[2K");
+                out.push_str(layer_id);
+                out.push_str(": ");
+                out.push_str(&state.status);
+
+                // Show progress bar for statuses with meaningful byte counts.
+                if state.total > 0 {
+                    out.push_str("  ");
+                    out.push_str(&format_progress_bar(state.current, state.total, BAR_WIDTH));
+                    out.push_str("  ");
+                    out.push_str(&format_bytes(state.current));
+                    out.push('/');
+                    out.push_str(&format_bytes(state.total));
+                }
+
+                out.push('\n');
+            }
+        }
+
+        self.displayed_lines = layer_count;
+        out
+    }
+
+    /// Consume the tracker and return clean (ANSI-free) output for storage
+    /// in `update_history.output`.
+    fn into_clean_output(self) -> String {
+        let mut out = String::new();
+
+        for msg in &self.messages {
+            out.push_str(msg);
+            out.push('\n');
+        }
+
+        for layer_id in &self.layer_order {
+            if let Some(state) = self.layer_state.get(layer_id) {
+                out.push_str(layer_id);
+                out.push_str(": ");
+                out.push_str(&state.status);
+                out.push('\n');
+            }
+        }
+
+        out
+    }
+}
+
+/// `write!` macro support for building ANSI frames.
+#[cfg(feature = "daemon")]
+use std::fmt::Write;
 
 // ── Test mock ────────────────────────────────────────────────────────────────
 
@@ -724,6 +961,8 @@ impl DockerClient for MockDockerClient {
 mod tests {
     use super::*;
 
+    // ── format_progress_line tests ───────────────────────────────────────
+
     #[test]
     fn format_progress_with_all_parts() {
         let line = format_progress_line(Some("abc123"), Some("Pulling fs layer"), Some("[=>  ]"));
@@ -760,52 +999,265 @@ mod tests {
         assert_eq!(line, "abc: [==>]");
     }
 
+    // ── format_bytes tests ──────────────────────────────────────────────
+
     #[test]
-    fn dedup_filters_repeated_status_per_layer() {
-        let mut seen = HashSet::new();
+    fn format_bytes_values() {
+        assert_eq!(format_bytes(0), "0B");
+        assert_eq!(format_bytes(512), "512B");
+        assert_eq!(format_bytes(1024), "1.00KB");
+        assert_eq!(format_bytes(1536), "1.50KB");
+        assert_eq!(format_bytes(1_048_576), "1.00MB");
+        assert_eq!(format_bytes(10_485_760), "10.00MB");
+        assert_eq!(format_bytes(1_073_741_824), "1.00GB");
+    }
 
-        // First occurrence passes through.
-        assert!(is_new_progress_event(
-            &mut seen,
-            Some("abc123"),
-            Some("Downloading")
-        ));
+    // ── format_progress_bar tests ───────────────────────────────────────
 
-        // Same (id, status) is filtered.
-        assert!(!is_new_progress_event(
-            &mut seen,
-            Some("abc123"),
-            Some("Downloading")
-        ));
+    #[test]
+    fn progress_bar_zero_total_shows_empty() {
+        let bar = format_progress_bar(100, 0, 10);
+        assert_eq!(bar, "[          ]");
+    }
 
-        // Different status for same id passes through.
-        assert!(is_new_progress_event(
-            &mut seen,
-            Some("abc123"),
-            Some("Pull complete")
-        ));
+    #[test]
+    fn progress_bar_half_filled() {
+        let bar = format_progress_bar(500, 1000, 10);
+        assert_eq!(bar, "[====>     ]");
+    }
 
-        // Different id with same status passes through.
-        assert!(is_new_progress_event(
-            &mut seen,
-            Some("def456"),
-            Some("Downloading")
-        ));
+    #[test]
+    fn progress_bar_complete() {
+        let bar = format_progress_bar(1000, 1000, 10);
+        assert_eq!(bar, "[=========>]");
+    }
 
-        // Events without an id always pass through.
-        assert!(is_new_progress_event(
-            &mut seen,
-            None,
-            Some("Pulling from library/nginx")
-        ));
-        assert!(is_new_progress_event(
-            &mut seen,
-            None,
-            Some("Pulling from library/nginx")
-        ));
+    #[test]
+    fn progress_bar_start() {
+        let bar = format_progress_bar(0, 1000, 10);
+        assert_eq!(bar, "[          ]");
+    }
 
-        // Events without a status always pass through.
-        assert!(is_new_progress_event(&mut seen, Some("abc123"), None));
-        assert!(is_new_progress_event(&mut seen, Some("abc123"), None));
+    // ── PullProgressTracker tests ───────────────────────────────────────
+
+    fn make_message_event(status: &str) -> bollard::models::CreateImageInfo {
+        bollard::models::CreateImageInfo {
+            id: None,
+            status: Some(status.to_string()),
+            progress_detail: None,
+            error_detail: None,
+        }
+    }
+
+    fn make_layer_event(
+        id: &str,
+        status: &str,
+        current: i64,
+        total: i64,
+    ) -> bollard::models::CreateImageInfo {
+        bollard::models::CreateImageInfo {
+            id: Some(id.to_string()),
+            status: Some(status.to_string()),
+            progress_detail: Some(bollard::models::ProgressDetail {
+                current: Some(current),
+                total: Some(total),
+            }),
+            error_detail: None,
+        }
+    }
+
+    fn make_layer_event_no_progress(id: &str, status: &str) -> bollard::models::CreateImageInfo {
+        bollard::models::CreateImageInfo {
+            id: Some(id.to_string()),
+            status: Some(status.to_string()),
+            progress_detail: None,
+            error_detail: None,
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn tracker_emits_one_off_messages() {
+        let mut tracker = PullProgressTracker::new();
+        let event = make_message_event("Pulling from library/nginx");
+        let output = tracker.handle_event(&event);
+        assert!(output.is_some());
+        let text = output.unwrap();
+        assert!(text.contains("Pulling from library/nginx"));
+        assert!(text.ends_with('\n'));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn tracker_emits_layer_events_with_ansi() {
+        let mut tracker = PullProgressTracker::new();
+        let event = make_layer_event("abc123", "Downloading", 500, 1000);
+        let output = tracker.handle_event(&event);
+        assert!(output.is_some());
+        let text = output.unwrap();
+        // Should contain the layer ID, status, progress bar, and byte counts.
+        assert!(text.contains("abc123"));
+        assert!(text.contains("Downloading"));
+        assert!(text.contains('['));
+        assert!(text.contains("500B/1000B"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn tracker_redraws_with_cursor_up() {
+        let mut tracker = PullProgressTracker::new();
+
+        // First event — no cursor-up needed.
+        let event1 = make_layer_event("abc", "Downloading", 100, 1000);
+        let out1 = tracker.handle_event(&event1).unwrap();
+        // First frame has no cursor-up escape (no \x1b[<N>A pattern).
+        assert!(
+            !out1.contains("\x1b[1A"),
+            "first frame should not move cursor up"
+        );
+
+        // Status change on same layer — cursor-up by 1.
+        let event2 = make_layer_event_no_progress("abc", "Pull complete");
+        let out2 = tracker.handle_event(&event2).unwrap();
+        assert!(
+            out2.contains("\x1b[1A"),
+            "second frame should move cursor up by 1"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn tracker_multiple_layers_cursor_up() {
+        let mut tracker = PullProgressTracker::new();
+
+        let e1 = make_layer_event("aaa", "Downloading", 100, 1000);
+        let e2 = make_layer_event("bbb", "Downloading", 200, 2000);
+        tracker.handle_event(&e1);
+        // Second layer appears — status change so always emitted.
+        let out = tracker.handle_event(&e2).unwrap();
+        // displayed_lines was 1 after first event, so cursor-up by 1.
+        assert!(out.contains("\x1b[1A"));
+        assert!(out.contains("aaa"));
+        assert!(out.contains("bbb"));
+
+        // Now status change on first layer — cursor-up by 2.
+        let e3 = make_layer_event_no_progress("aaa", "Pull complete");
+        let out3 = tracker.handle_event(&e3).unwrap();
+        assert!(out3.contains("\x1b[2A"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn throttle_suppresses_rapid_progress_updates() {
+        let mut tracker = PullProgressTracker::new();
+        let event1 = make_layer_event("abc", "Downloading", 100, 1000);
+        let event2 = make_layer_event("abc", "Downloading", 200, 1000);
+        let event3 = make_layer_event("abc", "Downloading", 300, 1000);
+
+        assert!(
+            tracker.handle_event(&event1).is_some(),
+            "first event always emitted"
+        );
+        assert!(
+            tracker.handle_event(&event2).is_none(),
+            "rapid update throttled"
+        );
+
+        tokio::time::advance(std::time::Duration::from_millis(200)).await;
+
+        assert!(
+            tracker.handle_event(&event3).is_some(),
+            "emitted after interval elapsed"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn status_change_bypasses_throttle() {
+        let mut tracker = PullProgressTracker::new();
+        let event1 = make_layer_event("abc", "Downloading", 100, 1000);
+        let event2 = make_layer_event_no_progress("abc", "Pull complete");
+
+        assert!(tracker.handle_event(&event1).is_some());
+        // Immediately after — status changed, so must emit.
+        assert!(
+            tracker.handle_event(&event2).is_some(),
+            "status change always emits"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn terminal_status_bypasses_throttle() {
+        let mut tracker = PullProgressTracker::new();
+        let e1 = make_layer_event("abc", "Already exists", 0, 0);
+        assert!(
+            tracker.handle_event(&e1).is_some(),
+            "terminal status emits immediately"
+        );
+
+        // Same terminal status again — still a terminal status, bypasses throttle.
+        let e2 = make_layer_event("abc", "Already exists", 0, 0);
+        // Status didn't change but "Already exists" is terminal.
+        assert!(
+            tracker.handle_event(&e2).is_some(),
+            "terminal status always emits"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn message_between_layers_seals_block() {
+        let mut tracker = PullProgressTracker::new();
+        let layer = make_layer_event("abc", "Downloading", 100, 1000);
+        tracker.handle_event(&layer);
+        assert_eq!(tracker.displayed_lines, 1);
+
+        let msg = make_message_event("Digest: sha256:abc123");
+        let out = tracker.handle_event(&msg).unwrap();
+        assert!(
+            out.starts_with('\n'),
+            "message after layers should start with newline to seal block"
+        );
+        assert_eq!(tracker.displayed_lines, 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn clean_output_contains_final_states() {
+        let mut tracker = PullProgressTracker::new();
+
+        let msg1 = make_message_event("Pulling from library/nginx");
+        tracker.handle_event(&msg1);
+
+        let e1 = make_layer_event("abc", "Downloading", 500, 1000);
+        tracker.handle_event(&e1);
+        let e2 = make_layer_event_no_progress("abc", "Pull complete");
+        tracker.handle_event(&e2);
+
+        let msg2 = make_message_event("Digest: sha256:deadbeef");
+        tracker.handle_event(&msg2);
+
+        let clean = tracker.into_clean_output();
+        assert!(clean.contains("Pulling from library/nginx"));
+        assert!(clean.contains("abc: Pull complete"));
+        assert!(clean.contains("Digest: sha256:deadbeef"));
+        // No ANSI escape sequences in clean output.
+        assert!(!clean.contains("\x1b["));
+        assert!(!clean.contains("\x1b[2K"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn empty_status_events_are_skipped() {
+        let mut tracker = PullProgressTracker::new();
+        let event = make_message_event("");
+        assert!(tracker.handle_event(&event).is_none());
+
+        let layer_event = make_layer_event_no_progress("abc", "");
+        assert!(tracker.handle_event(&layer_event).is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn layer_without_progress_detail_shows_no_bar() {
+        let mut tracker = PullProgressTracker::new();
+        let event = make_layer_event_no_progress("abc", "Waiting");
+        let out = tracker.handle_event(&event).unwrap();
+        assert!(out.contains("abc: Waiting"));
+        // No progress bar when there's no byte total (the `[===>` pattern).
+        assert!(
+            !out.contains("[=") && !out.contains("[>") && !out.contains("[ "),
+            "should not contain a progress bar: {out}"
+        );
     }
 }
