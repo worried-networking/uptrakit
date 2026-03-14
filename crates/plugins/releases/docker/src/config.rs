@@ -166,6 +166,41 @@ pub struct DockerConfig {
     /// Defaults to `false` to avoid unexpected reads from the credential store.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub use_system_credentials: bool,
+
+    /// OCI platform to use for multi-arch image version checking.
+    ///
+    /// When set, version detection and release fetching compare the
+    /// platform-specific manifest digest instead of the image index digest.
+    /// This prevents false-positive update notifications when only a different
+    /// platform's image is updated.
+    ///
+    /// Format: `os/arch` or `os/arch/variant` (e.g. `linux/amd64`, `linux/arm/v7`).
+    /// When absent, the image-index digest is used (backwards-compatible behaviour).
+    /// Auto-detected during discovery from the locally installed image's architecture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
+}
+
+/// Compose an OCI platform string from Bollard image inspect fields.
+///
+/// Returns `None` when `os` or `architecture` are unavailable.
+/// Examples: `("linux", "amd64", None)` → `"linux/amd64"`,
+///           `("linux", "arm", Some("v7"))` → `"linux/arm/v7"`.
+pub(crate) fn form_platform_string(
+    os: Option<&str>,
+    architecture: Option<&str>,
+    variant: Option<&str>,
+) -> Option<String> {
+    match (os, architecture) {
+        (Some(os), Some(arch)) => {
+            if let Some(v) = variant {
+                Some(format!("{os}/{arch}/{v}"))
+            } else {
+                Some(format!("{os}/{arch}"))
+            }
+        }
+        _ => None,
+    }
 }
 
 impl DockerConfig {
@@ -264,6 +299,25 @@ impl DockerConfig {
             }
         }
 
+        if let Some(ref platform) = self.platform {
+            // OCI platform format: os/arch or os/arch/variant
+            let valid = {
+                let parts: Vec<&str> = platform.splitn(3, '/').collect();
+                parts.len() >= 2
+                    && parts.iter().all(|p| !p.is_empty())
+                    && parts.iter().all(|p| {
+                        p.chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+                    })
+            };
+            if !valid {
+                bail!(DockerError::Configuration(format!(
+                    "platform '{platform}' is not a valid OCI platform string \
+                     (expected os/arch or os/arch/variant, e.g. linux/amd64, linux/arm/v7)"
+                )));
+            }
+        }
+
         Ok(())
     }
 
@@ -313,6 +367,12 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for DockerConfig {
                 .with_visible_when("auth._type", vec!["bearer".to_string()]),
             FieldDef::new("tracked_tag", "Tracked Tag")
                 .with_help_text("Tag to track (overrides the tag in the image reference)"),
+            FieldDef::new("platform", "Platform")
+                .with_placeholder("linux/amd64")
+                .with_help_text(
+                    "OCI platform for multi-arch images (e.g. linux/amd64, linux/arm/v7). \
+                     Auto-detected during discovery; override only when needed.",
+                ),
             FieldDef::new("post_pull_command", "Post-pull Command").with_help_text(
                 "Shell command to run after pulling (supports {image}, {tag}, {digest})",
             ),
@@ -809,6 +869,98 @@ mod tests {
     #[test]
     fn use_system_credentials_defaults_to_false() {
         assert!(!DockerConfig::default().use_system_credentials);
+    }
+
+    // ── platform field ───────────────────────────────────────────────────────
+
+    #[test]
+    fn validation_accepts_valid_platform_amd64() {
+        let config = DockerConfig {
+            platform: Some("linux/amd64".to_string()),
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validation_accepts_valid_platform_armv7() {
+        let config = DockerConfig {
+            platform: Some("linux/arm/v7".to_string()),
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validation_rejects_platform_with_spaces() {
+        let config = DockerConfig {
+            platform: Some("linux amd64".to_string()),
+            ..Default::default()
+        };
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("platform")
+        );
+    }
+
+    #[test]
+    fn validation_rejects_platform_single_part() {
+        let config = DockerConfig {
+            platform: Some("linux".to_string()),
+            ..Default::default()
+        };
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("platform")
+        );
+    }
+
+    #[test]
+    fn platform_omitted_when_none() {
+        let config = DockerConfig::default();
+        let json = serde_json::to_string(&config).expect("serialize");
+        assert!(
+            !json.contains("platform"),
+            "platform should be omitted: {json}"
+        );
+    }
+
+    #[test]
+    fn platform_serialization_roundtrip() {
+        let config = DockerConfig {
+            platform: Some("linux/arm/v7".to_string()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        let de: DockerConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(de.platform.as_deref(), Some("linux/arm/v7"));
+    }
+
+    #[test]
+    fn form_platform_string_os_arch() {
+        assert_eq!(
+            super::form_platform_string(Some("linux"), Some("amd64"), None).as_deref(),
+            Some("linux/amd64")
+        );
+    }
+
+    #[test]
+    fn form_platform_string_with_variant() {
+        assert_eq!(
+            super::form_platform_string(Some("linux"), Some("arm"), Some("v7")).as_deref(),
+            Some("linux/arm/v7")
+        );
+    }
+
+    #[test]
+    fn form_platform_string_missing_arch() {
+        assert!(super::form_platform_string(Some("linux"), None, None).is_none());
     }
 
     #[test]

@@ -41,6 +41,13 @@ pub enum DockerError {
 
     #[error("docker pull failed: {0}")]
     PullFailed(String),
+
+    #[error("platform {platform} is not available for image {image}:{tag}")]
+    PlatformNotAvailable {
+        platform: String,
+        image: String,
+        tag: String,
+    },
 }
 
 /// Result type alias for Docker plugin operations.

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use rootcause::prelude::*;
 use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
+use crate::api_types::{OciManifestIndex, OciPlatform};
 use crate::auth::RegistryAuth;
 use crate::config::DockerAuth;
 use crate::error::{DockerError, Result};
@@ -146,6 +147,174 @@ impl RegistryClient {
         self.extract_digest(response).await
     }
 
+    /// Fetch the manifest body and return `(digest, content_type, body)`.
+    ///
+    /// Always issues a GET so the body is available for index parsing.
+    /// Uses the same 401-retry logic as `get_manifest_digest`.
+    async fn fetch_manifest_body(
+        &self,
+        registry: &str,
+        repository: &str,
+        reference: &str,
+    ) -> Result<(String, String, Vec<u8>)> {
+        let url = format!("https://{registry}/v2/{repository}/manifests/{reference}");
+        tracing::debug!(url = %url, "fetching manifest body");
+        self.authenticated_request_with_body(reqwest::Method::GET, &url)
+            .await
+    }
+
+    /// Authenticated GET that returns `(digest, content_type, body)`.
+    async fn authenticated_request_with_body(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+    ) -> Result<(String, String, Vec<u8>)> {
+        if let Some(token) = self.auth.cached_bearer_token() {
+            let response = self
+                .client
+                .request(method.clone(), url)
+                .header(reqwest::header::ACCEPT, MANIFEST_ACCEPT)
+                .bearer_auth(&token)
+                .send()
+                .await
+                .context_transform(|e| DockerError::Request(format!("{method} failed: {e}")))?;
+
+            if response.status() != reqwest::StatusCode::UNAUTHORIZED {
+                return self.extract_body(response).await;
+            }
+            self.auth.clear_cache();
+        }
+
+        let response = self
+            .client
+            .request(method.clone(), url)
+            .header(reqwest::header::ACCEPT, MANIFEST_ACCEPT)
+            .send()
+            .await
+            .context_transform(|e| DockerError::Request(format!("{method} failed: {e}")))?;
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            let www_auth = response
+                .headers()
+                .get("www-authenticate")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let token = self.auth.fetch_token(&self.client, &www_auth).await?;
+            let retry_response = self
+                .client
+                .request(method.clone(), url)
+                .header(reqwest::header::ACCEPT, MANIFEST_ACCEPT)
+                .bearer_auth(&token)
+                .send()
+                .await
+                .context_transform(|e| {
+                    DockerError::Request(format!("{method} retry failed: {e}"))
+                })?;
+            return self.extract_body(retry_response).await;
+        }
+
+        self.extract_body(response).await
+    }
+
+    /// Extract `(digest, content_type, body)` from a manifest GET response.
+    async fn extract_body(&self, response: reqwest::Response) -> Result<(String, String, Vec<u8>)> {
+        let status = response.status();
+
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            bail!(DockerError::RateLimited);
+        }
+        if !status.is_success() {
+            bail!(DockerError::ApiError {
+                status,
+                message: format!("manifest request returned {status}"),
+            });
+        }
+
+        let digest = response
+            .headers()
+            .get("docker-content-digest")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .ok_or_else(|| {
+                report!(DockerError::ParseResponse(
+                    "missing Docker-Content-Digest header".to_string()
+                ))
+            })?;
+
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+
+        let body = response
+            .bytes()
+            .await
+            .context_transform(|e| DockerError::Request(format!("failed to read body: {e}")))?
+            .to_vec();
+
+        Ok((digest, content_type, body))
+    }
+
+    /// Resolve the digest for a specific platform within a multi-arch image.
+    ///
+    /// If `tag` refers to an OCI Image Index or Docker Manifest List, parses
+    /// the index and returns the digest for the requested `platform` entry.
+    /// If the image is a single-arch manifest, returns its digest directly.
+    /// Returns `None` when the platform is not present in the manifest list
+    /// (the image tag exists but this platform was removed).
+    pub async fn get_platform_manifest_digest(
+        &self,
+        registry: &str,
+        repository: &str,
+        tag: &str,
+        platform: &str,
+    ) -> Result<Option<String>> {
+        let (index_digest, content_type, body) =
+            self.fetch_manifest_body(registry, repository, tag).await?;
+
+        let is_index =
+            content_type.contains("image.index") || content_type.contains("manifest.list");
+
+        if !is_index {
+            // Single-arch manifest — return the manifest digest directly.
+            tracing::debug!(
+                tag = %tag,
+                platform = %platform,
+                "manifest is single-arch; returning manifest digest"
+            );
+            return Ok(Some(index_digest));
+        }
+
+        let index: OciManifestIndex = serde_json::from_slice(&body).map_err(|e| {
+            report!(DockerError::ParseResponse(format!(
+                "failed to parse OCI manifest index: {e}"
+            )))
+        })?;
+
+        let found = index
+            .manifests
+            .iter()
+            .find(|e| {
+                e.platform
+                    .as_ref()
+                    .is_some_and(|p| platform_matches(p, platform))
+            })
+            .map(|e| e.digest.clone());
+
+        if found.is_none() {
+            tracing::debug!(
+                tag = %tag,
+                platform = %platform,
+                "platform not found in manifest index"
+            );
+        }
+
+        Ok(found)
+    }
+
     /// Extract the `Docker-Content-Digest` header from a manifest response.
     ///
     /// Works for both HEAD and GET responses; the header is present in both
@@ -177,6 +346,25 @@ impl RegistryClient {
     }
 }
 
+/// Parse an OCI platform string into `(os, arch, variant)`.
+///
+/// Format: `"os/arch"` or `"os/arch/variant"` (e.g. `"linux/arm/v7"`).
+fn parse_platform(s: &str) -> (&str, &str, Option<&str>) {
+    let mut parts = s.splitn(3, '/');
+    let os = parts.next().unwrap_or("");
+    let arch = parts.next().unwrap_or("");
+    let variant = parts.next();
+    (os, arch, variant)
+}
+
+/// Return `true` when the index entry's platform matches the wanted string.
+fn platform_matches(entry: &OciPlatform, wanted: &str) -> bool {
+    let (want_os, want_arch, want_variant) = parse_platform(wanted);
+    entry.os == want_os
+        && entry.architecture == want_arch
+        && entry.variant.as_deref() == want_variant
+}
+
 /// Returns `true` if the error represents a 403 Forbidden API response.
 fn is_forbidden_response(err: &Report<DockerError>) -> bool {
     matches!(
@@ -188,6 +376,7 @@ fn is_forbidden_response(err: &Report<DockerError>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api_types::OciPlatform;
 
     #[test]
     fn client_creation_succeeds() {
@@ -216,5 +405,56 @@ mod tests {
     fn is_forbidden_response_false_for_non_api_error() {
         let err = report!(DockerError::Request("connection failed".to_string()));
         assert!(!is_forbidden_response(&err));
+    }
+
+    #[test]
+    fn parse_platform_os_arch() {
+        let (os, arch, variant) = parse_platform("linux/amd64");
+        assert_eq!(os, "linux");
+        assert_eq!(arch, "amd64");
+        assert!(variant.is_none());
+    }
+
+    #[test]
+    fn parse_platform_with_variant() {
+        let (os, arch, variant) = parse_platform("linux/arm/v7");
+        assert_eq!(os, "linux");
+        assert_eq!(arch, "arm");
+        assert_eq!(variant, Some("v7"));
+    }
+
+    #[test]
+    fn platform_matches_amd64() {
+        let p = OciPlatform {
+            os: "linux".to_string(),
+            architecture: "amd64".to_string(),
+            variant: None,
+        };
+        assert!(platform_matches(&p, "linux/amd64"));
+        assert!(!platform_matches(&p, "linux/arm64"));
+    }
+
+    #[test]
+    fn platform_matches_armv7() {
+        let p = OciPlatform {
+            os: "linux".to_string(),
+            architecture: "arm".to_string(),
+            variant: Some("v7".to_string()),
+        };
+        assert!(platform_matches(&p, "linux/arm/v7"));
+        assert!(!platform_matches(&p, "linux/arm/v6"));
+        assert!(!platform_matches(&p, "linux/arm"));
+    }
+
+    #[test]
+    fn platform_matches_no_variant_mismatch() {
+        // Entry has no variant, wanted string has variant → should NOT match
+        let p = OciPlatform {
+            os: "linux".to_string(),
+            architecture: "arm64".to_string(),
+            variant: None,
+        };
+        assert!(!platform_matches(&p, "linux/arm64/v8"));
+        assert!(platform_matches(&p, "linux/arm64"));
     }
 }

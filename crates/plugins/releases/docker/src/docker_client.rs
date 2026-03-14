@@ -32,6 +32,12 @@ use crate::error::{DockerError, Result};
 pub struct LocalImageDigest {
     /// The SHA-256 digest string (e.g. `"sha256:abc…"`).
     pub digest: String,
+    /// OS field from `ImageInspect.os` (e.g. `"linux"`).
+    pub os: Option<String>,
+    /// Architecture from `ImageInspect.architecture` (e.g. `"amd64"`, `"arm"`).
+    pub architecture: Option<String>,
+    /// Architecture variant from `ImageInspect.variant` (e.g. `"v7"` for armv7).
+    pub variant: Option<String>,
 }
 
 /// Information about a running or stopped container.
@@ -379,7 +385,12 @@ impl DockerClient for BollardDockerClient {
                     .and_then(|d| d.split('@').nth(1))
                     .map(|d| d.to_string());
 
-                Ok(digest.map(|d| LocalImageDigest { digest: d }))
+                Ok(digest.map(|d| LocalImageDigest {
+                    digest: d,
+                    os: info.os.clone(),
+                    architecture: info.architecture.clone(),
+                    variant: info.variant.clone(),
+                }))
             }
             Err(bollard::errors::Error::DockerResponseServerError {
                 status_code: 404, ..
@@ -931,10 +942,12 @@ impl DockerClient for MockDockerClient {
     }
 
     async fn inspect_image(&self, _full_ref: &str) -> Result<Option<LocalImageDigest>> {
-        Ok(self
-            .inspect_result
-            .clone()
-            .map(|d| LocalImageDigest { digest: d }))
+        Ok(self.inspect_result.clone().map(|d| LocalImageDigest {
+            digest: d,
+            os: None,
+            architecture: None,
+            variant: None,
+        }))
     }
 
     async fn list_containers(&self, _all: bool) -> Result<Vec<LocalContainerInfo>> {
