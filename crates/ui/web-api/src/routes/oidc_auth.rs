@@ -353,88 +353,19 @@ async fn resolve_or_create_oidc_user(
 
     // Pre-check: if registration mode is Invite and auto_create is enabled,
     // check whether this would create a new user requiring a registration token.
-    let reg_settings = state.settings.registration();
-    if reg_settings.mode == RegistrationMode::Invite && provider.auto_create_users {
-        // Check if an OIDC link already exists for this subject
-        let has_link = match UserOidcLink::find()
-            .filter(user_oidc_link::Column::ProviderId.eq(provider_id))
-            .filter(user_oidc_link::Column::OidcSubject.eq(&sub))
-            .count(state.db())
-            .await
-        {
-            Ok(n) => n > 0,
-            Err(e) => {
-                tracing::error!(err = %e, "DB error checking OIDC link");
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        };
-
-        if !has_link {
-            // Check if a user with this email already exists
-            let has_user = match User::find()
-                .filter(uptrakit_shared_db::entity::user::Column::Email.eq(&email))
-                .count(state.db())
-                .await
-            {
-                Ok(n) => n > 0,
-                Err(e) => {
-                    tracing::error!(err = %e, "DB error checking user by email");
-                    return error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Internal server error",
-                    );
-                }
-            };
-
-            if !has_user {
-                // This would be a brand-new user — check if token is required
-                let is_first_user = User::find()
-                    .count(state.db())
-                    .await
-                    .map(|c| c == 0)
-                    .unwrap_or(false);
-
-                if reg_settings.needs_token_for_oidc(is_first_user) {
-                    // Store pending registration and redirect to token input form
-                    let mapped_roles = extract_mapped_roles(provider, &additional_claims);
-                    let code = match generate_secure_token() {
-                        Ok(t) => t,
-                        Err(e) => {
-                            tracing::error!(err = %e, "failed to generate secure registration code");
-                            return error_response(
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "internal server error",
-                            );
-                        }
-                    };
-
-                    if let Err(e) = state
-                        .oidc_registration_store
-                        .insert(crate::auth::oidc_state::PendingOidcRegistrationParams {
-                            registration_code: code.clone(),
-                            provider_id,
-                            oidc_subject: sub.clone(),
-                            email: email.clone(),
-                            first_name: first_name.clone(),
-                            last_name: last_name.clone(),
-                            mapped_roles,
-                        })
-                        .await
-                    {
-                        tracing::error!("Failed to store pending OIDC registration: {e:?}");
-                        return Redirect::to("/login?error=oidc_internal_error").into_response();
-                    }
-
-                    // Use a hash fragment so the registration code never
-                    // appears in server-side access logs (HTTP clients strip
-                    // fragments before sending the request).
-                    return Redirect::to(&format!(
-                        "/login#registration_token_required=true&registration_code={code}"
-                    ))
-                    .into_response();
-                }
-            }
-        }
+    if let Some(response) = check_registration_eligibility(
+        state,
+        provider_id,
+        provider,
+        &sub,
+        &email,
+        first_name.as_deref(),
+        last_name.as_deref(),
+        &additional_claims,
+    )
+    .await
+    {
+        return response;
     }
 
     // Resolve user inside a transaction to prevent the race where two concurrent
@@ -467,33 +398,23 @@ async fn resolve_or_create_oidc_user(
         }
     };
 
+    // For LinkedUser and NewUser, the handler performs DB work within the
+    // transaction and returns `Ok(user_id)` on success so we can commit and
+    // create the exchange redirect, or `Err(response)` on failure.
     match resolution {
         OidcUserResolution::LinkedUser(user_id) => {
-            // Defense-in-depth: verify user is still active before creating session
-            match User::find_by_id(user_id).one(&txn).await {
-                Ok(Some(user)) if !user.is_active => {
-                    return Redirect::to("/login?error=account_deactivated").into_response();
-                }
-                Ok(None) => {
-                    return Redirect::to("/login?error=oidc_internal_error").into_response();
-                }
-                Err(e) => {
-                    tracing::error!("failed to load user for OIDC login: {e:?}");
-                    return Redirect::to("/login?error=oidc_internal_error").into_response();
-                }
-                _ => {}
-            }
-
-            // Sync roles and create session
-            let _ = sync_oidc_roles(
+            let user_id = match handle_linked_user(
+                state,
                 &txn,
-                state.default_tenant_id,
                 user_id,
                 provider,
                 &additional_claims,
             )
-            .await;
-
+            .await
+            {
+                Ok(uid) => uid,
+                Err(response) => return response,
+            };
             if let Err(e) = txn.commit().await {
                 tracing::error!("Failed to commit OIDC callback transaction: {e}");
                 return Redirect::to("/login?error=oidc_internal_error").into_response();
@@ -501,54 +422,11 @@ async fn resolve_or_create_oidc_user(
             create_oidc_exchange_and_redirect(state, user_id, provider_id).await
         }
         OidcUserResolution::NewUser(user_id) => {
-            // Atomically check if this is the first user (threshold 1 because the
-            // user was just created by resolve_oidc_user) and handle owner role +
-            // initial setup inside the same transaction.
-            let user_count = match User::find().count(&txn).await {
-                Ok(n) => n,
-                Err(e) => {
-                    tracing::error!("Failed to count users during OIDC registration: {e}");
-                    return Redirect::to("/login?error=oidc_internal_error").into_response();
-                }
-            };
-            if user_count == 1 {
-                // Delete the default 'user' role assigned by resolve_oidc_user
-                let _ = UserRole::delete_many()
-                    .filter(user_role::Column::TenantId.eq(state.default_tenant_id))
-                    .filter(user_role::Column::UserId.eq(user_id))
-                    .exec(&txn)
-                    .await;
-
-                // Assign all roles (owner preset)
-                if let Err(e) =
-                    super::auth::assign_owner_roles(&txn, state.default_tenant_id, user_id).await
-                {
-                    tracing::error!("Failed to assign owner roles to first OIDC user: {e:?}");
-                }
-
-                // Complete initial setup (close registration, remove token)
-                let mut reg = state.settings.registration();
-                if let Err(e) = reg
-                    .complete_initial_setup(&txn, state.default_tenant_id)
-                    .await
-                {
-                    tracing::error!("Failed to complete initial setup for first OIDC user: {e:?}");
-                }
-                state.settings.set_registration(reg).await;
-
-                tracing::info!("first user registered via OIDC, assigned owner role");
-            }
-
-            // Sync roles
-            let _ = sync_oidc_roles(
-                &txn,
-                state.default_tenant_id,
-                user_id,
-                provider,
-                &additional_claims,
-            )
-            .await;
-
+            let user_id =
+                match handle_new_user(state, &txn, user_id, provider, &additional_claims).await {
+                    Ok(uid) => uid,
+                    Err(response) => return response,
+                };
             if let Err(e) = txn.commit().await {
                 tracing::error!("Failed to commit OIDC callback transaction: {e}");
                 return Redirect::to("/login?error=oidc_internal_error").into_response();
@@ -556,112 +434,38 @@ async fn resolve_or_create_oidc_user(
             create_oidc_exchange_and_redirect(state, user_id, provider_id).await
         }
         OidcUserResolution::LinkViaPasswordRequired { user_id } => {
-            // No DB writes needed in this branch, just drop the transaction
             drop(txn);
-
-            // Store pending link and redirect to frontend
-            let mapped_roles = extract_mapped_roles(provider, &additional_claims);
-            let link_token_value = match generate_secure_token() {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::error!(err = %e, "failed to generate secure link token");
-                    return error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "internal server error",
-                    );
-                }
-            };
-            let link_token = match store_pending_link(
+            handle_link_via_password(
                 state,
-                crate::auth::oidc_state::PendingAccountLinkParams {
-                    token: link_token_value,
-                    provider_id,
-                    oidc_subject: sub,
-                    email: email.clone(),
-                    user_id,
-                    first_name,
-                    last_name,
-                    mapped_roles,
-                    existing_link_provider_id: None,
-                },
+                provider_id,
+                provider,
+                &sub,
+                &email,
+                first_name,
+                last_name,
+                &additional_claims,
+                user_id,
             )
             .await
-            {
-                Ok(token) => token,
-                Err(e) => {
-                    tracing::error!("Failed to store pending link: {e:?}");
-                    return Redirect::to("/login?error=oidc_internal_error").into_response();
-                }
-            };
-            // Suppress Referer on the link-token redirect so the token URL is not
-            // forwarded to any third-party resource loaded by the login page.
-            let mut link_headers = HeaderMap::new();
-            link_headers.insert(
-                header::REFERRER_POLICY,
-                HeaderValue::from_static("no-referrer"),
-            );
-            (
-                link_headers,
-                Redirect::to(&build_link_required_redirect(&email, &link_token, None)),
-            )
-                .into_response()
         }
         OidcUserResolution::LinkViaOidcRequired {
             user_id,
             existing_provider_id,
         } => {
-            // No DB writes needed in this branch, just drop the transaction
             drop(txn);
-
-            let mapped_roles = extract_mapped_roles(provider, &additional_claims);
-            let link_token_value = match generate_secure_token() {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::error!(err = %e, "failed to generate secure link token");
-                    return error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "internal server error",
-                    );
-                }
-            };
-            let link_token = match store_pending_link(
+            handle_link_via_oidc(
                 state,
-                crate::auth::oidc_state::PendingAccountLinkParams {
-                    token: link_token_value,
-                    provider_id,
-                    oidc_subject: sub,
-                    email: email.clone(),
-                    user_id,
-                    first_name,
-                    last_name,
-                    mapped_roles,
-                    existing_link_provider_id: Some(existing_provider_id),
-                },
+                provider_id,
+                provider,
+                &sub,
+                &email,
+                first_name,
+                last_name,
+                &additional_claims,
+                user_id,
+                existing_provider_id,
             )
             .await
-            {
-                Ok(token) => token,
-                Err(e) => {
-                    tracing::error!("Failed to store pending link: {e:?}");
-                    return Redirect::to("/login?error=oidc_internal_error").into_response();
-                }
-            };
-            // Suppress Referer on the link-token redirect so the token URL is not
-            // forwarded to any third-party resource loaded by the login page.
-            let mut link_headers = HeaderMap::new();
-            link_headers.insert(
-                header::REFERRER_POLICY,
-                HeaderValue::from_static("no-referrer"),
-            );
-            (
-                link_headers,
-                Redirect::to(&build_link_required_redirect(
-                    &email,
-                    &link_token,
-                    Some(existing_provider_id),
-                )),
-            )
-                .into_response()
         }
         OidcUserResolution::NotAllowed => {
             drop(txn);
@@ -676,6 +480,343 @@ async fn resolve_or_create_oidc_user(
             Redirect::to("/login?error=account_deactivated").into_response()
         }
     }
+}
+
+/// Pre-check: when registration mode is Invite and auto-create is enabled,
+/// verify whether the OIDC subject already has a link or a matching user.
+/// If neither exists and a registration token is required, store a pending
+/// registration and return a redirect response. Returns `None` when the
+/// normal flow should continue.
+#[allow(clippy::too_many_arguments)]
+async fn check_registration_eligibility(
+    state: &AppState,
+    provider_id: Uuid,
+    provider: &oidc_provider::Model,
+    sub: &str,
+    email: &str,
+    first_name: Option<&str>,
+    last_name: Option<&str>,
+    additional_claims: &serde_json::Value,
+) -> Option<Response> {
+    let reg_settings = state.settings.registration();
+    if reg_settings.mode != RegistrationMode::Invite || !provider.auto_create_users {
+        return None;
+    }
+
+    // Check if an OIDC link already exists for this subject
+    let has_link = match UserOidcLink::find()
+        .filter(user_oidc_link::Column::ProviderId.eq(provider_id))
+        .filter(user_oidc_link::Column::OidcSubject.eq(sub))
+        .count(state.db())
+        .await
+    {
+        Ok(n) => n > 0,
+        Err(e) => {
+            tracing::error!(err = %e, "DB error checking OIDC link");
+            return Some(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    if has_link {
+        return None;
+    }
+
+    // Check if a user with this email already exists
+    let has_user = match User::find()
+        .filter(uptrakit_shared_db::entity::user::Column::Email.eq(email))
+        .count(state.db())
+        .await
+    {
+        Ok(n) => n > 0,
+        Err(e) => {
+            tracing::error!(err = %e, "DB error checking user by email");
+            return Some(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    if has_user {
+        return None;
+    }
+
+    // This would be a brand-new user -- check if token is required
+    let is_first_user = User::find()
+        .count(state.db())
+        .await
+        .map(|c| c == 0)
+        .unwrap_or(false);
+
+    if !reg_settings.needs_token_for_oidc(is_first_user) {
+        return None;
+    }
+
+    // Store pending registration and redirect to token input form
+    let mapped_roles = extract_mapped_roles(provider, additional_claims);
+    let code = match generate_secure_token() {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(err = %e, "failed to generate secure registration code");
+            return Some(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal server error",
+            ));
+        }
+    };
+
+    if let Err(e) = state
+        .oidc_registration_store
+        .insert(crate::auth::oidc_state::PendingOidcRegistrationParams {
+            registration_code: code.clone(),
+            provider_id,
+            oidc_subject: sub.to_owned(),
+            email: email.to_owned(),
+            first_name: first_name.map(str::to_owned),
+            last_name: last_name.map(str::to_owned),
+            mapped_roles,
+        })
+        .await
+    {
+        tracing::error!("Failed to store pending OIDC registration: {e:?}");
+        return Some(Redirect::to("/login?error=oidc_internal_error").into_response());
+    }
+
+    // Use a hash fragment so the registration code never appears in
+    // server-side access logs (HTTP clients strip fragments before sending
+    // the request).
+    Some(
+        Redirect::to(&format!(
+            "/login#registration_token_required=true&registration_code={code}"
+        ))
+        .into_response(),
+    )
+}
+
+/// Handle the `LinkedUser` resolution: verify the user is still active and
+/// sync OIDC roles within the transaction.
+///
+/// Returns `Ok(user_id)` so the caller can commit the transaction and create
+/// the exchange redirect, or `Err(Response)` on failure.
+async fn handle_linked_user(
+    state: &AppState,
+    txn: &sea_orm::DatabaseTransaction,
+    user_id: Uuid,
+    provider: &oidc_provider::Model,
+    additional_claims: &serde_json::Value,
+) -> Result<Uuid, Response> {
+    // Defense-in-depth: verify user is still active before creating session
+    match User::find_by_id(user_id).one(txn).await {
+        Ok(Some(user)) if !user.is_active => {
+            return Err(Redirect::to("/login?error=account_deactivated").into_response());
+        }
+        Ok(None) => {
+            return Err(Redirect::to("/login?error=oidc_internal_error").into_response());
+        }
+        Err(e) => {
+            tracing::error!("failed to load user for OIDC login: {e:?}");
+            return Err(Redirect::to("/login?error=oidc_internal_error").into_response());
+        }
+        _ => {}
+    }
+
+    // Sync roles
+    let _ = sync_oidc_roles(
+        txn,
+        state.default_tenant_id,
+        user_id,
+        provider,
+        additional_claims,
+    )
+    .await;
+
+    Ok(user_id)
+}
+
+/// Handle the `NewUser` resolution: check if this is the first user (owner
+/// setup) and sync OIDC roles within the transaction.
+///
+/// Returns `Ok(user_id)` so the caller can commit the transaction and create
+/// the exchange redirect, or `Err(Response)` on failure.
+async fn handle_new_user(
+    state: &AppState,
+    txn: &sea_orm::DatabaseTransaction,
+    user_id: Uuid,
+    provider: &oidc_provider::Model,
+    additional_claims: &serde_json::Value,
+) -> Result<Uuid, Response> {
+    // Atomically check if this is the first user (threshold 1 because the
+    // user was just created by resolve_oidc_user) and handle owner role +
+    // initial setup inside the same transaction.
+    let user_count = match User::find().count(txn).await {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::error!("Failed to count users during OIDC registration: {e}");
+            return Err(Redirect::to("/login?error=oidc_internal_error").into_response());
+        }
+    };
+    if user_count == 1 {
+        // Delete the default 'user' role assigned by resolve_oidc_user
+        let _ = UserRole::delete_many()
+            .filter(user_role::Column::TenantId.eq(state.default_tenant_id))
+            .filter(user_role::Column::UserId.eq(user_id))
+            .exec(txn)
+            .await;
+
+        // Assign all roles (owner preset)
+        if let Err(e) = super::auth::assign_owner_roles(txn, state.default_tenant_id, user_id).await
+        {
+            tracing::error!("Failed to assign owner roles to first OIDC user: {e:?}");
+        }
+
+        // Complete initial setup (close registration, remove token)
+        let mut reg = state.settings.registration();
+        if let Err(e) = reg
+            .complete_initial_setup(txn, state.default_tenant_id)
+            .await
+        {
+            tracing::error!("Failed to complete initial setup for first OIDC user: {e:?}");
+        }
+        state.settings.set_registration(reg).await;
+
+        tracing::info!("first user registered via OIDC, assigned owner role");
+    }
+
+    // Sync roles
+    let _ = sync_oidc_roles(
+        txn,
+        state.default_tenant_id,
+        user_id,
+        provider,
+        additional_claims,
+    )
+    .await;
+
+    Ok(user_id)
+}
+
+/// Handle the `LinkViaPasswordRequired` resolution: store a pending link and
+/// redirect to the frontend password-confirmation form.
+#[allow(clippy::too_many_arguments)]
+async fn handle_link_via_password(
+    state: &AppState,
+    provider_id: Uuid,
+    provider: &oidc_provider::Model,
+    sub: &str,
+    email: &str,
+    first_name: Option<String>,
+    last_name: Option<String>,
+    additional_claims: &serde_json::Value,
+    user_id: Uuid,
+) -> Response {
+    let mapped_roles = extract_mapped_roles(provider, additional_claims);
+    let link_token_value = match generate_secure_token() {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(err = %e, "failed to generate secure link token");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
+        }
+    };
+    let link_token = match store_pending_link(
+        state,
+        crate::auth::oidc_state::PendingAccountLinkParams {
+            token: link_token_value,
+            provider_id,
+            oidc_subject: sub.to_owned(),
+            email: email.to_owned(),
+            user_id,
+            first_name,
+            last_name,
+            mapped_roles,
+            existing_link_provider_id: None,
+        },
+    )
+    .await
+    {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::error!("Failed to store pending link: {e:?}");
+            return Redirect::to("/login?error=oidc_internal_error").into_response();
+        }
+    };
+
+    link_redirect_with_no_referrer(email, &link_token, None)
+}
+
+/// Handle the `LinkViaOidcRequired` resolution: store a pending link and
+/// redirect to the frontend OIDC re-authentication form.
+#[allow(clippy::too_many_arguments)]
+async fn handle_link_via_oidc(
+    state: &AppState,
+    provider_id: Uuid,
+    provider: &oidc_provider::Model,
+    sub: &str,
+    email: &str,
+    first_name: Option<String>,
+    last_name: Option<String>,
+    additional_claims: &serde_json::Value,
+    user_id: Uuid,
+    existing_provider_id: Uuid,
+) -> Response {
+    let mapped_roles = extract_mapped_roles(provider, additional_claims);
+    let link_token_value = match generate_secure_token() {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(err = %e, "failed to generate secure link token");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
+        }
+    };
+    let link_token = match store_pending_link(
+        state,
+        crate::auth::oidc_state::PendingAccountLinkParams {
+            token: link_token_value,
+            provider_id,
+            oidc_subject: sub.to_owned(),
+            email: email.to_owned(),
+            user_id,
+            first_name,
+            last_name,
+            mapped_roles,
+            existing_link_provider_id: Some(existing_provider_id),
+        },
+    )
+    .await
+    {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::error!("Failed to store pending link: {e:?}");
+            return Redirect::to("/login?error=oidc_internal_error").into_response();
+        }
+    };
+
+    link_redirect_with_no_referrer(email, &link_token, Some(existing_provider_id))
+}
+
+/// Build a redirect response for account-linking flows, suppressing the
+/// `Referer` header so the link token is not forwarded to third-party
+/// resources loaded by the login page.
+fn link_redirect_with_no_referrer(
+    email: &str,
+    link_token: &str,
+    existing_provider_id: Option<Uuid>,
+) -> Response {
+    let mut link_headers = HeaderMap::new();
+    link_headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    (
+        link_headers,
+        Redirect::to(&build_link_required_redirect(
+            email,
+            link_token,
+            existing_provider_id,
+        )),
+    )
+        .into_response()
 }
 
 /// Exchange an OIDC exchange code for tokens (deferred token creation).
