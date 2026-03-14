@@ -440,7 +440,6 @@ pub enum NatsCommands {
     Clear,
 }
 
-#[allow(clippy::too_many_lines)] // Large dispatch is inherent to the settings tree
 pub async fn dispatch(command: SettingsCommands, ctx: &CliContext) -> Result<()> {
     match command {
         SettingsCommands::Show => {
@@ -453,125 +452,16 @@ pub async fn dispatch(command: SettingsCommands, ctx: &CliContext) -> Result<()>
             .await?;
             crate::output::print_output(ctx.format, &resp)?;
         }
-        SettingsCommands::Registration { command } => match command {
-            RegistrationCommands::Show => {
-                let resp = registration_show(
-                    ctx.server.as_deref(),
-                    ctx.token.as_deref(),
-                    ctx.insecure,
-                    ctx.request_timeout,
-                )
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-            }
-            RegistrationCommands::Update {
-                mode,
-                token,
-                require_token_for_oidc,
-            } => {
-                let resp = registration_update(RegistrationUpdateParams {
-                    server: ctx.server.as_deref(),
-                    token: ctx.token.as_deref(),
-                    insecure: ctx.insecure,
-                    mode,
-                    reg_token: token,
-                    require_token_for_oidc,
-                    request_timeout: ctx.request_timeout,
-                })
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-            }
-        },
-        SettingsCommands::Authentication { command } => match command {
-            AuthenticationCommands::Show => {
-                let resp = authentication_show(
-                    ctx.server.as_deref(),
-                    ctx.token.as_deref(),
-                    ctx.insecure,
-                    ctx.request_timeout,
-                )
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-            }
-            AuthenticationCommands::Update {
-                password_auth_enabled,
-            } => {
-                let resp = authentication_update(
-                    password_auth_enabled,
-                    ctx.server.as_deref(),
-                    ctx.token.as_deref(),
-                    ctx.insecure,
-                    ctx.request_timeout,
-                )
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-            }
-        },
-        SettingsCommands::Certificates { command } => match command {
-            CertificateCommands::Show => {
-                let resp = certificates_show(
-                    ctx.server.as_deref(),
-                    ctx.token.as_deref(),
-                    ctx.insecure,
-                    ctx.request_timeout,
-                )
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-            }
-            CertificateCommands::Update {
-                lifetime_hours,
-                renewal_window_hours,
-            } => {
-                let resp = certificates_update(
-                    lifetime_hours,
-                    renewal_window_hours,
-                    ctx.server.as_deref(),
-                    ctx.token.as_deref(),
-                    ctx.insecure,
-                    ctx.request_timeout,
-                )
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-            }
-        },
-        SettingsCommands::Network { command } => match command {
-            NetworkCommands::Show => {
-                let resp = network_show(
-                    ctx.server.as_deref(),
-                    ctx.token.as_deref(),
-                    ctx.insecure,
-                    ctx.request_timeout,
-                )
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-            }
-            NetworkCommands::Update {
-                trusted_proxies,
-                real_ip_header,
-                sans,
-                https_addr,
-                fwd_cert_info_header,
-                fwd_cert_pem_header,
-                pki_addr,
-            } => {
-                let resp = network_update(NetworkUpdateParams {
-                    server: ctx.server.as_deref(),
-                    token: ctx.token.as_deref(),
-                    insecure: ctx.insecure,
-                    trusted_proxies: trusted_proxies
-                        .map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
-                    real_ip_header,
-                    sans: sans.map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
-                    https_addr,
-                    fwd_cert_info_header,
-                    fwd_cert_pem_header,
-                    pki_addr,
-                    request_timeout: ctx.request_timeout,
-                })
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-            }
-        },
+        SettingsCommands::Registration { command } => {
+            dispatch_registration(command, ctx).await?;
+        }
+        SettingsCommands::Authentication { command } => {
+            dispatch_authentication(command, ctx).await?;
+        }
+        SettingsCommands::Certificates { command } => {
+            dispatch_certificates(command, ctx).await?;
+        }
+        SettingsCommands::Network { command } => dispatch_network(command, ctx).await?,
         SettingsCommands::RotateCa => {
             let resp = rotate_ca(
                 ctx.server.as_deref(),
@@ -604,88 +494,8 @@ pub async fn dispatch(command: SettingsCommands, ctx: &CliContext) -> Result<()>
             .await?;
             crate::output::print_output(ctx.format, &resp)?;
         }
-        SettingsCommands::Smtp { command } => match command {
-            SmtpCommands::Show => {
-                let resp = smtp_show(
-                    ctx.server.as_deref(),
-                    ctx.token.as_deref(),
-                    ctx.insecure,
-                    ctx.request_timeout,
-                )
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-            }
-            SmtpCommands::Set {
-                host,
-                port,
-                username,
-                clear_username,
-                password,
-                clear_password,
-                from_address,
-                from_name,
-                clear_from_name,
-                tls_mode,
-            } => {
-                let resp = smtp_set(SmtpSetParams {
-                    server: ctx.server.as_deref(),
-                    token: ctx.token.as_deref(),
-                    insecure: ctx.insecure,
-                    request_timeout: ctx.request_timeout,
-                    host,
-                    port,
-                    username,
-                    clear_username,
-                    password,
-                    clear_password,
-                    from_address,
-                    from_name,
-                    clear_from_name,
-                    tls_mode,
-                })
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-            }
-        },
-        SettingsCommands::Nats { command } => match command {
-            NatsCommands::Show => {
-                let resp = nats_show(
-                    ctx.server.as_deref(),
-                    ctx.token.as_deref(),
-                    ctx.insecure,
-                    ctx.request_timeout,
-                )
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-            }
-            NatsCommands::Set { url } => {
-                let resp = nats_set(
-                    url,
-                    ctx.server.as_deref(),
-                    ctx.token.as_deref(),
-                    ctx.insecure,
-                    ctx.request_timeout,
-                )
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-                eprintln!(
-                    "NATS URL updated. The change will take effect after the controller is restarted."
-                );
-            }
-            NatsCommands::Clear => {
-                let resp = nats_clear(
-                    ctx.server.as_deref(),
-                    ctx.token.as_deref(),
-                    ctx.insecure,
-                    ctx.request_timeout,
-                )
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-                eprintln!(
-                    "NATS URL cleared. The change will take effect after the controller is restarted."
-                );
-            }
-        },
+        SettingsCommands::Smtp { command } => dispatch_smtp(command, ctx).await?,
+        SettingsCommands::Nats { command } => dispatch_nats(command, ctx).await?,
         SettingsCommands::ResetData { confirm } => {
             if !confirm {
                 eprintln!(
@@ -706,7 +516,241 @@ pub async fn dispatch(command: SettingsCommands, ctx: &CliContext) -> Result<()>
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)] // Large dispatch is inherent to MQTT subcommands
+async fn dispatch_registration(command: RegistrationCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        RegistrationCommands::Show => {
+            let resp = registration_show(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        RegistrationCommands::Update {
+            mode,
+            token,
+            require_token_for_oidc,
+        } => {
+            let resp = registration_update(RegistrationUpdateParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                mode,
+                reg_token: token,
+                require_token_for_oidc,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
+
+async fn dispatch_authentication(command: AuthenticationCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        AuthenticationCommands::Show => {
+            let resp = authentication_show(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        AuthenticationCommands::Update {
+            password_auth_enabled,
+        } => {
+            let resp = authentication_update(
+                password_auth_enabled,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
+
+async fn dispatch_certificates(command: CertificateCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        CertificateCommands::Show => {
+            let resp = certificates_show(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        CertificateCommands::Update {
+            lifetime_hours,
+            renewal_window_hours,
+        } => {
+            let resp = certificates_update(
+                lifetime_hours,
+                renewal_window_hours,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
+
+async fn dispatch_network(command: NetworkCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        NetworkCommands::Show => {
+            let resp = network_show(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        NetworkCommands::Update {
+            trusted_proxies,
+            real_ip_header,
+            sans,
+            https_addr,
+            fwd_cert_info_header,
+            fwd_cert_pem_header,
+            pki_addr,
+        } => {
+            let resp = network_update(NetworkUpdateParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                trusted_proxies: trusted_proxies
+                    .map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
+                real_ip_header,
+                sans: sans.map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
+                https_addr,
+                fwd_cert_info_header,
+                fwd_cert_pem_header,
+                pki_addr,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
+
+async fn dispatch_smtp(command: SmtpCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        SmtpCommands::Show => {
+            let resp = smtp_show(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SmtpCommands::Set {
+            host,
+            port,
+            username,
+            clear_username,
+            password,
+            clear_password,
+            from_address,
+            from_name,
+            clear_from_name,
+            tls_mode,
+        } => {
+            let resp = smtp_set(SmtpSetParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+                host,
+                port,
+                username,
+                clear_username,
+                password,
+                clear_password,
+                from_address,
+                from_name,
+                clear_from_name,
+                tls_mode,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
+
+async fn dispatch_nats(command: NatsCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        NatsCommands::Show => {
+            let resp = nats_show(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        NatsCommands::Set { url } => {
+            let resp = nats_set(
+                url,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+            eprintln!(
+                "NATS URL updated. The change will take effect after the controller is restarted."
+            );
+        }
+        NatsCommands::Clear => {
+            let resp = nats_clear(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+            eprintln!(
+                "NATS URL cleared. The change will take effect after the controller is restarted."
+            );
+        }
+    }
+    Ok(())
+}
+
+fn resolve_ha_discovery_flag(ha_discovery: bool, no_ha_discovery: bool) -> Option<bool> {
+    if ha_discovery {
+        Some(true)
+    } else if no_ha_discovery {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 async fn dispatch_mqtt(command: MqttCommands, ctx: &CliContext) -> Result<()> {
     match command {
         MqttCommands::List => {
@@ -747,13 +791,7 @@ async fn dispatch_mqtt(command: MqttCommands, ctx: &CliContext) -> Result<()> {
             ha_discovery_prefix,
         } => {
             let ca_pem = super::resolve_ca_pem(ca_pem, ca_pem_file)?;
-            let ha_discovery_flag = if ha_discovery {
-                Some(true)
-            } else if no_ha_discovery {
-                Some(false)
-            } else {
-                None
-            };
+            let ha_discovery_flag = resolve_ha_discovery_flag(ha_discovery, no_ha_discovery);
             let resp = mqtt_create(MqttCreateParams {
                 server: ctx.server.as_deref(),
                 token: ctx.token.as_deref(),
@@ -793,13 +831,7 @@ async fn dispatch_mqtt(command: MqttCommands, ctx: &CliContext) -> Result<()> {
             ha_discovery_prefix,
         } => {
             let ca_pem = super::resolve_ca_pem(ca_pem, ca_pem_file)?;
-            let ha_discovery_flag = if ha_discovery {
-                Some(true)
-            } else if no_ha_discovery {
-                Some(false)
-            } else {
-                None
-            };
+            let ha_discovery_flag = resolve_ha_discovery_flag(ha_discovery, no_ha_discovery);
             let resp = mqtt_update(MqttUpdateParams {
                 server: ctx.server.as_deref(),
                 token: ctx.token.as_deref(),
