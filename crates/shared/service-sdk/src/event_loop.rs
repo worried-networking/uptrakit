@@ -160,121 +160,23 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
             // 4. Controller messages.
             msg = conn.recv() => {
                 consecutive_service_events = 0;
-                // Check for transient network errors before converting to
-                // LoopError. A broken pipe, connection reset, or similar
-                // transport failure during recv() is a disconnection — not
-                // a fatal protocol error.
-                if let Err(ref e) = msg
-                    && (e.current_context().is_transient_network()
-                        || e.current_context().is_receive_closed())
-                {
-                    tracing::warn!(error = %e, "connection lost, will reconnect");
-                    break LoopOutcome::Disconnected;
-                }
-                match msg.context_to::<LoopError>()? {
-                    Some(ControllerMessage::Pong(pong)) => {
-                        let rtt = now_millis() - pong.service_ts;
-                        tracing::trace!(
-                            service_ts = pong.service_ts,
-                            controller_ts = pong.controller_ts,
-                            rtt_ms = rtt,
-                            "received pong"
-                        );
-                    }
-                    Some(ControllerMessage::Certificate(payload)) => {
-                        break cert_handler
-                            .handle_certificate(identity, &payload)
-                            .await
-                            .context_to::<LoopError>()?;
-                    }
-                    Some(ControllerMessage::ServiceSettings(settings)) => {
-                        // Compute agreed capabilities: intersection of controller's
-                        // advertised set with this service's own capabilities,
-                        // keeping only typed (known) variants.
-                        let agreed: BTreeSet<Capability> = settings
-                            .capabilities
-                            .intersection(&handler.capabilities())
-                            .filter(|c| c.is_known())
-                            .cloned()
-                            .collect();
-                        conn.set_agreed_capabilities(agreed.clone());
-                        conn.set_report_page_limits(settings.report_page_limits.clone());
-                        tracing::debug!(capabilities = ?agreed, "negotiated protocol capabilities");
-
-                        let mut loop_state = LoopState {
-                            shutdown_timeout: &mut shutdown_timeout,
-                            renewal_sleep: &mut renewal_sleep,
-                            ping_timer: &mut ping_timer,
-                            cert_not_after_ts,
-                            config_dir: &config_dir,
-                        };
-                        handle_service_settings(
-                            &settings,
-                            &mut loop_state,
-                            identity,
-                            ctx,
-                        ).await;
-                        // Announce the service's full capability set so the
-                        // controller can persist it and refresh gating flags
-                        // for the current session. This handles services that
-                        // gain or drop capabilities across version upgrades
-                        // without requiring re-enrollment.
-                        let caps_payload = UpdateCapabilitiesPayload {
-                            capabilities: handler.capabilities(),
-                        };
-                        if let Err(e) = conn
-                            .send(ServiceMessage::UpdateCapabilities(caps_payload))
-                            .await
-                        {
-                            tracing::warn!(error = %e, "failed to send UpdateCapabilities");
-                        }
-                        handler.on_settings(&settings, &mut conn).await;
-                    }
-                    Some(ControllerMessage::CaBundleUpdated(payload)) => {
-                        cert_handler.handle_ca_bundle_updated(identity, &payload).await;
-                    }
-                    Some(ControllerMessage::RequestCertRenewal(payload)) => {
-                        if let Some(o) = cert_handler
-                            .handle_request_cert_renewal(identity, &mut conn, &payload)
-                            .await
-                        {
-                            break o;
-                        }
-                    }
-                    Some(ControllerMessage::ServerRestarting(payload)) => {
-                        tracing::info!(
-                            reason = %payload.reason,
-                            "controller is restarting, initiating graceful shutdown"
-                        );
-                        break handler
-                            .on_shutdown(
-                                &mut conn,
-                                ShutdownCause::ServerRestarting,
-                                shutdown_timeout,
-                            )
-                            .await;
-                    }
-                    Some(ControllerMessage::ExtensionRequest(payload)) => {
-                        handler.on_extension_request(payload, &mut conn).await?;
-                    }
-                    Some(ControllerMessage::ExtensionResponse(payload)) => {
-                        handler.on_extension_response(payload);
-                    }
-                    Some(ControllerMessage::Unknown) => {
-                        tracing::warn!(
-                            "received unknown controller message type; \
-                             ignoring for forward compatibility"
-                        );
-                    }
-                    Some(msg) => {
-                        match handler.on_message(msg, &mut conn).await? {
-                            Some(outcome) => break outcome,
-                            None => continue,
-                        }
-                    }
-                    None => {
-                        break dispatch_close_reason(conn.close_reason());
-                    }
+                let mut loop_state = LoopState {
+                    shutdown_timeout: &mut shutdown_timeout,
+                    renewal_sleep: &mut renewal_sleep,
+                    ping_timer: &mut ping_timer,
+                    cert_not_after_ts,
+                    config_dir: &config_dir,
+                };
+                if let Some(outcome) = handle_controller_message(
+                    msg,
+                    handler,
+                    &mut conn,
+                    &mut cert_handler,
+                    &mut loop_state,
+                    identity,
+                    ctx,
+                ).await? {
+                    break outcome;
                 }
             }
 
@@ -381,6 +283,139 @@ async fn handle_service_settings(
         ctx.ca_pem,
     )
     .await;
+}
+
+/// Dispatch a single controller message received from `conn.recv()`.
+///
+/// Returns `Ok(Some(outcome))` when the event loop should break with that
+/// outcome, or `Ok(None)` when the loop should continue to the next
+/// iteration. Transient network errors are mapped to
+/// `Ok(Some(LoopOutcome::Disconnected))` for automatic reconnection.
+async fn handle_controller_message<H: ServiceHandler>(
+    msg: crate::error::Result<Option<ControllerMessage>>,
+    handler: &mut H,
+    conn: &mut ControllerConnection,
+    cert_handler: &mut CertificateRenewalHandler,
+    loop_state: &mut LoopState<'_>,
+    identity: &mut ServiceIdentityState,
+    ctx: &EventLoopContext<'_>,
+) -> LoopResult<Option<LoopOutcome>> {
+    // Check for transient network errors before converting to LoopError.
+    // A broken pipe, connection reset, or similar transport failure during
+    // recv() is a disconnection — not a fatal protocol error.
+    if let Err(ref e) = msg
+        && (e.current_context().is_transient_network() || e.current_context().is_receive_closed())
+    {
+        tracing::warn!(error = %e, "connection lost, will reconnect");
+        return Ok(Some(LoopOutcome::Disconnected));
+    }
+
+    match msg.context_to::<LoopError>()? {
+        Some(ControllerMessage::Pong(pong)) => {
+            let rtt = now_millis() - pong.service_ts;
+            tracing::trace!(
+                service_ts = pong.service_ts,
+                controller_ts = pong.controller_ts,
+                rtt_ms = rtt,
+                "received pong"
+            );
+            Ok(None)
+        }
+        Some(ControllerMessage::Certificate(payload)) => {
+            let outcome = cert_handler
+                .handle_certificate(identity, &payload)
+                .await
+                .context_to::<LoopError>()?;
+            Ok(Some(outcome))
+        }
+        Some(ControllerMessage::ServiceSettings(settings)) => {
+            process_service_settings(&settings, handler, conn, loop_state, identity, ctx).await;
+            Ok(None)
+        }
+        Some(ControllerMessage::CaBundleUpdated(payload)) => {
+            cert_handler
+                .handle_ca_bundle_updated(identity, &payload)
+                .await;
+            Ok(None)
+        }
+        Some(ControllerMessage::RequestCertRenewal(payload)) => Ok(cert_handler
+            .handle_request_cert_renewal(identity, conn, &payload)
+            .await),
+        Some(ControllerMessage::ServerRestarting(payload)) => {
+            tracing::info!(
+                reason = %payload.reason,
+                "controller is restarting, initiating graceful shutdown"
+            );
+            let outcome = handler
+                .on_shutdown(
+                    conn,
+                    ShutdownCause::ServerRestarting,
+                    *loop_state.shutdown_timeout,
+                )
+                .await;
+            Ok(Some(outcome))
+        }
+        Some(ControllerMessage::ExtensionRequest(payload)) => {
+            handler.on_extension_request(payload, conn).await?;
+            Ok(None)
+        }
+        Some(ControllerMessage::ExtensionResponse(payload)) => {
+            handler.on_extension_response(payload);
+            Ok(None)
+        }
+        Some(ControllerMessage::Unknown) => {
+            tracing::warn!(
+                "received unknown controller message type; \
+                 ignoring for forward compatibility"
+            );
+            Ok(None)
+        }
+        Some(msg) => handler.on_message(msg, conn).await,
+        None => Ok(Some(dispatch_close_reason(conn.close_reason()))),
+    }
+}
+
+/// Negotiate capabilities with the controller, apply shared settings
+/// (shutdown timeout, renewal schedule, ping interval, CA staleness),
+/// and announce this service's capability set.
+async fn process_service_settings<H: ServiceHandler>(
+    settings: &ServiceSettingsPayload,
+    handler: &mut H,
+    conn: &mut ControllerConnection,
+    loop_state: &mut LoopState<'_>,
+    identity: &mut ServiceIdentityState,
+    ctx: &EventLoopContext<'_>,
+) {
+    // Compute agreed capabilities: intersection of controller's advertised
+    // set with this service's own capabilities, keeping only typed (known)
+    // variants.
+    let agreed: BTreeSet<Capability> = settings
+        .capabilities
+        .intersection(&handler.capabilities())
+        .filter(|c| c.is_known())
+        .cloned()
+        .collect();
+    conn.set_agreed_capabilities(agreed.clone());
+    conn.set_report_page_limits(settings.report_page_limits.clone());
+    tracing::debug!(capabilities = ?agreed, "negotiated protocol capabilities");
+
+    handle_service_settings(settings, loop_state, identity, ctx).await;
+
+    // Announce the service's full capability set so the controller can
+    // persist it and refresh gating flags for the current session. This
+    // handles services that gain or drop capabilities across version
+    // upgrades without requiring re-enrollment.
+    let caps_payload = UpdateCapabilitiesPayload {
+        capabilities: handler.capabilities(),
+    };
+    if let Err(e) = conn
+        .send(ServiceMessage::UpdateCapabilities(caps_payload))
+        .await
+    {
+        tracing::warn!(error = %e, "failed to send UpdateCapabilities");
+    }
+
+    handler.on_settings(settings, conn).await;
 }
 
 /// Map a WebSocket close reason to a [`LoopOutcome`].
