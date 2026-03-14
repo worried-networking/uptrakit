@@ -39,6 +39,25 @@ use uuid::Uuid;
 
 use crate::service_connections::ServiceConnectionRegistry;
 
+/// Resources needed by the NATS consumer loop.
+///
+/// Groups the secondary parameters of [`NatsTransport::run_consumer`] so that
+/// the function stays under the clippy argument-count limit.
+pub struct NatsConsumerConfig {
+    /// Service-connection registry for local delivery routing.
+    pub registry: ServiceConnectionRegistry,
+    /// Database connection for MQTT lease coordination.
+    pub db: DatabaseConnection,
+    /// Admin-event broadcaster — relays cross-controller SSE events locally.
+    pub event_broadcaster: crate::event_broadcaster::EventBroadcaster,
+    /// Trigger for CA certificate rotation (optional).
+    pub ca_rotation_trigger: Option<Arc<Notify>>,
+    /// Trigger for CRL rebuild (optional).
+    pub revocation_notify: Option<Arc<Notify>>,
+    /// Token denylist for cross-controller token revocation (optional).
+    pub token_denylist: Option<Arc<crate::auth::token_denylist::TokenDenylist>>,
+}
+
 /// Maximum delivery attempts before a message is dropped.
 const MAX_DELIVER: i64 = 3;
 
@@ -129,15 +148,15 @@ impl NatsTransport {
     ///
     /// This loop runs until `cancel` is triggered.
     #[tracing::instrument(skip_all, fields(controller_id = %self.controller_id))]
-    pub async fn run_consumer(
-        self,
-        registry: ServiceConnectionRegistry,
-        db: DatabaseConnection,
-        ca_rotation_trigger: Option<Arc<Notify>>,
-        revocation_notify: Option<Arc<Notify>>,
-        token_denylist: Option<Arc<crate::auth::token_denylist::TokenDenylist>>,
-        cancel: CancellationToken,
-    ) {
+    pub async fn run_consumer(self, config: NatsConsumerConfig, cancel: CancellationToken) {
+        let NatsConsumerConfig {
+            registry,
+            db,
+            event_broadcaster,
+            ca_rotation_trigger,
+            revocation_notify,
+            token_denylist,
+        } = config;
         let consumer = match self.create_consumer().await {
             Ok(c) => c,
             Err(e) => {
@@ -230,6 +249,7 @@ impl NatsTransport {
                     ca_rotation_trigger: ca_rotation_trigger.as_ref(),
                     revocation_notify: revocation_notify.as_ref(),
                     token_denylist: token_denylist.as_ref(),
+                    event_broadcaster: Some(&event_broadcaster),
                 };
                 let delivered = crate::event_delivery::deliver_event(
                     &registry,

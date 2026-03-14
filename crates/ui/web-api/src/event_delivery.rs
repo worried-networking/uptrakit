@@ -9,9 +9,10 @@ use std::sync::Arc;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Notify;
 use uptrakit_internal_wire::{
-    Capability, ControllerMessage, MqttClientCreatedPayload, MqttTenantRevokedPayload,
-    TokenRevokedPayload,
+    BroadcastAdminEventPayload, Capability, ControllerMessage, MqttClientCreatedPayload,
+    MqttTenantRevokedPayload, TokenRevokedPayload,
 };
+use uptrakit_web_api_types::events::AdminEvent;
 use uuid::Uuid;
 
 use crate::mqtt_lease_coordinator::{LeaseCoordinatorError, MqttLeaseCoordinator};
@@ -24,6 +25,12 @@ pub struct ControllerResources<'a> {
     pub ca_rotation_trigger: Option<&'a Arc<Notify>>,
     pub revocation_notify: Option<&'a Arc<Notify>>,
     pub token_denylist: Option<&'a Arc<crate::auth::token_denylist::TokenDenylist>>,
+    /// Admin event broadcaster for relaying cross-controller SSE events.
+    ///
+    /// When set, `BroadcastAdminEvent` messages are decoded and re-broadcast
+    /// to local SSE subscribers using `send_local` / `send_global_local`
+    /// (without re-publishing to NATS to avoid loops).
+    pub event_broadcaster: Option<&'a crate::event_broadcaster::EventBroadcaster>,
 }
 
 /// Parse a capability string back to a typed [`Capability`] variant.
@@ -209,6 +216,31 @@ pub async fn deliver_controller_event(
             }
             true
         }
+        ControllerMessage::BroadcastAdminEvent(BroadcastAdminEventPayload {
+            tenant_id,
+            event_json,
+        }) => {
+            if let Some(broadcaster) = resources.event_broadcaster {
+                match serde_json::from_str::<AdminEvent>(&event_json) {
+                    Ok(event) => {
+                        if let Some(tid) = tenant_id {
+                            broadcaster.send_local(tid, event).await;
+                        } else {
+                            broadcaster.send_global_local(event).await;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "failed to deserialise BroadcastAdminEvent payload, skipping"
+                        );
+                    }
+                }
+            } else {
+                tracing::debug!("received BroadcastAdminEvent but no event_broadcaster configured");
+            }
+            true
+        }
         _ => {
             tracing::warn!(
                 msg_type = ?std::mem::discriminant(&msg),
@@ -287,6 +319,7 @@ mod tests {
             ca_rotation_trigger: None,
             revocation_notify: None,
             token_denylist: None,
+            event_broadcaster: None,
         };
         let result = deliver_event(&registry, &db, &resources, None, None, msg).await;
         assert!(result);
@@ -307,6 +340,7 @@ mod tests {
             ca_rotation_trigger: None,
             revocation_notify: None,
             token_denylist: None,
+            event_broadcaster: None,
         };
         let result = deliver_event(&registry, &db, &resources, Some(service_id), None, msg).await;
         assert!(result);
@@ -325,6 +359,7 @@ mod tests {
             ca_rotation_trigger: None,
             revocation_notify: None,
             token_denylist: None,
+            event_broadcaster: None,
         };
         let result = deliver_event(
             &registry,

@@ -546,20 +546,9 @@ pub(crate) fn spawn_server_cert_renewal(
 pub(crate) fn spawn_nats_consumer(
     token: CancellationToken,
     nats: uptrakit_web_api::nats_transport::NatsTransport,
-    registry: uptrakit_web_api::service_connections::ServiceConnectionRegistry,
-    db: sea_orm::DatabaseConnection,
-    ca_rotation_trigger: Option<Arc<tokio::sync::Notify>>,
-    revocation_notify: Option<Arc<tokio::sync::Notify>>,
-    token_denylist: Option<Arc<uptrakit_web_api::auth::token_denylist::TokenDenylist>>,
+    config: uptrakit_web_api::nats_transport::NatsConsumerConfig,
 ) -> JoinHandle<()> {
-    tokio::spawn(nats.run_consumer(
-        registry,
-        db,
-        ca_rotation_trigger,
-        revocation_notify,
-        token_denylist,
-        token,
-    ))
+    tokio::spawn(nats.run_consumer(config, token))
 }
 
 // ---------------------------------------------------------------------------

@@ -308,6 +308,15 @@ async fn run(args: cli::Args) -> Result<()> {
         batch_progress_broadcaster
     };
 
+    // Build the admin event broadcaster with NATS for cross-instance SSE fan-out.
+    // When NATS is not configured the broadcaster operates in single-instance mode.
+    #[cfg_attr(not(feature = "nats"), allow(unused_mut))]
+    let mut event_broadcaster = uptrakit_web_api::event_broadcaster::EventBroadcaster::new();
+    #[cfg(feature = "nats")]
+    if let Some(ref nats) = nats_transport {
+        event_broadcaster = event_broadcaster.with_nats(nats.clone(), controller_id);
+    }
+
     let token_denylist = Arc::new(
         uptrakit_web_api::auth::token_denylist::TokenDenylist::new_with_db(db_conn.clone()),
     );
@@ -463,6 +472,7 @@ async fn run(args: cli::Args) -> Result<()> {
         .notification_dispatcher(notification_dispatcher)
         .token_denylist(token_denylist)
         .credential_sources(credential_sources)
+        .event_broadcaster(event_broadcaster.clone())
         .batch_progress_broadcaster(batch_progress_broadcaster)
         .shutdown_token(shutdown_token.clone())
         .audit_log_filter(audit_filter)
@@ -631,11 +641,14 @@ async fn run(args: cli::Args) -> Result<()> {
         let h = tasks::spawn_nats_consumer(
             bg.child_token(),
             nats.clone(),
-            service_connections.clone(),
-            app_state.db().clone(),
-            Some(Arc::clone(&app_state.ca_rotation_trigger)),
-            Some(Arc::clone(&app_state.revocation_notify)),
-            Some(Arc::clone(&app_state.token_denylist)),
+            uptrakit_web_api::nats_transport::NatsConsumerConfig {
+                registry: service_connections.clone(),
+                db: app_state.db().clone(),
+                event_broadcaster: app_state.event_broadcaster.clone(),
+                ca_rotation_trigger: Some(Arc::clone(&app_state.ca_rotation_trigger)),
+                revocation_notify: Some(Arc::clone(&app_state.revocation_notify)),
+                token_denylist: Some(Arc::clone(&app_state.token_denylist)),
+            },
         );
         bg.track("nats-consumer", h);
     }

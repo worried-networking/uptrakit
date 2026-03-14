@@ -377,6 +377,16 @@ impl AppStateBuilder {
         self
     }
 
+    /// Override the admin event broadcaster.
+    ///
+    /// Optional — defaults to [`EventBroadcaster::new()`] (single-instance mode,
+    /// no NATS).  Pass a broadcaster built with [`EventBroadcaster::with_nats`] to
+    /// enable cross-controller SSE fan-out when NATS is configured.
+    pub fn event_broadcaster(mut self, v: crate::event_broadcaster::EventBroadcaster) -> Self {
+        self.event_broadcaster = Some(v);
+        self
+    }
+
     /// Override the batch progress broadcaster.
     ///
     /// Optional — defaults to [`BatchProgressBroadcaster::new()`] (single-instance

@@ -32,39 +32,120 @@ struct ChannelEntry {
 /// Registry of per-tenant broadcast channels for real-time admin event delivery.
 ///
 /// Thread-safe and cheaply cloneable (interior `Arc`).
+///
+/// ## Multi-instance support (NATS)
+///
+/// When the `nats` feature is enabled and a NATS transport is attached via
+/// [`EventBroadcaster::with_nats`], every call to [`send`](Self::send) and
+/// [`send_global`](Self::send_global) also publishes the event to all other
+/// controller instances via NATS JetStream. Receiving instances call
+/// [`send_local`](Self::send_local) / [`send_global_local`](Self::send_global_local)
+/// to re-broadcast locally without re-publishing (avoiding infinite loops).
 #[derive(Clone)]
 pub struct EventBroadcaster {
     channels: Arc<RwLock<HashMap<Uuid, ChannelEntry>>>,
+    /// This controller's UUID — used as the NATS publication source.
+    #[cfg(feature = "nats")]
+    controller_id: Uuid,
+    #[cfg(feature = "nats")]
+    nats: Option<crate::nats_transport::NatsTransport>,
 }
 
 impl EventBroadcaster {
-    /// Create a new empty broadcaster.
+    /// Create a new empty broadcaster (single-instance mode, no NATS).
     pub fn new() -> Self {
         Self {
             channels: Arc::new(RwLock::new(HashMap::new())),
+            #[cfg(feature = "nats")]
+            controller_id: Uuid::nil(),
+            #[cfg(feature = "nats")]
+            nats: None,
         }
     }
 
-    /// Send an event to all subscribers of the given tenant.
+    /// Attach a NATS transport for cross-controller event fan-out.
     ///
-    /// Fire-and-forget: no-op if no subscribers are connected for this tenant.
+    /// Returns `self` for builder-style chaining.  All subsequent calls to
+    /// [`send`] and [`send_global`] will also publish the event via NATS so
+    /// that other controller instances can relay it to their local SSE clients.
+    #[cfg(feature = "nats")]
+    pub fn with_nats(
+        mut self,
+        nats: crate::nats_transport::NatsTransport,
+        controller_id: Uuid,
+    ) -> Self {
+        self.nats = Some(nats);
+        self.controller_id = controller_id;
+        self
+    }
+
+    /// Broadcast an event to local SSE subscribers of the given tenant **only**.
+    ///
+    /// Does **not** publish to NATS. Used by the NATS consumer to relay
+    /// cross-controller events without causing a re-publish loop.
     #[tracing::instrument(skip_all, fields(%tenant_id))]
-    pub async fn send(&self, tenant_id: Uuid, event: AdminEvent) {
+    pub async fn send_local(&self, tenant_id: Uuid, event: AdminEvent) {
         let channels = self.channels.read().await;
         if let Some(entry) = channels.get(&tenant_id) {
             let _ = entry.tx.send(event);
         }
     }
 
-    /// Send an event to all active tenant channels (for system-wide events).
+    /// Broadcast an event to **all** local tenant channels **only**.
     ///
-    /// Fire-and-forget: iterates all tenant channels and sends to each.
+    /// Does **not** publish to NATS. Used by the NATS consumer for system-wide
+    /// cross-controller events without causing a re-publish loop.
     #[tracing::instrument(skip_all)]
-    pub async fn send_global(&self, event: AdminEvent) {
+    pub async fn send_global_local(&self, event: AdminEvent) {
         let channels = self.channels.read().await;
         for entry in channels.values() {
             let _ = entry.tx.send(event.clone());
         }
+    }
+
+    /// Send an event to all subscribers of the given tenant.
+    ///
+    /// Fire-and-forget: no-op if no subscribers are connected for this tenant.
+    /// Also publishes to NATS when a transport is configured so other controller
+    /// instances relay the event to their own local SSE subscribers.
+    #[tracing::instrument(skip_all, fields(%tenant_id))]
+    pub async fn send(&self, tenant_id: Uuid, event: AdminEvent) {
+        self.send_local(tenant_id, event.clone()).await;
+        self.maybe_publish_nats(Some(tenant_id), event).await;
+    }
+
+    /// Send an event to all active tenant channels (for system-wide events).
+    ///
+    /// Fire-and-forget: iterates all tenant channels and sends to each.
+    /// Also publishes to NATS when a transport is configured.
+    #[tracing::instrument(skip_all)]
+    pub async fn send_global(&self, event: AdminEvent) {
+        self.send_global_local(event.clone()).await;
+        self.maybe_publish_nats(None, event).await;
+    }
+
+    /// Publish an `AdminEvent` to NATS so other controller instances can
+    /// relay it to their local SSE subscribers.  No-op when NATS is not
+    /// configured or the `nats` feature is disabled.
+    async fn maybe_publish_nats(&self, tenant_id: Option<Uuid>, event: AdminEvent) {
+        #[cfg(feature = "nats")]
+        if let (Some(nats), Ok(event_json)) = (&self.nats, serde_json::to_string(&event)) {
+            nats.publish(
+                self.controller_id,
+                None,
+                Some("controller"),
+                uptrakit_internal_wire::ControllerMessage::BroadcastAdminEvent(
+                    uptrakit_internal_wire::BroadcastAdminEventPayload {
+                        tenant_id,
+                        event_json,
+                    },
+                ),
+            )
+            .await;
+        }
+        // Suppress unused variable warnings in non-NATS builds.
+        #[cfg(not(feature = "nats"))]
+        let _ = (tenant_id, event);
     }
 
     /// Subscribe to admin events for the given tenant.
