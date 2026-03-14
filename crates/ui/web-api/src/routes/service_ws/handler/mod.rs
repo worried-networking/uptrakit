@@ -47,6 +47,7 @@ use rootcause::prelude::*;
 use sea_orm::EntityTrait;
 
 use uptrakit_internal_wire::limits::WireValidate;
+use uptrakit_internal_wire::payloads::RequestCertificatePayload;
 use uptrakit_internal_wire::report_tracker::ReportTracker;
 use uptrakit_internal_wire::{
     ApprovedPayload, Capability, CertificatePayload, CloseReason, ControllerMessage, ErrorCode,
@@ -189,7 +190,7 @@ impl MessageProcessor {
         while let Some(pm) = msg_rx.recv().await {
             let response = self.dispatch(pm.message, pm.pagination).await;
             if resp_tx.send(response).await.is_err() {
-                // Main loop dropped — connection is closing.
+                // Main loop dropped -- connection is closing.
                 break;
             }
         }
@@ -538,32 +539,55 @@ impl MessageProcessor {
 }
 
 // ---------------------------------------------------------------------------
-// handle_authenticated_loop
+// AuthenticatedSessionState
 // ---------------------------------------------------------------------------
 
-/// Unified authenticated handler for all service types.
+/// All state produced during authenticated session setup that the main loop
+/// and cleanup phases need.
+struct AuthenticatedSessionState {
+    service_id: uuid::Uuid,
+    is_system: bool,
+    is_mqtt: bool,
+    has_software_discovery: bool,
+    has_ui_extensions: bool,
+    is_external_scheduler: bool,
+    service_tenant_id: Option<uuid::Uuid>,
+    linked_host_ids: Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+    lease_coordinator: Option<MqttLeaseCoordinator>,
+    push_rx: tokio::sync::mpsc::Receiver<ControllerMessage>,
+    cancel_token: tokio_util::sync::CancellationToken,
+    msg_tx: tokio::sync::mpsc::Sender<ProcessorMessage>,
+    resp_rx: tokio::sync::mpsc::Receiver<ProcessorResponse>,
+    processor_cancel: tokio_util::sync::CancellationToken,
+    processor_handle: tokio::task::JoinHandle<()>,
+    rate_limiter: MessageRateLimiter,
+}
+
+// ---------------------------------------------------------------------------
+// setup_authenticated_session
+// ---------------------------------------------------------------------------
+
+/// Perform all pre-loop setup for the authenticated handler.
 ///
-/// Called by [`super::service_ws`] after certificate validation, service status
-/// check, and sending `ServiceSettings`. Dispatches incoming messages based on
-/// the service's capability set.
+/// Loads the service from the DB, delivers credentials, runs the MQTT
+/// handshake (if applicable), registers the connection, spawns the background
+/// processor, and delivers pending updates.
 ///
-/// Spawns a [`MessageProcessor`] task for heavy message processing. The main
-/// loop handles lightweight inline operations and forwards everything else.
-#[tracing::instrument(skip_all, fields(service_id = %ctx.service_id))]
-pub(crate) async fn handle_authenticated_loop(
+/// Returns `None` if the connection must be closed early (e.g. failed MQTT
+/// handshake or write failure).
+// All parameters originate from the caller's `AuthenticatedContext` and cannot
+// be meaningfully grouped without introducing a wrapper that duplicates it.
+#[allow(clippy::too_many_arguments)]
+async fn setup_authenticated_session(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
     state: &Arc<AppState>,
-    ctx: AuthenticatedContext<'_>,
-) {
-    let AuthenticatedContext {
-        service_id,
-        cert,
-        is_system,
-        out_seq,
-        in_seq,
-    } = ctx;
-
+    service_id: uuid::Uuid,
+    cert: &CertIdentity,
+    is_system: bool,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
+) -> Option<AuthenticatedSessionState> {
     // Load service from DB, derive capabilities, app name, and tenant ID.
     let (capabilities, service_app_name, service_tenant_id): (
         BTreeSet<Capability>,
@@ -601,7 +625,6 @@ pub(crate) async fn handle_authenticated_loop(
     let has_ui_extensions = capabilities.contains(&Capability::UiExtensions);
 
     let mut rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
-    let mut consecutive_unknown: u32 = 0;
 
     // ------------------------------------------------------------------
     // Credential delivery for services with credential capabilities
@@ -637,7 +660,7 @@ pub(crate) async fn handle_authenticated_loop(
             if let Some(json) = serialize_controller_msg(out_seq, cred_msg)
                 && sink.send(Message::Text(json.into())).await.is_err()
             {
-                return;
+                return None;
             }
             tracing::info!(
                 %service_id,
@@ -665,7 +688,7 @@ pub(crate) async fn handle_authenticated_loop(
         .await
         {
             Some(h) => Some(h),
-            None => return, // connection closed before Register
+            None => return None, // connection closed before Register
         }
     } else {
         None
@@ -674,7 +697,7 @@ pub(crate) async fn handle_authenticated_loop(
     // ------------------------------------------------------------------
     // Register in service_connections (must happen before lease assignment)
     // ------------------------------------------------------------------
-    let (mut push_rx, cancel_token) = if let Some(ref h) = mqtt_handshake {
+    let (push_rx, cancel_token) = if let Some(ref h) = mqtt_handshake {
         state
             .service_connections
             .register(
@@ -725,11 +748,11 @@ pub(crate) async fn handle_authenticated_loop(
         });
         let Some(json) = serialize_controller_msg(out_seq, registered_msg) else {
             state.service_connections.unregister(&service_id).await;
-            return;
+            return None;
         };
         if sink.send(Message::Text(json.into())).await.is_err() {
             state.service_connections.unregister(&service_id).await;
-            return;
+            return None;
         }
 
         // Send initial tenant assignments.
@@ -740,11 +763,11 @@ pub(crate) async fn handle_authenticated_loop(
                 });
             let Some(json) = serialize_controller_msg(out_seq, assignments_msg) else {
                 state.service_connections.unregister(&service_id).await;
-                return;
+                return None;
             };
             if sink.send(Message::Text(json.into())).await.is_err() {
                 state.service_connections.unregister(&service_id).await;
-                return;
+                return None;
             }
         }
 
@@ -821,7 +844,7 @@ pub(crate) async fn handle_authenticated_loop(
     // ------------------------------------------------------------------
     let (msg_tx, msg_rx) =
         tokio::sync::mpsc::channel::<ProcessorMessage>(PROCESSOR_CHANNEL_CAPACITY);
-    let (resp_tx, mut resp_rx) =
+    let (resp_tx, resp_rx) =
         tokio::sync::mpsc::channel::<ProcessorResponse>(RESPONSE_CHANNEL_CAPACITY);
 
     let processor = MessageProcessor {
@@ -850,185 +873,47 @@ pub(crate) async fn handle_authenticated_loop(
         }
     });
 
-    // ------------------------------------------------------------------
-    // Main operational loop
-    // ------------------------------------------------------------------
-    loop {
-        tokio::select! {
-            // 1. Incoming WebSocket messages
-            msg = stream.next() => {
-                let Some(msg) = msg else { break };
-                let msg = match msg {
-                    Ok(m) => m,
-                    Err(e) => {
-                        tracing::debug!(error = %e, "websocket receive error");
-                        break;
-                    }
-                };
-                if !rate_limiter.allow() {
-                    let _ = close_with_reason(sink, CloseReason::RateLimitExceeded).await;
-                    break;
-                }
-                match msg {
-                    Message::Text(text) => {
-                        let deserialized =
-                            match deserialize_service_msg(in_seq, &text) {
-                                Ok(Some(m)) => m,
-                                Ok(None) => continue,
-                                Err(e) => {
-                                    tracing::debug!(error = %e, "deserialize error");
-                                    break;
-                                }
-                            };
-                        let pagination = deserialized.pagination;
-                        let service_msg = deserialized.message;
+    Some(AuthenticatedSessionState {
+        service_id,
+        is_system,
+        is_mqtt,
+        has_software_discovery,
+        has_ui_extensions,
+        is_external_scheduler,
+        service_tenant_id,
+        linked_host_ids,
+        lease_coordinator,
+        push_rx,
+        cancel_token,
+        msg_tx,
+        resp_rx,
+        processor_cancel,
+        processor_handle,
+        rate_limiter,
+    })
+}
 
-                        // -- Inline fast-path messages --
-                        match &service_msg {
-                            ServiceMessage::Ping(PingPayload { service_ts, .. }) => {
-                                if messages::handle_ping(sink, out_seq, state, service_id, *service_ts, lease_coordinator.as_ref(), is_system).await.is_break() {
-                                    break;
-                                }
-                                consecutive_unknown = 0;
-                                continue;
-                            }
-                            ServiceMessage::Disconnecting(payload) => {
-                                tracing::info!(
-                                    %service_id,
-                                    reason = ?payload.reason,
-                                    "service disconnecting gracefully"
-                                );
-                                break;
-                            }
-                            ServiceMessage::Unknown => {
-                                consecutive_unknown += 1;
-                                tracing::warn!(
-                                    %service_id,
-                                    consecutive_unknown,
-                                    "received unknown service message type; \
-                                     ignoring for forward compatibility"
-                                );
-                                if consecutive_unknown >= MAX_CONSECUTIVE_UNKNOWN_MESSAGES {
-                                    tracing::warn!(
-                                        %service_id,
-                                        "closing connection: {MAX_CONSECUTIVE_UNKNOWN_MESSAGES} \
-                                         consecutive unknown messages"
-                                    );
-                                    let _ = close_with_reason(
-                                        sink,
-                                        CloseReason::RateLimitExceeded,
-                                    )
-                                    .await;
-                                    break;
-                                }
-                                continue;
-                            }
-                            _ => {}
-                        }
+// ---------------------------------------------------------------------------
+// cleanup_authenticated_session
+// ---------------------------------------------------------------------------
 
-                        // Reset unknown counter — any known message breaks the streak.
-                        consecutive_unknown = 0;
-
-                        // Forward to processor
-                        if msg_tx.send(ProcessorMessage { message: service_msg, pagination }).await.is_err() {
-                            tracing::debug!("processor channel closed, breaking main loop");
-                            break;
-                        }
-                    }
-                    Message::Close(_) => break,
-                    _ => {}
-                }
-            }
-
-            // 2. Push messages from ServiceConnectionRegistry
-            push = push_rx.recv() => {
-                let Some(msg) = push else { break };
-                let Some(json) = serialize_controller_msg(out_seq, msg) else { break };
-                match tokio::time::timeout(
-                    WS_WRITE_TIMEOUT,
-                    sink.send(Message::Text(json.into())),
-                ).await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(_)) => break,
-                    Err(_) => {
-                        tracing::warn!(
-                            %service_id,
-                            "WebSocket write timed out after {}s, dropping connection",
-                            WS_WRITE_TIMEOUT.as_secs(),
-                        );
-                        break;
-                    }
-                }
-            }
-
-            // 3. Responses from the background processor
-            resp = resp_rx.recv() => {
-                let Some(resp) = resp else {
-                    tracing::debug!("processor response channel closed");
-                    break;
-                };
-
-                // Send reply messages
-                let mut write_failed = false;
-                for reply in resp.replies {
-                    let Some(json) = serialize_controller_msg(out_seq, reply) else {
-                        write_failed = true;
-                        break;
-                    };
-                    match tokio::time::timeout(
-                        WS_WRITE_TIMEOUT,
-                        sink.send(Message::Text(json.into())),
-                    ).await {
-                        Ok(Ok(())) => {}
-                        Ok(Err(_)) => { write_failed = true; break; }
-                        Err(_) => {
-                            tracing::warn!(
-                                %service_id,
-                                "WebSocket write timed out after {}s on processor reply",
-                                WS_WRITE_TIMEOUT.as_secs(),
-                            );
-                            write_failed = true;
-                            break;
-                        }
-                    }
-                }
-
-                if write_failed {
-                    break;
-                }
-
-                // Execute the action
-                match resp.action {
-                    ProcessorAction::Continue => {}
-                    ProcessorAction::Break => break,
-                    ProcessorAction::CloseWithReason(reason) => {
-                        let _ = close_with_reason(sink, reason).await;
-                        break;
-                    }
-                }
-            }
-
-            // 4. Connection superseded
-            _ = cancel_token.cancelled() => {
-                tracing::info!(%service_id, "connection superseded by new registration");
-                let _ = close_with_reason(sink, CloseReason::Superseded).await;
-                // Do NOT unregister -- the new connection owns the registry entry.
-                // Release MQTT leases if applicable (new connection will re-reconcile).
-                if let Some(ref lc) = lease_coordinator
-                    && let Err(e) = lc.release_all_for_service(&service_id).await
-                {
-                    tracing::error!(error = %e, "failed to release leases on superseded disconnect");
-                }
-                processor_cancel.cancel();
-                let _ = processor_handle.await;
-                return;
-            }
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Cleanup
-    // ------------------------------------------------------------------
+/// Perform all cleanup after the authenticated loop exits normally (not
+/// superseded).
+async fn cleanup_authenticated_session(state: &Arc<AppState>, session: AuthenticatedSessionState) {
+    let AuthenticatedSessionState {
+        service_id,
+        is_system,
+        is_mqtt,
+        has_software_discovery,
+        has_ui_extensions,
+        is_external_scheduler,
+        service_tenant_id,
+        linked_host_ids,
+        lease_coordinator,
+        processor_cancel,
+        processor_handle,
+        ..
+    } = session;
 
     // Cancel the processor task and wait for it to finish.
     processor_cancel.cancel();
@@ -1087,6 +972,225 @@ pub(crate) async fn handle_authenticated_loop(
         state.service_connections.unregister(&service_id).await;
     }
     tracing::debug!(%service_id, "authenticated service disconnected");
+}
+
+// ---------------------------------------------------------------------------
+// handle_authenticated_loop
+// ---------------------------------------------------------------------------
+
+/// Unified authenticated handler for all service types.
+///
+/// Called by [`super::service_ws`] after certificate validation, service status
+/// check, and sending `ServiceSettings`. Dispatches incoming messages based on
+/// the service's capability set.
+///
+/// Spawns a [`MessageProcessor`] task for heavy message processing. The main
+/// loop handles lightweight inline operations and forwards everything else.
+#[tracing::instrument(skip_all, fields(service_id = %ctx.service_id))]
+pub(crate) async fn handle_authenticated_loop(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    stream: &mut futures_util::stream::SplitStream<WebSocket>,
+    state: &Arc<AppState>,
+    ctx: AuthenticatedContext<'_>,
+) {
+    let AuthenticatedContext {
+        service_id,
+        cert,
+        is_system,
+        out_seq,
+        in_seq,
+    } = ctx;
+
+    let Some(mut session) = setup_authenticated_session(
+        sink, stream, state, service_id, &cert, is_system, out_seq, in_seq,
+    )
+    .await
+    else {
+        return;
+    };
+
+    let mut consecutive_unknown: u32 = 0;
+
+    // ------------------------------------------------------------------
+    // Main operational loop
+    // ------------------------------------------------------------------
+    loop {
+        tokio::select! {
+            // 1. Incoming WebSocket messages
+            msg = stream.next() => {
+                let Some(msg) = msg else { break };
+                let msg = match msg {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::debug!(error = %e, "websocket receive error");
+                        break;
+                    }
+                };
+                if !session.rate_limiter.allow() {
+                    let _ = close_with_reason(sink, CloseReason::RateLimitExceeded).await;
+                    break;
+                }
+                match msg {
+                    Message::Text(text) => {
+                        let deserialized =
+                            match deserialize_service_msg(in_seq, &text) {
+                                Ok(Some(m)) => m,
+                                Ok(None) => continue,
+                                Err(e) => {
+                                    tracing::debug!(error = %e, "deserialize error");
+                                    break;
+                                }
+                            };
+                        let pagination = deserialized.pagination;
+                        let service_msg = deserialized.message;
+
+                        // -- Inline fast-path messages --
+                        match &service_msg {
+                            ServiceMessage::Ping(PingPayload { service_ts, .. }) => {
+                                if messages::handle_ping(sink, out_seq, state, service_id, *service_ts, session.lease_coordinator.as_ref(), is_system).await.is_break() {
+                                    break;
+                                }
+                                consecutive_unknown = 0;
+                                continue;
+                            }
+                            ServiceMessage::Disconnecting(payload) => {
+                                tracing::info!(
+                                    %service_id,
+                                    reason = ?payload.reason,
+                                    "service disconnecting gracefully"
+                                );
+                                break;
+                            }
+                            ServiceMessage::Unknown => {
+                                consecutive_unknown += 1;
+                                tracing::warn!(
+                                    %service_id,
+                                    consecutive_unknown,
+                                    "received unknown service message type; \
+                                     ignoring for forward compatibility"
+                                );
+                                if consecutive_unknown >= MAX_CONSECUTIVE_UNKNOWN_MESSAGES {
+                                    tracing::warn!(
+                                        %service_id,
+                                        "closing connection: {MAX_CONSECUTIVE_UNKNOWN_MESSAGES} \
+                                         consecutive unknown messages"
+                                    );
+                                    let _ = close_with_reason(
+                                        sink,
+                                        CloseReason::RateLimitExceeded,
+                                    )
+                                    .await;
+                                    break;
+                                }
+                                continue;
+                            }
+                            _ => {}
+                        }
+
+                        // Reset unknown counter -- any known message breaks the streak.
+                        consecutive_unknown = 0;
+
+                        // Forward to processor
+                        if session.msg_tx.send(ProcessorMessage { message: service_msg, pagination }).await.is_err() {
+                            tracing::debug!("processor channel closed, breaking main loop");
+                            break;
+                        }
+                    }
+                    Message::Close(_) => break,
+                    _ => {}
+                }
+            }
+
+            // 2. Push messages from ServiceConnectionRegistry
+            push = session.push_rx.recv() => {
+                let Some(msg) = push else { break };
+                let Some(json) = serialize_controller_msg(out_seq, msg) else { break };
+                match tokio::time::timeout(
+                    WS_WRITE_TIMEOUT,
+                    sink.send(Message::Text(json.into())),
+                ).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) => break,
+                    Err(_) => {
+                        tracing::warn!(
+                            %service_id,
+                            "WebSocket write timed out after {}s, dropping connection",
+                            WS_WRITE_TIMEOUT.as_secs(),
+                        );
+                        break;
+                    }
+                }
+            }
+
+            // 3. Responses from the background processor
+            resp = session.resp_rx.recv() => {
+                let Some(resp) = resp else {
+                    tracing::debug!("processor response channel closed");
+                    break;
+                };
+
+                // Send reply messages
+                let mut write_failed = false;
+                for reply in resp.replies {
+                    let Some(json) = serialize_controller_msg(out_seq, reply) else {
+                        write_failed = true;
+                        break;
+                    };
+                    match tokio::time::timeout(
+                        WS_WRITE_TIMEOUT,
+                        sink.send(Message::Text(json.into())),
+                    ).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(_)) => { write_failed = true; break; }
+                        Err(_) => {
+                            tracing::warn!(
+                                %service_id,
+                                "WebSocket write timed out after {}s on processor reply",
+                                WS_WRITE_TIMEOUT.as_secs(),
+                            );
+                            write_failed = true;
+                            break;
+                        }
+                    }
+                }
+
+                if write_failed {
+                    break;
+                }
+
+                // Execute the action
+                match resp.action {
+                    ProcessorAction::Continue => {}
+                    ProcessorAction::Break => break,
+                    ProcessorAction::CloseWithReason(reason) => {
+                        let _ = close_with_reason(sink, reason).await;
+                        break;
+                    }
+                }
+            }
+
+            // 4. Connection superseded
+            _ = session.cancel_token.cancelled() => {
+                tracing::info!(%service_id, "connection superseded by new registration");
+                let _ = close_with_reason(sink, CloseReason::Superseded).await;
+                // Do NOT unregister -- the new connection owns the registry entry.
+                // Release MQTT leases if applicable (new connection will re-reconcile).
+                if let Some(ref lc) = session.lease_coordinator
+                    && let Err(e) = lc.release_all_for_service(&service_id).await
+                {
+                    tracing::error!(error = %e, "failed to release leases on superseded disconnect");
+                }
+                session.processor_cancel.cancel();
+                let _ = session.processor_handle.await;
+                return;
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Cleanup
+    // ------------------------------------------------------------------
+    cleanup_authenticated_session(state, session).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -1152,23 +1256,33 @@ async fn upgrade_service_capabilities(
 }
 
 // ---------------------------------------------------------------------------
-// handle_enrolled_loop
+// EnrolledSessionState
 // ---------------------------------------------------------------------------
 
-/// Unified enrolled handler for all service types.
+/// All state produced during enrolled session setup that the main loop and
+/// cleanup phases need.
+struct EnrolledSessionState {
+    is_external_scheduler: bool,
+    push_rx: tokio::sync::mpsc::Receiver<ControllerMessage>,
+    cancel_token: tokio_util::sync::CancellationToken,
+    approved: bool,
+    rate_limiter: MessageRateLimiter,
+    approval_poll: tokio::time::Interval,
+}
+
+// ---------------------------------------------------------------------------
+// setup_enrolled_session
+// ---------------------------------------------------------------------------
+
+/// Perform all pre-loop setup for the enrolled handler.
 ///
-/// Handles Ping, RequestCertificate, and polls for approval changes at a
-/// fixed interval (decoupled from client-controlled ping frequency).
-#[tracing::instrument(skip_all, fields(%service_id, is_system))]
-pub(crate) async fn handle_enrolled_loop(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    stream: &mut futures_util::stream::SplitStream<WebSocket>,
+/// Loads the service from the DB, registers the connection, detects the
+/// external scheduler capability, and checks the initial approval status.
+async fn setup_enrolled_session(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     is_system: bool,
-    out_seq: &mut OutgoingSeq,
-    in_seq: &mut IncomingSeq,
-) {
+) -> EnrolledSessionState {
     // Fetch service to derive capabilities for registration.
     let capabilities: BTreeSet<Capability> = if is_system {
         match sys_svc_entity::Entity::find_by_id(service_id)
@@ -1189,7 +1303,7 @@ pub(crate) async fn handle_enrolled_loop(
     };
 
     // Register in service_connections.
-    let (mut push_rx, cancel_token) = state
+    let (push_rx, cancel_token) = state
         .service_connections
         .register(service_id, capabilities.clone(), None, None)
         .await;
@@ -1224,11 +1338,181 @@ pub(crate) async fn handle_enrolled_loop(
         approved = true;
     }
 
-    let mut rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
+    let rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
 
     // Dedicated interval for polling approval status from the DB.
     let mut approval_poll = tokio::time::interval(APPROVAL_POLL_INTERVAL);
     approval_poll.tick().await; // skip immediate first tick
+
+    EnrolledSessionState {
+        is_external_scheduler,
+        push_rx,
+        cancel_token,
+        approved,
+        rate_limiter,
+        approval_poll,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CertificateResult
+// ---------------------------------------------------------------------------
+
+/// Result of processing a `RequestCertificate` message.
+enum CertificateResult {
+    /// Certificate issued (or error sent); break out of the main loop.
+    Break,
+    /// Service not yet approved; already sent error reply, continue looping.
+    NotApproved,
+}
+
+// ---------------------------------------------------------------------------
+// handle_request_certificate
+// ---------------------------------------------------------------------------
+
+/// Handle a `RequestCertificate` message during the enrolled loop.
+///
+/// Signs the CSR for either a system service or a regular service, sends the
+/// certificate (or error) back over the WebSocket, and returns whether the
+/// loop should break or continue.
+async fn handle_request_certificate(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    is_system: bool,
+    approved: bool,
+    out_seq: &mut OutgoingSeq,
+    payload: &RequestCertificatePayload,
+) -> CertificateResult {
+    if !approved {
+        let err = ControllerMessage::Error(ErrorPayload {
+            code: ErrorCode::NotApproved,
+            message: "service is not yet approved".to_string(),
+        });
+        if let Some(json) = serialize_controller_msg(out_seq, err) {
+            let _ = sink.send(Message::Text(json.into())).await;
+        }
+        return CertificateResult::NotApproved;
+    }
+
+    if is_system {
+        let sys_svc = match sys_svc_entity::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            Ok(Some(s)) => s,
+            _ => {
+                let err = ControllerMessage::Error(ErrorPayload {
+                    code: ErrorCode::InternalError,
+                    message: "system service not found".to_string(),
+                });
+                if let Some(json) = serialize_controller_msg(out_seq, err) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+                return CertificateResult::Break;
+            }
+        };
+
+        match do_sign_csr_for_system_service(
+            state.cert_signer.as_ref(),
+            &state.settings,
+            state.db(),
+            sys_svc,
+            &payload.csr_pem,
+        )
+        .await
+        {
+            Ok(bundle) => {
+                let cert_msg = ControllerMessage::Certificate(CertificatePayload {
+                    cert_pem: bundle.cert_pem,
+                    not_after: bundle.not_after,
+                });
+                if let Some(json) = serialize_controller_msg(out_seq, cert_msg) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+                tracing::info!(%service_id, "system service certificate issued via WS");
+            }
+            Err(e) => {
+                let err = ControllerMessage::Error(ErrorPayload {
+                    code: ErrorCode::CertificateError,
+                    message: e.current_context().to_string(),
+                });
+                if let Some(json) = serialize_controller_msg(out_seq, err) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+            }
+        }
+    } else {
+        let svc = match service::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            Ok(Some(s)) => s,
+            _ => {
+                let err = ControllerMessage::Error(ErrorPayload {
+                    code: ErrorCode::InternalError,
+                    message: "service not found".to_string(),
+                });
+                if let Some(json) = serialize_controller_msg(out_seq, err) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+                return CertificateResult::Break;
+            }
+        };
+
+        match do_sign_csr(
+            state.cert_signer.as_ref(),
+            &state.settings,
+            state.db(),
+            svc,
+            &payload.csr_pem,
+        )
+        .await
+        {
+            Ok(bundle) => {
+                let cert_msg = ControllerMessage::Certificate(CertificatePayload {
+                    cert_pem: bundle.cert_pem,
+                    not_after: bundle.not_after,
+                });
+                if let Some(json) = serialize_controller_msg(out_seq, cert_msg) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+                tracing::info!(%service_id, "certificate issued via WS");
+            }
+            Err(e) => {
+                let err = ControllerMessage::Error(ErrorPayload {
+                    code: ErrorCode::CertificateError,
+                    message: e.current_context().to_string(),
+                });
+                if let Some(json) = serialize_controller_msg(out_seq, err) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+            }
+        }
+    }
+
+    CertificateResult::Break
+}
+
+// ---------------------------------------------------------------------------
+// handle_enrolled_loop
+// ---------------------------------------------------------------------------
+
+/// Unified enrolled handler for all service types.
+///
+/// Handles Ping, RequestCertificate, and polls for approval changes at a
+/// fixed interval (decoupled from client-controlled ping frequency).
+#[tracing::instrument(skip_all, fields(%service_id, is_system))]
+pub(crate) async fn handle_enrolled_loop(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    stream: &mut futures_util::stream::SplitStream<WebSocket>,
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    is_system: bool,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
+) {
+    let mut session = setup_enrolled_session(state, service_id, is_system).await;
 
     loop {
         tokio::select! {
@@ -1241,7 +1525,7 @@ pub(crate) async fn handle_enrolled_loop(
                         break;
                     }
                 };
-                if !rate_limiter.allow() {
+                if !session.rate_limiter.allow() {
                     let _ = close_with_reason(sink, CloseReason::RateLimitExceeded).await;
                     break;
                 }
@@ -1289,148 +1573,12 @@ pub(crate) async fn handle_enrolled_loop(
                                 }
                             }
                             ServiceMessage::RequestCertificate(payload) => {
-                                if !approved {
-                                    let err = ControllerMessage::Error(ErrorPayload {
-                                        code: ErrorCode::NotApproved,
-                                        message: "service is not yet approved".to_string(),
-                                    });
-                                    if let Some(json) =
-                                        serialize_controller_msg(out_seq, err)
-                                    {
-                                        let _ =
-                                            sink.send(Message::Text(json.into())).await;
-                                    }
-                                    continue;
-                                }
-
-                                if is_system {
-                                    let sys_svc = match sys_svc_entity::Entity::find_by_id(
-                                        service_id,
-                                    )
-                                    .one(state.db())
-                                    .await
-                                    {
-                                        Ok(Some(s)) => s,
-                                        _ => {
-                                            let err = ControllerMessage::Error(ErrorPayload {
-                                                code: ErrorCode::InternalError,
-                                                message: "system service not found".to_string(),
-                                            });
-                                            if let Some(json) =
-                                                serialize_controller_msg(out_seq, err)
-                                            {
-                                                let _ =
-                                                    sink.send(Message::Text(json.into())).await;
-                                            }
-                                            break;
-                                        }
-                                    };
-
-                                    match do_sign_csr_for_system_service(
-                                        state.cert_signer.as_ref(),
-                                        &state.settings,
-                                        state.db(),
-                                        sys_svc,
-                                        &payload.csr_pem,
-                                    )
-                                    .await
-                                    {
-                                        Ok(bundle) => {
-                                            let cert_msg = ControllerMessage::Certificate(
-                                                CertificatePayload {
-                                                    cert_pem: bundle.cert_pem,
-                                                    not_after: bundle.not_after,
-                                                },
-                                            );
-                                            if let Some(json) =
-                                                serialize_controller_msg(out_seq, cert_msg)
-                                            {
-                                                let _ =
-                                                    sink.send(Message::Text(json.into())).await;
-                                            }
-                                            tracing::info!(
-                                                %service_id,
-                                                "system service certificate issued via WS"
-                                            );
-                                            break;
-                                        }
-                                        Err(e) => {
-                                            let err = ControllerMessage::Error(ErrorPayload {
-                                                code: ErrorCode::CertificateError,
-                                                message: e.current_context().to_string(),
-                                            });
-                                            if let Some(json) =
-                                                serialize_controller_msg(out_seq, err)
-                                            {
-                                                let _ =
-                                                    sink.send(Message::Text(json.into())).await;
-                                            }
-                                            break;
-                                        }
-                                    }
-                                } else {
-                                    let svc = match service::Entity::find_by_id(service_id)
-                                        .one(state.db())
-                                        .await
-                                    {
-                                        Ok(Some(s)) => s,
-                                        _ => {
-                                            let err = ControllerMessage::Error(ErrorPayload {
-                                                code: ErrorCode::InternalError,
-                                                message: "service not found".to_string(),
-                                            });
-                                            if let Some(json) =
-                                                serialize_controller_msg(out_seq, err)
-                                            {
-                                                let _ =
-                                                    sink.send(Message::Text(json.into())).await;
-                                            }
-                                            break;
-                                        }
-                                    };
-
-                                    match do_sign_csr(
-                                        state.cert_signer.as_ref(),
-                                        &state.settings,
-                                        state.db(),
-                                        svc,
-                                        &payload.csr_pem,
-                                    )
-                                    .await
-                                    {
-                                        Ok(bundle) => {
-                                            let cert_msg = ControllerMessage::Certificate(
-                                                CertificatePayload {
-                                                    cert_pem: bundle.cert_pem,
-                                                    not_after: bundle.not_after,
-                                                },
-                                            );
-                                            if let Some(json) =
-                                                serialize_controller_msg(out_seq, cert_msg)
-                                            {
-                                                let _ =
-                                                    sink.send(Message::Text(json.into())).await;
-                                            }
-                                            tracing::info!(
-                                                %service_id,
-                                                "certificate issued via WS"
-                                            );
-                                            break;
-                                        }
-                                        Err(e) => {
-                                            let err = ControllerMessage::Error(ErrorPayload {
-                                                code: ErrorCode::CertificateError,
-                                                message: e.current_context().to_string(),
-                                            });
-                                            if let Some(json) =
-                                                serialize_controller_msg(out_seq, err)
-                                            {
-                                                let _ =
-                                                    sink.send(Message::Text(json.into())).await;
-                                            }
-                                            break;
-                                        }
-                                    }
+                                match handle_request_certificate(
+                                    sink, state, service_id, is_system,
+                                    session.approved, out_seq, &payload,
+                                ).await {
+                                    CertificateResult::Break => break,
+                                    CertificateResult::NotApproved => continue,
                                 }
                             }
                             ServiceMessage::Enroll(_) => {
@@ -1465,13 +1613,13 @@ pub(crate) async fn handle_enrolled_loop(
                     _ => {}
                 }
             }
-            push = push_rx.recv() => {
+            push = session.push_rx.recv() => {
                 let Some(msg) = push else { break };
 
                 // Track state transitions; handle Rejected specially (send + break).
                 let is_rejected = matches!(&msg, ControllerMessage::Rejected(_));
                 if matches!(&msg, ControllerMessage::Approved(_)) {
-                    approved = true;
+                    session.approved = true;
                 }
 
                 let Some(json) = serialize_controller_msg(out_seq, msg) else { break };
@@ -1495,7 +1643,7 @@ pub(crate) async fn handle_enrolled_loop(
                 }
             }
             // Dedicated approval poll at a fixed interval.
-            _ = approval_poll.tick(), if !approved => {
+            _ = session.approval_poll.tick(), if !session.approved => {
                 if is_system {
                     if let Ok(Some(s)) = sys_svc_entity::Entity::find_by_id(service_id)
                         .one(state.db())
@@ -1503,7 +1651,7 @@ pub(crate) async fn handle_enrolled_loop(
                     {
                         match s.status {
                             sys_svc_entity::SystemServiceStatus::Approved => {
-                                approved = true;
+                                session.approved = true;
                                 let msg = ControllerMessage::Approved(ApprovedPayload {
                                     service_id,
                                 });
@@ -1529,7 +1677,7 @@ pub(crate) async fn handle_enrolled_loop(
                 {
                     match s.status {
                         service::ServiceStatus::Approved => {
-                            approved = true;
+                            session.approved = true;
                             let msg = ControllerMessage::Approved(ApprovedPayload {
                                 service_id,
                             });
@@ -1550,7 +1698,7 @@ pub(crate) async fn handle_enrolled_loop(
                     }
                 }
             }
-            _ = cancel_token.cancelled() => {
+            _ = session.cancel_token.cancelled() => {
                 tracing::info!(%service_id, "enrolled connection superseded by new registration");
                 let _ = close_with_reason(sink, CloseReason::Superseded).await;
                 // Do NOT unregister -- the new connection owns the registry entry.
@@ -1560,8 +1708,8 @@ pub(crate) async fn handle_enrolled_loop(
     }
 
     // Cleanup: unregister unless superseded.
-    if !cancel_token.is_cancelled() {
-        if is_external_scheduler {
+    if !session.cancel_token.is_cancelled() {
+        if session.is_external_scheduler {
             // Unregister first so has_capability_connected excludes this service.
             state.service_connections.unregister(&service_id).await;
             if !state
