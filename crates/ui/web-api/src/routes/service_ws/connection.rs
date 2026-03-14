@@ -14,8 +14,11 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrde
 use uptrakit_internal_wire::{
     ApprovedPayload, CloseReason, ControllerMessage, EnrolledPayload, ErrorCode, ErrorPayload,
     IncomingSeq, OutgoingSeq, RejectedPayload, ServiceMessage, ServiceSettingsPayload,
+    service_profile::{ServiceProfile, parse_capabilities},
 };
 use uptrakit_shared_db::entity::service as service_entity;
+use uptrakit_shared_db::entity::system_service as sys_svc_entity;
+use uptrakit_shared_db::entity::system_service_certificate as sys_cert_entity;
 
 use super::protocol::{
     AuthenticatedContext, CertIdentity, ServiceWsError, close_with_reason, controller_capabilities,
@@ -64,154 +67,13 @@ pub(super) async fn handle_authenticated(
 
     let (mut sink, mut stream) = socket.split();
 
-    // ---------------------------------------------------------------------------
-    // 1. Certificate validation check.
-    //
-    // Try the tenant service_certificates table first. If not found, fall back to
-    // system_service_certificates. The table that contains the record determines
-    // whether this is a system service (is_system).
-    // ---------------------------------------------------------------------------
-    use uptrakit_shared_db::entity::system_service as sys_svc_entity;
-    use uptrakit_shared_db::entity::system_service_certificate as sys_cert_entity;
-
-    // Returns (ca_fingerprint, revoked_at, is_system) after looking up in both
-    // tables. We use a helper enum so we can update last_seen_at on the correct
-    // record type after the status check.
-    enum CertLookupResult {
-        Tenant(uptrakit_shared_db::entity::service_certificate::Model),
-        System(uptrakit_shared_db::entity::system_service_certificate::Model),
-    }
-
-    let cert_lookup = if cert_serial.is_empty() {
-        // No serial: try tenant certs first, then system certs.
-        let tenant_result = uptrakit_shared_db::entity::prelude::ServiceCertificate::find()
-            .filter(
-                uptrakit_shared_db::entity::service_certificate::Column::ServiceId.eq(service_id),
-            )
-            .filter(uptrakit_shared_db::entity::service_certificate::Column::RevokedAt.is_null())
-            .order_by_desc(uptrakit_shared_db::entity::service_certificate::Column::CreatedAt)
-            .one(state.db())
-            .await;
-
-        match tenant_result {
-            Ok(Some(record)) => {
-                tracing::warn!(
-                    %service_id,
-                    "service connected via proxy without cert serial, using service-id-only lookup"
-                );
-                CertLookupResult::Tenant(record)
-            }
-            Ok(None) => {
-                // Try system certs.
-                let sys_result = sys_cert_entity::Entity::find()
-                    .filter(sys_cert_entity::Column::SystemServiceId.eq(service_id))
-                    .filter(sys_cert_entity::Column::RevokedAt.is_null())
-                    .order_by_desc(sys_cert_entity::Column::CreatedAt)
-                    .one(state.db())
-                    .await;
-
-                match sys_result {
-                    Ok(Some(record)) => {
-                        tracing::warn!(
-                            %service_id,
-                            "system service connected via proxy without cert serial"
-                        );
-                        CertLookupResult::System(record)
-                    }
-                    Ok(None) => {
-                        tracing::warn!(
-                            %service_id,
-                            "rejected connection: no non-revoked certificate found"
-                        );
-                        let _ = close_with_reason(&mut sink, CloseReason::NoValidCertificate).await;
-                        return;
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "system certificate validation check failed");
-                        let _ = close_with_reason(&mut sink, CloseReason::InternalError).await;
-                        return;
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "certificate validation check failed");
-                let _ = close_with_reason(&mut sink, CloseReason::InternalError).await;
-                return;
-            }
-        }
-    } else {
-        // Serial present: try tenant certs first, then system certs.
-        let tenant_result = uptrakit_shared_db::entity::prelude::ServiceCertificate::find()
-            .filter(
-                uptrakit_shared_db::entity::service_certificate::Column::SerialNumber
-                    .eq(cert_serial.clone()),
-            )
-            .filter(
-                uptrakit_shared_db::entity::service_certificate::Column::ServiceId.eq(service_id),
-            )
-            .one(state.db())
-            .await;
-
-        match tenant_result {
-            Ok(Some(record)) => {
-                if record.revoked_at.is_some() {
-                    tracing::warn!(
-                        %service_id,
-                        serial_number = %cert_serial,
-                        "rejected connection: certificate is revoked"
-                    );
-                    let _ = close_with_reason(&mut sink, CloseReason::CertificateRevoked).await;
-                    return;
-                }
-                CertLookupResult::Tenant(record)
-            }
-            Ok(None) => {
-                // Not in tenant table — try system certs.
-                let sys_result = sys_cert_entity::Entity::find()
-                    .filter(sys_cert_entity::Column::SerialNumber.eq(cert_serial.clone()))
-                    .filter(sys_cert_entity::Column::SystemServiceId.eq(service_id))
-                    .one(state.db())
-                    .await;
-
-                match sys_result {
-                    Ok(Some(record)) => {
-                        if record.revoked_at.is_some() {
-                            tracing::warn!(
-                                %service_id,
-                                serial_number = %cert_serial,
-                                "rejected connection: system service certificate is revoked"
-                            );
-                            let _ =
-                                close_with_reason(&mut sink, CloseReason::CertificateRevoked).await;
-                            return;
-                        }
-                        CertLookupResult::System(record)
-                    }
-                    Ok(None) => {
-                        tracing::warn!(
-                            %service_id,
-                            serial_number = %cert_serial,
-                            "rejected connection: certificate not recognized"
-                        );
-                        let _ = close_with_reason(&mut sink, CloseReason::CertificateNotRecognized)
-                            .await;
-                        return;
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            error = %e,
-                            "system certificate validation check failed"
-                        );
-                        let _ = close_with_reason(&mut sink, CloseReason::InternalError).await;
-                        return;
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "certificate validation check failed");
-                let _ = close_with_reason(&mut sink, CloseReason::InternalError).await;
-                return;
-            }
+    // 1. Certificate validation.
+    let cert_lookup = match validate_service_certificate(state.db(), service_id, &cert_serial).await
+    {
+        Ok(lookup) => lookup,
+        Err(reason) => {
+            let _ = close_with_reason(&mut sink, reason).await;
+            return;
         }
     };
 
@@ -221,81 +83,13 @@ pub(super) async fn handle_authenticated(
         CertLookupResult::System(r) => r.ca_fingerprint.clone(),
     };
 
-    // ---------------------------------------------------------------------------
     // 2. Service status check.
-    // ---------------------------------------------------------------------------
-    use uptrakit_internal_wire::service_profile::{ServiceProfile, parse_capabilities};
-
-    let (capabilities_json, ping_interval_seconds, service_tenant_id) = if is_system {
-        let svc = match sys_svc_entity::Entity::find_by_id(service_id)
-            .one(state.db())
-            .await
-        {
-            Ok(Some(s)) => s,
-            Ok(None) => {
-                tracing::warn!(%service_id, "rejected connection: system service not found");
-                let _ = close_with_reason(&mut sink, CloseReason::ServiceNotFound).await;
-                return;
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "system service status check failed");
-                let _ = close_with_reason(&mut sink, CloseReason::InternalError).await;
-                return;
-            }
-        };
-
-        if svc.deactivated_at.is_some() {
-            tracing::warn!(
-                %service_id,
-                "deactivated system service connected with valid certificate"
-            );
-            let _ = close_with_reason(&mut sink, CloseReason::ServiceDeactivated).await;
+    let service_status = match load_service_status(state.db(), service_id, is_system).await {
+        Ok(status) => status,
+        Err(reason) => {
+            let _ = close_with_reason(&mut sink, reason).await;
             return;
         }
-        if svc.status != sys_svc_entity::SystemServiceStatus::Approved {
-            tracing::warn!(%service_id, "rejected connection: system service not approved");
-            let _ = close_with_reason(&mut sink, CloseReason::ServiceNotApproved).await;
-            return;
-        }
-
-        (svc.capabilities.clone(), svc.ping_interval_seconds, None)
-    } else {
-        let svc = match uptrakit_shared_db::entity::prelude::Service::find_by_id(service_id)
-            .one(state.db())
-            .await
-        {
-            Ok(Some(s)) => s,
-            Ok(None) => {
-                tracing::warn!(%service_id, "rejected connection: service not found");
-                let _ = close_with_reason(&mut sink, CloseReason::ServiceNotFound).await;
-                return;
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "service status check failed");
-                let _ = close_with_reason(&mut sink, CloseReason::InternalError).await;
-                return;
-            }
-        };
-
-        if svc.deactivated_at.is_some() {
-            tracing::warn!(
-                %service_id,
-                "deactivated service connected with valid certificate"
-            );
-            let _ = close_with_reason(&mut sink, CloseReason::ServiceDeactivated).await;
-            return;
-        }
-        if svc.status != service_entity::ServiceStatus::Approved {
-            tracing::warn!(%service_id, "rejected connection: service not approved");
-            let _ = close_with_reason(&mut sink, CloseReason::ServiceNotApproved).await;
-            return;
-        }
-
-        (
-            svc.capabilities.clone(),
-            svc.ping_interval_seconds,
-            Some(svc.tenant_id),
-        )
     };
 
     // Bundle certificate identity.
@@ -304,8 +98,293 @@ pub(super) async fn handle_authenticated(
         ca_fingerprint: cert_ca_fingerprint,
     };
 
-    let now = time::OffsetDateTime::now_utc();
+    // 3. Record activity and send ServiceSettings.
+    record_activity_and_update_cert(&state, service_id, is_system, client_ip, cert_lookup).await;
 
+    if send_service_settings(&state, &service_status, &mut sink, out_seq)
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    // 4. Dispatch to unified capability-gated authenticated handler.
+    let ctx = AuthenticatedContext {
+        service_id,
+        cert: cert_id,
+        is_system,
+        out_seq,
+        in_seq,
+    };
+    super::handler::handle_authenticated_loop(&mut sink, &mut stream, &state, ctx).await;
+}
+
+// ---------------------------------------------------------------------------
+// Authenticated path helpers
+// ---------------------------------------------------------------------------
+
+/// Certificate lookup result — determines whether this is a tenant or system
+/// service and carries the record for later `last_seen_at` update.
+enum CertLookupResult {
+    Tenant(uptrakit_shared_db::entity::service_certificate::Model),
+    System(sys_cert_entity::Model),
+}
+
+/// Loaded service status after approval/deactivation checks.
+struct ServiceStatus {
+    capabilities_json: String,
+    ping_interval_seconds: Option<i32>,
+    tenant_id: Option<uuid::Uuid>,
+}
+
+/// Validate the service certificate against both tenant and system certificate
+/// tables. Returns the lookup result on success, or a [`CloseReason`] on
+/// failure (revoked, not found, DB error).
+async fn validate_service_certificate(
+    db: &sea_orm::DatabaseConnection,
+    service_id: uuid::Uuid,
+    cert_serial: &str,
+) -> Result<CertLookupResult, CloseReason> {
+    if cert_serial.is_empty() {
+        validate_cert_without_serial(db, service_id).await
+    } else {
+        validate_cert_with_serial(db, service_id, cert_serial).await
+    }
+}
+
+/// Certificate lookup when the proxy did not forward a serial number.
+///
+/// Searches for the most recent non-revoked certificate by service ID alone,
+/// trying tenant certificates first, then system certificates.
+async fn validate_cert_without_serial(
+    db: &sea_orm::DatabaseConnection,
+    service_id: uuid::Uuid,
+) -> Result<CertLookupResult, CloseReason> {
+    use uptrakit_shared_db::entity::service_certificate;
+
+    let tenant_result = uptrakit_shared_db::entity::prelude::ServiceCertificate::find()
+        .filter(service_certificate::Column::ServiceId.eq(service_id))
+        .filter(service_certificate::Column::RevokedAt.is_null())
+        .order_by_desc(service_certificate::Column::CreatedAt)
+        .one(db)
+        .await;
+
+    match tenant_result {
+        Ok(Some(record)) => {
+            tracing::warn!(
+                %service_id,
+                "service connected via proxy without cert serial, using service-id-only lookup"
+            );
+            Ok(CertLookupResult::Tenant(record))
+        }
+        Ok(None) => {
+            // Try system certs.
+            let sys_result = sys_cert_entity::Entity::find()
+                .filter(sys_cert_entity::Column::SystemServiceId.eq(service_id))
+                .filter(sys_cert_entity::Column::RevokedAt.is_null())
+                .order_by_desc(sys_cert_entity::Column::CreatedAt)
+                .one(db)
+                .await;
+
+            match sys_result {
+                Ok(Some(record)) => {
+                    tracing::warn!(
+                        %service_id,
+                        "system service connected via proxy without cert serial"
+                    );
+                    Ok(CertLookupResult::System(record))
+                }
+                Ok(None) => {
+                    tracing::warn!(
+                        %service_id,
+                        "rejected connection: no non-revoked certificate found"
+                    );
+                    Err(CloseReason::NoValidCertificate)
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "system certificate validation check failed");
+                    Err(CloseReason::InternalError)
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "certificate validation check failed");
+            Err(CloseReason::InternalError)
+        }
+    }
+}
+
+/// Certificate lookup when the serial number is available.
+///
+/// Searches for the certificate by serial + service ID in the tenant table
+/// first, then the system table. Checks revocation status.
+async fn validate_cert_with_serial(
+    db: &sea_orm::DatabaseConnection,
+    service_id: uuid::Uuid,
+    cert_serial: &str,
+) -> Result<CertLookupResult, CloseReason> {
+    use uptrakit_shared_db::entity::service_certificate;
+
+    let tenant_result = uptrakit_shared_db::entity::prelude::ServiceCertificate::find()
+        .filter(service_certificate::Column::SerialNumber.eq(cert_serial))
+        .filter(service_certificate::Column::ServiceId.eq(service_id))
+        .one(db)
+        .await;
+
+    match tenant_result {
+        Ok(Some(record)) => {
+            if record.revoked_at.is_some() {
+                tracing::warn!(
+                    %service_id,
+                    serial_number = %cert_serial,
+                    "rejected connection: certificate is revoked"
+                );
+                return Err(CloseReason::CertificateRevoked);
+            }
+            Ok(CertLookupResult::Tenant(record))
+        }
+        Ok(None) => {
+            // Not in tenant table -- try system certs.
+            let sys_result = sys_cert_entity::Entity::find()
+                .filter(sys_cert_entity::Column::SerialNumber.eq(cert_serial))
+                .filter(sys_cert_entity::Column::SystemServiceId.eq(service_id))
+                .one(db)
+                .await;
+
+            match sys_result {
+                Ok(Some(record)) => {
+                    if record.revoked_at.is_some() {
+                        tracing::warn!(
+                            %service_id,
+                            serial_number = %cert_serial,
+                            "rejected connection: system service certificate is revoked"
+                        );
+                        return Err(CloseReason::CertificateRevoked);
+                    }
+                    Ok(CertLookupResult::System(record))
+                }
+                Ok(None) => {
+                    tracing::warn!(
+                        %service_id,
+                        serial_number = %cert_serial,
+                        "rejected connection: certificate not recognized"
+                    );
+                    Err(CloseReason::CertificateNotRecognized)
+                }
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        "system certificate validation check failed"
+                    );
+                    Err(CloseReason::InternalError)
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "certificate validation check failed");
+            Err(CloseReason::InternalError)
+        }
+    }
+}
+
+/// Load the service from the database and verify it is approved and not
+/// deactivated. Returns capabilities, ping interval, and tenant ID on success,
+/// or a [`CloseReason`] on failure.
+async fn load_service_status(
+    db: &sea_orm::DatabaseConnection,
+    service_id: uuid::Uuid,
+    is_system: bool,
+) -> Result<ServiceStatus, CloseReason> {
+    if is_system {
+        load_system_service_status(db, service_id).await
+    } else {
+        load_tenant_service_status(db, service_id).await
+    }
+}
+
+async fn load_system_service_status(
+    db: &sea_orm::DatabaseConnection,
+    service_id: uuid::Uuid,
+) -> Result<ServiceStatus, CloseReason> {
+    let svc = match sys_svc_entity::Entity::find_by_id(service_id).one(db).await {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            tracing::warn!(%service_id, "rejected connection: system service not found");
+            return Err(CloseReason::ServiceNotFound);
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "system service status check failed");
+            return Err(CloseReason::InternalError);
+        }
+    };
+
+    if svc.deactivated_at.is_some() {
+        tracing::warn!(
+            %service_id,
+            "deactivated system service connected with valid certificate"
+        );
+        return Err(CloseReason::ServiceDeactivated);
+    }
+    if svc.status != sys_svc_entity::SystemServiceStatus::Approved {
+        tracing::warn!(%service_id, "rejected connection: system service not approved");
+        return Err(CloseReason::ServiceNotApproved);
+    }
+
+    Ok(ServiceStatus {
+        capabilities_json: svc.capabilities.clone(),
+        ping_interval_seconds: svc.ping_interval_seconds,
+        tenant_id: None,
+    })
+}
+
+async fn load_tenant_service_status(
+    db: &sea_orm::DatabaseConnection,
+    service_id: uuid::Uuid,
+) -> Result<ServiceStatus, CloseReason> {
+    let svc = match uptrakit_shared_db::entity::prelude::Service::find_by_id(service_id)
+        .one(db)
+        .await
+    {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            tracing::warn!(%service_id, "rejected connection: service not found");
+            return Err(CloseReason::ServiceNotFound);
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "service status check failed");
+            return Err(CloseReason::InternalError);
+        }
+    };
+
+    if svc.deactivated_at.is_some() {
+        tracing::warn!(
+            %service_id,
+            "deactivated service connected with valid certificate"
+        );
+        return Err(CloseReason::ServiceDeactivated);
+    }
+    if svc.status != service_entity::ServiceStatus::Approved {
+        tracing::warn!(%service_id, "rejected connection: service not approved");
+        return Err(CloseReason::ServiceNotApproved);
+    }
+
+    Ok(ServiceStatus {
+        capabilities_json: svc.capabilities.clone(),
+        ping_interval_seconds: svc.ping_interval_seconds,
+        tenant_id: Some(svc.tenant_id),
+    })
+}
+
+/// Record service activity and update the certificate `last_seen_at` timestamp.
+///
+/// Failures are logged but do not abort the connection.
+async fn record_activity_and_update_cert(
+    state: &AppState,
+    service_id: uuid::Uuid,
+    is_system: bool,
+    client_ip: Option<IpAddr>,
+    cert_lookup: CertLookupResult,
+) {
     // Record service activity in the appropriate table.
     if is_system {
         if let Err(e) = record_system_service_activity(state.db(), service_id, client_ip).await {
@@ -316,6 +395,7 @@ pub(super) async fn handle_authenticated(
     }
 
     // Record certificate usage (last_seen_at).
+    let now = time::OffsetDateTime::now_utc();
     match cert_lookup {
         CertLookupResult::Tenant(record) => {
             let mut active: uptrakit_shared_db::entity::service_certificate::ActiveModel =
@@ -336,16 +416,28 @@ pub(super) async fn handle_authenticated(
             }
         }
     }
+}
 
-    // Send ServiceSettings on connect.
+/// Build and send the [`ServiceSettingsPayload`] message over the WebSocket.
+///
+/// Returns `Err(())` if serialization or sending fails (connection should be
+/// abandoned).
+async fn send_service_settings(
+    state: &AppState,
+    service_status: &ServiceStatus,
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    out_seq: &mut OutgoingSeq,
+) -> Result<(), ()> {
     let renewal_window_hours = state.settings.renewal_window_hours();
     let ca_bundle_hash = state.ca_snapshot.borrow().bundle_hash.clone();
-    let capabilities = parse_capabilities(&capabilities_json);
+    let capabilities = parse_capabilities(&service_status.capabilities_json);
     let profile = ServiceProfile::from_capabilities(&capabilities);
     let shutdown_timeout = profile.shutdown_timeout_secs();
-    let ping_secs =
-        ping_interval_seconds.map_or_else(|| profile.default_ping_interval_secs(), |v| v as u32);
+    let ping_secs = service_status
+        .ping_interval_seconds
+        .map_or_else(|| profile.default_ping_interval_secs(), |v| v as u32);
     let ping_interval = std::time::Duration::from_secs(u64::from(ping_secs));
+
     let settings_msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
         renewal_window_hours,
         ca_bundle_hash,
@@ -354,24 +446,11 @@ pub(super) async fn handle_authenticated(
         shutdown_timeout: shutdown_timeout
             .map(|secs| std::time::Duration::from_secs(u64::from(secs))),
         ping_interval,
-        tenant_id: service_tenant_id,
+        tenant_id: service_status.tenant_id,
     });
-    let Some(json) = serialize_controller_msg(out_seq, settings_msg) else {
-        return;
-    };
-    if sink.send(Message::Text(json.into())).await.is_err() {
-        return;
-    }
 
-    // Dispatch to unified capability-gated authenticated handler.
-    let ctx = AuthenticatedContext {
-        service_id,
-        cert: cert_id,
-        is_system,
-        out_seq,
-        in_seq,
-    };
-    super::handler::handle_authenticated_loop(&mut sink, &mut stream, &state, ctx).await;
+    let json = serialize_controller_msg(out_seq, settings_msg).ok_or(())?;
+    sink.send(Message::Text(json.into())).await.map_err(|_| ())
 }
 
 // ---------------------------------------------------------------------------
@@ -389,8 +468,6 @@ pub(super) async fn handle_enrolled(
     in_seq: &mut IncomingSeq,
 ) {
     tracing::debug!(%service_id, is_system, "enrolled service connected (bearer)");
-
-    use uptrakit_shared_db::entity::system_service as sys_svc_entity;
 
     let (mut sink, mut stream) = socket.split();
 
