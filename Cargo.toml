@@ -152,6 +152,7 @@ mdns-sd = { version = "0.12", default-features = false }
 
 [workspace.lints.rust]
 warnings = "deny"
+unreachable_pub = "deny"
 
 [workspace.lints.clippy]
 all = "deny"
