@@ -14,7 +14,7 @@ use uptrakit_shared_db::entity::{
 };
 use uptrakit_shared_macros::impl_report_conversion;
 
-pub use uptrakit_web_api_types::services::ServiceStatus;
+pub(crate) use uptrakit_web_api_types::services::ServiceStatus;
 
 // ---------------------------------------------------------------------------
 // System credential capability guard

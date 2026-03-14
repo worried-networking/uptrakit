@@ -10,7 +10,7 @@ use super::http_client::TestClient;
 // ── HTTP helpers ────────────────────────────────────────────────────────
 
 /// Register a user via HTTP and return the full [`AuthResponse`].
-pub async fn register_user(
+pub(crate) async fn register_user(
     client: &TestClient,
     email: &str,
     password: &str,
@@ -29,14 +29,14 @@ pub async fn register_user(
 }
 
 /// Register a user and return just the access token (panics on failure).
-pub async fn register_and_get_token(client: &TestClient) -> String {
+pub(crate) async fn register_and_get_token(client: &TestClient) -> String {
     let (status, auth) = register_user(client, "owner@test.local", "TestPassword123!").await;
     assert_eq!(status, http::StatusCode::CREATED, "registration failed");
     auth.access_token.expose_secret().to_string()
 }
 
 /// Login a user via HTTP and return the full [`AuthResponse`].
-pub async fn login_user(
+pub(crate) async fn login_user(
     client: &TestClient,
     email: &str,
     password: &str,
@@ -52,7 +52,7 @@ pub async fn login_user(
 }
 
 /// Refresh a token via HTTP.
-pub async fn refresh_token(
+pub(crate) async fn refresh_token(
     client: &TestClient,
     refresh: &str,
 ) -> (http::StatusCode, RefreshResponse) {
@@ -66,7 +66,7 @@ pub async fn refresh_token(
 // ── Direct DB helpers ───────────────────────────────────────────────────
 
 /// Insert a service entity directly in the database.
-pub async fn insert_service(
+pub(crate) async fn insert_service(
     db: &DatabaseConnection,
     tenant_id: uuid::Uuid,
     status: service::ServiceStatus,
@@ -98,7 +98,7 @@ pub async fn insert_service(
 }
 
 /// Insert a host entity directly in the database.
-pub async fn insert_host(db: &DatabaseConnection, tenant_id: uuid::Uuid) -> host::Model {
+pub(crate) async fn insert_host(db: &DatabaseConnection, tenant_id: uuid::Uuid) -> host::Model {
     let id = uuid::Uuid::now_v7();
     let now = time::OffsetDateTime::now_utc();
     host::ActiveModel {
@@ -128,7 +128,7 @@ pub async fn insert_host(db: &DatabaseConnection, tenant_id: uuid::Uuid) -> host
 /// seeded with correct role assignments, so this is effectively a no-op in
 /// normal circumstances. It is kept for backwards-compatibility with tests
 /// that call it and as a safety net if a permission somehow wasn't seeded.
-pub async fn seed_permissions_for_owner(db: &DatabaseConnection, names: &[&str]) {
+pub(crate) async fn seed_permissions_for_owner(db: &DatabaseConnection, names: &[&str]) {
     // Use the first built-in role we find — after migration the first
     // registered user holds all 8 roles, so any role will do.
     let any_role = role::Entity::find()
@@ -180,7 +180,7 @@ pub async fn seed_permissions_for_owner(db: &DatabaseConnection, names: &[&str])
 }
 
 /// Link a service to a host via the join table.
-pub async fn link_service_host(
+pub(crate) async fn link_service_host(
     db: &DatabaseConnection,
     service_id: uuid::Uuid,
     host_id: uuid::Uuid,

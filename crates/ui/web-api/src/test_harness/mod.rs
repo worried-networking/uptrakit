@@ -7,8 +7,8 @@
 //!
 //! Gated behind `#[cfg(all(test, feature = "db-sqlite"))]`.
 
-pub mod fixtures;
-pub mod http_client;
+pub(crate) mod fixtures;
+pub(crate) mod http_client;
 
 use std::sync::Arc;
 
@@ -21,7 +21,7 @@ use crate::{AppState, ServiceCredentialSources, build_router};
 
 /// Self-contained test fixture for integration tests.
 #[allow(dead_code)]
-pub struct TestApp {
+pub(crate) struct TestApp {
     /// The shared application state.
     pub state: Arc<AppState>,
     /// The Axum router (clone-friendly).
@@ -37,7 +37,7 @@ pub struct TestApp {
 impl TestApp {
     /// Build a fully initialised test app with migrated SQLite DB and
     /// seeded default tenant.
-    pub async fn new() -> Self {
+    pub(crate) async fn new() -> Self {
         let db = setup_migrated_db().await;
         let tenant_id = insert_default_tenant(&db).await;
         let (state, jwt) = build_test_state(db.clone(), tenant_id).await;
@@ -53,13 +53,13 @@ impl TestApp {
     }
 
     /// Create a [`http_client::TestClient`] for this app.
-    pub fn client(&self) -> http_client::TestClient {
+    pub(crate) fn client(&self) -> http_client::TestClient {
         http_client::TestClient::new(self.router.clone())
     }
 }
 
 /// Create an in-memory SQLite database with all migrations applied.
-pub async fn setup_migrated_db() -> DatabaseConnection {
+pub(crate) async fn setup_migrated_db() -> DatabaseConnection {
     let opt = ConnectOptions::new("sqlite::memory:".to_owned());
     let db = Database::connect(opt).await.expect("test db");
     uptrakit_shared_db::migration::run_migrations(&db)
@@ -69,7 +69,7 @@ pub async fn setup_migrated_db() -> DatabaseConnection {
 }
 
 /// Insert a default tenant row and return its UUID.
-pub async fn insert_default_tenant(db: &DatabaseConnection) -> uuid::Uuid {
+pub(crate) async fn insert_default_tenant(db: &DatabaseConnection) -> uuid::Uuid {
     use sea_orm::ActiveModelTrait;
     use sea_orm::Set;
     use uptrakit_shared_db::entity::tenant;
@@ -93,7 +93,7 @@ pub async fn insert_default_tenant(db: &DatabaseConnection) -> uuid::Uuid {
 
 /// Build an [`AppState`] wired for testing — mirrors the canonical
 /// `test_state()` from `lib.rs` but uses a migrated DB and a real tenant.
-pub async fn build_test_state(
+pub(crate) async fn build_test_state(
     db: DatabaseConnection,
     tenant_id: uuid::Uuid,
 ) -> (Arc<AppState>, Arc<JwtManager>) {

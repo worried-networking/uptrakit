@@ -63,7 +63,7 @@ pub(super) struct ProcessorResponse {
 
 impl ProcessorResponse {
     /// Continue with no reply.
-    pub fn cont() -> Self {
+    pub(crate) fn cont() -> Self {
         Self {
             replies: Vec::new(),
             action: ProcessorAction::Continue,
@@ -71,7 +71,7 @@ impl ProcessorResponse {
     }
 
     /// Continue with a single reply.
-    pub fn reply(msg: ControllerMessage) -> Self {
+    pub(crate) fn reply(msg: ControllerMessage) -> Self {
         Self {
             replies: vec![msg],
             action: ProcessorAction::Continue,
@@ -79,7 +79,7 @@ impl ProcessorResponse {
     }
 
     /// Break with a single reply.
-    pub fn reply_and_break(msg: ControllerMessage) -> Self {
+    pub(crate) fn reply_and_break(msg: ControllerMessage) -> Self {
         Self {
             replies: vec![msg],
             action: ProcessorAction::Break,
@@ -87,7 +87,7 @@ impl ProcessorResponse {
     }
 
     /// Send a reply and close with a reason.
-    pub fn reply_and_close(msg: ControllerMessage, reason: CloseReason) -> Self {
+    pub(crate) fn reply_and_close(msg: ControllerMessage, reason: CloseReason) -> Self {
         Self {
             replies: vec![msg],
             action: ProcessorAction::CloseWithReason(reason),

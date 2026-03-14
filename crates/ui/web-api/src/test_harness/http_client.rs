@@ -10,44 +10,44 @@ use tower::ServiceExt;
 ///
 /// The router is cloned for each request, so a single `TestClient` can
 /// issue multiple sequential requests.
-pub struct TestClient {
+pub(crate) struct TestClient {
     router: Router,
 }
 
 impl TestClient {
     /// Create a new client for the given router.
-    pub fn new(router: Router) -> Self {
+    pub(crate) fn new(router: Router) -> Self {
         Self { router }
     }
 
     /// Start building a `GET` request.
-    pub fn get(&self, uri: &str) -> RequestBuilder {
+    pub(crate) fn get(&self, uri: &str) -> RequestBuilder {
         RequestBuilder::new(self.router.clone(), http::Method::GET, uri)
     }
 
     /// Start building a `POST` request with a JSON body.
-    pub fn post_json(&self, uri: &str, body: &impl serde::Serialize) -> RequestBuilder {
+    pub(crate) fn post_json(&self, uri: &str, body: &impl serde::Serialize) -> RequestBuilder {
         RequestBuilder::new(self.router.clone(), http::Method::POST, uri).json_body(body)
     }
 
     /// Start building a `PUT` request with a JSON body.
-    pub fn put_json(&self, uri: &str, body: &impl serde::Serialize) -> RequestBuilder {
+    pub(crate) fn put_json(&self, uri: &str, body: &impl serde::Serialize) -> RequestBuilder {
         RequestBuilder::new(self.router.clone(), http::Method::PUT, uri).json_body(body)
     }
 
     /// Start building a `DELETE` request.
-    pub fn delete(&self, uri: &str) -> RequestBuilder {
+    pub(crate) fn delete(&self, uri: &str) -> RequestBuilder {
         RequestBuilder::new(self.router.clone(), http::Method::DELETE, uri)
     }
 
     /// Start building a `POST` request with an empty body.
-    pub fn post_empty(&self, uri: &str) -> RequestBuilder {
+    pub(crate) fn post_empty(&self, uri: &str) -> RequestBuilder {
         RequestBuilder::new(self.router.clone(), http::Method::POST, uri)
     }
 }
 
 /// Builder for a single HTTP request.
-pub struct RequestBuilder {
+pub(crate) struct RequestBuilder {
     router: Router,
     method: http::Method,
     uri: String,
@@ -77,7 +77,7 @@ impl RequestBuilder {
     }
 
     /// Add an `Authorization: Bearer <token>` header.
-    pub fn bearer(mut self, token: &str) -> Self {
+    pub(crate) fn bearer(mut self, token: &str) -> Self {
         self.headers.push((
             http::header::AUTHORIZATION.to_string(),
             format!("Bearer {token}"),
@@ -86,13 +86,13 @@ impl RequestBuilder {
     }
 
     /// Add a custom header.
-    pub fn header(mut self, key: &str, value: &str) -> Self {
+    pub(crate) fn header(mut self, key: &str, value: &str) -> Self {
         self.headers.push((key.to_string(), value.to_string()));
         self
     }
 
     /// Execute the request and return the raw `http::Response`.
-    pub async fn send(self) -> http::Response<Body> {
+    pub(crate) async fn send(self) -> http::Response<Body> {
         let body = match self.body {
             Some(b) => Body::from(b),
             None => Body::empty(),
@@ -111,7 +111,7 @@ impl RequestBuilder {
     }
 
     /// Execute the request and return `(StatusCode, deserialized body)`.
-    pub async fn send_json<T: serde::de::DeserializeOwned>(self) -> (http::StatusCode, T) {
+    pub(crate) async fn send_json<T: serde::de::DeserializeOwned>(self) -> (http::StatusCode, T) {
         let resp = self.send().await;
         let status = resp.status();
         let bytes = resp.into_body().collect().await.expect("body").to_bytes();
@@ -126,7 +126,7 @@ impl RequestBuilder {
     }
 
     /// Execute the request and return just the status code.
-    pub async fn send_status(self) -> http::StatusCode {
+    pub(crate) async fn send_status(self) -> http::StatusCode {
         self.send().await.status()
     }
 }

@@ -1299,7 +1299,7 @@ fn build_plugin_assignment_nullable(
 ///
 /// Broadcasts a stdin attention event to all SSE subscribers of the update.
 #[tracing::instrument(skip_all, fields(%service_id, update_history_id = %payload.update_history_id))]
-pub async fn handle_stdin_attention(
+pub(crate) async fn handle_stdin_attention(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     payload: &uptrakit_internal_wire::StdinAttentionPayload,
