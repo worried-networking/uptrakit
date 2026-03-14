@@ -1,8 +1,64 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::error::Result;
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
+
+#[derive(Debug, Subcommand)]
+pub enum SchedulerCommands {
+    /// List scheduled tasks
+    List,
+    /// Show scheduled task details
+    Show {
+        /// Task UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Trigger immediate execution of a scheduled task
+    Trigger {
+        /// Task UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+}
+
+pub async fn dispatch(command: SchedulerCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        SchedulerCommands::List => {
+            let resp = list(ListParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SchedulerCommands::Show { id } => {
+            let resp = show(ShowParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SchedulerCommands::Trigger { id } => {
+            let resp = trigger(TriggerParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::scheduler::{
     ScheduledTaskResponse, TriggerScheduledTaskResponse,

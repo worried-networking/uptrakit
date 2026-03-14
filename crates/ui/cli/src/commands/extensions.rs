@@ -1,6 +1,8 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::error::Result;
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
 use serde::Serialize;
 use std::ffi::OsString;
@@ -10,6 +12,91 @@ use uptrakit_internal_wire::extension::{
 };
 use uptrakit_openapi_client::types::extensions::{ExtensionProviderInfo, ExtensionResponse};
 use uuid::Uuid;
+
+#[derive(Debug, Subcommand)]
+pub enum ExtensionsCommands {
+    /// List all registered UI extensions
+    List,
+    /// List connected service instances providing an extension
+    Providers {
+        /// Extension ID (e.g. "ssh-agent.host-management")
+        extension_id: String,
+    },
+    /// Invoke an extension action (raw JSON params)
+    Invoke {
+        /// Extension ID
+        extension_id: String,
+        /// Action ID to invoke
+        action_id: String,
+        /// JSON parameters to pass to the action
+        #[arg(long, default_value = "{}")]
+        params: String,
+        /// Route to a specific service instance (required for targeted extensions)
+        #[arg(long)]
+        service_id: Option<Uuid>,
+    },
+    /// Dynamic extension subcommand (e.g., `extensions ssh-agent.hosts list-hosts`)
+    #[command(external_subcommand)]
+    Dynamic(Vec<OsString>),
+}
+
+pub async fn dispatch(command: ExtensionsCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        ExtensionsCommands::List => {
+            let resp = list(ListParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        ExtensionsCommands::Providers { extension_id } => {
+            let resp = providers(ProvidersParams {
+                extension_id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        ExtensionsCommands::Invoke {
+            extension_id,
+            action_id,
+            params,
+            service_id,
+        } => {
+            let params_value: serde_json::Value = serde_json::from_str(&params).context_to()?;
+            let resp = invoke(InvokeParams {
+                extension_id,
+                action_id,
+                params: params_value,
+                service_id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        ExtensionsCommands::Dynamic(args) => {
+            let resp = dynamic_invoke(
+                args,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 
 // ── HumanOutput impls ──────────────────────────────────────────────────────
 

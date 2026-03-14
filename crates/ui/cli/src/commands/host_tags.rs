@@ -1,8 +1,187 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::error::Result;
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
+
+#[derive(Debug, Subcommand)]
+pub enum HostTagsCommands {
+    /// List all host tags
+    List {
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+        /// Search by name
+        #[arg(long)]
+        search: Option<String>,
+    },
+    /// Show host tag details
+    Show {
+        /// Host tag UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Create a new host tag
+    Create {
+        /// Tag name
+        #[arg(long)]
+        name: String,
+        /// Tag color (hex, e.g. #3B82F6). Auto-generated if omitted.
+        #[arg(long)]
+        color: Option<String>,
+        /// Tag description
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// Update a host tag
+    Update {
+        /// Host tag UUID
+        id: uptrakit_openapi_client::Uuid,
+        /// New name
+        #[arg(long)]
+        name: Option<String>,
+        /// New color (hex, e.g. #3B82F6)
+        #[arg(long)]
+        color: Option<String>,
+        /// New description
+        #[arg(long)]
+        description: Option<String>,
+        /// Clear the description
+        #[arg(long)]
+        clear_description: bool,
+    },
+    /// Delete a host tag
+    Delete {
+        /// Host tag UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Set tags on a host (replaces existing tags)
+    Set {
+        /// Host UUID
+        host_id: uptrakit_openapi_client::Uuid,
+        /// Tag UUIDs (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<uptrakit_openapi_client::Uuid>,
+    },
+    /// Perform a batch action on multiple host tags
+    Batch {
+        /// Action to perform (e.g. delete)
+        action: String,
+        /// Host tag UUIDs (space-separated)
+        ids: Vec<uptrakit_openapi_client::Uuid>,
+    },
+}
+
+pub async fn dispatch(command: HostTagsCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        HostTagsCommands::List {
+            page,
+            per_page,
+            search,
+        } => {
+            let resp = list(ListParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+                page,
+                per_page,
+                search,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        HostTagsCommands::Show { id } => {
+            let resp = show(ShowParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        HostTagsCommands::Create {
+            name,
+            color,
+            description,
+        } => {
+            let resp = create(CreateParams {
+                name,
+                color,
+                description,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        HostTagsCommands::Update {
+            id,
+            name,
+            color,
+            description,
+            clear_description,
+        } => {
+            let resp = update(UpdateParams {
+                id: &id,
+                name,
+                color,
+                description,
+                clear_description,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        HostTagsCommands::Delete { id } => {
+            let resp = delete(DeleteParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        HostTagsCommands::Set { host_id, tags } => {
+            let resp = set_tags(SetParams {
+                host_id: &host_id,
+                tag_ids: tags,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        HostTagsCommands::Batch { action, ids } => {
+            let resp = batch(
+                &action,
+                &ids,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_openapi_client::types::host_tags::{

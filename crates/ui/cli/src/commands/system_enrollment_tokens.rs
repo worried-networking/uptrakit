@@ -1,6 +1,8 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::error::Result;
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
@@ -11,6 +13,98 @@ use uptrakit_openapi_client::types::system_enrollment_tokens::{
 };
 
 use crate::commands::settings::DeletedOutput;
+
+#[derive(Debug, Subcommand)]
+pub enum SystemEnrollmentTokensCommands {
+    /// List system enrollment tokens
+    List {
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Create a new system enrollment token
+    Create {
+        /// Human-readable token name
+        #[arg(long)]
+        name: String,
+        /// Maximum number of enrollments allowed
+        #[arg(long)]
+        max_uses: Option<u32>,
+        /// Token lifetime in seconds (e.g. 86400 for 24 hours)
+        #[arg(long)]
+        expires_in: Option<u64>,
+    },
+    /// Show system enrollment token details
+    Show {
+        /// System enrollment token UUID
+        id: Uuid,
+    },
+    /// Revoke a system enrollment token
+    Revoke {
+        /// System enrollment token UUID
+        id: Uuid,
+    },
+}
+
+pub async fn dispatch(command: SystemEnrollmentTokensCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        SystemEnrollmentTokensCommands::List { page, per_page } => {
+            let resp = list(ListParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+                page,
+                per_page,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SystemEnrollmentTokensCommands::Create {
+            name,
+            max_uses,
+            expires_in,
+        } => {
+            let resp = create(CreateParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+                name: &name,
+                max_uses,
+                expires_in_seconds: expires_in,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SystemEnrollmentTokensCommands::Show { id } => {
+            let resp = show(ShowParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SystemEnrollmentTokensCommands::Revoke { id } => {
+            let resp = revoke(RevokeParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 
 // ── Human output ────────────────────────────────────────────────────────────
 

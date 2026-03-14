@@ -1,8 +1,219 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::error::{CliError, Result};
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
 use serde::Serialize;
+
+#[derive(Debug, Subcommand)]
+pub enum ServicesCommands {
+    /// List all services
+    List {
+        /// Filter by capability (software_discovery, mqtt_bridge, ssh_remote)
+        #[arg(long)]
+        capability: Option<String>,
+        /// Filter by status (pending, approved, rejected, deactivated)
+        #[arg(long)]
+        status: Option<String>,
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Show service details
+    Show {
+        /// Service UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Approve a pending service
+    Approve {
+        /// Service UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Reject a pending service
+    Reject {
+        /// Service UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Remove (deactivate) a service
+    Remove {
+        /// Service UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Update a service's settings
+    Update {
+        /// Service UUID
+        id: uptrakit_openapi_client::Uuid,
+        /// Custom ping interval in seconds (0 to clear override)
+        #[arg(long)]
+        ping_interval: Option<u32>,
+        /// Per-service certificate lifetime in hours (0 to clear override)
+        #[arg(long)]
+        cert_lifetime_hours: Option<u32>,
+    },
+    /// Merge a source service into a target service
+    Merge {
+        /// Target service UUID (approved)
+        target_id: uptrakit_openapi_client::Uuid,
+        /// Source service UUID (pending)
+        source_id: uptrakit_openapi_client::Uuid,
+    },
+    /// Enable or disable the update freeze on a connected service
+    UpdateFreeze {
+        /// Service UUID
+        id: uptrakit_openapi_client::Uuid,
+        /// Enable the freeze (blocks updates on the agent)
+        #[arg(long, group = "freeze_action")]
+        enable: bool,
+        /// Disable the freeze (allows updates on the agent)
+        #[arg(long, group = "freeze_action")]
+        disable: bool,
+        /// Optional reason for the freeze
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Perform a batch action on multiple services
+    Batch {
+        /// Action to perform (e.g. approve, reject, deactivate, delete)
+        action: String,
+        /// Service UUIDs (space-separated)
+        ids: Vec<uptrakit_openapi_client::Uuid>,
+    },
+}
+
+pub async fn dispatch(command: ServicesCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        ServicesCommands::List {
+            capability,
+            status,
+            page,
+            per_page,
+        } => {
+            let resp = list(ListParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                capability: capability.as_deref(),
+                status: status.as_deref(),
+                page,
+                per_page,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        ServicesCommands::Show { id } => {
+            let resp = show(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        ServicesCommands::Approve { id } => {
+            let resp = approve(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        ServicesCommands::Reject { id } => {
+            let resp = reject(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        ServicesCommands::Remove { id } => {
+            let resp = remove(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        ServicesCommands::Update {
+            id,
+            ping_interval,
+            cert_lifetime_hours,
+        } => {
+            let resp = update(
+                &id,
+                ping_interval,
+                cert_lifetime_hours,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        ServicesCommands::Merge {
+            target_id,
+            source_id,
+        } => {
+            let resp = merge(
+                &target_id,
+                &source_id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        ServicesCommands::UpdateFreeze {
+            id,
+            enable,
+            disable: _,
+            reason,
+        } => {
+            let resp = update_freeze(
+                &id,
+                enable,
+                reason.as_deref(),
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        ServicesCommands::Batch { action, ids } => {
+            let resp = batch(
+                &action,
+                &ids,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchActionResponse};

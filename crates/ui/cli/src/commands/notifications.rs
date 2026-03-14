@@ -1,8 +1,346 @@
 use crate::client::authenticated_client;
-use crate::error::Result;
+use crate::commands::CliContext;
+use crate::error::{CliError, Result};
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
 use serde::Serialize;
+
+#[derive(Debug, Subcommand)]
+pub enum NotificationsCommands {
+    /// Manage notification channels
+    Channels {
+        #[command(subcommand)]
+        command: ChannelsCommands,
+    },
+    /// Manage notification rules
+    Rules {
+        #[command(subcommand)]
+        command: RulesCommands,
+    },
+    /// View notification delivery log
+    Log {
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ChannelsCommands {
+    /// List notification channels
+    List {
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Show notification channel details
+    Get {
+        /// Channel UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Create a new notification channel
+    Create {
+        /// Channel name
+        #[arg(long)]
+        name: String,
+        /// Channel type (webhook, telegram)
+        #[arg(long = "type")]
+        channel_type: String,
+        /// Channel-specific configuration as JSON string
+        #[arg(long)]
+        config: String,
+    },
+    /// Update a notification channel
+    Update {
+        /// Channel UUID
+        id: uptrakit_openapi_client::Uuid,
+        /// New name
+        #[arg(long)]
+        name: Option<String>,
+        /// Updated configuration as JSON string
+        #[arg(long)]
+        config: Option<String>,
+        /// Enable or disable
+        #[arg(long)]
+        enabled: Option<bool>,
+    },
+    /// Delete a notification channel
+    Delete {
+        /// Channel UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Send a test notification through a channel
+    Test {
+        /// Channel UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RulesCommands {
+    /// List notification rules
+    List {
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Show notification rule details
+    Get {
+        /// Rule UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Create a new notification rule
+    Create {
+        /// Channel UUID to deliver notifications through
+        #[arg(long)]
+        channel_id: uptrakit_openapi_client::Uuid,
+        /// Event type (update_available, update_completed, update_failed, new_software_discovered, new_service_enrolled, ca_rotated)
+        #[arg(long)]
+        event_type: String,
+        /// Optionally scope to a specific host
+        #[arg(long)]
+        host_id: Option<uptrakit_openapi_client::Uuid>,
+        /// Optionally scope to a specific software item
+        #[arg(long)]
+        software_item_id: Option<uptrakit_openapi_client::Uuid>,
+        /// Optionally scope to a specific plugin type
+        #[arg(long)]
+        plugin_type: Option<String>,
+    },
+    /// Update a notification rule
+    Update {
+        /// Rule UUID
+        id: uptrakit_openapi_client::Uuid,
+        /// New event type
+        #[arg(long)]
+        event_type: Option<String>,
+        /// Enable or disable
+        #[arg(long)]
+        enabled: Option<bool>,
+    },
+    /// Delete a notification rule
+    Delete {
+        /// Rule UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+}
+
+#[allow(clippy::too_many_lines)] // dispatch function mirrors the CLI structure
+pub async fn dispatch(command: NotificationsCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        NotificationsCommands::Channels { command } => match command {
+            ChannelsCommands::List { page, per_page } => {
+                let resp = channel_list(ChannelListParams {
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                    page,
+                    per_page,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            ChannelsCommands::Get { id } => {
+                let resp = channel_get(ChannelGetParams {
+                    id: &id,
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            ChannelsCommands::Create {
+                name,
+                channel_type,
+                config,
+            } => {
+                let channel_type: uptrakit_openapi_client::types::notifications::NotificationChannelType =
+                    channel_type.parse().map_err(|_| {
+                        report!(CliError::Other(format!(
+                            "unknown channel type: {channel_type} (expected webhook or telegram)"
+                        )))
+                    })?;
+                let config_value: serde_json::Value =
+                    serde_json::from_str(&config).map_err(|e| {
+                        report!(CliError::Other(format!("invalid JSON for --config: {e}")))
+                    })?;
+                let resp = channel_create(ChannelCreateParams {
+                    name,
+                    channel_type,
+                    config: config_value,
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            ChannelsCommands::Update {
+                id,
+                name,
+                config,
+                enabled,
+            } => {
+                let config_value: Option<serde_json::Value> = match config {
+                    Some(s) => Some(serde_json::from_str(&s).map_err(|e| {
+                        report!(CliError::Other(format!("invalid JSON for --config: {e}")))
+                    })?),
+                    None => None,
+                };
+                let resp = channel_update(ChannelUpdateParams {
+                    id: &id,
+                    name,
+                    config: config_value,
+                    enabled,
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            ChannelsCommands::Delete { id } => {
+                let resp = channel_delete(ChannelDeleteParams {
+                    id: &id,
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            ChannelsCommands::Test { id } => {
+                let resp = channel_test(ChannelTestParams {
+                    id: &id,
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+        },
+        NotificationsCommands::Rules { command } => match command {
+            RulesCommands::List { page, per_page } => {
+                let resp = rule_list(RuleListParams {
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                    page,
+                    per_page,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            RulesCommands::Get { id } => {
+                let resp = rule_get(RuleGetParams {
+                    id: &id,
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            RulesCommands::Create {
+                channel_id,
+                event_type,
+                host_id,
+                software_item_id,
+                plugin_type,
+            } => {
+                let event_type: uptrakit_openapi_client::types::notifications::NotificationEventType =
+                    event_type.parse().map_err(|_| {
+                        report!(CliError::Other(format!(
+                            "unknown event type: {event_type} (expected update_available, update_completed, update_failed, new_software_discovered, new_service_enrolled, or ca_rotated)"
+                        )))
+                    })?;
+                let resp = rule_create(RuleCreateParams {
+                    channel_id,
+                    event_type,
+                    host_id,
+                    software_item_id,
+                    plugin_type,
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            RulesCommands::Update {
+                id,
+                event_type,
+                enabled,
+            } => {
+                let event_type: Option<uptrakit_openapi_client::types::notifications::NotificationEventType> =
+                    match event_type {
+                        Some(s) => Some(s.parse().map_err(|_| {
+                            report!(CliError::Other(format!(
+                                "unknown event type: {s} (expected update_available, update_completed, update_failed, new_software_discovered, new_service_enrolled, or ca_rotated)"
+                            )))
+                        })?),
+                        None => None,
+                    };
+                let resp = rule_update(RuleUpdateParams {
+                    id: &id,
+                    event_type,
+                    enabled,
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            RulesCommands::Delete { id } => {
+                let resp = rule_delete(RuleDeleteParams {
+                    id: &id,
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+        },
+        NotificationsCommands::Log { page, per_page } => {
+            let resp = log_list(LogListParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+                page,
+                per_page,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::notifications::{

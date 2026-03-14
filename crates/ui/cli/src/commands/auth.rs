@@ -1,7 +1,9 @@
 use crate::client::{UptrakitClient, resolve_server_and_token};
+use crate::commands::CliContext;
 use crate::config::{Config, Credentials, load_config, save_config, save_credentials};
 use crate::error::{CliError, Result};
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use futures_util::StreamExt;
 use rootcause::prelude::*;
 use serde::Serialize;
@@ -11,6 +13,89 @@ use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::device_auth_stream::DeviceAuthSseEvent;
 use uptrakit_openapi_client::types::api_tokens::CreateApiTokenRequest;
 use uptrakit_openapi_client::types::device_auth::{DeviceAuthPollRequest, DeviceAuthStartRequest};
+
+#[derive(Debug, Subcommand)]
+pub enum AuthCommands {
+    /// Login to the server via browser authorization
+    Login,
+    /// Show current authentication status
+    Status,
+    /// API token management
+    Token {
+        #[command(subcommand)]
+        command: TokenCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TokenCommands {
+    /// Create a new API token
+    Create {
+        /// Token name
+        #[arg(long)]
+        name: String,
+    },
+    /// List API tokens
+    List,
+    /// Revoke an API token
+    Revoke {
+        /// Token ID to revoke
+        id: Uuid,
+    },
+}
+
+pub async fn dispatch(command: AuthCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        AuthCommands::Login => {
+            login(ctx.server.as_deref(), ctx.insecure).await?;
+        }
+        AuthCommands::Status => {
+            let resp = status(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        AuthCommands::Token { command } => match command {
+            TokenCommands::Create { name } => {
+                let resp = token_create(
+                    &name,
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            TokenCommands::List => {
+                let resp = token_list(
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            TokenCommands::Revoke { id } => {
+                let resp = token_revoke(
+                    &id,
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+        },
+    }
+    Ok(())
+}
 
 /// Serializable output for `auth status`.
 #[derive(Debug, Serialize)]

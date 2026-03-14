@@ -1,8 +1,80 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::error::Result;
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use futures_util::StreamExt;
 use rootcause::prelude::*;
+
+#[derive(Debug, Subcommand)]
+pub enum UpdateBatchesCommands {
+    /// List update batches
+    List {
+        /// Filter by status
+        #[arg(long, value_parser = ["in_progress", "completed", "partially_completed"])]
+        status: Option<String>,
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Show update batch details
+    Show {
+        /// Batch UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Follow batch progress in real-time via SSE
+    Follow {
+        /// Batch UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+}
+
+pub async fn dispatch(command: UpdateBatchesCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        UpdateBatchesCommands::List {
+            status,
+            page,
+            per_page,
+        } => {
+            let resp = list_batches(ListBatchParams {
+                status: status.as_deref(),
+                page,
+                per_page,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        UpdateBatchesCommands::Show { id } => {
+            let resp = show_batch(ShowBatchParams {
+                batch_id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        UpdateBatchesCommands::Follow { id } => {
+            let result = follow_batch(FollowBatchParams {
+                batch_id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+            })
+            .await?;
+            std::process::exit(result.exit_code());
+        }
+    }
+    Ok(())
+}
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::batch_progress_stream::BatchProgressEvent;
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;

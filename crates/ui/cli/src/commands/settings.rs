@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::error::Result;
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
 use serde::Serialize;
 use uptrakit_openapi_client::Uuid;
@@ -38,6 +40,945 @@ use uptrakit_openapi_client::types::settings_smtp::{
     SmtpSettingsResponse, UpdateSmtpSettingsRequest,
 };
 use uptrakit_openapi_client::types::system_alerts::SystemAlertsResponse;
+
+#[derive(Debug, Subcommand)]
+pub enum SettingsCommands {
+    /// Show combined settings overview
+    Show,
+    /// Registration settings
+    Registration {
+        #[command(subcommand)]
+        command: RegistrationCommands,
+    },
+    /// Authentication settings
+    Authentication {
+        #[command(subcommand)]
+        command: AuthenticationCommands,
+    },
+    /// Agent certificate settings
+    Certificates {
+        #[command(subcommand)]
+        command: CertificateCommands,
+    },
+    /// Network settings
+    Network {
+        #[command(subcommand)]
+        command: NetworkCommands,
+    },
+    /// Rotate the CA certificate
+    RotateCa,
+    /// Renew the server TLS certificate
+    RenewServerCert,
+    /// MQTT client configuration
+    Mqtt {
+        #[command(subcommand)]
+        command: MqttCommands,
+    },
+    /// OIDC provider management
+    Oidc {
+        #[command(subcommand)]
+        command: OidcCommands,
+    },
+    /// Show system alerts
+    Alerts,
+    /// SMTP settings for email notifications
+    Smtp {
+        #[command(subcommand)]
+        command: SmtpCommands,
+    },
+    /// NATS server URL configuration
+    Nats {
+        #[command(subcommand)]
+        command: NatsCommands,
+    },
+    /// Reset all tenant-scoped data (hosts, software items, plugin configs, etc.)
+    ResetData {
+        /// Confirm the destructive operation (required)
+        #[arg(long)]
+        confirm: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RegistrationCommands {
+    /// Show registration settings
+    Show,
+    /// Update registration settings
+    Update {
+        /// Registration mode (open, invite, closed)
+        #[arg(long, value_parser = super::parse_registration_mode)]
+        mode: RegistrationMode,
+        /// Registration token (required for invite mode)
+        #[arg(long)]
+        token: Option<String>,
+        /// Whether OIDC users also need a registration token
+        #[arg(long)]
+        require_token_for_oidc: Option<bool>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AuthenticationCommands {
+    /// Show authentication settings
+    Show,
+    /// Update authentication settings
+    Update {
+        /// Enable or disable password authentication
+        #[arg(long)]
+        password_auth_enabled: Option<bool>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CertificateCommands {
+    /// Show agent certificate settings
+    Show,
+    /// Update agent certificate settings
+    Update {
+        /// Certificate lifetime in hours (max 17520)
+        #[arg(long)]
+        lifetime_hours: Option<u32>,
+        /// Certificate renewal window in hours (use 0 to reset to automatic: min(14 days, lifetime/5))
+        #[arg(long)]
+        renewal_window_hours: Option<u16>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum NetworkCommands {
+    /// Show network settings
+    Show,
+    /// Update network settings
+    Update {
+        /// Comma-separated trusted proxy CIDRs
+        #[arg(long)]
+        trusted_proxies: Option<String>,
+        /// Header name for extracting real client IP
+        #[arg(long)]
+        real_ip_header: Option<String>,
+        /// Comma-separated Subject Alternative Names for the server certificate
+        #[arg(long)]
+        sans: Option<String>,
+        /// HTTPS listen address
+        #[arg(long)]
+        https_addr: Option<String>,
+        /// Header for forwarded client cert info
+        #[arg(long)]
+        fwd_cert_info_header: Option<String>,
+        /// Header for forwarded client cert PEM
+        #[arg(long)]
+        fwd_cert_pem_header: Option<String>,
+        /// PKI address for OCSP/CRL/CA cert
+        #[arg(long)]
+        pki_addr: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MqttCommands {
+    /// List MQTT client configurations
+    List,
+    /// Show MQTT client configuration details
+    Show {
+        /// MQTT configuration UUID
+        id: Uuid,
+    },
+    /// Create a new MQTT client configuration
+    Create {
+        /// MQTT URL (e.g. mqtt://broker:1883)
+        #[arg(long)]
+        url: Option<String>,
+        /// Transport type (tcp, tls)
+        #[arg(long)]
+        transport: Option<String>,
+        /// Broker hostname
+        #[arg(long)]
+        host: Option<String>,
+        /// Broker port
+        #[arg(long)]
+        port: Option<u16>,
+        /// Enable or disable
+        #[arg(long)]
+        enabled: Option<bool>,
+        /// MQTT client ID
+        #[arg(long)]
+        client_id: Option<String>,
+        /// MQTT username
+        #[arg(long)]
+        username: Option<String>,
+        /// MQTT password
+        #[arg(long)]
+        password: Option<String>,
+        /// Custom CA certificate in PEM format (for private brokers)
+        #[arg(long, conflicts_with = "ca_pem_file")]
+        ca_pem: Option<String>,
+        /// Path to a PEM file containing a custom CA certificate (for private brokers)
+        #[arg(long, conflicts_with = "ca_pem")]
+        ca_pem_file: Option<std::path::PathBuf>,
+        /// Topic prefix (e.g. uptrakit)
+        #[arg(long)]
+        topic_prefix: Option<String>,
+        /// Enable Home Assistant MQTT discovery
+        #[arg(long = "ha-discovery", action = clap::ArgAction::SetTrue, default_value_t = false)]
+        ha_discovery: bool,
+        /// Disable Home Assistant MQTT discovery
+        #[arg(long = "no-ha-discovery", action = clap::ArgAction::SetTrue, default_value_t = false, conflicts_with = "ha_discovery")]
+        no_ha_discovery: bool,
+        /// Home Assistant discovery topic prefix (default: homeassistant)
+        #[arg(long)]
+        ha_discovery_prefix: Option<String>,
+    },
+    /// Update an MQTT client configuration
+    Update {
+        /// MQTT configuration UUID
+        id: Uuid,
+        /// MQTT URL
+        #[arg(long)]
+        url: Option<String>,
+        /// Transport type (tcp, tls)
+        #[arg(long)]
+        transport: Option<String>,
+        /// Broker hostname
+        #[arg(long)]
+        host: Option<String>,
+        /// Broker port
+        #[arg(long)]
+        port: Option<u16>,
+        /// Enable or disable
+        #[arg(long)]
+        enabled: Option<bool>,
+        /// MQTT client ID
+        #[arg(long)]
+        client_id: Option<String>,
+        /// MQTT username
+        #[arg(long)]
+        username: Option<String>,
+        /// MQTT password
+        #[arg(long)]
+        password: Option<String>,
+        /// Custom CA certificate in PEM format (for private brokers)
+        #[arg(long, conflicts_with = "ca_pem_file")]
+        ca_pem: Option<String>,
+        /// Path to a PEM file containing a custom CA certificate (for private brokers)
+        #[arg(long, conflicts_with = "ca_pem")]
+        ca_pem_file: Option<std::path::PathBuf>,
+        /// Topic prefix
+        #[arg(long)]
+        topic_prefix: Option<String>,
+        /// Enable Home Assistant MQTT discovery
+        #[arg(long = "ha-discovery", action = clap::ArgAction::SetTrue, default_value_t = false)]
+        ha_discovery: bool,
+        /// Disable Home Assistant MQTT discovery
+        #[arg(long = "no-ha-discovery", action = clap::ArgAction::SetTrue, default_value_t = false, conflicts_with = "ha_discovery")]
+        no_ha_discovery: bool,
+        /// Home Assistant discovery topic prefix (default: homeassistant)
+        #[arg(long)]
+        ha_discovery_prefix: Option<String>,
+    },
+    /// Delete an MQTT client configuration
+    Delete {
+        /// MQTT configuration UUID
+        id: Uuid,
+    },
+    /// MQTT client limit management
+    Limit {
+        #[command(subcommand)]
+        command: MqttLimitCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MqttLimitCommands {
+    /// Show MQTT client limit
+    Show,
+    /// Update MQTT client limit
+    Update {
+        /// Maximum MQTT clients per tenant
+        #[arg(long)]
+        max: u16,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum OidcCommands {
+    /// List OIDC providers
+    List,
+    /// Show OIDC provider details
+    Show {
+        /// OIDC provider UUID
+        id: Uuid,
+    },
+    /// Create a new OIDC provider
+    Create {
+        /// Provider display name
+        #[arg(long)]
+        name: String,
+        /// URL-safe slug
+        #[arg(long)]
+        slug: String,
+        /// Logo URL
+        #[arg(long)]
+        logo_url: Option<String>,
+        /// OIDC issuer URL
+        #[arg(long)]
+        issuer_url: String,
+        /// OAuth client ID
+        #[arg(long)]
+        client_id: String,
+        /// OAuth client secret
+        #[arg(long)]
+        client_secret: String,
+        /// OAuth scopes (default: "openid email profile groups")
+        #[arg(long)]
+        scopes: Option<String>,
+        /// Auto-create users on first login
+        #[arg(long)]
+        auto_create_users: Option<bool>,
+        /// JSONPath for role claim
+        #[arg(long)]
+        role_claim_path: Option<String>,
+    },
+    /// Update an OIDC provider
+    Update {
+        /// OIDC provider UUID
+        id: Uuid,
+        /// Provider display name
+        #[arg(long)]
+        name: Option<String>,
+        /// URL-safe slug
+        #[arg(long)]
+        slug: Option<String>,
+        /// Logo URL
+        #[arg(long)]
+        logo_url: Option<String>,
+        /// OIDC issuer URL
+        #[arg(long)]
+        issuer_url: Option<String>,
+        /// OAuth client ID
+        #[arg(long)]
+        client_id: Option<String>,
+        /// OAuth client secret
+        #[arg(long)]
+        client_secret: Option<String>,
+        /// OAuth scopes
+        #[arg(long)]
+        scopes: Option<String>,
+        /// Auto-create users on first login
+        #[arg(long)]
+        auto_create_users: Option<bool>,
+        /// JSONPath for role claim
+        #[arg(long)]
+        role_claim_path: Option<String>,
+    },
+    /// Delete an OIDC provider
+    Delete {
+        /// OIDC provider UUID
+        id: Uuid,
+    },
+    /// Activate an OIDC provider
+    Activate {
+        /// OIDC provider UUID
+        id: Uuid,
+    },
+    /// Deactivate an OIDC provider
+    Deactivate {
+        /// OIDC provider UUID
+        id: Uuid,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SmtpCommands {
+    /// Show current SMTP settings
+    Show,
+    /// Update SMTP settings
+    Set {
+        /// SMTP server hostname
+        #[arg(long)]
+        host: Option<String>,
+        /// SMTP server port (default: 587)
+        #[arg(long)]
+        port: Option<u16>,
+        /// SMTP username
+        #[arg(long)]
+        username: Option<String>,
+        /// Clear the saved username
+        #[arg(long, conflicts_with = "username")]
+        clear_username: bool,
+        /// SMTP password
+        #[arg(long)]
+        password: Option<String>,
+        /// Clear the saved password
+        #[arg(long, conflicts_with = "password")]
+        clear_password: bool,
+        /// Sender email address
+        #[arg(long)]
+        from_address: Option<String>,
+        /// Sender display name
+        #[arg(long)]
+        from_name: Option<String>,
+        /// Clear the saved sender display name
+        #[arg(long, conflicts_with = "from_name")]
+        clear_from_name: bool,
+        /// TLS mode: starttls, tls, or none (default: starttls)
+        #[arg(long)]
+        tls_mode: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum NatsCommands {
+    /// Show current NATS server URL configuration
+    Show,
+    /// Set the NATS server URL
+    Set {
+        /// NATS server URL (e.g. nats://host:4222 or nats://user:password@host:4222)
+        #[arg(long)]
+        url: String,
+    },
+    /// Clear the stored NATS server URL
+    Clear,
+}
+
+#[allow(clippy::too_many_lines)] // Large dispatch is inherent to the settings tree
+pub async fn dispatch(command: SettingsCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        SettingsCommands::Show => {
+            let resp = show_combined(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SettingsCommands::Registration { command } => match command {
+            RegistrationCommands::Show => {
+                let resp = registration_show(
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            RegistrationCommands::Update {
+                mode,
+                token,
+                require_token_for_oidc,
+            } => {
+                let resp = registration_update(RegistrationUpdateParams {
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    mode,
+                    reg_token: token,
+                    require_token_for_oidc,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+        },
+        SettingsCommands::Authentication { command } => match command {
+            AuthenticationCommands::Show => {
+                let resp = authentication_show(
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            AuthenticationCommands::Update {
+                password_auth_enabled,
+            } => {
+                let resp = authentication_update(
+                    password_auth_enabled,
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+        },
+        SettingsCommands::Certificates { command } => match command {
+            CertificateCommands::Show => {
+                let resp = certificates_show(
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            CertificateCommands::Update {
+                lifetime_hours,
+                renewal_window_hours,
+            } => {
+                let resp = certificates_update(
+                    lifetime_hours,
+                    renewal_window_hours,
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+        },
+        SettingsCommands::Network { command } => match command {
+            NetworkCommands::Show => {
+                let resp = network_show(
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            NetworkCommands::Update {
+                trusted_proxies,
+                real_ip_header,
+                sans,
+                https_addr,
+                fwd_cert_info_header,
+                fwd_cert_pem_header,
+                pki_addr,
+            } => {
+                let resp = network_update(NetworkUpdateParams {
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    trusted_proxies: trusted_proxies
+                        .map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
+                    real_ip_header,
+                    sans: sans.map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
+                    https_addr,
+                    fwd_cert_info_header,
+                    fwd_cert_pem_header,
+                    pki_addr,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+        },
+        SettingsCommands::RotateCa => {
+            let resp = rotate_ca(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SettingsCommands::RenewServerCert => {
+            let resp = renew_server_cert(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SettingsCommands::Mqtt { command } => dispatch_mqtt(command, ctx).await?,
+        SettingsCommands::Oidc { command } => dispatch_oidc(command, ctx).await?,
+        SettingsCommands::Alerts => {
+            let resp = alerts(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SettingsCommands::Smtp { command } => match command {
+            SmtpCommands::Show => {
+                let resp = smtp_show(
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            SmtpCommands::Set {
+                host,
+                port,
+                username,
+                clear_username,
+                password,
+                clear_password,
+                from_address,
+                from_name,
+                clear_from_name,
+                tls_mode,
+            } => {
+                let resp = smtp_set(SmtpSetParams {
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                    host,
+                    port,
+                    username,
+                    clear_username,
+                    password,
+                    clear_password,
+                    from_address,
+                    from_name,
+                    clear_from_name,
+                    tls_mode,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+        },
+        SettingsCommands::Nats { command } => match command {
+            NatsCommands::Show => {
+                let resp = nats_show(
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            NatsCommands::Set { url } => {
+                let resp = nats_set(
+                    url,
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+                eprintln!(
+                    "NATS URL updated. The change will take effect after the controller is restarted."
+                );
+            }
+            NatsCommands::Clear => {
+                let resp = nats_clear(
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+                eprintln!(
+                    "NATS URL cleared. The change will take effect after the controller is restarted."
+                );
+            }
+        },
+        SettingsCommands::ResetData { confirm } => {
+            if !confirm {
+                eprintln!(
+                    "Error: You must pass --confirm to reset all data. This action is irreversible."
+                );
+                std::process::exit(1);
+            }
+            let resp = reset_data(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)] // Large dispatch is inherent to MQTT subcommands
+async fn dispatch_mqtt(command: MqttCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        MqttCommands::List => {
+            let resp = mqtt_list(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        MqttCommands::Show { id } => {
+            let resp = mqtt_show(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        MqttCommands::Create {
+            url,
+            transport,
+            host,
+            port,
+            enabled,
+            client_id,
+            username,
+            password,
+            ca_pem,
+            ca_pem_file,
+            topic_prefix,
+            ha_discovery,
+            no_ha_discovery,
+            ha_discovery_prefix,
+        } => {
+            let ca_pem = super::resolve_ca_pem(ca_pem, ca_pem_file)?;
+            let ha_discovery_flag = if ha_discovery {
+                Some(true)
+            } else if no_ha_discovery {
+                Some(false)
+            } else {
+                None
+            };
+            let resp = mqtt_create(MqttCreateParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                url,
+                transport,
+                host,
+                port,
+                enabled,
+                client_id,
+                username,
+                password,
+                ca_pem,
+                topic_prefix,
+                ha_discovery: ha_discovery_flag,
+                ha_discovery_prefix,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        MqttCommands::Update {
+            id,
+            url,
+            transport,
+            host,
+            port,
+            enabled,
+            client_id,
+            username,
+            password,
+            ca_pem,
+            ca_pem_file,
+            topic_prefix,
+            ha_discovery,
+            no_ha_discovery,
+            ha_discovery_prefix,
+        } => {
+            let ca_pem = super::resolve_ca_pem(ca_pem, ca_pem_file)?;
+            let ha_discovery_flag = if ha_discovery {
+                Some(true)
+            } else if no_ha_discovery {
+                Some(false)
+            } else {
+                None
+            };
+            let resp = mqtt_update(MqttUpdateParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                id,
+                url,
+                transport,
+                host,
+                port,
+                enabled,
+                client_id,
+                username,
+                password,
+                ca_pem,
+                topic_prefix,
+                ha_discovery: ha_discovery_flag,
+                ha_discovery_prefix,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        MqttCommands::Delete { id } => {
+            let resp = mqtt_delete(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        MqttCommands::Limit { command } => match command {
+            MqttLimitCommands::Show => {
+                let resp = mqtt_limit_show(
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            MqttLimitCommands::Update { max } => {
+                let resp = mqtt_limit_update(
+                    max,
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+        },
+    }
+    Ok(())
+}
+
+async fn dispatch_oidc(command: OidcCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        OidcCommands::List => {
+            let resp = oidc_list(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        OidcCommands::Show { id } => {
+            let resp = oidc_show(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        OidcCommands::Create {
+            name,
+            slug,
+            logo_url,
+            issuer_url,
+            client_id,
+            client_secret,
+            scopes,
+            auto_create_users,
+            role_claim_path,
+        } => {
+            let resp = oidc_create(OidcCreateParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                name,
+                slug,
+                logo_url,
+                issuer_url,
+                client_id,
+                client_secret,
+                scopes,
+                auto_create_users,
+                role_claim_path,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        OidcCommands::Update {
+            id,
+            name,
+            slug,
+            logo_url,
+            issuer_url,
+            client_id,
+            client_secret,
+            scopes,
+            auto_create_users,
+            role_claim_path,
+        } => {
+            let resp = oidc_update(OidcUpdateParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                id,
+                name,
+                slug,
+                logo_url,
+                issuer_url,
+                client_id,
+                client_secret,
+                scopes,
+                auto_create_users,
+                role_claim_path,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        OidcCommands::Delete { id } => {
+            let resp = oidc_delete(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        OidcCommands::Activate { id } => {
+            let resp = oidc_activate(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        OidcCommands::Deactivate { id } => {
+            let resp = oidc_deactivate(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 
 // ── Local types ──────────────────────────────────────────────────────────────
 

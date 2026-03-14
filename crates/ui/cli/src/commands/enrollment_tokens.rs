@@ -1,8 +1,114 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::error::Result;
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
+
+#[derive(Debug, Subcommand)]
+pub enum EnrollmentTokensCommands {
+    /// List enrollment tokens
+    List {
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Create a new enrollment token
+    Create {
+        /// Human-readable token name
+        #[arg(long)]
+        name: String,
+        /// Comma-separated list of allowed capabilities (e.g. software_discovery,mqtt_bridge).
+        /// Omit for a wildcard token that allows any service type.
+        #[arg(long)]
+        capabilities: Option<String>,
+        /// Maximum number of enrollments allowed
+        #[arg(long)]
+        max_uses: Option<u32>,
+        /// Token lifetime in seconds (e.g. 86400 for 24 hours)
+        #[arg(long)]
+        expires_in: Option<u64>,
+    },
+    /// Show enrollment token details
+    Show {
+        /// Enrollment token UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Revoke an enrollment token
+    Revoke {
+        /// Enrollment token UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+}
+
+pub async fn dispatch(command: EnrollmentTokensCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        EnrollmentTokensCommands::List { page, per_page } => {
+            let resp = list(ListParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+                page,
+                per_page,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        EnrollmentTokensCommands::Create {
+            name,
+            capabilities,
+            max_uses,
+            expires_in,
+        } => {
+            let allowed_capabilities = capabilities.map(|s| {
+                s.split(',')
+                    .map(|c| c.trim().to_string())
+                    .filter(|c| !c.is_empty())
+                    .collect()
+            });
+            let resp = create(CreateParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+                name: &name,
+                allowed_capabilities,
+                max_uses,
+                expires_in_seconds: expires_in,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        EnrollmentTokensCommands::Show { id } => {
+            let resp = show(ShowParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        EnrollmentTokensCommands::Revoke { id } => {
+            let resp = revoke(RevokeParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::enrollment_tokens::{
     CreateEnrollmentTokenRequest, EnrollmentTokenCreatedResponse, EnrollmentTokenResponse,

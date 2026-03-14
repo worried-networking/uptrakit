@@ -1,16 +1,73 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::commands::settings::DeletedOutput;
 use crate::error::Result;
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
+use uptrakit_shared_types::PluginType;
+
+#[derive(Debug, Subcommand)]
+pub enum DiscoveryAllowlistCommands {
+    /// List tenant-wide discovery allowlist entries.
+    ///
+    /// An empty list means no restrictions — all discovery plugins run.
+    List,
+    /// Add a plugin type to the tenant-wide discovery allowlist
+    Add {
+        /// Plugin type (e.g. package_manager_homebrew)
+        plugin_type: PluginType,
+    },
+    /// Remove a tenant-wide discovery allowlist entry
+    Remove {
+        /// Entry UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+}
+
+pub async fn dispatch(command: DiscoveryAllowlistCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        DiscoveryAllowlistCommands::List => {
+            let resp = tenant_list(ListTenantParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        DiscoveryAllowlistCommands::Add { plugin_type } => {
+            let resp = tenant_add(AddTenantParams {
+                plugin_type,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        DiscoveryAllowlistCommands::Remove { id } => {
+            let resp = tenant_remove(RemoveTenantParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::discovery_allowlist::{
     CreateDiscoveryAllowlistEntryRequest, HostDiscoveryAllowlistEntry,
     TenantDiscoveryAllowlistEntry,
 };
-use uptrakit_shared_types::PluginType;
-
 // ── Human output ────────────────────────────────────────────────────────────
 
 impl HumanOutput for Vec<TenantDiscoveryAllowlistEntry> {

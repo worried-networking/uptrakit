@@ -1,6 +1,8 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::error::{CliError, Result};
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
@@ -11,6 +13,161 @@ use uptrakit_openapi_client::types::system_services::{
     ListSystemServicesQuery, ParseServiceStatusError, SystemServiceResponse,
     UpdateSystemServiceRequest,
 };
+
+#[derive(Debug, Subcommand)]
+pub enum SystemServicesCommands {
+    /// List all system services
+    List {
+        /// Filter by capability (mqtt_bridge, scheduler)
+        #[arg(long)]
+        capability: Option<String>,
+        /// Filter by status (pending, approved, rejected, deactivated)
+        #[arg(long)]
+        status: Option<String>,
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Show system service details
+    Show {
+        /// System service UUID
+        id: Uuid,
+    },
+    /// Approve a pending system service
+    Approve {
+        /// System service UUID
+        id: Uuid,
+    },
+    /// Reject a pending system service
+    Reject {
+        /// System service UUID
+        id: Uuid,
+    },
+    /// Remove (deactivate) a system service
+    Remove {
+        /// System service UUID
+        id: Uuid,
+    },
+    /// Update a system service's settings
+    Update {
+        /// System service UUID
+        id: Uuid,
+        /// Custom ping interval in seconds (0 to clear override)
+        #[arg(long)]
+        ping_interval: Option<u32>,
+        /// Per-service certificate lifetime in hours (0 to clear override)
+        #[arg(long)]
+        cert_lifetime_hours: Option<u32>,
+    },
+    /// Perform a batch action on multiple system services
+    Batch {
+        /// Action to perform (e.g. approve, reject, deactivate, delete)
+        action: String,
+        /// System service UUIDs (space-separated)
+        ids: Vec<Uuid>,
+    },
+}
+
+pub async fn dispatch(command: SystemServicesCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        SystemServicesCommands::List {
+            capability,
+            status,
+            page,
+            per_page,
+        } => {
+            let resp = list(ListParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                capability: capability.as_deref(),
+                status: status.as_deref(),
+                page,
+                per_page,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SystemServicesCommands::Show { id } => {
+            let resp = show(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SystemServicesCommands::Approve { id } => {
+            let resp = approve(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SystemServicesCommands::Reject { id } => {
+            let resp = reject(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SystemServicesCommands::Remove { id } => {
+            let resp = remove(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SystemServicesCommands::Update {
+            id,
+            ping_interval,
+            cert_lifetime_hours,
+        } => {
+            let resp = update(
+                &id,
+                ping_interval,
+                cert_lifetime_hours,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SystemServicesCommands::Batch { action, ids } => {
+            let resp = batch(
+                &action,
+                &ids,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 
 // ── Human output ────────────────────────────────────────────────────────────
 

@@ -1,8 +1,52 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::error::Result;
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
 use uptrakit_openapi_client::Uuid;
+
+#[derive(Debug, Subcommand)]
+pub enum CheckCommands {
+    /// Trigger bulk version check (all items, all hosts)
+    All,
+    /// Trigger version check for a software item
+    Item {
+        /// Software item UUID
+        item_id: Uuid,
+        /// Optionally scope to a specific host
+        #[arg(long)]
+        host: Option<Uuid>,
+    },
+}
+
+pub async fn dispatch(command: CheckCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        CheckCommands::All => {
+            let resp = all(AllParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        CheckCommands::Item { item_id, host } => {
+            let resp = item(ItemParams {
+                item_id: &item_id,
+                host_id: host.as_ref(),
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 use uptrakit_openapi_client::types::scheduler::{
     TASK_TYPE_FETCH_RELEASES, TriggerScheduledTaskResponse,
 };

@@ -1,6 +1,8 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::error::Result;
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
@@ -8,6 +10,193 @@ use uptrakit_openapi_client::types::autodiscovery::TriggerDiscoveryResponse;
 use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_openapi_client::types::hosts::{HostMessageResponse, HostResponse, UpdateHostRequest};
 use uptrakit_openapi_client::types::pagination::{PaginatedResponse, PaginationParams};
+use uptrakit_shared_types::PluginType;
+
+#[derive(Debug, Subcommand)]
+pub enum HostsCommands {
+    /// List all hosts
+    List {
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Show host details
+    Show {
+        /// Host UUID
+        id: Uuid,
+    },
+    /// Update a host's settings
+    Update {
+        /// Host UUID
+        id: Uuid,
+        /// New friendly name
+        #[arg(long)]
+        friendly_name: Option<String>,
+    },
+    /// Deactivate (remove) a host
+    Deactivate {
+        /// Host UUID
+        id: Uuid,
+    },
+    /// Trigger autodiscovery on a host
+    Discover {
+        /// Host UUID
+        id: Uuid,
+    },
+    /// Manage the host-specific discovery plugin allowlist
+    DiscoveryAllowlist {
+        /// Host UUID
+        id: Uuid,
+        #[command(subcommand)]
+        command: HostDiscoveryAllowlistCommands,
+    },
+    /// Perform a batch action on multiple hosts
+    Batch {
+        /// Action to perform (e.g. deactivate, delete)
+        action: String,
+        /// Host UUIDs (space-separated)
+        ids: Vec<Uuid>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum HostDiscoveryAllowlistCommands {
+    /// List host-specific discovery allowlist entries.
+    ///
+    /// An empty list means the host inherits the tenant allowlist.
+    List,
+    /// Add a plugin type to the host's discovery allowlist
+    Add {
+        /// Plugin type (e.g. package_manager_apt)
+        plugin_type: PluginType,
+    },
+    /// Remove a host-specific discovery allowlist entry
+    Remove {
+        /// Entry UUID
+        entry_id: Uuid,
+    },
+}
+
+pub async fn dispatch(command: HostsCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        HostsCommands::List { page, per_page } => {
+            let resp = list(ListParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                page,
+                per_page,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        HostsCommands::Show { id } => {
+            let resp = show(ShowParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        HostsCommands::Update { id, friendly_name } => {
+            let resp = update(UpdateParams {
+                id: &id,
+                friendly_name,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        HostsCommands::Deactivate { id } => {
+            let resp = deactivate(DeactivateParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        HostsCommands::Discover { id } => {
+            let resp = discover(DiscoverParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        HostsCommands::DiscoveryAllowlist { id, command } => match command {
+            HostDiscoveryAllowlistCommands::List => {
+                let resp = super::discovery_allowlist::host_list(
+                    super::discovery_allowlist::ListHostParams {
+                        host_id: &id,
+                        server: ctx.server.as_deref(),
+                        token: ctx.token.as_deref(),
+                        insecure: ctx.insecure,
+                        request_timeout: ctx.request_timeout,
+                    },
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            HostDiscoveryAllowlistCommands::Add { plugin_type } => {
+                let resp = super::discovery_allowlist::host_add(
+                    super::discovery_allowlist::AddHostParams {
+                        host_id: &id,
+                        plugin_type,
+                        server: ctx.server.as_deref(),
+                        token: ctx.token.as_deref(),
+                        insecure: ctx.insecure,
+                        request_timeout: ctx.request_timeout,
+                    },
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            HostDiscoveryAllowlistCommands::Remove { entry_id } => {
+                let resp = super::discovery_allowlist::host_remove(
+                    super::discovery_allowlist::RemoveHostParams {
+                        host_id: &id,
+                        entry_id: &entry_id,
+                        server: ctx.server.as_deref(),
+                        token: ctx.token.as_deref(),
+                        insecure: ctx.insecure,
+                        request_timeout: ctx.request_timeout,
+                    },
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+        },
+        HostsCommands::Batch { action, ids } => {
+            let resp = batch(
+                &action,
+                &ids,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 
 // ── Human output ────────────────────────────────────────────────────────────
 

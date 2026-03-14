@@ -1,12 +1,143 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::error::Result;
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::audit_logs::{
     AuditLogListParams, AuditLogResponse, SystemAuditLogResponse,
 };
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
+
+#[derive(Debug, Subcommand)]
+pub enum AuditLogsCommands {
+    /// List tenant-scoped audit log entries
+    List {
+        /// Filter by actor type (user, api_token, oidc)
+        #[arg(long)]
+        actor_type: Option<String>,
+        /// Filter by HTTP method (GET, POST, PUT, DELETE, PATCH)
+        #[arg(long)]
+        method: Option<String>,
+        /// Filter by exact HTTP status code (e.g. 200, 403, 500)
+        #[arg(long)]
+        status: Option<u16>,
+        /// Lower bound timestamp (inclusive), RFC 3339 format
+        #[arg(long)]
+        from: Option<String>,
+        /// Upper bound timestamp (inclusive), RFC 3339 format
+        #[arg(long)]
+        to: Option<String>,
+        /// Filter entries by a specific actor UUID
+        #[arg(long)]
+        actor_id: Option<Uuid>,
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// View system-level audit log entries (global settings, CA rotation, etc.)
+    System {
+        #[command(subcommand)]
+        command: AuditLogsSystemCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AuditLogsSystemCommands {
+    /// List system-level audit log entries
+    List {
+        /// Filter by actor type (user, api_token, oidc)
+        #[arg(long)]
+        actor_type: Option<String>,
+        /// Filter by HTTP method (GET, POST, PUT, DELETE, PATCH)
+        #[arg(long)]
+        method: Option<String>,
+        /// Filter by exact HTTP status code (e.g. 200, 403, 500)
+        #[arg(long)]
+        status: Option<u16>,
+        /// Lower bound timestamp (inclusive), RFC 3339 format
+        #[arg(long)]
+        from: Option<String>,
+        /// Upper bound timestamp (inclusive), RFC 3339 format
+        #[arg(long)]
+        to: Option<String>,
+        /// Filter entries by a specific actor UUID
+        #[arg(long)]
+        actor_id: Option<Uuid>,
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+}
+
+pub async fn dispatch(command: AuditLogsCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        AuditLogsCommands::List {
+            actor_type,
+            method,
+            status,
+            from,
+            to,
+            actor_id,
+            page,
+            per_page,
+        } => {
+            let resp = list(ListParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+                actor_type: actor_type.as_deref(),
+                method: method.as_deref(),
+                status,
+                from: from.as_deref(),
+                to: to.as_deref(),
+                actor_id,
+                page,
+                per_page,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        AuditLogsCommands::System { command } => match command {
+            AuditLogsSystemCommands::List {
+                actor_type,
+                method,
+                status,
+                from,
+                to,
+                actor_id,
+                page,
+                per_page,
+            } => {
+                let resp = list_system(ListParams {
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                    actor_type: actor_type.as_deref(),
+                    method: method.as_deref(),
+                    status,
+                    from: from.as_deref(),
+                    to: to.as_deref(),
+                    actor_id,
+                    page,
+                    per_page,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+        },
+    }
+    Ok(())
+}
 
 // ── Human output ────────────────────────────────────────────────────────────
 

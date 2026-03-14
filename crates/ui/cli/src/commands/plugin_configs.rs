@@ -1,8 +1,193 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::commands::settings::DeletedOutput;
-use crate::error::Result;
+use crate::error::{CliError, Result};
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
+
+#[derive(Debug, Subcommand)]
+pub enum PluginConfigsCommands {
+    /// List plugin configurations
+    List {
+        /// Page number
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Show a plugin configuration
+    Show {
+        /// Plugin config UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Create a new plugin configuration
+    Create {
+        /// Config name
+        #[arg(long)]
+        name: String,
+        /// Plugin type (github_releases, docker, homebrew, proxmox_helper_scripts)
+        #[arg(long)]
+        plugin_type: String,
+        /// Plugin-specific config as JSON string
+        #[arg(long)]
+        config: Option<String>,
+        /// Enable on creation
+        #[arg(long)]
+        enabled: Option<bool>,
+    },
+    /// Update a plugin configuration
+    Update {
+        /// Plugin config UUID
+        id: uptrakit_openapi_client::Uuid,
+        /// New name
+        #[arg(long)]
+        name: Option<String>,
+        /// Updated config as JSON string
+        #[arg(long)]
+        config: Option<String>,
+        /// Enable or disable
+        #[arg(long)]
+        enabled: Option<bool>,
+    },
+    /// Delete a plugin configuration
+    Delete {
+        /// Plugin config UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Trigger autodiscovery for a plugin config
+    Discover {
+        /// Plugin config UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Perform a batch action on multiple plugin configs
+    Batch {
+        /// Action to perform (e.g. delete, enable, disable)
+        action: String,
+        /// Plugin config UUIDs (space-separated)
+        ids: Vec<uptrakit_openapi_client::Uuid>,
+    },
+}
+
+pub async fn dispatch(command: PluginConfigsCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        PluginConfigsCommands::List { page, per_page } => {
+            let resp = list(ListParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                page,
+                per_page,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        PluginConfigsCommands::Show { id } => {
+            let resp = show(ShowParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        PluginConfigsCommands::Create {
+            name,
+            plugin_type,
+            config,
+            enabled,
+        } => {
+            let plugin_type: uptrakit_shared_types::PluginType =
+                plugin_type.parse().map_err(|_| {
+                    report!(CliError::Other(format!(
+                        "unknown plugin type: {plugin_type}"
+                    )))
+                })?;
+            let config_value: serde_json::Value = match config {
+                Some(s) => serde_json::from_str(&s).map_err(|e| {
+                    report!(CliError::Other(format!("invalid JSON for --config: {e}")))
+                })?,
+                None => serde_json::Value::Object(serde_json::Map::new()),
+            };
+            let resp = create(CreateParams {
+                name,
+                plugin_type,
+                config: config_value,
+                enabled,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        PluginConfigsCommands::Update {
+            id,
+            name,
+            config,
+            enabled,
+        } => {
+            let config_value: Option<serde_json::Value> = match config {
+                Some(s) => Some(serde_json::from_str(&s).map_err(|e| {
+                    report!(CliError::Other(format!("invalid JSON for --config: {e}")))
+                })?),
+                None => None,
+            };
+            let resp = update(UpdateParams {
+                id: &id,
+                name,
+                config: config_value,
+                enabled,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        PluginConfigsCommands::Delete { id } => {
+            let resp = delete(DeleteParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        PluginConfigsCommands::Discover { id } => {
+            let resp = discover(DiscoverParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        PluginConfigsCommands::Batch { action, ids } => {
+            let resp = batch(
+                &action,
+                &ids,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 use serde_json::Value;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;

@@ -1,8 +1,252 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::commands::settings::DeletedOutput;
 use crate::error::Result;
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
+
+#[derive(Debug, Subcommand)]
+pub enum SoftwareItemsCommands {
+    /// List all software items
+    List {
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Show software item details
+    Show {
+        /// Software item UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Create a new software item
+    Create {
+        /// Item name
+        #[arg(long)]
+        name: String,
+        /// Feature or unfeature on creation
+        #[arg(long)]
+        featured: Option<bool>,
+        /// Optional HTTPS URL to an icon/logo image
+        #[arg(long)]
+        icon_url: Option<String>,
+    },
+    /// Update a software item
+    Update {
+        /// Software item UUID
+        id: uptrakit_openapi_client::Uuid,
+        /// New name
+        #[arg(long)]
+        name: Option<String>,
+        /// Feature or unfeature
+        #[arg(long)]
+        featured: Option<bool>,
+        /// Set a new HTTPS icon URL
+        #[arg(long)]
+        icon_url: Option<String>,
+        /// Clear the icon URL
+        #[arg(long)]
+        clear_icon_url: bool,
+    },
+    /// Delete a software item
+    Delete {
+        /// Software item UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Approve a pending discovered software item
+    Approve {
+        /// Software item UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Assign a host to a software item
+    Assign {
+        /// Software item UUID
+        id: uptrakit_openapi_client::Uuid,
+        /// Host UUID
+        #[arg(long)]
+        host: uptrakit_openapi_client::Uuid,
+        /// Plugin config UUID
+        #[arg(long)]
+        plugin_config: Option<uptrakit_openapi_client::Uuid>,
+        /// Package identifier
+        #[arg(long)]
+        package: Option<String>,
+    },
+    /// Unassign a host from a software item
+    Unassign {
+        /// Software item UUID
+        id: uptrakit_openapi_client::Uuid,
+        /// Host UUID
+        #[arg(long)]
+        host: uptrakit_openapi_client::Uuid,
+        /// Also create an autodiscovery ignore rule
+        #[arg(long, default_value_t = false)]
+        ignore: bool,
+    },
+    /// Trigger update to the latest known version for a software item on a host
+    UpdateLatest {
+        /// Software item UUID
+        id: uptrakit_openapi_client::Uuid,
+        /// Host UUID
+        #[arg(long)]
+        host: uptrakit_openapi_client::Uuid,
+    },
+    /// Perform a batch action on multiple software items
+    Batch {
+        /// Action to perform (e.g. approve, delete, enable, disable)
+        action: String,
+        /// Software item UUIDs (space-separated)
+        ids: Vec<uptrakit_openapi_client::Uuid>,
+    },
+}
+
+pub async fn dispatch(command: SoftwareItemsCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        SoftwareItemsCommands::List { page, per_page } => {
+            let resp = list(ListParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                page,
+                per_page,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SoftwareItemsCommands::Show { id } => {
+            let resp = show(ShowParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SoftwareItemsCommands::Create {
+            name,
+            featured,
+            icon_url,
+        } => {
+            let resp = create(CreateParams {
+                name,
+                featured,
+                icon_url,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SoftwareItemsCommands::Update {
+            id,
+            name,
+            featured,
+            icon_url,
+            clear_icon_url,
+        } => {
+            let resp = update(UpdateParams {
+                id: &id,
+                name,
+                featured,
+                icon_url,
+                clear_icon_url,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SoftwareItemsCommands::Delete { id } => {
+            let resp = delete(DeleteParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SoftwareItemsCommands::Approve { id } => {
+            let resp = approve(ApproveParams {
+                id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SoftwareItemsCommands::Assign {
+            id,
+            host,
+            plugin_config,
+            package,
+        } => {
+            let resp = assign(AssignParams {
+                id: &id,
+                host_id: &host,
+                plugin_config_id: plugin_config.as_ref(),
+                package_identifier: package,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SoftwareItemsCommands::Unassign { id, host, ignore } => {
+            let resp = unassign(UnassignParams {
+                id: &id,
+                host_id: &host,
+                ignore,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SoftwareItemsCommands::UpdateLatest { id, host } => {
+            let resp = update_latest(UpdateLatestParams {
+                id: &id,
+                host_id: &host,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        SoftwareItemsCommands::Batch { action, ids } => {
+            let resp = batch(
+                &action,
+                &ids,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchActionResponse};

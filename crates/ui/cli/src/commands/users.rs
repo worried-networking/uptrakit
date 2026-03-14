@@ -1,6 +1,8 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::error::Result;
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::access_presets::AccessPresetResponse;
@@ -8,6 +10,180 @@ use uptrakit_openapi_client::types::roles::RoleResponse;
 use uptrakit_openapi_client::types::users::{
     ApplyPresetRequest, UpdateUserActiveRequest, UpdateUserRolesRequest, UserWithRolesResponse,
 };
+
+#[derive(Debug, Subcommand)]
+pub enum UsersCommands {
+    /// List all users with their roles
+    List,
+    /// Show user details including roles and permissions
+    Show {
+        /// User UUID
+        id: Uuid,
+    },
+    /// Replace a user's roles
+    SetRoles {
+        /// User UUID
+        id: Uuid,
+        /// Role UUIDs to assign (replaces all existing roles)
+        #[arg(required = true)]
+        role_ids: Vec<Uuid>,
+    },
+    /// Activate a user
+    Activate {
+        /// User UUID
+        id: Uuid,
+    },
+    /// Deactivate a user
+    Deactivate {
+        /// User UUID
+        id: Uuid,
+    },
+    /// Apply an access preset to a user
+    ApplyPreset {
+        /// User UUID
+        id: Uuid,
+        /// Preset name to apply
+        preset: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RolesCommands {
+    /// List all roles with their permissions
+    List,
+    /// Show role details including permissions
+    Show {
+        /// Role UUID
+        id: Uuid,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AccessPresetsCommands {
+    /// List all access presets
+    List,
+}
+
+pub async fn dispatch_users(command: UsersCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        UsersCommands::List => {
+            let resp = list(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        UsersCommands::Show { id } => {
+            let resp = show(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        UsersCommands::SetRoles { id, role_ids } => {
+            let resp = set_roles(
+                &id,
+                &role_ids,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        UsersCommands::Activate { id } => {
+            let resp = set_active(
+                &id,
+                true,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        UsersCommands::Deactivate { id } => {
+            let resp = set_active(
+                &id,
+                false,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        UsersCommands::ApplyPreset { id, preset } => {
+            let resp = apply_preset(
+                &id,
+                &preset,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn dispatch_roles(command: RolesCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        RolesCommands::List => {
+            let resp = list_roles(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        RolesCommands::Show { id } => {
+            let resp = show_role(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn dispatch_access_presets(
+    command: AccessPresetsCommands,
+    ctx: &CliContext,
+) -> Result<()> {
+    match command {
+        AccessPresetsCommands::List => {
+            let resp = list_presets(
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 
 // ── Human output ────────────────────────────────────────────────────────────
 

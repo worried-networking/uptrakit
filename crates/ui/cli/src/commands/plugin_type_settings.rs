@@ -1,8 +1,89 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::commands::settings::DeletedOutput;
-use crate::error::Result;
+use crate::error::{CliError, Result};
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
+
+#[derive(Debug, Subcommand)]
+pub enum PluginTypeSettingsCommands {
+    /// List all plugin-type-level settings
+    List,
+    /// Show plugin-type-level settings for a specific plugin type
+    Show {
+        /// Plugin type (e.g. releases_github)
+        plugin_type: String,
+    },
+    /// Create or update plugin-type-level settings for a specific plugin type
+    Set {
+        /// Plugin type (e.g. releases_github)
+        plugin_type: String,
+        /// Settings as a JSON object string
+        #[arg(long)]
+        config: String,
+    },
+    /// Delete plugin-type-level settings for a specific plugin type
+    Reset {
+        /// Plugin type (e.g. releases_github)
+        plugin_type: String,
+    },
+}
+
+pub async fn dispatch(command: PluginTypeSettingsCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        PluginTypeSettingsCommands::List => {
+            let resp = list(ListParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        PluginTypeSettingsCommands::Show { plugin_type } => {
+            let resp = show(ShowParams {
+                plugin_type: &plugin_type,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        PluginTypeSettingsCommands::Set {
+            plugin_type,
+            config,
+        } => {
+            let config: serde_json::Value = serde_json::from_str(&config)
+                .map_err(|e| report!(CliError::Other(format!("invalid JSON for --config: {e}"))))?;
+            let resp = set(SetParams {
+                plugin_type: &plugin_type,
+                config,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        PluginTypeSettingsCommands::Reset { plugin_type } => {
+            let resp = reset(ResetParams {
+                plugin_type: &plugin_type,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+    }
+    Ok(())
+}
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::types::plugin_type_settings::{
     PluginTypeSettingsResponse, UpsertPluginTypeSettingsRequest,

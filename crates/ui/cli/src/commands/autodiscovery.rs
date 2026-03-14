@@ -1,8 +1,104 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::commands::settings::DeletedOutput;
 use crate::error::Result;
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
+
+#[derive(Debug, Subcommand)]
+pub enum AutodiscoveryCommands {
+    /// Manage autodiscovery ignore rules
+    Ignores {
+        #[command(subcommand)]
+        command: IgnoresCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum IgnoresCommands {
+    /// List autodiscovery ignore rules
+    List {
+        /// Page number
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Create an autodiscovery ignore rule
+    Create {
+        /// Software item name to suppress from future discoveries
+        #[arg(long)]
+        name: String,
+    },
+    /// Delete an autodiscovery ignore rule
+    Delete {
+        /// Ignore rule UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Perform a batch action on multiple autodiscovery ignore rules
+    Batch {
+        /// Action to perform (e.g. delete)
+        action: String,
+        /// Ignore rule UUIDs (space-separated)
+        ids: Vec<uptrakit_openapi_client::Uuid>,
+    },
+}
+
+pub async fn dispatch(command: AutodiscoveryCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        AutodiscoveryCommands::Ignores { command } => match command {
+            IgnoresCommands::List { page, per_page } => {
+                let resp = ignores_list(IgnoresListParams {
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    page,
+                    per_page,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            IgnoresCommands::Create { name } => {
+                let resp = ignores_create(IgnoresCreateParams {
+                    name,
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            IgnoresCommands::Delete { id } => {
+                let resp = ignores_delete(IgnoresDeleteParams {
+                    id: &id,
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            IgnoresCommands::Batch { action, ids } => {
+                let resp = batch(
+                    &action,
+                    &ids,
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+        },
+    }
+    Ok(())
+}
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::autodiscovery::ListIgnoresParams;

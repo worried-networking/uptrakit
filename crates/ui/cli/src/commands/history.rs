@@ -1,8 +1,90 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::error::{CliError, Result};
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
+
+#[derive(Debug, Subcommand)]
+pub enum HistoryCommands {
+    /// List update history
+    List {
+        /// Filter by host UUID
+        #[arg(long)]
+        host: Option<uptrakit_openapi_client::Uuid>,
+        /// Filter by software item UUID
+        #[arg(long)]
+        software_item: Option<uptrakit_openapi_client::Uuid>,
+        /// Filter by status (pending, in_progress, completed, failed)
+        #[arg(long)]
+        status: Option<String>,
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Show update history details
+    Show {
+        /// Update history UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+    /// Tail update output in real-time
+    Tail {
+        /// Update history UUID
+        id: uptrakit_openapi_client::Uuid,
+    },
+}
+
+pub async fn dispatch(command: HistoryCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        HistoryCommands::List {
+            host,
+            software_item,
+            status,
+            page,
+            per_page,
+        } => {
+            let resp = list(ListParams {
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                host_id: host,
+                software_item_id: software_item,
+                status: status.as_deref(),
+                page,
+                per_page,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        HistoryCommands::Show { id } => {
+            let resp = show(
+                &id,
+                ctx.server.as_deref(),
+                ctx.token.as_deref(),
+                ctx.insecure,
+                ctx.request_timeout,
+            )
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
+        HistoryCommands::Tail { id } => {
+            let tail_result = super::tail::tail(super::tail::TailParams {
+                update_history_id: &id,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+            })
+            .await?;
+            std::process::exit(tail_result.exit_code());
+        }
+    }
+    Ok(())
+}
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::update_history::{

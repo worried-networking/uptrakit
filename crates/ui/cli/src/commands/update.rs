@@ -1,8 +1,167 @@
 use crate::client::authenticated_client;
+use crate::commands::CliContext;
 use crate::error::Result;
 use crate::output::HumanOutput;
+use clap::Subcommand;
 use rootcause::prelude::*;
 use uptrakit_openapi_client::Uuid;
+
+#[derive(Debug, Subcommand)]
+pub enum UpdateCommands {
+    /// Trigger an update for a software item on a host
+    Trigger {
+        /// Software item UUID
+        item_id: Uuid,
+        /// Host UUID
+        host_id: Uuid,
+        /// Target version to update to
+        #[arg(long)]
+        to_version: String,
+        /// Release tag (defaults to to_version)
+        #[arg(long)]
+        release_tag: Option<String>,
+        /// Release URL
+        #[arg(long)]
+        release_url: Option<String>,
+        /// Follow (tail) update output in real-time after triggering
+        #[arg(long, short)]
+        follow: bool,
+        /// Request interactive (PTY) mode for the update session
+        #[arg(long, short)]
+        interactive: bool,
+    },
+    /// Trigger a batch update for all outdated items on a host
+    BatchHost {
+        /// Host UUID
+        host_id: Uuid,
+        /// Only update items in this category (e.g. security)
+        #[arg(long)]
+        category: Option<String>,
+        /// Exclude these software item UUIDs from the batch
+        #[arg(long, value_delimiter = ',')]
+        exclude: Vec<Uuid>,
+        /// Follow batch progress in real-time after triggering
+        #[arg(long, short)]
+        follow: bool,
+    },
+    /// Trigger a batch update to roll out a software item to hosts
+    BatchItem {
+        /// Software item UUID
+        item_id: Uuid,
+        /// Target version to update to
+        #[arg(long)]
+        to_version: String,
+        /// Limit to these host UUIDs (default: all assigned hosts)
+        #[arg(long, value_delimiter = ',')]
+        host: Vec<Uuid>,
+        /// Follow batch progress in real-time after triggering
+        #[arg(long, short)]
+        follow: bool,
+    },
+}
+
+pub async fn dispatch(command: UpdateCommands, ctx: &CliContext) -> Result<()> {
+    match command {
+        UpdateCommands::Trigger {
+            item_id,
+            host_id,
+            to_version,
+            release_tag,
+            release_url,
+            follow,
+            interactive,
+        } => {
+            let resp = trigger(TriggerParams {
+                item_id: &item_id,
+                host_id: &host_id,
+                to_version: &to_version,
+                release_tag: release_tag.as_deref(),
+                release_url: release_url.as_deref(),
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+                interactive,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+
+            if follow {
+                let tail_result = super::tail::tail(super::tail::TailParams {
+                    update_history_id: &resp.update_history_id,
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                })
+                .await?;
+                std::process::exit(tail_result.exit_code());
+            }
+        }
+        UpdateCommands::BatchHost {
+            host_id,
+            category,
+            exclude,
+            follow,
+        } => {
+            let resp =
+                super::batch_update::trigger_host_batch(super::batch_update::HostBatchParams {
+                    host_id: &host_id,
+                    category: category.as_deref(),
+                    exclude: &exclude,
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+
+            if follow && let Some(batch_id) = resp.batch_id {
+                let result =
+                    super::batch_update::follow_batch(super::batch_update::FollowBatchParams {
+                        batch_id: &batch_id,
+                        server: ctx.server.as_deref(),
+                        token: ctx.token.as_deref(),
+                        insecure: ctx.insecure,
+                    })
+                    .await?;
+                std::process::exit(result.exit_code());
+            }
+        }
+        UpdateCommands::BatchItem {
+            item_id,
+            to_version,
+            host,
+            follow,
+        } => {
+            let resp =
+                super::batch_update::trigger_item_batch(super::batch_update::ItemBatchParams {
+                    item_id: &item_id,
+                    to_version: &to_version,
+                    host_ids: &host,
+                    server: ctx.server.as_deref(),
+                    token: ctx.token.as_deref(),
+                    insecure: ctx.insecure,
+                    request_timeout: ctx.request_timeout,
+                })
+                .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+
+            if follow && let Some(batch_id) = resp.batch_id {
+                let result =
+                    super::batch_update::follow_batch(super::batch_update::FollowBatchParams {
+                        batch_id: &batch_id,
+                        server: ctx.server.as_deref(),
+                        token: ctx.token.as_deref(),
+                        insecure: ctx.insecure,
+                    })
+                    .await?;
+                std::process::exit(result.exit_code());
+            }
+        }
+    }
+    Ok(())
+}
 use uptrakit_openapi_client::types::software_items::{
     ReleaseInfoRequest, TriggerUpdateRequest, TriggerUpdateResponse,
 };
