@@ -605,6 +605,63 @@ pub async fn list_software_items(
             .filter(host_software_item::Column::DeactivatedAt.is_null());
     }
 
+    if let Some(updatable) = params.updatable {
+        use sea_orm::sea_query::{BinOper, ExprTrait, Query};
+        // Build an EXISTS subquery: active host assignment where installed != latest (both non-null).
+        let exists_sub = Query::select()
+            .expr(Expr::val(1_i32))
+            .from(host_software_item::Entity)
+            .inner_join(
+                host::Entity,
+                Expr::col((
+                    host_software_item::Entity,
+                    host_software_item::Column::HostId,
+                ))
+                .equals((host::Entity, host::Column::Id)),
+            )
+            .and_where(
+                Expr::col((
+                    host_software_item::Entity,
+                    host_software_item::Column::SoftwareItemId,
+                ))
+                .equals((software_item::Entity, software_item::Column::Id)),
+            )
+            .and_where(Expr::col((host::Entity, host::Column::DeactivatedAt)).is_null())
+            .and_where(
+                Expr::col((
+                    host_software_item::Entity,
+                    host_software_item::Column::InstalledVersion,
+                ))
+                .is_not_null(),
+            )
+            .and_where(
+                Expr::col((
+                    host_software_item::Entity,
+                    host_software_item::Column::LatestVersion,
+                ))
+                .is_not_null(),
+            )
+            .and_where(
+                Expr::col((
+                    host_software_item::Entity,
+                    host_software_item::Column::InstalledVersion,
+                ))
+                .binary(
+                    BinOper::NotEqual,
+                    Expr::col((
+                        host_software_item::Entity,
+                        host_software_item::Column::LatestVersion,
+                    )),
+                ),
+            )
+            .take();
+        if updatable {
+            base_query = base_query.filter(Expr::exists(exists_sub));
+        } else {
+            base_query = base_query.filter(Expr::not_exists(exists_sub));
+        }
+    }
+
     let total = base_query
         .clone()
         .count(tenant_db.db())
