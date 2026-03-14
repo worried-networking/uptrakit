@@ -11,7 +11,12 @@ For comprehensive error handling patterns, conventions, and the full decision gu
 - Use `report!(MyError::Variant(…))` for creating new error reports. Never call
   `rootcause::Report::new(…)` directly — the macro additionally captures source location.
 - Use `bail!(MyError::Variant(…))` for early returns.
-- Avoid `Result<T, String>`; prefer typed enums.
+- Avoid `Result<T, String>`; prefer typed enums. **Exception:** in `web-api` route
+  handlers and their private validation helpers, `Result<T, String>` is acceptable
+  when the string is a user-facing error message that the caller maps to an HTTP
+  error response (e.g., via `error_response(StatusCode::BAD_REQUEST, msg)`). This
+  avoids `clippy::result_large_err` from returning `Response` directly and keeps
+  validation helpers decoupled from HTTP types.
 - Logging should never expose secrets (tokens, passwords, keys).
 
 ## Panic Policy
