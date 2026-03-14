@@ -20,7 +20,7 @@
 	let { output, class: className = '', onInput }: Props = $props();
 
 	let containerEl: HTMLDivElement | undefined = $state(undefined);
-	let terminal: Terminal | null = null;
+	let terminal: Terminal | null = $state(null);
 	let fitAddon: FitAddon | null = null;
 	let resizeObserver: ResizeObserver | null = null;
 	let themeObserver: MutationObserver | null = null;
@@ -125,11 +125,6 @@
 			attributes: true,
 			attributeFilter: ['class']
 		});
-
-		// Write static output if provided.
-		if (output) {
-			terminal.write(output);
-		}
 	});
 
 	onDestroy(() => {
