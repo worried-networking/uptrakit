@@ -8,6 +8,7 @@ use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_core::PluginOps;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, software_item,
+    update_history,
 };
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_types::PluginRole;
@@ -279,6 +280,25 @@ async fn load_item_hosts(
         }
     };
 
+    // Batch-load active update IDs for all hosts. One query total (no N+1).
+    let active_updates: HashMap<Uuid, Uuid> = match UpdateHistory::find()
+        .filter(update_history::Column::SoftwareItemId.eq(item_id))
+        .filter(update_history::Column::HostId.is_in(host_ids.clone()))
+        .filter(update_history::Column::Status.is_in([
+            UpdateStatus::Queued,
+            UpdateStatus::Pending,
+            UpdateStatus::InProgress,
+        ]))
+        .all(db)
+        .await
+    {
+        Ok(rows) => rows.into_iter().map(|u| (u.host_id, u.id)).collect(),
+        Err(e) => {
+            tracing::warn!("Failed to load active updates for software item: {e}");
+            HashMap::new()
+        }
+    };
+
     // Bulk-load all plugin role assignments for this software item.
     let plugin_rows = match HostSoftwareItemPlugin::find()
         .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
@@ -367,6 +387,7 @@ async fn load_item_hosts(
                 latest_version: link.latest_version,
                 latest_release_metadata: link.latest_release_metadata,
                 update_available: update_avail,
+                active_update_history_id: active_updates.get(&host.id).copied(),
                 update_category: link.update_category,
                 last_updated_at: link.last_updated_at,
                 linked_at: link.linked_at,
@@ -1509,6 +1530,7 @@ mod tests {
             latest_version: Some("7.4.0".to_string()),
             latest_release_metadata: None,
             update_available: true,
+            active_update_history_id: None,
             update_category: "unknown".to_string(),
             last_updated_at: None,
             linked_at: now,

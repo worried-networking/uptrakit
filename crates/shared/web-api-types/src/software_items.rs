@@ -193,6 +193,11 @@ pub struct SoftwareItemHostSummary {
     pub latest_release_metadata: Option<serde_json::Value>,
     /// `true` when `installed_version` and `latest_version` are both `Some` and differ.
     pub update_available: bool,
+    /// ID of the currently active (queued / pending / in_progress) update for this host,
+    /// if any. `None` when no update is running. Used by the UI to show a contextual
+    /// status badge and open the live terminal instead of the update confirmation dialog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_update_history_id: Option<Uuid>,
     /// Classification of the available update (security, bugfix, feature, unknown).
     pub update_category: String,
     #[serde(with = "time::serde::rfc3339::option")]
