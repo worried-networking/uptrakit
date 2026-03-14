@@ -379,8 +379,6 @@ impl SshSession {
         use uptrakit_command::CommandError;
 
         const ATTENTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-        const MAX_OUTPUT: usize = 10 * 1024 * 1024;
-        const TRUNCATION_MARKER: &str = "\n... [output truncated at 10 MB] ...\n";
         /// Flush interval for coalescing rapid PTY output chunks.
         ///
         /// PTY sessions (especially PHS update scripts) emit many tiny data
@@ -389,20 +387,8 @@ impl SshSession {
         /// Coalescing over 50 ms (20 Hz) reduces message rate dramatically while
         /// keeping the UI refresh rate imperceptible to a human operator.
         const PTY_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
-        /// Size threshold for immediate flush: prevent unbounded buffer growth
-        /// when output is continuous without any event-loop lull.
-        const PTY_FLUSH_SIZE_THRESHOLD: usize = 64 * 1024;
 
-        let mut accumulated_output = String::new();
-        let mut truncated = false;
-        let mut exit_code: Option<u32> = None;
-        let mut eof_received = false;
-        let mut last_output_time = tokio::time::Instant::now();
-        let mut attention_sent = false;
-
-        // Pending buffers for coalesced PTY output.
-        let mut pending_stdout = String::new();
-        let mut pending_stderr = String::new();
+        let mut state = InteractiveSessionState::new();
 
         // Periodic flush timer. The first tick fires immediately but is a no-op
         // since both pending buffers are empty at loop start.
@@ -410,10 +396,10 @@ impl SshSession {
         flush_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
-            let attention_sleep = if attention_sent {
+            let attention_sleep = if state.attention_sent {
                 tokio::time::sleep(std::time::Duration::from_secs(3600))
             } else {
-                let elapsed = last_output_time.elapsed();
+                let elapsed = state.last_output_time.elapsed();
                 if elapsed >= ATTENTION_TIMEOUT {
                     tokio::time::sleep(std::time::Duration::ZERO)
                 } else {
@@ -427,80 +413,18 @@ impl SshSession {
                 msg = channel.wait() => {
                     match msg {
                         Some(ChannelMsg::Data { ref data }) => {
-                            last_output_time = tokio::time::Instant::now();
-                            attention_sent = false;
-                            let text = String::from_utf8_lossy(data).to_string();
-                            if !truncated {
-                                if accumulated_output.len() + text.len() > MAX_OUTPUT {
-                                    accumulated_output.push_str(TRUNCATION_MARKER);
-                                    truncated = true;
-                                } else {
-                                    accumulated_output.push_str(&text);
-                                }
-                            }
-                            // Accumulate for coalesced flush rather than sending
-                            // each chunk immediately. The flush arm below drains
-                            // the buffer every PTY_FLUSH_INTERVAL. If the buffer
-                            // grows past PTY_FLUSH_SIZE_THRESHOLD (continuous high-
-                            // throughput output without any event-loop lull), flush
-                            // now so memory stays bounded.
-                            pending_stdout.push_str(&text);
-                            // Non-blocking send; must not await here so that
-                            // ExitStatus / Eof processing is never stalled.
-                            if pending_stdout.len() >= PTY_FLUSH_SIZE_THRESHOLD
-                                && output_tx
-                                    .try_send(uptrakit_command::UpdateOutputLine {
-                                        text: std::mem::take(&mut pending_stdout),
-                                        stream: OutputStreamType::Stdout,
-                                    })
-                                    .is_err()
-                            {
-                                tracing::debug!(
-                                    "SSH output channel full; dropping stdout chunk"
-                                );
-                            }
+                            state.handle_channel_data(data, OutputStreamType::Stdout, output_tx);
                         }
                         Some(ChannelMsg::ExtendedData { ref data, ext: 1 }) => {
-                            last_output_time = tokio::time::Instant::now();
-                            attention_sent = false;
-                            let text = String::from_utf8_lossy(data).to_string();
-                            if !truncated {
-                                if accumulated_output.len() + text.len() > MAX_OUTPUT {
-                                    accumulated_output.push_str(TRUNCATION_MARKER);
-                                    truncated = true;
-                                } else {
-                                    accumulated_output.push_str(&text);
-                                }
-                            }
-                            pending_stderr.push_str(&text);
-                            if pending_stderr.len() >= PTY_FLUSH_SIZE_THRESHOLD
-                                && output_tx
-                                    .try_send(uptrakit_command::UpdateOutputLine {
-                                        text: std::mem::take(&mut pending_stderr),
-                                        stream: OutputStreamType::Stderr,
-                                    })
-                                    .is_err()
-                            {
-                                tracing::debug!(
-                                    "SSH output channel full; dropping stderr chunk"
-                                );
-                            }
+                            state.handle_channel_data(data, OutputStreamType::Stderr, output_tx);
                         }
                         Some(ChannelMsg::ExitStatus { exit_status }) => {
-                            exit_code = Some(exit_status);
-                            // If EOF already arrived before ExitStatus (common on
-                            // OpenSSH PTY sessions), we can stop now.
-                            if eof_received {
-                                break;
-                            }
+                            state.exit_code = Some(exit_status);
+                            if state.eof_received { break; }
                         }
                         Some(ChannelMsg::Eof | ChannelMsg::Close) => {
-                            eof_received = true;
-                            // Keep looping to allow a racing ExitStatus to arrive,
-                            // unless the exit code is already known.
-                            if exit_code.is_some() {
-                                break;
-                            }
+                            state.eof_received = true;
+                            if state.exit_code.is_some() { break; }
                         }
                         Some(_) => {}
                         None => break,
@@ -514,17 +438,7 @@ impl SshSession {
                 }
 
                 Some(sig) = signal_rx.recv() => {
-                    // Translate signal numbers to control characters for the PTY.
-                    let ctrl_char = match sig {
-                        2 => Some(b'\x03'),   // SIGINT → Ctrl+C
-                        3 => Some(b'\x1c'),   // SIGQUIT → Ctrl+\
-                        28 => Some(b'\x1a'),  // SIGTSTP → Ctrl+Z (signal 20 on Linux, 28 is unused but kept for safety)
-                        _ => {
-                            tracing::warn!(signal = sig, "unsupported signal for SSH PTY");
-                            None
-                        }
-                    };
-                    if let Some(ch) = ctrl_char
+                    if let Some(ch) = translate_signal_to_control_char(sig)
                         && channel.data(&[ch][..]).await.is_err()
                     {
                         tracing::warn!("failed to write signal character to SSH channel");
@@ -532,38 +446,13 @@ impl SshSession {
                 }
 
                 _ = flush_interval.tick() => {
-                    // Flush any coalesced PTY output accumulated since the last tick.
-                    // Still non-blocking (try_send) to avoid stalling completion detection.
-                    if !pending_stdout.is_empty()
-                        && output_tx
-                            .try_send(uptrakit_command::UpdateOutputLine {
-                                text: std::mem::take(&mut pending_stdout),
-                                stream: OutputStreamType::Stdout,
-                            })
-                            .is_err()
-                    {
-                        tracing::debug!(
-                            "SSH output channel full; dropping coalesced stdout chunk"
-                        );
-                    }
-                    if !pending_stderr.is_empty()
-                        && output_tx
-                            .try_send(uptrakit_command::UpdateOutputLine {
-                                text: std::mem::take(&mut pending_stderr),
-                                stream: OutputStreamType::Stderr,
-                            })
-                            .is_err()
-                    {
-                        tracing::debug!(
-                            "SSH output channel full; dropping coalesced stderr chunk"
-                        );
-                    }
+                    state.flush_pending_output(output_tx, "coalesced ");
                 }
 
                 _ = attention_sleep => {
-                    if !attention_sent {
+                    if !state.attention_sent {
                         let _ = attention_tx.try_send(());
-                        attention_sent = true;
+                        state.attention_sent = true;
                     }
                 }
             }
@@ -571,24 +460,15 @@ impl SshSession {
 
         // Flush any remaining buffered output before returning so the last line
         // (e.g. "Done." without a trailing newline) is visible in the UI.
-        if !pending_stdout.is_empty() {
-            let _ = output_tx.try_send(uptrakit_command::UpdateOutputLine {
-                text: pending_stdout,
-                stream: OutputStreamType::Stdout,
-            });
-        }
-        if !pending_stderr.is_empty() {
-            let _ = output_tx.try_send(uptrakit_command::UpdateOutputLine {
-                text: pending_stderr,
-                stream: OutputStreamType::Stderr,
-            });
-        }
+        state.flush_pending_output(output_tx, "final ");
 
         // When the remote side closed the channel cleanly (Eof/Close) without
         // sending an ExitStatus — which happens on some PTY sessions over OpenSSH
         // (e.g. Proxmox VE) due to a race between Eof and ExitStatus — treat
         // the exit code as 0 (success) rather than u32::MAX → -1 (failure).
-        let code = exit_code.unwrap_or(if eof_received { 0 } else { u32::MAX });
+        let code = state
+            .exit_code
+            .unwrap_or(if state.eof_received { 0 } else { u32::MAX });
         let code_i32 = i32::try_from(code).unwrap_or(-1);
 
         if code_i32 != 0 {
@@ -596,7 +476,7 @@ impl SshSession {
         }
 
         Ok(uptrakit_command::CommandOutput {
-            output: accumulated_output,
+            output: state.accumulated_output,
             exit_code: code_i32,
         })
     }
@@ -625,6 +505,145 @@ impl SshSession {
                      skipping disconnect — this is a programming error"
                 );
             }
+        }
+    }
+}
+
+// ── Interactive session helpers ──────────────────────────────────────
+
+/// Mutable state for the interactive SSH session event loop.
+///
+/// Extracted from [`SshSession::drive_interactive_ssh_session`] to reduce
+/// cyclomatic complexity. Groups accumulated output, truncation tracking,
+/// pending coalesced buffers, and attention-timeout bookkeeping.
+#[cfg(feature = "interactive")]
+struct InteractiveSessionState {
+    accumulated_output: String,
+    truncated: bool,
+    exit_code: Option<u32>,
+    eof_received: bool,
+    last_output_time: tokio::time::Instant,
+    attention_sent: bool,
+    /// Pending buffer for coalesced stdout PTY output.
+    pending_stdout: String,
+    /// Pending buffer for coalesced stderr PTY output.
+    pending_stderr: String,
+}
+
+#[cfg(feature = "interactive")]
+impl InteractiveSessionState {
+    /// Maximum accumulated output size (10 MB) to prevent OOM from runaway commands.
+    const MAX_OUTPUT: usize = 10 * 1024 * 1024;
+    const TRUNCATION_MARKER: &str = "\n... [output truncated at 10 MB] ...\n";
+    /// Size threshold for immediate flush: prevent unbounded buffer growth
+    /// when output is continuous without any event-loop lull.
+    const PTY_FLUSH_SIZE_THRESHOLD: usize = 64 * 1024;
+
+    fn new() -> Self {
+        Self {
+            accumulated_output: String::new(),
+            truncated: false,
+            exit_code: None,
+            eof_received: false,
+            last_output_time: tokio::time::Instant::now(),
+            attention_sent: false,
+            pending_stdout: String::new(),
+            pending_stderr: String::new(),
+        }
+    }
+
+    /// Handle incoming channel data (stdout or stderr).
+    ///
+    /// Resets the attention timer, accumulates data (with truncation),
+    /// and appends to the coalesced pending buffer. If the pending buffer
+    /// exceeds [`Self::PTY_FLUSH_SIZE_THRESHOLD`], flushes it immediately
+    /// via a non-blocking send to prevent unbounded memory growth.
+    fn handle_channel_data(
+        &mut self,
+        data: &[u8],
+        stream: OutputStreamType,
+        output_tx: &mpsc::Sender<uptrakit_command::UpdateOutputLine>,
+    ) {
+        self.last_output_time = tokio::time::Instant::now();
+        self.attention_sent = false;
+
+        let text = String::from_utf8_lossy(data).to_string();
+
+        // Accumulate for total output (with truncation guard).
+        if !self.truncated {
+            if self.accumulated_output.len() + text.len() > Self::MAX_OUTPUT {
+                self.accumulated_output.push_str(Self::TRUNCATION_MARKER);
+                self.truncated = true;
+            } else {
+                self.accumulated_output.push_str(&text);
+            }
+        }
+
+        // Accumulate for coalesced flush. The flush_interval tick drains the
+        // buffer every PTY_FLUSH_INTERVAL. If the buffer exceeds the size
+        // threshold (continuous high-throughput output), flush now.
+        let pending = match stream {
+            OutputStreamType::Stdout => &mut self.pending_stdout,
+            OutputStreamType::Stderr => &mut self.pending_stderr,
+            _ => {
+                tracing::warn!(?stream, "unexpected output stream type; treating as stdout");
+                &mut self.pending_stdout
+            }
+        };
+        pending.push_str(&text);
+
+        if pending.len() >= Self::PTY_FLUSH_SIZE_THRESHOLD
+            && output_tx
+                .try_send(uptrakit_command::UpdateOutputLine {
+                    text: std::mem::take(pending),
+                    stream,
+                })
+                .is_err()
+        {
+            tracing::debug!(?stream, "SSH output channel full; dropping chunk");
+        }
+    }
+
+    /// Flush any remaining coalesced stdout/stderr to the output channel.
+    ///
+    /// The `context` parameter is included in the debug log message to
+    /// distinguish between periodic flushes and the final flush (e.g.
+    /// `"coalesced "` vs `"final "`).
+    fn flush_pending_output(
+        &mut self,
+        output_tx: &mpsc::Sender<uptrakit_command::UpdateOutputLine>,
+        context: &str,
+    ) {
+        for (pending, stream) in [
+            (&mut self.pending_stdout, OutputStreamType::Stdout),
+            (&mut self.pending_stderr, OutputStreamType::Stderr),
+        ] {
+            if !pending.is_empty()
+                && output_tx
+                    .try_send(uptrakit_command::UpdateOutputLine {
+                        text: std::mem::take(pending),
+                        stream,
+                    })
+                    .is_err()
+            {
+                tracing::debug!(?stream, "SSH output channel full; dropping {context}chunk");
+            }
+        }
+    }
+}
+
+/// Translate a Unix signal number to the corresponding PTY control character.
+///
+/// Returns `None` for unsupported signals (with a warning logged).
+#[cfg(feature = "interactive")]
+fn translate_signal_to_control_char(signal: i32) -> Option<u8> {
+    match signal {
+        2 => Some(b'\x03'),  // SIGINT  -> Ctrl+C
+        3 => Some(b'\x1c'),  // SIGQUIT -> Ctrl+backslash
+        28 => Some(b'\x1a'), // SIGTSTP -> Ctrl+Z (signal 20 on Linux, 28 kept for safety)
+        _ => {
+            tracing::warn!(signal, "unsupported signal for SSH PTY");
+            None
         }
     }
 }
