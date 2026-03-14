@@ -13,12 +13,12 @@ use crate::ssh_transport::SshSession;
 // ── SshRemoteExecutor ──────────────────────────────────────────────────
 
 /// Implements [`RemoteExecutor`] by delegating to an [`SshSession`].
-pub struct SshRemoteExecutor {
+pub(crate) struct SshRemoteExecutor {
     session: Arc<SshSession>,
 }
 
 impl SshRemoteExecutor {
-    pub fn new(session: Arc<SshSession>) -> Self {
+    pub(crate) fn new(session: Arc<SshSession>) -> Self {
         Self { session }
     }
 }

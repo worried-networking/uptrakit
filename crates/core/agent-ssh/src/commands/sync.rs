@@ -32,7 +32,7 @@ use crate::ssh_target::SshTarget;
 use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
 
 /// Arguments for the `sync` command.
-pub struct SyncArgs {
+pub(crate) struct SyncArgs {
     /// Host name, UUID, or SSH address (`[user@]host[:port]` /
     /// `ssh://[user@]host[:port]`).
     ///
@@ -105,7 +105,7 @@ async fn resolve_host(
 }
 
 /// Run the `sync` command.
-pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
+pub(crate) async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
     // 1. Load SSH host from DB (supports name, UUID, and SSH address).
     let (host, url_username) = resolve_host(db, &args.name_or_id).await?;
 
@@ -407,7 +407,7 @@ impl GuestBootstrapExecutor for NoopGuestBootstrap {
 /// When the UI user selects a non-stored auth method, the extension handler
 /// populates this struct from the form fields and ECIES-decrypted sensitive
 /// params.
-pub struct SyncAuthOverride {
+pub(crate) struct SyncAuthOverride {
     /// Username to connect as (e.g. `root`).
     pub username: String,
     /// Password authentication (mutually exclusive with `auth_private_key_pem`).
@@ -421,7 +421,7 @@ pub struct SyncAuthOverride {
 /// When `auth_override` is `None`, uses the stored SSH key and username.
 /// When `Some`, connects as the specified user with the provided credentials
 /// (sudo state is not persisted for the override user, matching CLI behavior).
-pub async fn run_for_extension(
+pub(crate) async fn run_for_extension(
     host_id: &str,
     db: &DatabaseConnection,
     tenant_id: Option<uuid::Uuid>,

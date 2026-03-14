@@ -14,7 +14,7 @@ mod m20260310_000001_data_encryption_keys;
 mod m20260313_000001_drop_ssh_host_is_pve_node;
 mod m20260322_000001_ssh_hosts_lower_name_index;
 
-pub struct Migrator;
+pub(crate) struct Migrator;
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
@@ -56,6 +56,8 @@ impl MigratorTrait for Migrator {
 }
 
 /// Run all pending migrations on the local SSH agent database.
-pub async fn run_migrations(db: &DatabaseConnection) -> std::result::Result<(), sea_orm::DbErr> {
+pub(crate) async fn run_migrations(
+    db: &DatabaseConnection,
+) -> std::result::Result<(), sea_orm::DbErr> {
     Migrator::up(db, None).await
 }

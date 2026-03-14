@@ -15,7 +15,7 @@ use uptrakit_web_api::AppState;
 use crate::durations;
 
 /// Holds all background task handles for orderly shutdown.
-pub struct BackgroundTasks {
+pub(crate) struct BackgroundTasks {
     shutdown_token: CancellationToken,
     /// Tasks that respond to the [`CancellationToken`] and are awaited with a per-task timeout.
     cancellable: Vec<(&'static str, JoinHandle<()>, Duration)>,
@@ -24,7 +24,7 @@ pub struct BackgroundTasks {
 }
 
 impl BackgroundTasks {
-    pub fn new(shutdown_token: CancellationToken) -> Self {
+    pub(crate) fn new(shutdown_token: CancellationToken) -> Self {
         Self {
             shutdown_token,
             cancellable: Vec::new(),
@@ -33,7 +33,7 @@ impl BackgroundTasks {
     }
 
     /// Create a child token from the shared shutdown token.
-    pub fn child_token(&self) -> CancellationToken {
+    pub(crate) fn child_token(&self) -> CancellationToken {
         self.shutdown_token.child_token()
     }
 
@@ -41,7 +41,7 @@ impl BackgroundTasks {
     ///
     /// Uses [`durations::BACKGROUND_TASK_SHUTDOWN_TIMEOUT`] as the shutdown timeout.
     /// For tasks that need more time (e.g. the scheduler), use [`track_with_timeout`](Self::track_with_timeout).
-    pub fn track(&mut self, name: &'static str, handle: JoinHandle<()>) {
+    pub(crate) fn track(&mut self, name: &'static str, handle: JoinHandle<()>) {
         self.cancellable
             .push((name, handle, durations::BACKGROUND_TASK_SHUTDOWN_TIMEOUT));
     }
@@ -52,7 +52,7 @@ impl BackgroundTasks {
     /// [`durations::BACKGROUND_TASK_SHUTDOWN_TIMEOUT`] — for example, the scheduler
     /// which may be mid-execution on a database query.
     #[cfg(feature = "embedded-scheduler")]
-    pub fn track_with_timeout(
+    pub(crate) fn track_with_timeout(
         &mut self,
         name: &'static str,
         handle: JoinHandle<()>,
@@ -62,7 +62,7 @@ impl BackgroundTasks {
     }
 
     /// Register a task to be aborted on shutdown.
-    pub fn track_abort(&mut self, name: &'static str, handle: JoinHandle<()>) {
+    pub(crate) fn track_abort(&mut self, name: &'static str, handle: JoinHandle<()>) {
         self.abortable.push((name, handle));
     }
 
@@ -73,7 +73,7 @@ impl BackgroundTasks {
     /// 3. Cancel all token-based background tasks.
     /// 4. Abort non-token tasks (CRL manager, PKI HTTP).
     /// 5. Await cancellable tasks with a per-task timeout.
-    pub async fn shutdown(
+    pub(crate) async fn shutdown(
         self,
         server_handle: axum_server::Handle<SocketAddr>,
         service_connections: uptrakit_web_api::service_connections::ServiceConnectionRegistry,
@@ -219,7 +219,7 @@ pub(crate) async fn wait_for_service_drain(
 /// This is per-instance (not in the centralised scheduler) because the denylist
 /// is an in-memory data structure. DB-backed auth store cleanup is handled by the
 /// scheduler's `AuthCleanupExecutor`.
-pub fn spawn_denylist_cleanup(
+pub(crate) fn spawn_denylist_cleanup(
     token: CancellationToken,
     token_denylist: Arc<uptrakit_web_api::auth::token_denylist::TokenDenylist>,
 ) -> JoinHandle<()> {
@@ -240,7 +240,10 @@ pub fn spawn_denylist_cleanup(
 }
 
 /// Periodic settings version check for cross-instance cache invalidation.
-pub fn spawn_settings_reload(token: CancellationToken, app_state: Arc<AppState>) -> JoinHandle<()> {
+pub(crate) fn spawn_settings_reload(
+    token: CancellationToken,
+    app_state: Arc<AppState>,
+) -> JoinHandle<()> {
     let settings = app_state.settings.clone();
     let db = app_state.db().clone();
     let tid = app_state.default_tenant_id;
@@ -267,7 +270,7 @@ pub fn spawn_settings_reload(token: CancellationToken, app_state: Arc<AppState>)
 }
 
 /// Polls the CA version counter in the database to detect cross-instance CA updates.
-pub fn spawn_ca_reload(
+pub(crate) fn spawn_ca_reload(
     token: CancellationToken,
     app_state: Arc<AppState>,
     ca_tx: tokio::sync::watch::Sender<crate::pki::CaSnapshot>,
@@ -339,7 +342,7 @@ pub fn spawn_ca_reload(
 /// Periodic CA rotation checking is handled by the centralised scheduler
 /// (`CaRotationCheckExecutor`), which fires `ca_rotation_trigger` when rotation
 /// is needed. This task only listens for that trigger and API-initiated rotations.
-pub fn spawn_ca_rotation(
+pub(crate) fn spawn_ca_rotation(
     token: CancellationToken,
     app_state: Arc<AppState>,
     ca_tx: tokio::sync::watch::Sender<crate::pki::CaSnapshot>,
@@ -443,7 +446,7 @@ pub fn spawn_ca_rotation(
 }
 
 /// Periodic server certificate auto-renewal (internally generated certs only).
-pub fn spawn_server_cert_renewal(
+pub(crate) fn spawn_server_cert_renewal(
     token: CancellationToken,
     app_state: Arc<AppState>,
     crl_manager: Arc<crate::crl_manager::CrlManager>,
@@ -540,7 +543,7 @@ pub fn spawn_server_cert_renewal(
 /// Pulls messages from JetStream, filters self-originated events, and delivers
 /// to local services via the shared event delivery routing logic.
 #[cfg(feature = "nats")]
-pub fn spawn_nats_consumer(
+pub(crate) fn spawn_nats_consumer(
     token: CancellationToken,
     nats: uptrakit_web_api::nats_transport::NatsTransport,
     registry: uptrakit_web_api::service_connections::ServiceConnectionRegistry,

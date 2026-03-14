@@ -14,7 +14,7 @@ use crate::ssh_config;
 use crate::ssh_key;
 
 /// Dispatch a host subcommand.
-pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
+pub(crate) async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
     let db = crate::db::init_db(state_dir).await.map_err(|e| {
         report!(Error::Database(sea_orm::DbErr::Custom(format!(
             "failed to initialize local database: {e}"

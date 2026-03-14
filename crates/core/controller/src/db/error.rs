@@ -3,7 +3,7 @@ use thiserror::Error;
 use uptrakit_shared_macros::impl_report_conversion;
 
 #[derive(Debug, Error)]
-pub enum DbError {
+pub(crate) enum DbError {
     #[error("database connection error: {0}")]
     Connection(String),
 
@@ -17,6 +17,6 @@ pub enum DbError {
     SeaOrm(#[from] sea_orm::DbErr),
 }
 
-pub type Result<T> = std::result::Result<T, Report<DbError>>;
+pub(crate) type Result<T> = std::result::Result<T, Report<DbError>>;
 
 impl_report_conversion!(sea_orm::DbErr => DbError::SeaOrm);

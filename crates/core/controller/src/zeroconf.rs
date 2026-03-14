@@ -17,10 +17,10 @@ use uptrakit_web_api::ca_snapshot::CaPublicSnapshot;
 use uptrakit_web_api::settings::ZeroconfSnapshot;
 
 /// mDNS service type for Uptrakit controller discovery.
-pub const SERVICE_TYPE: &str = "_uptrakit._tcp.local.";
+pub(crate) const SERVICE_TYPE: &str = "_uptrakit._tcp.local.";
 
 /// Build TXT record properties from the current CA snapshot and zeroconf settings.
-pub fn build_txt_properties(
+pub(crate) fn build_txt_properties(
     ca_snapshot: &CaPublicSnapshot,
     zeroconf: &ZeroconfSnapshot,
 ) -> Vec<(&'static str, String)> {
@@ -51,7 +51,7 @@ fn strip_local_suffix(hostname: &str) -> &str {
 /// Run the mDNS advertiser until the cancellation token is triggered.
 ///
 /// Errors during startup are logged as warnings and do not crash the controller.
-pub async fn run_advertiser(
+pub(crate) async fn run_advertiser(
     cancel: CancellationToken,
     https_addr: SocketAddr,
     ca_snapshot: CaPublicSnapshot,

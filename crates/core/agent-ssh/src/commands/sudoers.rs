@@ -15,7 +15,7 @@ use crate::error::{Error, Result};
 /// Detect whether the current SSH user is root by running `id -u`.
 ///
 /// Returns `false` on any error so callers can proceed conservatively.
-pub async fn detect_is_root(executor: &dyn RemoteExecutor) -> Result<bool> {
+pub(crate) async fn detect_is_root(executor: &dyn RemoteExecutor) -> Result<bool> {
     let result = executor.exec_command("id -u").await.context_to::<Error>()?;
     Ok(result.exit_code == 0 && result.stdout.trim() == "0")
 }
@@ -24,7 +24,7 @@ pub async fn detect_is_root(executor: &dyn RemoteExecutor) -> Result<bool> {
 ///
 /// Returns `false` on any error or non-zero exit. Only meaningful when
 /// [`detect_is_root`] returned `false`.
-pub async fn detect_sudo_available(executor: &dyn RemoteExecutor) -> Result<bool> {
+pub(crate) async fn detect_sudo_available(executor: &dyn RemoteExecutor) -> Result<bool> {
     let result = executor
         .exec_command("sudo -n true")
         .await
@@ -35,7 +35,7 @@ pub async fn detect_sudo_available(executor: &dyn RemoteExecutor) -> Result<bool
 // ── Sudoers content ────────────────────────────────────────────────────
 
 /// A command entry with its resolved absolute path on the remote host.
-pub struct ResolvedSudoCommand {
+pub(crate) struct ResolvedSudoCommand {
     /// Absolute path of the command on the remote host (e.g. `/usr/bin/apt-get`).
     pub command_path: String,
     /// Human-readable explanation, shown as a sudoers comment.
@@ -47,7 +47,7 @@ pub struct ResolvedSudoCommand {
 }
 
 /// Describes what to write to the sudoers file.
-pub enum SudoersContent {
+pub(crate) enum SudoersContent {
     /// Write `NOPASSWD: ALL` — maximum permissions, legacy fallback.
     AllCommands,
     /// Write one entry per resolved command — minimal, specific permissions.
@@ -63,7 +63,7 @@ pub enum SudoersContent {
 /// `privileged` controls whether write commands are prefixed with `sudo`:
 /// - `true` when the auth user is non-root and has passwordless sudo.
 /// - `false` when the auth user is root.
-pub async fn install_helper_script(
+pub(crate) async fn install_helper_script(
     executor: &dyn RemoteExecutor,
     helper: &SudoHelperScript,
     privileged: bool,
@@ -95,7 +95,7 @@ pub async fn install_helper_script(
 /// `command -v <name>`.
 ///
 /// Returns `None` if the command is not found or the session fails.
-pub async fn resolve_command_path(
+pub(crate) async fn resolve_command_path(
     executor: &dyn RemoteExecutor,
     command: &str,
 ) -> Result<Option<String>> {
@@ -179,7 +179,7 @@ fn render_sudoers_command_spec(command_spec: &str) -> String {
         .join(" ")
 }
 
-pub fn generate_sudoers_content(username: &str, content: &SudoersContent) -> String {
+pub(crate) fn generate_sudoers_content(username: &str, content: &SudoersContent) -> String {
     let mut out = String::new();
     out.push_str("# Managed by Uptrakit - DO NOT EDIT MANUALLY\n");
     out.push_str("# Regenerate: uptrakit-agent-ssh host sync <host>\n");
@@ -220,7 +220,7 @@ pub fn generate_sudoers_content(username: &str, content: &SudoersContent) -> Str
 /// `privileged` mirrors the same flag used by [`write_sudoers_file`]:
 /// `true` when the auth user is non-root and has passwordless sudo, `false`
 /// when the auth user is root.
-pub async fn ensure_docker_group_membership(
+pub(crate) async fn ensure_docker_group_membership(
     executor: &dyn RemoteExecutor,
     username: &str,
     privileged: bool,
@@ -257,7 +257,7 @@ pub async fn ensure_docker_group_membership(
 /// `privileged` controls whether write commands are prefixed with `sudo`:
 /// - `true` when the auth user is non-root and has passwordless sudo.
 /// - `false` when the auth user is root.
-pub async fn write_sudoers_file(
+pub(crate) async fn write_sudoers_file(
     executor: &dyn RemoteExecutor,
     username: &str,
     content: &SudoersContent,

@@ -39,7 +39,7 @@ struct SchedulerRuntime {
 const STOP_SCHEDULER_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// `ServiceHandler` for the external scheduler.
-pub struct SchedulerHandler {
+pub(crate) struct SchedulerHandler {
     pub poll_interval_secs: u64,
     runtime: Option<SchedulerRuntime>,
     /// Stable service ID captured on connect; used as the claim identity so that
@@ -48,7 +48,7 @@ pub struct SchedulerHandler {
 }
 
 impl SchedulerHandler {
-    pub fn new(poll_interval_secs: u64) -> Self {
+    pub(crate) fn new(poll_interval_secs: u64) -> Self {
         Self {
             poll_interval_secs,
             runtime: None,

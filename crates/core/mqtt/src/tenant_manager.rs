@@ -52,7 +52,7 @@ struct ConnectivityState {
 ///
 /// Unlike the database-polling version, this manager receives configuration
 /// updates from the controller via WebSocket messages.
-pub struct TenantManager {
+pub(crate) struct TenantManager {
     clients: HashMap<Uuid, ClientState>,
     event_tx: Option<mpsc::Sender<MqttServiceEvent>>,
     software_states: HashMap<Uuid, Vec<uptrakit_internal_wire::MqttSoftwareStateItem>>,
@@ -70,7 +70,7 @@ pub struct TenantManager {
 }
 
 impl TenantManager {
-    pub fn new(event_tx: Option<mpsc::Sender<MqttServiceEvent>>) -> Self {
+    pub(crate) fn new(event_tx: Option<mpsc::Sender<MqttServiceEvent>>) -> Self {
         Self {
             clients: HashMap::new(),
             event_tx,
@@ -85,7 +85,7 @@ impl TenantManager {
     ///
     /// This is called when receiving `TenantAssignments` message.
     #[tracing::instrument(skip_all)]
-    pub async fn apply_assignments(&mut self, configs: Vec<MqttTenantConfig>) {
+    pub(crate) async fn apply_assignments(&mut self, configs: Vec<MqttTenantConfig>) {
         for config in configs {
             if config.enabled {
                 self.start_or_update_client(config).await;
@@ -99,7 +99,7 @@ impl TenantManager {
     ///
     /// This is called when receiving `TenantConfigUpdated` message.
     #[tracing::instrument(skip_all, fields(mqtt_client_id = %config.mqtt_client_id))]
-    pub async fn reload_client(&mut self, config: MqttTenantConfig) {
+    pub(crate) async fn reload_client(&mut self, config: MqttTenantConfig) {
         if config.enabled {
             self.start_or_update_client(config).await;
         } else {
@@ -111,7 +111,7 @@ impl TenantManager {
     ///
     /// This is called when receiving `TenantRevoked` message or when config is disabled.
     #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
-    pub async fn stop_client(&mut self, mqtt_client_id: &Uuid) {
+    pub(crate) async fn stop_client(&mut self, mqtt_client_id: &Uuid) {
         if let Some(state) = self.clients.remove(mqtt_client_id) {
             tracing::info!(%mqtt_client_id, "shutting down MQTT client");
             self.report_status(*mqtt_client_id, MqttClientConnectionStatus::Offline);
@@ -120,13 +120,13 @@ impl TenantManager {
     }
 
     /// Return list of active MQTT client IDs (used in `Disconnecting` payload).
-    pub fn active_mqtt_client_ids(&self) -> Vec<Uuid> {
+    pub(crate) fn active_mqtt_client_ids(&self) -> Vec<Uuid> {
         self.clients.keys().copied().collect()
     }
 
     /// Graceful shutdown: stop all MQTT clients.
     #[tracing::instrument(skip_all)]
-    pub async fn shutdown_all(&mut self) {
+    pub(crate) async fn shutdown_all(&mut self) {
         let clients = std::mem::take(&mut self.clients);
         let mut tasks = FuturesUnordered::new();
 
@@ -148,7 +148,7 @@ impl TenantManager {
     /// Home Assistant discovery config topics are published only for clients
     /// that have `ha_discovery` enabled.
     #[tracing::instrument(skip_all, fields(tenant_id = %payload.tenant_id))]
-    pub async fn update_software_states(
+    pub(crate) async fn update_software_states(
         &mut self,
         payload: uptrakit_internal_wire::MqttSoftwareStatesPayload,
     ) {
@@ -183,7 +183,7 @@ impl TenantManager {
     /// that tenant. Connectivity discovery configs are published for
     /// HA-enabled clients on first sight of a host.
     #[tracing::instrument(skip_all, fields(tenant_id = %tenant_id))]
-    pub async fn handle_host_connectivity_updated(
+    pub(crate) async fn handle_host_connectivity_updated(
         &mut self,
         tenant_id: Uuid,
         updates: Vec<HostConnectivityUpdate>,
@@ -221,7 +221,7 @@ impl TenantManager {
     /// Republishes both state/version topics (for all clients) and HA discovery
     /// config topics (only for HA-enabled clients) from the in-memory cache.
     #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
-    pub async fn handle_reconnected(&mut self, mqtt_client_id: &uuid::Uuid) {
+    pub(crate) async fn handle_reconnected(&mut self, mqtt_client_id: &uuid::Uuid) {
         let Some(state) = self.clients.get(mqtt_client_id) else {
             return;
         };
@@ -257,7 +257,7 @@ impl TenantManager {
     /// and `{ha_prefix}/binary_sensor/.../config` messages need to be
     /// republished so that HA re-registers its entities.
     #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
-    pub async fn handle_ha_online(&mut self, mqtt_client_id: &uuid::Uuid) {
+    pub(crate) async fn handle_ha_online(&mut self, mqtt_client_id: &uuid::Uuid) {
         let Some(state) = self.clients.get(mqtt_client_id) else {
             return;
         };
@@ -290,7 +290,7 @@ impl TenantManager {
     ///
     /// Returns `None` if the topic doesn't match any known `(item, host)` in
     /// the stored states.
-    pub fn resolve_update_trigger(
+    pub(crate) fn resolve_update_trigger(
         &self,
         mqtt_client_id: uuid::Uuid,
         topic: &str,
@@ -317,7 +317,7 @@ impl TenantManager {
     ///
     /// Returns `None` if the topic doesn't match the host-packages command
     /// pattern `{prefix}/hosts/{host_id}/set`.
-    pub fn resolve_host_batch_update_trigger(
+    pub(crate) fn resolve_host_batch_update_trigger(
         &self,
         mqtt_client_id: uuid::Uuid,
         topic: &str,
@@ -339,7 +339,7 @@ impl TenantManager {
     ///
     /// Returns `None` if the topic doesn't match the security command
     /// pattern `{prefix}/hosts/{host_id}/security/set`.
-    pub fn resolve_host_security_batch_update_trigger(
+    pub(crate) fn resolve_host_security_batch_update_trigger(
         &self,
         mqtt_client_id: uuid::Uuid,
         topic: &str,

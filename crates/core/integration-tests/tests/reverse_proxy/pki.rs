@@ -6,7 +6,7 @@ use rcgen::{
 use std::net::Ipv4Addr;
 
 /// A complete test PKI: CA, server certificate, and agent client certificate.
-pub struct TestPki {
+pub(crate) struct TestPki {
     /// PEM-encoded CA certificate.
     pub ca_cert_pem: String,
     /// PEM-encoded CA private key.
@@ -32,7 +32,7 @@ impl TestPki {
     /// - CA: CN=`Test CA`, ECDSA P-256, self-signed, 1-day validity
     /// - Server cert: signed by CA, SANs = `localhost`, `host.docker.internal`, `127.0.0.1`
     /// - Agent cert: signed by CA, CN = random UUID v7, EKU = ClientAuth
-    pub fn generate() -> Self {
+    pub(crate) fn generate() -> Self {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let ca_cn = "Test CA".to_string();
@@ -118,7 +118,7 @@ impl TestPki {
     /// Generate a second agent certificate (for revocation testing).
     ///
     /// Returns `(cert_pem, key_pem, agent_id)`.
-    pub fn generate_extra_agent_cert(&self) -> (String, String, uuid::Uuid) {
+    pub(crate) fn generate_extra_agent_cert(&self) -> (String, String, uuid::Uuid) {
         let ca_issuer = Issuer::from_ca_cert_pem(&self.ca_cert_pem, self.ca_key_pair())
             .expect("CA issuer from PEM");
 
@@ -145,7 +145,7 @@ impl TestPki {
     /// Generate a second agent certificate with an AIA extension embedding the given OCSP URL.
     ///
     /// Returns `(cert_pem, key_pem, agent_id)`.
-    pub fn generate_extra_agent_cert_with_aia(
+    pub(crate) fn generate_extra_agent_cert_with_aia(
         &self,
         ocsp_url: &str,
     ) -> (String, String, uuid::Uuid) {
@@ -184,7 +184,7 @@ impl TestPki {
     /// Generate a PEM-encoded CRL containing the specified revoked certificate
     /// serial numbers. The serial numbers should be the hex-encoded serials
     /// from the X.509 certificates.
-    pub fn generate_crl_pem(&self, revoked_serial_hex: &[&str]) -> String {
+    pub(crate) fn generate_crl_pem(&self, revoked_serial_hex: &[&str]) -> String {
         let ca_key = self.ca_key_pair();
         let ca_issuer =
             Issuer::from_ca_cert_pem(&self.ca_cert_pem, ca_key).expect("CA issuer for CRL");
@@ -223,7 +223,7 @@ impl TestPki {
 }
 
 /// Extract the hex-encoded serial number from a PEM certificate.
-pub fn extract_serial_hex(cert_pem: &str) -> String {
+pub(crate) fn extract_serial_hex(cert_pem: &str) -> String {
     let (_, pem) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
         .expect("parse PEM for serial extraction");
     let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)

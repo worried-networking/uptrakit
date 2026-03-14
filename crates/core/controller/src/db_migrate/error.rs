@@ -3,7 +3,7 @@ use thiserror::Error;
 
 /// Errors that can occur during a database migration.
 #[derive(Debug, Error)]
-pub enum DbMigrateError {
+pub(crate) enum DbMigrateError {
     /// Failed to connect to the source or target database, or a setup step
     /// (master key, URL validation) failed.
     #[error("database connection error: {0}")]
@@ -40,4 +40,4 @@ pub enum DbMigrateError {
     },
 }
 
-pub type Result<T> = std::result::Result<T, Report<DbMigrateError>>;
+pub(crate) type Result<T> = std::result::Result<T, Report<DbMigrateError>>;

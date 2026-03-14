@@ -84,7 +84,7 @@ fn encode_der_length(len: usize) -> Result<Vec<u8>> {
 }
 
 /// Add AIA and CDP extensions to certificate parameters when a backend URL is set.
-pub fn add_pki_extensions(params: &mut CertificateParams, pki_addr: &str) -> Result<()> {
+pub(crate) fn add_pki_extensions(params: &mut CertificateParams, pki_addr: &str) -> Result<()> {
     let ocsp_url = format!("{pki_addr}/api/v1/pki/ocsp");
     let ca_issuers_url = format!("{pki_addr}/api/v1/pki/ca.crt");
     let crl_url = format!("{pki_addr}/api/v1/pki/ca.crl");
@@ -107,7 +107,7 @@ pub fn add_pki_extensions(params: &mut CertificateParams, pki_addr: &str) -> Res
 }
 
 #[derive(Debug, Error)]
-pub enum PkiError {
+pub(crate) enum PkiError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -145,7 +145,7 @@ pub enum PkiError {
     LengthOverflow(usize),
 }
 
-pub type Result<T> = std::result::Result<T, Report<PkiError>>;
+pub(crate) type Result<T> = std::result::Result<T, Report<PkiError>>;
 
 impl_report_conversion! {
     std::io::Error => PkiError::Io,
@@ -163,20 +163,20 @@ impl_report_conversion!(pki_utils::PkiUtilError => PkiError, |e| match e {
 });
 
 /// Loaded CA material.
-pub struct CaBundle {
+pub(crate) struct CaBundle {
     pub cert_pem: String,
     pub key_pem: String,
     pub issuer: Issuer<'static, KeyPair>,
 }
 
 /// Loaded server certificate material.
-pub struct ServerCertBundle {
+pub(crate) struct ServerCertBundle {
     pub cert_pem: String,
     pub key_pem: String,
 }
 
 /// Active + optional previous CA state.
-pub struct CaState {
+pub(crate) struct CaState {
     pub active: CaBundle,
     pub previous: Option<CaBundle>,
     pub trusted: Vec<CaBundle>,
@@ -184,14 +184,14 @@ pub struct CaState {
 }
 
 /// Type alias for the canonical public CA snapshot type from the web-api crate.
-pub type CaSnapshot = uptrakit_web_api::ca_snapshot::CaPublicSnapshot;
+pub(crate) type CaSnapshot = uptrakit_web_api::ca_snapshot::CaPublicSnapshot;
 
 /// Type alias for the CA key store type from the web-api crate.
-pub type CaKeyStore = uptrakit_web_api::ca_snapshot::CaKeyStore;
+pub(crate) type CaKeyStore = uptrakit_web_api::ca_snapshot::CaKeyStore;
 
 impl CaState {
     /// Build a PEM bundle of all trusted CA certs (active + historical).
-    pub fn ca_bundle_pem(&self) -> String {
+    pub(crate) fn ca_bundle_pem(&self) -> String {
         let mut bundle = String::new();
         for ca in &self.trusted {
             if !bundle.is_empty() && !bundle.ends_with('\n') {
@@ -203,7 +203,7 @@ impl CaState {
     }
 
     /// Build a shareable public snapshot and a private key store.
-    pub fn to_snapshot(&self, pki_addr: Option<String>) -> Result<(CaSnapshot, CaKeyStore)> {
+    pub(crate) fn to_snapshot(&self, pki_addr: Option<String>) -> Result<(CaSnapshot, CaKeyStore)> {
         let active_fingerprint = ca_fingerprint(&self.active.cert_pem)?;
         let previous_fingerprint = match &self.previous {
             Some(prev) => Some(ca_fingerprint(&prev.cert_pem)?),
@@ -258,14 +258,14 @@ impl CaState {
 }
 
 /// Ensure the PKI directory exists and return its path.
-pub fn pki_dir(data_dir: &Path) -> Result<PathBuf> {
+pub(crate) fn pki_dir(data_dir: &Path) -> Result<PathBuf> {
     let dir = data_dir.join("pki");
     fs::create_dir_all(&dir).context_to::<PkiError>()?;
     Ok(dir)
 }
 
 /// Load or initialize the managed CA from the database.
-pub async fn load_or_init_managed_ca(
+pub(crate) async fn load_or_init_managed_ca(
     db: &DatabaseConnection,
     pki_addr: Option<&str>,
 ) -> Result<CaState> {
@@ -327,7 +327,7 @@ pub async fn load_or_init_managed_ca(
 }
 
 /// Load the full managed CA state from the database.
-pub async fn load_managed_ca_state(db: &DatabaseConnection) -> Result<CaState> {
+pub(crate) async fn load_managed_ca_state(db: &DatabaseConnection) -> Result<CaState> {
     let active_fp = load_active_ca_fingerprint(db).await?.ok_or_else(|| {
         report!(PkiError::CaValidation(
             "missing active CA fingerprint".into()
@@ -391,13 +391,13 @@ pub async fn load_managed_ca_state(db: &DatabaseConnection) -> Result<CaState> {
 }
 
 /// Result of a CA rotation attempt.
-pub struct RotationOutcome {
+pub(crate) struct RotationOutcome {
     pub rotated: bool,
     pub state: CaState,
 }
 
 /// Rotate the managed CA using a compare-and-swap guard in the database.
-pub async fn rotate_managed_ca(
+pub(crate) async fn rotate_managed_ca(
     db: &DatabaseConnection,
     pki_addr: Option<&str>,
     expected_active_fp: &str,
@@ -549,7 +549,7 @@ fn bundle_from_model(model: ca_certificate::Model) -> Result<CaBundle> {
     })
 }
 
-pub fn bundle_from_pem(cert_pem: String, key_pem: String) -> Result<CaBundle> {
+pub(crate) fn bundle_from_pem(cert_pem: String, key_pem: String) -> Result<CaBundle> {
     let key_pair = KeyPair::from_pem(&key_pem).context_to::<PkiError>()?;
     let issuer = Issuer::from_ca_cert_pem(&cert_pem, key_pair).context_to::<PkiError>()?;
     Ok(CaBundle {
@@ -673,7 +673,7 @@ async fn bump_global_setting_i64(db: &impl ConnectionTrait, key: SettingKey) -> 
     Ok(next)
 }
 
-pub async fn load_ca_version(db: &DatabaseConnection) -> Result<i64> {
+pub(crate) async fn load_ca_version(db: &DatabaseConnection) -> Result<i64> {
     let row = global_setting::Entity::find_by_id(SettingKey::PkiCaVersion.as_str().to_string())
         .one(db)
         .await
@@ -682,14 +682,14 @@ pub async fn load_ca_version(db: &DatabaseConnection) -> Result<i64> {
 }
 
 /// Load a CA from user-provided (external) paths.
-pub fn load_external_ca(cert_path: &Path, key_path: &Path) -> Result<CaBundle> {
+pub(crate) fn load_external_ca(cert_path: &Path, key_path: &Path) -> Result<CaBundle> {
     let bundle = load_ca(cert_path, key_path)?;
     tracing::info!("using external CA certificate from {}", cert_path.display());
     Ok(bundle)
 }
 
 /// Load a server certificate from user-provided paths.
-pub fn load_external_cert(cert_path: &Path, key_path: &Path) -> Result<ServerCertBundle> {
+pub(crate) fn load_external_cert(cert_path: &Path, key_path: &Path) -> Result<ServerCertBundle> {
     let cert_pem = fs::read_to_string(cert_path).context_to::<PkiError>()?;
     let key_pem = fs::read_to_string(key_path).context_to::<PkiError>()?;
     tracing::info!(
@@ -700,7 +700,7 @@ pub fn load_external_cert(cert_path: &Path, key_path: &Path) -> Result<ServerCer
 }
 
 /// Load or generate a server certificate signed by the internal CA.
-pub async fn load_or_generate_server_cert(
+pub(crate) async fn load_or_generate_server_cert(
     pki: &Path,
     ca: &CaBundle,
     sans: &[String],
@@ -768,14 +768,14 @@ fn generate_server_cert(ca: &CaBundle, sans: &[String]) -> Result<ServerCertBund
 // --- CA fingerprint ---
 
 /// Compute SHA-256 hex fingerprint of a PEM-encoded certificate.
-pub fn ca_fingerprint(cert_pem: &str) -> Result<String> {
+pub(crate) fn ca_fingerprint(cert_pem: &str) -> Result<String> {
     let (_, pem_block) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
         .map_err(|_| report!(PkiError::PemParse))?;
     Ok(sha256_hex(&pem_block.contents))
 }
 
 /// SHA-256 hex digest of arbitrary bytes.
-pub fn sha256_hex(data: &[u8]) -> String {
+pub(crate) fn sha256_hex(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
     uptrakit_shared_types::hex::encode(hasher.finalize())
@@ -785,7 +785,7 @@ pub fn sha256_hex(data: &[u8]) -> String {
 
 /// Check if a PEM-encoded certificate is expired.
 /// Returns `true` if the certificate is expired or unparseable.
-pub fn is_cert_expired(pem: &str) -> bool {
+pub(crate) fn is_cert_expired(pem: &str) -> bool {
     let Ok((_, pem_block)) = x509_parser::pem::parse_x509_pem(pem.as_bytes()) else {
         return true;
     };
@@ -796,7 +796,7 @@ pub fn is_cert_expired(pem: &str) -> bool {
 }
 
 /// Extract the `not_after` timestamp from a PEM-encoded certificate.
-pub fn cert_not_after(pem: &str) -> Result<OffsetDateTime> {
+pub(crate) fn cert_not_after(pem: &str) -> Result<OffsetDateTime> {
     let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes())
         .map_err(|_| report!(PkiError::PemParse))?;
     let cert = pem_block
@@ -807,7 +807,7 @@ pub fn cert_not_after(pem: &str) -> Result<OffsetDateTime> {
 }
 
 /// Extract the `not_before` timestamp from a PEM-encoded certificate.
-pub fn cert_not_before(pem: &str) -> Result<OffsetDateTime> {
+pub(crate) fn cert_not_before(pem: &str) -> Result<OffsetDateTime> {
     let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes())
         .map_err(|_| report!(PkiError::PemParse))?;
     let cert = pem_block
@@ -827,7 +827,7 @@ fn cert_common_name(pem: &str) -> Option<String> {
 // --- Rotation helpers ---
 
 /// Returns `true` if the CA certificate expires within 183 days (6 months).
-pub fn should_rotate_ca(cert_pem: &str) -> bool {
+pub(crate) fn should_rotate_ca(cert_pem: &str) -> bool {
     let Ok(not_after) = cert_not_after(cert_pem) else {
         return true;
     };
@@ -839,7 +839,7 @@ pub fn should_rotate_ca(cert_pem: &str) -> bool {
 // --- Server cert renewal ---
 
 /// Returns `true` if the server certificate expires within 30 days.
-pub fn should_renew_server_cert(cert_pem: &str) -> bool {
+pub(crate) fn should_renew_server_cert(cert_pem: &str) -> bool {
     let Ok(not_after) = cert_not_after(cert_pem) else {
         return true;
     };
@@ -849,7 +849,7 @@ pub fn should_renew_server_cert(cert_pem: &str) -> bool {
 }
 
 /// Generate a new server cert signed by the given CA and save to the PKI directory.
-pub async fn renew_server_cert(
+pub(crate) async fn renew_server_cert(
     pki: &Path,
     ca: &CaBundle,
     sans: &[String],
@@ -873,7 +873,7 @@ pub async fn renew_server_cert(
 ///
 /// Returns a `SanCollection` with the DNS names and IP addresses found in
 /// the certificate's SAN extension.
-pub fn extract_sans_from_cert(cert_pem: &str) -> Result<SanCollection> {
+pub(crate) fn extract_sans_from_cert(cert_pem: &str) -> Result<SanCollection> {
     use x509_parser::extensions::GeneralName;
 
     let (_, pem_block) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
@@ -927,7 +927,7 @@ pub fn extract_sans_from_cert(cert_pem: &str) -> Result<SanCollection> {
 ///
 /// Computes the expected SAN set via `parse_san_list(sans)` and uses exact
 /// equality (not subset check) since the list is now canonical.
-pub fn server_cert_needs_san_update(cert_pem: &str, sans: &[String]) -> Result<bool> {
+pub(crate) fn server_cert_needs_san_update(cert_pem: &str, sans: &[String]) -> Result<bool> {
     let expected = pki_utils::parse_san_list(sans);
     let actual = extract_sans_from_cert(cert_pem)?;
 
@@ -948,7 +948,7 @@ pub fn server_cert_needs_san_update(cert_pem: &str, sans: &[String]) -> Result<b
 ///
 /// Thin wrapper around `pki_utils::cert_signed_by_ca` that converts errors
 /// to `PkiError`.
-pub fn cert_signed_by_ca(cert_pem: &str, ca_pem: &str) -> Result<bool> {
+pub(crate) fn cert_signed_by_ca(cert_pem: &str, ca_pem: &str) -> Result<bool> {
     pki_utils::cert_signed_by_ca(cert_pem, ca_pem).context_to::<PkiError>()
 }
 
@@ -956,7 +956,7 @@ pub fn cert_signed_by_ca(cert_pem: &str, ca_pem: &str) -> Result<bool> {
 
 /// URLs extracted from a certificate's AIA and CDP extensions.
 #[derive(Debug, Default, PartialEq)]
-pub struct CertPkiUrls {
+pub(crate) struct CertPkiUrls {
     pub ocsp_url: Option<String>,
     pub ca_issuers_url: Option<String>,
     pub crl_url: Option<String>,
@@ -964,13 +964,13 @@ pub struct CertPkiUrls {
 
 impl CertPkiUrls {
     /// Returns `true` if the certificate has any AIA or CDP extensions.
-    pub fn has_extensions(&self) -> bool {
+    pub(crate) fn has_extensions(&self) -> bool {
         self.ocsp_url.is_some() || self.ca_issuers_url.is_some() || self.crl_url.is_some()
     }
 }
 
 /// Extract AIA and CDP URLs from a PEM-encoded certificate.
-pub fn extract_cert_pki_urls(cert_pem: &str) -> Result<CertPkiUrls> {
+pub(crate) fn extract_cert_pki_urls(cert_pem: &str) -> Result<CertPkiUrls> {
     use x509_parser::extensions::ParsedExtension;
 
     let (_, pem_block) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
@@ -1025,7 +1025,7 @@ pub fn extract_cert_pki_urls(cert_pem: &str) -> Result<CertPkiUrls> {
 ///
 /// Call this after loading CA state and before building the snapshot.
 /// Mismatch causes a hard startup failure with descriptive error.
-pub fn validate_ca_pki_addr(cert_pem: &str, pki_addr: Option<&str>) -> Result<()> {
+pub(crate) fn validate_ca_pki_addr(cert_pem: &str, pki_addr: Option<&str>) -> Result<()> {
     let cert_urls = extract_cert_pki_urls(cert_pem)?;
     let has_extensions = cert_urls.has_extensions();
 
@@ -1098,7 +1098,7 @@ pub fn validate_ca_pki_addr(cert_pem: &str, pki_addr: Option<&str>) -> Result<()
 
 /// Build a `rustls::ServerConfig` from PEM-encoded cert and key (no client auth).
 #[cfg(test)]
-pub fn build_rustls_config(cert_pem: &str, key_pem: &str) -> Result<rustls::ServerConfig> {
+pub(crate) fn build_rustls_config(cert_pem: &str, key_pem: &str) -> Result<rustls::ServerConfig> {
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
@@ -1121,7 +1121,7 @@ pub fn build_rustls_config(cert_pem: &str, key_pem: &str) -> Result<rustls::Serv
 ///
 /// Each CA in the bundle gets its own CRL. The verifier checks client certificates
 /// against all supplied CRLs.
-pub fn build_rustls_config_with_client_auth_and_crls(
+pub(crate) fn build_rustls_config_with_client_auth_and_crls(
     cert_pem: &str,
     key_pem: &str,
     ca_bundle_pem: &str,

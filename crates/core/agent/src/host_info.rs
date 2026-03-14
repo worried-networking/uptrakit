@@ -1,7 +1,7 @@
 use uptrakit_internal_wire::HostInfo;
 
 /// Collect host information for the current machine.
-pub fn collect_host_info() -> HostInfo {
+pub(crate) fn collect_host_info() -> HostInfo {
     HostInfo {
         machine_id: read_machine_id(),
         os_type: Some(std::env::consts::OS.to_string()),

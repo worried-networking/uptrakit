@@ -66,13 +66,13 @@ struct PoolEntry {
 /// A single pool instance lives on `SshAgentHandler` for the lifetime of the
 /// controller connection.
 #[derive(Clone)]
-pub struct SshConnectionPool {
+pub(crate) struct SshConnectionPool {
     sessions: Arc<Mutex<HashMap<Uuid, PoolEntry>>>,
 }
 
 impl SshConnectionPool {
     /// Create a new, empty pool.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -86,7 +86,7 @@ impl SshConnectionPool {
     ///
     /// Returns an error if the connection attempt fails.  Nothing is stored in
     /// the pool on failure.
-    pub async fn acquire(&self, host: &Model) -> Result<Arc<SshSession>> {
+    pub(crate) async fn acquire(&self, host: &Model) -> Result<Arc<SshSession>> {
         // Check the pool under the lock first.
         {
             let mut pool = self.sessions.lock();
@@ -154,7 +154,7 @@ impl SshConnectionPool {
     /// defunct session.
     ///
     /// [`acquire`]: Self::acquire
-    pub async fn evict(&self, host_id: Uuid) {
+    pub(crate) async fn evict(&self, host_id: Uuid) {
         let removed = self.sessions.lock().remove(&host_id).is_some();
         if removed {
             tracing::debug!(host_id = %host_id, "evicted SSH session from pool");
@@ -165,7 +165,7 @@ impl SshConnectionPool {
     ///
     /// Should be called on service shutdown so remote hosts receive a clean
     /// SSH disconnect instead of a silent idle drop.
-    pub async fn disconnect_all(&self) {
+    pub(crate) async fn disconnect_all(&self) {
         let sessions: Vec<Arc<SshSession>> = {
             let mut pool = self.sessions.lock();
             pool.drain().map(|(_, e)| e.session).collect()
@@ -191,13 +191,13 @@ impl SshConnectionPool {
 
     /// Return whether `host_id` has a cached session.
     #[cfg(test)]
-    pub async fn is_cached(&self, host_id: Uuid) -> bool {
+    pub(crate) async fn is_cached(&self, host_id: Uuid) -> bool {
         self.sessions.lock().contains_key(&host_id)
     }
 
     /// Return the number of currently cached sessions.
     #[cfg(test)]
-    pub async fn len(&self) -> usize {
+    pub(crate) async fn len(&self) -> usize {
         self.sessions.lock().len()
     }
 }

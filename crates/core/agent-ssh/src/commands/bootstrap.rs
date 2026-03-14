@@ -36,7 +36,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 // ── Bootstrap parameters ─────────────────────────────────────────────
 
 /// Parameters for the bootstrap workflow, mirroring CLI args.
-pub struct BootstrapParams {
+pub(crate) struct BootstrapParams {
     pub name: String,
     pub hostname: String,
     pub port: i32,
@@ -72,7 +72,7 @@ pub struct BootstrapParams {
 }
 
 /// Result of a successful bootstrap, carrying metadata for the event loop.
-pub struct BootstrapResult {
+pub(crate) struct BootstrapResult {
     /// Infrastructure detection results from each plugin that ran
     /// `on_host_bootstrapped`. The event loop uses these to send
     /// `ReportPluginConfig` or update host state.
@@ -82,7 +82,10 @@ pub struct BootstrapResult {
 // ── Main orchestrator ────────────────────────────────────────────────
 
 /// Run the full bootstrap workflow.
-pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<BootstrapResult> {
+pub(crate) async fn run_bootstrap(
+    state_dir: &Path,
+    params: BootstrapParams,
+) -> Result<BootstrapResult> {
     // 1. VALIDATE INPUTS
     if params.strict_host_key_checking && params.host_key_fingerprint.is_none() {
         bail!(Error::InvalidInput(

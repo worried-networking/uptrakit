@@ -9,12 +9,12 @@ use uptrakit_web_api::settings_store::{RawSettings, upsert_global_setting};
 /// Error type used for reconciliation failures.
 #[derive(Debug, thiserror::Error)]
 #[error("settings reconciliation failed")]
-pub struct ReconcileError;
+pub(crate) struct ReconcileError;
 
-pub type Result<T> = std::result::Result<T, Report<ReconcileError>>;
+pub(crate) type Result<T> = std::result::Result<T, Report<ReconcileError>>;
 
 /// JSON conversion pair used by [`reconcile_setting`].
-pub struct JsonConvert<T> {
+pub(crate) struct JsonConvert<T> {
     pub to_json: fn(&T) -> serde_json::Value,
     pub from_json: fn(&serde_json::Value) -> Option<T>,
 }
@@ -22,7 +22,7 @@ pub struct JsonConvert<T> {
 /// Parameters for [`reconcile_setting`].
 ///
 /// All reconciled settings are global (no `tenant_id`).
-pub struct ReconcileParams<'a, T> {
+pub(crate) struct ReconcileParams<'a, T> {
     pub db: &'a DatabaseConnection,
     pub key: SettingKey,
     pub raw: &'a RawSettings,
@@ -44,7 +44,7 @@ pub struct ReconcileParams<'a, T> {
 /// 3. DB has value + (CLI absent OR same) → use DB
 /// 4. No DB value + CLI provided → use CLI, save to DB
 /// 5. No DB value + CLI absent → use default, save to DB
-pub async fn reconcile_setting<T>(params: ReconcileParams<'_, T>) -> Result<T>
+pub(crate) async fn reconcile_setting<T>(params: ReconcileParams<'_, T>) -> Result<T>
 where
     T: PartialEq + Clone + fmt::Display,
 {

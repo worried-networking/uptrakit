@@ -12,7 +12,7 @@ use thiserror::Error;
 
 /// A parsed SSH connection target.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SshTarget {
+pub(crate) struct SshTarget {
     pub username: Option<String>,
     pub hostname: String,
     pub port: Option<u16>,
@@ -20,7 +20,7 @@ pub struct SshTarget {
 
 /// Errors produced while parsing an SSH target string.
 #[derive(Debug, Error)]
-pub enum ParseSshTargetError {
+pub(crate) enum ParseSshTargetError {
     #[error("empty target string")]
     Empty,
 

@@ -11,7 +11,7 @@ use serde::Deserialize;
 ///
 /// Used by integration tests to register a user, log in, and query the
 /// controller's state (e.g. list enrolled services).
-pub struct ApiClient {
+pub(crate) struct ApiClient {
     client: reqwest::Client,
     base_url: String,
     access_token: Option<String>,
@@ -25,13 +25,13 @@ struct AuthResponse {
 
 /// Paginated response wrapper matching the controller's API format.
 #[derive(Deserialize)]
-pub struct PaginatedResponse<T> {
+pub(crate) struct PaginatedResponse<T> {
     pub items: Vec<T>,
 }
 
 /// Minimal service response — only the fields needed for assertions.
 #[derive(Debug, Deserialize)]
-pub struct ServiceResponse {
+pub(crate) struct ServiceResponse {
     pub friendly_name: String,
     pub status: String,
     pub capabilities: Vec<String>,
@@ -40,7 +40,7 @@ pub struct ServiceResponse {
 
 impl ApiClient {
     /// Create a new API client pointing at the controller's mapped host port.
-    pub fn new(controller_port: u16) -> Self {
+    pub(crate) fn new(controller_port: u16) -> Self {
         let client = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .connect_timeout(Duration::from_secs(10))
@@ -58,7 +58,7 @@ impl ApiClient {
     /// Wait until the controller's health endpoint returns 200.
     ///
     /// Polls `GET /healthz` every 500ms until success or timeout.
-    pub async fn wait_for_ready(&self, timeout: Duration) {
+    pub(crate) async fn wait_for_ready(&self, timeout: Duration) {
         let deadline = tokio::time::Instant::now() + timeout;
 
         loop {
@@ -82,7 +82,7 @@ impl ApiClient {
     }
 
     /// Register a test user and log in, optionally supplying a registration token.
-    pub async fn register_and_login_with_token(&mut self, registration_token: Option<&str>) {
+    pub(crate) async fn register_and_login_with_token(&mut self, registration_token: Option<&str>) {
         // Register
         let register_resp = self
             .client
@@ -129,7 +129,7 @@ impl ApiClient {
     /// List all services visible to the authenticated user.
     ///
     /// Requires a prior call to [`register_and_login`](Self::register_and_login).
-    pub async fn list_services(&self) -> Vec<ServiceResponse> {
+    pub(crate) async fn list_services(&self) -> Vec<ServiceResponse> {
         let token = self
             .access_token
             .as_ref()
@@ -154,7 +154,7 @@ impl ApiClient {
     /// or until `timeout` elapses.
     ///
     /// Returns the service list once the threshold is reached.
-    pub async fn wait_for_service_count(
+    pub(crate) async fn wait_for_service_count(
         &self,
         min_count: usize,
         timeout: Duration,

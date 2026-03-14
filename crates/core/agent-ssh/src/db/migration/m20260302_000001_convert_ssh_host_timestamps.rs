@@ -9,7 +9,7 @@ use sea_orm_migration::schema::*;
 /// recreate the table with the correct schema, copy the data with an in-place
 /// format conversion, drop the old table, and rename the new one.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

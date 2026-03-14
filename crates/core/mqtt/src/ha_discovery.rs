@@ -23,7 +23,7 @@ use uuid::Uuid;
 /// let topic = discovery_config_topic("homeassistant", "uptrakit_abc_def_ghi");
 /// assert_eq!(topic, "homeassistant/update/uptrakit/abc_def_ghi/config");
 /// ```
-pub fn discovery_config_topic(ha_prefix: &str, unique_id: &str) -> String {
+pub(crate) fn discovery_config_topic(ha_prefix: &str, unique_id: &str) -> String {
     let object_id = unique_id.strip_prefix("uptrakit_").unwrap_or(unique_id);
     format!("{ha_prefix}/update/uptrakit/{object_id}/config")
 }
@@ -43,7 +43,7 @@ pub fn discovery_config_topic(ha_prefix: &str, unique_id: &str) -> String {
 /// let prefix = host_topic_prefix("uptrakit", Uuid::nil());
 /// assert!(prefix.starts_with("uptrakit/hosts/"));
 /// ```
-pub fn host_topic_prefix(topic_prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn host_topic_prefix(topic_prefix: &str, host_id: Uuid) -> String {
     format!("{topic_prefix}/hosts/{host_id}")
 }
 
@@ -61,7 +61,7 @@ pub fn host_topic_prefix(topic_prefix: &str, host_id: Uuid) -> String {
 /// let topic = state_topic("uptrakit", item_id, host_id);
 /// assert!(topic.ends_with("/state"));
 /// ```
-pub fn state_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String {
+pub(crate) fn state_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String {
     let hp = host_topic_prefix(topic_prefix, host_id);
     format!("{hp}/items/{item_id}/state")
 }
@@ -80,7 +80,7 @@ pub fn state_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String {
 /// let topic = latest_version_topic("uptrakit", item_id, host_id);
 /// assert!(topic.ends_with("/latest_version"));
 /// ```
-pub fn latest_version_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String {
+pub(crate) fn latest_version_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String {
     let hp = host_topic_prefix(topic_prefix, host_id);
     format!("{hp}/items/{item_id}/latest_version")
 }
@@ -99,7 +99,7 @@ pub fn latest_version_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) ->
 /// let topic = command_topic("uptrakit", item_id, host_id);
 /// assert!(topic.ends_with("/set"));
 /// ```
-pub fn command_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String {
+pub(crate) fn command_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String {
     let hp = host_topic_prefix(topic_prefix, host_id);
     format!("{hp}/items/{item_id}/set")
 }
@@ -122,7 +122,7 @@ pub fn command_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String
 /// let topic = json_attributes_topic("uptrakit", item_id, host_id);
 /// assert!(topic.ends_with("/attributes"));
 /// ```
-pub fn json_attributes_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String {
+pub(crate) fn json_attributes_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String {
     let hp = host_topic_prefix(topic_prefix, host_id);
     format!("{hp}/items/{item_id}/attributes")
 }
@@ -141,7 +141,7 @@ pub fn json_attributes_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -
 /// let topic = hostname_topic("uptrakit", Uuid::nil());
 /// assert!(topic.ends_with("/hostname"));
 /// ```
-pub fn hostname_topic(topic_prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn hostname_topic(topic_prefix: &str, host_id: Uuid) -> String {
     let hp = host_topic_prefix(topic_prefix, host_id);
     format!("{hp}/hostname")
 }
@@ -160,7 +160,7 @@ pub fn hostname_topic(topic_prefix: &str, host_id: Uuid) -> String {
 /// let topic = friendly_name_topic("uptrakit", Uuid::nil());
 /// assert!(topic.ends_with("/friendly_name"));
 /// ```
-pub fn friendly_name_topic(topic_prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn friendly_name_topic(topic_prefix: &str, host_id: Uuid) -> String {
     let hp = host_topic_prefix(topic_prefix, host_id);
     format!("{hp}/friendly_name")
 }
@@ -196,7 +196,7 @@ pub fn friendly_name_topic(topic_prefix: &str, host_id: Uuid) -> String {
 /// assert_eq!(payload["release_date"], "2025-01-15");
 /// assert!(payload.get("last_checked_at").is_none());
 /// ```
-pub fn build_attributes_payload(
+pub(crate) fn build_attributes_payload(
     in_progress: bool,
     update_category: Option<&str>,
     release_date: Option<&str>,
@@ -234,7 +234,7 @@ pub fn build_attributes_payload(
 /// assert!(uid.starts_with("uptrakit_"));
 /// assert!(!uid.contains('-'));
 /// ```
-pub fn unique_id(tenant_id: Uuid, item_id: Uuid, host_id: Uuid) -> String {
+pub(crate) fn unique_id(tenant_id: Uuid, item_id: Uuid, host_id: Uuid) -> String {
     let t = tenant_id.simple();
     let h = host_id.simple();
     let i = item_id.simple();
@@ -247,7 +247,7 @@ pub fn unique_id(tenant_id: Uuid, item_id: Uuid, host_id: Uuid) -> String {
 /// is omitted so that Home Assistant merges the info from whichever entity
 /// provides it first.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct HostOsInfo<'a> {
+pub(crate) struct HostOsInfo<'a> {
     /// OS family / type string (maps to `model` in the HA device block).
     pub os_type: Option<&'a str>,
     /// OS version string (maps to `sw_version` in the HA device block).
@@ -261,7 +261,7 @@ pub struct HostOsInfo<'a> {
 /// Passed to [`build_discovery_config`] to include release page links and
 /// changelog snippets in the HA MQTT discovery payload.
 #[derive(Debug, Default, Clone)]
-pub struct ReleaseInfo<'a> {
+pub(crate) struct ReleaseInfo<'a> {
     /// URL to the upstream release page (e.g. a GitHub release).
     pub url: Option<&'a str>,
     /// Full release notes or changelog text.
@@ -344,7 +344,7 @@ fn build_device_block(
 /// assert_eq!(v["title"], "Software Update (My App)");
 /// ```
 #[allow(clippy::too_many_arguments)]
-pub fn build_discovery_config(
+pub(crate) fn build_discovery_config(
     topic_prefix: &str,
     tenant_id: Uuid,
     item_id: Uuid,
@@ -426,7 +426,7 @@ fn truncate_str(s: &str, max_chars: usize) -> &str {
 /// assert_eq!(slugify("foo--bar"), "foo_bar");
 /// assert_eq!(slugify("  leading"), "leading");
 /// ```
-pub fn slugify(s: &str) -> String {
+pub(crate) fn slugify(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut prev_underscore = false;
 
@@ -468,7 +468,7 @@ pub fn slugify(s: &str) -> String {
 /// // Non-matching topic returns None.
 /// assert!(parse_command_topic("uptrakit", "uptrakit/hosts/bad/items/set").is_none());
 /// ```
-pub fn parse_command_topic(topic_prefix: &str, topic: &str) -> Option<(Uuid, Uuid)> {
+pub(crate) fn parse_command_topic(topic_prefix: &str, topic: &str) -> Option<(Uuid, Uuid)> {
     // Expected: "{prefix}/hosts/{uuid}/items/{uuid}/set"
     let prefix = format!("{topic_prefix}/hosts/");
     let rest = topic.strip_prefix(prefix.as_str())?;
@@ -511,7 +511,7 @@ pub fn parse_command_topic(topic_prefix: &str, topic: &str) -> Option<(Uuid, Uui
 /// let topic = host_packages_state_topic("uptrakit", Uuid::nil());
 /// assert!(topic.ends_with("/state"));
 /// ```
-pub fn host_packages_state_topic(prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn host_packages_state_topic(prefix: &str, host_id: Uuid) -> String {
     let hp = host_topic_prefix(prefix, host_id);
     format!("{hp}/state")
 }
@@ -534,7 +534,7 @@ pub fn host_packages_state_topic(prefix: &str, host_id: Uuid) -> String {
 /// let topic = host_packages_latest_version_topic("uptrakit", Uuid::nil());
 /// assert!(topic.ends_with("/latest_version"));
 /// ```
-pub fn host_packages_latest_version_topic(prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn host_packages_latest_version_topic(prefix: &str, host_id: Uuid) -> String {
     let hp = host_topic_prefix(prefix, host_id);
     format!("{hp}/latest_version")
 }
@@ -555,7 +555,7 @@ pub fn host_packages_latest_version_topic(prefix: &str, host_id: Uuid) -> String
 /// let topic = host_packages_json_attributes_topic("uptrakit", Uuid::nil());
 /// assert!(topic.ends_with("/attributes"));
 /// ```
-pub fn host_packages_json_attributes_topic(prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn host_packages_json_attributes_topic(prefix: &str, host_id: Uuid) -> String {
     let hp = host_topic_prefix(prefix, host_id);
     format!("{hp}/attributes")
 }
@@ -573,7 +573,7 @@ pub fn host_packages_json_attributes_topic(prefix: &str, host_id: Uuid) -> Strin
 /// let topic = host_packages_command_topic("uptrakit", Uuid::nil());
 /// assert!(topic.ends_with("/set"));
 /// ```
-pub fn host_packages_command_topic(prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn host_packages_command_topic(prefix: &str, host_id: Uuid) -> String {
     let hp = host_topic_prefix(prefix, host_id);
     format!("{hp}/set")
 }
@@ -597,7 +597,7 @@ pub fn host_packages_command_topic(prefix: &str, host_id: Uuid) -> String {
 /// assert!(topic.starts_with("homeassistant/update/uptrakit/pkgs_"));
 /// assert!(topic.ends_with("/config"));
 /// ```
-pub fn host_packages_discovery_config_topic(
+pub(crate) fn host_packages_discovery_config_topic(
     ha_prefix: &str,
     tenant_id: Uuid,
     host_id: Uuid,
@@ -621,7 +621,7 @@ pub fn host_packages_discovery_config_topic(
 /// assert!(uid.ends_with("_pkgs"));
 /// assert!(!uid.contains('-'));
 /// ```
-pub fn host_packages_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
+pub(crate) fn host_packages_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
     let t = tenant_id.simple();
     let h = host_id.simple();
     format!("uptrakit_{t}_{h}_pkgs")
@@ -650,7 +650,7 @@ pub fn host_packages_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
 /// assert_eq!(payload["bugfix_count"], 1u32);
 /// assert_eq!(payload["feature_count"], 2u32);
 /// ```
-pub fn build_host_packages_attributes_payload(
+pub(crate) fn build_host_packages_attributes_payload(
     in_progress: bool,
     pending_count: u32,
     total_count: u32,
@@ -679,7 +679,7 @@ pub fn build_host_packages_attributes_payload(
 /// assert_eq!(payload["in_progress"], false);
 /// assert_eq!(payload["pending_count"], 2u32);
 /// ```
-pub fn build_host_security_attributes_payload(
+pub(crate) fn build_host_security_attributes_payload(
     in_progress: bool,
     security_pending_count: u32,
 ) -> serde_json::Value {
@@ -702,7 +702,7 @@ pub fn build_host_security_attributes_payload(
 /// assert_eq!(host_packages_state_string(0), "up-to-date");
 /// assert_eq!(host_packages_state_string(3), "unknown");
 /// ```
-pub fn host_packages_state_string(pending_count: u32) -> String {
+pub(crate) fn host_packages_state_string(pending_count: u32) -> String {
     if pending_count > 0 {
         "unknown".to_string()
     } else {
@@ -724,7 +724,7 @@ pub fn host_packages_state_string(pending_count: u32) -> String {
 /// assert_eq!(host_packages_latest_version_string(0), "up-to-date");
 /// assert_eq!(host_packages_latest_version_string(3), "3 available");
 /// ```
-pub fn host_packages_latest_version_string(pending_count: u32) -> String {
+pub(crate) fn host_packages_latest_version_string(pending_count: u32) -> String {
     if pending_count > 0 {
         format!("{pending_count} available")
     } else {
@@ -744,7 +744,7 @@ pub fn host_packages_latest_version_string(pending_count: u32) -> String {
 /// assert_eq!(host_security_state_string(0), "up-to-date");
 /// assert_eq!(host_security_state_string(2), "unknown");
 /// ```
-pub fn host_security_state_string(security_pending_count: u32) -> String {
+pub(crate) fn host_security_state_string(security_pending_count: u32) -> String {
     if security_pending_count > 0 {
         "unknown".to_string()
     } else {
@@ -765,7 +765,7 @@ pub fn host_security_state_string(security_pending_count: u32) -> String {
 /// assert_eq!(host_security_latest_version_string(0), "up-to-date");
 /// assert_eq!(host_security_latest_version_string(2), "2 available");
 /// ```
-pub fn host_security_latest_version_string(security_pending_count: u32) -> String {
+pub(crate) fn host_security_latest_version_string(security_pending_count: u32) -> String {
     if security_pending_count > 0 {
         format!("{security_pending_count} available")
     } else {
@@ -804,7 +804,7 @@ pub fn host_security_latest_version_string(security_pending_count: u32) -> Strin
 /// assert_eq!(v["payload_install"], "install");
 /// assert_eq!(v["enabled_by_default"], false);
 /// ```
-pub fn build_host_packages_discovery_config(
+pub(crate) fn build_host_packages_discovery_config(
     topic_prefix: &str,
     tenant_id: Uuid,
     host_id: Uuid,
@@ -860,7 +860,7 @@ pub fn build_host_packages_discovery_config(
 /// // Non-matching topic returns None.
 /// assert!(parse_host_packages_command_topic("uptrakit", "uptrakit/update/bad/set").is_none());
 /// ```
-pub fn parse_host_packages_command_topic(topic_prefix: &str, topic: &str) -> Option<Uuid> {
+pub(crate) fn parse_host_packages_command_topic(topic_prefix: &str, topic: &str) -> Option<Uuid> {
     // Expected: "{prefix}/hosts/{uuid}/set"
     let prefix = format!("{topic_prefix}/hosts/");
     let rest = topic.strip_prefix(prefix.as_str())?;
@@ -895,7 +895,7 @@ pub fn parse_host_packages_command_topic(topic_prefix: &str, topic: &str) -> Opt
 /// let topic = host_security_state_topic("uptrakit", Uuid::nil());
 /// assert!(topic.ends_with("/security/state"));
 /// ```
-pub fn host_security_state_topic(prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn host_security_state_topic(prefix: &str, host_id: Uuid) -> String {
     let hp = host_topic_prefix(prefix, host_id);
     format!("{hp}/security/state")
 }
@@ -917,7 +917,7 @@ pub fn host_security_state_topic(prefix: &str, host_id: Uuid) -> String {
 /// let topic = host_security_latest_version_topic("uptrakit", Uuid::nil());
 /// assert!(topic.ends_with("/security/latest_version"));
 /// ```
-pub fn host_security_latest_version_topic(prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn host_security_latest_version_topic(prefix: &str, host_id: Uuid) -> String {
     let hp = host_topic_prefix(prefix, host_id);
     format!("{hp}/security/latest_version")
 }
@@ -939,7 +939,7 @@ pub fn host_security_latest_version_topic(prefix: &str, host_id: Uuid) -> String
 /// let topic = host_security_json_attributes_topic("uptrakit", Uuid::nil());
 /// assert!(topic.ends_with("/security/attributes"));
 /// ```
-pub fn host_security_json_attributes_topic(prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn host_security_json_attributes_topic(prefix: &str, host_id: Uuid) -> String {
     let hp = host_topic_prefix(prefix, host_id);
     format!("{hp}/security/attributes")
 }
@@ -957,7 +957,7 @@ pub fn host_security_json_attributes_topic(prefix: &str, host_id: Uuid) -> Strin
 /// let topic = host_security_command_topic("uptrakit", Uuid::nil());
 /// assert!(topic.ends_with("/security/set"));
 /// ```
-pub fn host_security_command_topic(prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn host_security_command_topic(prefix: &str, host_id: Uuid) -> String {
     let hp = host_topic_prefix(prefix, host_id);
     format!("{hp}/security/set")
 }
@@ -976,7 +976,7 @@ pub fn host_security_command_topic(prefix: &str, host_id: Uuid) -> String {
 /// assert!(uid.ends_with("_sec"));
 /// assert!(!uid.contains('-'));
 /// ```
-pub fn host_security_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
+pub(crate) fn host_security_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
     let t = tenant_id.simple();
     let h = host_id.simple();
     format!("uptrakit_{t}_{h}_sec")
@@ -1001,7 +1001,7 @@ pub fn host_security_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
 /// assert!(topic.starts_with("homeassistant/update/uptrakit/sec_"));
 /// assert!(topic.ends_with("/config"));
 /// ```
-pub fn host_security_discovery_config_topic(
+pub(crate) fn host_security_discovery_config_topic(
     ha_prefix: &str,
     tenant_id: Uuid,
     host_id: Uuid,
@@ -1039,7 +1039,7 @@ pub fn host_security_discovery_config_topic(
 /// assert_eq!(v["payload_install"], "install");
 /// assert_eq!(v["enabled_by_default"], false);
 /// ```
-pub fn build_host_security_discovery_config(
+pub(crate) fn build_host_security_discovery_config(
     topic_prefix: &str,
     tenant_id: Uuid,
     host_id: Uuid,
@@ -1099,7 +1099,7 @@ pub fn build_host_security_discovery_config(
 /// let topic = host_info_topic("uptrakit", Uuid::nil());
 /// assert!(topic.ends_with("/info"));
 /// ```
-pub fn host_info_topic(prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn host_info_topic(prefix: &str, host_id: Uuid) -> String {
     let hp = host_topic_prefix(prefix, host_id);
     format!("{hp}/info")
 }
@@ -1118,7 +1118,7 @@ pub fn host_info_topic(prefix: &str, host_id: Uuid) -> String {
 /// let topic = host_tags_topic("uptrakit", Uuid::nil());
 /// assert!(topic.ends_with("/tags"));
 /// ```
-pub fn host_tags_topic(prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn host_tags_topic(prefix: &str, host_id: Uuid) -> String {
     let hp = host_topic_prefix(prefix, host_id);
     format!("{hp}/tags")
 }
@@ -1137,7 +1137,7 @@ pub fn host_tags_topic(prefix: &str, host_id: Uuid) -> String {
 /// let topic = host_agent_topic("uptrakit", Uuid::nil());
 /// assert!(topic.ends_with("/agent"));
 /// ```
-pub fn host_agent_topic(prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn host_agent_topic(prefix: &str, host_id: Uuid) -> String {
     let hp = host_topic_prefix(prefix, host_id);
     format!("{hp}/agent")
 }
@@ -1157,7 +1157,7 @@ pub fn host_agent_topic(prefix: &str, host_id: Uuid) -> String {
 /// let topic = host_connectivity_state_topic("uptrakit", Uuid::nil());
 /// assert!(topic.ends_with("/connectivity/state"));
 /// ```
-pub fn host_connectivity_state_topic(prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn host_connectivity_state_topic(prefix: &str, host_id: Uuid) -> String {
     let hp = host_topic_prefix(prefix, host_id);
     format!("{hp}/connectivity/state")
 }
@@ -1178,7 +1178,7 @@ pub fn host_connectivity_state_topic(prefix: &str, host_id: Uuid) -> String {
 /// let topic = host_connectivity_attributes_topic("uptrakit", Uuid::nil());
 /// assert!(topic.ends_with("/connectivity/attributes"));
 /// ```
-pub fn host_connectivity_attributes_topic(prefix: &str, host_id: Uuid) -> String {
+pub(crate) fn host_connectivity_attributes_topic(prefix: &str, host_id: Uuid) -> String {
     let hp = host_topic_prefix(prefix, host_id);
     format!("{hp}/connectivity/attributes")
 }
@@ -1197,7 +1197,7 @@ pub fn host_connectivity_attributes_topic(prefix: &str, host_id: Uuid) -> String
 /// assert!(uid.ends_with("_conn"));
 /// assert!(!uid.contains('-'));
 /// ```
-pub fn host_connectivity_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
+pub(crate) fn host_connectivity_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
     let t = tenant_id.simple();
     let h = host_id.simple();
     format!("uptrakit_{t}_{h}_conn")
@@ -1221,7 +1221,7 @@ pub fn host_connectivity_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
 /// assert!(topic.starts_with("homeassistant/binary_sensor/uptrakit/"));
 /// assert!(topic.ends_with("_conn/config"));
 /// ```
-pub fn host_connectivity_discovery_config_topic(
+pub(crate) fn host_connectivity_discovery_config_topic(
     ha_prefix: &str,
     tenant_id: Uuid,
     host_id: Uuid,
@@ -1255,7 +1255,7 @@ pub fn host_connectivity_discovery_config_topic(
 /// assert!(payload["last_seen"].is_null());
 /// assert!(payload["version"].is_null());
 /// ```
-pub fn build_host_connectivity_attributes_payload(
+pub(crate) fn build_host_connectivity_attributes_payload(
     last_seen: Option<&str>,
     version: Option<&str>,
 ) -> serde_json::Value {
@@ -1303,7 +1303,7 @@ pub fn build_host_connectivity_attributes_payload(
 /// assert_eq!(v["payload_off"], "offline");
 /// assert_eq!(v["enabled_by_default"], true);
 /// ```
-pub fn build_host_connectivity_discovery_config(
+pub(crate) fn build_host_connectivity_discovery_config(
     topic_prefix: &str,
     tenant_id: Uuid,
     host_id: Uuid,
@@ -1354,7 +1354,7 @@ pub fn build_host_connectivity_discovery_config(
 /// let payload = build_host_info_payload(None, None, None);
 /// assert!(payload["os_type"].is_null());
 /// ```
-pub fn build_host_info_payload(
+pub(crate) fn build_host_info_payload(
     os_type: Option<&str>,
     os_version: Option<&str>,
     architecture: Option<&str>,
@@ -1385,7 +1385,7 @@ pub fn build_host_info_payload(
 /// assert!(payload["last_seen"].is_null());
 /// assert!(payload["version"].is_null());
 /// ```
-pub fn build_host_agent_payload(
+pub(crate) fn build_host_agent_payload(
     last_seen: Option<&str>,
     version: Option<&str>,
 ) -> serde_json::Value {
@@ -1417,7 +1417,7 @@ pub fn build_host_agent_payload(
 /// // Non-matching topic returns None.
 /// assert!(parse_host_security_command_topic("uptrakit", "uptrakit/hosts/bad/set").is_none());
 /// ```
-pub fn parse_host_security_command_topic(topic_prefix: &str, topic: &str) -> Option<Uuid> {
+pub(crate) fn parse_host_security_command_topic(topic_prefix: &str, topic: &str) -> Option<Uuid> {
     // Expected: "{prefix}/hosts/{uuid}/security/set"
     let prefix = format!("{topic_prefix}/hosts/");
     let rest = topic.strip_prefix(prefix.as_str())?;

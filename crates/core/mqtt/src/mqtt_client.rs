@@ -13,7 +13,7 @@ use uptrakit_service_sdk::Backoff;
 use uptrakit_shared_macros::impl_report_conversion;
 
 /// Configuration for connecting to an MQTT broker.
-pub struct MqttConfig {
+pub(crate) struct MqttConfig {
     /// Transport protocol.
     pub transport: MqttTransport,
     /// Broker hostname.
@@ -49,14 +49,14 @@ impl fmt::Debug for MqttConfig {
 
 /// Status event emitted by a running MQTT client.
 #[derive(Debug, Clone)]
-pub struct MqttClientStatusEvent {
+pub(crate) struct MqttClientStatusEvent {
     pub mqtt_client_id: uuid::Uuid,
     pub status: MqttClientConnectionStatus,
 }
 
 /// Events emitted by a running MQTT client connection.
 #[derive(Debug, Clone)]
-pub enum MqttServiceEvent {
+pub(crate) enum MqttServiceEvent {
     /// Connection-status change (Online/Offline/Connecting).
     Status(MqttClientStatusEvent),
     /// Broker reconnect — discovery configs and state topics must be republished.
@@ -75,7 +75,7 @@ pub enum MqttServiceEvent {
 ///
 /// Dropping without calling [`shutdown`](MqttHandle::shutdown) will abort the
 /// event-loop task (the broker will then publish the LWT).
-pub struct MqttHandle {
+pub(crate) struct MqttHandle {
     client: AsyncClient,
     topic: String,
     task: tokio::task::JoinHandle<()>,
@@ -88,7 +88,11 @@ impl MqttHandle {
     /// Returns an error if the operation does not complete within
     /// [`OPERATION_TIMEOUT`], which typically means the broker connection is
     /// down and the internal request channel is full.
-    pub async fn publish_retained(&self, topic: &str, payload: impl Into<Vec<u8>>) -> Result<()> {
+    pub(crate) async fn publish_retained(
+        &self,
+        topic: &str,
+        payload: impl Into<Vec<u8>>,
+    ) -> Result<()> {
         let payload = payload.into();
         match tokio::time::timeout(
             OPERATION_TIMEOUT,
@@ -105,7 +109,7 @@ impl MqttHandle {
     ///
     /// Returns an error if the operation does not complete within
     /// [`OPERATION_TIMEOUT`].
-    pub async fn subscribe_topic(&self, topic: &str) -> Result<()> {
+    pub(crate) async fn subscribe_topic(&self, topic: &str) -> Result<()> {
         match tokio::time::timeout(
             OPERATION_TIMEOUT,
             self.client.subscribe(topic, QoS::AtLeastOnce),
@@ -119,7 +123,7 @@ impl MqttHandle {
 
     /// Publish a retained `offline` message, disconnect, and wait for the
     /// event-loop task to finish.
-    pub async fn shutdown(self) {
+    pub(crate) async fn shutdown(self) {
         // Use a timeout for the offline publish and disconnect so that
         // shutdown is not blocked indefinitely when the broker connection is
         // already down and the request channel is full.
@@ -161,7 +165,7 @@ const OPERATION_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Errors returned by [`start`].
 #[derive(Debug, Error)]
-pub enum MqttError {
+pub(crate) enum MqttError {
     /// Wraps [`rumqttc::ClientError`].
     #[error("MQTT client error: {0}")]
     Client(#[from] rumqttc::ClientError),
@@ -171,7 +175,7 @@ pub enum MqttError {
     OperationTimeout,
 }
 
-pub type Result<T> = std::result::Result<T, Report<MqttError>>;
+pub(crate) type Result<T> = std::result::Result<T, Report<MqttError>>;
 
 impl_report_conversion!(rumqttc::ClientError => MqttError::Client);
 
@@ -242,7 +246,7 @@ impl MqttEventReporter {
 /// When `ha_status_topic` is `Some`, the event loop subscribes to that topic
 /// after every `ConnAck` and emits [`MqttServiceEvent::HaOnline`] whenever HA
 /// publishes `"online"` to it (HA birth message).
-pub async fn start(
+pub(crate) async fn start(
     config: MqttConfig,
     event_sender: Option<mpsc::Sender<MqttServiceEvent>>,
     mqtt_client_id: uuid::Uuid,

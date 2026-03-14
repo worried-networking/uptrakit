@@ -9,7 +9,7 @@
 mod error;
 mod tables;
 
-pub use error::DbMigrateError;
+pub(crate) use error::DbMigrateError;
 use error::Result;
 
 use std::io::Write as _;
@@ -33,7 +33,7 @@ use crate::cli::{Args, DbMigrateArgs};
 /// 7. Copies every application table from source to target.
 /// 8. Verifies row counts match on both sides.
 /// 9. Prints a summary.
-pub async fn run(args: &Args, migrate_args: &DbMigrateArgs) -> Result<()> {
+pub(crate) async fn run(args: &Args, migrate_args: &DbMigrateArgs) -> Result<()> {
     let started = Instant::now();
 
     // ── 1. Master key ────────────────────────────────────────────────────────

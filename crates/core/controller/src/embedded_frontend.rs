@@ -22,7 +22,7 @@ struct Assets;
 /// - Immutable assets (`_app/immutable/*`) get a one-year cache header.
 /// - `index.html` is served with `Cache-Control: no-cache`.
 /// - Unmatched non-API paths fall back to `index.html` (SPA routing).
-pub fn router() -> Router {
+pub(crate) fn router() -> Router {
     let api_not_found = Router::new()
         .route(
             "/api/{*path}",

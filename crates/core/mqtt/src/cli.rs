@@ -10,7 +10,7 @@ use uptrakit_service_sdk::cli::CommonServiceArgs;
 #[derive(Parser, Debug)]
 #[command(name = "uptrakit-mqtt")]
 #[command(disable_version_flag = true)]
-pub struct Args {
+pub(crate) struct Args {
     #[command(flatten)]
     pub common: CommonServiceArgs,
 

@@ -6,7 +6,7 @@ use sea_orm_migration::prelude::*;
 /// Same schema as the controller's `data_encryption_keys` table. Enables
 /// envelope encryption for SSH agent secrets (private keys).
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

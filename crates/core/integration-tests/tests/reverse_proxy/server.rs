@@ -26,7 +26,7 @@ use super::pki::TestPki;
 /// A lightweight test HTTPS server that runs the real `resolve_ip` and
 /// `resolve_proxy_headers` middleware with minimal setup (in-memory SQLite,
 /// no DB migrations, no auth).
-pub struct TestServer {
+pub(crate) struct TestServer {
     /// The local port the server is listening on.
     pub port: u16,
     handle: axum_server::Handle<SocketAddr>,
@@ -37,7 +37,11 @@ impl TestServer {
     ///
     /// - `info_header`: the forwarded client cert info header name (or `None`)
     /// - `pem_header`: the forwarded client cert PEM header name (or `None`)
-    pub async fn start(pki: &TestPki, info_header: Option<&str>, pem_header: Option<&str>) -> Self {
+    pub(crate) async fn start(
+        pki: &TestPki,
+        info_header: Option<&str>,
+        pem_header: Option<&str>,
+    ) -> Self {
         let state = build_state(pki, info_header, pem_header).await;
         let router = build_router(state);
 
@@ -68,14 +72,14 @@ impl TestServer {
     }
 
     /// Gracefully shut down the server.
-    pub fn shutdown(&self) {
+    pub(crate) fn shutdown(&self) {
         self.handle.graceful_shutdown(None);
     }
 }
 
 /// Response type for `/test/identity`.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct IdentityResponse {
+pub(crate) struct IdentityResponse {
     pub agent_id: Option<String>,
     pub cert_serial: Option<String>,
 }

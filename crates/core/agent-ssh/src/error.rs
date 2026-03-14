@@ -4,7 +4,7 @@ use uptrakit_service_sdk::EnrollmentError;
 use uptrakit_shared_macros::impl_report_conversion;
 
 #[derive(Debug, Error)]
-pub enum Error {
+pub(crate) enum Error {
     // ── Enrollment (delegates to enrollment crate) ────────────────────
     #[error(transparent)]
     Enrollment(#[from] EnrollmentError),
@@ -57,7 +57,7 @@ pub enum Error {
     InvalidInput(String),
 }
 
-pub type Result<T> = std::result::Result<T, Report<Error>>;
+pub(crate) type Result<T> = std::result::Result<T, Report<Error>>;
 
 impl_report_conversion! {
     EnrollmentError => Error::Enrollment,

@@ -27,13 +27,13 @@ use crate::pki;
 ///
 /// This executor stays in the controller binary (not in the engine) because
 /// it requires the in-process CA snapshot watch channel and `Notify`.
-pub struct CaRotationCheckExecutor {
+pub(crate) struct CaRotationCheckExecutor {
     ca_snapshot: tokio::sync::watch::Receiver<pki::CaSnapshot>,
     ca_rotation_trigger: Arc<Notify>,
 }
 
 impl CaRotationCheckExecutor {
-    pub fn new(
+    pub(crate) fn new(
         ca_snapshot: tokio::sync::watch::Receiver<pki::CaSnapshot>,
         ca_rotation_trigger: Arc<Notify>,
     ) -> Self {
@@ -71,14 +71,14 @@ impl TaskExecutor for CaRotationCheckExecutor {
 /// Used by the embedded scheduler so that engine executors (`VersionCheckExecutor`,
 /// `ServiceCertCheckExecutor`) can deliver messages through the same
 /// `NotificationService` the controller uses for other WebSocket push messages.
-pub struct ControllerSchedulerNotifier {
+pub(crate) struct ControllerSchedulerNotifier {
     notification_service: uptrakit_web_api::notification_service::NotificationService,
     ca_rotation_trigger: Arc<Notify>,
     revocation_notify: Arc<Notify>,
 }
 
 impl ControllerSchedulerNotifier {
-    pub fn new(
+    pub(crate) fn new(
         notification_service: uptrakit_web_api::notification_service::NotificationService,
         ca_rotation_trigger: Arc<Notify>,
         revocation_notify: Arc<Notify>,

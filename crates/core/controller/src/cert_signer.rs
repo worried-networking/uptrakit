@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::pki::CaSnapshot;
 
-pub struct RcgenAgentCertSigner {
+pub(crate) struct RcgenAgentCertSigner {
     ca_rx: watch::Receiver<CaSnapshot>,
     ca_key_store: uptrakit_web_api::CaKeyStoreRef,
 }
@@ -19,7 +19,7 @@ pub struct RcgenAgentCertSigner {
 const MAX_CERT_LIFETIME: time::Duration = time::Duration::days(730);
 
 impl RcgenAgentCertSigner {
-    pub fn new(
+    pub(crate) fn new(
         ca_rx: watch::Receiver<CaSnapshot>,
         ca_key_store: uptrakit_web_api::CaKeyStoreRef,
     ) -> Self {

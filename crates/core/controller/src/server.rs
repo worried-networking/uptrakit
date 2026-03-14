@@ -15,16 +15,16 @@ use crate::mtls_acceptor::MtlsAcceptor;
 use uptrakit_web_api::AppState;
 
 #[derive(Debug, Error)]
-pub enum ServerError {
+pub(crate) enum ServerError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
 
-pub type Result<T> = std::result::Result<T, Report<ServerError>>;
+pub(crate) type Result<T> = std::result::Result<T, Report<ServerError>>;
 
 impl_report_conversion!(std::io::Error => ServerError::Io);
 
-pub struct ServerOptions {
+pub(crate) struct ServerOptions {
     pub https_addr: SocketAddr,
     pub rustls_config: axum_server::tls_rustls::RustlsConfig,
     pub app_state: Arc<AppState>,
@@ -62,7 +62,7 @@ async fn create_listener(
 }
 
 /// Run the HTTPS server.
-pub async fn run(cfg: ServerOptions) -> Result<()> {
+pub(crate) async fn run(cfg: ServerOptions) -> Result<()> {
     let mut router = uptrakit_web_api::build_router(cfg.app_state);
     if let Some(ref dir) = cfg.static_dir {
         let index_for_fallback = dir.join("index.html");
@@ -124,7 +124,7 @@ pub async fn run(cfg: ServerOptions) -> Result<()> {
 ///
 /// Started when `--pki-http listener` is set. Required for Nginx `ssl_ocsp_responder`
 /// which only supports `http://` OCSP responder URLs.
-pub async fn run_pki_http(addr: SocketAddr, app_state: Arc<AppState>) -> Result<()> {
+pub(crate) async fn run_pki_http(addr: SocketAddr, app_state: Arc<AppState>) -> Result<()> {
     let router = uptrakit_web_api::build_pki_router(app_state);
     let listener = tokio::net::TcpListener::bind(addr)
         .await

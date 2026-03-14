@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 /// Defaults resolved from `~/.ssh/config` for a given host.
 #[derive(Debug, Default)]
-pub struct SshConfigDefaults {
+pub(crate) struct SshConfigDefaults {
     pub username: Option<String>,
     pub port: Option<u16>,
     pub hostname: Option<String>,
@@ -20,7 +20,7 @@ pub struct SshConfigDefaults {
 /// Returns empty defaults if the config file does not exist, cannot be read,
 /// or fails to parse. This ensures the bootstrap command never fails solely
 /// because of a broken SSH config.
-pub fn resolve_defaults(host: &str) -> SshConfigDefaults {
+pub(crate) fn resolve_defaults(host: &str) -> SshConfigDefaults {
     let Some(config_path) = ssh_config_path() else {
         tracing::debug!("could not determine home directory; skipping SSH config");
         return SshConfigDefaults::default();

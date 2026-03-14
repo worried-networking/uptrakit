@@ -12,7 +12,7 @@ use sea_orm_migration::prelude::*;
 ///    this column, so on fresh databases it no longer exists. We guard with
 ///    `pragma_table_info` to make the drop idempotent.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

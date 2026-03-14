@@ -3,11 +3,11 @@ use rootcause::prelude::*;
 use std::path::Path;
 
 /// Default maximum number of database connections in the pool.
-pub const DEFAULT_MAX_CONNECTIONS: u32 = 10;
+pub(crate) const DEFAULT_MAX_CONNECTIONS: u32 = 10;
 
 /// Database configuration
 #[derive(Debug, Clone)]
-pub struct DbConfig {
+pub(crate) struct DbConfig {
     pub url: String,
     /// Maximum number of connections in the connection pool.
     /// Default: [`DEFAULT_MAX_CONNECTIONS`].
@@ -16,7 +16,7 @@ pub struct DbConfig {
 
 impl DbConfig {
     /// Create config from CLI args, defaulting to SQLite in data_dir.
-    pub fn from_args(
+    pub(crate) fn from_args(
         db_url: Option<String>,
         data_dir: &Path,
         max_connections: u32,

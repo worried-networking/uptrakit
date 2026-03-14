@@ -37,12 +37,12 @@ type BoxedAcceptFuture<I, S> = Pin<Box<dyn Future<Output = io::Result<(TlsStream
 /// their own authentication requirements.  Enrollment-only routes accept
 /// `None`; all post-enrollment agent routes require `Some`.
 #[derive(Clone)]
-pub struct MtlsAcceptor {
+pub(crate) struct MtlsAcceptor {
     inner: RustlsAcceptor,
 }
 
 impl MtlsAcceptor {
-    pub fn new(inner: RustlsAcceptor) -> Self {
+    pub(crate) fn new(inner: RustlsAcceptor) -> Self {
         Self { inner }
     }
 }
@@ -64,7 +64,7 @@ where
 }
 
 /// Future that completes TLS handshake and extracts agent identity.
-pub struct MtlsAcceptFuture<I, S>
+pub(crate) struct MtlsAcceptFuture<I, S>
 where
     I: AsyncRead + AsyncWrite + Unpin,
 {
@@ -97,7 +97,7 @@ where
 
 /// Service wrapper that injects `ServiceIdentity` into request extensions.
 #[derive(Clone)]
-pub struct MtlsService<S> {
+pub(crate) struct MtlsService<S> {
     inner: S,
     agent_identity: Option<ServiceIdentity>,
 }

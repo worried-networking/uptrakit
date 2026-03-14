@@ -9,7 +9,7 @@ use crate::ssh_target::SshTarget;
 #[command(name = "uptrakit-agent-ssh")]
 #[command(about = "Uptrakit SSH-backed agent that manages remote hosts over SSH")]
 #[command(disable_version_flag = true)]
-pub struct Args {
+pub(crate) struct Args {
     #[command(flatten)]
     pub common: CommonServiceArgs,
 
@@ -38,7 +38,7 @@ pub struct Args {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum Commands {
+pub(crate) enum Commands {
     /// Manage SSH host entries in the local database.
     Host {
         #[command(subcommand)]
@@ -47,7 +47,7 @@ pub enum Commands {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum HostCommands {
+pub(crate) enum HostCommands {
     /// Add a new SSH host.
     Add {
         /// Friendly name for this host (must be unique).

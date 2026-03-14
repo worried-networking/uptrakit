@@ -11,7 +11,7 @@ use sea_orm_migration::schema::*;
 /// This migration unconditionally recreates the table with the correct schema,
 /// ensuring `machine_id` has no `NOT NULL` constraint on every installation.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 /// Recreate `ssh_hosts` with the correct schema, copying all data.
 ///

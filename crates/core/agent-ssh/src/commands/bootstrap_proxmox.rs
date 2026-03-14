@@ -29,7 +29,7 @@ use std::time::Duration;
 const PVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Parameters for the Proxmox guest bootstrap workflow.
-pub struct ProxmoxBootstrapParams {
+pub(crate) struct ProxmoxBootstrapParams {
     /// Local DB ID of the PVE host to use as gateway.
     pub pve_host_id: String,
     /// VMID of the target guest.
@@ -53,7 +53,7 @@ pub struct ProxmoxBootstrapParams {
 }
 
 /// Result of a successful Proxmox guest bootstrap.
-pub struct ProxmoxBootstrapResult {
+pub(crate) struct ProxmoxBootstrapResult {
     /// The hostname or IP address of the guest (for the DB entry).
     ///
     /// Contains the FQDN when one can be confirmed via reverse DNS, otherwise
@@ -65,7 +65,7 @@ pub struct ProxmoxBootstrapResult {
 ///
 /// Used in contexts where no bootstrap will actually be performed (e.g., in the
 /// `on_post_report_hosts` background task where guest execution is not needed).
-pub struct NoopGuestBootstrapExecutor;
+pub(crate) struct NoopGuestBootstrapExecutor;
 
 #[async_trait]
 impl GuestBootstrapExecutor for NoopGuestBootstrapExecutor {
@@ -87,7 +87,7 @@ impl GuestBootstrapExecutor for NoopGuestBootstrapExecutor {
 ///
 /// Translates generic `GuestBootstrapParams` from the infra plugin into
 /// `ProxmoxBootstrapParams` and calls `run_proxmox_bootstrap`.
-pub struct AgentGuestBootstrapExecutor {
+pub(crate) struct AgentGuestBootstrapExecutor {
     pub state_dir: std::path::PathBuf,
     pub service_id: Option<uuid::Uuid>,
 }
@@ -133,7 +133,7 @@ impl GuestBootstrapExecutor for AgentGuestBootstrapExecutor {
 /// 5. Get the guest's IP address
 /// 6. Verify SSH connectivity to the guest
 /// 7. Save the host to the local DB
-pub async fn run_proxmox_bootstrap(
+pub(crate) async fn run_proxmox_bootstrap(
     state_dir: &Path,
     params: ProxmoxBootstrapParams,
 ) -> Result<ProxmoxBootstrapResult> {

@@ -35,7 +35,7 @@ use uuid::Uuid;
 ///
 /// SQLite-only (the agent-ssh database is always SQLite).
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

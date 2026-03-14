@@ -10,11 +10,11 @@ use uptrakit_crypto::EncryptedString;
 
 #[derive(Debug, Error)]
 #[error("invalid SSH key type: expected ed25519, rsa, or ecdsa")]
-pub struct ParseSshKeyTypeError;
+pub(crate) struct ParseSshKeyTypeError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumIter, sea_orm::DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "Text")]
-pub enum SshKeyType {
+pub(crate) enum SshKeyType {
     #[sea_orm(string_value = "ed25519")]
     Ed25519,
     #[sea_orm(string_value = "rsa")]
@@ -30,7 +30,7 @@ impl fmt::Display for SshKeyType {
 }
 
 impl SshKeyType {
-    pub fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Self::Ed25519 => "ed25519",
             Self::Rsa => "rsa",
@@ -56,6 +56,7 @@ impl FromStr for SshKeyType {
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "ssh_hosts")]
+#[allow(unreachable_pub)]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: uuid::Uuid,
@@ -110,7 +111,7 @@ impl Model {
     ///   to be non-root until confirmed otherwise.
     /// - `sudo_policy`: `SudoPolicy::Auto` when the stored string cannot be
     ///   parsed.
-    pub fn resolved_sudo_context(&self) -> SudoContext {
+    pub(crate) fn resolved_sudo_context(&self) -> SudoContext {
         SudoContext {
             is_root: self.is_root.unwrap_or(false),
             sudo_available: self.sudo_available.unwrap_or(true),
@@ -119,6 +120,7 @@ impl Model {
     }
 }
 
+#[allow(unreachable_pub)]
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 

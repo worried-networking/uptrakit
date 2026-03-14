@@ -28,7 +28,7 @@ const SHA256_OID: const_oid::ObjectIdentifier =
 ///
 /// Does NOT use the production OCSP code to avoid DB migrations.
 /// Signs responses with the CA key using ECDSA P-256 SHA-256.
-pub struct OcspResponder {
+pub(crate) struct OcspResponder {
     port: u16,
     state: Arc<OcspState>,
     shutdown: tokio::sync::watch::Sender<bool>,
@@ -83,7 +83,11 @@ impl OcspResponder {
     /// - `ca_cert_pem`: PEM-encoded CA certificate
     /// - `ca_key_pem`: PEM-encoded CA private key
     /// - `revoked_serials`: serial numbers (lowercase hex) to report as revoked
-    pub async fn start(ca_cert_pem: &str, ca_key_pem: &str, revoked_serials: Vec<String>) -> Self {
+    pub(crate) async fn start(
+        ca_cert_pem: &str,
+        ca_key_pem: &str,
+        revoked_serials: Vec<String>,
+    ) -> Self {
         let listener = TcpListener::bind("0.0.0.0:0").expect("bind OCSP responder");
         Self::start_http_with_listener(listener, ca_cert_pem, ca_key_pem, revoked_serials).await
     }
@@ -91,7 +95,7 @@ impl OcspResponder {
     /// Start a test OCSP responder on a specific port (plain HTTP).
     ///
     /// Panics if the port cannot be bound.
-    pub async fn start_on_port(
+    pub(crate) async fn start_on_port(
         port: u16,
         ca_cert_pem: &str,
         ca_key_pem: &str,
@@ -140,7 +144,7 @@ impl OcspResponder {
     /// Start a test OCSP responder on a specific port (HTTPS / TLS).
     ///
     /// Panics if the port cannot be bound.
-    pub async fn start_https_on_port(
+    pub(crate) async fn start_https_on_port(
         port: u16,
         ca_cert_pem: &str,
         ca_key_pem: &str,
@@ -211,17 +215,17 @@ impl OcspResponder {
     }
 
     /// The port the responder is listening on.
-    pub fn port(&self) -> u16 {
+    pub(crate) fn port(&self) -> u16 {
         self.port
     }
 
     /// Number of OCSP requests processed so far.
-    pub fn request_count(&self) -> usize {
+    pub(crate) fn request_count(&self) -> usize {
         self.state.request_count.load(Ordering::Relaxed)
     }
 
     /// Shut down the responder.
-    pub fn shutdown(self) {
+    pub(crate) fn shutdown(self) {
         let _ = self.shutdown.send(true);
     }
 }

@@ -8,6 +8,7 @@ use sea_orm::entity::prelude::*;
 /// `proxmox_host_mappings.host_id` can be satisfied.
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "pending_proxmox_matches")]
+#[allow(unreachable_pub)]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = true)]
     pub id: i32,
@@ -19,6 +20,7 @@ pub struct Model {
     pub created_at: String,
 }
 
+#[allow(unreachable_pub)]
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 

@@ -7,15 +7,15 @@ compile_error!(
 pub(crate) mod config;
 mod error;
 
-pub use config::{DEFAULT_MAX_CONNECTIONS, DbConfig};
-pub use error::{DbError, Result};
+pub(crate) use config::{DEFAULT_MAX_CONNECTIONS, DbConfig};
+pub(crate) use error::{DbError, Result};
 
 use rootcause::prelude::*;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 use std::time::Duration;
 
 /// Initialize a database connection pool using the provided configuration.
-pub async fn connect(config: &DbConfig) -> Result<DatabaseConnection> {
+pub(crate) async fn connect(config: &DbConfig) -> Result<DatabaseConnection> {
     let mut opt = ConnectOptions::new(config.url.clone());
     opt.max_connections(config.max_connections)
         .min_connections(1)
@@ -31,7 +31,7 @@ pub async fn connect(config: &DbConfig) -> Result<DatabaseConnection> {
 }
 
 /// Sanitize database URL for logging (removes credentials)
-pub fn sanitize_url(url: &str) -> String {
+pub(crate) fn sanitize_url(url: &str) -> String {
     if let Some(at_pos) = url.find('@')
         && let Some(proto_end) = url.find("://")
     {

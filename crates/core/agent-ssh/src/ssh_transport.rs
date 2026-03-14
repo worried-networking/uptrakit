@@ -28,14 +28,14 @@ const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
 // ── Configuration types ──────────────────────────────────────────────
 
 /// SSH connection configuration.
-pub struct SshConnectionConfig {
+pub(crate) struct SshConnectionConfig {
     pub hostname: String,
     pub port: u16,
     pub connect_timeout: Duration,
 }
 
 /// Authentication method for the SSH session.
-pub enum AuthMethod<'a> {
+pub(crate) enum AuthMethod<'a> {
     Password(&'a str),
     PrivateKey(&'a str),
     /// Authenticate using keys from the local SSH agent (`SSH_AUTH_SOCK`).
@@ -44,7 +44,7 @@ pub enum AuthMethod<'a> {
 
 /// Result of executing a remote command.
 #[derive(Debug)]
-pub struct RemoteCommandResult {
+pub(crate) struct RemoteCommandResult {
     pub stdout: String,
     pub stderr: String,
     pub exit_code: u32,
@@ -199,7 +199,7 @@ impl LineBuffer {
 
 /// An authenticated SSH session. Wraps the russh [`Handle`] so the
 /// private handler type does not leak into the public API.
-pub struct SshSession {
+pub(crate) struct SshSession {
     handle: Handle<BootstrapHandler>,
     pub(crate) hostname: String,
 }
@@ -211,7 +211,7 @@ impl SshSession {
     /// The caller owns the raw [`russh::Channel`] and can call
     /// `.into_stream()` to obtain a bidirectional `ChannelStream` for
     /// byte-level I/O (used by [`crate::ssh_stdio_tunnel::SshStdioTunnel`]).
-    pub async fn open_channel_for_command(
+    pub(crate) async fn open_channel_for_command(
         &self,
         command: &str,
     ) -> Result<russh::Channel<russh::client::Msg>> {
@@ -231,13 +231,13 @@ impl SshSession {
     }
 
     /// Execute a command on the remote host and collect stdout/stderr.
-    pub async fn exec_command(&self, command: &str) -> Result<RemoteCommandResult> {
+    pub(crate) async fn exec_command(&self, command: &str) -> Result<RemoteCommandResult> {
         self.exec_command_streaming(command, None).await
     }
 
     /// Execute a command on the remote host, optionally streaming output
     /// lines through `output_tx` in real time.
-    pub async fn exec_command_streaming(
+    pub(crate) async fn exec_command_streaming(
         &self,
         command: &str,
         output_tx: Option<&mpsc::Sender<UpdateOutputLine>>,
@@ -302,7 +302,7 @@ impl SshSession {
     /// process can read user input. Signals are delivered by writing the
     /// corresponding control character to the PTY (e.g., `\x03` for SIGINT).
     #[cfg(feature = "interactive")]
-    pub async fn exec_command_interactive(
+    pub(crate) async fn exec_command_interactive(
         &self,
         command: &str,
         output_tx: &mpsc::Sender<uptrakit_command::UpdateOutputLine>,
@@ -602,7 +602,7 @@ impl SshSession {
     }
 
     /// Disconnect the SSH session.
-    pub async fn disconnect(self) {
+    pub(crate) async fn disconnect(self) {
         let _ = self
             .handle
             .disconnect(Disconnect::ByApplication, "bootstrap complete", "en")
@@ -616,7 +616,7 @@ impl SshSession {
     /// clones should have been dropped before disconnecting), the disconnect
     /// is skipped and a warning is logged so the bug is visible without
     /// panicking.
-    pub async fn disconnect_shared(this: Arc<Self>) {
+    pub(crate) async fn disconnect_shared(this: Arc<Self>) {
         match Arc::try_unwrap(this) {
             Ok(session) => session.disconnect().await,
             Err(_) => {
@@ -634,7 +634,7 @@ impl SshSession {
 /// Connect and authenticate to an SSH server.
 ///
 /// Returns the session wrapper and the observed host key fingerprint.
-pub async fn connect_and_authenticate(
+pub(crate) async fn connect_and_authenticate(
     config: &SshConnectionConfig,
     username: &str,
     auth: &AuthMethod<'_>,

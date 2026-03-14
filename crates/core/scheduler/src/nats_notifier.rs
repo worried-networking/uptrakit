@@ -13,13 +13,13 @@ use uptrakit_scheduler_engine::SchedulerNotifier;
 use uuid::Uuid;
 
 /// Publishes scheduler messages to NATS for cross-controller delivery.
-pub struct NatsSchedulerNotifier {
+pub(crate) struct NatsSchedulerNotifier {
     nats: NatsConnection,
     scheduler_id: Uuid,
 }
 
 impl NatsSchedulerNotifier {
-    pub fn new(nats: NatsConnection, scheduler_id: Uuid) -> Self {
+    pub(crate) fn new(nats: NatsConnection, scheduler_id: Uuid) -> Self {
         Self { nats, scheduler_id }
     }
 }

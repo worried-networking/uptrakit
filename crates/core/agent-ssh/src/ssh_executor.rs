@@ -17,13 +17,13 @@ use crate::ssh_stdio_tunnel::SshStdioTunnel;
 use crate::ssh_transport::SshSession;
 
 /// Executes commands on a remote host via an SSH session.
-pub struct SshCommandExecutor {
+pub(crate) struct SshCommandExecutor {
     session: Arc<SshSession>,
 }
 
 impl SshCommandExecutor {
     /// Create a new executor backed by the given SSH session.
-    pub fn new(session: Arc<SshSession>) -> Self {
+    pub(crate) fn new(session: Arc<SshSession>) -> Self {
         Self { session }
     }
 

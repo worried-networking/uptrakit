@@ -13,7 +13,7 @@ use crate::ssh_transport::SshSession;
 ///
 /// Runs lightweight commands (`cat /etc/machine-id`, `uname`, `hostname`)
 /// over the given session. No sudo is required.
-pub async fn collect_remote_host_info(session: &SshSession) -> HostInfo {
+pub(crate) async fn collect_remote_host_info(session: &SshSession) -> HostInfo {
     let machine_id = read_remote_machine_id(session).await;
     let os_type = read_remote_os_type(session).await;
     let os_version = read_remote_os_version(session).await;

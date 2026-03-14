@@ -13,7 +13,7 @@ use uptrakit_shared_db::entity::{crl_cache, prelude::*, service_certificate};
 use crate::pki::{self, CaSnapshot};
 
 /// Configuration for the CRL manager.
-pub struct CrlManagerConfig {
+pub(crate) struct CrlManagerConfig {
     pub server_cert_pem: String,
     pub server_key_pem: String,
     pub db: DatabaseConnection,
@@ -34,7 +34,7 @@ struct CaIssuers {
 }
 
 /// A CRL loaded from the database cache.
-pub struct LoadedCrl {
+pub(crate) struct LoadedCrl {
     pub pem: String,
     pub der: Vec<u8>,
     pub crl_number: i64,
@@ -44,7 +44,7 @@ pub struct LoadedCrl {
 ///
 /// Builds CRLs from the database and hot-reloads the TLS configuration
 /// so that `WebPkiClientVerifier` rejects revoked client certificates.
-pub struct CrlManager {
+pub(crate) struct CrlManager {
     config: CrlManagerConfig,
     crl_number: AtomicU64,
     issuers: RwLock<CaIssuers>,
@@ -57,7 +57,7 @@ pub struct CrlManager {
 /// - No cache entry exists for the fingerprint, or
 /// - The cached CRL's `next_update` is within 1 hour of expiry (to ensure
 ///   we always have a fresh CRL available at startup).
-pub async fn try_load_crl_from_db(
+pub(crate) async fn try_load_crl_from_db(
     db: &DatabaseConnection,
     ca_fingerprint: &str,
 ) -> pki::Result<Option<LoadedCrl>> {
@@ -100,7 +100,7 @@ pub async fn try_load_crl_from_db(
 }
 
 /// Persist (upsert) a newly signed CRL into the database cache.
-pub async fn persist_crl_to_db(
+pub(crate) async fn persist_crl_to_db(
     db: &DatabaseConnection,
     ca_fingerprint: &str,
     crl_pem: &str,
@@ -146,7 +146,7 @@ pub async fn persist_crl_to_db(
 /// cached entry is missing or near expiry, a fresh CRL is signed and
 /// persisted. Returns the CRL number for the first generated CRL (all others
 /// use the same starting number within a startup cycle).
-pub async fn build_initial_crls(
+pub(crate) async fn build_initial_crls(
     db: &DatabaseConnection,
     snapshot: &CaSnapshot,
     key_store: &pki::CaKeyStore,
@@ -223,7 +223,7 @@ pub async fn build_initial_crls(
 }
 
 impl CrlManager {
-    pub fn new(
+    pub(crate) fn new(
         config: CrlManagerConfig,
         snapshot: &CaSnapshot,
         key_store: &pki::CaKeyStore,
@@ -271,7 +271,7 @@ impl CrlManager {
     }
 
     /// Update CA issuers after a rotation event.
-    pub async fn update_ca(
+    pub(crate) async fn update_ca(
         &self,
         snapshot: &CaSnapshot,
         key_store: &pki::CaKeyStore,
@@ -311,7 +311,7 @@ impl CrlManager {
     }
 
     /// Update server cert material (after renewal).
-    pub async fn update_server_cert(&self, cert_pem: String, key_pem: String) {
+    pub(crate) async fn update_server_cert(&self, cert_pem: String, key_pem: String) {
         let mut cert = self.server_cert.write().await;
         *cert = (cert_pem, key_pem);
     }
@@ -358,7 +358,7 @@ impl CrlManager {
     ///
     /// After hot-reload, the new CRLs are persisted to the `crl_cache` table
     /// so that restarting controllers can load them without regeneration.
-    pub async fn reload_tls_config(&self) -> pki::Result<()> {
+    pub(crate) async fn reload_tls_config(&self) -> pki::Result<()> {
         let (crls, crl_pem, persist_entries) = self.build_crls().await?;
 
         // Snapshot under each lock in order, then release before crypto work.
@@ -422,7 +422,10 @@ impl CrlManager {
     ///
     /// Accepts an optional `CancellationToken` for graceful shutdown. When the
     /// token is cancelled, the task exits cleanly.
-    pub async fn run(self: Arc<Self>, shutdown_token: Option<tokio_util::sync::CancellationToken>) {
+    pub(crate) async fn run(
+        self: Arc<Self>,
+        shutdown_token: Option<tokio_util::sync::CancellationToken>,
+    ) {
         loop {
             tokio::select! {
                 _ = self.config.revocation_notify.notified() => {

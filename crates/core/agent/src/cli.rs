@@ -5,7 +5,7 @@ use uptrakit_service_sdk::cli::CommonServiceArgs;
 #[command(name = "uptrakit-agent")]
 #[command(about = "Uptrakit agent that connects to the controller")]
 #[command(disable_version_flag = true)]
-pub struct Args {
+pub(crate) struct Args {
     #[command(flatten)]
     pub common: CommonServiceArgs,
 }

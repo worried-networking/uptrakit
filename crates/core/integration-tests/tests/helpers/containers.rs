@@ -29,7 +29,7 @@ const CONTROLLER_PORT: u16 = 8443;
 const NATS_PORT: u16 = 4222;
 
 /// A running controller container with its mapped host port.
-pub struct ControllerContainer {
+pub(crate) struct ControllerContainer {
     /// Sidecar NATS container required by system services with `nats_access`.
     _nats_container: testcontainers::ContainerAsync<GenericImage>,
     /// The underlying testcontainers handle. Dropping this stops the container.
@@ -52,7 +52,7 @@ impl ControllerContainer {
     /// - Bootstrap enrollment tokens with high max-uses and long TTL
     ///
     /// Waits for the "HTTPS server listening on" log message before returning.
-    pub async fn start(network: &str) -> Self {
+    pub(crate) async fn start(network: &str) -> Self {
         let nats_name = format!("nats-{}", uuid::Uuid::now_v7());
         let nats_container = GenericImage::new("nats", "latest")
             .with_wait_for(WaitFor::Log(
@@ -123,35 +123,35 @@ impl ControllerContainer {
     }
 
     /// The host port mapped to the controller's HTTPS port.
-    pub fn host_port(&self) -> u16 {
+    pub(crate) fn host_port(&self) -> u16 {
         self.host_port
     }
 
     /// The container name (used for DNS resolution by other containers).
-    pub fn container_name(&self) -> &str {
+    pub(crate) fn container_name(&self) -> &str {
         &self.container_name
     }
 
     /// The initial first-user registration token, if the controller printed one.
-    pub fn registration_token(&self) -> Option<&str> {
+    pub(crate) fn registration_token(&self) -> Option<&str> {
         self.registration_token.as_deref()
     }
 }
 
 /// A running service container (agent, scheduler, mqtt, or agent-ssh).
-pub struct ServiceContainer {
+pub(crate) struct ServiceContainer {
     /// The underlying testcontainers handle. Dropping this stops the container.
     _container: testcontainers::ContainerAsync<GenericImage>,
 }
 
 impl ServiceContainer {
     /// Start an agent container that enrolls with the given controller.
-    pub async fn start_agent(network: &str, controller_name: &str) -> Self {
+    pub(crate) async fn start_agent(network: &str, controller_name: &str) -> Self {
         Self::start_service(network, "uptrakit-agent", controller_name, ENROLLMENT_TOKEN).await
     }
 
     /// Start a scheduler container that enrolls as a system service.
-    pub async fn start_scheduler(network: &str, controller_name: &str) -> Self {
+    pub(crate) async fn start_scheduler(network: &str, controller_name: &str) -> Self {
         Self::start_service(
             network,
             "uptrakit-scheduler",
@@ -162,7 +162,7 @@ impl ServiceContainer {
     }
 
     /// Start an MQTT container that enrolls as a system service.
-    pub async fn start_mqtt(network: &str, controller_name: &str) -> Self {
+    pub(crate) async fn start_mqtt(network: &str, controller_name: &str) -> Self {
         Self::start_service(
             network,
             "uptrakit-mqtt",
@@ -176,7 +176,7 @@ impl ServiceContainer {
     ///
     /// The agent-ssh binary requires `--allow-plaintext-secrets` because it
     /// manages its own local secret store.
-    pub async fn start_agent_ssh(network: &str, controller_name: &str) -> Self {
+    pub(crate) async fn start_agent_ssh(network: &str, controller_name: &str) -> Self {
         let container = GenericImage::new(TEST_IMAGE, TEST_IMAGE_TAG)
             .with_wait_for(WaitFor::Log(
                 LogWaitStrategy::stdout_or_stderr("enrollment complete, certificate saved to disk")
@@ -238,7 +238,7 @@ impl ServiceContainer {
 }
 
 /// Generate a unique Docker network name for a test run.
-pub fn test_network_name() -> String {
+pub(crate) fn test_network_name() -> String {
     format!("uptrakit-test-{}", uuid::Uuid::now_v7())
 }
 

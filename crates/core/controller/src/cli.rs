@@ -7,7 +7,7 @@ use uptrakit_directories::AppDirs;
 
 /// Available subcommands for the controller binary.
 #[derive(Subcommand, Debug)]
-pub enum ControllerCommand {
+pub(crate) enum ControllerCommand {
     /// Migrate all data from one database to another.
     ///
     /// Copies every application table from the source database to the target
@@ -22,7 +22,7 @@ pub enum ControllerCommand {
 
 /// Arguments for the `db-migrate` subcommand.
 #[derive(Parser, Debug)]
-pub struct DbMigrateArgs {
+pub(crate) struct DbMigrateArgs {
     /// Source database URL to read data from.
     ///
     /// Supported schemes depend on enabled build features:
@@ -62,7 +62,7 @@ pub struct DbMigrateArgs {
 #[derive(Parser, Debug)]
 #[command(name = "uptrakit-controller")]
 #[command(disable_version_flag = true)]
-pub struct Args {
+pub(crate) struct Args {
     /// Show crate version and build metadata.
     #[arg(long)]
     pub version: bool,
@@ -317,7 +317,7 @@ pub struct Args {
 /// where OIDC configuration requires ManageSettings permission, but the first
 /// user must log in via OIDC.
 #[derive(Parser, Debug)]
-pub struct OidcBootstrapArgs {
+pub(crate) struct OidcBootstrapArgs {
     /// OIDC issuer URL. When set, bootstraps an OIDC provider at startup.
     /// Requires --oidc-client-id and --oidc-client-secret.
     #[arg(long, env = "UPTRAKIT_OIDC_ISSUER_URL")]
@@ -358,7 +358,7 @@ pub struct OidcBootstrapArgs {
 /// Same pattern applies for `--bootstrap-system-enrollment-token` for
 /// system services (MQTT bridge, external scheduler).
 #[derive(Parser, Debug)]
-pub struct EnrollmentBootstrapArgs {
+pub(crate) struct EnrollmentBootstrapArgs {
     /// Pre-shared token for tenant service auto-enrollment.
     /// Creates a token named "bootstrap" at startup if none with that name
     /// exists (active, not revoked, not expired).
@@ -411,7 +411,7 @@ pub struct EnrollmentBootstrapArgs {
 /// (e.g. `--audit-log-backend db --audit-log-backend journald`).
 /// `None` disables all audit logging and is mutually exclusive with other values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
-pub enum AuditLogBackendArg {
+pub(crate) enum AuditLogBackendArg {
     /// Store audit logs in the database.
     Db,
     /// Emit audit logs to journald via structured tracing events.
@@ -425,7 +425,7 @@ pub enum AuditLogBackendArg {
 ///
 /// Controls which authenticated HTTP requests are recorded.
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
-pub enum AuditLogFilterArg {
+pub(crate) enum AuditLogFilterArg {
     /// Log all authenticated HTTP requests (default).
     All,
     /// Log only mutation requests (POST, PUT, PATCH, DELETE).
@@ -436,7 +436,7 @@ pub enum AuditLogFilterArg {
 
 /// How to serve PKI endpoints over plain HTTP.
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
-pub enum PkiHttpMode {
+pub(crate) enum PkiHttpMode {
     /// Start a built-in plain HTTP listener for PKI endpoints.
     Listener,
     /// PKI HTTP is handled externally (e.g., by a reverse proxy).
@@ -481,7 +481,7 @@ impl Args {
     ///
     /// Returns `AppDirs` with separate config and state directories.
     /// CLI overrides take precedence over platform defaults.
-    pub fn resolve_dirs(&self) -> uptrakit_directories::Result<AppDirs> {
+    pub(crate) fn resolve_dirs(&self) -> uptrakit_directories::Result<AppDirs> {
         AppDirs::resolve(
             "controller",
             self.config_dir.as_deref(),

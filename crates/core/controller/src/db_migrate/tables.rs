@@ -69,7 +69,7 @@ pub(crate) const COPY_ORDER: &[&str] = &[
 /// Batch-copy all rows from `src` to `dst` in FK-safe order.
 ///
 /// Returns the total number of rows copied across all tables.
-pub async fn copy_all(
+pub(crate) async fn copy_all(
     src: &DatabaseConnection,
     dst: &DatabaseConnection,
     batch_size: u64,
@@ -139,7 +139,7 @@ pub async fn copy_all(
 /// This is the reverse of the copy order (same as the migration `down()` drop
 /// list). Running this before `copy_all` removes any seed data written by
 /// `run_migrations` and ensures a clean slate for the import.
-pub async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
+pub(crate) async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
     macro_rules! clean {
         ($entity:ty, $name:literal) => {
             clean_table::<$entity>($name, dst).await?;
@@ -202,7 +202,7 @@ pub async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
 ///
 /// Returns the total number of rows verified, or the first
 /// [`DbMigrateError::Mismatch`] found.
-pub async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnection) -> Result<u64> {
+pub(crate) async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnection) -> Result<u64> {
     let mut total = 0u64;
 
     macro_rules! verify {

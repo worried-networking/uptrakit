@@ -10,7 +10,7 @@ use crate::db::entity::ssh_host::SshKeyType;
 use crate::error::Error;
 
 /// Read a private key from a file path, or from stdin if `path` is `-`.
-pub fn read_private_key(path: &Path) -> crate::error::Result<String> {
+pub(crate) fn read_private_key(path: &Path) -> crate::error::Result<String> {
     if path.as_os_str() == "-" {
         let mut buf = String::new();
         std::io::stdin()
@@ -29,7 +29,7 @@ pub fn read_private_key(path: &Path) -> crate::error::Result<String> {
 /// - `BEGIN EC PRIVATE KEY` → ECDSA (SEC1)
 /// - `BEGIN OPENSSH PRIVATE KEY` → decode and inspect the key type string
 /// - `BEGIN PRIVATE KEY` → PKCS#8 (decode and inspect OID)
-pub fn detect_key_type(pem_content: &str) -> crate::error::Result<SshKeyType> {
+pub(crate) fn detect_key_type(pem_content: &str) -> crate::error::Result<SshKeyType> {
     let trimmed = pem_content.trim();
 
     if trimmed.contains("BEGIN RSA PRIVATE KEY") {
@@ -212,7 +212,7 @@ fn read_openssh_string(data: &[u8], pos: usize) -> crate::error::Result<String> 
 ///
 /// Returns `(private_pem, public_openssh)` where the private key is in
 /// OpenSSH PEM format and the public key is in `authorized_keys` format.
-pub fn generate_ed25519_keypair() -> crate::error::Result<(String, String)> {
+pub(crate) fn generate_ed25519_keypair() -> crate::error::Result<(String, String)> {
     let private_key =
         PrivateKey::random(&mut ssh_key::rand_core::OsRng, ssh_key::Algorithm::Ed25519)
             .map_err(|e| report!(Error::KeyGeneration(e.to_string())))?;
@@ -236,7 +236,7 @@ pub fn generate_ed25519_keypair() -> crate::error::Result<(String, String)> {
 
 /// Extract the public key in `authorized_keys` format from a PEM-encoded
 /// private key.
-pub fn extract_public_key_openssh(pem_content: &str) -> crate::error::Result<String> {
+pub(crate) fn extract_public_key_openssh(pem_content: &str) -> crate::error::Result<String> {
     let private_key = PrivateKey::from_openssh(pem_content).map_err(|e| {
         report!(Error::UnsupportedKeyType(format!(
             "failed to parse private key: {e}"
