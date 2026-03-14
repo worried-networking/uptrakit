@@ -25,10 +25,12 @@ use std::time::Duration;
 
 use clap::Parser;
 use rootcause::prelude::*;
+use sea_orm::DatabaseConnection;
 use thiserror::Error;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
+use uptrakit_audit_log::{AuditFilter, AuditLogDispatcher};
 use uptrakit_build_info::BuildInfo;
 use uptrakit_shared_macros::impl_report_conversion;
 
@@ -363,81 +365,7 @@ async fn run(args: cli::Args) -> Result<()> {
     let shutdown_token = CancellationToken::new();
 
     // Audit log backend and filter wiring.
-    let (audit_filter, audit_dispatcher) = {
-        use uptrakit_audit_log::{AuditFilter, AuditLogDispatcher, FilterMode, NoopBackend};
-
-        let filter_mode = match args.audit_log_filter {
-            cli::AuditLogFilterArg::All => FilterMode::All,
-            cli::AuditLogFilterArg::Mutations => FilterMode::Mutations,
-            cli::AuditLogFilterArg::None => FilterMode::None,
-        };
-
-        // Validate mutual exclusivity: `none` cannot be combined with other backends.
-        let has_none = args
-            .audit_log_backend
-            .contains(&cli::AuditLogBackendArg::None);
-        if has_none && args.audit_log_backend.len() > 1 {
-            tracing::warn!(
-                "--audit-log-backend=none is mutually exclusive with other backends; \
-                 disabling all audit logging"
-            );
-        }
-
-        if has_none || filter_mode == FilterMode::None {
-            let backend: std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend> =
-                std::sync::Arc::new(NoopBackend);
-            (
-                AuditFilter::new(FilterMode::None),
-                AuditLogDispatcher::new(backend),
-            )
-        } else {
-            // Build the database connection for the audit log backend.
-            // Use the separate audit DB URL if provided, otherwise the main DB.
-            let audit_db = if let Some(ref url) = args.audit_log_db_url {
-                startup::init_audit_database(url, args.db_max_connections).await?
-            } else {
-                db_conn.clone()
-            };
-
-            let mut backends: Vec<std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend>> =
-                Vec::new();
-
-            for backend_arg in &args.audit_log_backend {
-                match backend_arg {
-                    cli::AuditLogBackendArg::Db => {
-                        backends.push(std::sync::Arc::new(
-                            uptrakit_audit_log::DatabaseBackend::new(audit_db.clone()),
-                        ));
-                    }
-                    #[cfg(feature = "journald")]
-                    cli::AuditLogBackendArg::Journald => {
-                        backends.push(std::sync::Arc::new(uptrakit_audit_log::JournaldBackend));
-                    }
-                    cli::AuditLogBackendArg::None => {
-                        // Already handled above (has_none guard).
-                    }
-                }
-            }
-
-            let backend: std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend> =
-                match backends.len() {
-                    0 => std::sync::Arc::new(NoopBackend),
-                    1 => backends.into_iter().next().expect("one backend"),
-                    _ => std::sync::Arc::new(uptrakit_audit_log::MultiplexBackend::new(backends)),
-                };
-
-            tracing::info!(
-                filter = %filter_mode,
-                backends = args.audit_log_backend.len(),
-                "audit logging configured"
-            );
-
-            (
-                AuditFilter::new(filter_mode),
-                AuditLogDispatcher::new(backend),
-            )
-        }
-    };
+    let (audit_filter, audit_dispatcher) = build_audit_logger(&args, &db_conn).await?;
 
     // Seed the extension registry with plugin-provided manifests (including
     // notification plugin extensions aggregated by the unified plugin_ops).
@@ -504,26 +432,215 @@ async fn run(args: cli::Args) -> Result<()> {
 
     // Spawn background tasks
     let mut bg = tasks::BackgroundTasks::new(shutdown_token);
+    spawn_background_tasks(
+        &mut bg,
+        &app_state,
+        &crl_manager,
+        ca_managed,
+        ca_tx,
+        initial_ca_version,
+        controller_id,
+        args.tls_cert.is_some(),
+        &service_connections,
+        #[cfg(feature = "nats")]
+        &nats_transport,
+    );
 
+    // Set up signal handlers
+    let mut sigterm = signal(SignalKind::terminate()).context_transform(|e| {
+        AppError::Config(format!("failed to set up SIGTERM handler: {e}"))
+    })?;
+    let mut sigint = signal(SignalKind::interrupt())
+        .context_transform(|e| AppError::Config(format!("failed to set up SIGINT handler: {e}")))?;
+    let mut sigusr1 = signal(SignalKind::user_defined1()).context_transform(|e| {
+        AppError::Config(format!("failed to set up SIGUSR1 handler: {e}"))
+    })?;
+
+    // Spawn HTTPS server
+    let server_handle = axum_server::Handle::new();
+    let server_options = server::ServerOptions {
+        https_addr: reconciled.https_addr,
+        rustls_config,
+        app_state: Arc::clone(&app_state),
+        static_dir: validated.static_dir,
+        handle: server_handle.clone(),
+        enable_reuseport: args.reuseport,
+    };
+    let server_task = tokio::spawn(server::run(server_options));
+
+    // Coordinate takeover from old process if requested
+    handle_server_takeover(args.takeover_from, &server_handle).await;
+
+    // Spawn zeroconf mDNS advertiser if enabled
+    #[cfg(feature = "zeroconf")]
+    spawn_zeroconf(&mut bg, &app_state, reconciled.https_addr);
+
+    // Spawn PKI HTTP server if needed
+    spawn_pki_http(&mut bg, &app_state, validated.pki_http_port);
+
+    // Main event loop — wait for shutdown signal or server exit
+    let mut server_task = server_task;
+    let shutdown_reason = tokio::select! {
+        result = &mut server_task => {
+            match result {
+                Ok(Ok(())) => {
+                    tracing::info!("server task exited normally");
+                    "server exit"
+                }
+                Ok(Err(e)) => {
+                    tracing::error!(error = ?e, "server error");
+                    return Err(e).context(AppError::Server)?;
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "server task panicked");
+                    "server panic"
+                }
+            }
+        }
+        _ = sigterm.recv() => {
+            tracing::info!("received SIGTERM, initiating graceful shutdown");
+            "SIGTERM"
+        }
+        _ = sigint.recv() => {
+            tracing::info!("received SIGINT, initiating graceful shutdown");
+            "SIGINT"
+        }
+        _ = sigusr1.recv() => {
+            tracing::info!("received SIGUSR1 (new process ready), initiating graceful shutdown");
+            "SIGUSR1 (takeover)"
+        }
+    };
+
+    // Graceful shutdown
+    tracing::info!(reason = shutdown_reason, "shutdown signal received");
+    let shutdown_timeout = Duration::from_secs(args.shutdown_timeout_secs);
+    bg.shutdown(server_handle, service_connections, shutdown_timeout)
+        .await;
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Extracted helper functions
+// ---------------------------------------------------------------------------
+
+/// Build the audit log filter and dispatcher from CLI arguments.
+///
+/// Configures the audit backend (database, journald, or noop) and the
+/// event filter (all, mutations-only, or none).
+async fn build_audit_logger(
+    args: &cli::Args,
+    db_conn: &DatabaseConnection,
+) -> Result<(AuditFilter, AuditLogDispatcher)> {
+    use uptrakit_audit_log::{FilterMode, NoopBackend};
+
+    let filter_mode = match args.audit_log_filter {
+        cli::AuditLogFilterArg::All => FilterMode::All,
+        cli::AuditLogFilterArg::Mutations => FilterMode::Mutations,
+        cli::AuditLogFilterArg::None => FilterMode::None,
+    };
+
+    // Validate mutual exclusivity: `none` cannot be combined with other backends.
+    let has_none = args
+        .audit_log_backend
+        .contains(&cli::AuditLogBackendArg::None);
+    if has_none && args.audit_log_backend.len() > 1 {
+        tracing::warn!(
+            "--audit-log-backend=none is mutually exclusive with other backends; \
+             disabling all audit logging"
+        );
+    }
+
+    if has_none || filter_mode == FilterMode::None {
+        let backend: std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend> =
+            std::sync::Arc::new(NoopBackend);
+        return Ok((
+            AuditFilter::new(FilterMode::None),
+            AuditLogDispatcher::new(backend),
+        ));
+    }
+
+    // Build the database connection for the audit log backend.
+    // Use the separate audit DB URL if provided, otherwise the main DB.
+    let audit_db = if let Some(ref url) = args.audit_log_db_url {
+        startup::init_audit_database(url, args.db_max_connections).await?
+    } else {
+        db_conn.clone()
+    };
+
+    let mut backends: Vec<std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend>> = Vec::new();
+
+    for backend_arg in &args.audit_log_backend {
+        match backend_arg {
+            cli::AuditLogBackendArg::Db => {
+                backends.push(std::sync::Arc::new(
+                    uptrakit_audit_log::DatabaseBackend::new(audit_db.clone()),
+                ));
+            }
+            #[cfg(feature = "journald")]
+            cli::AuditLogBackendArg::Journald => {
+                backends.push(std::sync::Arc::new(uptrakit_audit_log::JournaldBackend));
+            }
+            cli::AuditLogBackendArg::None => {
+                // Already handled above (has_none guard).
+            }
+        }
+    }
+
+    let backend: std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend> = match backends.len() {
+        0 => std::sync::Arc::new(NoopBackend),
+        1 => backends.into_iter().next().expect("one backend"),
+        _ => std::sync::Arc::new(uptrakit_audit_log::MultiplexBackend::new(backends)),
+    };
+
+    tracing::info!(
+        filter = %filter_mode,
+        backends = args.audit_log_backend.len(),
+        "audit logging configured"
+    );
+
+    Ok((
+        AuditFilter::new(filter_mode),
+        AuditLogDispatcher::new(backend),
+    ))
+}
+
+/// Spawn all background tasks: CRL manager, denylist cleanup, settings reload,
+/// CA reload/rotation, scheduler, server cert renewal, and NATS consumer.
+#[allow(clippy::too_many_arguments)]
+fn spawn_background_tasks(
+    bg: &mut tasks::BackgroundTasks,
+    app_state: &Arc<AppState>,
+    crl_manager: &Arc<crl_manager::CrlManager>,
+    ca_managed: bool,
+    ca_tx: tokio::sync::watch::Sender<pki::CaSnapshot>,
+    initial_ca_version: i64,
+    controller_id: uuid::Uuid,
+    has_external_tls_cert: bool,
+    service_connections: &uptrakit_web_api::service_connections::ServiceConnectionRegistry,
+    #[cfg(feature = "nats")] nats_transport: &Option<
+        uptrakit_web_api::nats_transport::NatsTransport,
+    >,
+) {
     // CRL manager: uses the child cancellation token for cooperative shutdown.
     // Must use track() (not track_abort()) so the manager finishes its current
     // cycle and writes the final TLS config before the process exits.
-    let crl_handle = tokio::spawn(Arc::clone(&crl_manager).run(Some(bg.child_token())));
+    let crl_handle = tokio::spawn(Arc::clone(crl_manager).run(Some(bg.child_token())));
     bg.track("crl-manager", crl_handle);
 
     // Token denylist cleanup (in-memory, per-instance — not in scheduler)
     let h = tasks::spawn_denylist_cleanup(bg.child_token(), Arc::clone(&app_state.token_denylist));
     bg.track("denylist-cleanup", h);
 
-    let h = tasks::spawn_settings_reload(bg.child_token(), Arc::clone(&app_state));
+    let h = tasks::spawn_settings_reload(bg.child_token(), Arc::clone(app_state));
     bg.track("settings-reload", h);
 
     if ca_managed {
         let h = tasks::spawn_ca_reload(
             bg.child_token(),
-            Arc::clone(&app_state),
+            Arc::clone(app_state),
             ca_tx.clone(),
-            Arc::clone(&crl_manager),
+            Arc::clone(crl_manager),
             initial_ca_version,
         );
         bg.track("ca-reload", h);
@@ -616,28 +733,31 @@ async fn run(args: cli::Args) -> Result<()> {
         bg.track_with_timeout("scheduler", h, durations::SCHEDULER_SHUTDOWN_TIMEOUT);
     }
 
+    // Suppress unused-variable warnings when embedded-scheduler is disabled.
+    let _ = controller_id;
+
     if ca_managed {
         let h = tasks::spawn_ca_rotation(
             bg.child_token(),
-            Arc::clone(&app_state),
+            Arc::clone(app_state),
             ca_tx,
-            Arc::clone(&crl_manager),
+            Arc::clone(crl_manager),
         );
         bg.track("ca-rotation", h);
     }
 
-    if args.tls_cert.is_none() {
+    if !has_external_tls_cert {
         let h = tasks::spawn_server_cert_renewal(
             bg.child_token(),
-            Arc::clone(&app_state),
-            Arc::clone(&crl_manager),
+            Arc::clone(app_state),
+            Arc::clone(crl_manager),
         );
         bg.track("server-cert-renewal", h);
     }
 
     // NATS consumer (cross-controller event delivery)
     #[cfg(feature = "nats")]
-    if let Some(ref nats) = nats_transport {
+    if let Some(ref nats) = *nats_transport {
         let h = tasks::spawn_nats_consumer(
             bg.child_token(),
             nats.clone(),
@@ -653,118 +773,76 @@ async fn run(args: cli::Args) -> Result<()> {
         bg.track("nats-consumer", h);
     }
 
-    // Set up signal handlers
-    let mut sigterm = signal(SignalKind::terminate()).context_transform(|e| {
-        AppError::Config(format!("failed to set up SIGTERM handler: {e}"))
-    })?;
-    let mut sigint = signal(SignalKind::interrupt())
-        .context_transform(|e| AppError::Config(format!("failed to set up SIGINT handler: {e}")))?;
-    let mut sigusr1 = signal(SignalKind::user_defined1()).context_transform(|e| {
-        AppError::Config(format!("failed to set up SIGUSR1 handler: {e}"))
-    })?;
+    // Suppress unused-variable warnings when nats feature is disabled.
+    #[cfg(not(feature = "nats"))]
+    let _ = service_connections;
+}
 
-    // Spawn HTTPS server
-    let server_handle = axum_server::Handle::new();
-    let server_options = server::ServerOptions {
-        https_addr: reconciled.https_addr,
-        rustls_config,
-        app_state: Arc::clone(&app_state),
-        static_dir: validated.static_dir,
-        handle: server_handle.clone(),
-        enable_reuseport: args.reuseport,
-    };
-    let server_task = tokio::spawn(server::run(server_options));
-
-    // If taking over, wait until the new server is actually listening before
-    // signaling the old process.  `Handle::listening()` resolves the moment
-    // axum-server calls `notify_listening()` internally — i.e. when the socket
-    // is bound and ready to accept.  A 10-second timeout guards against a port
-    // conflict or slow TLS init keeping us blocked indefinitely.
-    if let Some(old_pid) = args.takeover_from {
-        match tokio::time::timeout(Duration::from_secs(10), server_handle.listening()).await {
-            Ok(_) => tracing::info!("server is listening; signaling old process"),
-            Err(_) => tracing::warn!(
-                "timed out waiting for server to become ready (10s); \
-                 signaling old process anyway"
-            ),
-        }
-        match nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(old_pid as i32),
-            nix::sys::signal::Signal::SIGUSR1,
-        ) {
-            Ok(()) => tracing::info!(pid = old_pid, "sent SIGUSR1 to old process"),
-            Err(e) => tracing::warn!(pid = old_pid, error = %e, "failed to signal old process"),
-        }
-    }
-
-    // Spawn zeroconf mDNS advertiser if enabled
-    #[cfg(feature = "zeroconf")]
-    {
-        let zeroconf_settings = app_state.settings.zeroconf();
-        if zeroconf_settings.enabled {
-            let ca_snap = app_state.ca_snapshot.borrow().clone();
-            let zc_cancel = bg.child_token();
-            let zc_addr = reconciled.https_addr;
-            let handle = tokio::spawn(zeroconf::run_advertiser(
-                zc_cancel,
-                zc_addr,
-                ca_snap,
-                zeroconf_settings,
-            ));
-            bg.track("zeroconf-advertiser", handle);
-        }
-    }
-
-    // Spawn PKI HTTP server if needed
-    if let Some(port) = validated.pki_http_port {
-        let addr = SocketAddr::from(([0, 0, 0, 0], port));
-        let app_state_for_pki = Arc::clone(&app_state);
-        let pki_http_handle = tokio::spawn(async move {
-            if let Err(e) = server::run_pki_http(addr, app_state_for_pki).await {
-                tracing::error!(error = ?e, "PKI HTTP server error");
-            }
-        });
-        bg.track_abort("pki-http", pki_http_handle);
-    }
-
-    // Main event loop — wait for shutdown signal or server exit
-    let mut server_task = server_task;
-    let shutdown_reason = tokio::select! {
-        result = &mut server_task => {
-            match result {
-                Ok(Ok(())) => {
-                    tracing::info!("server task exited normally");
-                    "server exit"
-                }
-                Ok(Err(e)) => {
-                    tracing::error!(error = ?e, "server error");
-                    return Err(e).context(AppError::Server)?;
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, "server task panicked");
-                    "server panic"
-                }
-            }
-        }
-        _ = sigterm.recv() => {
-            tracing::info!("received SIGTERM, initiating graceful shutdown");
-            "SIGTERM"
-        }
-        _ = sigint.recv() => {
-            tracing::info!("received SIGINT, initiating graceful shutdown");
-            "SIGINT"
-        }
-        _ = sigusr1.recv() => {
-            tracing::info!("received SIGUSR1 (new process ready), initiating graceful shutdown");
-            "SIGUSR1 (takeover)"
-        }
+/// Wait for the HTTPS server to become ready, then signal the old controller
+/// process via SIGUSR1 to begin its graceful shutdown.
+async fn handle_server_takeover(
+    old_pid: Option<u32>,
+    server_handle: &axum_server::Handle<SocketAddr>,
+) {
+    let Some(old_pid) = old_pid else {
+        return;
     };
 
-    // Graceful shutdown
-    tracing::info!(reason = shutdown_reason, "shutdown signal received");
-    let shutdown_timeout = Duration::from_secs(args.shutdown_timeout_secs);
-    bg.shutdown(server_handle, service_connections, shutdown_timeout)
-        .await;
+    // Wait until the new server is actually listening before signaling the old
+    // process. A 10-second timeout guards against a port conflict or slow TLS
+    // init keeping us blocked indefinitely.
+    match tokio::time::timeout(Duration::from_secs(10), server_handle.listening()).await {
+        Ok(_) => tracing::info!("server is listening; signaling old process"),
+        Err(_) => tracing::warn!(
+            "timed out waiting for server to become ready (10s); \
+             signaling old process anyway"
+        ),
+    }
+    match nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(old_pid as i32),
+        nix::sys::signal::Signal::SIGUSR1,
+    ) {
+        Ok(()) => tracing::info!(pid = old_pid, "sent SIGUSR1 to old process"),
+        Err(e) => tracing::warn!(pid = old_pid, error = %e, "failed to signal old process"),
+    }
+}
 
-    Ok(())
+/// Spawn the zeroconf mDNS advertiser if the feature is enabled and configured.
+#[cfg(feature = "zeroconf")]
+fn spawn_zeroconf(
+    bg: &mut tasks::BackgroundTasks,
+    app_state: &Arc<AppState>,
+    https_addr: SocketAddr,
+) {
+    let zeroconf_settings = app_state.settings.zeroconf();
+    if zeroconf_settings.enabled {
+        let ca_snap = app_state.ca_snapshot.borrow().clone();
+        let zc_cancel = bg.child_token();
+        let handle = tokio::spawn(zeroconf::run_advertiser(
+            zc_cancel,
+            https_addr,
+            ca_snap,
+            zeroconf_settings,
+        ));
+        bg.track("zeroconf-advertiser", handle);
+    }
+}
+
+/// Spawn the optional plain-HTTP PKI server on the given port.
+fn spawn_pki_http(
+    bg: &mut tasks::BackgroundTasks,
+    app_state: &Arc<AppState>,
+    pki_http_port: Option<u16>,
+) {
+    let Some(port) = pki_http_port else {
+        return;
+    };
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let app_state_for_pki = Arc::clone(app_state);
+    let pki_http_handle = tokio::spawn(async move {
+        if let Err(e) = server::run_pki_http(addr, app_state_for_pki).await {
+            tracing::error!(error = ?e, "PKI HTTP server error");
+        }
+    });
+    bg.track_abort("pki-http", pki_http_handle);
 }
