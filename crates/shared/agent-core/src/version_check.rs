@@ -89,6 +89,302 @@ pub async fn check_version(
     }
 }
 
+/// Per-item detect result: `(installed_version, error)`.
+type DetectItemResult = (Option<String>, Option<String>);
+
+/// Per-item fetch result: `(latest_version, update_category, error)`.
+type FetchItemResult = (Option<String>, UpdateCategory, Option<String>);
+
+/// A group of assignments sharing the same plugin type and effective config,
+/// ready for a single batch plugin invocation.
+struct BatchGroup {
+    plugin_type: PluginType,
+    effective_config: serde_json::Value,
+    /// Each entry is `(assignment_index, package_identifier)`.
+    items: Vec<(usize, String)>,
+}
+
+/// Group key: `(plugin_type, serialised effective config)`.
+type GroupKey = (PluginType, String);
+
+/// Build detect and fetch groups from assignments, keyed by
+/// `(PluginType, effective_config_json)`.
+fn build_batch_groups(
+    assignments: &[VersionCheckAssignment],
+    ctx: &ConnectionContext,
+) -> (HashMap<GroupKey, BatchGroup>, HashMap<GroupKey, BatchGroup>) {
+    let mut detect_groups: HashMap<GroupKey, BatchGroup> = HashMap::new();
+    let mut fetch_groups: HashMap<GroupKey, BatchGroup> = HashMap::new();
+
+    for (idx, assignment) in assignments.iter().enumerate() {
+        if let Some(pa) = &assignment.detect_version {
+            insert_into_group(&mut detect_groups, pa, idx, ctx);
+        }
+        if let Some(pa) = &assignment.fetch_releases {
+            insert_into_group(&mut fetch_groups, pa, idx, ctx);
+        }
+    }
+
+    (detect_groups, fetch_groups)
+}
+
+/// Insert a single plugin assignment into the appropriate group map.
+fn insert_into_group(
+    groups: &mut HashMap<GroupKey, BatchGroup>,
+    pa: &PluginAssignment,
+    idx: usize,
+    ctx: &ConnectionContext,
+) {
+    let mut effective_config = pa.config.clone();
+    ctx.apply_to_config(&pa.plugin_type, &mut effective_config);
+    let key = (pa.plugin_type.clone(), effective_config.to_string());
+    let group = groups.entry(key).or_insert_with(|| BatchGroup {
+        plugin_type: pa.plugin_type.clone(),
+        effective_config,
+        items: vec![],
+    });
+    group.items.push((idx, pa.package_identifier.clone()));
+}
+
+/// Produce an error result for every item in a group.
+fn error_for_all_detect_items(
+    items: &[(usize, String)],
+    err: String,
+) -> Vec<(usize, DetectItemResult)> {
+    items
+        .iter()
+        .map(|(idx, _)| (*idx, (None, Some(err.clone()))))
+        .collect()
+}
+
+/// Produce an error result for every item in a fetch group.
+fn error_for_all_fetch_items(
+    items: &[(usize, String)],
+    err: String,
+) -> Vec<(usize, FetchItemResult)> {
+    items
+        .iter()
+        .map(|(idx, _)| (*idx, (None, UpdateCategory::Unknown, Some(err.clone()))))
+        .collect()
+}
+
+/// Run a single detect group: create the plugin and call
+/// `batch_detect_installed_version`.
+///
+/// Returns `(assignment_index, (installed_version, error))` for each item.
+async fn run_detect_group(
+    group: BatchGroup,
+    executor: Arc<dyn CommandExecutor>,
+) -> Vec<(usize, DetectItemResult)> {
+    let batch_items: Vec<BatchDetectItem> = group
+        .items
+        .iter()
+        .map(|(_, pkg)| BatchDetectItem::new(pkg.clone()))
+        .collect();
+
+    let plugin = match PluginRegistry::create_plugin(
+        group.plugin_type.clone(),
+        &group.effective_config,
+        executor,
+    )
+    .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            return error_for_all_detect_items(
+                &group.items,
+                format!("failed to create plugin: {e}"),
+            );
+        }
+    };
+
+    let detector = match plugin.as_version_detector() {
+        Some(d) => d,
+        None => {
+            return error_for_all_detect_items(
+                &group.items,
+                format!(
+                    "plugin {} does not implement VersionDetectorPlugin",
+                    group.plugin_type
+                ),
+            );
+        }
+    };
+
+    let results = match detector.batch_detect_installed_version(&batch_items).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(
+                plugin_type = %group.plugin_type,
+                item_count = group.items.len(),
+                error = %e,
+                "batch detect_installed_version failed"
+            );
+            return error_for_all_detect_items(&group.items, format!("detection failed: {e}"));
+        }
+    };
+
+    let result_map: HashMap<String, DetectItemResult> = results
+        .into_iter()
+        .map(|r| {
+            let version = r.installed_version.map(|v| v.to_string());
+            let error = r.error.map(|e| format!("detection failed: {e}"));
+            (r.package_identifier, (version, error))
+        })
+        .collect();
+
+    group
+        .items
+        .iter()
+        .map(|(idx, pkg)| {
+            let outcome = result_map
+                .get(pkg.as_str())
+                .cloned()
+                .unwrap_or((None, None));
+            (*idx, outcome)
+        })
+        .collect()
+}
+
+/// Run a single fetch group: create the plugin and call
+/// `batch_fetch_releases`.
+///
+/// Returns `(assignment_index, (latest_version, update_category, error))` for
+/// each item.
+async fn run_fetch_group(
+    group: BatchGroup,
+    executor: Arc<dyn CommandExecutor>,
+) -> Vec<(usize, FetchItemResult)> {
+    let batch_items: Vec<BatchFetchItem> = group
+        .items
+        .iter()
+        .map(|(_, pkg)| BatchFetchItem::new(pkg.clone()))
+        .collect();
+
+    let plugin = match PluginRegistry::create_plugin(
+        group.plugin_type.clone(),
+        &group.effective_config,
+        executor,
+    )
+    .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            return error_for_all_fetch_items(
+                &group.items,
+                format!("failed to create plugin: {e}"),
+            );
+        }
+    };
+
+    let fetcher = match plugin.as_release_fetcher() {
+        Some(f) => f,
+        None => {
+            return error_for_all_fetch_items(
+                &group.items,
+                format!(
+                    "plugin {} does not implement ReleaseFetcherPlugin",
+                    group.plugin_type
+                ),
+            );
+        }
+    };
+
+    let results = match fetcher.batch_fetch_releases(&batch_items).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(
+                plugin_type = %group.plugin_type,
+                item_count = group.items.len(),
+                error = %e,
+                "batch fetch_releases failed"
+            );
+            return error_for_all_fetch_items(&group.items, format!("fetch_releases failed: {e}"));
+        }
+    };
+
+    let result_map: HashMap<String, FetchItemResult> = results
+        .into_iter()
+        .map(|r| {
+            let error = r.error.map(|e| format!("fetch_releases failed: {e}"));
+            let (version, category) = r
+                .releases
+                .first()
+                .map(|release| {
+                    let category = release.category.clone().unwrap_or_default();
+                    (Some(release.version.to_string()), category)
+                })
+                .unwrap_or((None, UpdateCategory::Unknown));
+            (r.package_identifier, (version, category, error))
+        })
+        .collect();
+
+    group
+        .items
+        .iter()
+        .map(|(idx, pkg)| {
+            let outcome = result_map.get(pkg.as_str()).cloned().unwrap_or((
+                None,
+                UpdateCategory::Unknown,
+                None,
+            ));
+            (*idx, outcome)
+        })
+        .collect()
+}
+
+/// Refresh the package index for each unique fetch group.
+///
+/// Runs sequentially to avoid concurrent `apt-get update` / `brew update`.
+async fn refresh_package_indexes(
+    fetch_groups: &HashMap<GroupKey, BatchGroup>,
+    executor: &Arc<dyn CommandExecutor>,
+) {
+    for group in fetch_groups.values() {
+        match PluginRegistry::create_plugin(
+            group.plugin_type.clone(),
+            &group.effective_config,
+            Arc::clone(executor),
+        )
+        .await
+        {
+            Ok(plugin) if plugin.has_capability(PluginCapability::RefreshPackageIndex) => {
+                if let Some(pkg_index) = plugin.as_package_index() {
+                    tracing::info!(
+                        plugin_type = %group.plugin_type,
+                        "refreshing package index"
+                    );
+                    if let Err(e) = pkg_index.refresh_package_index().await {
+                        tracing::warn!(
+                            plugin_type = %group.plugin_type,
+                            error = %e,
+                            "failed to refresh package index"
+                        );
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(
+                    plugin_type = %group.plugin_type,
+                    error = %e,
+                    "failed to create plugin for index refresh"
+                );
+            }
+        }
+    }
+}
+
+/// Merge detect and fetch results into a combined error string.
+fn merge_errors(detect_error: Option<String>, fetch_error: Option<String>) -> Option<String> {
+    match (detect_error, fetch_error) {
+        (Some(d), Some(f)) => Some(format!("detect: {d}; fetch: {f}")),
+        (Some(d), None) => Some(d),
+        (None, Some(f)) => Some(f),
+        (None, None) => None,
+    }
+}
+
 /// Check installed versions and latest versions for a batch of software items,
 /// using native batch operations when the plugin supports them.
 ///
@@ -113,47 +409,10 @@ pub async fn batch_check_versions(
         return vec![];
     }
 
-    // Group key: (plugin_type, serialised effective config) — unique per config.
-    type GroupKey = (PluginType, String);
-
-    struct Group {
-        plugin_type: PluginType,
-        effective_config: serde_json::Value,
-        /// (assignment index, package_identifier)
-        items: Vec<(usize, String)>,
-    }
-
     // ── Step 1: Build detect and fetch groups ────────────────────────────────
-    let mut detect_groups: HashMap<GroupKey, Group> = HashMap::new();
-    let mut fetch_groups: HashMap<GroupKey, Group> = HashMap::new();
-
-    for (idx, assignment) in assignments.iter().enumerate() {
-        if let Some(pa) = &assignment.detect_version {
-            let mut effective_config = pa.config.clone();
-            ctx.apply_to_config(&pa.plugin_type, &mut effective_config);
-            let key = (pa.plugin_type.clone(), effective_config.to_string());
-            let group = detect_groups.entry(key).or_insert_with(|| Group {
-                plugin_type: pa.plugin_type.clone(),
-                effective_config,
-                items: vec![],
-            });
-            group.items.push((idx, pa.package_identifier.clone()));
-        }
-        if let Some(pa) = &assignment.fetch_releases {
-            let mut effective_config = pa.config.clone();
-            ctx.apply_to_config(&pa.plugin_type, &mut effective_config);
-            let key = (pa.plugin_type.clone(), effective_config.to_string());
-            let group = fetch_groups.entry(key).or_insert_with(|| Group {
-                plugin_type: pa.plugin_type.clone(),
-                effective_config,
-                items: vec![],
-            });
-            group.items.push((idx, pa.package_identifier.clone()));
-        }
-    }
+    let (detect_groups, fetch_groups) = build_batch_groups(&assignments, ctx);
 
     // ── Step 2: Run detect groups in parallel ────────────────────────────────
-    // Each future resolves to Vec<(item_idx, (Option<version_str>, Option<error_str>))>.
     let detect_futs: Vec<_> = detect_groups
         .into_values()
         .map(|group| {
@@ -162,90 +421,11 @@ pub async fn batch_check_versions(
                 item_count = group.items.len(),
                 "queuing detect_installed_version batch group"
             );
-            let executor = Arc::clone(&executor);
-            async move {
-                let batch_items: Vec<BatchDetectItem> = group
-                    .items
-                    .iter()
-                    .map(|(_, pkg)| BatchDetectItem::new(pkg.clone()))
-                    .collect();
-
-                let plugin = match PluginRegistry::create_plugin(
-                    group.plugin_type.clone(),
-                    &group.effective_config,
-                    executor,
-                )
-                .await
-                {
-                    Ok(p) => p,
-                    Err(e) => {
-                        let err = format!("failed to create plugin: {e}");
-                        return group
-                            .items
-                            .iter()
-                            .map(|(idx, _)| (*idx, (None::<String>, Some(err.clone()))))
-                            .collect::<Vec<_>>();
-                    }
-                };
-
-                let detector = match plugin.as_version_detector() {
-                    Some(d) => d,
-                    None => {
-                        let err = format!(
-                            "plugin {} does not implement VersionDetectorPlugin",
-                            group.plugin_type
-                        );
-                        return group
-                            .items
-                            .iter()
-                            .map(|(idx, _)| (*idx, (None::<String>, Some(err.clone()))))
-                            .collect::<Vec<_>>();
-                    }
-                };
-
-                let results = match detector.batch_detect_installed_version(&batch_items).await {
-                    Ok(r) => r,
-                    Err(e) => {
-                        tracing::warn!(
-                            plugin_type = %group.plugin_type,
-                            item_count = group.items.len(),
-                            error = %e,
-                            "batch detect_installed_version failed"
-                        );
-                        let err = format!("detection failed: {e}");
-                        return group
-                            .items
-                            .iter()
-                            .map(|(idx, _)| (*idx, (None::<String>, Some(err.clone()))))
-                            .collect::<Vec<_>>();
-                    }
-                };
-
-                let result_map: HashMap<String, (Option<String>, Option<String>)> = results
-                    .into_iter()
-                    .map(|r| {
-                        let version = r.installed_version.map(|v| v.to_string());
-                        let error = r.error.map(|e| format!("detection failed: {e}"));
-                        (r.package_identifier, (version, error))
-                    })
-                    .collect();
-
-                group
-                    .items
-                    .iter()
-                    .map(|(idx, pkg)| {
-                        let outcome = result_map
-                            .get(pkg.as_str())
-                            .cloned()
-                            .unwrap_or((None, None));
-                        (*idx, outcome)
-                    })
-                    .collect::<Vec<_>>()
-            }
+            run_detect_group(group, Arc::clone(&executor))
         })
         .collect();
 
-    let mut detect_map: HashMap<usize, (Option<String>, Option<String>)> = HashMap::new();
+    let mut detect_map: HashMap<usize, DetectItemResult> = HashMap::new();
     for group_results in join_all(detect_futs).await {
         for (idx, result) in group_results {
             detect_map.insert(idx, result);
@@ -253,46 +433,9 @@ pub async fn batch_check_versions(
     }
 
     // ── Step 3: RefreshPackageIndex – at most once per unique fetch group ───
-    // Runs sequentially to avoid concurrent `apt-get update` / `brew update`.
-    for (plugin_type, effective_config) in fetch_groups
-        .values()
-        .map(|g| (g.plugin_type.clone(), g.effective_config.clone()))
-    {
-        match PluginRegistry::create_plugin(
-            plugin_type.clone(),
-            &effective_config,
-            Arc::clone(&executor),
-        )
-        .await
-        {
-            Ok(plugin) if plugin.has_capability(PluginCapability::RefreshPackageIndex) => {
-                if let Some(pkg_index) = plugin.as_package_index() {
-                    tracing::info!(
-                        plugin_type = %plugin_type,
-                        "refreshing package index"
-                    );
-                    if let Err(e) = pkg_index.refresh_package_index().await {
-                        tracing::warn!(
-                            plugin_type = %plugin_type,
-                            error = %e,
-                            "failed to refresh package index"
-                        );
-                    }
-                }
-            }
-            Ok(_) => {}
-            Err(e) => {
-                tracing::warn!(
-                    plugin_type = %plugin_type,
-                    error = %e,
-                    "failed to create plugin for index refresh"
-                );
-            }
-        }
-    }
+    refresh_package_indexes(&fetch_groups, &executor).await;
 
     // ── Step 4: Run fetch groups in parallel ─────────────────────────────────
-    // Each future resolves to Vec<(item_idx, (Option<version_str>, UpdateCategory, Option<error_str>))>.
     let fetch_futs: Vec<_> = fetch_groups
         .into_values()
         .map(|group| {
@@ -301,115 +444,11 @@ pub async fn batch_check_versions(
                 item_count = group.items.len(),
                 "queuing fetch_releases batch group"
             );
-            let executor = Arc::clone(&executor);
-            async move {
-                let batch_items: Vec<BatchFetchItem> = group
-                    .items
-                    .iter()
-                    .map(|(_, pkg)| BatchFetchItem::new(pkg.clone()))
-                    .collect();
-
-                let plugin = match PluginRegistry::create_plugin(
-                    group.plugin_type.clone(),
-                    &group.effective_config,
-                    executor,
-                )
-                .await
-                {
-                    Ok(p) => p,
-                    Err(e) => {
-                        let err = format!("failed to create plugin: {e}");
-                        return group
-                            .items
-                            .iter()
-                            .map(|(idx, _)| {
-                                (
-                                    *idx,
-                                    (None::<String>, UpdateCategory::Unknown, Some(err.clone())),
-                                )
-                            })
-                            .collect::<Vec<_>>();
-                    }
-                };
-
-                let fetcher = match plugin.as_release_fetcher() {
-                    Some(f) => f,
-                    None => {
-                        let err = format!(
-                            "plugin {} does not implement ReleaseFetcherPlugin",
-                            group.plugin_type
-                        );
-                        return group
-                            .items
-                            .iter()
-                            .map(|(idx, _)| {
-                                (
-                                    *idx,
-                                    (None::<String>, UpdateCategory::Unknown, Some(err.clone())),
-                                )
-                            })
-                            .collect::<Vec<_>>();
-                    }
-                };
-
-                let results = match fetcher.batch_fetch_releases(&batch_items).await {
-                    Ok(r) => r,
-                    Err(e) => {
-                        tracing::warn!(
-                            plugin_type = %group.plugin_type,
-                            item_count = group.items.len(),
-                            error = %e,
-                            "batch fetch_releases failed"
-                        );
-                        let err = format!("fetch_releases failed: {e}");
-                        return group
-                            .items
-                            .iter()
-                            .map(|(idx, _)| {
-                                (
-                                    *idx,
-                                    (None::<String>, UpdateCategory::Unknown, Some(err.clone())),
-                                )
-                            })
-                            .collect::<Vec<_>>();
-                    }
-                };
-
-                let result_map: HashMap<String, (Option<String>, UpdateCategory, Option<String>)> =
-                    results
-                        .into_iter()
-                        .map(|r| {
-                            let error = r.error.map(|e| format!("fetch_releases failed: {e}"));
-                            let (version, category) = r
-                                .releases
-                                .first()
-                                .map(|release| {
-                                    let category = release.category.clone().unwrap_or_default();
-                                    (Some(release.version.to_string()), category)
-                                })
-                                .unwrap_or((None, UpdateCategory::Unknown));
-                            (r.package_identifier, (version, category, error))
-                        })
-                        .collect();
-
-                group
-                    .items
-                    .iter()
-                    .map(|(idx, pkg)| {
-                        let outcome = result_map.get(pkg.as_str()).cloned().unwrap_or((
-                            None,
-                            UpdateCategory::Unknown,
-                            None,
-                        ));
-                        (*idx, outcome)
-                    })
-                    .collect::<Vec<_>>()
-            }
+            run_fetch_group(group, Arc::clone(&executor))
         })
         .collect();
 
-    let mut fetch_map: HashMap<usize, (Option<String>, UpdateCategory, Option<String>)> =
-        HashMap::new();
+    let mut fetch_map: HashMap<usize, FetchItemResult> = HashMap::new();
     for group_results in join_all(fetch_futs).await {
         for (idx, result) in group_results {
             fetch_map.insert(idx, result);
@@ -428,19 +467,12 @@ pub async fn batch_check_versions(
                 .cloned()
                 .unwrap_or((None, UpdateCategory::Unknown, None));
 
-            let error = match (detect_error, fetch_error) {
-                (Some(d), Some(f)) => Some(format!("detect: {d}; fetch: {f}")),
-                (Some(d), None) => Some(d),
-                (None, Some(f)) => Some(f),
-                (None, None) => None,
-            };
-
             VersionCheckResult {
                 software_item_id: assignment.software_item_id,
                 host_software_item_id: assignment.host_software_item_id,
                 installed_version,
                 latest_version,
-                error,
+                error: merge_errors(detect_error, fetch_error),
                 update_category,
             }
         })
