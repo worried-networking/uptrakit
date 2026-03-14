@@ -77,6 +77,12 @@ pub enum SettingKey {
     ///
     /// DB key: `global_smtp.tls_mode`
     GlobalSmtpTlsMode,
+    /// Global Telegram bot token (shared across all tenants as a fallback).
+    ///
+    /// Per-channel `bot_token` overrides this when set.
+    ///
+    /// DB key: `global_telegram.bot_token`
+    GlobalTelegramBotToken,
     /// Whether mDNS/DNS-SD zero-configuration advertising is enabled.
     ///
     /// DB key: `zeroconf.enabled`
@@ -128,6 +134,7 @@ impl SettingKey {
             Self::GlobalSmtpFromAddress => "global_smtp.from_address",
             Self::GlobalSmtpFromName => "global_smtp.from_name",
             Self::GlobalSmtpTlsMode => "global_smtp.tls_mode",
+            Self::GlobalTelegramBotToken => "global_telegram.bot_token",
             Self::NatsUrl => "nats.url",
             Self::AuditLogFilter => "audit_log.filter",
             Self::AuditLogRetentionDays => "audit_log.retention_days",
@@ -175,6 +182,7 @@ impl SettingKey {
             "global_smtp.from_address" => Some(Self::GlobalSmtpFromAddress),
             "global_smtp.from_name" => Some(Self::GlobalSmtpFromName),
             "global_smtp.tls_mode" => Some(Self::GlobalSmtpTlsMode),
+            "global_telegram.bot_token" => Some(Self::GlobalTelegramBotToken),
             "nats.url" => Some(Self::NatsUrl),
             "audit_log.filter" => Some(Self::AuditLogFilter),
             "audit_log.retention_days" => Some(Self::AuditLogRetentionDays),
@@ -209,6 +217,7 @@ impl SettingKey {
                 | Self::GlobalSmtpFromAddress
                 | Self::GlobalSmtpFromName
                 | Self::GlobalSmtpTlsMode
+                | Self::GlobalTelegramBotToken
                 | Self::NatsUrl
                 | Self::ZeroconfEnabled
                 | Self::ZeroconfUrl

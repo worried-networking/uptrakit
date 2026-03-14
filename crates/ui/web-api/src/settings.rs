@@ -120,6 +120,17 @@ impl fmt::Debug for SmtpSettingsSnapshot {
     }
 }
 
+/// Telegram settings snapshot for sending Telegram notifications.
+///
+/// The global bot token is used as a fallback when a per-channel bot token
+/// is not configured. The token is stored as plaintext since it is already
+/// a Telegram API token (not a password).
+#[derive(Clone, Default, Debug)]
+pub struct TelegramSettingsSnapshot {
+    /// Global bot token used as fallback when per-channel token is absent.
+    pub bot_token: Option<String>,
+}
+
 /// Zero-configuration discovery settings for mDNS/DNS-SD advertising.
 #[derive(Clone, Debug, Default)]
 pub struct ZeroconfSnapshot {
@@ -147,6 +158,8 @@ pub struct SettingsSnapshot {
     pub smtp: SmtpSettingsSnapshot,
     /// Global SMTP defaults shared across all tenants.
     pub global_smtp: SmtpSettingsSnapshot,
+    /// Global Telegram settings shared across all tenants.
+    pub global_telegram: TelegramSettingsSnapshot,
     /// NATS server URL (raw, decrypted). `None` when not configured.
     /// Stored as `Option<MaskedUrl>` so `Debug` automatically masks any password.
     pub nats_url: Option<MaskedUrl>,
@@ -196,6 +209,7 @@ impl Settings {
             mqtt_max_clients_per_tenant: DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT,
             smtp: SmtpSettingsSnapshot::default(),
             global_smtp: SmtpSettingsSnapshot::default(),
+            global_telegram: TelegramSettingsSnapshot::default(),
             nats_url: None,
             zeroconf: ZeroconfSnapshot::default(),
         };
@@ -253,6 +267,7 @@ impl Settings {
         let global_smtp = Self::load_global_smtp_settings(&global_raw);
         let nats_url = Self::load_nats_url(&global_raw);
         let zeroconf = Self::load_zeroconf_settings(&global_raw);
+        let global_telegram = Self::load_global_telegram_settings(&global_raw);
 
         // Read initial version counters
         let (version, global_version) =
@@ -267,6 +282,7 @@ impl Settings {
             mqtt_max_clients_per_tenant,
             smtp,
             global_smtp,
+            global_telegram,
             nats_url,
             zeroconf,
         };
@@ -388,6 +404,7 @@ impl Settings {
         // started as a copy of global_raw extended with per-tenant rows).
         let nats_url = Self::load_nats_url(&combined);
         let zeroconf = Self::load_zeroconf_settings(&combined);
+        let global_telegram = Self::load_global_telegram_settings(&global_raw);
 
         // Publish complete snapshot atomically
         let _guard = self.inner.write_mutex.lock().await;
@@ -400,6 +417,7 @@ impl Settings {
             mqtt_max_clients_per_tenant,
             smtp,
             global_smtp,
+            global_telegram,
             nats_url,
             zeroconf,
         });
@@ -689,6 +707,32 @@ impl Settings {
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.global_smtp = smtp);
+    }
+
+    // --- Global Telegram settings ---
+
+    /// Read the global Telegram settings snapshot (synchronous).
+    pub fn global_telegram(&self) -> TelegramSettingsSnapshot {
+        self.inner.snapshot_rx.borrow().global_telegram.clone()
+    }
+
+    /// Replace global Telegram settings (acquires write mutex for atomic publish).
+    pub async fn set_global_telegram(&self, telegram: TelegramSettingsSnapshot) {
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.global_telegram = telegram);
+    }
+
+    /// Load global Telegram settings from a [`RawSettings`] map.
+    pub fn load_global_telegram_settings(raw: &RawSettings) -> TelegramSettingsSnapshot {
+        let bot_token = raw
+            .get_setting(SettingKey::GlobalTelegramBotToken)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
+        TelegramSettingsSnapshot { bot_token }
     }
 
     // --- NATS settings ---

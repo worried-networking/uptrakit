@@ -214,6 +214,28 @@ async fn dispatch_loop(
                     }
                 };
 
+            // For telegram channels, inject global bot_token if per-channel config lacks one.
+            #[cfg(feature = "notifications-telegram")]
+            let config_json = if channel_model.channel_type == "telegram"
+                && config_json
+                    .get("bot_token")
+                    .and_then(|v| v.as_str())
+                    .is_none_or(str::is_empty)
+            {
+                let global_telegram = settings.global_telegram();
+                if let Some(token) = global_telegram.bot_token {
+                    let mut merged = config_json;
+                    if let Some(obj) = merged.as_object_mut() {
+                        obj.insert("bot_token".to_string(), serde_json::json!(token));
+                    }
+                    merged
+                } else {
+                    config_json
+                }
+            } else {
+                config_json
+            };
+
             // For email channels, merge SMTP settings (global + per-tenant)
             // into the per-channel config (which only stores `to_addresses`).
             let config_json = if channel_model.channel_type == "email" {

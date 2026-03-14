@@ -52,14 +52,7 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for TelegramPlugin {
     }
 
     fn validate_config(&self, config: &serde_json::Value) -> std::result::Result<(), String> {
-        if config
-            .get("bot_token")
-            .and_then(|v| v.as_str())
-            .is_none_or(str::is_empty)
-        {
-            return Err("'bot_token' is required".to_string());
-        }
-
+        // bot_token is optional here: if absent, the global bot token is used at delivery time.
         if config
             .get("chat_id")
             .and_then(|v| v.as_str())
@@ -110,6 +103,31 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for TelegramPlugin {
                 },
             )
             .with_permission("view_notifications"),
+            // Global Telegram defaults panel (below global settings)
+            ExtensionManifest::new(
+                "notifications.telegram.global_settings",
+                "Telegram Defaults",
+                601,
+                ExtensionPlacement::Panel {
+                    target_page: "global-settings".to_string(),
+                    position: PanelPosition::Below,
+                    tab_group: None,
+                },
+                ExtensionUi::Form(
+                    FormDef::new(vec![
+                        FieldDef::new("bot_token", "Global Bot Token")
+                            .with_type(FieldType::Password)
+                            .sensitive()
+                            .with_placeholder("123456:ABC-DEF...")
+                            .with_help_text(
+                                "Shared bot token used as a fallback for all Telegram channels \
+                                 that do not have their own token configured.",
+                            ),
+                    ])
+                    .with_pre_load_action("get_global_telegram"),
+                ),
+            )
+            .with_permission("manage_global_settings"),
         ]
     }
 
@@ -192,6 +210,9 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for TelegramPlugin {
                     "/api/v1/notifications/channels/{{id}}",
                     serde_json::json!({}),
                 )),
+            ActionDef::new("get_global_telegram", "Get Global Telegram Settings"),
+            ActionDef::new("save_global_telegram", "Save Global Telegram Settings")
+                .with_permission("manage_global_settings"),
         ]
     }
 
@@ -209,9 +230,12 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransportPlugin for Telegr
     }
 
     async fn deliver(&self, config: &serde_json::Value, message: &DeliveryMessage) -> Result<()> {
+        // bot_token may be absent in per-channel config if a global token is configured
+        // (the dispatcher merges it before calling deliver).
         let bot_token = config["bot_token"].as_str().ok_or_else(|| {
             report!(NotificationPluginError::InvalidConfig(
-                "missing 'bot_token'".to_string()
+                "missing 'bot_token' (no per-channel token and no global token configured)"
+                    .to_string()
             ))
         })?;
         let chat_id = config["chat_id"].as_str().ok_or_else(|| {
@@ -284,13 +308,10 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::PluginBase;
 
     #[test]
-    fn validate_config_requires_bot_token() {
+    fn validate_config_accepts_config_without_bot_token() {
         let plugin = TelegramPlugin::new().expect("client builds");
-        let config = serde_json::json!({"chat_id": "12345"});
-        let result = PluginBase::validate_config(&plugin, &config);
-        assert!(result.is_err());
-        let msg = result.unwrap_err();
-        assert!(msg.contains("'bot_token'"), "got: {msg}");
+        let config = serde_json::json!({"chat_id": "-100123"});
+        assert!(PluginBase::validate_config(&plugin, &config).is_ok());
     }
 
     #[test]
@@ -301,14 +322,6 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err();
         assert!(msg.contains("'chat_id'"), "got: {msg}");
-    }
-
-    #[test]
-    fn validate_config_rejects_empty_bot_token() {
-        let plugin = TelegramPlugin::new().expect("client builds");
-        let config = serde_json::json!({"bot_token": "", "chat_id": "12345"});
-        let result = PluginBase::validate_config(&plugin, &config);
-        assert!(result.is_err());
     }
 
     #[test]
