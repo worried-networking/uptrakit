@@ -15,6 +15,11 @@
   conflicts), updates can be triggered in interactive mode with `--interactive`. This allocates
   a PTY on the target host and keeps stdin open for bidirectional terminal I/O. See
   [Interactive Updates](interactive-updates.md) for details.
+- **In-progress badge**: on the software detail page, the per-host status badge changes from
+  yellow "Update Available" to blue "In Progress" as soon as an update is queued, pending, or
+  running for that host. Clicking the blue badge opens the live terminal output directly instead
+  of the update confirmation dialog. The badge reverts to its previous state once the update
+  completes or fails.
 
 ## Update Categories
 
