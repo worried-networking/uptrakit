@@ -3,6 +3,7 @@
 //! Provides endpoints for triggering host-wide and item-wide batch updates,
 //! listing batches, retrieving batch details, and streaming batch progress.
 
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 
@@ -18,8 +19,8 @@ use axum::{
 use uuid::Uuid;
 
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
-use uptrakit_shared_db::entity::{host, update_batch, update_history};
-use uptrakit_shared_types::BatchStatus;
+use uptrakit_shared_db::entity::{host, software_item, update_batch, update_history};
+use uptrakit_shared_types::{BatchStatus, UpdateStatus};
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::update_batches::{
     HostBatchUpdateRequest, ItemBatchUpdateRequest, UpdateBatchDetailResponse,
@@ -310,6 +311,242 @@ pub async fn get_batch(
 }
 
 // ---------------------------------------------------------------------------
+// SSE batch progress — helper types and functions
+// ---------------------------------------------------------------------------
+
+/// Preloaded context for streaming batch progress events.
+///
+/// Holds the batch record and all related data needed to build replay events,
+/// avoiding repeated database queries during the SSE stream.
+struct BatchContext {
+    batch: update_batch::Model,
+    children: Vec<update_history::Model>,
+    host_names: HashMap<Uuid, String>,
+    item_names: HashMap<Uuid, String>,
+}
+
+impl BatchContext {
+    /// Whether the batch has reached a terminal status.
+    fn is_terminal(&self) -> bool {
+        matches!(
+            self.batch.status,
+            BatchStatus::Completed | BatchStatus::PartiallyCompleted
+        )
+    }
+}
+
+/// Load the batch record, child update history rows, and related host/item
+/// names from the database.
+///
+/// Returns an error response suitable for returning directly from a handler
+/// when any query fails.
+async fn load_batch_context(
+    tenant_db: &TenantDb,
+    batch_id: Uuid,
+) -> Result<BatchContext, Response> {
+    // Load the batch record (tenant-scoped).
+    let batch = match tenant_db
+        .find_by_id::<update_batch::Entity, _>(batch_id)
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(Some(b)) => b,
+        Ok(None) => {
+            return Err(error_response(
+                StatusCode::NOT_FOUND,
+                "Update batch not found",
+            ));
+        }
+        Err(e) => {
+            tracing::error!("Failed to load update batch for SSE: {e}");
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    // Load child update_history records.
+    let children = match update_history::Entity::find()
+        .filter(update_history::Column::BatchId.eq(batch_id))
+        .order_by_asc(update_history::Column::Id)
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to load batch children for SSE: {e}");
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    // Collect unique IDs for batch-loading names.
+    let host_ids: Vec<Uuid> = children
+        .iter()
+        .map(|c| c.host_id)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let si_ids: Vec<Uuid> = children
+        .iter()
+        .map(|c| c.software_item_id)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let host_names = match host::Entity::find()
+        .filter(host::Column::Id.is_in(host_ids))
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(records) => records
+            .into_iter()
+            .map(|h| (h.id, h.friendly_name))
+            .collect(),
+        Err(e) => {
+            tracing::error!("Failed to load host names for SSE replay: {e}");
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    let item_names = match software_item::Entity::find()
+        .filter(software_item::Column::Id.is_in(si_ids))
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(records) => records.into_iter().map(|si| (si.id, si.name)).collect(),
+        Err(e) => {
+            tracing::error!("Failed to load software item names for SSE replay: {e}");
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    Ok(BatchContext {
+        batch,
+        children,
+        host_names,
+        item_names,
+    })
+}
+
+/// Build a replay [`BatchProgressEvent`] from a child update_history record.
+///
+/// Returns the event and whether the child counts as completed, failed, or
+/// pending (as a tuple of `(completed_delta, failed_delta, pending_delta)`).
+fn build_replay_event(
+    child: &update_history::Model,
+    host_names: &HashMap<Uuid, String>,
+    item_names: &HashMap<Uuid, String>,
+) -> (BatchProgressEvent, i64, i64, i64) {
+    let host_name = host_names
+        .get(&child.host_id)
+        .cloned()
+        .unwrap_or_else(|| "Unknown Host".to_string());
+    let sw_name = item_names
+        .get(&child.software_item_id)
+        .cloned()
+        .unwrap_or_else(|| "Unknown Software".to_string());
+
+    match child.status {
+        UpdateStatus::Completed => (
+            BatchProgressEvent::UpdateCompleted {
+                update_history_id: child.id,
+                software_item_name: sw_name,
+                host_name,
+            },
+            1,
+            0,
+            0,
+        ),
+        UpdateStatus::Failed => (
+            BatchProgressEvent::UpdateFailed {
+                update_history_id: child.id,
+                software_item_name: sw_name,
+                host_name,
+                error: None,
+            },
+            0,
+            1,
+            0,
+        ),
+        UpdateStatus::InProgress => (
+            BatchProgressEvent::UpdateStarted {
+                update_history_id: child.id,
+                software_item_name: sw_name,
+                host_name,
+            },
+            0,
+            0,
+            1,
+        ),
+        UpdateStatus::Pending | UpdateStatus::Queued => (
+            BatchProgressEvent::UpdateDispatched {
+                update_history_id: child.id,
+                software_item_name: sw_name,
+                host_name,
+            },
+            0,
+            0,
+            1,
+        ),
+        _ => {
+            tracing::warn!(
+                "Unknown update status {:?}, treating as pending",
+                child.status
+            );
+            (
+                BatchProgressEvent::UpdateDispatched {
+                    update_history_id: child.id,
+                    software_item_name: sw_name,
+                    host_name,
+                },
+                0,
+                0,
+                1,
+            )
+        }
+    }
+}
+
+/// Calculate progress counts from the batch children.
+///
+/// Returns `(completed, failed, pending)`.
+fn calculate_batch_progress(children: &[update_history::Model]) -> (i64, i64, i64) {
+    let mut completed: i64 = 0;
+    let mut failed: i64 = 0;
+    let mut pending: i64 = 0;
+    for child in children {
+        match child.status {
+            UpdateStatus::Completed => completed += 1,
+            UpdateStatus::Failed => failed += 1,
+            _ => pending += 1,
+        }
+    }
+    (completed, failed, pending)
+}
+
+/// Returns the SSE event name for a [`BatchProgressEvent`].
+fn sse_event_name(event: &BatchProgressEvent) -> &'static str {
+    match event {
+        BatchProgressEvent::UpdateDispatched { .. }
+        | BatchProgressEvent::UpdateStarted { .. }
+        | BatchProgressEvent::UpdateCompleted { .. }
+        | BatchProgressEvent::UpdateFailed { .. } => "update",
+        BatchProgressEvent::Progress { .. } => "progress",
+        BatchProgressEvent::BatchCompleted { .. } => "batch_completed",
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SSE batch progress stream
 // ---------------------------------------------------------------------------
 
@@ -339,149 +576,25 @@ pub async fn stream_batch_progress(
     State(state): State<Arc<AppState>>,
     Path(batch_id): Path<Uuid>,
 ) -> Response {
-    // 1. Load the batch record (tenant-scoped).
-    let batch = match tenant_db
-        .find_by_id::<update_batch::Entity, _>(batch_id)
-        .one(tenant_db.db())
-        .await
-    {
-        Ok(Some(b)) => b,
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Update batch not found"),
-        Err(e) => {
-            tracing::error!("Failed to load update batch for SSE: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
+    let ctx = match load_batch_context(&tenant_db, batch_id).await {
+        Ok(ctx) => ctx,
+        Err(resp) => return resp,
     };
 
-    let is_terminal = matches!(
-        batch.status,
-        BatchStatus::Completed | BatchStatus::PartiallyCompleted
-    );
+    let is_terminal = ctx.is_terminal();
 
-    // 2. Subscribe to the broadcast channel BEFORE loading DB state to avoid gaps.
+    // Subscribe to the broadcast channel BEFORE replaying DB state to avoid gaps.
     let broadcast_rx = state.batch_progress_broadcaster.subscribe(batch_id).await;
 
-    // 3. Load current child update records for replay.
-    let children = match update_history::Entity::find()
-        .filter(update_history::Column::BatchId.eq(batch_id))
-        .order_by_asc(update_history::Column::Id)
-        .all(tenant_db.db())
-        .await
-    {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!("Failed to load batch children for SSE: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    // Batch-load host and software item names for replay events.
-    let host_ids: Vec<Uuid> = children
-        .iter()
-        .map(|c| c.host_id)
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-    let si_ids: Vec<Uuid> = children
-        .iter()
-        .map(|c| c.software_item_id)
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-
-    let host_names: std::collections::HashMap<Uuid, String> = match host::Entity::find()
-        .filter(host::Column::Id.is_in(host_ids))
-        .all(tenant_db.db())
-        .await
-    {
-        Ok(records) => records
-            .into_iter()
-            .map(|h| (h.id, h.friendly_name))
-            .collect(),
-        Err(e) => {
-            tracing::error!("Failed to load host names for SSE replay: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    let si_names: std::collections::HashMap<Uuid, String> =
-        match uptrakit_shared_db::entity::software_item::Entity::find()
-            .filter(uptrakit_shared_db::entity::software_item::Column::Id.is_in(si_ids))
-            .all(tenant_db.db())
-            .await
-        {
-            Ok(records) => records.into_iter().map(|si| (si.id, si.name)).collect(),
-            Err(e) => {
-                tracing::error!("Failed to load software item names for SSE replay: {e}");
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        };
-
-    let total = batch.total_count;
-    let batch_status_str = batch.status.as_str().to_string();
+    let (completed, failed, pending) = calculate_batch_progress(&ctx.children);
+    let total = ctx.batch.total_count;
+    let batch_status_str = ctx.batch.status.as_str().to_string();
     let shutdown_token = state.shutdown_token.clone();
 
     let stream = async_stream::stream! {
         // Replay per-item status from DB.
-        let mut completed: i64 = 0;
-        let mut failed: i64 = 0;
-        let mut pending: i64 = 0;
-
-        for child in &children {
-            let host_name = host_names
-                .get(&child.host_id)
-                .cloned()
-                .unwrap_or_else(|| "Unknown Host".to_string());
-            let sw_name = si_names
-                .get(&child.software_item_id)
-                .cloned()
-                .unwrap_or_else(|| "Unknown Software".to_string());
-
-            let event = match child.status {
-                update_history::UpdateStatus::Completed => {
-                    completed += 1;
-                    BatchProgressEvent::UpdateCompleted {
-                        update_history_id: child.id,
-                        software_item_name: sw_name,
-                        host_name,
-                    }
-                }
-                update_history::UpdateStatus::Failed => {
-                    failed += 1;
-                    BatchProgressEvent::UpdateFailed {
-                        update_history_id: child.id,
-                        software_item_name: sw_name,
-                        host_name,
-                        error: None,
-                    }
-                }
-                update_history::UpdateStatus::InProgress => {
-                    pending += 1;
-                    BatchProgressEvent::UpdateStarted {
-                        update_history_id: child.id,
-                        software_item_name: sw_name,
-                        host_name,
-                    }
-                }
-                update_history::UpdateStatus::Pending => {
-                    pending += 1;
-                    BatchProgressEvent::UpdateDispatched {
-                        update_history_id: child.id,
-                        software_item_name: sw_name,
-                        host_name,
-                    }
-                }
-                _ => {
-                    tracing::warn!("Unknown update status {:?}, treating as pending", child.status);
-                    pending += 1;
-                    BatchProgressEvent::UpdateDispatched {
-                        update_history_id: child.id,
-                        software_item_name: sw_name,
-                        host_name,
-                    }
-                }
-            };
-
+        for child in &ctx.children {
+            let (event, _, _, _) = build_replay_event(child, &ctx.host_names, &ctx.item_names);
             if let Ok(json) = serde_json::to_string(&event) {
                 yield Ok::<_, Infallible>(Event::default().event("update").data(json));
             }
@@ -516,19 +629,11 @@ pub async fn stream_batch_progress(
                     ev = rx.recv() => {
                         match ev {
                             Ok(event) => {
-                                let event_name = match &event {
-                                    BatchProgressEvent::UpdateDispatched { .. }
-                                    | BatchProgressEvent::UpdateStarted { .. }
-                                    | BatchProgressEvent::UpdateCompleted { .. }
-                                    | BatchProgressEvent::UpdateFailed { .. } => "update",
-                                    BatchProgressEvent::Progress { .. } => "progress",
-                                    BatchProgressEvent::BatchCompleted { .. } => "batch_completed",
-                                };
-                                let is_batch_completed = matches!(event, BatchProgressEvent::BatchCompleted { .. });
+                                let is_done = matches!(event, BatchProgressEvent::BatchCompleted { .. });
                                 if let Ok(json) = serde_json::to_string(&event) {
-                                    yield Ok::<_, Infallible>(Event::default().event(event_name).data(json));
+                                    yield Ok::<_, Infallible>(Event::default().event(sse_event_name(&event)).data(json));
                                 }
-                                if is_batch_completed {
+                                if is_done {
                                     return;
                                 }
                             }
@@ -542,7 +647,6 @@ pub async fn stream_batch_progress(
                         }
                     }
                     _ = shutdown_token.cancelled() => {
-                        // Server is shutting down; terminate the SSE stream.
                         return;
                     }
                 }
@@ -565,19 +669,11 @@ pub async fn stream_batch_progress(
                             tracing::warn!(batch_id = %batch_id, "received unparseable NATS batch progress event");
                             continue;
                         };
-                        let event_name = match &event {
-                            BatchProgressEvent::UpdateDispatched { .. }
-                            | BatchProgressEvent::UpdateStarted { .. }
-                            | BatchProgressEvent::UpdateCompleted { .. }
-                            | BatchProgressEvent::UpdateFailed { .. } => "update",
-                            BatchProgressEvent::Progress { .. } => "progress",
-                            BatchProgressEvent::BatchCompleted { .. } => "batch_completed",
-                        };
-                        let is_batch_completed = matches!(event, BatchProgressEvent::BatchCompleted { .. });
+                        let is_done = matches!(event, BatchProgressEvent::BatchCompleted { .. });
                         if let Ok(json) = serde_json::to_string(&event) {
-                            yield Ok::<_, Infallible>(Event::default().event(event_name).data(json));
+                            yield Ok::<_, Infallible>(Event::default().event(sse_event_name(&event)).data(json));
                         }
-                        if is_batch_completed {
+                        if is_done {
                             return;
                         }
                     }
