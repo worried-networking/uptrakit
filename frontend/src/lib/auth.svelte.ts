@@ -1,5 +1,8 @@
 import type { User, RegisterRequest, LoginRequest, OidcLinkRequest } from './types';
 import * as api from './api';
+import { getAccessToken, setAccessToken, getSessionExpired, setSessionExpired } from './token-store.svelte';
+
+export { getAccessToken, setAccessToken, getSessionExpired, setSessionExpired };
 
 let user = $state<User | null>(null);
 let loading = $state(true);
@@ -20,34 +23,12 @@ export function setLoading(v: boolean): void {
 	loading = v;
 }
 
-/** In-memory access token — never persisted to localStorage. */
-let accessToken: string | null = null;
-
-export function getAccessToken(): string | null {
-	return accessToken;
-}
-
-export function setAccessToken(token: string | null): void {
-	accessToken = token;
-}
-
-/** Reactive flag set when a token refresh fails with a 4xx (session truly expired). */
-let sessionExpired = $state(false);
-
-export function getSessionExpired(): boolean {
-	return sessionExpired;
-}
-
-export function setSessionExpired(v: boolean): void {
-	sessionExpired = v;
-}
-
 export async function initialize() {
 	try {
-		if (!accessToken) {
+		if (!getAccessToken()) {
 			try {
 				const refreshed = await api.refreshAccessToken();
-				accessToken = refreshed.access_token;
+				setAccessToken(refreshed.access_token);
 			} catch {
 				user = null;
 				return;
@@ -56,9 +37,9 @@ export async function initialize() {
 		const u = await api.me();
 		user = u;
 		// Clear any prior session-expired banner on successful auth
-		sessionExpired = false;
+		setSessionExpired(false);
 	} catch {
-		accessToken = null;
+		setAccessToken(null);
 		user = null;
 	} finally {
 		loading = false;
@@ -67,27 +48,27 @@ export async function initialize() {
 
 export async function handleLogin(data: LoginRequest) {
 	const res = await api.login(data);
-	accessToken = res.access_token;
+	setAccessToken(res.access_token);
 	user = res.user;
-	sessionExpired = false;
+	setSessionExpired(false);
 }
 
 export async function handleRegister(data: RegisterRequest) {
 	const res = await api.register(data);
-	accessToken = res.access_token;
+	setAccessToken(res.access_token);
 	user = res.user;
-	sessionExpired = false;
+	setSessionExpired(false);
 }
 
 export async function handleLogout() {
 	try {
 		await api.logout();
 	} finally {
-		accessToken = null;
+		setAccessToken(null);
 		user = null;
 		// Always clear a stale session-expired banner on logout so it doesn't
 		// bleed into the next login attempt.
-		sessionExpired = false;
+		setSessionExpired(false);
 	}
 }
 
@@ -101,16 +82,16 @@ export async function handleOidcLogin(providerId: string) {
 
 export async function handleOidcCallback(code: string) {
 	const res = await api.oidcExchange(code);
-	accessToken = res.access_token;
+	setAccessToken(res.access_token);
 	user = res.user;
-	sessionExpired = false;
+	setSessionExpired(false);
 }
 
 export async function handleOidcCompleteRegistration(registrationCode: string, registrationToken: string) {
 	const res = await api.oidcCompleteRegistration(registrationCode, registrationToken);
-	accessToken = res.access_token;
+	setAccessToken(res.access_token);
 	user = res.user;
-	sessionExpired = false;
+	setSessionExpired(false);
 }
 
 export async function handleOidcLink(linkToken: string, password?: string) {
@@ -119,7 +100,7 @@ export async function handleOidcLink(linkToken: string, password?: string) {
 		data.password = password;
 	}
 	const res = await api.oidcLink(data);
-	accessToken = res.access_token;
+	setAccessToken(res.access_token);
 	user = res.user;
-	sessionExpired = false;
+	setSessionExpired(false);
 }

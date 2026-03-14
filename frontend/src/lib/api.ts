@@ -1,4 +1,4 @@
-import { getAccessToken, setAccessToken, setSessionExpired } from './auth.svelte';
+import { getAccessToken, setAccessToken, setSessionExpired } from './token-store.svelte';
 import type {
 	BatchActionResponse,
 	AgentCertificateSettings,

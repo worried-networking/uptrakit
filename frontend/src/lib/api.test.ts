@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { extractErrorMessage, me, sealedBoxEncrypt } from './api';
-import { getAccessToken, setAccessToken, setSessionExpired } from './auth.svelte';
+import { getAccessToken, setAccessToken, setSessionExpired } from './token-store.svelte';
 import type { RefreshResponse, User } from './types';
+
+// Mock ./token-store.svelte (where api.ts now imports token state from)
+vi.mock('./token-store.svelte', () => ({
+	getAccessToken: vi.fn().mockReturnValue(null),
+	setAccessToken: vi.fn(),
+	getSessionExpired: vi.fn().mockReturnValue(false),
+	setSessionExpired: vi.fn()
+}));
 
 // Mock ./auth.svelte to avoid Svelte rune initialization in test environment
 vi.mock('./auth.svelte', () => ({
