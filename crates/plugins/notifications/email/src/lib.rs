@@ -17,7 +17,7 @@ use uptrakit_extension_framework::{
     FieldDef, FieldType, FormDef, PanelPosition, SelectOption, TableColumn,
 };
 use uptrakit_notification_plugin_core::{
-    DeliveryMessage, NotificationPlugin, NotificationPluginError, Result, escape_html,
+    DeliveryMessage, NotificationPluginError, Result, escape_html,
 };
 
 /// Minimum config required on the per-channel DB row (recipients only).
@@ -233,94 +233,29 @@ async fn send_email(cfg: &EmailConfig, message: MessageBuilder<'_>) -> Result<()
     Ok(())
 }
 
+// ── PluginBase + NotificationTransportPlugin ────────────────────────────────
+
 #[async_trait]
-impl NotificationPlugin for EmailPlugin {
-    fn channel_type(&self) -> &'static str {
+impl uptrakit_plugin_infrastructure_core::PluginBase for EmailPlugin {
+    fn plugin_type_id(&self) -> &str {
         "email"
     }
 
-    /// Deliver a notification to all configured recipients.
-    ///
-    /// The `config` argument must be the *merged* config containing both the
-    /// global SMTP settings and the per-channel `to_addresses`.
-    async fn deliver(&self, config: &serde_json::Value, message: &DeliveryMessage) -> Result<()> {
-        let cfg: EmailConfig = serde_json::from_value(config.clone()).map_err(|e| {
-            report!(NotificationPluginError::InvalidConfig(format!(
-                "failed to deserialize email config: {e}"
-            )))
-        })?;
-
-        if cfg.to_addresses.is_empty() {
-            bail!(NotificationPluginError::InvalidConfig(
-                "'to_addresses' must not be empty".to_string()
-            ));
-        }
-        if cfg.smtp_host.is_empty() {
-            bail!(NotificationPluginError::InvalidConfig(
-                "'smtp_host' must not be empty".to_string()
-            ));
-        }
-        if cfg.from_address.is_empty() {
-            bail!(NotificationPluginError::InvalidConfig(
-                "'from_address' must not be empty".to_string()
-            ));
-        }
-
-        // Build From header
-        let from_header = if let Some(ref name) = cfg.from_name {
-            format!("{name} <{}>", cfg.from_address)
-        } else {
-            cfg.from_address.clone()
-        };
-
-        // Build the HTML body — use existing HTML if provided, otherwise escape plain text.
-        let html_body = if let Some(ref html) = message.body_html {
-            wrap_html(html)
-        } else {
-            wrap_html(&escape_html(&message.body))
-        };
-
-        // Send one message per recipient.
-        for to_addr in &cfg.to_addresses {
-            let email = MessageBuilder::new()
-                .from(from_header.as_str())
-                .to(to_addr.as_str())
-                .subject(&message.title)
-                .text_body(&message.body)
-                .html_body(&html_body);
-
-            send_email(&cfg, email).await?;
-
-            tracing::debug!(to = %to_addr, "email notification delivered");
-        }
-
-        Ok(())
+    fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+        vec![uptrakit_plugin_infrastructure_core::PluginCapability::NotificationDelivery]
     }
 
-    /// Validate per-channel config.
-    ///
-    /// Only `to_addresses` is stored in the per-channel config. This method
-    /// verifies the array is non-empty and each entry is a plausible email
-    /// address. SMTP server settings are validated separately when they are
-    /// configured via `PUT /api/v1/settings/smtp`.
-    fn validate_config(&self, config: &serde_json::Value) -> Result<()> {
-        let cfg: EmailChannelConfig = serde_json::from_value(config.clone()).map_err(|e| {
-            report!(NotificationPluginError::InvalidConfig(format!(
-                "failed to deserialize email channel config: {e}"
-            )))
-        })?;
+    fn validate_config(&self, config: &serde_json::Value) -> std::result::Result<(), String> {
+        let cfg: EmailChannelConfig =
+            serde_json::from_value(config.clone()).map_err(|e| e.to_string())?;
 
         if cfg.to_addresses.is_empty() {
-            bail!(NotificationPluginError::InvalidConfig(
-                "'to_addresses' must not be empty".to_string()
-            ));
+            return Err("'to_addresses' must not be empty".to_string());
         }
 
         for addr in &cfg.to_addresses {
             if !is_valid_email(addr) {
-                bail!(NotificationPluginError::InvalidConfig(format!(
-                    "invalid email address: '{addr}'"
-                )));
+                return Err(format!("invalid email address: '{addr}'"));
             }
         }
 
@@ -509,59 +444,83 @@ impl NotificationPlugin for EmailPlugin {
                 .with_permission("manage_global_settings"),
         ]
     }
-}
 
-// ── PluginBase + NotificationTransportPlugin ────────────────────────────────
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::PluginBase for EmailPlugin {
-    fn plugin_type_id(&self) -> &str {
-        "email"
-    }
-
-    fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
-        vec![uptrakit_plugin_infrastructure_core::PluginCapability::NotificationDelivery]
-    }
-
-    fn validate_config(&self, config: &serde_json::Value) -> std::result::Result<(), String> {
-        NotificationPlugin::validate_config(self, config).map_err(|e| e.to_string())
-    }
-
-    fn mask_config_secrets(&self, config: &serde_json::Value) -> serde_json::Value {
-        NotificationPlugin::mask_config_secrets(self, config)
-    }
-
-    fn restore_config_secrets(
+    fn as_notification_transport(
         &self,
-        incoming: &serde_json::Value,
-        stored: &serde_json::Value,
-    ) -> serde_json::Value {
-        NotificationPlugin::restore_config_secrets(self, incoming, stored)
-    }
-
-    fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
-        NotificationPlugin::extension_manifests(self)
-    }
-
-    fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
-        NotificationPlugin::extension_actions(self)
+    ) -> Option<&dyn uptrakit_plugin_infrastructure_core::NotificationTransportPlugin> {
+        Some(self)
     }
 }
 
 #[async_trait]
 impl uptrakit_plugin_infrastructure_core::NotificationTransportPlugin for EmailPlugin {
     fn channel_type(&self) -> &'static str {
-        NotificationPlugin::channel_type(self)
+        "email"
     }
 
+    /// Deliver a notification to all configured recipients.
+    ///
+    /// The `config` argument must be the *merged* config containing both the
+    /// global SMTP settings and the per-channel `to_addresses`.
     async fn deliver(&self, config: &serde_json::Value, message: &DeliveryMessage) -> Result<()> {
-        NotificationPlugin::deliver(self, config, message).await
+        let cfg: EmailConfig = serde_json::from_value(config.clone()).map_err(|e| {
+            report!(NotificationPluginError::InvalidConfig(format!(
+                "failed to deserialize email config: {e}"
+            )))
+        })?;
+
+        if cfg.to_addresses.is_empty() {
+            bail!(NotificationPluginError::InvalidConfig(
+                "'to_addresses' must not be empty".to_string()
+            ));
+        }
+        if cfg.smtp_host.is_empty() {
+            bail!(NotificationPluginError::InvalidConfig(
+                "'smtp_host' must not be empty".to_string()
+            ));
+        }
+        if cfg.from_address.is_empty() {
+            bail!(NotificationPluginError::InvalidConfig(
+                "'from_address' must not be empty".to_string()
+            ));
+        }
+
+        // Build From header
+        let from_header = if let Some(ref name) = cfg.from_name {
+            format!("{name} <{}>", cfg.from_address)
+        } else {
+            cfg.from_address.clone()
+        };
+
+        // Build the HTML body — use existing HTML if provided, otherwise escape plain text.
+        let html_body = if let Some(ref html) = message.body_html {
+            wrap_html(html)
+        } else {
+            wrap_html(&escape_html(&message.body))
+        };
+
+        // Send one message per recipient.
+        for to_addr in &cfg.to_addresses {
+            let email = MessageBuilder::new()
+                .from(from_header.as_str())
+                .to(to_addr.as_str())
+                .subject(&message.title)
+                .text_body(&message.body)
+                .html_body(&html_body);
+
+            send_email(&cfg, email).await?;
+
+            tracing::debug!(to = %to_addr, "email notification delivered");
+        }
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_plugin_infrastructure_core::{NotificationTransportPlugin, PluginBase};
 
     fn plugin() -> EmailPlugin {
         EmailPlugin
@@ -572,48 +531,44 @@ mod tests {
     #[test]
     fn validate_config_rejects_empty_to_addresses() {
         let config = serde_json::json!({"to_addresses": []});
-        let err = plugin().validate_config(&config).unwrap_err();
-        let msg = err.current_context().to_string();
+        let err = PluginBase::validate_config(&plugin(), &config).unwrap_err();
         assert!(
-            msg.contains("to_addresses"),
-            "expected to_addresses mention, got: {msg}"
+            err.contains("to_addresses"),
+            "expected to_addresses mention, got: {err}"
         );
     }
 
     #[test]
     fn validate_config_rejects_missing_to_addresses() {
         let config = serde_json::json!({});
-        let err = plugin().validate_config(&config).unwrap_err();
-        let msg = err.current_context().to_string();
-        assert!(!msg.is_empty(), "should produce an error for missing field");
+        let err = PluginBase::validate_config(&plugin(), &config).unwrap_err();
+        assert!(!err.is_empty(), "should produce an error for missing field");
     }
 
     #[test]
     fn validate_config_rejects_invalid_email_format() {
         let config = serde_json::json!({"to_addresses": ["not-an-email"]});
-        let err = plugin().validate_config(&config).unwrap_err();
-        let msg = err.current_context().to_string();
+        let err = PluginBase::validate_config(&plugin(), &config).unwrap_err();
         assert!(
-            msg.contains("invalid email address"),
-            "expected invalid email error, got: {msg}"
+            err.contains("invalid email address"),
+            "expected invalid email error, got: {err}"
         );
     }
 
     #[test]
     fn validate_config_rejects_email_without_dot_in_domain() {
         let config = serde_json::json!({"to_addresses": ["user@nodomain"]});
-        let err = plugin().validate_config(&config).unwrap_err();
-        let msg = err.current_context().to_string();
+        let err = PluginBase::validate_config(&plugin(), &config).unwrap_err();
         assert!(
-            msg.contains("invalid email address"),
-            "expected invalid email error, got: {msg}"
+            err.contains("invalid email address"),
+            "expected invalid email error, got: {err}"
         );
     }
 
     #[test]
     fn validate_config_accepts_valid_config() {
         let config = serde_json::json!({"to_addresses": ["user@example.com"]});
-        assert!(plugin().validate_config(&config).is_ok());
+        assert!(PluginBase::validate_config(&plugin(), &config).is_ok());
     }
 
     #[test]
@@ -621,7 +576,7 @@ mod tests {
         let config = serde_json::json!({
             "to_addresses": ["alice@example.com", "bob@example.org"]
         });
-        assert!(plugin().validate_config(&config).is_ok());
+        assert!(PluginBase::validate_config(&plugin(), &config).is_ok());
     }
 
     // ── mask_config_secrets ──────────────────────────────────────────────
@@ -629,7 +584,7 @@ mod tests {
     #[test]
     fn mask_config_secrets_returns_config_unchanged() {
         let config = serde_json::json!({"to_addresses": ["user@example.com"]});
-        let masked = plugin().mask_config_secrets(&config);
+        let masked = PluginBase::mask_config_secrets(&plugin(), &config);
         assert_eq!(masked, config, "per-channel config has no secrets to mask");
     }
 
@@ -640,15 +595,12 @@ mod tests {
         // Config missing smtp_host and from_address should fail deserialization or validation.
         let config = serde_json::json!({"to_addresses": ["user@example.com"]});
         let msg = DeliveryMessage::new("Test", "Body", None, serde_json::json!({}), vec![]);
-        let result = plugin().deliver(&config, &msg).await;
+        let result = NotificationTransportPlugin::deliver(&plugin(), &config, &msg).await;
         assert!(result.is_err(), "missing smtp_host should produce an error");
     }
 
     #[tokio::test]
     async fn deliver_returns_error_on_unreachable_smtp_host() {
-        // Bind on a loopback port then immediately release it so that the
-        // connection attempt gets an instant ECONNREFUSED rather than waiting
-        // for an OS-level TCP timeout.
         let free_addr = {
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             listener.local_addr().unwrap()
@@ -661,7 +613,7 @@ mod tests {
             "tls_mode": "none"
         });
         let msg = DeliveryMessage::new("Test", "Body", None, serde_json::json!({}), vec![]);
-        let result = plugin().deliver(&config, &msg).await;
+        let result = NotificationTransportPlugin::deliver(&plugin(), &config, &msg).await;
         assert!(
             result.is_err(),
             "delivery to a refused connection should fail"

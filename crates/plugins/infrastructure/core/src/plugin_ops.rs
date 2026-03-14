@@ -167,12 +167,15 @@ pub trait PluginOps: Send + Sync + 'static {
 
     /// Look up a notification plugin by channel type name (e.g. `"webhook"`).
     ///
+    /// Returns an `Arc<dyn PluginBase>` so callers can clone into spawned tasks
+    /// and use `as_notification_transport()` to access delivery methods.
+    ///
     /// Returns `None` when the channel type is unknown or notifications are
     /// not enabled.
-    fn notification_plugin(
+    fn notification_transport(
         &self,
         _channel_type: &str,
-    ) -> Option<std::sync::Arc<dyn uptrakit_notification_plugin_core::NotificationPlugin>> {
+    ) -> Option<std::sync::Arc<dyn crate::PluginBase>> {
         None
     }
 
@@ -182,11 +185,13 @@ pub trait PluginOps: Send + Sync + 'static {
     }
 
     /// Validate notification channel configuration JSON.
+    ///
+    /// Returns `Err(message)` when validation fails.
     fn notification_validate_config(
         &self,
         _channel_type: &str,
         _config: &serde_json::Value,
-    ) -> uptrakit_notification_plugin_core::Result<()> {
+    ) -> std::result::Result<(), String> {
         Ok(())
     }
 

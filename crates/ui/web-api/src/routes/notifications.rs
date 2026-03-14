@@ -286,15 +286,24 @@ pub async fn test_channel(
         };
 
     // Look up channel implementation
-    let channel_impl = match state
+    let channel_plugin = match state
         .plugin_ops
-        .notification_plugin(&channel_model.channel_type)
+        .notification_transport(&channel_model.channel_type)
     {
         Some(c) => c,
         None => {
             return error_response(
                 StatusCode::BAD_REQUEST,
                 format!("Unsupported channel type: {}", channel_model.channel_type),
+            );
+        }
+    };
+    let channel_transport = match channel_plugin.as_notification_transport() {
+        Some(t) => t,
+        None => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Plugin does not support notification delivery",
             );
         }
     };
@@ -338,7 +347,7 @@ pub async fn test_channel(
     );
 
     // Deliver
-    match channel_impl.deliver(&config_json, &test_msg).await {
+    match channel_transport.deliver(&config_json, &test_msg).await {
         Ok(()) => {
             let resp = TestNotificationResponse {
                 success: true,

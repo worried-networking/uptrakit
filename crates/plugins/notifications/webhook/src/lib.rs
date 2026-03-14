@@ -17,9 +17,7 @@ use uptrakit_extension_framework::{
     ActionDef, ActionUi, ApiSubmitDef, ExtensionManifest, ExtensionPlacement, ExtensionUi,
     FieldDef, FieldType, FormDef, PanelPosition, TableColumn,
 };
-use uptrakit_notification_plugin_core::{
-    DeliveryMessage, NotificationPlugin, NotificationPluginError, Result,
-};
+use uptrakit_notification_plugin_core::{DeliveryMessage, NotificationPluginError, Result};
 
 type HmacSha256 = hmac::Hmac<Sha256>;
 
@@ -67,7 +65,7 @@ impl WebhookPlugin {
     /// Create a new webhook plugin with a pre-configured HTTP client.
     ///
     /// When `allow_private_urls` is `true`, the private-host check in
-    /// [`validate_config`](NotificationPlugin::validate_config) is skipped.
+    /// [`validate_config`](uptrakit_plugin_infrastructure_core::PluginBase::validate_config) is skipped.
     /// This is intended for single-tenant / self-hosted deployments where
     /// internal webhook URLs (e.g. a Mattermost on the LAN) are legitimate.
     /// The header blocklist is always enforced regardless of this flag.
@@ -96,114 +94,26 @@ impl WebhookPlugin {
     }
 }
 
+// ── PluginBase + NotificationTransportPlugin ────────────────────────────────
+
 #[async_trait]
-impl NotificationPlugin for WebhookPlugin {
-    fn channel_type(&self) -> &'static str {
+impl uptrakit_plugin_infrastructure_core::PluginBase for WebhookPlugin {
+    fn plugin_type_id(&self) -> &str {
         "webhook"
     }
 
-    async fn deliver(&self, config: &serde_json::Value, message: &DeliveryMessage) -> Result<()> {
-        let url = config["url"].as_str().ok_or_else(|| {
-            report!(NotificationPluginError::InvalidConfig(
-                "missing 'url'".to_string()
-            ))
-        })?;
-
-        let payload = serde_json::json!({
-            "title": message.title,
-            "body": message.body,
-            "event": message.event_payload,
-            "actions": message.actions.iter().map(|a| {
-                serde_json::json!({
-                    "label": a.label,
-                    "callback_url": a.callback_url,
-                    "token": a.token,
-                })
-            }).collect::<Vec<_>>(),
-        });
-
-        let body_bytes = serde_json::to_vec(&payload)
-            .map_err(|e| report!(NotificationPluginError::Serialization(e.to_string())))?;
-
-        let mut req = self
-            .http
-            .post(url)
-            .header("Content-Type", "application/json");
-
-        // Add custom headers from config.  Defence-in-depth: enforce the
-        // blocked-header list at delivery time even if validation was skipped
-        // (e.g. config written directly to the DB before the blocklist existed).
-        if let Some(headers) = config.get("headers").and_then(|h| h.as_object()) {
-            for (key, value) in headers {
-                check_header_allowed(key)?;
-                if let Some(v) = value.as_str() {
-                    req = req.header(key.as_str(), v);
-                }
-            }
-        }
-
-        // HMAC-SHA256 signature if a secret is configured.
-        if let Some(secret) = config.get("secret").and_then(|s| s.as_str()) {
-            let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-                .map_err(|e| report!(NotificationPluginError::HmacKey(e.to_string())))?;
-            mac.update(&body_bytes);
-            let signature = uptrakit_shared_types::hex::encode(mac.finalize().into_bytes());
-            req = req.header("X-Uptrakit-Signature", format!("sha256={signature}"));
-        }
-
-        let resp = req
-            .body(body_bytes)
-            .send()
-            .await
-            .map_err(|e| report!(NotificationPluginError::HttpRequest(e.to_string())))?;
-
-        // Reject redirect responses explicitly. Redirect following is disabled
-        // to prevent SSRF via attacker-controlled redirect targets.
-        if resp.status().is_redirection() {
-            let status = resp.status();
-            let location = resp
-                .headers()
-                .get("location")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("<missing>");
-            tracing::warn!(
-                %status,
-                redirect_target = %location,
-                "webhook delivery returned redirect — not following (SSRF protection)"
-            );
-            bail!(NotificationPluginError::DeliveryFailed(format!(
-                "webhook returned redirect {status} to {location} — redirects are not followed"
-            )));
-        }
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body_text = resp.text().await.unwrap_or_default();
-            tracing::warn!(
-                %status,
-                response_body = %body_text,
-                "webhook delivery returned non-success status"
-            );
-            bail!(NotificationPluginError::DeliveryFailed(format!(
-                "webhook returned {status}: {body_text}"
-            )));
-        }
-
-        tracing::debug!(url, "webhook notification delivered");
-        Ok(())
+    fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+        vec![uptrakit_plugin_infrastructure_core::PluginCapability::NotificationDelivery]
     }
 
-    fn validate_config(&self, config: &serde_json::Value) -> Result<()> {
-        let url = config.get("url").and_then(|u| u.as_str()).ok_or_else(|| {
-            report!(NotificationPluginError::InvalidConfig(
-                "'url' is required".to_string()
-            ))
-        })?;
+    fn validate_config(&self, config: &serde_json::Value) -> std::result::Result<(), String> {
+        let url = config
+            .get("url")
+            .and_then(|u| u.as_str())
+            .ok_or("'url' is required")?;
 
         if !url.starts_with("http://") && !url.starts_with("https://") {
-            bail!(NotificationPluginError::InvalidConfig(
-                "'url' must start with http:// or https://".to_string()
-            ));
+            return Err("'url' must start with http:// or https://".to_string());
         }
 
         // Private-host SSRF check (skipped when allow_private_urls is true).
@@ -212,21 +122,17 @@ impl NotificationPlugin for WebhookPlugin {
             && let Some(host) = parsed.host_str()
             && is_private_host(host)
         {
-            bail!(NotificationPluginError::InvalidConfig(
-                "'url' must not point to private/loopback addresses".to_string()
-            ));
+            return Err("'url' must not point to private/loopback addresses".to_string());
         }
 
         // Validate headers structure and enforce blocked-header list.
         if let Some(headers) = config.get("headers") {
             if !headers.is_object() {
-                bail!(NotificationPluginError::InvalidConfig(
-                    "'headers' must be an object".to_string()
-                ));
+                return Err("'headers' must be an object".to_string());
             }
             if let Some(obj) = headers.as_object() {
                 for key in obj.keys() {
-                    check_header_allowed(key)?;
+                    check_header_allowed(key).map_err(|e| e.to_string())?;
                 }
             }
         }
@@ -353,59 +259,116 @@ impl NotificationPlugin for WebhookPlugin {
                 )),
         ]
     }
-}
 
-// ── PluginBase + NotificationTransportPlugin ────────────────────────────────
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::PluginBase for WebhookPlugin {
-    fn plugin_type_id(&self) -> &str {
-        "webhook"
-    }
-
-    fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
-        vec![uptrakit_plugin_infrastructure_core::PluginCapability::NotificationDelivery]
-    }
-
-    fn validate_config(&self, config: &serde_json::Value) -> std::result::Result<(), String> {
-        NotificationPlugin::validate_config(self, config).map_err(|e| e.to_string())
-    }
-
-    fn mask_config_secrets(&self, config: &serde_json::Value) -> serde_json::Value {
-        NotificationPlugin::mask_config_secrets(self, config)
-    }
-
-    fn restore_config_secrets(
+    fn as_notification_transport(
         &self,
-        incoming: &serde_json::Value,
-        stored: &serde_json::Value,
-    ) -> serde_json::Value {
-        NotificationPlugin::restore_config_secrets(self, incoming, stored)
-    }
-
-    fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
-        NotificationPlugin::extension_manifests(self)
-    }
-
-    fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
-        NotificationPlugin::extension_actions(self)
+    ) -> Option<&dyn uptrakit_plugin_infrastructure_core::NotificationTransportPlugin> {
+        Some(self)
     }
 }
 
 #[async_trait]
 impl uptrakit_plugin_infrastructure_core::NotificationTransportPlugin for WebhookPlugin {
     fn channel_type(&self) -> &'static str {
-        NotificationPlugin::channel_type(self)
+        "webhook"
     }
 
     async fn deliver(&self, config: &serde_json::Value, message: &DeliveryMessage) -> Result<()> {
-        NotificationPlugin::deliver(self, config, message).await
+        let url = config["url"].as_str().ok_or_else(|| {
+            report!(NotificationPluginError::InvalidConfig(
+                "missing 'url'".to_string()
+            ))
+        })?;
+
+        let payload = serde_json::json!({
+            "title": message.title,
+            "body": message.body,
+            "event": message.event_payload,
+            "actions": message.actions.iter().map(|a| {
+                serde_json::json!({
+                    "label": a.label,
+                    "callback_url": a.callback_url,
+                    "token": a.token,
+                })
+            }).collect::<Vec<_>>(),
+        });
+
+        let body_bytes = serde_json::to_vec(&payload)
+            .map_err(|e| report!(NotificationPluginError::Serialization(e.to_string())))?;
+
+        let mut req = self
+            .http
+            .post(url)
+            .header("Content-Type", "application/json");
+
+        // Add custom headers from config.  Defence-in-depth: enforce the
+        // blocked-header list at delivery time even if validation was skipped
+        // (e.g. config written directly to the DB before the blocklist existed).
+        if let Some(headers) = config.get("headers").and_then(|h| h.as_object()) {
+            for (key, value) in headers {
+                check_header_allowed(key)?;
+                if let Some(v) = value.as_str() {
+                    req = req.header(key.as_str(), v);
+                }
+            }
+        }
+
+        // HMAC-SHA256 signature if a secret is configured.
+        if let Some(secret) = config.get("secret").and_then(|s| s.as_str()) {
+            let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+                .map_err(|e| report!(NotificationPluginError::HmacKey(e.to_string())))?;
+            mac.update(&body_bytes);
+            let signature = uptrakit_shared_types::hex::encode(mac.finalize().into_bytes());
+            req = req.header("X-Uptrakit-Signature", format!("sha256={signature}"));
+        }
+
+        let resp = req
+            .body(body_bytes)
+            .send()
+            .await
+            .map_err(|e| report!(NotificationPluginError::HttpRequest(e.to_string())))?;
+
+        // Reject redirect responses explicitly. Redirect following is disabled
+        // to prevent SSRF via attacker-controlled redirect targets.
+        if resp.status().is_redirection() {
+            let status = resp.status();
+            let location = resp
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("<missing>");
+            tracing::warn!(
+                %status,
+                redirect_target = %location,
+                "webhook delivery returned redirect — not following (SSRF protection)"
+            );
+            bail!(NotificationPluginError::DeliveryFailed(format!(
+                "webhook returned redirect {status} to {location} — redirects are not followed"
+            )));
+        }
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            tracing::warn!(
+                %status,
+                response_body = %body_text,
+                "webhook delivery returned non-success status"
+            );
+            bail!(NotificationPluginError::DeliveryFailed(format!(
+                "webhook returned {status}: {body_text}"
+            )));
+        }
+
+        tracing::debug!(url, "webhook notification delivered");
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_plugin_infrastructure_core::PluginBase;
 
     /// Helper: create a plugin with private URLs blocked (the default).
     fn plugin() -> WebhookPlugin {
@@ -420,72 +383,68 @@ mod tests {
     #[test]
     fn validate_config_requires_url() {
         let config = serde_json::json!({});
-        let result = plugin().validate_config(&config);
+        let result = PluginBase::validate_config(&plugin(), &config);
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        let msg = err.current_context().to_string();
+        let msg = result.unwrap_err();
         assert!(msg.contains("'url' is required"), "got: {msg}");
     }
 
     #[test]
     fn validate_config_rejects_non_http_url() {
         let config = serde_json::json!({"url": "ftp://example.com"});
-        let result = plugin().validate_config(&config);
+        let result = PluginBase::validate_config(&plugin(), &config);
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        let msg = err.current_context().to_string();
+        let msg = result.unwrap_err();
         assert!(msg.contains("http:// or https://"), "got: {msg}");
     }
 
     #[test]
     fn validate_config_accepts_https_url() {
         let config = serde_json::json!({"url": "https://example.com/hook"});
-        assert!(plugin().validate_config(&config).is_ok());
+        assert!(PluginBase::validate_config(&plugin(), &config).is_ok());
     }
 
     #[test]
     fn validate_config_rejects_private_url() {
         let config = serde_json::json!({"url": "http://192.168.1.1:8080/hook"});
-        let result = plugin().validate_config(&config);
+        let result = PluginBase::validate_config(&plugin(), &config);
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        let msg = err.current_context().to_string();
+        let msg = result.unwrap_err();
         assert!(msg.contains("private"), "got: {msg}");
     }
 
     #[test]
     fn validate_config_rejects_localhost_url() {
         let config = serde_json::json!({"url": "http://localhost:8080/hook"});
-        let result = plugin().validate_config(&config);
+        let result = PluginBase::validate_config(&plugin(), &config);
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        let msg = err.current_context().to_string();
+        let msg = result.unwrap_err();
         assert!(msg.contains("private"), "got: {msg}");
     }
 
     #[test]
     fn validate_config_rejects_loopback_url() {
         let config = serde_json::json!({"url": "http://127.0.0.1/hook"});
-        let result = plugin().validate_config(&config);
+        let result = PluginBase::validate_config(&plugin(), &config);
         assert!(result.is_err());
     }
 
     #[test]
     fn validate_config_allows_private_url_when_flag_set() {
         let config = serde_json::json!({"url": "http://192.168.1.1:8080/hook"});
-        assert!(plugin_allow_private().validate_config(&config).is_ok());
+        assert!(PluginBase::validate_config(&plugin_allow_private(), &config).is_ok());
     }
 
     #[test]
     fn validate_config_allows_localhost_when_flag_set() {
         let config = serde_json::json!({"url": "http://localhost:8080/hook"});
-        assert!(plugin_allow_private().validate_config(&config).is_ok());
+        assert!(PluginBase::validate_config(&plugin_allow_private(), &config).is_ok());
     }
 
     #[test]
     fn validate_config_rejects_non_object_headers() {
         let config = serde_json::json!({"url": "https://example.com", "headers": "bad"});
-        let result = plugin().validate_config(&config);
+        let result = PluginBase::validate_config(&plugin(), &config);
         assert!(result.is_err());
     }
 
@@ -493,7 +452,7 @@ mod tests {
     fn validate_config_accepts_object_headers() {
         let config =
             serde_json::json!({"url": "https://example.com", "headers": {"X-Custom": "val"}});
-        assert!(plugin().validate_config(&config).is_ok());
+        assert!(PluginBase::validate_config(&plugin(), &config).is_ok());
     }
 
     #[test]
@@ -502,10 +461,9 @@ mod tests {
             "url": "https://example.com",
             "headers": {"Authorization": "Bearer token"}
         });
-        let result = plugin().validate_config(&config);
+        let result = PluginBase::validate_config(&plugin(), &config);
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        let msg = err.current_context().to_string();
+        let msg = result.unwrap_err();
         assert!(msg.contains("Authorization"), "got: {msg}");
     }
 
@@ -515,7 +473,7 @@ mod tests {
             "url": "https://example.com",
             "headers": {"Cookie": "session=abc"}
         });
-        let result = plugin().validate_config(&config);
+        let result = PluginBase::validate_config(&plugin(), &config);
         assert!(result.is_err());
     }
 
@@ -525,7 +483,7 @@ mod tests {
             "url": "https://example.com",
             "headers": {"Host": "evil.com"}
         });
-        let result = plugin().validate_config(&config);
+        let result = PluginBase::validate_config(&plugin(), &config);
         assert!(result.is_err());
     }
 
@@ -535,7 +493,7 @@ mod tests {
             "url": "https://example.com",
             "headers": {"AUTHORIZATION": "Bearer token"}
         });
-        let result = plugin().validate_config(&config);
+        let result = PluginBase::validate_config(&plugin(), &config);
         assert!(result.is_err());
     }
 
@@ -545,7 +503,7 @@ mod tests {
             "url": "https://example.com",
             "headers": {"Authorization": "Bearer token"}
         });
-        let result = plugin_allow_private().validate_config(&config);
+        let result = PluginBase::validate_config(&plugin_allow_private(), &config);
         assert!(result.is_err());
     }
 
@@ -584,7 +542,7 @@ mod tests {
             "url": "https://example.com",
             "secret": "super-secret-key"
         });
-        let masked = plugin().mask_config_secrets(&config);
+        let masked = PluginBase::mask_config_secrets(&plugin(), &config);
         assert_eq!(masked["url"], "https://example.com");
         assert_eq!(masked["secret"], "***");
     }
@@ -592,7 +550,7 @@ mod tests {
     #[test]
     fn mask_config_secrets_preserves_config_without_secret() {
         let config = serde_json::json!({"url": "https://example.com"});
-        let masked = plugin().mask_config_secrets(&config);
+        let masked = PluginBase::mask_config_secrets(&plugin(), &config);
         assert_eq!(masked, config);
     }
 }

@@ -26,6 +26,8 @@ use uptrakit_plugin_releases_forgejo::{ForgejoConfig, ForgejoPlugin};
 use uptrakit_plugin_releases_github::{GitHubConfig, GitHubPlugin};
 use uptrakit_plugin_releases_gitlab::{GitLabConfig, GitLabPlugin};
 
+#[cfg(feature = "notifications")]
+use crate::NotificationRegistryConfig;
 use crate::error::{PluginRegistryError, Result};
 
 /// Deserialize, mask secrets via [`SecretMasking`], and re-serialize.
@@ -538,10 +540,10 @@ macro_rules! register_plugins {
 /// macro invocation below and implement `validate_identifier` on its config
 /// type (no-op `Ok(())` is acceptable for unconstrained identifiers).
 pub struct PluginRegistry {
-    /// Notification plugin registry, when the `notifications` feature is enabled.
+    /// Notification plugins stored directly, keyed by channel type.
     #[cfg(feature = "notifications")]
-    pub(crate) notification_registry:
-        uptrakit_notification_plugin_registry::NotificationPluginRegistry,
+    pub(crate) notification_plugins:
+        std::collections::HashMap<&'static str, std::sync::Arc<dyn PluginBase>>,
 }
 
 register_plugins! {
@@ -633,26 +635,60 @@ impl PluginRegistry {
     pub fn new() -> Self {
         Self {
             #[cfg(feature = "notifications")]
-            notification_registry:
-                uptrakit_notification_plugin_registry::NotificationPluginRegistry::new(
-                    uptrakit_notification_plugin_registry::NotificationRegistryConfig::default(),
-                )
-                .expect("default notification registry config should always succeed"),
+            notification_plugins: std::collections::HashMap::new(),
         }
     }
 
     /// Create a plugin registry with notification support.
     ///
-    /// The `config` is forwarded to [`NotificationPluginRegistry::new`]
-    /// which registers compiled-in plugins based on feature flags.
+    /// Registers compiled-in notification plugins based on feature flags.
+    /// The `config` carries deployment-level settings (e.g. whether to
+    /// allow private webhook URLs).
     #[cfg(feature = "notifications")]
     pub fn with_notifications(
-        config: uptrakit_notification_plugin_registry::NotificationRegistryConfig,
+        // Used conditionally by feature-gated notification channel blocks below.
+        #[allow(unused_variables)] config: NotificationRegistryConfig,
     ) -> uptrakit_notification_plugin_core::Result<Self> {
+        #[allow(unused_mut)] // mutated conditionally by feature-gated channel insertions
+        let mut plugins: std::collections::HashMap<
+            &'static str,
+            std::sync::Arc<dyn PluginBase>,
+        > = std::collections::HashMap::new();
+
+        #[cfg(feature = "notifications-webhook")]
+        {
+            let plugin = uptrakit_notification_plugin_webhook::WebhookPlugin::new(
+                config.allow_private_urls,
+            )?;
+            plugins.insert("webhook", std::sync::Arc::new(plugin));
+        }
+
+        #[cfg(feature = "notifications-telegram")]
+        {
+            let plugin = uptrakit_notification_plugin_telegram::TelegramPlugin::new()?;
+            plugins.insert("telegram", std::sync::Arc::new(plugin));
+        }
+
+        #[cfg(feature = "notifications-email")]
+        {
+            plugins.insert(
+                "email",
+                std::sync::Arc::new(uptrakit_notification_plugin_email::EmailPlugin),
+            );
+        }
+
         Ok(Self {
-            notification_registry:
-                uptrakit_notification_plugin_registry::NotificationPluginRegistry::new(config)?,
+            notification_plugins: plugins,
         })
+    }
+
+    /// Look up a notification plugin by channel type.
+    #[cfg(feature = "notifications")]
+    pub(crate) fn notification_plugin_ref(
+        &self,
+        channel_type: &str,
+    ) -> Option<&std::sync::Arc<dyn PluginBase>> {
+        self.notification_plugins.get(channel_type)
     }
 }
 

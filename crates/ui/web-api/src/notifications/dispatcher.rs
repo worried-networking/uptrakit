@@ -79,7 +79,7 @@ fn merge_smtp_into_config(
 ) -> serde_json::Value {
     let plugin_global = to_plugin_smtp_snapshot(global_smtp);
     let plugin_tenant = to_plugin_smtp_snapshot(tenant_smtp);
-    uptrakit_notification_plugin_registry::merge_smtp_into_config(
+    uptrakit_notification_plugin_email::merge_smtp_into_config(
         &plugin_global,
         &plugin_tenant,
         config,
@@ -101,8 +101,8 @@ pub(crate) fn merge_smtp_into_config_pub(
 #[cfg(feature = "notifications-email")]
 fn to_plugin_smtp_snapshot(
     smtp: &crate::settings::SmtpSettingsSnapshot,
-) -> uptrakit_notification_plugin_registry::SmtpSettingsSnapshot {
-    uptrakit_notification_plugin_registry::SmtpSettingsSnapshot {
+) -> uptrakit_notification_plugin_email::SmtpSettingsSnapshot {
+    uptrakit_notification_plugin_email::SmtpSettingsSnapshot {
         host: smtp.host.clone(),
         port: smtp.port,
         username: smtp.username.clone(),
@@ -188,8 +188,8 @@ async fn dispatch_loop(
             };
 
             // Look up channel implementation
-            let channel_impl =
-                match notification_ops.notification_plugin(&channel_model.channel_type) {
+            let channel_plugin =
+                match notification_ops.notification_transport(&channel_model.channel_type) {
                     Some(c) => c,
                     None => {
                         tracing::warn!(
@@ -289,9 +289,16 @@ async fn dispatch_loop(
 
             // Spawn delivery task
             let db_clone = db.clone();
-            let channel_impl = channel_impl.clone();
+            let channel_plugin = channel_plugin.clone();
             tokio::spawn(async move {
-                match channel_impl.deliver(&config_json, &message).await {
+                let Some(transport) = channel_plugin.as_notification_transport() else {
+                    tracing::error!(
+                        log_id = %log_id,
+                        "plugin does not implement NotificationTransportPlugin"
+                    );
+                    return;
+                };
+                match transport.deliver(&config_json, &message).await {
                     Ok(()) => {
                         let now = OffsetDateTime::now_utc();
                         let update = notification_log::ActiveModel {

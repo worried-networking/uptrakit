@@ -20,10 +20,10 @@ agent-infra = [
     "uptrakit-plugin-infrastructure-core/agent-infra",
     "uptrakit-plugin-infrastructure-proxmox/agent-infra",
 ]
-notifications = ["dep:uptrakit-notification-plugin-registry"]
-notifications-webhook = ["notifications", "uptrakit-notification-plugin-registry/webhook"]
-notifications-telegram = ["notifications", "uptrakit-notification-plugin-registry/telegram"]
-notifications-email = ["notifications", "uptrakit-notification-plugin-registry/email"]
+notifications = []
+notifications-webhook = ["notifications", "dep:uptrakit-notification-plugin-webhook"]
+notifications-telegram = ["notifications", "dep:uptrakit-notification-plugin-telegram"]
+notifications-email = ["notifications", "dep:uptrakit-notification-plugin-email"]
 
 [dependencies]
 uptrakit-shared-types = { workspace = true }
@@ -54,7 +54,9 @@ thiserror = { workspace = true }
 rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-notification-plugin-core = { workspace = true }
-uptrakit-notification-plugin-registry = { workspace = true, optional = true }
+uptrakit-notification-plugin-webhook = { workspace = true, optional = true }
+uptrakit-notification-plugin-telegram = { workspace = true, optional = true }
+uptrakit-notification-plugin-email = { workspace = true, optional = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 sea-orm-migration = { workspace = true, optional = true }

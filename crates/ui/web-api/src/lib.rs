@@ -157,8 +157,12 @@ mod tests {
             controller_id,
         );
 
-        let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
-            Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry::new());
+        let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(
+            uptrakit_plugin_infrastructure_registry::PluginRegistry::with_notifications(
+                uptrakit_plugin_infrastructure_registry::NotificationRegistryConfig::default(),
+            )
+            .expect("notification registry should build in tests"),
+        );
 
         let notification_dispatcher = crate::notifications::dispatcher::NotificationDispatcher::new(
             db.clone(),

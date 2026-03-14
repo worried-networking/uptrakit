@@ -34,7 +34,6 @@ uptrakit-web-api = { workspace = true }
 uptrakit-directories = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uptrakit-command = { workspace = true }
-uptrakit-notification-plugin-registry = { workspace = true, features = ["webhook"] }
 uptrakit-plugin-infrastructure-core = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["notifications", "migrations"] }
 async-trait = { workspace = true }

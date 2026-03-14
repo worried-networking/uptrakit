@@ -1,15 +1,14 @@
-//! Core trait and types for notification plugins.
+//! Core types for notification plugins.
 //!
-//! This crate defines the [`NotificationPlugin`] trait implemented by each
-//! notification channel (webhook, Telegram, email, etc.) and the
-//! [`DeliveryMessage`] struct used to pass channel-agnostic notification
-//! content to plugins.
+//! This crate defines the [`DeliveryMessage`] struct used to pass
+//! channel-agnostic notification content to plugins, along with error types
+//! and utility functions.
 
 mod error;
 mod traits;
 
 pub use error::{NotificationPluginError, Result};
-pub use traits::{DeliveryMessage, MessageAction, NotificationPlugin};
+pub use traits::{DeliveryMessage, MessageAction};
 
 /// Escape HTML-significant characters for safe interpolation into HTML bodies.
 ///

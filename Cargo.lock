@@ -6642,7 +6642,6 @@ dependencies = [
  "uptrakit-crypto",
  "uptrakit-directories",
  "uptrakit-internal-wire",
- "uptrakit-notification-plugin-registry",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-scheduler-engine",
@@ -6798,13 +6797,10 @@ dependencies = [
 name = "uptrakit-notification-plugin-core"
 version = "0.0.1"
 dependencies = [
- "async-trait",
  "rootcause",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tokio",
- "uptrakit-extension-framework",
 ]
 
 [[package]]
@@ -6822,22 +6818,6 @@ dependencies = [
  "uptrakit-extension-framework",
  "uptrakit-notification-plugin-core",
  "uptrakit-plugin-infrastructure-core",
-]
-
-[[package]]
-name = "uptrakit-notification-plugin-registry"
-version = "0.0.1"
-dependencies = [
- "async-trait",
- "rootcause",
- "serde_json",
- "tokio",
- "tracing",
- "uptrakit-extension-framework",
- "uptrakit-notification-plugin-core",
- "uptrakit-notification-plugin-email",
- "uptrakit-notification-plugin-telegram",
- "uptrakit-notification-plugin-webhook",
 ]
 
 [[package]]
@@ -6993,7 +6973,9 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-extension-framework",
  "uptrakit-notification-plugin-core",
- "uptrakit-notification-plugin-registry",
+ "uptrakit-notification-plugin-email",
+ "uptrakit-notification-plugin-telegram",
+ "uptrakit-notification-plugin-webhook",
  "uptrakit-plugin-discovery-proxmox-helper-scripts",
  "uptrakit-plugin-generic-shell",
  "uptrakit-plugin-infrastructure-core",
@@ -7471,7 +7453,7 @@ dependencies = [
  "uptrakit-internal-wire",
  "uptrakit-nats",
  "uptrakit-notification-plugin-core",
- "uptrakit-notification-plugin-registry",
+ "uptrakit-notification-plugin-email",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",

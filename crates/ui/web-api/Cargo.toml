@@ -13,8 +13,8 @@ oidc = ["uptrakit-web-api-auth/oidc", "dep:openidconnect", "dep:reqwest"]
 swagger-ui = ["dep:utoipa-swagger-ui"]
 nats = ["dep:async-nats", "dep:uptrakit-nats"]
 interactive = []
-notifications-telegram = ["uptrakit-notification-plugin-registry/telegram"]
-notifications-email = ["uptrakit-notification-plugin-registry/email"]
+notifications-telegram = ["uptrakit-plugin-infrastructure-registry/notifications-telegram"]
+notifications-email = ["dep:uptrakit-notification-plugin-email", "uptrakit-plugin-infrastructure-registry/notifications-email"]
 notifications-all = ["notifications-telegram", "notifications-email"]
 db-all = ["db-sqlite", "db-postgres", "db-mysql"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-web-api-queries/db-sqlite"]
@@ -47,7 +47,7 @@ uptrakit-shared-db = { workspace = true }
 uptrakit-update-hooks = { workspace = true }
 uptrakit-shared-types = { workspace = true, features = ["openapi"] }
 uptrakit-internal-wire = { workspace = true }
-uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["notifications"] }
+uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["notifications", "notifications-webhook"] }
 uptrakit-command = { workspace = true }
 rand = { workspace = true }
 client-ip = { workspace = true, features = ["forwarded-header"] }
@@ -80,7 +80,7 @@ async-nats = { workspace = true, optional = true }
 uptrakit-nats = { workspace = true, optional = true }
 uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-notification-plugin-core = { workspace = true }
-uptrakit-notification-plugin-registry = { workspace = true, features = ["webhook"] }
+uptrakit-notification-plugin-email = { workspace = true, optional = true }
 uptrakit-backoff = { workspace = true }
 uptrakit-web-api-auth = { workspace = true }
 uptrakit-web-api-queries = { workspace = true }

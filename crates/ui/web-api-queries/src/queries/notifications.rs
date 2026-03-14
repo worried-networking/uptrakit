@@ -26,7 +26,10 @@ pub async fn create_channel(
 ) -> ChannelResult<NotificationChannelResponse> {
     // Validate config with channel implementation
     let channel_type_str = req.channel_type.as_str();
-    if plugin_ops.notification_plugin(channel_type_str).is_none() {
+    if plugin_ops
+        .notification_transport(channel_type_str)
+        .is_none()
+    {
         return Err(report!(ChannelQueryError::UnsupportedType(
             channel_type_str.to_string()
         )));
@@ -449,7 +452,7 @@ fn mask_channel_config(
         serde_json::from_str(channel.config.expose_secret()).unwrap_or_default();
 
     if plugin_ops
-        .notification_plugin(&channel.channel_type)
+        .notification_transport(&channel.channel_type)
         .is_some()
     {
         plugin_ops.notification_mask_config_secrets(&channel.channel_type, &config)

@@ -44,9 +44,19 @@ pub use uptrakit_shared_types::PluginType;
 // Re-export executor types for downstream convenience
 pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};
 
-// Re-export notification types when the feature is enabled.
+/// Configuration for the notification plugins in the registry.
+///
+/// Carries deployment-level settings that affect plugin behaviour.
 #[cfg(feature = "notifications")]
-pub use uptrakit_notification_plugin_registry::NotificationRegistryConfig;
+#[derive(Clone, Debug, Default)]
+pub struct NotificationRegistryConfig {
+    /// When `true`, the webhook plugin allows URLs pointing to private /
+    /// loopback / link-local addresses. Intended for single-tenant or
+    /// self-hosted deployments where internal webhook targets are legitimate.
+    ///
+    /// Default: `false` (private URLs are blocked).
+    pub allow_private_urls: bool,
+}
 
 /// Return all controller-side database migrations contributed by plugins.
 ///
@@ -170,7 +180,7 @@ impl PluginOps for PluginRegistry {
             uptrakit_plugin_infrastructure_proxmox::extensions::extension_manifests();
         #[cfg(feature = "notifications")]
         {
-            for plugin in self.notification_registry.plugins() {
+            for plugin in self.notification_plugins.values() {
                 manifests.extend(plugin.extension_manifests());
             }
         }
@@ -182,7 +192,7 @@ impl PluginOps for PluginRegistry {
         let mut actions = uptrakit_plugin_infrastructure_proxmox::extensions::extension_actions();
         #[cfg(feature = "notifications")]
         {
-            for plugin in self.notification_registry.plugins() {
+            for plugin in self.notification_plugins.values() {
                 actions.extend(plugin.extension_actions());
             }
         }
@@ -205,13 +215,13 @@ impl PluginOps for PluginRegistry {
         PluginRegistry::handle_extension_action(ctx, extension_id, action_id, params)
     }
 
-    fn notification_plugin(
+    fn notification_transport(
         &self,
         _channel_type: &str,
-    ) -> Option<std::sync::Arc<dyn uptrakit_notification_plugin_core::NotificationPlugin>> {
+    ) -> Option<std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::PluginBase>> {
         #[cfg(feature = "notifications")]
         {
-            self.notification_registry.get(_channel_type)
+            self.notification_plugin_ref(_channel_type).cloned()
         }
         #[cfg(not(feature = "notifications"))]
         {
@@ -222,7 +232,7 @@ impl PluginOps for PluginRegistry {
     fn notification_supported_types(&self) -> Vec<&'static str> {
         #[cfg(feature = "notifications")]
         {
-            self.notification_registry.supported_types()
+            self.notification_plugins.keys().copied().collect()
         }
         #[cfg(not(feature = "notifications"))]
         {
@@ -234,15 +244,11 @@ impl PluginOps for PluginRegistry {
         &self,
         _channel_type: &str,
         _config: &serde_json::Value,
-    ) -> uptrakit_notification_plugin_core::Result<()> {
+    ) -> std::result::Result<(), String> {
         #[cfg(feature = "notifications")]
         {
-            let Some(plugin) = self.notification_registry.get(_channel_type) else {
-                return Err(rootcause::report!(
-                    uptrakit_notification_plugin_core::NotificationPluginError::InvalidConfig(
-                        format!("unknown channel type: {_channel_type}")
-                    )
-                ));
+            let Some(plugin) = self.notification_plugin_ref(_channel_type) else {
+                return Err(format!("unknown channel type: {_channel_type}"));
             };
             plugin.validate_config(_config)
         }
@@ -259,7 +265,7 @@ impl PluginOps for PluginRegistry {
     ) -> serde_json::Value {
         #[cfg(feature = "notifications")]
         {
-            if let Some(plugin) = self.notification_registry.get(_channel_type) {
+            if let Some(plugin) = self.notification_plugin_ref(_channel_type) {
                 return plugin.mask_config_secrets(config);
             }
         }
@@ -274,7 +280,7 @@ impl PluginOps for PluginRegistry {
     ) -> serde_json::Value {
         #[cfg(feature = "notifications")]
         {
-            if let Some(plugin) = self.notification_registry.get(_channel_type) {
+            if let Some(plugin) = self.notification_plugin_ref(_channel_type) {
                 return plugin.restore_config_secrets(incoming, _stored);
             }
         }

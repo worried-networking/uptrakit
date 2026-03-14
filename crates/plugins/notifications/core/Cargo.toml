@@ -6,18 +6,15 @@ authors.workspace = true
 repository.workspace = true
 version.workspace = true
 publish = false
-description = "Core trait and types for notification plugins"
+description = "Core types for notification plugins"
 
 [dependencies]
-async-trait = { workspace = true }
 rootcause = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-uptrakit-extension-framework = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]
 workspace = true
