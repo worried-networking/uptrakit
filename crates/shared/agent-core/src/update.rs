@@ -112,45 +112,15 @@ pub async fn execute_update(
     let timeout_duration = payload.timeout;
     let execution_result = tokio::time::timeout(timeout_duration, async {
         // Run pre-update hooks
-        if !payload.pre_update_hooks.is_empty() {
-            tracing::warn!(
-                hook_count = payload.pre_update_hooks.len(),
-                commands = %hook_summaries(&payload.pre_update_hooks),
-                "security_audit: executing pre-update hooks"
-            );
-            send_output(
-                &output_tx,
-                "[pre-hook] Starting pre-update hooks...",
-                OutputStreamType::System,
-            )
-            .await;
-
-            for hook_cmd in &payload.pre_update_hooks {
-                send_output(
-                    &output_tx,
-                    &format!("[pre-hook] Running: {hook_cmd}"),
-                    OutputStreamType::PreHook,
-                )
-                .await;
-
-                match run_hook_command(hook_cmd, OutputStreamType::PreHook, &output_tx).await {
-                    Ok((output, exit_code)) => {
-                        append_bounded(&mut accumulated_output, &output, MAX_OUTPUT_BYTES);
-                        send_output(
-                            &output_tx,
-                            &format!("[pre-hook] (exit code {exit_code})"),
-                            OutputStreamType::PreHook,
-                        )
-                        .await;
-                    }
-                    Err(e) => {
-                        let error_msg = format!("[pre-hook] Failed: {e}");
-                        send_output(&output_tx, &error_msg, OutputStreamType::System).await;
-                        return Err(AgentCoreError::PreUpdateHookFailed(e.to_string()));
-                    }
-                }
-            }
-        }
+        run_hook_phase(
+            &payload.pre_update_hooks,
+            "pre-hook",
+            OutputStreamType::PreHook,
+            &output_tx,
+            &mut accumulated_output,
+            AgentCoreError::PreUpdateHookFailed,
+        )
+        .await?;
 
         // Attestation gate — abort if policy requires a verified attestation
         // and none was found.
@@ -195,45 +165,15 @@ pub async fn execute_update(
         }
 
         // Run post-update hooks
-        if !payload.post_update_hooks.is_empty() {
-            tracing::warn!(
-                hook_count = payload.post_update_hooks.len(),
-                commands = %hook_summaries(&payload.post_update_hooks),
-                "security_audit: executing post-update hooks"
-            );
-            send_output(
-                &output_tx,
-                "[post-hook] Starting post-update hooks...",
-                OutputStreamType::System,
-            )
-            .await;
-
-            for hook_cmd in &payload.post_update_hooks {
-                send_output(
-                    &output_tx,
-                    &format!("[post-hook] Running: {hook_cmd}"),
-                    OutputStreamType::PostHook,
-                )
-                .await;
-
-                match run_hook_command(hook_cmd, OutputStreamType::PostHook, &output_tx).await {
-                    Ok((output, exit_code)) => {
-                        append_bounded(&mut accumulated_output, &output, MAX_OUTPUT_BYTES);
-                        send_output(
-                            &output_tx,
-                            &format!("[post-hook] (exit code {exit_code})"),
-                            OutputStreamType::PostHook,
-                        )
-                        .await;
-                    }
-                    Err(e) => {
-                        let error_msg = format!("[post-hook] Failed: {e}");
-                        send_output(&output_tx, &error_msg, OutputStreamType::System).await;
-                        return Err(AgentCoreError::PostUpdateHookFailed(e.to_string()));
-                    }
-                }
-            }
-        }
+        run_hook_phase(
+            &payload.post_update_hooks,
+            "post-hook",
+            OutputStreamType::PostHook,
+            &output_tx,
+            &mut accumulated_output,
+            AgentCoreError::PostUpdateHookFailed,
+        )
+        .await?;
 
         Ok(())
     })
@@ -453,6 +393,61 @@ async fn execute_plugin_update(
     }
 
     Ok(update_output)
+}
+
+/// Execute a sequence of hook commands, streaming output and collecting results.
+///
+/// Returns `Ok(())` if all hooks succeed, or `Err(AgentCoreError)` on the
+/// first failure (pre-hooks abort the update, post-hooks abort further hooks).
+async fn run_hook_phase(
+    hooks: &[HookCommand],
+    phase_label: &str,
+    stream_type: OutputStreamType,
+    output_tx: &mpsc::Sender<UpdateOutputMessage>,
+    accumulated_output: &mut String,
+    make_error: fn(String) -> AgentCoreError,
+) -> Result<(), AgentCoreError> {
+    if hooks.is_empty() {
+        return Ok(());
+    }
+    tracing::warn!(
+        hook_count = hooks.len(),
+        commands = %hook_summaries(hooks),
+        "security_audit: executing {phase_label} hooks",
+    );
+    send_output(
+        output_tx,
+        &format!("[{phase_label}] Starting {phase_label} hooks..."),
+        OutputStreamType::System,
+    )
+    .await;
+
+    for hook_cmd in hooks {
+        send_output(
+            output_tx,
+            &format!("[{phase_label}] Running: {hook_cmd}"),
+            stream_type,
+        )
+        .await;
+
+        match run_hook_command(hook_cmd, stream_type, output_tx).await {
+            Ok((output, exit_code)) => {
+                append_bounded(accumulated_output, &output, MAX_OUTPUT_BYTES);
+                send_output(
+                    output_tx,
+                    &format!("[{phase_label}] (exit code {exit_code})"),
+                    stream_type,
+                )
+                .await;
+            }
+            Err(e) => {
+                let error_msg = format!("[{phase_label}] Failed: {e}");
+                send_output(output_tx, &error_msg, OutputStreamType::System).await;
+                return Err(make_error(e.to_string()));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Execute a `HookCommand`, dispatching to shell or direct exec as appropriate.
