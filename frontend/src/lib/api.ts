@@ -702,13 +702,15 @@ export function getSoftwareItems(
 	page?: number,
 	perPage?: number,
 	featured?: boolean,
-	hostId?: string
+	hostId?: string,
+	updatable?: boolean
 ): Promise<PaginatedResponse<SoftwareItemResponse>> {
 	const params = new URLSearchParams();
 	if (page != null) params.set('page', String(page));
 	if (perPage != null) params.set('per_page', String(perPage));
 	if (featured != null) params.set('featured', String(featured));
 	if (hostId != null) params.set('host_id', hostId);
+	if (updatable != null) params.set('updatable', String(updatable));
 	const query = params.toString();
 	return request(`/software-items${query ? `?${query}` : ''}`);
 }

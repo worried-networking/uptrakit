@@ -45,6 +45,7 @@
 	let submitting: boolean = $state(false);
 	let checkingVersionsId: string | null = $state(null);
 	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'featured');
+	let showUpdatableOnly: boolean = $state(page.url.searchParams.get('updatable') === 'true');
 
 	const tabExtensions = $derived(getTabExtensions('software'));
 	const isItemsTab = $derived(activeTab === 'all' || activeTab === 'featured' || activeTab === 'unfeatured');
@@ -95,6 +96,7 @@
 	$effect(() => {
 		const parts: string[] = [];
 		if (activeTab !== 'all') parts.push(`tab=${activeTab}`);
+		if (isItemsTab && showUpdatableOnly) parts.push('updatable=true');
 		if (isItemsTab && currentPage > 1) parts.push(`page=${currentPage}`);
 		const search = parts.join('&');
 		goto(search ? `${location.pathname}?${search}` : location.pathname, {
@@ -143,7 +145,13 @@
 			error = null;
 		}
 		try {
-			const result = await getSoftwareItems(page, undefined, featuredFilter());
+			const result = await getSoftwareItems(
+				page,
+				undefined,
+				featuredFilter(),
+				undefined,
+				showUpdatableOnly ? true : undefined
+			);
 			items = result.items;
 			currentPage = result.page;
 			totalPages = result.total_pages;
@@ -164,6 +172,8 @@
 		activeTab = tab;
 		if (tab === 'all' || tab === 'featured' || tab === 'unfeatured') {
 			loadAll(1);
+		} else {
+			showUpdatableOnly = false;
 		}
 	}
 
@@ -421,6 +431,20 @@
 					</button>
 				{/each}
 			</div>
+			{#if isItemsTab}
+				<label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+					<input
+						class="checkbox"
+						type="checkbox"
+						bind:checked={showUpdatableOnly}
+						onchange={() => {
+							currentPage = 1;
+							loadAll(1);
+						}}
+					/>
+					Updates available
+				</label>
+			{/if}
 			{#if isItemsTab && canManage}
 				<button class="btn preset-filled-primary-500" onclick={() => (showAddModal = true)}>Add Software</button>
 			{/if}
@@ -555,7 +579,10 @@
 							{:else}
 								<tr>
 									<td colspan={canManage ? 7 : 4} class="py-8 text-center">
-										{#if activeTab === 'featured'}
+										{#if showUpdatableOnly}
+											<p class="text-lg font-medium">No updates available</p>
+											<p class="mt-1 text-sm text-surface-500">All software in this view is up to date.</p>
+										{:else if activeTab === 'featured'}
 											<p class="text-lg font-medium">No featured software</p>
 											<p class="mt-1 text-sm text-surface-500">
 												Feature software items to highlight them on the dashboard.
