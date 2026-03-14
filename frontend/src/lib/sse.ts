@@ -189,6 +189,7 @@ export type AdminEventType =
 	| 'software_item_updated'
 	| 'software_item_created'
 	| 'version_check_completed'
+	| 'update_triggered'
 	| 'update_started'
 	| 'update_completed'
 	| 'discovery_completed'

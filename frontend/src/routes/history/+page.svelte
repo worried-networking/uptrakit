@@ -84,17 +84,40 @@
 			// Subscribe to admin events for real-time list updates.
 			disconnectEventStream = connectEventStream({
 				onEvent: (eventType, data) => {
-					if (eventType === 'update_started') {
+					if (eventType === 'update_triggered') {
+						// Reload page 1 when a new update is created so the entry
+						// appears immediately, but only when the active filter would
+						// include it (pending / queued / all).
+						if (
+							currentPage === 1 &&
+							(statusFilter === 'all' || statusFilter === 'pending' || statusFilter === 'queued')
+						) {
+							loadHistory(1);
+						}
+					} else if (eventType === 'update_started') {
 						const historyId = data.update_history_id as string;
 						const interactive = data.interactive as boolean;
-						// Mark the matching item as interactive so the badge appears
-						// immediately without waiting for a reload.
-						items = items.map((i) => (i.id === historyId ? { ...i, interactive } : i));
+						const alreadyInList = items.some((i) => i.id === historyId);
+						// Update status + interactive flag on the existing item immediately,
+						// without a round-trip to the server.
+						items = items.map((i) => (i.id === historyId ? { ...i, status: 'in_progress' as const, interactive } : i));
+						// If the item is not visible yet, reload page 1 when the active
+						// filter would include in-progress items.
+						if (!alreadyInList && currentPage === 1 && (statusFilter === 'all' || statusFilter === 'in_progress')) {
+							loadHistory(1);
+						}
 					} else if (eventType === 'update_completed') {
-						// Reload the completed item so status and output are fresh.
 						const historyId = data.update_history_id as string;
+						const status = data.status as string;
 						if (items.some((i) => i.id === historyId)) {
+							// Refresh only the affected row — fetches final output and status.
 							reloadItem(historyId);
+						} else if (
+							currentPage === 1 &&
+							(statusFilter === 'all' || statusFilter === 'completed' || statusFilter === status)
+						) {
+							// Completed items move into view on these filters.
+							loadHistory(1);
 						}
 					}
 				}
