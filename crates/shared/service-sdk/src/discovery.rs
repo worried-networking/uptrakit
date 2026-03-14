@@ -139,7 +139,11 @@ pub async fn browse_mdns() -> Result<Option<DiscoveryCache>, String> {
         {
             Ok(Ok(Ok(event))) => {
                 if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
-                    let addresses: Vec<IpAddr> = info.get_addresses().iter().copied().collect();
+                    let addresses: Vec<IpAddr> = info
+                        .get_addresses()
+                        .iter()
+                        .map(|ip| ip.to_ip_addr())
+                        .collect();
                     let port = info.get_port();
                     let properties: Vec<(&str, &str)> = info
                         .get_properties()
