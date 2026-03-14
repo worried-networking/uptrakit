@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import type { Snippet } from 'svelte';
 
 	let {
@@ -75,7 +74,7 @@
 		}
 	}
 
-	onMount(() => {
+	$effect(() => {
 		const rect = menuEl.getBoundingClientRect();
 		const vw = window.innerWidth;
 		const vh = window.innerHeight;
@@ -102,7 +101,13 @@
 		visible = true;
 
 		// Auto-focus first menu item after positioning.
-		focusItem(0);
+		// Inline the initial focus instead of calling focusItem() to avoid tracking
+		// focusedIndex as an effect dependency (focusItem reads it after writing it).
+		const initialItems = getMenuItems();
+		if (initialItems.length > 0) {
+			focusedIndex = 0;
+			initialItems[0].focus();
+		}
 	});
 </script>
 

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -38,9 +37,6 @@
 		{ id: 'deactivate', label: 'Deactivate', destructive: true }
 	];
 
-	let refreshInterval: ReturnType<typeof setInterval> | null = null;
-	let unsubscribers: (() => void)[] = [];
-
 	$effect(() => {
 		const search = currentPage > 1 ? `page=${currentPage}` : '';
 		goto(search ? `${location.pathname}?${search}` : location.pathname, {
@@ -50,22 +46,21 @@
 		});
 	});
 
-	onMount(() => {
+	$effect(() => {
 		loadHosts(currentPage);
-		unsubscribers.push(
+		const unsubs = [
 			subscribeToEvent('host_updated', () => loadHosts(currentPage, true)),
 			subscribeToEvent('host_created', () => loadHosts(currentPage, true)),
 			subscribeToEvent('host_deleted', () => loadHosts(currentPage, true)),
 			subscribeToEvent('discovery_completed', () => loadHosts(currentPage, true))
-		);
-		refreshInterval = setInterval(() => {
+		];
+		const interval = setInterval(() => {
 			if (document.visibilityState === 'visible') loadHosts(currentPage, true);
 		}, 300_000);
-	});
-
-	onDestroy(() => {
-		for (const unsub of unsubscribers) unsub();
-		if (refreshInterval) clearInterval(refreshInterval);
+		return () => {
+			for (const unsub of unsubs) unsub();
+			clearInterval(interval);
+		};
 	});
 
 	async function loadHosts(page: number, background = false) {

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy, untrack } from 'svelte';
+	import { untrack } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -76,9 +76,6 @@
 		return acts;
 	});
 
-	let refreshInterval: ReturnType<typeof setInterval> | null = null;
-	let unsubscribers: (() => void)[] = [];
-
 	$effect(() => {
 		const parts: string[] = [];
 		if (capabilityFilter !== 'all') parts.push(`capability=${capabilityFilter}`);
@@ -95,22 +92,15 @@
 		const _filter = capabilityFilter; // explicit dependency tracking
 		loadServices(untrack(() => currentPage));
 
-		refreshInterval = setInterval(() => {
+		const interval = setInterval(() => {
 			if (document.visibilityState === 'visible') loadServices(currentPage, true);
 		}, 300_000);
+		const unsubStatusChanged = subscribeToEvent('service_status_changed', () => loadServices(currentPage, true));
 
 		return () => {
-			if (refreshInterval) clearInterval(refreshInterval);
+			clearInterval(interval);
+			unsubStatusChanged();
 		};
-	});
-
-	onMount(() => {
-		unsubscribers.push(subscribeToEvent('service_status_changed', () => loadServices(currentPage, true)));
-	});
-
-	onDestroy(() => {
-		for (const unsub of unsubscribers) unsub();
-		if (refreshInterval) clearInterval(refreshInterval);
 	});
 
 	async function loadServices(page: number, background = false) {

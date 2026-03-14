@@ -3,7 +3,7 @@ import { fileURLToPath, URL } from 'url';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-	plugins: [svelte({ hot: false })],
+	plugins: [svelte()],
 	resolve: {
 		// Force browser entry points so Svelte's client runtime is used in jsdom
 		// (prevents "mount() is not available on the server" errors).

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { SystemAlert } from '$lib/types';
-	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import {
@@ -47,7 +46,7 @@
 		}
 	}
 
-	onMount(() => {
+	$effect(() => {
 		initialize();
 		initTheme();
 	});
