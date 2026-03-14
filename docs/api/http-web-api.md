@@ -103,6 +103,13 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
   (`host_software_item_plugins`), not on the item itself. Create (`POST`) and update (`PATCH`)
   accept an optional `icon_url` field (HTTPS only, max 2048 chars) to associate an icon/logo image
   with the item. Send `null` to clear an existing icon URL.
+  The `GET /api/v1/software-items` list endpoint accepts the following optional query parameters:
+  - `featured` (bool): filter by featured status (`true` = featured only, `false` = unfeatured only).
+  - `host_id` (UUID): only return items assigned to the given host.
+  - `updatable` (bool): `true` = only items where at least one active host has an update available
+    (`installed_version != latest_version`, both non-null); `false` = only items where no active
+    host has an update available. The filter is applied at the database layer so pagination totals
+    are accurate.
 - `POST /api/v1/software-items/{id}/hosts`: assign a software item to one or more hosts. Each host
   assignment carries a list of role-specific plugin assignments (`plugins: Vec<HostPluginRoleAssignment>`),
   where each role entry specifies the `role`, `plugin_type`, optional `plugin_config_id` (or inline `plugin_config`),
@@ -1048,7 +1055,7 @@ All paginated endpoints return a `PaginatedResponse<T>`:
 | `GET /api/v1/services` | `ListServicesQuery` (includes `page`/`per_page`) | Filterable by `capability`, `status` |
 | `GET /api/v1/system-services` | `ListSystemServicesQuery` (includes `page`/`per_page`) | Filterable by `capability`, `status` |
 | `GET /api/v1/hosts` | `PaginationParams` | |
-| `GET /api/v1/software-items` | `PaginationParams` | |
+| `GET /api/v1/software-items` | `ListSoftwareItemsParams` | Filterable by `featured` (bool), `host_id` (UUID), `updatable` (bool) |
 | `GET /api/v1/update-history` | `UpdateHistoryQuery` (includes `page`/`per_page`) | Filterable by `host_id`, `software_item_id`, `status` |
 | `GET /api/v1/plugin-configs` | `PaginationParams` | |
 | `GET /api/v1/enrollment-tokens` | `ListEnrollmentTokensQuery` (includes `page`/`per_page`) | |
