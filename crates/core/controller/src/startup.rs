@@ -524,6 +524,44 @@ pub(crate) async fn rotate_master_key(
 // Phase 6: Settings reconciliation
 // ---------------------------------------------------------------------------
 
+/// Reconcile a nullable string setting: empty string <-> JSON null, returning
+/// `Some(value)` for non-empty values and `None` for empty/null.
+async fn reconcile_nullable_string(
+    db: &sea_orm::DatabaseConnection,
+    key: SettingKey,
+    raw: &uptrakit_web_api::settings_store::RawSettings,
+    cli_value: Option<String>,
+    force: bool,
+) -> crate::Result<Option<String>> {
+    let value = crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
+        db,
+        key,
+        raw,
+        cli_value,
+        default_value: String::new(),
+        force,
+        convert: crate::reconcile::JsonConvert {
+            to_json: |v| {
+                if v.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::json!(v)
+                }
+            },
+            from_json: |v| {
+                if v.is_null() {
+                    Some(String::new())
+                } else {
+                    v.as_str().map(String::from)
+                }
+            },
+        },
+    })
+    .await
+    .context(AppError::Settings)?;
+    Ok(if value.is_empty() { None } else { Some(value) })
+}
+
 /// Reconcile all DB-managed global settings with CLI values and update the
 /// in-memory [`Settings`] object.
 pub(crate) async fn reconcile_all_settings(
@@ -580,109 +618,38 @@ pub(crate) async fn reconcile_all_settings(
     .context(AppError::Settings)?;
     settings.set_real_ip_header(real_ip_header).await;
 
-    let forwarded_cert_info_header =
-        crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
-            db,
-            key: SettingKey::ForwardedClientCertInfoHeader,
-            raw: global_raw,
-            cli_value: args.forwarded_client_cert_info_header.clone(),
-            default_value: String::new(),
-            force,
-            convert: crate::reconcile::JsonConvert {
-                to_json: |v| {
-                    if v.is_empty() {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::json!(v)
-                    }
-                },
-                from_json: |v| {
-                    if v.is_null() {
-                        Some(String::new())
-                    } else {
-                        v.as_str().map(String::from)
-                    }
-                },
-            },
-        })
-        .await
-        .context(AppError::Settings)?;
-    let forwarded_cert_info_opt = if forwarded_cert_info_header.is_empty() {
-        None
-    } else {
-        Some(forwarded_cert_info_header)
-    };
+    let forwarded_cert_info_opt = reconcile_nullable_string(
+        db,
+        SettingKey::ForwardedClientCertInfoHeader,
+        global_raw,
+        args.forwarded_client_cert_info_header.clone(),
+        force,
+    )
+    .await?;
     settings
         .set_forwarded_client_cert_info_header(forwarded_cert_info_opt.clone())
         .await;
 
-    let forwarded_cert_pem_header =
-        crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
-            db,
-            key: SettingKey::ForwardedClientCertPemHeader,
-            raw: global_raw,
-            cli_value: args.forwarded_client_cert_pem_header.clone(),
-            default_value: String::new(),
-            force,
-            convert: crate::reconcile::JsonConvert {
-                to_json: |v| {
-                    if v.is_empty() {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::json!(v)
-                    }
-                },
-                from_json: |v| {
-                    if v.is_null() {
-                        Some(String::new())
-                    } else {
-                        v.as_str().map(String::from)
-                    }
-                },
-            },
-        })
-        .await
-        .context(AppError::Settings)?;
-    let forwarded_cert_pem_opt = if forwarded_cert_pem_header.is_empty() {
-        None
-    } else {
-        Some(forwarded_cert_pem_header)
-    };
+    let forwarded_cert_pem_opt = reconcile_nullable_string(
+        db,
+        SettingKey::ForwardedClientCertPemHeader,
+        global_raw,
+        args.forwarded_client_cert_pem_header.clone(),
+        force,
+    )
+    .await?;
     settings
         .set_forwarded_client_cert_pem_header(forwarded_cert_pem_opt.clone())
         .await;
 
-    let pki_addr = crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
+    let pki_addr_opt = reconcile_nullable_string(
         db,
-        key: SettingKey::PkiAddr,
-        raw: global_raw,
-        cli_value: args.pki_addr.clone(),
-        default_value: String::new(),
+        SettingKey::PkiAddr,
+        global_raw,
+        args.pki_addr.clone(),
         force,
-        convert: crate::reconcile::JsonConvert {
-            to_json: |v| {
-                if v.is_empty() {
-                    serde_json::Value::Null
-                } else {
-                    serde_json::json!(v)
-                }
-            },
-            from_json: |v| {
-                if v.is_null() {
-                    Some(String::new())
-                } else {
-                    v.as_str().map(String::from)
-                }
-            },
-        },
-    })
-    .await
-    .context(AppError::Settings)?;
-    let pki_addr_opt = if pki_addr.is_empty() {
-        None
-    } else {
-        Some(pki_addr)
-    };
+    )
+    .await?;
     settings.set_pki_addr(pki_addr_opt.clone()).await;
 
     // Warn if cert headers are configured but no trusted proxies
@@ -846,75 +813,28 @@ pub(crate) async fn reconcile_all_settings(
             .await
             .context(AppError::Settings)?;
 
-        let zeroconf_url = crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
+        let zeroconf_url_opt = reconcile_nullable_string(
             db,
-            key: SettingKey::ZeroconfUrl,
-            raw: global_raw,
-            cli_value: args.zeroconf_url.clone(),
-            default_value: String::new(),
+            SettingKey::ZeroconfUrl,
+            global_raw,
+            args.zeroconf_url.clone(),
             force,
-            convert: crate::reconcile::JsonConvert {
-                to_json: |v| {
-                    if v.is_empty() {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::json!(v)
-                    }
-                },
-                from_json: |v| {
-                    if v.is_null() {
-                        Some(String::new())
-                    } else {
-                        v.as_str().map(String::from)
-                    }
-                },
-            },
-        })
-        .await
-        .context(AppError::Settings)?;
-        let zeroconf_url_opt = if zeroconf_url.is_empty() {
-            None
-        } else {
-            Some(zeroconf_url)
-        };
+        )
+        .await?;
 
         // Fall back to reconciled pki_addr if no explicit zeroconf_pki_addr
         let zeroconf_pki_addr_cli = args
             .zeroconf_pki_addr
             .clone()
             .or_else(|| pki_addr_opt.clone());
-        let zeroconf_pki_addr =
-            crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
-                db,
-                key: SettingKey::ZeroconfPkiAddr,
-                raw: global_raw,
-                cli_value: zeroconf_pki_addr_cli,
-                default_value: String::new(),
-                force,
-                convert: crate::reconcile::JsonConvert {
-                    to_json: |v| {
-                        if v.is_empty() {
-                            serde_json::Value::Null
-                        } else {
-                            serde_json::json!(v)
-                        }
-                    },
-                    from_json: |v| {
-                        if v.is_null() {
-                            Some(String::new())
-                        } else {
-                            v.as_str().map(String::from)
-                        }
-                    },
-                },
-            })
-            .await
-            .context(AppError::Settings)?;
-        let zeroconf_pki_addr_opt = if zeroconf_pki_addr.is_empty() {
-            None
-        } else {
-            Some(zeroconf_pki_addr)
-        };
+        let zeroconf_pki_addr_opt = reconcile_nullable_string(
+            db,
+            SettingKey::ZeroconfPkiAddr,
+            global_raw,
+            zeroconf_pki_addr_cli,
+            force,
+        )
+        .await?;
 
         let zeroconf_snapshot = uptrakit_web_api::settings::ZeroconfSnapshot {
             enabled: zeroconf_enabled,
