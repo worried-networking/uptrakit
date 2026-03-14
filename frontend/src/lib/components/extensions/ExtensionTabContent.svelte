@@ -97,6 +97,21 @@
 			preLoadAction={extension.ui.pre_load_action}
 		/>
 	{/if}
+	{#if extension.ui.footer_actions && extension.ui.footer_actions.length > 0}
+		<div class="mt-4 flex flex-wrap gap-2">
+			{#each extension.ui.footer_actions as actionId (actionId)}
+				{@const action = resolveAction(actionId)}
+				{#if action}
+					<ActionButton
+						extensionId={extension.id}
+						{action}
+						serviceId={selectedServiceId}
+						encryptionPublicKey={selectedEncryptionKey}
+					/>
+				{/if}
+			{/each}
+		</div>
+	{/if}
 {:else if extension.ui.type === 'key_value'}
 	<SchemaKeyValue extensionId={extension.id} dataAction={extension.ui.data_action} serviceId={selectedServiceId} />
 {:else if extension.ui.type === 'actions'}

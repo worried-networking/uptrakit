@@ -621,6 +621,9 @@ pub struct FormDef {
     /// Values are used as initial field values (overriding `default_value`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pre_load_action: Option<String>,
+    /// Action IDs to render as buttons below the form (after the save button).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub footer_actions: Vec<String>,
 }
 
 impl FormDef {
@@ -629,12 +632,19 @@ impl FormDef {
         Self {
             fields,
             pre_load_action: None,
+            footer_actions: Vec::new(),
         }
     }
 
     /// Set the action ID to invoke when the form opens for pre-population.
     pub fn with_pre_load_action(mut self, action_id: impl Into<String>) -> Self {
         self.pre_load_action = Some(action_id.into());
+        self
+    }
+
+    /// Set action IDs to render as buttons below the form (after the save button).
+    pub fn with_footer_actions(mut self, actions: Vec<String>) -> Self {
+        self.footer_actions = actions;
         self
     }
 }
@@ -1217,6 +1227,7 @@ mod tests {
                     visible_when: None,
                 }],
                 pre_load_action: None,
+                footer_actions: vec![],
             },
             submit_action: Some("validate-host".to_string()),
         };
@@ -1236,6 +1247,7 @@ mod tests {
                 form: FormDef {
                     fields: vec![],
                     pre_load_action: None,
+                    footer_actions: vec![],
                 },
                 submit_action: None,
             }],
@@ -1443,6 +1455,7 @@ mod tests {
                 visible_when: None,
             }],
             pre_load_action: None,
+            footer_actions: vec![],
         };
 
         let json = serde_json::to_string(&form).expect("serialize should succeed");

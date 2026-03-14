@@ -888,6 +888,8 @@ export interface FormDef {
 	fields: FieldDef[];
 	/** Action ID to invoke when the form opens, to pre-populate field values from the response. */
 	pre_load_action?: string;
+	/** Action IDs rendered as buttons below the form save button. */
+	footer_actions?: string[];
 }
 
 export interface WizardStep {
@@ -964,7 +966,7 @@ export type ExtensionUi =
 			/** Default number of items per page. When absent, defaults to 20. */
 			default_per_page?: number;
 	  }
-	| { type: 'form'; fields: FieldDef[]; pre_load_action?: string }
+	| { type: 'form'; fields: FieldDef[]; pre_load_action?: string; footer_actions?: string[] }
 	| { type: 'key_value'; data_action: string }
 	| { type: 'actions'; actions: string[] };
 
