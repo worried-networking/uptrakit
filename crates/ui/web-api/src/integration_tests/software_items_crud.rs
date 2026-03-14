@@ -355,3 +355,144 @@ async fn approve_non_pending_item_returns_409() {
 
     assert_eq!(status, http::StatusCode::CONFLICT);
 }
+
+/// The `updatable` query parameter filters by update availability at the DB layer,
+/// so total counts and pagination are correct regardless of page size.
+#[tokio::test]
+async fn list_with_updatable_filter() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    // Create two software items.
+    let (_, item_a): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/software-items",
+            &serde_json::json!({ "name": "App A" }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+    let item_a_id: Uuid = item_a["id"].as_str().expect("id").parse().expect("uuid");
+
+    let (_, item_b): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/software-items",
+            &serde_json::json!({ "name": "App B" }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+    let item_b_id: Uuid = item_b["id"].as_str().expect("id").parse().expect("uuid");
+
+    // Insert a host.
+    let now = time::OffsetDateTime::now_utc();
+    let host_id = Uuid::now_v7();
+    host::ActiveModel {
+        id: Set(host_id),
+        tenant_id: Set(app.tenant_id),
+        machine_id: Set(host_id.to_string()),
+        hostname: Set(format!("host-{host_id}")),
+        friendly_name: Set(format!("Host {host_id}")),
+        os_type: Set(Some("linux".to_string())),
+        os_version: Set(None),
+        architecture: Set(None),
+        ip_address: Set(None),
+        last_seen_at: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deactivated_at: Set(None),
+    }
+    .insert(&app.db)
+    .await
+    .expect("insert host");
+
+    // App A: update available (installed 1.0, latest 2.0).
+    host_software_item::ActiveModel {
+        id: Set(Uuid::now_v7()),
+        host_id: Set(host_id),
+        software_item_id: Set(item_a_id),
+        qualifier: Set(None),
+        installed_version: Set(Some("1.0".to_string())),
+        installed_version_detected_at: Set(None),
+        latest_version: Set(Some("2.0".to_string())),
+        latest_version_fetched_at: Set(None),
+        latest_release_metadata: Set(None),
+        last_updated_at: Set(None),
+        linked_at: Set(now),
+        update_category: Set("unknown".to_string()),
+        plugin_config_id: Set(None),
+        package_identifier: Set(None),
+        deactivated_at: Set(None),
+    }
+    .insert(&app.db)
+    .await
+    .expect("insert host_software_item for App A");
+
+    // App B: up to date (installed 3.0, latest 3.0).
+    host_software_item::ActiveModel {
+        id: Set(Uuid::now_v7()),
+        host_id: Set(host_id),
+        software_item_id: Set(item_b_id),
+        qualifier: Set(None),
+        installed_version: Set(Some("3.0".to_string())),
+        installed_version_detected_at: Set(None),
+        latest_version: Set(Some("3.0".to_string())),
+        latest_version_fetched_at: Set(None),
+        latest_release_metadata: Set(None),
+        last_updated_at: Set(None),
+        linked_at: Set(now),
+        update_category: Set("unknown".to_string()),
+        plugin_config_id: Set(None),
+        package_identifier: Set(None),
+        deactivated_at: Set(None),
+    }
+    .insert(&app.db)
+    .await
+    .expect("insert host_software_item for App B");
+
+    // updatable=true → only App A.
+    let (status, body): (_, serde_json::Value) = client
+        .get("/api/v1/software-items?updatable=true")
+        .bearer(&token)
+        .send_json()
+        .await;
+    assert_eq!(status, http::StatusCode::OK);
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(
+        items.len(),
+        1,
+        "only App A should appear with updatable=true"
+    );
+    assert_eq!(items[0]["name"], "App A");
+    assert_eq!(body["total"], 1, "total must reflect DB-side filter");
+    assert!(items[0]["update_available"].as_bool().unwrap_or(false));
+
+    // updatable=false → only App B.
+    let (status, body): (_, serde_json::Value) = client
+        .get("/api/v1/software-items?updatable=false")
+        .bearer(&token)
+        .send_json()
+        .await;
+    assert_eq!(status, http::StatusCode::OK);
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(
+        items.len(),
+        1,
+        "only App B should appear with updatable=false"
+    );
+    assert_eq!(items[0]["name"], "App B");
+    assert_eq!(body["total"], 1, "total must reflect DB-side filter");
+    assert!(!items[0]["update_available"].as_bool().unwrap_or(true));
+
+    // No filter → both items.
+    let (status, body): (_, serde_json::Value) = client
+        .get("/api/v1/software-items")
+        .bearer(&token)
+        .send_json()
+        .await;
+    assert_eq!(status, http::StatusCode::OK);
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 2, "both items should appear with no filter");
+    assert_eq!(body["total"], 2);
+}
