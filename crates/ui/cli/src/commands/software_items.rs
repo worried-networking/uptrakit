@@ -272,6 +272,7 @@ pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<SoftwareIt
         per_page: params.per_page,
         featured: None,
         host_id: None,
+        updatable: None,
     };
     client.list_software_items(&list_params).await.context_to()
 }

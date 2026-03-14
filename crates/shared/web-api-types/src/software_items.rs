@@ -316,6 +316,13 @@ pub struct ListSoftwareItemsParams {
     pub featured: Option<bool>,
     /// Filter by host — only return software items assigned to this host.
     pub host_id: Option<Uuid>,
+    /// Filter by update availability.
+    ///
+    /// - `true`: only items where at least one active host has an update available
+    ///   (`installed_version != latest_version`, both non-null).
+    /// - `false`: only items where no active host has an update available.
+    /// - Omit: no filter.
+    pub updatable: Option<bool>,
 }
 
 impl ListSoftwareItemsParams {
@@ -844,5 +851,13 @@ mod tests {
         assert!(params.featured.is_none());
         assert!(params.page.is_none());
         assert!(params.per_page.is_none());
+    }
+
+    #[test]
+    fn list_software_items_params_updatable_filter() {
+        let json = serde_json::json!({ "updatable": true });
+        let params: ListSoftwareItemsParams =
+            serde_json::from_value(json).expect("deserialization should succeed");
+        assert_eq!(params.updatable, Some(true));
     }
 }
