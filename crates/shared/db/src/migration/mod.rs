@@ -48,6 +48,7 @@ mod m20260321_000002_updates_queue;
 mod m20260322_000001_hosts_lower_name_index;
 mod m20260322_000002_hsi_updatable_index;
 mod m20260322_000003_update_history_truncated;
+mod m20260323_000001_notification_permissions;
 
 pub struct Migrator;
 
@@ -100,6 +101,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260322_000001_hosts_lower_name_index::Migration),
             Box::new(m20260322_000002_hsi_updatable_index::Migration),
             Box::new(m20260322_000003_update_history_truncated::Migration),
+            Box::new(m20260323_000001_notification_permissions::Migration),
         ]
     }
 }
@@ -343,6 +345,8 @@ mod tests {
             "approve_system_services",
             "manage_users",
             "manage_ignores",
+            "view_notifications",
+            "manage_notifications",
         ] {
             let ss_perm_stmt = sea_orm_migration::prelude::Query::select()
                 .expr(sea_orm_migration::prelude::Func::count(
