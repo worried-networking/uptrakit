@@ -24,6 +24,7 @@ Quality gates are automatically enforced locally via git hooks managed by
 | `cargo clippy --all-targets --no-default-features --features db-sqlite` | |
 | `cargo deny check` | Fast (~3 s) |
 | `cargo test --no-default-features --features db-sqlite` | |
+| `sentrux check .` | Skipped gracefully if `sentrux` is not installed |
 | `npm run check` + `npm run test` + `npm run build` (cwd: `frontend/`) | Guarded by `node_modules` |
 
 ### Bypass methods
@@ -129,3 +130,21 @@ All warnings and errors must be resolved; do not silence them by adding exceptio
 The `.markdownlintignore` file excludes `node_modules/`, `target/`, `.claude/`, and `CODEREVIEW.md`.
 
 CI runs markdownlint on every PR. A PR that fails any quality gate will not merge.
+
+## Architectural rules (sentrux)
+
+Run `sentrux check .` to validate the architectural constraints defined in `.sentrux/rules.toml`.
+This checks layer ordering, boundary rules, and structural thresholds (coupling grade, cyclomatic
+complexity, file/function length, circular dependencies).
+
+Install sentrux if not already present:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sentrux/sentrux/main/install.sh | sh
+```
+
+```sh
+sentrux check .
+```
+
+The pre-push hook runs this automatically when `sentrux` is on `PATH`. CI always runs it.

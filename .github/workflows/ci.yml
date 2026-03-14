@@ -119,6 +119,15 @@ jobs:
       - name: Run system integration tests
         run: cargo test -p uptrakit-integration-tests -- --ignored
 
+  sentrux:
+    runs-on:
+      - ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install sentrux
+        run: curl -fsSL https://raw.githubusercontent.com/sentrux/sentrux/main/install.sh | sh
+      - run: sentrux check .
+
   frontend:
     runs-on:
       - ubuntu-latest

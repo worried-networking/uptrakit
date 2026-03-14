@@ -1,0 +1,369 @@
+# Sentrux architectural rules for uptrakit
+# Run:  sentrux check .
+# MCP:  sentrux.check_rules()
+
+# ── Constraints ───────────────────────────────────────────────────────────────
+
+[constraints]
+
+# max_grade = "C"  # uncomment to enforce an overall health floor
+
+# Cross-crate cycles are already prevented by Cargo; this catches logical
+# module-level cycles within a crate.
+max_cycles = 0
+
+# A complex plugin/auth system will never reach A, but C is manageable.
+max_coupling = "C"
+
+# Rust match arms each add 1 to CC, so route handlers and plugin dispatchers
+# legitimately reach 20+.
+max_cc = 30
+
+# Route handlers and batch executors are inherently long.
+max_fn_lines = 150
+
+max_file_lines = 800
+
+# Plugin registries and route aggregators have intentionally high fan-out.
+no_god_files = false
+
+# ── Layers ────────────────────────────────────────────────────────────────────
+#
+# Dependency direction:  shared <- plugins <- ui <- binaries
+#
+# Sentrux: layer with order=0 can import any higher-order layer.
+# Violation fires when from_order > to_order (more foundational imports less).
+#
+#   0  binaries   crates/core/**      entry-point crates
+#   1  ui         crates/ui/**        web-api, cli
+#   2  plugins    crates/plugins/**   plugin library crates
+#   3  shared     crates/shared/**    foundational types, DB, wire, crypto
+
+[[layers]]
+name = "binaries"
+paths = ["crates/core/**"]
+order = 0
+
+[[layers]]
+name = "ui"
+paths = ["crates/ui/**"]
+order = 1
+
+[[layers]]
+name = "plugins"
+paths = ["crates/plugins/**"]
+order = 2
+
+[[layers]]
+name = "shared"
+paths = ["crates/shared/**"]
+order = 3
+
+# ── Boundaries ────────────────────────────────────────────────────────────────
+
+[[boundaries]]
+from = "crates/plugins/**"
+to = "crates/core/**"
+reason = "Plugin library crates must not depend on binary entry-point crates"
+
+[[boundaries]]
+from = "crates/shared/**"
+to = "crates/ui/**"
+reason = "Shared library crates must not depend on the UI layer"
+
+[[boundaries]]
+from = "crates/shared/**"
+to = "crates/core/**"
+reason = "Shared library crates must not depend on binary entry-point crates"
+
+[[boundaries]]
+from = "crates/core/agent/**"
+to = "crates/ui/web-api/**"
+reason = "Agent must not depend on controller-side web-api"
+
+[[boundaries]]
+from = "crates/plugins/releases/**"
+to = "crates/plugins/package-managers/**"
+reason = "Release plugins must not depend on package manager plugins"
+
+[[boundaries]]
+from = "crates/plugins/package-managers/**"
+to = "crates/plugins/releases/**"
+reason = "Package manager plugins must not depend on release plugins"
+
+[[boundaries]]
+from = "crates/plugins/notifications/**"
+to = "crates/plugins/releases/**"
+reason = "Notification plugins must not depend on release plugins"
+
+[[boundaries]]
+from = "crates/plugins/notifications/**"
+to = "crates/plugins/package-managers/**"
+reason = "Notification plugins must not depend on package manager plugins"
+
+[[boundaries]]
+from = "crates/plugins/notifications/**"
+to = "crates/plugins/discovery/**"
+reason = "Notification plugins must not depend on discovery plugins"
+
+[[boundaries]]
+from = "crates/plugins/discovery/**"
+to = "crates/plugins/notifications/**"
+reason = "Discovery plugins must not depend on notification plugins"
+
+# ── Rule 1: plugins/infrastructure/registry is the only external plugin entry point ──
+
+[[boundaries]]
+from = "crates/shared/**"
+to = "crates/plugins/**"
+reason = "Shared crates must not depend on plugin crates"
+
+[[boundaries]]
+from = "crates/ui/**"
+to = "crates/plugins/releases/**"
+reason = "UI crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/ui/**"
+to = "crates/plugins/package-managers/**"
+reason = "UI crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+# NOTE: web-api currently depends on notifications/registry — known violation to address
+[[boundaries]]
+from = "crates/ui/**"
+to = "crates/plugins/notifications/**"
+reason = "UI crates must not directly import notification plugin crates — move NotificationOps to crates/shared"
+
+[[boundaries]]
+from = "crates/ui/**"
+to = "crates/plugins/discovery/**"
+reason = "UI crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/ui/**"
+to = "crates/plugins/generic/**"
+reason = "UI crates must not directly import the generic shell plugin crate"
+
+[[boundaries]]
+from = "crates/ui/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "UI crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/ui/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "UI crates must not directly import the Proxmox infrastructure plugin"
+
+[[boundaries]]
+from = "crates/core/**"
+to = "crates/plugins/releases/**"
+reason = "Binary crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/**"
+to = "crates/plugins/package-managers/**"
+reason = "Binary crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/**"
+to = "crates/plugins/notifications/**"
+reason = "Binary crates must not directly import notification plugin crates — use infrastructure/registry or move NotificationOps to crates/shared"
+
+[[boundaries]]
+from = "crates/core/**"
+to = "crates/plugins/discovery/**"
+reason = "Binary crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/**"
+to = "crates/plugins/generic/**"
+reason = "Binary crates must not directly import the generic shell plugin crate"
+
+[[boundaries]]
+from = "crates/core/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Binary crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/core/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Binary crates must not directly import the Proxmox infrastructure plugin"
+
+# ── Rule 2: plugins must not depend on wire or web-api ────────────────────────
+# plugins → ui/* is also caught by the layer check; listed explicitly for clarity.
+
+[[boundaries]]
+from = "crates/plugins/**"
+to = "crates/shared/wire/**"
+reason = "Plugins must not depend on the wire protocol — use crates/shared/extension-framework directly"
+
+[[boundaries]]
+from = "crates/plugins/**"
+to = "crates/ui/web-api/**"
+reason = "Plugins must not depend on web-api"
+
+[[boundaries]]
+from = "crates/plugins/**"
+to = "crates/ui/web-api-auth/**"
+reason = "Plugins must not depend on web-api-auth"
+
+[[boundaries]]
+from = "crates/plugins/**"
+to = "crates/ui/web-api-queries/**"
+reason = "Plugins must not depend on web-api-queries"
+
+# ── Rule 3: service processes must not depend on web-api ──────────────────────
+# service-sdk → ui/* is also caught by the layer check (shared=3, ui=1).
+
+[[boundaries]]
+from = "crates/core/agent/**"
+to = "crates/ui/web-api-auth/**"
+reason = "Agent must not depend on web-api-auth"
+
+[[boundaries]]
+from = "crates/core/agent/**"
+to = "crates/ui/web-api-queries/**"
+reason = "Agent must not depend on web-api-queries"
+
+[[boundaries]]
+from = "crates/core/agent-ssh/**"
+to = "crates/ui/web-api/**"
+reason = "SSH agent must not depend on web-api"
+
+[[boundaries]]
+from = "crates/core/agent-ssh/**"
+to = "crates/ui/web-api-auth/**"
+reason = "SSH agent must not depend on web-api-auth"
+
+[[boundaries]]
+from = "crates/core/agent-ssh/**"
+to = "crates/ui/web-api-queries/**"
+reason = "SSH agent must not depend on web-api-queries"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/ui/web-api/**"
+reason = "MQTT service must not depend on web-api"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/ui/web-api-auth/**"
+reason = "MQTT service must not depend on web-api-auth"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/ui/web-api-queries/**"
+reason = "MQTT service must not depend on web-api-queries"
+
+[[boundaries]]
+from = "crates/core/scheduler/**"
+to = "crates/ui/web-api/**"
+reason = "Scheduler must not depend on web-api"
+
+[[boundaries]]
+from = "crates/core/scheduler/**"
+to = "crates/ui/web-api-auth/**"
+reason = "Scheduler must not depend on web-api-auth"
+
+[[boundaries]]
+from = "crates/core/scheduler/**"
+to = "crates/ui/web-api-queries/**"
+reason = "Scheduler must not depend on web-api-queries"
+
+# ── Rule 4: service processes must not depend on controller-internal shared crates ──
+# Scheduler is exempt from the db boundary — direct DB access is its purpose.
+
+[[boundaries]]
+from = "crates/core/agent/**"
+to = "crates/shared/db/**"
+reason = "Agent must not depend on the database layer"
+
+[[boundaries]]
+from = "crates/core/agent/**"
+to = "crates/shared/web-api-types/**"
+reason = "Agent must not depend on HTTP API types"
+
+[[boundaries]]
+from = "crates/core/agent/**"
+to = "crates/shared/openapi-client/**"
+reason = "Agent must not depend on the HTTP API client"
+
+[[boundaries]]
+from = "crates/core/agent/**"
+to = "crates/shared/audit-log/**"
+reason = "Agent must not depend on the audit log"
+
+[[boundaries]]
+from = "crates/core/agent-ssh/**"
+to = "crates/shared/db/**"
+reason = "SSH agent must not depend on the database layer"
+
+[[boundaries]]
+from = "crates/core/agent-ssh/**"
+to = "crates/shared/web-api-types/**"
+reason = "SSH agent must not depend on HTTP API types"
+
+[[boundaries]]
+from = "crates/core/agent-ssh/**"
+to = "crates/shared/openapi-client/**"
+reason = "SSH agent must not depend on the HTTP API client"
+
+[[boundaries]]
+from = "crates/core/agent-ssh/**"
+to = "crates/shared/audit-log/**"
+reason = "SSH agent must not depend on the audit log"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/shared/db/**"
+reason = "MQTT service must not depend on the database layer"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/shared/web-api-types/**"
+reason = "MQTT service must not depend on HTTP API types"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/shared/openapi-client/**"
+reason = "MQTT service must not depend on the HTTP API client"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/shared/audit-log/**"
+reason = "MQTT service must not depend on the audit log"
+
+[[boundaries]]
+from = "crates/core/scheduler/**"
+to = "crates/shared/web-api-types/**"
+reason = "Scheduler must not depend on HTTP API types"
+
+[[boundaries]]
+from = "crates/core/scheduler/**"
+to = "crates/shared/openapi-client/**"
+reason = "Scheduler must not depend on the HTTP API client"
+
+[[boundaries]]
+from = "crates/core/scheduler/**"
+to = "crates/shared/audit-log/**"
+reason = "Scheduler must not depend on the audit log"
+
+[[boundaries]]
+from = "crates/shared/service-sdk/**"
+to = "crates/shared/db/**"
+reason = "Service SDK must not depend on the database layer"
+
+[[boundaries]]
+from = "crates/shared/service-sdk/**"
+to = "crates/shared/web-api-types/**"
+reason = "Service SDK must not depend on HTTP API types"
+
+[[boundaries]]
+from = "crates/shared/service-sdk/**"
+to = "crates/shared/openapi-client/**"
+reason = "Service SDK must not depend on the HTTP API client"
+
+[[boundaries]]
+from = "crates/shared/service-sdk/**"
+to = "crates/shared/audit-log/**"
+reason = "Service SDK must not depend on the audit log"

@@ -33,6 +33,15 @@ fi
 echo "[pre-push] Running cargo test (db-sqlite)..."
 cargo test --no-default-features --features db-sqlite
 
+# --- Sentrux architectural rules ---
+if command -v sentrux >/dev/null 2>&1; then
+  echo "[pre-push] Running sentrux check..."
+  sentrux check .
+else
+  echo "[pre-push] sentrux not found, skipping architectural check."
+  echo "[pre-push] Install: curl -fsSL https://raw.githubusercontent.com/sentrux/sentrux/main/install.sh | sh"
+fi
+
 # --- Frontend ---
 if [ -d frontend/node_modules ]; then
   echo "[pre-push] Running npm check..."
