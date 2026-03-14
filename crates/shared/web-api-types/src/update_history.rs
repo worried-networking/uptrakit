@@ -111,6 +111,12 @@ pub struct UpdateHistoryResponse {
     /// this to show an "Input Required" badge on every in-progress interactive
     /// update in the history list, even when not actively watching the stream.
     pub interactive: bool,
+    /// Whether any output was dropped because it exceeded the output size cap.
+    ///
+    /// When `true`, only the first 50 MB of output is stored. The truncation
+    /// point is marked in the output stream with a system notice line. The
+    /// detail view shows an amber warning banner when this field is `true`.
+    pub output_truncated: bool,
 }
 
 // ---------------------------------------------------------------------------

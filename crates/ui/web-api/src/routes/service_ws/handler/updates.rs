@@ -15,8 +15,8 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrde
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{
     BatchUpdateResultPayload, ControllerMessage, ExecuteUpdatePayload, OutgoingSeq,
-    PluginAssignment, UpdateFinalStatus, UpdateOutputPayload, UpdateResultPayload,
-    UpdateStartedPayload,
+    OutputStreamType, PluginAssignment, UpdateFinalStatus, UpdateOutputPayload,
+    UpdateResultPayload, UpdateStartedPayload,
 };
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, service, service_host,
@@ -531,10 +531,68 @@ pub(super) async fn handle_update_output(
     };
 
     if updated.rows_affected == 0 {
-        tracing::debug!(
-            update_id = %payload.update_history_id,
-            "update output exceeded {MAX_UPDATE_OUTPUT_BYTES} byte cap, dropping"
-        );
+        // Cap exceeded — mark the first truncation atomically and, if this is
+        // the first time, emit a visible system notice into the output stream.
+        let mark_result = update_history::Entity::update_many()
+            .col_expr(update_history::Column::OutputTruncated, Expr::value(true))
+            .filter(update_history::Column::Id.eq(payload.update_history_id))
+            .filter(update_history::Column::OutputTruncated.eq(false))
+            .exec(state.db())
+            .await;
+
+        match mark_result {
+            Ok(r) if r.rows_affected == 1 => {
+                // First truncation — insert and broadcast a system notice line.
+                tracing::warn!(
+                    update_id = %payload.update_history_id,
+                    cap_bytes = MAX_UPDATE_OUTPUT_BYTES,
+                    "update output exceeded cap — truncation notice emitted"
+                );
+                let notice_text = "\n[Output truncated: this update produced more than 50 MB of \
+                    output. Only the first 50 MB is stored.]\n"
+                    .to_string();
+                let notice_id = uuid::Uuid::now_v7();
+                let notice_ts = time::OffsetDateTime::now_utc();
+                let notice_line = update_output_line::ActiveModel {
+                    id: Set(notice_id),
+                    update_history_id: Set(payload.update_history_id),
+                    stream: Set(OutputStreamType::System),
+                    output: Set(notice_text.clone()),
+                    created_at: Set(notice_ts),
+                };
+                if let Err(e) = update_output_line::Entity::insert(notice_line)
+                    .exec(state.db())
+                    .await
+                {
+                    tracing::warn!(error = %e, "failed to insert truncation notice line");
+                }
+                state
+                    .update_output_broadcaster
+                    .send_line(
+                        payload.update_history_id,
+                        notice_id,
+                        notice_text,
+                        OutputStreamType::System,
+                        notice_ts,
+                    )
+                    .await;
+            }
+            Ok(_) => {
+                // Already truncated — quiet drop.
+                tracing::trace!(
+                    update_id = %payload.update_history_id,
+                    "update output exceeded cap, dropping"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    update_id = %payload.update_history_id,
+                    "failed to mark output_truncated"
+                );
+            }
+        }
+
         return ProcessorResponse::cont();
     }
 
@@ -633,22 +691,26 @@ pub(super) async fn handle_update_result(
         buf
     };
 
-    let final_output = if db_output.len() > payload.output.len() {
+    let (final_output, agent_truncated) = if db_output.len() > payload.output.len() {
         tracing::info!(
             update_id = %payload.update_history_id,
             agent_bytes = payload.output.len(),
             db_bytes = db_output.len(),
             "using controller-side streaming output (more complete than agent payload)"
         );
-        db_output
+        // output_truncated already reflects the streaming phase; preserve it.
+        (db_output, false)
     } else if payload.output.len() > MAX_UPDATE_OUTPUT_BYTES {
-        payload.output[..MAX_UPDATE_OUTPUT_BYTES].to_string()
+        (payload.output[..MAX_UPDATE_OUTPUT_BYTES].to_string(), true)
     } else {
-        payload.output
+        (payload.output, false)
     };
 
     active.output = Set(final_output.clone());
     active.output_bytes = Set(final_output.len() as i64);
+    if agent_truncated {
+        active.output_truncated = Set(true);
+    }
     if payload.from_version.is_some() {
         active.from_version = Set(payload.from_version);
     }

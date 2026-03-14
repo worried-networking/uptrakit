@@ -34,6 +34,13 @@ pub struct Model {
     /// for every in-progress interactive update.
     #[sea_orm(default_value = "false")]
     pub interactive: bool,
+    /// Whether any output was dropped because the output size cap was exceeded.
+    ///
+    /// Set atomically on first truncation during the streaming phase. Persists
+    /// across the update lifecycle so the history detail view can show a
+    /// truncation warning even for completed updates.
+    #[sea_orm(default_value = "false")]
+    pub output_truncated: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -423,6 +423,7 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
         update_category: Set(params.update_category.to_string()),
         batch_id: Set(params.batch_id),
         interactive: Set(params.interactive),
+        output_truncated: Set(false),
     };
 
     record.insert(db).await.context_to()?;
@@ -1200,6 +1201,7 @@ mod tests {
             update_category: Set("feature".to_string()),
             batch_id: Set(None),
             interactive: Set(false),
+            output_truncated: Set(false),
         }
         .insert(&db)
         .await
@@ -1293,6 +1295,7 @@ mod tests {
             update_category: Set("feature".to_string()),
             batch_id: Set(None),
             interactive: Set(false),
+            output_truncated: Set(false),
         }
         .insert(&db)
         .await
@@ -1326,6 +1329,7 @@ mod tests {
             update_category: Set("feature".to_string()),
             batch_id: Set(None),
             interactive: Set(false),
+            output_truncated: Set(false),
         }
         .insert(&db)
         .await
@@ -1380,6 +1384,7 @@ mod tests {
             update_category: Set("feature".to_string()),
             batch_id: Set(None),
             interactive: Set(false),
+            output_truncated: Set(false),
         }
         .insert(&db)
         .await

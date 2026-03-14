@@ -27,7 +27,12 @@ fn db_status_to_api(status: &update_history::UpdateStatus) -> UpdateStatus {
     }
 }
 
-const UPDATE_OUTPUT_BYTES_CAP: usize = 1_048_576;
+/// Maximum bytes of output to load and return via the API (50 MB).
+///
+/// Must match `MAX_UPDATE_OUTPUT_BYTES` in the WebSocket handler. This cap is
+/// applied when assembling output from streaming lines; stored consolidated
+/// output is returned as-is (it was already capped at write time).
+const UPDATE_OUTPUT_BYTES_CAP: usize = 52_428_800;
 
 fn build_response(
     record: &update_history::Model,
@@ -52,6 +57,7 @@ fn build_response(
         created_at: record.created_at,
         update_category: record.update_category.clone(),
         interactive: record.interactive,
+        output_truncated: record.output_truncated,
     }
 }
 
@@ -287,6 +293,7 @@ mod tests {
             update_category: "unknown".to_string(),
             batch_id: None,
             interactive: false,
+            output_truncated: false,
         };
 
         let resp = build_response(
@@ -329,6 +336,7 @@ mod tests {
             update_category: "security".to_string(),
             batch_id: None,
             interactive: false,
+            output_truncated: false,
         };
 
         let resp = build_response(
@@ -369,6 +377,7 @@ mod tests {
             update_category: "unknown".to_string(),
             batch_id: None,
             interactive: false,
+            output_truncated: false,
         };
 
         let resp = build_response(

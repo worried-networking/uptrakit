@@ -88,7 +88,8 @@ const sampleHistoryEntry: UpdateHistoryResponse = {
 	completed_at: '2024-06-01T12:00:00Z',
 	output: null,
 	created_at: '2024-06-01T11:54:00Z',
-	interactive: false
+	interactive: false,
+	output_truncated: false
 };
 
 // ---------------------------------------------------------------------------

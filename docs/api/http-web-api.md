@@ -700,6 +700,29 @@ See [Audit Logs API Reference](audit-logs.md) for the full specification.
 
 Update history records each attempt and stores the full command output for auditing.
 
+**`UpdateHistoryResponse` fields** (returned by `GET /api/v1/update-history` and
+`GET /api/v1/update-history/{id}`):
+
+| Field | Type | Description |
+| :---- | :--- | :---------- |
+| `id` | UUID | Update history record ID |
+| `host_id` | UUID | Target host |
+| `host_name` | String | Display name of the target host |
+| `software_item_id` | UUID | Software item that was updated |
+| `software_item_name` | String | Name of the software item |
+| `from_version` | String? | Version before the update (`null` if unknown) |
+| `to_version` | String | Requested target version |
+| `status` | UpdateStatus | Current status — see table below |
+| `output` | String | Captured output (up to 50 MB; see `output_truncated`) |
+| `actor_type` | String | Who initiated the update (`user`, `scheduler`, `mqtt`) |
+| `actor_id` | String | UUID of the initiating user (empty for non-user actors) |
+| `started_at` | DateTime (RFC 3339) | When the update started |
+| `completed_at` | DateTime (RFC 3339)? | When the update finished (`null` if still running) |
+| `created_at` | DateTime (RFC 3339) | When the history record was created |
+| `update_category` | String | Classification: `security`, `bugfix`, `feature`, `unknown` |
+| `interactive` | bool | Whether a PTY was allocated (shows "Input Required" badge in UI) |
+| `output_truncated` | bool | `true` if some output was dropped because it exceeded the 50 MB cap. A system notice line appears at the truncation point in `output` and the UI shows an amber warning banner. |
+
 **`UpdateStatus` values** in history responses:
 
 | Value | Meaning |

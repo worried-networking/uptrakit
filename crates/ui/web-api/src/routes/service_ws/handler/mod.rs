@@ -71,11 +71,16 @@ use uptrakit_internal_wire::service_profile::parse_capabilities;
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Maximum size of the `update_history.output` column (1 MB).
+/// Maximum size of the `update_history.output` column (50 MB).
 ///
-/// Once the output reaches this limit, further `UpdateOutput` messages are
-/// silently dropped to prevent unbounded DB growth.
-const MAX_UPDATE_OUTPUT_BYTES: usize = 1_048_576;
+/// Docker image pulls generate very verbose progress output (tens of megabytes
+/// for large images). This cap covers virtually all real-world update outputs
+/// while preventing unbounded DB growth.
+///
+/// When the cap is first exceeded, a visible system output line is emitted
+/// into the stream and the `output_truncated` flag is set on the history
+/// record so the UI can display a persistent warning banner.
+const MAX_UPDATE_OUTPUT_BYTES: usize = 52_428_800;
 
 /// Interval between approval-status DB polls in enrolled loops.
 const APPROVAL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);

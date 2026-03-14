@@ -47,6 +47,7 @@ mod m20260321_000001_software_items_icon_url;
 mod m20260321_000002_updates_queue;
 mod m20260322_000001_hosts_lower_name_index;
 mod m20260322_000002_hsi_updatable_index;
+mod m20260322_000003_update_history_truncated;
 
 pub struct Migrator;
 
@@ -98,6 +99,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260321_000002_updates_queue::Migration),
             Box::new(m20260322_000001_hosts_lower_name_index::Migration),
             Box::new(m20260322_000002_hsi_updatable_index::Migration),
+            Box::new(m20260322_000003_update_history_truncated::Migration),
         ]
     }
 }

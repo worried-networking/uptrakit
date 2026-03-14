@@ -1568,6 +1568,7 @@ mod tests {
             update_category: Set("security".to_string()),
             batch_id: Set(Some(batch_id)),
             interactive: Set(false),
+            output_truncated: Set(false),
         }
         .insert(db)
         .await
@@ -1592,6 +1593,7 @@ mod tests {
             update_category: Set("security".to_string()),
             batch_id: Set(Some(batch_id)),
             interactive: Set(false),
+            output_truncated: Set(false),
         }
         .insert(db)
         .await
@@ -1717,6 +1719,7 @@ mod tests {
             update_category: Set("security".to_string()),
             batch_id: Set(None),
             interactive: Set(false),
+            output_truncated: Set(false),
         }
         .insert(db)
         .await

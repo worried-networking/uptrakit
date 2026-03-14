@@ -32,6 +32,11 @@ with full ANSI color support. For in-progress or pending updates, the terminal s
 real time via SSE — a pulsing "Live" badge indicates an active stream. For completed or failed
 updates, the stored output is rendered in the terminal.
 
+> **Output size limit:** Uptrakit stores up to 50 MB of output per update. Updates that generate
+> more output (such as large Docker image pulls) will show a truncation notice at the end of the
+> terminal stream and an amber warning banner in the detail view. Only the first 50 MB is
+> retained; the update itself continues to run normally regardless of the cap.
+
 ### CLI
 
 ```bash

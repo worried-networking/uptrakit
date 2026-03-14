@@ -412,6 +412,12 @@
 										{:else}
 											<p class="text-sm text-surface-500">No output recorded.</p>
 										{/if}
+										{#if item.output_truncated}
+											<aside class="mt-2 rounded-lg p-3 preset-tonal-warning text-sm">
+												<strong>Output truncated</strong> — this update produced more than 50 MB of output. Only the first
+												50 MB is stored.
+											</aside>
+										{/if}
 										{#if item.actor_type}
 											<p class="mt-2 text-xs text-surface-500">
 												Actor: {item.actor_type} ({item.actor_id})

@@ -594,6 +594,8 @@ export interface UpdateHistoryResponse {
 	created_at: string;
 	/** Whether the update was dispatched in interactive mode (PTY allocated). */
 	interactive: boolean;
+	/** Whether any output was dropped because it exceeded the 50 MB output cap. */
+	output_truncated: boolean;
 }
 
 export interface ReleaseInfoRequest {
