@@ -14,6 +14,8 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use rootcause::prelude::*;
 #[cfg(feature = "daemon")]
+use std::collections::HashSet;
+#[cfg(feature = "daemon")]
 use uptrakit_plugin_infrastructure_core::OutputStreamType;
 use uptrakit_plugin_infrastructure_core::UpdateOutputLine;
 #[cfg(feature = "daemon")]
@@ -348,6 +350,7 @@ impl DockerClient for BollardDockerClient {
         );
 
         let mut output = String::new();
+        let mut seen = HashSet::new();
 
         while let Some(item) = stream.next().await {
             let info = item.context_to::<DockerError>()?;
@@ -356,6 +359,10 @@ impl DockerClient for BollardDockerClient {
                 let msg = detail.message.as_deref().unwrap_or("docker pull error");
                 tracing::warn!(error = %msg, "Docker pull stream error");
                 bail!(DockerError::PullFailed(msg.to_string()));
+            }
+
+            if !is_new_progress_event(&mut seen, info.id.as_deref(), info.status.as_deref()) {
+                continue;
             }
 
             let line = format_progress_line(info.id.as_deref(), info.status.as_deref(), None);
@@ -593,6 +600,23 @@ fn map_auth_to_credentials(image: &str, auth: &DockerAuth) -> bollard::auth::Doc
     }
 }
 
+/// Returns `true` when this `(id, status)` combination has not been seen before.
+///
+/// Events without an `id` (e.g. `"Pulling from library/nginx"`) always pass
+/// through because they are one-off status messages, not per-layer progress.
+/// Events without a `status` are also let through unconditionally.
+#[cfg(feature = "daemon")]
+fn is_new_progress_event(
+    seen: &mut HashSet<(String, String)>,
+    id: Option<&str>,
+    status: Option<&str>,
+) -> bool {
+    match (id, status) {
+        (Some(id), Some(status)) => seen.insert((id.to_string(), status.to_string())),
+        _ => true,
+    }
+}
+
 /// Format a single pull-progress event as `"{id}: {status} {progress}"`,
 /// omitting any empty components.
 #[cfg(feature = "daemon")]
@@ -734,5 +758,54 @@ mod tests {
     fn format_progress_only_progress_with_no_status() {
         let line = format_progress_line(Some("abc"), None, Some("[==>]"));
         assert_eq!(line, "abc: [==>]");
+    }
+
+    #[test]
+    fn dedup_filters_repeated_status_per_layer() {
+        let mut seen = HashSet::new();
+
+        // First occurrence passes through.
+        assert!(is_new_progress_event(
+            &mut seen,
+            Some("abc123"),
+            Some("Downloading")
+        ));
+
+        // Same (id, status) is filtered.
+        assert!(!is_new_progress_event(
+            &mut seen,
+            Some("abc123"),
+            Some("Downloading")
+        ));
+
+        // Different status for same id passes through.
+        assert!(is_new_progress_event(
+            &mut seen,
+            Some("abc123"),
+            Some("Pull complete")
+        ));
+
+        // Different id with same status passes through.
+        assert!(is_new_progress_event(
+            &mut seen,
+            Some("def456"),
+            Some("Downloading")
+        ));
+
+        // Events without an id always pass through.
+        assert!(is_new_progress_event(
+            &mut seen,
+            None,
+            Some("Pulling from library/nginx")
+        ));
+        assert!(is_new_progress_event(
+            &mut seen,
+            None,
+            Some("Pulling from library/nginx")
+        ));
+
+        // Events without a status always pass through.
+        assert!(is_new_progress_event(&mut seen, Some("abc123"), None));
+        assert!(is_new_progress_event(&mut seen, Some("abc123"), None));
     }
 }
