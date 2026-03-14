@@ -1242,6 +1242,33 @@ Consumed by controllers to trigger `ca_rotation_trigger.notify_one()`.
 }
 ```
 
+### `broadcast_admin_event`
+
+Published by any controller that emits an [`AdminEvent`](sse-events.md) (e.g. after triggering an update,
+approving a service, or completing a version check). All other controller instances consume this message and
+re-broadcast the event to their local SSE subscribers using `send_local` / `send_global_local` — **without**
+re-publishing to NATS — to avoid infinite loops.
+
+This ensures that all browser clients connected to any controller instance in an HA cluster receive real-time
+History page updates regardless of which instance processed the original API request.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 1,
+  "type": "broadcast_admin_event",
+  "tenant_id": "550e8400-e29b-41d4-a716-446655440000",
+  "event_json": "{\"update_triggered\":{\"update_history_id\":\"...\",\"host_id\":\"...\",\"software_item_id\":\"...\"}}"
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `tenant_id` | UUID | No | Target tenant. `null` or absent means system-wide broadcast (all tenants). |
+| `event_json` | string | Yes | JSON-serialised `AdminEvent` (externally-tagged serde format). |
+
+**Safe to publish via NATS** — contains no credential material or plugin configs.
+
 ## Batch update messages
 
 ### `execute_batch_update` (controller -> agent)

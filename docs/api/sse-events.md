@@ -101,7 +101,8 @@ to carry a JSON payload.
 | `software_item_updated` | `{"id":"<uuid>"}` | Software item updated |
 | `software_item_created` | `{"id":"<uuid>"}` | New software item created |
 | `version_check_completed` | `{"host_id":"<uuid>","software_item_id":"<uuid>"}` | Version check done |
-| `update_started` | `{"update_history_id":"<uuid>","host_id":"<uuid>","software_item_id":"<uuid>"}` | Update execution started |
+| `update_triggered` | `{"update_history_id":"<uuid>","host_id":"<uuid>","software_item_id":"<uuid>"}` | Update dispatched to agent (status `Pending`/`Queued`) |
+| `update_started` | `{"update_history_id":"<uuid>","host_id":"<uuid>","software_item_id":"<uuid>","interactive":<bool>}` | Update execution started by agent |
 | `update_completed` | `{"update_history_id":"<uuid>","host_id":"<uuid>","software_item_id":"<uuid>","status":"<string>"}` | Update done |
 | `discovery_completed` | `{"host_id":"<uuid>"}` | Autodiscovery done for host |
 | `host_software_changed` | `{"host_id":"<uuid>"}` | Host software items updated |

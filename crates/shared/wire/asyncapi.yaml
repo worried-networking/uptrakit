@@ -1577,6 +1577,14 @@ components:
       payload:
         $ref: "#/components/schemas/requestCrlRenewalPayload"
 
+    broadcastAdminEvent:
+      name: broadcast_admin_event
+      title: Broadcast Admin Event Message
+      summary: Fan-out an AdminEvent to all controller instances for local SSE relay
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/broadcastAdminEventPayload"
+
   schemas:
     pingPayload:
       type: object
@@ -4542,6 +4550,49 @@ components:
           type: string
           const: request_crl_renewal
           description: Message type discriminator
+
+    broadcastAdminEventPayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+        - event_json
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: broadcast_admin_event
+          description: Message type discriminator
+        tenant_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            Target tenant UUID. When `null` or absent the event is a system-wide broadcast
+            delivered to all active tenant SSE streams.
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+        event_json:
+          type: string
+          description: |
+            JSON-serialised `AdminEvent` value (serde externally-tagged format).
+            Receiving controllers deserialise this and relay it to local SSE subscribers
+            via `send_local` / `send_global_local` without re-publishing to NATS.
+          examples:
+            - '{"update_triggered":{"update_history_id":"...","host_id":"...","software_item_id":"..."}}'
 
     updateCapabilitiesPayload:
       type: object
