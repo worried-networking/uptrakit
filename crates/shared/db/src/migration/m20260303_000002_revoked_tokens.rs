@@ -15,7 +15,7 @@ use sea_orm_migration::prelude::*;
 /// event; remote instances update their in-memory caches but do not write to
 /// DB (avoiding double-write).
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

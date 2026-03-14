@@ -6,7 +6,7 @@ use sea_orm_migration::prelude::*;
 /// Nullable because existing enrolled services won't have this value until they
 /// re-enroll. New enrollments always provide it.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

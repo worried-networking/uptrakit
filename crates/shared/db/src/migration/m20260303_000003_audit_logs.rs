@@ -3,7 +3,7 @@ use sea_orm_migration::prelude::*;
 /// Create `audit_logs` and `system_audit_logs` tables for audit trail, plus
 /// seed the `audit_log_cleanup` scheduled task (disabled by default).
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

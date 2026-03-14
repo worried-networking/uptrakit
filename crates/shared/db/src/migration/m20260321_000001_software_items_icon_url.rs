@@ -1,6 +1,6 @@
 use sea_orm_migration::prelude::*;
 
-pub struct Migration;
+pub(super) struct Migration;
 
 impl MigrationName for Migration {
     fn name(&self) -> &str {

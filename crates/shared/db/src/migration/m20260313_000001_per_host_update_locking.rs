@@ -17,7 +17,7 @@ use sea_orm_migration::prelude::*;
 /// produce a unique-constraint violation (which surfaces as `UpdateAlreadyActive`)
 /// rather than silently inserting a duplicate active row.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

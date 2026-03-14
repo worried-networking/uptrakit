@@ -43,7 +43,7 @@ use sea_orm_migration::prelude::*;
 ///
 /// No-op: reverting to the broken format would re-introduce the decode error.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

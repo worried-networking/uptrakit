@@ -16,7 +16,7 @@ use sea_orm_migration::schema::*;
 ///
 /// Also removes the old `system_services.enrollment_token` plaintext setting.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

@@ -40,7 +40,7 @@ use uuid::Uuid;
 /// are dropped before proceeding (State B recovery). If only `*_new` exists
 /// (State C), the rename step is applied directly without re-copying.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 // ---------------------------------------------------------------------------
 // Iden definitions

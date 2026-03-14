@@ -31,7 +31,7 @@ use super::helpers::{self, CrashRecoveryState};
 /// | `idx_hp_has_update_category` | `(host_id, has_update, update_category)` |
 /// | `idx_hp_host_category` | `(host_id, update_category)` |
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 /// Non-generated data columns of `host_packages`.
 ///

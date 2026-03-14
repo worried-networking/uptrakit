@@ -12,7 +12,7 @@ use sea_orm_migration::prelude::*;
 /// single index scan without touching the table heap, improving performance for
 /// the bulk-count and bulk-version-load queries on the Software list page.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

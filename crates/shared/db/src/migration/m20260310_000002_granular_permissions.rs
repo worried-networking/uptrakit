@@ -23,7 +23,7 @@ use uuid::Uuid;
 /// All INSERTs use `ON CONFLICT DO NOTHING` on the appropriate unique columns.
 /// DELETEs are filtered by name, so re-running is safe.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 

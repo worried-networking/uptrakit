@@ -12,7 +12,7 @@ use sea_orm_migration::prelude::*;
 /// Note: MySQL does not support partial indexes; the WHERE clause is
 /// silently ignored. The application layer enforces the condition.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

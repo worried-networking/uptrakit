@@ -22,7 +22,7 @@ use sea_orm_migration::prelude::*;
 use super::helpers::{self, CrashRecoveryState};
 
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 /// Package manager plugin types whose auto-created configs should be migrated.
 const PACKAGE_MANAGER_TYPES: &[&str] = &[

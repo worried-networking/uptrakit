@@ -6,7 +6,7 @@ use sea_orm_migration::prelude::*;
 /// Data is encrypted with DEKs — never directly with the KEK. This enables
 /// O(1) master key rotation (re-wrap DEKs only, no data re-encryption).
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

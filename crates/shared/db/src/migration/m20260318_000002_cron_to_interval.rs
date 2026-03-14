@@ -24,7 +24,7 @@ use super::helpers::{self, CrashRecoveryState};
 /// | audit_log_cleanup      | `0 3 * * *`    | 86400           | 300            |
 /// | discover_host_packages | `0 */6 * * *`  | 21600           | 300            |
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 /// Non-generated data columns of the new `scheduled_tasks` schema (without `cron_expression`).
 #[derive(Copy, Clone, DeriveIden)]

@@ -15,7 +15,7 @@ use sea_orm_migration::prelude::*;
 /// (which remains in place — it may still be chosen for non-updatable queries
 /// that only need the FK lookup).
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

@@ -10,7 +10,7 @@ use sea_orm_migration::schema::*;
 /// `system_service_certificates` mirrors `service_certificates` with a FK to
 /// `system_services` instead of `services`.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

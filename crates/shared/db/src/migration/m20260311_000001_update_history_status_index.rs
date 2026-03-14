@@ -13,7 +13,7 @@ use sea_orm_migration::prelude::*;
 /// grows (one row per triggered update) the scan cost increases linearly
 /// with every batch precondition check.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

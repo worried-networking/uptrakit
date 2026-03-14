@@ -6,7 +6,7 @@ use sea_orm_migration::prelude::*;
 /// The index speeds up the per-host FIFO query in `dispatch_next_queued_for_host`:
 /// `SELECT ... WHERE host_id = ? AND status = 'queued' ORDER BY id LIMIT 1`.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

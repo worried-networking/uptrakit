@@ -2,7 +2,7 @@ use sea_orm_migration::prelude::*;
 use uuid::Uuid;
 
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

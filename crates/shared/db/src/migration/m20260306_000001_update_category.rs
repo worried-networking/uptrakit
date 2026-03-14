@@ -9,7 +9,7 @@ use sea_orm_migration::prelude::*;
 /// Also adds a composite index on `(host_id, update_category)` in
 /// `host_software_items` for filtered batch-update queries.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

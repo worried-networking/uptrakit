@@ -12,7 +12,7 @@ use sea_orm_migration::prelude::*;
 ///    rows into `global_settings`.
 /// 3. Deletes those keys from the `settings` table for ALL tenants.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 /// The 13 global setting keys that move to the new table.
 const GLOBAL_KEYS: &[&str] = &[

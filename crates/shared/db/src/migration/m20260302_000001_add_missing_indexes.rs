@@ -13,7 +13,7 @@ use sea_orm_migration::prelude::*;
 /// - `host_software_item_plugins(plugin_config_id, package_identifier)` —
 ///   composite index for plugin-scoped software item lookups
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

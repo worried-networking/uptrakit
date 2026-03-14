@@ -5,7 +5,7 @@ use sea_orm_migration::prelude::*;
 /// This column stores a per-service override for the certificate lifetime
 /// in hours. `NULL` means "use the global default".
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

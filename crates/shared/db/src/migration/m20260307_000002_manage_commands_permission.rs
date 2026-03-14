@@ -29,7 +29,7 @@ use uuid::Uuid;
 /// Role-permission INSERTs use `ON CONFLICT DO NOTHING` on the composite
 /// `(role_id, permission_id)` PK.  Both make the migration safe to re-run.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 /// Helper: insert a row into `role_permissions` by resolving role and
 /// permission by name via a subquery.  Idempotent (`ON CONFLICT DO NOTHING`

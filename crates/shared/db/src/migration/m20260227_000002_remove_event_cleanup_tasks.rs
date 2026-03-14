@@ -1,7 +1,7 @@
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[derive(DeriveIden)]
 enum ScheduledTasks {

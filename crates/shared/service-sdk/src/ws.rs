@@ -37,15 +37,15 @@ const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// Type alias for the WebSocket stream produced by [`connect_ws`].
-pub type WsStream =
+pub(crate) type WsStream =
     tokio_tungstenite::WebSocketStream<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>;
 
 /// Write half of a split [`WsStream`].
-pub type WsSink =
+pub(crate) type WsSink =
     futures_util::stream::SplitSink<WsStream, tokio_tungstenite::tungstenite::Message>;
 
 /// Read half of a split [`WsStream`].
-pub type WsRead = futures_util::stream::SplitStream<WsStream>;
+pub(crate) type WsRead = futures_util::stream::SplitStream<WsStream>;
 
 /// Connect TCP → TLS → WebSocket upgrade, with optional Authorization header.
 ///
@@ -53,7 +53,7 @@ pub type WsRead = futures_util::stream::SplitStream<WsStream>;
 /// parameter to the WebSocket URL. The controller uses this to narrow the
 /// enrollment-secret lookup to the specific service, preventing cross-tenant
 /// secret collisions during the narrow pre-certificate window.
-pub async fn connect_ws(
+pub(crate) async fn connect_ws(
     host: &str,
     port: u16,
     tls_connector: &TlsConnector,
@@ -126,7 +126,7 @@ pub async fn connect_ws(
 /// Send Enroll message and read Enrolled response.
 ///
 /// Times out after [`RESPONSE_TIMEOUT`] (60 seconds).
-pub async fn send_enroll(
+pub(crate) async fn send_enroll(
     ws: &mut WsStream,
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
@@ -203,7 +203,7 @@ pub async fn send_enroll(
 ///
 /// Returns `Ok(())` on `Approved`, errors on `Rejected`.
 /// Times out after [`APPROVAL_TIMEOUT`] (30 minutes).
-pub async fn wait_for_approval(ws: &mut WsStream, in_seq: &mut IncomingSeq) -> Result<()> {
+pub(crate) async fn wait_for_approval(ws: &mut WsStream, in_seq: &mut IncomingSeq) -> Result<()> {
     tracing::info!("waiting for approval...");
 
     tokio::time::timeout(APPROVAL_TIMEOUT, async {
@@ -277,7 +277,7 @@ pub async fn wait_for_approval(ws: &mut WsStream, in_seq: &mut IncomingSeq) -> R
 /// Send `RequestCertificate` with a CSR and read `Certificate` response.
 ///
 /// Times out after [`RESPONSE_TIMEOUT`] (60 seconds).
-pub async fn request_certificate_ws(
+pub(crate) async fn request_certificate_ws(
     ws: &mut WsStream,
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
@@ -364,7 +364,7 @@ pub async fn request_certificate_ws(
 }
 
 /// Log a WebSocket close frame.
-pub fn log_close_frame(frame: Option<tokio_tungstenite::tungstenite::protocol::CloseFrame>) {
+pub(crate) fn log_close_frame(frame: Option<tokio_tungstenite::tungstenite::protocol::CloseFrame>) {
     match frame {
         Some(frame) => {
             tracing::warn!(
@@ -383,7 +383,7 @@ pub fn log_close_frame(frame: Option<tokio_tungstenite::tungstenite::protocol::C
 /// connection without sending a TLS `close_notify`. This is normal
 /// when the controller terminates a connection (e.g. service deactivated,
 /// network interruption, or controller restart).
-pub fn is_peer_closed(err: &tokio_tungstenite::tungstenite::Error) -> bool {
+pub(crate) fn is_peer_closed(err: &tokio_tungstenite::tungstenite::Error) -> bool {
     use std::io::ErrorKind;
     use tokio_tungstenite::tungstenite::Error as WsErr;
     use tokio_tungstenite::tungstenite::error::ProtocolError;
@@ -404,7 +404,7 @@ pub fn is_peer_closed(err: &tokio_tungstenite::tungstenite::Error) -> bool {
 }
 
 /// Parameters for [`run_enrollment`].
-pub struct EnrollmentParams<'a> {
+pub(crate) struct EnrollmentParams<'a> {
     pub identity: &'a mut crate::identity::ServiceIdentityState,
     pub host: &'a str,
     pub port: u16,
@@ -419,7 +419,7 @@ pub struct EnrollmentParams<'a> {
 /// Run a fresh enrollment flow: enroll → wait for approval → generate CSR → request certificate.
 ///
 /// On success, the identity is fully certified (service_id, key, and cert persisted).
-pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
+pub(crate) async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
     let EnrollmentParams {
         identity,
         host,
@@ -486,7 +486,7 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
 /// Resume enrollment for a service that already has a service_id and enrollment secret.
 ///
 /// Reconnects with Bearer auth, waits for approval, generates CSR, and requests certificate.
-pub async fn resume_enrollment(
+pub(crate) async fn resume_enrollment(
     identity: &mut crate::identity::ServiceIdentityState,
     host: &str,
     port: u16,

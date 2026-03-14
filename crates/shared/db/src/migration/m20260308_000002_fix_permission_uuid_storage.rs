@@ -45,7 +45,7 @@ use uuid::Uuid;
 ///
 /// A no-op: re-introducing TEXT storage would re-introduce the parsing bug.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

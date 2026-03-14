@@ -39,7 +39,7 @@ use crate::migration::helpers;
 /// ### Scheduler tasks
 /// - Rename `discover_host_packages` → `discover_software`
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 // ---------------------------------------------------------------------------
 // Iden definitions

@@ -7,7 +7,7 @@ use sea_orm_migration::schema::*;
 /// `update_output_lines` tables are dropped and recreated to include the new
 /// column with an inline FK constraint (avoids SQLite ALTER TABLE limitations).
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

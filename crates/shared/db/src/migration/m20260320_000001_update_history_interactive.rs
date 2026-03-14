@@ -10,7 +10,7 @@ use sea_orm_migration::prelude::*;
 /// in-progress interactive update, even when the user is not actively watching
 /// its live output stream.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

@@ -26,7 +26,7 @@ use super::helpers;
 ///
 /// Unique: `(tenant_id, name)`.
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(super) struct Migration;
 
 #[derive(DeriveIden)]
 enum AutodiscoveryIgnores {
