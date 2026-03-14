@@ -37,6 +37,9 @@ pub async fn handle(
         "save_smtp" => save_smtp_settings(state, tenant_ctx, &params).await,
         "get_global_smtp" => get_global_smtp_settings(state).await,
         "save_global_smtp" => save_global_smtp_settings(state, &params).await,
+        "get_global_telegram" => get_global_telegram_settings(state).await,
+        "save_global_telegram" => save_global_telegram_settings(state, &params).await,
+        "test_global_smtp_email" => test_global_smtp_email(state, &params).await,
         _ => error_response_with_code(StatusCode::NOT_FOUND, "Unknown action", "not_found"),
     }
 }
@@ -467,4 +470,164 @@ async fn save_global_smtp_settings(state: &Arc<AppState>, params: &serde_json::V
     });
 
     (StatusCode::OK, Json(response)).into_response()
+}
+
+/// Get global Telegram settings.
+#[cfg(feature = "notifications-telegram")]
+async fn get_global_telegram_settings(state: &Arc<AppState>) -> Response {
+    let telegram = state.settings.global_telegram();
+    let response = serde_json::json!({
+        "has_bot_token": telegram.bot_token.is_some(),
+    });
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+#[cfg(not(feature = "notifications-telegram"))]
+async fn get_global_telegram_settings(_state: &Arc<AppState>) -> Response {
+    error_response_with_code(
+        StatusCode::NOT_FOUND,
+        "Telegram notifications not enabled",
+        "not_found",
+    )
+}
+
+/// Save global Telegram settings.
+#[cfg(feature = "notifications-telegram")]
+async fn save_global_telegram_settings(
+    state: &Arc<AppState>,
+    params: &serde_json::Value,
+) -> Response {
+    use crate::SettingKey;
+    use crate::settings_store::upsert_global_setting;
+
+    let mut telegram = state.settings.global_telegram();
+
+    // Empty string clears the token.
+    if let Some(bot_token) = params.get("bot_token").and_then(|v| v.as_str()) {
+        let new_token = if bot_token.is_empty() {
+            None
+        } else {
+            Some(bot_token.to_string())
+        };
+        if let Err(e) = upsert_global_setting(
+            state.db(),
+            SettingKey::GlobalTelegramBotToken,
+            serde_json::json!(new_token.as_deref().unwrap_or("")),
+        )
+        .await
+        {
+            tracing::error!("Failed to save global_telegram.bot_token: {e:?}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        telegram.bot_token = new_token;
+    }
+
+    state.settings.set_global_telegram(telegram.clone()).await;
+
+    let response = serde_json::json!({
+        "has_bot_token": telegram.bot_token.is_some(),
+    });
+
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+#[cfg(not(feature = "notifications-telegram"))]
+async fn save_global_telegram_settings(
+    _state: &Arc<AppState>,
+    _params: &serde_json::Value,
+) -> Response {
+    error_response_with_code(
+        StatusCode::NOT_FOUND,
+        "Telegram notifications not enabled",
+        "not_found",
+    )
+}
+
+/// Send a test email using the global SMTP defaults.
+#[cfg(feature = "notifications-email")]
+async fn test_global_smtp_email(state: &Arc<AppState>, params: &serde_json::Value) -> Response {
+    let to_address = match params
+        .get("to_address")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        Some(addr) => addr.to_string(),
+        None => {
+            return error_response(StatusCode::BAD_REQUEST, "to_address is required");
+        }
+    };
+
+    let global_smtp = state.settings.global_smtp();
+    let empty_smtp = crate::settings::SmtpSettingsSnapshot::default();
+
+    if !global_smtp.is_configured() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "Global SMTP is not configured. Set SMTP host and from address before sending a test email.",
+        );
+    }
+
+    let config = crate::notifications::dispatcher::merge_smtp_into_config_pub(
+        &global_smtp,
+        &empty_smtp,
+        serde_json::json!({ "to_addresses": [to_address] }),
+    );
+
+    let email_plugin = match state.plugin_ops.notification_transport("email") {
+        Some(plugin) => plugin,
+        None => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Email plugin not available",
+            );
+        }
+    };
+    let transport = match email_plugin.as_notification_transport() {
+        Some(t) => t,
+        None => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Email plugin does not support delivery",
+            );
+        }
+    };
+
+    let test_msg = uptrakit_notification_plugin_core::DeliveryMessage::new(
+        "Test Email from Uptrakit",
+        "This is a test email sent from the Global SMTP settings page.",
+        None,
+        serde_json::json!({}),
+        vec![],
+    );
+
+    match transport.deliver(&config, &test_msg).await {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "success": true,
+                "message": format!("Test email sent successfully to {to_address}")
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::warn!(error = ?e, to_address, "test global smtp email failed");
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "success": false,
+                    "message": e.to_string()
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+#[cfg(not(feature = "notifications-email"))]
+async fn test_global_smtp_email(_state: &Arc<AppState>, _params: &serde_json::Value) -> Response {
+    error_response_with_code(
+        StatusCode::NOT_FOUND,
+        "Email notifications not enabled",
+        "not_found",
+    )
 }

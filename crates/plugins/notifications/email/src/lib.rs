@@ -330,7 +330,8 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for EmailPlugin {
                             .with_type(FieldType::Password)
                             .with_help_text("Leave empty to keep current password"),
                     ])
-                    .with_pre_load_action("get_global_smtp"),
+                    .with_pre_load_action("get_global_smtp")
+                    .with_footer_actions(vec!["test_global_smtp_email".to_string()]),
                 ),
             )
             .with_permission("manage_global_settings"),
@@ -439,6 +440,16 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for EmailPlugin {
             ActionDef::new("get_smtp", "Get SMTP Settings"),
             ActionDef::new("save_smtp", "Save SMTP Settings")
                 .with_permission("manage_notifications"),
+            ActionDef::new("test_global_smtp_email", "Send Test Email")
+                .with_permission("manage_global_settings")
+                .with_ui(ActionUi::Form(FormDef::new(vec![
+                    FieldDef::new("to_address", "Recipient Email Address")
+                        .required()
+                        .with_placeholder("you@example.com")
+                        .with_help_text(
+                            "A test email will be sent using the global SMTP defaults above.",
+                        ),
+                ]))),
             ActionDef::new("get_global_smtp", "Get Global SMTP Defaults"),
             ActionDef::new("save_global_smtp", "Save Global SMTP Defaults")
                 .with_permission("manage_global_settings"),
