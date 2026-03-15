@@ -143,6 +143,7 @@ pub async fn list_extension_providers(
 pub async fn invoke_action(
     State(state): State<Arc<AppState>>,
     tenant_ctx: TenantContext,
+    axum::Extension(auth_user): axum::Extension<crate::middleware::require_auth::AuthenticatedUser>,
     Path((extension_id, action_id)): Path<(String, String)>,
     Query(query): Query<InvokeActionQuery>,
     Json(body): Json<InvokeExtensionActionRequest>,
@@ -177,6 +178,7 @@ pub async fn invoke_action(
                 return crate::routes::notification_extensions::handle(
                     &state,
                     &tenant_ctx,
+                    auth_user.user_id,
                     &extension_id,
                     &action_id,
                     body.params.clone(),

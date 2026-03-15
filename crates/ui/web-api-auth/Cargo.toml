@@ -41,6 +41,7 @@ uptrakit-web-api-types = { workspace = true }
 [dev-dependencies]
 strum = { workspace = true }
 uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
+uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
 zeroize = { workspace = true }
 
 [lints]
