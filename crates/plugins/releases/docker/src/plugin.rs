@@ -180,6 +180,14 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
             Self::CAPABILITIES.to_vec()
         }
 
+        fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
+            crate::extensions::extension_manifests()
+        }
+
+        fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
+            crate::extensions::extension_actions()
+        }
+
         fn as_discovery(
             &self,
         ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {

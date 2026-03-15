@@ -7100,6 +7100,7 @@ dependencies = [
  "parking_lot",
  "reqwest",
  "rootcause",
+ "sea-orm",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -7107,10 +7108,13 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-command",
+ "uptrakit-extension-framework",
  "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "url",
+ "uuid",
 ]
 
 [[package]]

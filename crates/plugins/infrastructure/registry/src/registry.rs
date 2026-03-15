@@ -559,7 +559,12 @@ register_plugins! {
     ReleasesGithub                => { config: GitHubConfig,               plugin: GitHubPlugin },
     ReleasesGitlab                => { config: GitLabConfig,               plugin: GitLabPlugin },
     ReleasesForgejo               => { config: ForgejoConfig,              plugin: ForgejoPlugin },
-    ReleasesDocker                => { config: DockerConfig,               plugin: DockerPlugin },
+    ReleasesDocker                => {
+        config: DockerConfig,
+        plugin: DockerPlugin,
+        extension_prefix: "docker.",
+        extension_handler: uptrakit_plugin_releases_docker::extensions::handle_action
+    },
     DiscoveryProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig, plugin: ProxmoxHelperScriptsPlugin },
     PackageManagerHomebrew        => { config: HomebrewConfig,             plugin: HomebrewPlugin },
     PackageManagerApt             => { config: AptConfig,                  plugin: AptPlugin },
