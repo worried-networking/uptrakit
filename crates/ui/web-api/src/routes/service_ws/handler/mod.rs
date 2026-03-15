@@ -312,92 +312,34 @@ impl MessageProcessor {
             }
 
             // -- UpdateHooks capability --
-            ServiceMessage::UpdateStarted(payload) if self.has_update_hooks => {
-                updates::handle_update_started(
-                    &self.state,
-                    self.service_id,
-                    &payload,
-                    &self.linked_host_ids,
-                )
-                .await
-            }
-            ServiceMessage::UpdateOutput(payload) if self.has_update_hooks => {
-                updates::handle_update_output(
-                    &self.state,
-                    self.service_id,
-                    &payload,
-                    &self.linked_host_ids,
-                )
-                .await
-            }
-            ServiceMessage::UpdateResult(payload) if self.has_update_hooks => {
-                updates::handle_update_result(
-                    &self.state,
-                    self.service_id,
-                    payload,
-                    &self.linked_host_ids,
-                )
-                .await
-            }
-            ServiceMessage::BatchUpdateResult(payload) if self.has_update_hooks => {
-                updates::handle_batch_update_result(
-                    &self.state,
-                    self.service_id,
-                    payload,
-                    &self.linked_host_ids,
-                )
-                .await
-            }
-            ServiceMessage::StdinAttention(payload) if self.has_update_hooks => {
-                updates::handle_stdin_attention(
-                    &self.state,
-                    self.service_id,
-                    &payload,
-                    &self.linked_host_ids,
-                )
-                .await
+            msg @ (ServiceMessage::UpdateStarted(_)
+            | ServiceMessage::UpdateOutput(_)
+            | ServiceMessage::UpdateResult(_)
+            | ServiceMessage::BatchUpdateResult(_)
+            | ServiceMessage::StdinAttention(_))
+                if self.has_update_hooks =>
+            {
+                self.dispatch_update_hooks(msg).await
             }
 
             // -- MqttBridge capability --
-            ServiceMessage::ReleaseTenants(payload) if self.is_mqtt => {
-                mqtt::handle_release_tenants(
-                    &self.state,
-                    self.service_id,
-                    &payload,
-                    self.lease_coordinator.as_ref(),
-                )
-                .await
-            }
-            ServiceMessage::MqttClientStatus(payload) if self.is_mqtt => {
-                mqtt::handle_mqtt_client_status(&self.state, &payload).await
-            }
-            ServiceMessage::MqttTriggerUpdate(payload) if self.is_mqtt => {
-                mqtt::handle_mqtt_trigger_update(&self.state, &payload, self.mqtt_context.as_ref())
-                    .await
-            }
-            ServiceMessage::MqttTriggerHostBatchUpdate(payload) if self.is_mqtt => {
-                mqtt::handle_mqtt_trigger_host_batch_update(
-                    &self.state,
-                    &payload,
-                    self.mqtt_context.as_ref(),
-                )
-                .await
+            msg @ (ServiceMessage::ReleaseTenants(_)
+            | ServiceMessage::MqttClientStatus(_)
+            | ServiceMessage::MqttTriggerUpdate(_)
+            | ServiceMessage::MqttTriggerHostBatchUpdate(_))
+                if self.is_mqtt =>
+            {
+                self.dispatch_mqtt(msg).await
             }
 
             // -- UiExtensions capability --
-            ServiceMessage::ExtensionRegister(payload) if self.has_ui_extensions => {
-                self.handle_extension_register(payload).await
-            }
-            ServiceMessage::ExtensionActionsRegister(payload) if self.has_ui_extensions => {
-                self.handle_extension_actions_register(payload)
-            }
-            ServiceMessage::ExtensionResponse(payload) if self.has_ui_extensions => {
-                let request_id = payload.request_id.clone();
-                self.state.extension_proxy.complete(&request_id, payload);
-                ProcessorResponse::cont()
-            }
-            ServiceMessage::ExtensionRequest(payload) if self.has_ui_extensions => {
-                self.handle_extension_request(payload).await
+            msg @ (ServiceMessage::ExtensionRegister(_)
+            | ServiceMessage::ExtensionActionsRegister(_)
+            | ServiceMessage::ExtensionResponse(_)
+            | ServiceMessage::ExtensionRequest(_))
+                if self.has_ui_extensions =>
+            {
+                self.dispatch_extensions(msg).await
             }
 
             // -- Universal messages (all capabilities) --
@@ -429,6 +371,110 @@ impl MessageProcessor {
                 code: ErrorCode::BadRequest,
                 message: "message not supported for this service capability".to_string(),
             })),
+        }
+    }
+
+    /// Dispatch update-hooks messages (UpdateStarted, UpdateOutput, etc.).
+    async fn dispatch_update_hooks(&self, msg: ServiceMessage) -> ProcessorResponse {
+        match msg {
+            ServiceMessage::UpdateStarted(payload) => {
+                updates::handle_update_started(
+                    &self.state,
+                    self.service_id,
+                    &payload,
+                    &self.linked_host_ids,
+                )
+                .await
+            }
+            ServiceMessage::UpdateOutput(payload) => {
+                updates::handle_update_output(
+                    &self.state,
+                    self.service_id,
+                    &payload,
+                    &self.linked_host_ids,
+                )
+                .await
+            }
+            ServiceMessage::UpdateResult(payload) => {
+                updates::handle_update_result(
+                    &self.state,
+                    self.service_id,
+                    payload,
+                    &self.linked_host_ids,
+                )
+                .await
+            }
+            ServiceMessage::BatchUpdateResult(payload) => {
+                updates::handle_batch_update_result(
+                    &self.state,
+                    self.service_id,
+                    payload,
+                    &self.linked_host_ids,
+                )
+                .await
+            }
+            ServiceMessage::StdinAttention(payload) => {
+                updates::handle_stdin_attention(
+                    &self.state,
+                    self.service_id,
+                    &payload,
+                    &self.linked_host_ids,
+                )
+                .await
+            }
+            _ => unreachable!("dispatch_update_hooks called with non-update message"),
+        }
+    }
+
+    /// Dispatch MQTT bridge messages (ReleaseTenants, MqttClientStatus, etc.).
+    async fn dispatch_mqtt(&self, msg: ServiceMessage) -> ProcessorResponse {
+        match msg {
+            ServiceMessage::ReleaseTenants(payload) => {
+                mqtt::handle_release_tenants(
+                    &self.state,
+                    self.service_id,
+                    &payload,
+                    self.lease_coordinator.as_ref(),
+                )
+                .await
+            }
+            ServiceMessage::MqttClientStatus(payload) => {
+                mqtt::handle_mqtt_client_status(&self.state, &payload).await
+            }
+            ServiceMessage::MqttTriggerUpdate(payload) => {
+                mqtt::handle_mqtt_trigger_update(&self.state, &payload, self.mqtt_context.as_ref())
+                    .await
+            }
+            ServiceMessage::MqttTriggerHostBatchUpdate(payload) => {
+                mqtt::handle_mqtt_trigger_host_batch_update(
+                    &self.state,
+                    &payload,
+                    self.mqtt_context.as_ref(),
+                )
+                .await
+            }
+            _ => unreachable!("dispatch_mqtt called with non-MQTT message"),
+        }
+    }
+
+    /// Dispatch UI extension messages (ExtensionRegister, ExtensionResponse, etc.).
+    async fn dispatch_extensions(&mut self, msg: ServiceMessage) -> ProcessorResponse {
+        match msg {
+            ServiceMessage::ExtensionRegister(payload) => {
+                self.handle_extension_register(payload).await
+            }
+            ServiceMessage::ExtensionActionsRegister(payload) => {
+                self.handle_extension_actions_register(payload)
+            }
+            ServiceMessage::ExtensionResponse(payload) => {
+                let request_id = payload.request_id.clone();
+                self.state.extension_proxy.complete(&request_id, payload);
+                ProcessorResponse::cont()
+            }
+            ServiceMessage::ExtensionRequest(payload) => {
+                self.handle_extension_request(payload).await
+            }
+            _ => unreachable!("dispatch_extensions called with non-extension message"),
         }
     }
 
