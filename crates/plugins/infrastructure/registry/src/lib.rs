@@ -217,11 +217,13 @@ impl PluginOps for PluginRegistry {
 
     fn notification_transport(
         &self,
-        _channel_type: &str,
+        // Only used by the `#[cfg(feature = "notifications")]` path below
+        // (`self.notification_plugin_ref()`). Cannot be removed: defined by `PluginOps` trait.
+        #[allow(unused_variables)] channel_type: &str,
     ) -> Option<std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::PluginBase>> {
         #[cfg(feature = "notifications")]
         {
-            self.notification_plugin_ref(_channel_type).cloned()
+            self.notification_plugin_ref(channel_type).cloned()
         }
         #[cfg(not(feature = "notifications"))]
         {
@@ -242,15 +244,19 @@ impl PluginOps for PluginRegistry {
 
     fn notification_validate_config(
         &self,
-        _channel_type: &str,
-        _config: &serde_json::Value,
+        // Only used by the `#[cfg(feature = "notifications")]` path below.
+        // Cannot be removed: defined by `PluginOps` trait.
+        #[allow(unused_variables)] channel_type: &str,
+        // Only used by the `#[cfg(feature = "notifications")]` path below.
+        // Cannot be removed: defined by `PluginOps` trait.
+        #[allow(unused_variables)] config: &serde_json::Value,
     ) -> std::result::Result<(), String> {
         #[cfg(feature = "notifications")]
         {
-            let Some(plugin) = self.notification_plugin_ref(_channel_type) else {
-                return Err(format!("unknown channel type: {_channel_type}"));
+            let Some(plugin) = self.notification_plugin_ref(channel_type) else {
+                return Err(format!("unknown channel type: {channel_type}"));
             };
-            plugin.validate_config(_config)
+            plugin.validate_config(config)
         }
         #[cfg(not(feature = "notifications"))]
         {
@@ -260,12 +266,14 @@ impl PluginOps for PluginRegistry {
 
     fn notification_mask_config_secrets(
         &self,
-        _channel_type: &str,
+        // Only used by the `#[cfg(feature = "notifications")]` path below.
+        // Cannot be removed: defined by `PluginOps` trait.
+        #[allow(unused_variables)] channel_type: &str,
         config: &serde_json::Value,
     ) -> serde_json::Value {
         #[cfg(feature = "notifications")]
         {
-            if let Some(plugin) = self.notification_plugin_ref(_channel_type) {
+            if let Some(plugin) = self.notification_plugin_ref(channel_type) {
                 return plugin.mask_config_secrets(config);
             }
         }
@@ -274,14 +282,18 @@ impl PluginOps for PluginRegistry {
 
     fn notification_restore_config_secrets(
         &self,
-        _channel_type: &str,
+        // Only used by the `#[cfg(feature = "notifications")]` path below.
+        // Cannot be removed: defined by `PluginOps` trait.
+        #[allow(unused_variables)] channel_type: &str,
         incoming: &serde_json::Value,
-        _stored: &serde_json::Value,
+        // Only used by the `#[cfg(feature = "notifications")]` path below.
+        // Cannot be removed: defined by `PluginOps` trait.
+        #[allow(unused_variables)] stored: &serde_json::Value,
     ) -> serde_json::Value {
         #[cfg(feature = "notifications")]
         {
-            if let Some(plugin) = self.notification_plugin_ref(_channel_type) {
-                return plugin.restore_config_secrets(incoming, _stored);
+            if let Some(plugin) = self.notification_plugin_ref(channel_type) {
+                return plugin.restore_config_secrets(incoming, stored);
             }
         }
         incoming.clone()
