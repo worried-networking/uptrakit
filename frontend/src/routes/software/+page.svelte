@@ -54,6 +54,8 @@
 	let checkingVersionsId: string | null = $state(null);
 	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'featured');
 	let showUpdatableOnly: boolean = $state(page.url.searchParams.get('updatable') === 'true');
+	let pluginTypeFilter: string = $state(page.url.searchParams.get('plugin_type') ?? '');
+	let pluginTypeOptions: { plugin_type: string; display_name: string }[] = $state([]);
 
 	const tabExtensions = $derived(getTabExtensions('software'));
 	const isItemsTab = $derived(activeTab === 'all' || activeTab === 'featured' || activeTab === 'unfeatured');
@@ -119,6 +121,7 @@
 		const parts: string[] = [];
 		if (activeTab !== 'all') parts.push(`tab=${activeTab}`);
 		if (isItemsTab && showUpdatableOnly) parts.push('updatable=true');
+		if (isItemsTab && pluginTypeFilter) parts.push(`plugin_type=${encodeURIComponent(pluginTypeFilter)}`);
 		if (isItemsTab && currentPage > 1) parts.push(`page=${currentPage}`);
 		const search = parts.join('&');
 		goto(search ? `${location.pathname}?${search}` : location.pathname, {
@@ -144,6 +147,7 @@
 		listPluginTypes()
 			.then((types) => {
 				pluginTypeNames = new Map(types.map((t) => [t.plugin_type, t.display_name]));
+				pluginTypeOptions = [...types].sort((a, b) => a.display_name.localeCompare(b.display_name));
 			})
 			.catch(() => {
 				// Non-fatal: raw plugin type keys will show as fallback
@@ -172,7 +176,8 @@
 				undefined,
 				featuredFilter(),
 				undefined,
-				showUpdatableOnly ? true : undefined
+				showUpdatableOnly ? true : undefined,
+				pluginTypeFilter || undefined
 			);
 			items = result.items;
 			for (const item of result.items) {
@@ -201,6 +206,7 @@
 			loadAll(1);
 		} else {
 			showUpdatableOnly = false;
+			pluginTypeFilter = '';
 		}
 	}
 
@@ -380,7 +386,8 @@
 					100,
 					featuredFilter(),
 					undefined,
-					showUpdatableOnly ? true : undefined
+					showUpdatableOnly ? true : undefined,
+					pluginTypeFilter || undefined
 				);
 				for (const item of result.items) {
 					batchSelectedIds.add(item.id);
@@ -538,6 +545,22 @@
 					Updates available
 				</label>
 			{/if}
+			{#if isItemsTab && pluginTypeOptions.length > 0}
+				<select
+					class="select text-sm"
+					bind:value={pluginTypeFilter}
+					onchange={() => {
+						currentPage = 1;
+						loadAll(1);
+					}}
+					aria-label="Filter by plugin"
+				>
+					<option value="">All plugins</option>
+					{#each pluginTypeOptions as opt (opt.plugin_type)}
+						<option value={opt.plugin_type}>{opt.display_name}</option>
+					{/each}
+				</select>
+			{/if}
 			{#if isItemsTab && canManage}
 				<button class="btn preset-filled-primary-500" onclick={() => (showAddModal = true)}>Add Software</button>
 			{/if}
@@ -680,6 +703,9 @@
 										{#if showUpdatableOnly}
 											<p class="text-lg font-medium">No updates available</p>
 											<p class="mt-1 text-sm text-surface-500">All software in this view is up to date.</p>
+										{:else if pluginTypeFilter}
+											<p class="text-lg font-medium">No matching software</p>
+											<p class="mt-1 text-sm text-surface-500">No items are tracked using the selected plugin.</p>
 										{:else if activeTab === 'featured'}
 											<p class="text-lg font-medium">No featured software</p>
 											<p class="mt-1 text-sm text-surface-500">

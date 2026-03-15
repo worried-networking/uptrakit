@@ -703,7 +703,8 @@ export function getSoftwareItems(
 	perPage?: number,
 	featured?: boolean,
 	hostId?: string,
-	updatable?: boolean
+	updatable?: boolean,
+	pluginType?: string
 ): Promise<PaginatedResponse<SoftwareItemResponse>> {
 	const params = new URLSearchParams();
 	if (page != null) params.set('page', String(page));
@@ -711,6 +712,7 @@ export function getSoftwareItems(
 	if (featured != null) params.set('featured', String(featured));
 	if (hostId != null) params.set('host_id', hostId);
 	if (updatable != null) params.set('updatable', String(updatable));
+	if (pluginType != null) params.set('plugin_type', pluginType);
 	const query = params.toString();
 	return request(`/software-items${query ? `?${query}` : ''}`);
 }
