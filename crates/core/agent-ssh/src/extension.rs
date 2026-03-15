@@ -22,7 +22,7 @@ use uptrakit_internal_wire::extension::{
 use uptrakit_plugin_infrastructure_core::PluginBase;
 use uptrakit_plugin_infrastructure_core::agent_infra::{InfraActionInvoker, InfraPluginContext};
 use uptrakit_service_sdk::ControllerConnection;
-use uptrakit_shared_types::Permission;
+use uptrakit_shared_types::{Permission, SecretString};
 
 use crate::host_ops;
 use crate::operations::bootstrap::{self, BootstrapParams};
@@ -781,8 +781,9 @@ fn parse_bootstrap_params(
         .and_then(|v| v.as_str())
         .unwrap_or("password");
 
-    let auth_password = sensitive.and_then(|s| s.auth_password.clone());
-    let auth_private_key = sensitive.and_then(|s| s.auth_private_key.clone());
+    let auth_password = sensitive.and_then(|s| s.auth_password.clone().map(SecretString::new));
+    let auth_private_key =
+        sensitive.and_then(|s| s.auth_private_key.clone().map(SecretString::new));
 
     match auth_method {
         "password" if auth_password.is_none() => {

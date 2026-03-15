@@ -16,6 +16,7 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{
     InfraActionInvoker, InfraPluginContext,
 };
 use uptrakit_plugin_infrastructure_registry::{PluginRegistry, create_agent_infra_plugins};
+use uptrakit_shared_types::SecretString;
 
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams};
@@ -42,12 +43,12 @@ pub(crate) struct BootstrapParams {
     pub hostname: String,
     pub port: i32,
     pub auth_username: String,
-    pub auth_password: Option<String>,
-    pub auth_private_key_pem: Option<String>,
+    pub auth_password: Option<SecretString>,
+    pub auth_private_key_pem: Option<SecretString>,
     /// Use the local SSH agent for authentication (detected from `SSH_AUTH_SOCK`).
     pub use_ssh_agent: bool,
     pub target_username: String,
-    pub target_private_key_pem: Option<String>,
+    pub target_private_key_pem: Option<SecretString>,
     pub host_key_fingerprint: Option<String>,
     /// When `true`, `host_key_fingerprint` must be `Some` and TOFU is disabled.
     pub strict_host_key_checking: bool,
@@ -146,7 +147,7 @@ pub(crate) async fn bootstrap_connect(
 
     // 2. PREPARE KEY MATERIAL (validate only, not persisted)
     if let Some(pem) = &params.target_private_key_pem {
-        ssh_key::extract_public_key_openssh(pem)?;
+        ssh_key::extract_public_key_openssh(pem.expose_secret())?;
     }
 
     // 3. CONNECT & AUTHENTICATE (as auth_username)
@@ -433,8 +434,8 @@ pub(crate) async fn bootstrap_execute(
     let (target_private_pem, target_public_openssh, generated_key) =
         match &params.target_private_key_pem {
             Some(pem) => {
-                let pubkey = ssh_key::extract_public_key_openssh(pem)?;
-                (pem.clone(), pubkey, false)
+                let pubkey = ssh_key::extract_public_key_openssh(pem.expose_secret())?;
+                (pem.expose_secret().to_owned(), pubkey, false)
             }
             None => {
                 tracing::info!("generating Ed25519 keypair for target user");
@@ -652,8 +653,8 @@ async fn prepare_bootstrap_connection(
         &params.auth_private_key_pem,
         params.use_ssh_agent,
     ) {
-        (Some(password), _, _) => AuthMethod::Password(password),
-        (_, Some(pem), _) => AuthMethod::PrivateKey(pem),
+        (Some(password), _, _) => AuthMethod::Password(password.expose_secret()),
+        (_, Some(pem), _) => AuthMethod::PrivateKey(pem.expose_secret()),
         (_, _, true) => AuthMethod::Agent,
         _ => bail!(Error::InvalidInput(
             "no authentication method available".to_string()
