@@ -28,7 +28,10 @@
 	import { connectInteractiveSession } from '$lib/interactive';
 	import type { InteractiveConnectionState } from '$lib/interactive';
 	import { Permission, hasAnyPermission } from '$lib/types';
-	import type { AttestationStatus, SoftwareItemDetailResponse, SoftwareItemHostSummary } from '$lib/types';
+	import type { ActionDef, AttestationStatus, SoftwareItemDetailResponse, SoftwareItemHostSummary } from '$lib/types';
+	import { getContextMenuExtensions } from '$lib/extensions.svelte';
+	import { invokeExtensionAction } from '$lib/api';
+	import SchemaForm from '$lib/components/extensions/SchemaForm.svelte';
 
 	const id = $derived(page.params.id as string);
 
@@ -83,6 +86,14 @@
 
 	// Configure plugins modal state
 	let configureModal: SoftwareItemHostSummary | null = $state(null);
+
+	// Docker extension action modal state
+	let dockerExtModal: {
+		extensionId: string;
+		action: ActionDef;
+		host: SoftwareItemHostSummary;
+	} | null = $state(null);
+	let dockerExtSubmitting: boolean = $state(false);
 
 	// Release notes modal state
 	interface ReleaseMeta {
@@ -766,6 +777,30 @@
 					Unassign
 				</button>
 			</li>
+			{#if host.plugins.some((p) => p.plugin_type === 'releases_docker')}
+				{#each getContextMenuExtensions('software-item-host') as ext (ext.id)}
+					{#if ext.ui.type === 'actions'}
+						{#each ext.ui.actions as actionId (actionId)}
+							{@const action = ext.actions.find((a) => a.action_id === actionId)}
+							{#if action && action.label}
+								<li>
+									<button
+										class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+										role="menuitem"
+										tabindex="-1"
+										onclick={() => {
+											closeMenu();
+											dockerExtModal = { extensionId: ext.id, action, host };
+										}}
+									>
+										{action.label}
+									</button>
+								</li>
+							{/if}
+						{/each}
+					{/if}
+				{/each}
+			{/if}
 		</ContextMenu>
 	{/if}
 {/if}
@@ -1007,4 +1042,37 @@
 			loadItem(true);
 		}}
 	/>
+{/if}
+
+{#if dockerExtModal && item}
+	<Modal title={dockerExtModal.action.label} onclose={() => (dockerExtModal = null)}>
+		{#if dockerExtModal.action.ui?.type === 'form'}
+			<SchemaForm
+				fields={dockerExtModal.action.ui.fields}
+				onsubmit={async (values) => {
+					const modal = dockerExtModal;
+					if (!modal || !item) return;
+					dockerExtSubmitting = true;
+					try {
+						await invokeExtensionAction(modal.extensionId, modal.action.action_id, {
+							software_item_id: item.id,
+							host_id: modal.host.host_id,
+							...values
+						});
+						showSuccess(`${modal.action.label} completed`);
+						dockerExtModal = null;
+						await loadItem(true);
+					} catch (e) {
+						showError(e instanceof Error ? e.message : 'Action failed');
+					} finally {
+						dockerExtSubmitting = false;
+					}
+				}}
+				loading={dockerExtSubmitting}
+				extensionId={dockerExtModal.extensionId}
+				extraParams={{ software_item_id: item.id, host_id: dockerExtModal.host.host_id }}
+				preLoadAction={dockerExtModal.action.ui.pre_load_action}
+			/>
+		{/if}
+	</Modal>
 {/if}
