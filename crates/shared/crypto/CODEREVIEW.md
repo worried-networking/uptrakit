@@ -269,3 +269,28 @@ envelope encryption, key ring management), the `EncryptedString` SeaORM integrat
 key verification, and all tests. Splitting into `src/encryption.rs` (core AES-GCM operations),
 `src/keyring.rs` (DataKeyRing and key management), `src/encrypted_string.rs` (SeaORM type), and
 `src/lib.rs` (re-exports and public API) would improve navigability.
+
+---
+
+## 2026-03-15 Review Update
+
+### Code Quality
+
+**[MEDIUM]** `src/lib.rs` (~line 170) — `DataKeyRing::active_key()` uses
+`.expect("active key must exist in ring")` in the hot path during every encryption operation. This is
+one of two non-test `.expect()` calls in production code. The `expect` is unreachable after a
+successful `DataKeyRing::new()` because the ring is immutable thereafter; however, the coding
+standard prohibits `.expect()` in production code regardless. The correct resolution is to convert
+`DataKeyRing::new()` to return `Result` (adding a `MissingActiveKey` variant) and then make
+`active_key()` infallible by construction — as noted in the prior Code Quality finding (2026-03-06).
+*Confirming that finding remains open: the `assert!` in `DataKeyRing::new` at lines 151-154 and the
+`.expect` at line 170 are both still present.*
+
+### Strengths (2026-03-15)
+
+- `EncryptedString Debug` returns `"EncryptedString(***)"` and `Display` returns `"***REDACTED***"`.
+  Both verified by `test_debug_display_redact`. Confirmed correct.
+- Argon2id password hashing uses OWASP-recommended parameters: 19 MiB memory, 2 iterations,
+  parallelism 1. Confirmed correct.
+- v3 envelope encryption with DEK ring, per-column AAD binding, and no silent plaintext fallback.
+  Confirmed correct.

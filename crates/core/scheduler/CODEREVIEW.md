@@ -317,3 +317,33 @@ and maintainability.
   `find_due_tasks` results and skips it with a log warning rather than panicking. This enables
   safe rolling deployments where new task types are seeded in the database before all scheduler
   instances are upgraded.
+
+## Review — 2026-03-15
+
+- **Reviewer**: AI code review (HA)
+- **Branch**: docs/codereview-backend
+
+### High Availability
+
+#### Strengths
+
+- Optimistic locking (`LockedBy` column with `UPDATE WHERE locked_by IS NULL`) makes task
+  claims TOCTOU-free. Two concurrent scheduler instances racing for the same task have exactly
+  one winner determined by the database engine.
+- Stale claim recovery runs at the start of each poll cycle: claims older than 10 minutes are
+  released automatically, so a crashed instance's locks are recovered within one poll window
+  without operator intervention.
+- Shutdown cancellation has priority in the biased `select!`: the `token.cancelled()` arm is
+  evaluated before the poll-cycle arm, ensuring a shutdown signal is never missed due to a
+  runaway task occupying the loop.
+- External vs. embedded scheduler is controlled by the `external_scheduler_connected` flag.
+  When the external scheduler disconnects, the embedded scheduler takes over within one poll
+  cycle.
+
+#### Issues
+
+**[LOW]** No fairness guarantee across task types. The fastest DB responder claims any due task
+regardless of priority or type. Under sustained load with many tasks due simultaneously, a
+fast-executing high-frequency task type could starve slower or lower-frequency types. Acceptable
+given DB-level duplicate prevention, but worth noting for future scheduler evolution if priority
+lanes are introduced.

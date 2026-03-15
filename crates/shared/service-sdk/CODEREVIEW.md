@@ -523,3 +523,19 @@ is error-prone. Recommendation: rename the feature or restructure so that the pr
 feature enables the zeroconf code path rather than the absence enabling the fallback.~~ *(Fixed:
 `#[cfg(not(feature = "zeroconf"))]` block replaced with unconditional fallback; the
 `#[cfg(feature = "zeroconf")]` block now uses an explicit `return` so features remain additive.)*
+
+---
+
+## 2026-03-15 Review Update
+
+### Coding Standards
+
+**[LOW]** `src/lifecycle.rs:270` — `#[allow(unused_variables)]` on the `resolve_connection`
+parameter has no comment naming the feature that causes it to be conditionally unused. Per the
+project policy, every `#[allow()]` on a feature-gated item requires an inline comment of the form
+`// used by feature "X"`. The annotation should be updated to identify the relevant feature gate.
+*(Cross-reference: umbrella CODEREVIEW.md, 2026-03-15 Coding Standards section.)*
+
+**[APPROVED]** `src/lifecycle.rs:346` — `#[allow(unreachable_code)]` with an inline comment
+explaining that the `zeroconf` feature makes the subsequent code unreachable. Correctly follows the
+mandatory-comment policy.

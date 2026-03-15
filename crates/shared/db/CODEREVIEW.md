@@ -456,3 +456,32 @@ mismatch between file dates and vector order creates confusion. *Prior finding (
 well-structured individually, the cumulative volume makes it difficult to understand the full
 schema by reading migrations alone. Consider generating a schema snapshot documentation file
 from the final migration state.
+
+---
+
+## 2026-03-15 Review Update
+
+### Database — Positive Findings
+
+- 57 entity files and 48 migration files. Expected for a mature production schema with a long
+  change history. Entity count is consistent with the scope of the application.
+- No raw SQL in query modules. All queries use SeaORM type-safe builders, ensuring portability
+  across SQLite and PostgreSQL and preventing SQL injection. *(Confirmed from prior positive
+  findings; no regression.)*
+- Recent migrations add composite covering indexes: `(host_id, software_item_id, status)` for
+  update precondition checks, and `(software_item_id, host_id, installed_version, latest_version)`
+  for the updatable EXISTS filter. These directly address the prior `[LOW]` index gap finding.
+
+### Database — Tenant Isolation
+
+**[MEDIUM]** `src/queries/mqtt_software_states.rs:99` — `Host::find()` loads a host by ID without
+an explicit `tenant_id` filter. Although the host IDs originate from a prior tenant-scoped
+`software_items` query (providing mitigation via FK semantics), this pattern violates
+defense-in-depth. If the calling context changes and the source of host IDs becomes less
+tightly scoped, this query could leak cross-tenant host data. The filter should be added
+unconditionally.
+
+**[MEDIUM]** `src/queries/mqtt_software_states.rs:113` — `UpdateHistory::find()` filters by
+`software_item_id` but does not apply a `tenant_id` filter. The `update_history` table has a
+`tenant_id` column. An explicit `tenant_id` filter should be added to satisfy defense-in-depth,
+independent of whether the upstream software_item_id is already tenant-scoped.

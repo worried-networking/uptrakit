@@ -348,3 +348,40 @@ completeness.
 framework types, builders, validation, and tests. While the file is well-organized with clear section
 headers, splitting into `types.rs`, `builders.rs`, `validation.rs`, and `tests.rs` would improve
 navigability as the framework grows.
+
+---
+
+## 2026-03-15 Review Update
+
+### Coding Standards
+
+**[LOW]** `service-sdk/src/lifecycle.rs:270` — `#[allow(unused_variables)]` suppresses a warning on
+the `resolve_connection` parameter without any comment naming the feature that makes it conditionally
+unused. Per the project policy, every `#[allow()]` on a feature-gated item requires an inline comment
+of the form `// used by feature "X"`. This is a violation. The `#[allow(unreachable_code)]` at line
+346 (with a comment explaining the `zeroconf` feature) is the approved pattern.
+
+**[APPROVED]** `service-sdk/src/lifecycle.rs:346` — `#[allow(unreachable_code)]` with an inline
+comment referencing the `zeroconf` feature. Correctly follows the mandatory-comment policy.
+
+**[APPROVED]** `plugins/infrastructure/registry/src/lib.rs:178,191` — `#[allow(unused_mut)]` on
+mutation inside feature-gated blocks. The mutation is conditionally used depending on which
+notification-channel features are enabled; the allow annotation is acceptable.
+
+**[APPROVED]** `plugins/infrastructure/registry/src/registry.rs:650,652` — `#[allow(unused_variables)]`
+and `#[allow(unused_mut)]` with explicit comment `'Used conditionally by feature-gated notification
+channel blocks'`. Correctly follows the mandatory-comment policy.
+
+### Crate Boundaries
+
+**[MEDIUM]** `uptrakit-agent-core` imports `plugin-infrastructure-registry`. This pulls the full
+compiled plugin tree (all release and package-manager plugins) into both agent binaries. `agent-core`
+needs only the plugin trait and dispatch interfaces, which live in `plugin-infrastructure-core`.
+Moving the registry dependency to the binary-level `Cargo.toml` of `uptrakit-agent` and
+`uptrakit-agent-ssh` would reduce `agent-core`'s compilation footprint and improve layering.
+
+**[MEDIUM]** `web-api-types` imports `uptrakit-internal-wire`. External-facing API types are
+entangled with the internal WebSocket protocol crate. Types shared between the HTTP API and the wire
+protocol should be extracted to a neutral shared location (e.g., `uptrakit-shared-types`) rather than
+`web-api-types` depending on the wire crate. This coupling means any change to the internal protocol
+triggers recompilation of every consumer of `web-api-types`.

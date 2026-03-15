@@ -78,6 +78,7 @@ All auth mechanisms rated as GOOD by the parallel security review (2026-03-06):
 
 - **JWT**: Short-lived tokens (15 min), validates `exp`/`iss`/`aud`, HMAC signing via
   `jsonwebtoken`, signing key stored encrypted in DB with column-specific AAD.
+  JWT spec claims validation (`iss=uptrakit`, `aud=[uptrakit]`) prevents legacy token reuse.
 - **Password hashing**: Argon2id with OWASP parameters (19 MiB, 2 iterations), random salt,
   constant-time verification, password length validation (8-1024 chars).
 - **Sessions**: Refresh tokens stored as SHA-256 hashes, 7-day expiry, atomic rotation in DB
@@ -88,6 +89,12 @@ All auth mechanisms rated as GOOD by the parallel security review (2026-03-06):
   in-memory cache, cross-instance propagation via NATS.
 - **Rate limiting**: DB-backed sliding-window counter using atomic SQL upsert, HA-safe,
   TOCTOU-resistant, fully parameterized raw SQL.
+- **OIDC**: `email_verified: true` mandatory — prevents account takeover via unverified emails.
+  OIDC state stores keyed by UUID with TTL enforced (10 min for flows, 60 s for token exchange).
+- **Tokens**: Constant-time comparison via `ct_eq()` for HMAC secrets. 32-byte CSPRNG tokens
+  with SHA-256 hashing.
+- **Secrets**: `SecretString` wrapper for sensitive values; `Zeroize` for master key cleanup.
+- **Device flow**: Consonant-only user code alphabet avoids offensive codes.
 
 ### Issues
 
@@ -210,3 +217,9 @@ eliminate the dead conversion paths and make the error-propagation strategy unam
 
 **[LOW]** `settings_store.rs` -- Lacks any unit or integration tests. *Confirmed from
 2026-03-06 finding; no change in status.*
+
+### Dimension: Code Quality (D3) — 2026-03-15 additions
+
+**[LOW]** Test modules use `unwrap()` liberally on `user.insert()` and related DB calls.
+While acceptable in tests, replacing with `expect("…: reason")` would produce more actionable
+failure messages when a test setup assertion fails.

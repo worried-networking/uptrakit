@@ -111,7 +111,26 @@ Recommended tests:
 
 ## Coding Standards
 
+### Strengths
+
+- Comprehensive N+1 prevention — batch loading throughout all list endpoints.
+- Excellent transaction coverage for multi-statement write operations.
+- CAS pattern (Queued→Pending) for multi-controller dispatch safety.
+- `find_via_tenant_join` correctly used for join tables in the majority of call sites.
+
 ### Issues
+
+**[HIGH]** 12 `#[allow(clippy::type_complexity)]` violations — all should introduce type aliases:
+
+| Location | Notes |
+| --- | --- |
+| `software_items.rs:1317,1357` | Complex SeaORM select return types |
+| `plugin_configs.rs:344` | Complex query builder type |
+| `hosts.rs:287` | Complex join return type |
+| `autodiscovery/ignore_rules.rs:102` | Complex select type |
+| `services.rs:422,470,518` | Three violations in the same module |
+| `host_tags.rs:363` | Complex batch-load return |
+| `system_services.rs:284,327,371` | Three violations in the same module |
 
 ~~**[MEDIUM]** `queries/system_enrollment_tokens.rs:39,61,85,99,118,144,160` -- All seven public
 functions return `Result<T, sea_orm::DbErr>` instead of the crate-local `Result<T>` alias
@@ -145,6 +164,20 @@ the `host_ids` were already tenant-filtered from the previous query, and the sub
 services fetch re-applies tenant filtering, this violates the stated convention. The
 single-host helper `load_host_agents` on line 43 correctly uses `find_via_tenant_join`.
 *Found in parallel database review (2026-03-06).*~~ *(Fixed: replaced with `tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(...)`.)*
+
+**[MEDIUM] DB-15:** `queries/services.rs:380` -- `ServiceHost::find()` without
+`find_via_tenant_join` when loading service-host links. Per project standard, `service_host`
+has no `tenant_id` column; replace with
+`tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(...)`.
+
+**[MEDIUM] DB-16:** `queries/mqtt_software_states.rs:99` -- `Host::find()` without explicit
+`tenant_id` filter. Defense-in-depth gap — add `.filter(host::Column::TenantId.eq(...))`.
+
+**[MEDIUM] DB-17:** `queries/mqtt_software_states.rs:113` -- `UpdateHistory::find()` without
+`tenant_id` filter. Same defense-in-depth gap.
+
+**[MEDIUM] DB-18:** `queries/update_triggers.rs` -- Verify all `ServiceHost::find()` calls
+route through `find_via_tenant_join`; at least one unguarded call has been identified.
 
 **[LOW] DB-2:** `queries/software_items.rs:237,255,269,284` -- `load_item_hosts` helper takes
 a raw `&DatabaseConnection` rather than `&TenantDb` and queries `HostSoftwareItem::find()`,
@@ -226,6 +259,24 @@ and `host_software_item_plugin` rows remain active. Queries on these tables filt
 so deactivated hosts are excluded from results. However, orphaned rows accumulate. This is a
 known trade-off of soft-deletes and is likely acceptable. *Found in parallel database review
 (2026-03-06).*
+
+## Logic Consistency
+
+### Issues
+
+**[MEDIUM]** `queries/update_triggers.rs` -- Race window between `has_active_update_for_host()`
+check and the Pending INSERT. Mitigated by a unique index + error detection, but the mitigation
+relies on fragile string-matching against DB error message content via
+`is_unique_constraint_violation()`. If the DB error message format changes across SeaORM or
+driver versions, concurrent duplicate dispatches would succeed silently.
+
+**[MEDIUM]** `queries/update_batches/dispatch.rs` -- When `load_target_for_dispatch` fails, the
+update is marked Failed without triggering the batch completion check. This creates an orphaned
+Failed item that can leave a batch permanently stuck (never reaches Completed or PartiallyCompleted).
+
+**[MEDIUM]** `queries/update_batches/dispatch.rs` -- `maybe_complete_batch` does not re-check
+batch status before updating. Under concurrent controllers, two instances can both observe the
+last-item-completed condition and both attempt the terminal transition (double-transition risk).
 
 ## Architecture
 

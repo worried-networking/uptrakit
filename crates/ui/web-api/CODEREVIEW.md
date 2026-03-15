@@ -65,6 +65,28 @@ index).
 
 ### Strengths
 
+- Comprehensive middleware stack with correct security ordering: `resolve_proxy_headers` →
+  `rate_limit_auth` → `resolve_ip` → `request_log`. Proxy header stripping executes before
+  rate limiting, preventing header-spoofed bypass.
+- Permission-based RBAC via `permission_extractor!` macro: typed extractors compiled for all
+  9 permission levels, with handler signatures forming an auditable access-control inventory.
+- Rate limiting on auth endpoints with DB-backed sliding-window counters (TOCTOU-resistant
+  atomic SQL upsert) and a local in-memory fallback for when the DB is unavailable.
+- Multi-layer authentication: API tokens + JWT + OIDC with JTI-based and user-scoped token
+  denylist for immediate revocation; cross-instance propagation via NATS.
+- Audit logging for all authenticated requests (fire-and-forget dispatcher pattern, non-blocking).
+- `EncryptedString` used for all sensitive fields at rest.
+- SSRF protection on all user-controlled URL inputs via `SsrfSafeResolver`.
+- `Vec::with_capacity()` used in hot paths for pre-allocation.
+- `parking_lot::Mutex` correctly used throughout async code.
+
+### Issues
+
+**[HIGH]** `src/lib.rs:1-34` -- At ~38K LoC, this crate contains auth, middleware, routes,
+queries, settings, MQTT coordination, NATS transport, OCSP, PKI, notifications, and update
+output broadcasting. Consider extracting auth, settings, and MQTT coordination into shared
+crates.
+
 - `src/app_state.rs:114-387` -- Builder pattern for `AppState` with exhaustive field checks
   catches missing configuration at startup. `AppStateBuildError` names the first missing field.
   `plugin_ops` field defaults to real `PluginRegistry`, making test injection a one-call
@@ -111,6 +133,14 @@ index).
 queries, settings, MQTT coordination, NATS transport, OCSP, PKI, notifications, and update
 output broadcasting. Consider extracting auth, settings, and MQTT coordination into shared
 crates.
+
+**[MEDIUM]** `src/router.rs` -- 929-line flat router with 80+ sequential `.routes()` calls.
+Decompose into domain sub-routers (`auth_router`, `services_router`, `hosts_router`,
+`software_router`, `notifications_router`, `pki_router`) merged in `build_router()`.
+
+**[MEDIUM]** `src/app_state.rs` -- God-object with 26 public fields (32+ in builder); lacks
+domain-scoped accessors for PKI, credentials, auth, and notification sub-systems. Group
+related fields into sub-structs (`PkiState`, `AuthState`, `NotificationState`).
 
 **[HIGH]** `src/lib.rs:1-34` -- Twenty-four modules are declared `pub` at the crate root,
 making the full internal implementation surface globally visible. The controller binary (the
@@ -179,6 +209,10 @@ would strengthen defense-in-depth.
 **[LOW]** `src/middleware/resolve_proxy_headers.rs:256-258` -- CA CN comparison uses
 non-constant-time string equality. The compared values (CA CNs) are not confidential, making
 exploitability very low.
+
+**[MEDIUM]** `src/routes/service_ws/interactive_ws.rs` -- Multiple `unwrap()` calls on
+`serde_json` operations in production code. These could panic on invalid JSON from a
+theoretically validated source.
 
 ## Code Quality
 
@@ -272,6 +306,31 @@ added to prevent future refactoring attempts. *Found in parallel code quality re
 
 **[INFO]** `src/routes/service_ws/handler/updates.rs:534-537` -- Wildcard `_` arm on
 `UpdateFinalStatus` maps to `Failed` without `tracing::warn!`.
+
+**[HIGH]** `src/routes/oidc_auth.rs:420,512,725,773` -- Four `#[allow(clippy::too_many_arguments)]`
+suppressions. No Clippy suppression is approved per AGENTS.md invariant 13. Introduce
+parameter structs for each function.
+
+**[HIGH]** `src/routes/service_ws/handler/mod.rs:605` -- `#[allow(clippy::too_many_arguments)]`
+suppression. Same violation as above.
+
+**[MEDIUM]** `src/extension_proxy.rs:279,365,397,428,478` -- `Duration::from_secs(5)` repeated
+5 times. Extract to `const EXTENSION_ACTION_TIMEOUT: Duration`.
+
+**[MEDIUM]** Status strings `"approved"`, `"rejected"`, `"deactivated"`, `"pending"` appear
+14+ times as `.to_string()` literals. Introduce typed enums or `&'static str` constants.
+
+**[MEDIUM]** Role strings `"detect_version"`, `"fetch_releases"` used as magic string map keys.
+Replace with a typed `PluginRole` enum (`Copy`).
+
+**[MEDIUM]** Hook phase strings `["pre_update", "post_update"]` repeated in 3+ locations.
+Extract to a const or typed enum.
+
+**[MEDIUM]** Alert ID strings `"ca_expiring"`, `"server_cert_old_ca"`, `"server_cert_expiring"`
+used as string literals. Introduce a typed `AlertId` enum.
+
+**[LOW]** `src/routes/software_items.rs:209` -- `latest.category.clone().unwrap_or_default().to_string()`
+is a double allocation. Use `.as_deref().unwrap_or_default()`.
 
 **[LOW]** `src/auth/authentication.rs` -- `resolve_oidc_user` (most complex function in auth
 module with 7 return paths) has no tests. Orphaned-link fallthrough, `LinkViaOidcRequired`
@@ -379,6 +438,18 @@ pattern or `if cfg!(feature = "...")` blocks. *Found in parallel coding standard
 **[LOW]** `src/test_harness/mod.rs:23` -- `#[allow(dead_code)]` on `TestApp` struct. While
 test-only code, the `#[allow]` is unnecessary if the fields are used by integration test
 modules. *Found in parallel coding standards review (2026-03-06).*
+
+**[HIGH]** `src/settings.rs:183,296` -- `write_mutex` uses `tokio::sync::Mutex` instead of
+`parking_lot::Mutex` in locations where the guard is not held across `.await`. This violates
+the project synchronous-locks-in-async standard. The two call sites at lines 183 and 296 must
+be audited; where the guard is not actually held across an `await`, switch to `parking_lot`.
+(Note: the existing `[INFO]` finding at line 259 documents a justified exception for the main
+write path — that exception does not cover all uses.)
+
+**[MEDIUM]** Several request types are missing `Validate` implementations — evaluate whether
+input validation is needed: `AssignHostsRequest`, `TriggerUpdateRequest`,
+`InvokeExtensionActionRequest`, `DeviceAuthApproveRequest`, `DeviceAuthPollRequest`,
+`DeviceAuthStartRequest`, `CreateDiscoveryAllowlistEntryRequest`.
 
 **[LOW]** `src/routes/service_ws/protocol.rs:93` -- `#[allow(dead_code)]` on a `#[cfg(test)]`
 method. The comment says "Used by tests in mod.rs" -- if it is used, the allow is incorrect;
@@ -676,6 +747,60 @@ issues three sequential round-trips to the DB.
 **[LOW]** `src/queries/update_batches.rs:617-651` -- Host/software item lookups in
 `get_batch_with_items` lack tenant filter (defense-in-depth).
 
+**[MEDIUM]** `src/queries/mqtt_software_states.rs:99` -- `Host::find()` without explicit
+`tenant_id` filter (defense-in-depth gap). Add a `.filter(host::Column::TenantId.eq(...))`.
+
+**[MEDIUM]** `src/queries/mqtt_software_states.rs:113` -- `UpdateHistory::find()` without
+`tenant_id` filter.
+
+**[MEDIUM]** `src/queries/services.rs:380` -- `ServiceHost::find()` without
+`find_via_tenant_join`. Per project standard, `service_host` has no `tenant_id` column.
+Replace with `tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(...)`.
+
+**[MEDIUM]** `src/queries/update_triggers.rs` -- Multiple `ServiceHost::find()` calls; verify
+all route through `find_via_tenant_join`.
+
+## Logic Consistency
+
+### Issues
+
+**[HIGH]** `src/routes/service_ws/handler/updates.rs` -- Errors from
+`dispatch_update_to_agent` inside `create_batch` are silently logged and not propagated.
+A dispatch failure does not abort batch creation, leaving orphaned Pending items.
+
+**[HIGH]** `src/routes/service_ws/handler/updates.rs` -- `handle_update_started`:
+`active.update()` at line 414 error is logged but not propagated. This creates a state
+machine inconsistency: the in-memory state and DB state can diverge silently.
+
+**[HIGH]** `src/routes/service_ws/handler/updates.rs` -- `handle_update_result`:
+`active.update()` at line 717 error is logged but not propagated.
+
+**[HIGH]** `src/routes/service_ws/handler/updates.rs` -- `host_software_item` version update
+errors (lines 756-777) are logged but not propagated. A failed version write is silently
+ignored.
+
+**[MEDIUM]** `src/routes/service_ws/handler/updates.rs` -- `deliver_pending_updates` early-
+returns on `fail_in_progress_on_reconnect` failure, leaving pending items undelivered. This
+can cause a reconnect deadlock where the agent waits for items that will never be dispatched.
+
+**[MEDIUM]** `src/routes/service_ws/handler/updates.rs` -- `handle_update_started`
+unconditionally sets status to `InProgress` without checking the current status. A repeated
+`UpdateStarted` message from a misbehaving agent would reset state.
+
+**[MEDIUM]** `src/queries/update_batches.rs` -- `maybe_complete_batch` does not re-check batch
+status before transitioning. Under concurrent controllers, two instances could both observe
+a "last item completed" condition and both attempt the terminal transition (double-transition
+risk).
+
+**[MEDIUM]** `src/routes/service_ws/handler/updates.rs` -- `deliver_pending_updates` hardcodes
+`interactive = false` on reconnect dispatch. This violates the persisted
+`update_history.interactive` invariant: an interactive update that was pending when the agent
+disconnected is re-dispatched as non-interactive.
+
+**[MEDIUM]** `src/routes/service_ws/handler/updates.rs` -- `deliver_pending_updates` silently
+skips items whose `execute_update` plugin config is missing without marking them as Failed.
+These items remain Pending forever.
+
 ## Maintainability
 
 ### Strengths
@@ -745,6 +870,64 @@ the OpenAPI list silently omits the endpoint from generated docs without a compi
 no doc comment explaining that 64 bytes corresponds to a 512-bit HMAC key. The constant is used
 only in `generate_or_load_jwt_key`, which is the correct location, but without a comment a
 reader cannot verify whether 64 is bytes or hex characters.
+
+**[HIGH]** `src/routes/service_ws/handler/mod.rs` (1720 lines) -- `handle_authenticated_loop`
+is 700+ lines with high cyclomatic complexity: ping, message dispatch, approval polling,
+update lifecycle, and cancellation all in one `select!` loop. Extract into discrete handler
+functions.
+
+**[HIGH]** `src/routes/oidc_auth.rs` (1515 lines) -- `oidc_callback` is 413 lines with 7
+untested code paths; missing inline doc comments for the `OidcUserResolution` state machine.
+
+**[HIGH]** `src/routes/service_ws/handler/updates.rs` (1433 lines) -- Update lifecycle at 0%
+test coverage; security-critical but untested.
+
+**[HIGH]** `src/queries/autodiscovery/discovery_items.rs` (1391 lines) -- Mixed concerns,
+nested loops, no DB tests.
+
+**[MEDIUM]** `src/routes/software_items.rs` -- `batch_approve` N+1: 100 items = 200 sequential
+DB round-trips. Use a batch `is_in()` filter.
+
+## Idiomatic Rust
+
+### Issues
+
+**[LOW]** `src/queries/services.rs:209,430` -- Unnecessary `.clone()` where move semantics
+would work.
+
+**[LOW]** `src/routes/system_alerts.rs:30` -- `state.ca_snapshot.borrow().clone()` — double
+indirection; borrow and use the reference directly without an intermediate clone.
+
+**[LOW]** Status strings `"approved"` / `"rejected"` / `"deactivated"` used 14+ times as
+literals. Typed enums would provide exhaustiveness checking and eliminate heap allocations.
+
+**[LOW]** `AsRef<str>` not implemented for types that expose `as_str()` — ergonomics
+opportunity.
+
+## Heap and References
+
+### Issues
+
+**[LOW]** `src/event_broadcaster.rs:102,113,123` -- `send_global_local()` and `send_global()`
+clone the event N times for N subscribers. Consider wrapping events in `Arc<AdminEvent>` to
+share ownership without copying.
+
+**[LOW]** `src/mqtt_lease_coordinator.rs:558,591` -- `existing.clone().into_active_model()`
+is an unnecessary clone. Use `existing.into_active_model()` directly.
+
+**[LOW]** `src/notifications/dispatcher.rs:295,328,351` -- `Set("pending".to_string())`,
+`Set("delivered".to_string())`, `Set("failed".to_string())` are static string heap allocations
+on every call. Define as `const &'static str` and pass via `.to_string()` at a single site, or
+use `Cow<'static, str>`.
+
+**[LOW]** `src/mqtt_lease_coordinator.rs:802-829` -- Multiple `ActiveValue::Set("Default".to_string())`
+and similar static config strings allocated per-call. Hoist to constants.
+
+**[LOW]** `src/notifications/message_builder.rs:134` -- `"CA Certificate Rotated".to_string()`
+unnecessary if the value is passed directly to `format!()` or used as `&str`.
+
+**[LOW]** `src/batch_progress_broadcaster.rs:156` -- Same clone-before-NATS-publish pattern
+as `event_broadcaster.rs`; same `Arc<T>` fix applies.
 
 ---
 

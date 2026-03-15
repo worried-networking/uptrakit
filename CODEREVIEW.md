@@ -6,6 +6,7 @@
 - **Parallel reviewers**: 10 AI agents (architecture, security, code quality, tests, HA, database, coding standards, extensibility, consistency, maintainability)
 - **Comprehensive 12-dimension review date**: 2026-03-10
 - **12-dimension reviewers**: 12 AI agents (architecture, security, code quality, tests, high availability, database, coding standards, extensibility, consistency, idiomatic Rust, references & heap, maintainability)
+- **Sentrux structural metrics date**: 2026-03-15
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -198,6 +199,48 @@ now carry `publish = false`.
 | `crates/plugins/package-managers/homebrew` | [CODEREVIEW.md](crates/plugins/package-managers/homebrew/CODEREVIEW.md) |
 | `crates/plugins/discovery/proxmox-helper-scripts` | [CODEREVIEW.md](crates/plugins/discovery/proxmox-helper-scripts/CODEREVIEW.md) |
 
+## Sentrux Structural Metrics
+
+- **Scan date**: 2026-03-15
+- **Overall grade**: D | **Architecture grade**: B
+- **Files**: 1,137 | **Lines**: 285,295 | **Import edges**: 1,183
+
+| Dimension | Grade | Value |
+|-----------|-------|-------|
+| Coupling | A | Score 0.00, 1 cross-module edge |
+| Cycles | D | 4 circular dependency cycles |
+| Cohesion | D | 0.22 (poor module cohesion) |
+| Duplication | D | 234 groups (8.3%) |
+| Dead code | F | 4,402 entries (47.6%) — see note |
+| File size | C | 148 files exceed limit (13.1%) |
+| Long functions | B | 605 (6.5%) |
+| Cognitive complexity | B | 209 (2.3%) |
+| Complex functions | A | 1.2% |
+| Comment ratio | A | 15.2% |
+| High params | A | 162 (1.8%) |
+| Hotspots | A | 0 |
+| God files | B | 3 (0.3%) |
+| DSM layering | — | Clean (all deps flow downward, 0 propagation cost) |
+| Test coverage | F | 3.6% (39/1091 source files tested) — accepted policy |
+| Max blast radius | — | 31 files |
+
+**Note on dead code grade**: The F grade for dead code is expected and misleading — Sentrux
+counts feature-gated items (items behind `#[cfg(feature = "...")]`) as dead code because it
+does not model feature flag activation. The true dead code volume is substantially lower. The
+`#[allow(dead_code)]` policy in `AGENTS.md` (per-item `#[allow()]` with mandatory comment)
+partially mitigates this at the Rust compiler level.
+
+**Note on test coverage grade**: 3.6% (39/1091 source files tested) reflects only files with
+co-located `#[cfg(test)]` modules. The project's testing philosophy deliberately separates
+test code from production code (separate test crates, integration test binaries). The actual
+`cargo-llvm-cov` line coverage is 65.6% (see Test Coverage Analysis section). Low per-file
+test coverage is accepted policy.
+
+**Note on cycles grade**: The D grade for cycles (4 circular dependency cycles) conflicts with
+the dependency graph analysis which found a clean DAG. This likely reflects intra-crate module
+cycles (not inter-crate), which Sentrux detects at module granularity. These should be
+investigated.
+
 ## Architecture
 
 ### Strengths
@@ -238,6 +281,11 @@ now carry `publish = false`.
   before `merge_service`.
 - Batch plugin config loading in `list_ignore_rules` and JOIN-based `load_plugins` eliminate
   N+1 patterns.
+- Three-tier HTTP stack (`uptrakit-web-api`, `uptrakit-web-api-queries`, `uptrakit-web-api-auth`)
+  with zero inter-crate dependencies — clean separation between route handling, query execution,
+  and authentication logic.
+- Middleware execution order is explicit and well-structured: `security_headers` →
+  `request_id` → `request_log` → `resolve_proxy_headers` → `rate_limit` → `resolve_ip`.
 
 ### Issues
 
@@ -279,7 +327,16 @@ into sub-structs (e.g., `PkiState`, `AuthState`, `NotificationState`, `SseBroadc
 improve readability and allow partial injection in tests. The builder has 32 optional fields
 with runtime `.ok_or()` checks -- a typestate builder pattern would catch missing fields at
 compile time. *Note: 2026-03-06 parallel review confirmed 32+ fields, up from 26 reported
-previously.*
+previously. Sentrux reports AppState as one of 3 god files in the workspace.*
+
+**[HIGH]** `crates/ui/web-api/src/router.rs` -- At 929 lines, the router is a flat sequence of
+80+ `.routes()` calls with no domain-based decomposition. Should be refactored into domain
+sub-routers (e.g., `auth_router()`, `hosts_router()`, `plugins_router()`) that are mounted
+into the top-level router.
+
+**[MEDIUM]** Route module size — several route files are approaching or above 1,500 lines:
+`service_ws/handler/mod.rs` (1,720 LOC), `oidc_auth.rs` (1,515 LOC), `software_items.rs`
+(1,460 LOC), `plugin_configs.rs` (1,181 LOC). These should be split at concern boundaries.
 
 **[MEDIUM]** `crates/shared/db/src/entity/oidc_provider.rs:89` -- Soft-delete column named
 `deleted_at` instead of `deactivated_at`. All other 7 soft-deletable entities use
@@ -291,6 +348,11 @@ path is canonical.
 
 **[MEDIUM]** `crates/core/controller/src/migration/m20260209_000001_initial.rs:615-621` -- Raw
 SQL in migration seed uses `CURRENT_TIMESTAMP` which behaves differently across backends.
+
+**[MEDIUM]** ARCHITECTURE.md gaps: missing documentation for (1) middleware execution order and
+responsibilities, (2) the 10-phase startup sequence, (3) `AppState` field groupings, and
+(4) the fire-and-forget notification dispatcher pattern. These make onboarding harder for new
+contributors.
 
 **[LOW]** `Cargo.toml` (workspace root) -- No `rust-version` MSRV declared. Without an MSRV
 declaration, edition-2024 features may silently break older toolchains.
@@ -475,6 +537,11 @@ an SSE error event. *(2026-03-06 parallel review: code quality agent)*
   concurrent revocation from narrowing the window.
 - MQTT event delivery uses targeted routing via `mqtt_client_index` -- routes tenant-specific
   messages to specific MQTT service instance.
+- Graceful shutdown sequence: SIGTERM → `ServerRestarting` scattered over 5s → drain connections
+  → cancel tasks with per-task timeouts (default 5s, scheduler 60s). Clean handoff documented
+  in per-crate controller review.
+- MQTT lease coordination uses atomic SQL upserts — no race conditions on lease acquisition.
+- Durable NATS consumers per controller instance with explicit consumer names prevent message loss.
 
 ### Issues
 
@@ -536,6 +603,43 @@ groups are run in parallel via `join_all()`. With many plugin groups, this could
 concurrent subprocess calls (`dpkg-query`, `brew info`, `npm list`, etc.) simultaneously. A
 `tokio::sync::Semaphore` limiting concurrent invocations to 4-8 parallel groups would prevent
 resource exhaustion. *(2026-03-06 parallel review: HA agent)*
+
+**[MEDIUM]** Per-instance in-memory rate limiter -- In a multi-instance deployment, the rate
+limiter state is not shared across instances. A distributed brute-force attack that spreads
+requests across instances can bypass the per-instance threshold. Either use DB-backed rate
+limiting (already partially implemented) as the authoritative store for all instances, or
+document the multi-instance rate limiting gap.
+
+**[MEDIUM]** NATS consumer gives up after 30s of persistent errors with no infinite retry --
+The backoff caps at 30s and does not reset the failure counter. A prolonged NATS outage
+(>30s) could cause the consumer to stop retrying entirely. Document or implement an infinite
+retry with capped interval.
+
+**[MEDIUM]** No WebSocket keepalive/heartbeat -- Intermediaries (load balancers, NAT gateways)
+may silently drop idle WebSocket connections. Without application-level ping/pong, agent
+connections can appear live in the server state while the underlying TCP connection has been
+dropped by a middlebox.
+
+**[MEDIUM]** MQTT broker unavailability causes per-message timeout latency -- There is no
+circuit breaker on the MQTT client. When the broker is unavailable, each message attempt
+waits for a full timeout before failing. A circuit breaker pattern would fast-fail messages
+during known outage windows and reduce latency during partial failures.
+
+**[MEDIUM]** DB connection pool exhaustion blocks all requests -- No connection timeout or
+backpressure configuration is visible in the pool setup. Under sustained load, exhaustion
+would cause all handlers to block indefinitely waiting for a connection, rather than returning
+503 quickly. Configure `connect_timeout` on the pool and add a shed-load path.
+
+**[MEDIUM]** `maybe_complete_batch` transaction isolation gap -- The function uses PostgreSQL's
+default READ COMMITTED isolation. A new `Queued` item inserted between the `pending_count`
+check and the `UPDATE` by a concurrent controller would be missed, causing premature batch
+completion. Use `SERIALIZABLE` isolation or recheck within the same transaction using a
+`SELECT FOR UPDATE`.
+
+**[MEDIUM]** `deliver_pending_updates` batch-aware filter applies in-memory after query --
+Concurrent INSERT of a second item for the same `(batch_id, host_id)` between the query
+and the in-memory dedup could violate the sequential per-host invariant. Consider enforcing
+the constraint at the DB layer.
 
 ## Coding Standards
 
@@ -631,13 +735,14 @@ gain new variants (e.g., `ServiceAccount`, `System`) as the auth model evolves.
 
 ### Splitting Candidates
 
-#### `uptrakit-web-api` (~38K LoC, ~98 files)
+#### `uptrakit-web-api` (~38K LoC, ~111 files)
 
-**Current concerns:** The crate contains 8 distinct domains: authentication (JWT, OIDC, sessions,
-device flow, token denylist), authorization (permissions, rate limiting), routes (30+ handler
-files), queries (10+ DB query modules), settings (settings store, reconciliation), MQTT
+**Current concerns:** The crate contains multiple distinct domains: authentication (JWT, OIDC,
+sessions, device flow, token denylist), authorization (permissions, rate limiting), routes (52+
+handler files), queries (10+ DB query modules), settings (settings store, reconciliation), MQTT
 coordination (lease coordinator, MQTT client store), PKI/OCSP (CA snapshot, CRL, OCSP, cert
-signer), and cross-controller transport (NATS transport, notification service, event delivery).
+signer), extension proxy, and cross-controller transport (NATS transport, notification service,
+event delivery). Sentrux reports 18 internal dependencies and identifies it as a god-crate.
 
 **Proposed split:**
 
@@ -645,7 +750,7 @@ signer), and cross-controller transport (NATS transport, notification service, e
 | --- | --- | --- |
 | `uptrakit-web-api-auth` | JWT, sessions, token denylist, password hashing, device flow, OIDC state stores, rate limiting | `src/auth/` (16 files) |
 | `uptrakit-web-api-core` | `AppState`, `Settings`, `TenantDb`, `SettingKey`, settings store, CA snapshot, cert signer, error helpers | `app_state.rs`, `settings.rs`, `settings_store.rs`, `tenant_db.rs`, `ca_snapshot.rs`, `cert_signer.rs`, `setting_key.rs` |
-| `uptrakit-web-api-routes` | All HTTP route handlers and the router | `src/routes/` (30 files), `router.rs` |
+| `uptrakit-web-api-routes` | All HTTP route handlers and the router | `src/routes/` (52 files), `router.rs` |
 | `uptrakit-web-api` (rump) | NATS transport, notification service, MQTT coordination, OCSP, update broadcaster, event delivery | remaining files |
 
 **Priority:** MEDIUM — the crate is functional and its internal structure is clean; the split
@@ -692,6 +797,39 @@ are used by both the controller and web-api routes.
 
 **Risk:** Medium. PKI is security-critical; any refactor of the key store types requires careful
 audit of all call sites.
+
+---
+
+### New Crate Boundary Findings (2026-03-15)
+
+**[CRITICAL]** `uptrakit-web-api` is a confirmed god-crate -- Sentrux reports 111 files and 18
+internal dependencies with 5+ distinct responsibilities: routing, middleware, settings,
+events/SSE/WebSocket, PKI, MQTT coordination, and extension proxy. This reinforces the
+proposed split above and elevates its priority.
+
+**[MEDIUM]** `uptrakit-agent-core` imports `plugin-infrastructure-registry` (all 21 plugins) --
+Should depend only on `plugin-infrastructure-core` (traits). Move the registry import to the
+agent binary level only, reducing recompilation scope when any plugin changes.
+
+**[MEDIUM]** `db-sqlite`/`db-postgres`/`db-mysql` feature flags declared in 6 separate crates --
+Should be consolidated via a workspace-level feature crate or a documented propagation
+convention so that adding a new backend does not require touching 6 `Cargo.toml` files.
+
+**[MEDIUM]** `notifications-telegram`/`notifications-email`/`notifications-webhook` feature
+flags propagate through 3 crates with no single source of truth -- Consider a
+`uptrakit-notification-feature-flags` shim crate or centralize in `[workspace.dependencies]`.
+
+**[LOW]** `web-api-types` depends on `internal-wire` -- External API types are entangled with
+internal protocol types. This prevents using `web-api-types` in a context where `wire` is not
+needed (e.g., a standalone client library).
+
+**[Intentional]** `plugin-infrastructure-registry` has 24 deps (all plugins) -- This is by
+design; document this explicitly in the crate's `Cargo.toml` with a comment explaining that
+the registry is the single point of plugin aggregation and its large dep count is expected.
+
+**[Long-term]** Dynamic/manifest-based plugin loading would enable zero-code-change plugin
+addition. The current compile-time registry requires a recompilation for every new plugin.
+This is a long-term architectural direction, not a near-term action item.
 
 ---
 
@@ -1048,6 +1186,10 @@ despite containing 7 `OffsetDateTime::now_utc()` calls and handling encrypted se
 
 *(2026-03-06 parallel review: consistency agent)*
 
+**[MEDIUM]** Inconsistent list endpoint response shapes -- `oidc_providers` returns `Vec<T>`
+(unpaginated) while all other collections return `PaginatedResponse<T>`. This inconsistency
+breaks client-side pagination handling assumptions.
+
 **[LOW]** Error variant naming inconsistency for DB-wrapping variants across query error types:
   - `ServiceQueryError::Db(sea_orm::DbErr)` at `services.rs:44`
   - `SoftwareItemQueryError::Db(sea_orm::DbErr)` at `software_items.rs:61`
@@ -1085,6 +1227,30 @@ does not follow chronological file-name order (documented and intentional for FK
 reasons), but a comment at the top of the `migrations()` function would help prevent
 well-intentioned "cleanup" by new contributors.
 
+**[MEDIUM]** Single TODO comment in production code: `crates/ui/web-api/src/middleware/tenant_context.rs:16`
+-- multi-tenancy X-Tenant-Id header handling is marked as future work. Track this as a
+backlog item rather than a source-code TODO so it does not become invisible.
+
+**[MEDIUM]** `trigger_host_batch_update` and `trigger_item_batch_update` share near-identical
+second half -- Extract the shared dispatch logic into a common helper to reduce duplication
+and divergence risk.
+
+**[MEDIUM]** Settings routes split across 10 separate files (`settings.rs`,
+`settings_agent_certs.rs`, etc.) rather than a `settings/` subdirectory. Reorganize into a
+`routes/settings/` module to improve navigability.
+
+**[LOW]** `extension_proxy.rs:279,365,397,428,478` -- `Duration::from_secs(5)` repeated 5
+times. Extract as a named const (e.g., `EXTENSION_PROXY_TIMEOUT`).
+
+**[LOW]** `device_auth.rs:321` -- magic `600` (second timeout) should be a named constant
+(e.g., `DEVICE_FLOW_POLL_TIMEOUT_SECS`).
+
+**[LOW]** Scheduler endpoints use `'Failed to ...'` error messages inconsistently vs rest of
+codebase. Align with the standard error message format used in other route modules.
+
+**[LOW]** NATS backoff min/max (1s, 30s) are inline literals in `nats_transport.rs`. Extract
+as named constants alongside other duration constants in `durations.rs`.
+
 **[LOW]** `crates/shared/agent-core/src/version_check.rs` -- Detect/fetch retry logic duplicated.
 `detect_installed` (lines 421-481) and `fetch_latest` (lines 488-545) share nearly identical
 retry-with-backoff logic (~50 lines each). A shared generic retry helper would eliminate
@@ -1111,6 +1277,63 @@ These should be wrapped in a single encompassing transaction.
   - `software_items.rs:824` -- `assign_hosts` host existence check lacks tenant filter (user-provided `host_id`)
   - `host_packages.rs:435,485` -- `find_or_create_host_package` omits `tenant_id` filter on `HostPackage::find()`
 These are mitigated by upstream tenant scoping but violate the defense-in-depth convention.
+
+---
+
+## Logic Consistency Issues
+
+*(2026-03-15 review pass)*
+
+**[HIGH]** `maybe_complete_batch` (`dispatch.rs`) does not re-check batch status before
+completing -- A second concurrent controller could observe zero `pending_count` simultaneously
+and both execute the terminal `UPDATE`, causing a double-transition to `Completed`. The
+transaction-with-terminal-state-guard fix noted in the Summary protects against the known
+race, but the status check and the update remain two separate steps at READ COMMITTED isolation.
+Use `UPDATE ... WHERE status = 'InProgress' RETURNING id` to make the guard atomic.
+
+**[HIGH]** `dispatch_update_to_agent` errors in `create_batch` (lines 210-220) are logged but
+not propagated -- Callers cannot detect partial dispatch failures. If the first N agents are
+dispatched successfully and agent N+1 fails, the batch appears started but some hosts have no
+in-flight update. Propagate the error and roll back or mark the affected batch items as `Failed`.
+
+**[HIGH]** `handle_update_started` `active.update()` (line 414) error is logged but not
+propagated -- The record stays `Pending` in the DB while the agent has started executing.
+Subsequent status checks will see a stale state. Propagate the error; if the DB write fails,
+send a cancellation to the agent.
+
+**[HIGH]** `handle_update_result` `active.update()` (line 717) error is logged but not
+propagated -- Final output may not be persisted. The update appears to complete on the agent
+side but the controller retains stale state. Propagate and handle as a data integrity failure.
+
+**[HIGH]** `host_software_item` version update (lines 756-777) error is logged but not
+propagated -- The installed version is not updated on success. The next version-check cycle
+will incorrectly report the old version as current. Propagate the error or schedule a
+compensating version-check.
+
+**[MEDIUM]** `deliver_pending_updates` returns early on `fail_in_progress_on_reconnect` error
+without delivering pending items -- A DB error during the in-progress-failure step causes the
+reconnect to deadlock: the old in-progress record is not cleared, so the new pending items
+cannot be dispatched. Log the error and continue delivery with a compensating recovery path,
+or surface the error to the caller.
+
+**[MEDIUM]** `handle_update_started` unconditionally sets status to `InProgress` without
+checking current status -- If the record is already `InProgress` or `Completed` (e.g., from
+a duplicate message), the status is overwritten. Add a guard: `UPDATE ... WHERE status = 'Pending'`.
+
+**[MEDIUM]** Interactive flag invariant violated: `deliver_pending_updates` hardcodes
+`interactive = false` (line 348) on reconnect -- `update_history.interactive` is persisted at
+create time and reflects the original dispatch intent. Re-dispatching on reconnect should
+read the persisted `interactive` flag from the record rather than hardcoding `false`.
+
+**[MEDIUM]** Pending-updates-forever bug: `deliver_pending_updates` silently skips items
+missing an `execute_update` plugin without marking them `Failed` -- These items remain
+`Pending` indefinitely. Add a guard: if no plugin supports `execute_update` for the item's
+plugin type, transition to `Failed` with a descriptive reason.
+
+**[LOW]** `UpdateFinalStatus` match catch-all `_` defaults to `Failed` -- New variants added
+later will silently map to `Failed` rather than being an explicit compiler error. Replace `_`
+with exhaustive match arms, removing the catch-all, so the compiler enforces handling of new
+variants.
 
 ---
 

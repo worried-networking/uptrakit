@@ -308,3 +308,32 @@ string alone is insufficient for quick log triage.
 **[LOW]** `src/connection.rs` -- `.expect()` used in the connection retry loop for stream
 creation. The coding standard prohibits `.expect()` in production code. Replace with a fallible
 path that returns `Report<NatsError>`.
+
+---
+
+## 2026-03-15 Review Update
+
+### High Availability
+
+**[INFO]** `src/connection.rs` — Connection uses exponential backoff: 1 s base, 30 s maximum,
+±25% jitter, 10 retry attempts. On exhaustion the function returns a hard error (does not retry
+indefinitely). This is correct for startup; there is no post-connect retry loop because
+`async_nats::Client` handles reconnection internally.
+
+**[INFO]** `src/connection.rs` — JetStream consumer uses `DeliverPolicy::New`. Messages published
+while a consumer is absent (e.g., during a process restart) are not replayed. This is the
+accepted behavior for transient cross-instance messaging where replay would cause duplicate
+side-effects.
+
+**[INFO]** `src/connection.rs` — Publish is fire-and-forget: serialization errors are logged at
+`error` level and not propagated; publish failures are logged at `warn` level and not propagated.
+Callers are never blocked by NATS unavailability.
+
+**[INFO]** Stream retention: 24-hour `RetentionPolicy::Limits` with file-backed storage. Messages
+age out rather than filling disk when consumers fall behind.
+
+**[LOW]** `src/connection.rs` — The JetStream consumer loop gives up after approximately 30 s of
+persistent errors (derived from the retry/timeout configuration). Recovery requires a process
+restart; there is no automatic back-off-and-retry at the consumer level. This is an accepted
+operational risk for the current deployment model but should be documented in the module doc
+comment.

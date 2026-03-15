@@ -760,3 +760,41 @@ completeness.
 the tracing subscriber has not yet been initialized at this point in the startup sequence.
 The `eprintln!` calls are limited to the early startup path and are replaced by `tracing::error!`
 once the subscriber is active.
+
+## Review — 2026-03-15
+
+- **Reviewer**: AI code review (architecture|HA|quality|standards)
+- **Branch**: docs/codereview-backend
+
+### Architecture
+
+#### Strengths
+
+- Startup sequence has 10 well-defined phases: master_key → dirs → db → verify_key → crypto →
+  settings → OIDC → PKI → JWT → AppState construction. Phased initialization prevents
+  partial-init states: a failure in any phase is immediately attributable and leaves no partially
+  constructed runtime.
+- No singleton assumptions — multiple instances are safe via DB-level optimistic locking.
+  Token denylist is per-instance in-memory; cross-instance revocations are broadcast via NATS
+  (correct pattern). Settings reload every 30 seconds via scheduled task (all instances converge
+  within the polling window). SIGUSR1 handler supports graceful takeover for PKI rotation.
+
+### High Availability
+
+#### Strengths
+
+- Cross-instance token revocation is propagated via NATS broadcast — correct pattern for a
+  stateless per-instance denylist.
+- Settings converge across all instances within one 30-second poll cycle.
+- SIGUSR1 handler enables graceful takeover during PKI rotation without a full restart.
+
+### Coding Standards
+
+#### Issues
+
+**[MEDIUM]** `src/tasks.rs:610` -- `spawn_background_tasks` carries
+`#[allow(clippy::too_many_arguments)]` without a feature-gating justification. The comment
+"mirrors the distinct pieces of key deployment state" explains the argument composition but
+does not justify suppressing the lint. This is a violation of the project-wide zero-suppression
+standard. Refactor by grouping related arguments into a `SpawnBackgroundTasksParams` struct
+(or two domain-scoped structs). The suppression should be removed once the struct is introduced.

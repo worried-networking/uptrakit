@@ -409,3 +409,63 @@ file in the MQTT crate. It contains topic construction, discovery config buildin
 publishing, and command parsing. Candidate for splitting into sub-modules: `topics.rs` (topic
 string construction), `config.rs` (discovery config building), `publish.rs` (state
 publishing), and `commands.rs` (command topic parsing).
+
+## Review — 2026-03-15
+
+- **Reviewer**: AI code review (HA|standards|idiomatic Rust|references)
+- **Branch**: docs/codereview-backend
+
+### High Availability
+
+#### Strengths
+
+- Bounded event channel (512 capacity) between `TenantManager` and `MqttHandler` provides
+  backpressure. Dropped events are acceptable because device state auto-recovers on the next
+  push from the controller.
+- `MQTT_LEASE_STALE_AFTER = 60s`: stale leases may be reassigned after 60 seconds, limiting
+  the lease-orphan window for crashed instances.
+
+#### Issues
+
+**[MEDIUM]** No circuit breaker for MQTT broker unavailability. Under broker unavailability,
+each outbound message times out individually rather than fast-failing at the dispatch level.
+Under sustained broker downtime with many concurrent publish attempts, this produces high
+aggregate latency and resource consumption proportional to the number of queued messages.
+A circuit-breaker or per-client backoff accumulator would bound the blast radius.
+
+### Coding Standards
+
+#### Issues
+
+**[MEDIUM]** `src/ha_discovery/device.rs:88` -- `#[allow(clippy::too_many_arguments)]` without
+a feature-gating justification. The function accepts 8+ parameters for constructing Home
+Assistant discovery device configs. The project-wide zero-suppression standard applies.
+Refactor by introducing a `HaDeviceParams` builder or parameter struct. The suppression should
+be removed once the struct is introduced.
+
+### Idiomatic Rust
+
+#### Issues
+
+**[LOW]** `report_command()` in `mqtt_client.rs` takes `String` for the topic parameter.
+Callers that have a `&str` must allocate to satisfy the signature. Changing the parameter type
+to `impl Into<String>` (or `Cow<'_, str>`) would accept both `&str` and `String` without
+allocating in the `&str` case.
+
+### References and Heap
+
+#### Issues
+
+**[LOW]** `mqtt_client.rs:268` -- `topic.clone()` before `tokio::spawn`. The clone is
+necessary to move the topic into the spawned task, but if the topic string is long-lived and
+shared, an `Arc<str>` would reduce the clone cost from a heap allocation to a ref-count
+increment.
+
+**[LOW]** `mqtt_client.rs:424` -- `publish.topic.clone()` on the publish path. If the topic
+is not needed after the publish call, the `.clone()` can be replaced with `std::mem::take` or
+by restructuring the publish API to take ownership.
+
+**[LOW]** `tenant_manager.rs:157` -- `payload.items.clone()` stored in the `HashMap` cache.
+For large software-state payloads (hundreds of items), this is a full heap duplication. If
+`items` is consumed only for publishing and then cached, reordering to publish first and cache
+the original (moving ownership) eliminates the clone entirely.

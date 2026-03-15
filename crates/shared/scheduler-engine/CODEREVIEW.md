@@ -402,3 +402,27 @@ contexts. The project standard prescribes `parking_lot::Mutex` everywhere. Repla
   Claims are released on shutdown via `release_all_claims` scoped to the shutting-down controller.
   Unknown task types are skipped at the query level via `IS IN (...)` filtering, preventing
   deserialization failures during rolling upgrades. *Confirmed from prior HA and Database sections.*
+
+---
+
+## 2026-03-15 Review Update
+
+### High Availability
+
+**[INFO]** `src/scheduler.rs` — `register()` uses `debug_assert` to panic in debug builds on
+double-registration of the same task type. This is intentional fail-fast behavior in development.
+Release builds silently overwrite the previous executor, which is the correct tradeoff (avoids a
+panic in production from a configuration mistake).
+
+**[INFO]** `src/scheduler.rs` — `join_set.join_next()` catches task panics, logs them, and
+continues the scheduler loop. The scheduler does not terminate on a panicking executor task.
+
+**[INFO]** `src/scheduler.rs` — Poll interval is 15 s (configurable via `SchedulerConfig`). Task
+execution timeout is 2 h (`TASK_EXECUTION_TIMEOUT`). There is no fairness guarantee across
+task types within a single poll cycle; tasks are dispatched in the order `find_due_tasks` returns
+them. This is acceptable because DB-level optimistic locking (`try_claim`) prevents two scheduler
+instances from executing the same task concurrently.
+
+**[INFO]** `src/scheduler.rs` — Task execution is tenant-agnostic at the scheduler level. Any
+controller instance will execute due tasks for any tenant. Tenant isolation is the responsibility
+of each executor implementation. This is intentional for the distributed-scheduler model.

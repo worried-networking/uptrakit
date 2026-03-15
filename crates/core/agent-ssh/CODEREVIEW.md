@@ -423,3 +423,26 @@ prefix repetition that triggers the lint.
 - `src/ssh_transport.rs` -- `ConnectionContext` pattern encapsulates SSH connection parameters
   (host, port, username, auth method) in a single struct passed through the connection pipeline.
   This avoids long parameter lists and makes the connection setup self-documenting.
+
+## Review — 2026-03-15
+
+- **Reviewer**: AI code review (quality|standards)
+- **Branch**: docs/codereview-backend
+
+### Coding Standards
+
+#### Issues
+
+**[MEDIUM]** `src/commands/bootstrap.rs:364` -- `#[allow(clippy::too_many_arguments)]` is
+present without a feature-gating justification. The inline comment states the arguments
+"mirror the distinct pieces of key deployment state", which accurately describes the design
+rationale but does not justify suppressing the lint. The project-wide zero-suppression standard
+applies. Refactor by introducing a `BootstrapStepParams` (or similarly named) struct to group
+the related deployment-state arguments. The suppression should be removed once the struct is
+introduced.
+
+#### Approved `#[allow]` Suppressions
+
+- `src/client.rs:512` -- `#[allow(unused_mut)]` feature-gated — **approved** (the binding is
+  only mutated under a specific feature flag; the suppression is scoped to the feature-gated
+  block with a comment).

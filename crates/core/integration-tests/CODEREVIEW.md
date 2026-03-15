@@ -84,3 +84,25 @@ and maintainability.
   implementations (Caddy, Envoy, HAProxy, nginx, Traefik) with CRL and OCSP revocation
   scenarios. This is high-value coverage for the PKI infrastructure that validates
   certificate revocation propagation through real proxy configurations.
+
+## Review — 2026-03-15
+
+- **Reviewer**: AI code review (tests philosophy)
+- **Branch**: docs/codereview-backend
+
+### Tests
+
+#### Strengths (philosophy conformity — positive findings)
+
+- `start_paused = true` is correctly used only in tests that call `tokio::time::advance`.
+  Docker plugin tests that use Tokio time APIs carry the attribute; tests that do not use any
+  Tokio time API use plain `#[tokio::test]` — correct per the workspace `start_paused` rule.
+- `sleep` in `tests/helpers/api_client.rs` is for Docker container startup polling — an
+  acceptable use of sleep (waiting for an external process, not for async logic).
+- Proper timeout deadlines on all long-running test scenarios prevent infinite hangs in CI.
+- `TestApp` harness provides an isolated `sqlite::memory` DB per test. No shared state between
+  test cases.
+- `uptrakit_crypto::enable_plaintext_mode()` is called in all test DB setup functions,
+  consistent with the workspace `EncryptedString` testing standard.
+- No sleep-polling for async application logic. All async waits use explicit timeout
+  combinators or signal-based notification.

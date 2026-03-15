@@ -273,3 +273,36 @@ helper would reduce the repetition and make the validation logic independently t
 - `src/client.rs` -- Update rate limiting and freeze file support (via `agent-core`) prevent
   runaway update loops. The freeze file mechanism allows operators to pause updates without
   restarting the agent process.
+
+## Review — 2026-03-15
+
+- **Reviewer**: AI code review (architecture|quality|standards)
+- **Branch**: docs/codereview-backend
+
+### Architecture
+
+#### Issues
+
+**[HIGH]** `uptrakit-agent-core` imports `plugin-infrastructure-registry`, which bundles all
+21 plugin crates. The agent-core library crate should depend only on
+`plugin-infrastructure-core` (traits and the `PluginCapability` / `PluginError` types). Plugin
+selection and registration belong at the binary boundary (`uptrakit-agent` or
+`uptrakit-agent-ssh`), not inside a shared library. This crate boundary violation means that
+any consumer of `agent-core` transitively pulls in every plugin crate, inflating compile times
+and linking in code that a given agent binary may never use.
+
+### Code Quality
+
+#### Strengths
+
+- `ForwardingInteractiveExecutor` pattern in `agent-core/src/update.rs` is idiomatic: it
+  promotes to `execute_interactive()` on the first `execute()` call, sends PTY channels via
+  `tokio::sync::oneshot` back to the outer function, and falls back gracefully to
+  non-interactive if not supported. Avoids modifying the `Plugin` trait.
+
+#### Approved `#[allow]` Suppressions
+
+- `src/client.rs:31,43,44` -- `#[allow(unused_variables)]` with feature-gate context — **approved**
+  (variables are only used under a specific feature flag; comment documents the reason).
+- `src/client.rs:37` -- `#[allow(unreachable_code)]` with comment explaining the interactive
+  feature branch — **approved**.

@@ -120,7 +120,23 @@ No test issues found.
 
 ## Cross-Cutting HTTP Reliability
 
+### HTTP Client Safety
+
+All HTTP-using plugins satisfy the workspace requirements. Summary:
+
+| Plugin | SSRF Guard | Timeout | Notes |
+|---|---|---|---|
+| `releases/github` | Yes | Yes | `SsrfSafeResolver`, 10s connect, 60s request, `Policy::none()` |
+| `releases/docker` | Yes | Yes | `SsrfSafeResolver`, 10s connect, 60s request |
+| `releases/gitlab` | Yes | Yes | Same pattern as GitHub |
+| `releases/forgejo` | Yes | Yes | Same pattern |
+| `notifications/webhook` | Yes | Yes | Permissive mode when `allow_private_urls=true`, header blocklist |
+| `notifications/email` | N/A | Yes | SMTP protocol (not HTTP), 10s `SMTP_CONNECT_TIMEOUT` |
+| `notifications/telegram` | Yes | Yes | Standard pattern |
+
 ### Issues
+
+No cross-cutting HTTP reliability issues.
 
 ---
 
@@ -128,6 +144,38 @@ No test issues found.
 
 The following findings apply across the plugin subsystem and are documented here for reference.
 Individual crate reviews contain the crate-specific details.
+
+### Plugin Architecture Strengths
+
+- Zero cross-plugin coupling: all plugins depend only on `infrastructure-core`, never on each
+  other. The registry crate is the sole integration point.
+- The `register_plugins!` macro eliminates manual dispatch boilerplate. Adding a plugin requires
+  one line in the macro and one dependency in `registry/Cargo.toml`.
+- Compile-time `CAPABILITIES` constants allow static capability queries without instantiation.
+- `PluginCapability` is `#[non_exhaustive]` -- new variants can be added without breaking
+  downstream match sites.
+- Strong secret masking via `SecretMasking` trait with restore-from-existing semantics.
+- Comprehensive config validation: path traversal checks, regex validation (compile-time),
+  command length limits, private host detection.
+- `is_retryable()` method on `PluginError` enables callers to distinguish transient failures
+  from permanent ones without inspecting error messages.
+- `DetectHostCompatibility` uses fail-open semantics: treat as compatible on detection error,
+  preventing spurious plugin unavailability.
+- HTML escaping via `escape_html()` in notification core prevents XSS in email bodies.
+- Webhook header blocklist (`authorization`, `cookie`, `host`, `x-forwarded-*`) is enforced
+  regardless of `allow_private_urls`, preventing header injection.
+- No redirect following in webhook client (`Policy::none()`).
+
+### Crate Boundary Note
+
+`plugin-infrastructure-registry` depends on all 21 plugin crates plus 3 infra crates (24 total
+deps). This is intentional by design: the registry is the single integration point and the
+`register_plugins!` macro requires it to see every plugin crate at compile time. This pattern
+is documented in `registry.rs` and should not be treated as a coupling violation.
+
+Notification plugins follow a feature-flag registration pattern: `webhook` is on by default;
+`telegram` and `email` are opt-in. This is propagated consistently through `web-api` and
+`controller` feature flags.
 
 ### Plugin Extension Checklist
 
@@ -265,6 +313,10 @@ Recommendation: replace prefix matching with exact extension-ID registration in 
 
 Recommendation: extend `register_plugins!` to accumulate `extension_manifests()` and `extension_actions()` from all entries that declare an `extension_handler`, eliminating the hardcoded call sites.
 
+**[LOW] E3 — Extension action authorization relies on implicit middleware context**
+
+Extension action manifests declare `Permission` requirements, but enforcement in the `invoke_action` handler relies on the implicit `auth_routes` middleware context rather than a per-action explicit authorization guard. There is no compile-time or runtime check that the declared permissions are actually enforced for each action. Currently safe because all extension routes sit behind `auth_routes`, but worth hardening when a second extension-capable plugin is added.
+
 ---
 
 ### Generic / Shell
@@ -289,6 +341,18 @@ Recommendation: either add `impl_report_conversion!(ShellError, PluginError)` an
 `PluginOpsError` is a public error enum used across crate boundaries but does not carry `#[non_exhaustive]`. New error conditions are plausible future additions. Without this attribute, any crate that exhaustively matches all current variants will fail to compile when a new variant is added, creating a breaking change without a semver bump.
 
 Recommendation: add `#[non_exhaustive]` to `PluginOpsError` and verify that all external match sites add a wildcard arm with appropriate handling.
+
+**[VIOLATION] CS3 — `crates/plugins/infrastructure/proxmox/src/agent/extension_actions.rs:285` — `#[allow(clippy::too_many_arguments)]` without justification**
+
+The suppression comment says "mirrors the many fields needed for bootstrap," which describes the symptom rather than justifying the allow. The correct fix is to introduce a parameter struct. This is a coding-standards violation per the workspace rule that `#[allow()]` on non-feature-gated items must have a mandatory justification comment explaining why refactoring is not feasible.
+
+**[VIOLATION] CS4 — `crates/plugins/infrastructure/core/src/agent_infra.rs:55` — `#[allow(clippy::too_many_arguments)]`**
+
+Same violation pattern as CS3. A parameter struct would eliminate the need for the suppression.
+
+**[VIOLATION] CS5 — `notifications/email/src/lib.rs:89` — `.expect()` in production code**
+
+`merge_smtp_into_config` uses `.expect("config is always an object")`. This is one of only two non-test `.expect()` violations found across the entire backend codebase. If a non-object `serde_json::Value` reaches this call (e.g., `null`, `[]`, or a string), the server panics. The function should return `Result` and propagate the error to the caller. See also the duplicate entry under the 2026-03-10 dimension review below.
 
 #### Positive findings (cross-cutting)
 
