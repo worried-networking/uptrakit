@@ -81,6 +81,15 @@ export function formatVersion(version: string | null | undefined, fallback = 'â€
 	if (version.startsWith('sha256:')) {
 		return `sha256:${version.slice(7, 19)}\u2026`;
 	}
+	if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(version)) {
+		return new Date(version).toLocaleString(undefined, {
+			year: 'numeric',
+			month: 'short',
+			day: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
+	}
 	return version;
 }
 

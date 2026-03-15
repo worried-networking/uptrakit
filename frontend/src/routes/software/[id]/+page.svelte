@@ -124,6 +124,20 @@
 		execute_update: 'Update'
 	};
 
+	function groupHostPlugins(plugins: SoftwareItemHostSummary['plugins']): Array<{ name: string; roles: string[] }> {
+		const groups: Record<string, string[]> = {};
+		for (const p of plugins) {
+			const key = p.plugin_config_name ?? p.plugin_type;
+			const role = ROLE_SHORT[p.role] ?? p.role;
+			if (groups[key]) {
+				if (!groups[key].includes(role)) groups[key].push(role);
+			} else {
+				groups[key] = [role];
+			}
+		}
+		return Object.entries(groups).map(([name, roles]) => ({ name, roles }));
+	}
+
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 	let unsubscribers: (() => void)[] = [];
 
@@ -603,25 +617,19 @@
 						{#each item.hosts as host (host.id)}
 							<tr>
 								<td>
-									<a href="/hosts/{host.host_id}" class="hover:underline font-medium">{host.hostname}</a>
+									<a href="/hosts/{host.host_id}" class="hover:underline font-medium">{host.hostname}</a
+									>{#if host.qualifier}<span class="badge preset-tonal text-xs ml-1 font-mono">{host.qualifier}</span
+										>{/if}
 									{#if host.friendly_name && host.friendly_name !== host.hostname}
 										<span class="block text-xs text-surface-500">{host.friendly_name}</span>
 									{/if}
-									{#if host.qualifier}
-										<span class="block text-xs text-surface-500 font-mono">{host.qualifier}</span>
-									{/if}
 									{#if host.plugins.length > 0}
-										<div class="mt-1 space-y-0.5 overflow-hidden">
-											{#each host.plugins as p (`${p.plugin_config_id ?? p.plugin_type}_${p.role}`)}
-												<div class="flex min-w-0 items-baseline gap-1 text-xs text-surface-500">
-													<span class="shrink-0 font-semibold">{ROLE_SHORT[p.role] ?? p.role}:</span>
-													<span class="truncate">{p.plugin_config_name ?? p.plugin_type.replace(/_/g, ' ')}</span>
-													{#if p.package_identifier}
-														<span class="min-w-0 truncate opacity-60">({p.package_identifier})</span>
-													{/if}
-													{#if p.execution_site && p.execution_site !== 'auto'}
-														<span class="badge preset-tonal text-xs shrink-0">{p.execution_site}</span>
-													{/if}
+										<div class="mt-1 space-y-0.5">
+											{#each groupHostPlugins(host.plugins) as group (group.name)}
+												<div class="text-xs text-surface-500">
+													<span class="font-medium">{group.name}</span><span class="opacity-60">
+														· {group.roles.join(' · ')}</span
+													>
 												</div>
 											{/each}
 										</div>
@@ -629,10 +637,10 @@
 										<span class="mt-1 block text-xs italic text-surface-400">No plugins configured</span>
 									{/if}
 								</td>
-								<td title={host.installed_version ?? undefined}
+								<td class="whitespace-nowrap" title={host.installed_version ?? undefined}
 									>{formatVersion(resolveDisplayVersion(host.installed_version, host.installed_display_version))}</td
 								>
-								<td>
+								<td class="whitespace-nowrap">
 									<span title={host.latest_version ?? item.latest_version ?? undefined}
 										>{formatVersion(
 											resolveDisplayVersion(
@@ -643,19 +651,19 @@
 									>
 									{#if getReleaseMeta(host)}
 										<button
-											class="btn btn-sm preset-tonal ml-1"
-											title="View release notes"
-											onclick={() => openReleaseNotesModal(host)}>Notes</button
+											class="mt-0.5 block text-xs text-primary-500 hover:underline"
+											onclick={() => openReleaseNotesModal(host)}>Release notes ↗</button
 										>
 									{/if}
 									{#if getReleaseMeta(host)?.attestation_status === 'Verified'}
 										<span
-											class="badge preset-filled-success-500 ml-1 text-xs"
+											class="badge preset-filled-success-500 mt-0.5 block text-xs"
 											title="GitHub Actions attestation verified">Attested</span
 										>
 									{:else if getReleaseMeta(host)?.attestation_status === 'NotFound'}
-										<span class="badge preset-filled-error-500 ml-1 text-xs" title="No GitHub Actions attestation found"
-											>Not attested</span
+										<span
+											class="badge preset-filled-error-500 mt-0.5 block text-xs"
+											title="No GitHub Actions attestation found">Not attested</span
 										>
 									{/if}
 								</td>
@@ -680,7 +688,9 @@
 										<span class="badge {versionStatusClass(host)}">{versionStatusLabel(host)}</span>
 									{/if}
 								</td>
-								<td>{formatDate(host.installed_version_detected_at)}</td>
+								<td class="whitespace-nowrap text-sm text-surface-500"
+									>{formatDate(host.installed_version_detected_at)}</td
+								>
 								{#if canManage}
 									<td>
 										<div class="actions-menu">

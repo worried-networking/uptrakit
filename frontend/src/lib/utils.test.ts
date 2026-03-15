@@ -215,6 +215,24 @@ describe('formatVersion', () => {
 		const short = 'sha256:123456789012';
 		expect(formatVersion(short)).toBe('sha256:123456789012\u2026');
 	});
+
+	it('formats an ISO datetime string as a human-readable date', () => {
+		const result = formatVersion('2026-03-10T17:20:34Z');
+		// Should not be the raw ISO string
+		expect(result).not.toBe('2026-03-10T17:20:34Z');
+		// Should contain the year
+		expect(result).toContain('2026');
+		// Should contain the month abbreviation
+		expect(result).toMatch(/Mar/i);
+	});
+
+	it('sha256 truncation still works after ISO datetime branch added', () => {
+		expect(formatVersion(SHA256_FULL)).toBe('sha256:4d5a6206d4d5\u2026');
+	});
+
+	it('passes regular semver through unchanged', () => {
+		expect(formatVersion('3.14.1')).toBe('3.14.1');
+	});
 });
 
 // ── resolveDisplayVersion ─────────────────────────────────────────────────────
