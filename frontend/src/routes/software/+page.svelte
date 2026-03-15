@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { SvelteSet } from 'svelte/reactivity';
+	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
@@ -12,7 +12,8 @@
 		listPluginTypes,
 		getSoftwareItem,
 		triggerSoftwareUpdate,
-		batchSoftwareItems
+		batchSoftwareItems,
+		executeBatchChunked
 	} from '$lib/api';
 	import { formatDate, formatVersion, parseUrlPage, isValidLogoUrl } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -59,8 +60,18 @@
 	let selectedHostIds: Set<string> = $state(new Set());
 	let triggeringUpdate: boolean = $state(false);
 	let batchSelectedIds = new SvelteSet<string>();
+	const batchSelectedItemsMap = new SvelteMap<string, SoftwareItemResponse>();
 	let batchConfirmAction: string | null = $state(null);
 	let batchResult: BatchActionResponse | null = $state(null);
+	let selectingAllPages = $state(false);
+
+	const allBatchPageSelected = $derived(items.length > 0 && items.every((i) => batchSelectedIds.has(i.id)));
+
+	const selectAllPagesInfo = $derived(
+		isItemsTab && allBatchPageSelected && totalItems > items.length && batchSelectedIds.size < totalItems
+			? { total: totalItems, loading: selectingAllPages, onSelect: selectAllSoftwarePages }
+			: undefined
+	);
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived(
@@ -75,7 +86,7 @@
 	);
 
 	const batchActions = $derived.by(() => {
-		const selected = items.filter((i) => batchSelectedIds.has(i.id));
+		const selected = [...batchSelectedItemsMap.values()];
 		const acts: { id: string; label: string; destructive?: boolean }[] = [];
 		if (selected.some((i) => !i.featured)) {
 			acts.push({ id: 'feature', label: 'Feature' });
@@ -153,6 +164,9 @@
 				showUpdatableOnly ? true : undefined
 			);
 			items = result.items;
+			for (const item of result.items) {
+				if (batchSelectedIds.has(item.id)) batchSelectedItemsMap.set(item.id, item);
+			}
 			currentPage = result.page;
 			totalPages = result.total_pages;
 			totalItems = result.total;
@@ -168,6 +182,8 @@
 
 	function switchTab(tab: string) {
 		if (activeTab === tab) return;
+		batchSelectedIds.clear();
+		batchSelectedItemsMap.clear();
 		currentPage = 1;
 		activeTab = tab;
 		if (tab === 'all' || tab === 'featured' || tab === 'unfeatured') {
@@ -309,24 +325,58 @@
 	}
 
 	function toggleBatchSelectAll() {
-		if (batchSelectedIds.size === items.length) {
-			batchSelectedIds.clear();
+		if (allBatchPageSelected) {
+			for (const item of items) {
+				batchSelectedIds.delete(item.id);
+				batchSelectedItemsMap.delete(item.id);
+			}
 		} else {
-			batchSelectedIds.clear();
-			for (const item of items) batchSelectedIds.add(item.id);
+			for (const item of items) {
+				batchSelectedIds.add(item.id);
+				batchSelectedItemsMap.set(item.id, item);
+			}
 		}
 	}
 
 	function toggleBatchSelect(id: string) {
 		if (batchSelectedIds.has(id)) {
 			batchSelectedIds.delete(id);
+			batchSelectedItemsMap.delete(id);
 		} else {
 			batchSelectedIds.add(id);
+			const item = items.find((i) => i.id === id);
+			if (item) batchSelectedItemsMap.set(id, item);
 		}
 	}
 
 	function requestBatchAction(actionId: string) {
 		batchConfirmAction = actionId;
+	}
+
+	async function selectAllSoftwarePages() {
+		selectingAllPages = true;
+		try {
+			let p = 1;
+			while (true) {
+				const result = await getSoftwareItems(
+					p,
+					100,
+					featuredFilter(),
+					undefined,
+					showUpdatableOnly ? true : undefined
+				);
+				for (const item of result.items) {
+					batchSelectedIds.add(item.id);
+					batchSelectedItemsMap.set(item.id, item);
+				}
+				if (p >= result.total_pages) break;
+				p++;
+			}
+		} catch {
+			showError('Failed to select all items');
+		} finally {
+			selectingAllPages = false;
+		}
 	}
 
 	async function executeBatchAction() {
@@ -337,7 +387,7 @@
 		submitting = true;
 		try {
 			if (action === 'update-all') {
-				const itemsWithUpdates = items.filter((i) => batchSelectedIds.has(i.id) && i.update_available);
+				const itemsWithUpdates = [...batchSelectedItemsMap.values()].filter((i) => i.update_available);
 				if (itemsWithUpdates.length === 0) {
 					showSuccess('None of the selected items have updates available.');
 					batchSelectedIds.clear();
@@ -363,7 +413,7 @@
 					showSuccess(`Update triggered for ${totalTriggered} host(s) across ${itemsWithUpdates.length} item(s).`);
 				if (totalFailed > 0) showError(`Failed to trigger update for ${totalFailed} host(s).`);
 			} else {
-				const response = await batchSoftwareItems(action, ids);
+				const response = await executeBatchChunked(action, ids, batchSoftwareItems);
 				if (response.failed.length > 0) {
 					batchResult = response;
 				} else {
@@ -371,6 +421,7 @@
 				}
 			}
 			batchSelectedIds.clear();
+			batchSelectedItemsMap.clear();
 			await loadAll(currentPage);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : `Failed to ${action} software items`);
@@ -467,8 +518,8 @@
 									<input
 										type="checkbox"
 										class="checkbox"
-										checked={items.length > 0 && batchSelectedIds.size === items.length}
-										indeterminate={batchSelectedIds.size > 0 && batchSelectedIds.size < items.length}
+										checked={allBatchPageSelected}
+										indeterminate={!allBatchPageSelected && batchSelectedIds.size > 0}
 										onchange={toggleBatchSelectAll}
 										aria-label="Select all"
 									/>
@@ -609,7 +660,11 @@
 					selectedCount={batchSelectedIds.size}
 					actions={batchActions}
 					onaction={requestBatchAction}
-					oncancel={() => batchSelectedIds.clear()}
+					oncancel={() => {
+						batchSelectedIds.clear();
+						batchSelectedItemsMap.clear();
+					}}
+					selectAllPages={selectAllPagesInfo}
 				/>
 			{/if}
 
