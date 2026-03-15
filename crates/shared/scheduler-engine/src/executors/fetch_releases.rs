@@ -108,6 +108,34 @@ struct FetchJob {
     plugin: Box<dyn uptrakit_plugin_infrastructure_core::PluginBase>,
 }
 
+/// Compute the Phase A group key for a controller-side fetch row.
+///
+/// Items are batched into a single `batch_fetch_releases` call only when they
+/// share the same **effective configuration**, i.e. the same `plugin_config_id`
+/// *and* the same `assignment_config`.  Including the assignment config in the
+/// key is critical for plugins like Docker that store per-item platform
+/// overrides there (e.g. `{"platform": "linux/arm/v7"}`).  Two items that
+/// share a plugin config but differ in their assignment config must receive
+/// separate plugin instances so that each fetch uses the correct effective
+/// platform and returns the correct platform-specific digest.
+///
+/// `None` assignment config and an empty-object assignment config are treated
+/// as equivalent group members — both produce an empty `assignment_suffix`.
+fn phase_a_group_key(
+    plugin_config_id: Option<Uuid>,
+    plugin_type: &str,
+    assignment_config: Option<&serde_json::Value>,
+) -> String {
+    // Serialising serde_json::Value with Display is deterministic: the
+    // underlying Map uses BTreeMap (alphabetically sorted keys) when the
+    // `preserve_order` feature is disabled, which is the serde_json default.
+    let assignment_suffix = assignment_config.map(|c| c.to_string()).unwrap_or_default();
+    match plugin_config_id {
+        Some(id) => format!("{id}::{assignment_suffix}"),
+        None => format!("__type__{plugin_type}::{assignment_suffix}"),
+    }
+}
+
 #[async_trait::async_trait]
 impl TaskExecutor for FetchReleasesExecutor {
     #[tracing::instrument(skip_all, fields(task = "fetch_releases"))]
@@ -132,11 +160,14 @@ impl FetchReleasesExecutor {
     /// Execute controller-side fetch_releases for eligible plugins and store
     /// the latest version on all matching `host_software_items` rows.
     ///
-    /// Rows are grouped by `plugin_config_id`; all packages within a group are
-    /// passed to `batch_fetch_releases` in a single call. Groups run concurrently
-    /// (up to [`MAX_CONCURRENT_CONTROLLER_FETCHES`] at a time) via a `JoinSet`
-    /// and a `Semaphore`. After all fetches complete, the DB update loop and MQTT
-    /// push run sequentially.
+    /// Rows are grouped by `(plugin_config_id, assignment_config)` via
+    /// [`phase_a_group_key`]; all packages within a group are passed to
+    /// `batch_fetch_releases` in a single call. Including the assignment config
+    /// in the key ensures that items with different per-item overrides (e.g.
+    /// `platform`) receive separate plugin instances and correct digests.
+    /// Groups run concurrently (up to [`MAX_CONCURRENT_CONTROLLER_FETCHES`] at
+    /// a time) via a `JoinSet` and a `Semaphore`. After all fetches complete,
+    /// the DB update loop and MQTT push run sequentially.
     ///
     /// After updating `host_software_items`, batch-updates `software_item.last_checked_at`
     /// and pushes MQTT software states so that controller-only items receive the
@@ -161,21 +192,33 @@ impl FetchReleasesExecutor {
         let noop_executor: Arc<dyn CommandExecutor> = Arc::new(NoopCommandExecutor);
 
         // ── 1. Build groups map ───────────────────────────────────────────
-        // Group rows by plugin_config_id. For package manager types that have
-        // plugin_config_id = NULL (they use plugin_type_settings instead of
-        // per-config rows), use the plugin_type string as the group key so
-        // that npm, cargo, apt, etc. are each batched separately.
+        // Group rows by (plugin_config_id, assignment_config). The
+        // assignment_config is included in the key because it can carry
+        // per-item overrides (e.g. `{"platform": "linux/arm/v7"}`) that must
+        // be reflected in the plugin instance used for the fetch. Without this,
+        // multiple items sharing the same plugin_config_id but with different
+        // assignment_config values (different platforms on different hosts)
+        // would all be fetched using only the first row's effective config,
+        // returning the wrong platform-specific digest for every item after the
+        // first.
         //
-        // All packages sharing the same group key are passed to a single
-        // batch_fetch_releases call. The first row's assignment_config is used
-        // as a representative merge for plugin instantiation.
+        // For package manager types that have plugin_config_id = NULL (they
+        // use plugin_type_settings instead of per-config rows), use the
+        // plugin_type string as the group key prefix so that npm, cargo, etc.
+        // are each batched separately.
+        //
+        // Serializing serde_json::Value via Display/to_string() is
+        // deterministic for the same logical object because the underlying Map
+        // uses BTreeMap (alphabetically sorted keys) when the
+        // `preserve_order` feature is disabled, which is the default.
         let mut groups: HashMap<String, PhaseAGroup> = HashMap::new();
 
         for row in &rows {
-            let group_key = match row.plugin_config_id {
-                Some(id) => id.to_string(),
-                None => format!("__type__{}", row.plugin_type),
-            };
+            let group_key = phase_a_group_key(
+                row.plugin_config_id,
+                &row.plugin_type,
+                row.assignment_config.as_ref(),
+            );
             let entry = groups.entry(group_key).or_insert_with(|| {
                 let merged_config = uptrakit_update_hooks::resolve_effective_config(
                     None, // type_settings not loaded in scheduler query yet
@@ -618,6 +661,70 @@ mod tests {
     use crate::notifier::NoopSchedulerNotifier;
     use sea_orm::{ConnectOptions, Database};
     use uptrakit_shared_db::migration::run_migrations;
+
+    // ── phase_a_group_key ────────────────────────────────────────────────────
+
+    #[test]
+    fn same_config_id_same_assignment_same_group() {
+        let id = Uuid::now_v7();
+        let cfg = serde_json::json!({"platform": "linux/arm/v7"});
+        let k1 = phase_a_group_key(Some(id), "releases_docker", Some(&cfg));
+        let k2 = phase_a_group_key(Some(id), "releases_docker", Some(&cfg));
+        assert_eq!(k1, k2);
+    }
+
+    #[test]
+    fn same_config_id_different_assignment_different_group() {
+        // The core regression: two Docker items sharing one plugin config but
+        // running on hosts with different architectures must NOT end up in the
+        // same fetch group — otherwise the arm/v7 item would receive the amd64
+        // digest (or vice-versa) as its latest_version.
+        let id = Uuid::now_v7();
+        let arm = serde_json::json!({"platform": "linux/arm/v7"});
+        let x64 = serde_json::json!({"platform": "linux/amd64"});
+        let k_arm = phase_a_group_key(Some(id), "releases_docker", Some(&arm));
+        let k_x64 = phase_a_group_key(Some(id), "releases_docker", Some(&x64));
+        assert_ne!(k_arm, k_x64);
+    }
+
+    #[test]
+    fn no_assignment_config_and_empty_object_produce_different_keys() {
+        // None (no config at all) and Some({}) (explicitly empty object) must
+        // not be silently conflated — an empty object may grow new keys in a
+        // later migration and should stay in its own group.
+        let id = Uuid::now_v7();
+        let k_none = phase_a_group_key(Some(id), "releases_docker", None);
+        let k_empty = phase_a_group_key(Some(id), "releases_docker", Some(&serde_json::json!({})));
+        // `None` → suffix = "", `Some({})` → suffix = "{}" → keys differ.
+        assert_ne!(k_none, k_empty);
+    }
+
+    #[test]
+    fn different_plugin_config_ids_different_group() {
+        let id_a = Uuid::now_v7();
+        let id_b = Uuid::now_v7();
+        let cfg = serde_json::json!({"platform": "linux/amd64"});
+        let k_a = phase_a_group_key(Some(id_a), "releases_docker", Some(&cfg));
+        let k_b = phase_a_group_key(Some(id_b), "releases_docker", Some(&cfg));
+        assert_ne!(k_a, k_b);
+    }
+
+    #[test]
+    fn null_plugin_config_id_keyed_by_type() {
+        let k = phase_a_group_key(None, "package_manager_npm", None);
+        assert!(k.starts_with("__type__package_manager_npm::"));
+    }
+
+    #[test]
+    fn null_plugin_config_id_different_assignments_different_group() {
+        let cfg_a = serde_json::json!({"registry_url": "https://a.example.com"});
+        let cfg_b = serde_json::json!({"registry_url": "https://b.example.com"});
+        let k_a = phase_a_group_key(None, "package_manager_cargo", Some(&cfg_a));
+        let k_b = phase_a_group_key(None, "package_manager_cargo", Some(&cfg_b));
+        assert_ne!(k_a, k_b);
+    }
+
+    // ── FetchReleasesExecutor integration ───────────────────────────────────
 
     #[tokio::test]
     async fn fetch_releases_executor_empty_db_returns_ok() {
