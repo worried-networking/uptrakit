@@ -19,6 +19,7 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 uptrakit-crypto = { workspace = true }
 uptrakit-extension-framework = { workspace = true }
+uptrakit-shared-types = { workspace = true }
 uptrakit-notification-plugin-core = { workspace = true, features = ["extensions"] }
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
 uptrakit-shared-db = { workspace = true }

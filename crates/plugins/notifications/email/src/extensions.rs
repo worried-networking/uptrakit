@@ -16,6 +16,8 @@ use uptrakit_web_api_auth::settings_store::{
     upsert_setting_raw,
 };
 
+use uptrakit_shared_types::SecretString;
+
 use crate::{EmailPlugin, SmtpSettingsSnapshot, merge_smtp_into_config};
 
 /// Password AAD for per-tenant SMTP password encryption.
@@ -486,7 +488,8 @@ fn smtp_from_tenant_map(map: &HashMap<String, serde_json::Value>) -> SmtpSetting
         host: get_string(map, "smtp.host"),
         port: get_port(map, "smtp.port"),
         username: get_string(map, "smtp.username"),
-        password: get_decrypted_password(map, "smtp.password", SMTP_PASSWORD_AAD),
+        password: get_decrypted_password(map, "smtp.password", SMTP_PASSWORD_AAD)
+            .map(SecretString::new),
         from_address: get_string(map, "smtp.from_address"),
         from_name: get_string(map, "smtp.from_name"),
         tls_mode: get_tls_mode(map, "smtp.tls_mode"),
@@ -501,7 +504,8 @@ fn smtp_from_global_map(map: &HashMap<String, serde_json::Value>) -> SmtpSetting
         host: get_string(map, "global_smtp.host"),
         port: get_port(map, "global_smtp.port"),
         username: get_string(map, "global_smtp.username"),
-        password: get_decrypted_password(map, "global_smtp.password", GLOBAL_SMTP_PASSWORD_AAD),
+        password: get_decrypted_password(map, "global_smtp.password", GLOBAL_SMTP_PASSWORD_AAD)
+            .map(SecretString::new),
         from_address: get_string(map, "global_smtp.from_address"),
         from_name: get_string(map, "global_smtp.from_name"),
         tls_mode: get_tls_mode(map, "global_smtp.tls_mode"),

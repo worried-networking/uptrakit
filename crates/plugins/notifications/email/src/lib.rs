@@ -13,6 +13,7 @@ use mail_builder::MessageBuilder;
 use mail_send::SmtpClientBuilder;
 use rootcause::prelude::*;
 use serde::Deserialize;
+use uptrakit_shared_types::SecretString;
 
 use uptrakit_extension_framework::{
     ActionDef, ActionUi, ApiSubmitDef, ExtensionManifest, ExtensionPlacement, ExtensionUi,
@@ -114,7 +115,10 @@ pub fn merge_smtp_into_config(
 
     let password = tenant.password.as_ref().or(global.password.as_ref());
     if let Some(password) = password {
-        obj.insert("smtp_password".to_string(), serde_json::json!(password));
+        obj.insert(
+            "smtp_password".to_string(),
+            serde_json::json!(password.expose_secret()),
+        );
     }
 
     let from_address = tenant
@@ -151,12 +155,19 @@ pub fn merge_smtp_into_config(
 /// A snapshot of SMTP settings used for merging into per-channel config.
 ///
 /// This mirrors the fields provided by the settings store.
+///
+/// The `password` field uses [`SecretString`] to prevent the SMTP credential from
+/// appearing in tracing logs or panic messages. Call `.expose_secret()` only at the
+/// point where the plaintext password must be passed to the mail-send client.
 #[derive(Clone, Debug)]
 pub struct SmtpSettingsSnapshot {
     pub host: Option<String>,
     pub port: Option<u16>,
     pub username: Option<String>,
-    pub password: Option<String>,
+    /// SMTP authentication password.
+    ///
+    /// Stored as [`SecretString`] so that `Debug` output never reveals the credential.
+    pub password: Option<SecretString>,
     pub from_address: Option<String>,
     pub from_name: Option<String>,
     pub tls_mode: String,
@@ -217,7 +228,7 @@ pub fn smtp_from_settings_map(
         host: get_str("host"),
         port,
         username: get_str("username"),
-        password: get_str("password"),
+        password: get_str("password").map(SecretString::new),
         from_address: get_str("from_address"),
         from_name: get_str("from_name"),
         tls_mode,
@@ -875,7 +886,7 @@ mod tests {
     fn merge_smtp_propagates_all_optional_fields() {
         let mut smtp = make_smtp(Some("smtp.example.com"), None, Some("from@example.com"));
         smtp.username = Some("smtpuser".to_string());
-        smtp.password = Some("secret".to_string());
+        smtp.password = Some(SecretString::new("secret".to_string()));
         smtp.from_name = Some("Uptrakit Alerts".to_string());
         smtp.tls_mode = "tls".to_string();
 
