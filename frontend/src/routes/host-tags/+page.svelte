@@ -4,7 +4,14 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
-	import { getHostTags, createHostTag, updateHostTag, deleteHostTag, batchHostTags } from '$lib/api';
+	import {
+		getHostTags,
+		createHostTag,
+		updateHostTag,
+		deleteHostTag,
+		batchHostTags,
+		executeBatchChunked
+	} from '$lib/api';
 	import type { HostTagResponse, BatchActionResponse } from '$lib/types';
 	import { Permission, hasAnyPermission } from '$lib/types';
 	import { formatDate, parseUrlPage } from '$lib/utils';
@@ -36,6 +43,15 @@
 	let selectedIds = new SvelteSet<string>();
 	let batchConfirmAction: string | null = $state(null);
 	let batchResult: BatchActionResponse | null = $state(null);
+	let selectingAllPages = $state(false);
+
+	const allPageSelected = $derived(tags.length > 0 && tags.every((t) => selectedIds.has(t.id)));
+
+	const selectAllPagesInfo = $derived(
+		allPageSelected && totalItems > tags.length && selectedIds.size < totalItems
+			? { total: totalItems, loading: selectingAllPages, onSelect: selectAllPages }
+			: undefined
+	);
 
 	const batchActions: { id: string; label: string; destructive?: boolean }[] = [
 		{ id: 'delete', label: 'Delete', destructive: true }
@@ -92,6 +108,7 @@
 		searchQuery = value;
 		if (searchTimeout) clearTimeout(searchTimeout);
 		searchTimeout = setTimeout(() => {
+			selectedIds.clear();
 			currentPage = 1;
 			loadTags(1);
 		}, 300);
@@ -192,10 +209,9 @@
 	}
 
 	function toggleSelectAll() {
-		if (selectedIds.size === tags.length) {
-			selectedIds.clear();
+		if (allPageSelected) {
+			for (const t of tags) selectedIds.delete(t.id);
 		} else {
-			selectedIds.clear();
 			for (const t of tags) selectedIds.add(t.id);
 		}
 	}
@@ -212,13 +228,30 @@
 		batchConfirmAction = actionId;
 	}
 
+	async function selectAllPages() {
+		selectingAllPages = true;
+		try {
+			let p = 1;
+			while (true) {
+				const result = await getHostTags(p, 100, searchQuery || undefined);
+				for (const tag of result.items) selectedIds.add(tag.id);
+				if (p >= result.total_pages) break;
+				p++;
+			}
+		} catch {
+			showError('Failed to select all items');
+		} finally {
+			selectingAllPages = false;
+		}
+	}
+
 	async function executeBatchAction() {
 		if (!batchConfirmAction || submitting) return;
 		const action = batchConfirmAction;
 		batchConfirmAction = null;
 		submitting = true;
 		try {
-			const response = await batchHostTags(action, [...selectedIds]);
+			const response = await executeBatchChunked(action, [...selectedIds], batchHostTags);
 			if (response.failed.length > 0) {
 				batchResult = response;
 			} else {
@@ -272,8 +305,8 @@
 							<input
 								type="checkbox"
 								class="checkbox"
-								checked={tags.length > 0 && selectedIds.size === tags.length}
-								indeterminate={selectedIds.size > 0 && selectedIds.size < tags.length}
+								checked={allPageSelected}
+								indeterminate={!allPageSelected && selectedIds.size > 0}
 								onchange={toggleSelectAll}
 								aria-label="Select all"
 							/>
@@ -349,6 +382,7 @@
 			actions={batchActions}
 			onaction={requestBatchAction}
 			oncancel={() => selectedIds.clear()}
+			selectAllPages={selectAllPagesInfo}
 		/>
 	{/if}
 

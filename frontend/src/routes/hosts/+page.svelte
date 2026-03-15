@@ -3,7 +3,14 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
-	import { getHosts, updateHost, deactivateHost, triggerHostDiscovery, batchHosts } from '$lib/api';
+	import {
+		getHosts,
+		updateHost,
+		deactivateHost,
+		triggerHostDiscovery,
+		batchHosts,
+		executeBatchChunked
+	} from '$lib/api';
 	import type { HostResponse, BatchActionResponse } from '$lib/types';
 	import { Permission, hasAnyPermission } from '$lib/types';
 	import { formatDate, parseUrlPage } from '$lib/utils';
@@ -32,10 +39,19 @@
 	let selectedIds = new SvelteSet<string>();
 	let batchConfirmAction: string | null = $state(null);
 	let batchResult: BatchActionResponse | null = $state(null);
+	let selectingAllPages = $state(false);
 
 	const batchActions: { id: string; label: string; destructive?: boolean }[] = [
 		{ id: 'deactivate', label: 'Deactivate', destructive: true }
 	];
+
+	const allPageSelected = $derived(hosts.length > 0 && hosts.every((h) => selectedIds.has(h.id)));
+
+	const selectAllPagesInfo = $derived(
+		allPageSelected && totalItems > hosts.length && selectedIds.size < totalItems
+			? { total: totalItems, loading: selectingAllPages, onSelect: selectAllPages }
+			: undefined
+	);
 
 	$effect(() => {
 		const search = currentPage > 1 ? `page=${currentPage}` : '';
@@ -144,11 +160,27 @@
 	}
 
 	function toggleSelectAll() {
-		if (selectedIds.size === hosts.length) {
-			selectedIds.clear();
+		if (allPageSelected) {
+			for (const h of hosts) selectedIds.delete(h.id);
 		} else {
-			selectedIds.clear();
 			for (const h of hosts) selectedIds.add(h.id);
+		}
+	}
+
+	async function selectAllPages() {
+		selectingAllPages = true;
+		try {
+			let p = 1;
+			while (true) {
+				const result = await getHosts(p, 100);
+				for (const host of result.items) selectedIds.add(host.id);
+				if (p >= result.total_pages) break;
+				p++;
+			}
+		} catch {
+			showError('Failed to select all items');
+		} finally {
+			selectingAllPages = false;
 		}
 	}
 
@@ -170,7 +202,7 @@
 		batchConfirmAction = null;
 		submitting = true;
 		try {
-			const response = await batchHosts(action, [...selectedIds]);
+			const response = await executeBatchChunked(action, [...selectedIds], batchHosts);
 			if (response.failed.length > 0) {
 				batchResult = response;
 			} else {
@@ -242,8 +274,8 @@
 							<input
 								type="checkbox"
 								class="checkbox"
-								checked={hosts.length > 0 && selectedIds.size === hosts.length}
-								indeterminate={selectedIds.size > 0 && selectedIds.size < hosts.length}
+								checked={allPageSelected}
+								indeterminate={!allPageSelected && selectedIds.size > 0}
 								onchange={toggleSelectAll}
 								aria-label="Select all"
 							/>
@@ -335,6 +367,7 @@
 			actions={batchActions}
 			onaction={requestBatchAction}
 			oncancel={() => selectedIds.clear()}
+			selectAllPages={selectAllPagesInfo}
 		/>
 	{/if}
 
