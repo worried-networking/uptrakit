@@ -5,32 +5,29 @@ use tokio::sync::mpsc;
 use crate::backend::AuditLogBackend;
 use crate::entry::AuditEntry;
 
-/// Channel capacity for the audit log dispatcher.
-///
-/// Matches the notification dispatcher capacity. When the channel is full
-/// (DB backend lagging under high write load), new entries are dropped with
-/// a warning rather than blocking producers or growing without bound.
-const DISPATCHER_CHANNEL_CAPACITY: usize = 4096;
-
 /// Fire-and-forget audit log dispatcher.
 ///
-/// Follows the same pattern as `NotificationDispatcher`: event producers call
-/// `dispatch()` to enqueue entries. The background loop persists entries
-/// asynchronously through the configured backend. Write failures are logged
-/// but never surface to event producers.
+/// Audit log entries represent compliance-critical security records and **must never
+/// be dropped** due to backpressure. Unlike the notification dispatcher (which uses a
+/// bounded channel and drops on overflow), this dispatcher uses an unbounded channel so
+/// that every entry is guaranteed to reach the backend as long as the process is running.
 ///
-/// The internal channel is bounded at [`DISPATCHER_CHANNEL_CAPACITY`] entries.
-/// If the backend falls behind and the channel fills, `dispatch()` drops the
-/// new entry and logs a warning rather than blocking or panicking.
+/// The trade-off is unbounded memory growth if the backend falls severely behind under
+/// sustained high load. Operators should monitor backend write latency and scale the DB
+/// accordingly. In practice, the background loop drains the channel as fast as the
+/// backend can write, so the queue depth should remain near zero under normal conditions.
+///
+/// Write failures are logged at `warn` level but never surface to event producers.
+/// If the channel is closed (dispatcher shut down), the entry is silently dropped.
 #[derive(Clone)]
 pub struct AuditLogDispatcher {
-    tx: mpsc::Sender<AuditEntry>,
+    tx: mpsc::UnboundedSender<AuditEntry>,
 }
 
 impl AuditLogDispatcher {
     /// Create a new dispatcher and spawn the background processing loop.
     pub fn new(backend: Arc<dyn AuditLogBackend>) -> Self {
-        let (tx, rx) = mpsc::channel(DISPATCHER_CHANNEL_CAPACITY);
+        let (tx, rx) = mpsc::unbounded_channel();
         tokio::spawn(dispatch_loop(backend, rx));
         Self { tx }
     }
@@ -38,16 +35,19 @@ impl AuditLogDispatcher {
     /// Enqueue an audit entry for background processing.
     ///
     /// This never blocks and never fails from the caller's perspective.
-    /// If the channel is full, the entry is dropped with a warning log.
     /// If the channel is closed (dispatcher shut down), the entry is silently dropped.
+    /// Audit entries are **never** dropped due to backpressure — the channel is unbounded.
     pub fn dispatch(&self, entry: AuditEntry) {
-        if let Err(_e) = self.tx.try_send(entry) {
-            tracing::warn!("audit log dispatcher channel full, dropping entry");
-        }
+        // UnboundedSender::send only fails when the receiver is dropped (shutdown).
+        // Silently discard on shutdown — there is nothing meaningful to do at that point.
+        let _ = self.tx.send(entry);
     }
 }
 
-async fn dispatch_loop(backend: Arc<dyn AuditLogBackend>, mut rx: mpsc::Receiver<AuditEntry>) {
+async fn dispatch_loop(
+    backend: Arc<dyn AuditLogBackend>,
+    mut rx: mpsc::UnboundedReceiver<AuditEntry>,
+) {
     while let Some(entry) = rx.recv().await {
         if let Err(e) = backend.write(&entry).await {
             tracing::warn!(

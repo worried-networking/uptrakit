@@ -24,7 +24,7 @@ HTTP Request
      │
      ▼ dispatcher.dispatch(AuditEntry)
 ┌────────────────────────┐
-│ AuditLogDispatcher     │  mpsc::Sender (bounded, 4096 — fire-and-forget)
+│ AuditLogDispatcher     │  mpsc::UnboundedSender (never drops entries)
 │ (background loop)      │
 └──────┬─────────────────┘
        ▼
@@ -139,18 +139,19 @@ Implementations:
 
 ### `AuditLogDispatcher`
 
-Fire-and-forget dispatcher using a bounded `mpsc::Sender<AuditEntry>` (capacity: 4096). The
-background loop reads entries and calls `backend.write()`. Write failures are logged at `warn`
-level but never propagate to callers.
+Fire-and-forget dispatcher using `mpsc::UnboundedSender<AuditEntry>`. The background loop reads
+entries and calls `backend.write()`. Write failures are logged at `warn` level but never
+propagate to callers.
 
-`dispatch()` never blocks and never returns an error:
+`dispatch()` never blocks and never returns an error. If the channel is closed (dispatcher shut
+down), the entry is silently dropped — there is nothing meaningful to do at shutdown.
 
-- If the channel is **full** (backend lagging under high load), the entry is **dropped** and a
-  `tracing::warn!` is emitted. This matches the notification dispatcher overflow policy.
-- If the channel is **closed** (dispatcher shut down), the entry is silently dropped.
-
-The 4096-entry bound prevents unbounded memory growth during DB backend slowdowns or cascading
-failures. Under normal operation the channel is near-empty.
+**Why unbounded?** Audit log entries are compliance-critical security records. Unlike the
+notification dispatcher (which uses a bounded channel and drops on overflow), the audit log
+dispatcher intentionally uses an unbounded channel so that **no entry is ever dropped due to
+backpressure**. The trade-off is potential memory growth if the DB backend falls severely behind
+under sustained high load. Under normal operation the queue depth is near zero because the
+background loop drains faster than requests arrive.
 
 ## CLI configuration
 

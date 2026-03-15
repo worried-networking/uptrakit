@@ -185,10 +185,7 @@ changed from `Option<String>` to `Option<SecretString>`, so SMTP credentials are
 `Debug` output and zeroed on drop. `NotificationEventType` and `NotificationDeliveryStatus` in
 `uptrakit-web-api-types` now carry `Other(String)` catch-all variants with infallible custom
 `Serialize`/`Deserialize`, matching the canonical `EnrollmentStatus`/`ErrorCode` pattern — older clients
-receiving unknown values from a newer server no longer error. The audit log dispatcher
-(`crates/shared/audit-log/src/dispatcher.rs`) now uses a bounded `mpsc::channel(4096)` instead of
-`mpsc::unbounded_channel()`; `dispatch()` uses `try_send` and warns-and-drops on overflow, matching the
-notification dispatcher HA policy. The extension framework wire enums `ExtensionTargeting`, `PanelPosition`,
+receiving unknown values from a newer server no longer error. The extension framework wire enums `ExtensionTargeting`, `PanelPosition`,
 `FieldType`, and `RowCondition` in `uptrakit-extension-framework` now carry `Other(String)` catch-all
 variants with custom `Serialize`/`Deserialize`; `PanelPosition` uses a map-visitor implementation to
 maintain the `{"type": "..."}` adjacently-tagged format.
@@ -299,6 +296,7 @@ source dimension [D1..D14].
 - **[D3 Quality]** 237 duplicated `error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")` calls across 35 route files.
 - **[D3 Quality]** Error logging lacks structured context in 240+ route handler locations.
 - **[D3 Quality]** 4 silent `let _ = sync_oidc_roles(...)` in `oidc_auth.rs` swallow DB errors.
+- **[D5 HA]** Audit log dispatcher uses `mpsc::unbounded_channel()` — unbounded memory growth risk if the DB backend falls severely behind. This is intentional: audit entries are compliance-critical and must never be dropped. Operators should monitor DB write latency and scale accordingly.
 - **[D5 HA]** Orphaned in-progress update recovery missing after agent crash.
 - **[D6 Database]** Batch operations (`batch_deactivate_hosts`, `batch_approve_services`, `batch_reject_services`) lack transactions.
 - **[D6 Database]** `notification_rules.host_id` and `notification_rules.software_item_id` FK columns lack indexes (cascade delete perf on PostgreSQL).
