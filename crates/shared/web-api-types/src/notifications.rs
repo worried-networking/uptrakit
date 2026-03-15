@@ -4,6 +4,13 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+// ── Wire-safe Other(String) helpers ──────────────────────────────────────────
+//
+// These enums are serialized in API responses consumed by potentially-older
+// clients. The `Other(String)` catch-all prevents deserialization failures when
+// a newer server introduces a new variant. The pattern matches the canonical
+// `EnrollmentStatus`/`ErrorCode` implementation in `uptrakit-wire`.
+
 use crate::validation::{Validate, ValidationError};
 
 /// Deserializes a field that participates in the nullable-update pattern.
@@ -27,11 +34,17 @@ where
 // ── Enums ────────────────────────────────────────────────────────────────
 
 /// The type of event that triggers a notification.
+///
+/// # Wire forward-compatibility
+///
+/// `Other(String)` is a catch-all for event type strings received from a newer
+/// server that this client does not yet recognise. Serde deserialization is
+/// infallible: an unknown string becomes `Other(...)` rather than a parse error,
+/// allowing older clients to survive rolling upgrades without dropping the
+/// enclosing response.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[cfg_attr(test, derive(strum::EnumIter))]
-#[serde(rename_all = "snake_case")]
 pub enum NotificationEventType {
     UpdateAvailable,
     UpdateCompleted,
@@ -43,10 +56,17 @@ pub enum NotificationEventType {
     BatchUpdatePartiallyCompleted,
     /// An interactive update process appears to be waiting for stdin input.
     StdinAttention,
+    /// An unknown event type received from a newer server.
+    ///
+    /// The inner string is the raw snake_case value as it appeared in the response.
+    Other(String),
 }
 
 impl NotificationEventType {
-    pub fn as_str(&self) -> &'static str {
+    /// Returns the snake_case string representation.
+    ///
+    /// For [`NotificationEventType::Other`], returns the inner string as-is.
+    pub fn as_str(&self) -> &str {
         match self {
             Self::UpdateAvailable => "update_available",
             Self::UpdateCompleted => "update_completed",
@@ -57,6 +77,7 @@ impl NotificationEventType {
             Self::BatchUpdateCompleted => "batch_update_completed",
             Self::BatchUpdatePartiallyCompleted => "batch_update_partially_completed",
             Self::StdinAttention => "stdin_attention",
+            Self::Other(s) => s.as_str(),
         }
     }
 }
@@ -67,7 +88,46 @@ impl std::fmt::Display for NotificationEventType {
     }
 }
 
+impl From<String> for NotificationEventType {
+    /// Converts a snake_case string to a notification event type.
+    ///
+    /// Unknown strings map to [`NotificationEventType::Other`] rather than failing.
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "update_available" => Self::UpdateAvailable,
+            "update_completed" => Self::UpdateCompleted,
+            "update_failed" => Self::UpdateFailed,
+            "new_software_discovered" => Self::NewSoftwareDiscovered,
+            "new_service_enrolled" => Self::NewServiceEnrolled,
+            "ca_rotated" => Self::CaRotated,
+            "batch_update_completed" => Self::BatchUpdateCompleted,
+            "batch_update_partially_completed" => Self::BatchUpdatePartiallyCompleted,
+            "stdin_attention" => Self::StdinAttention,
+            _ => {
+                tracing::debug!(event_type = s, "received unknown notification event type");
+                Self::Other(s)
+            }
+        }
+    }
+}
+
+impl Serialize for NotificationEventType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for NotificationEventType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(NotificationEventType::from)
+    }
+}
+
 /// Error returned when parsing an invalid [`NotificationEventType`] string.
+///
+/// This error is only returned by [`FromStr`] (strict user-input parsing).
+/// Serde deserialization is infallible and maps unknown strings to
+/// [`NotificationEventType::Other`].
 #[derive(Debug, Error)]
 #[error("invalid notification event type")]
 pub struct ParseNotificationEventTypeError;
@@ -92,23 +152,35 @@ impl FromStr for NotificationEventType {
 }
 
 /// The delivery status of a notification.
+///
+/// # Wire forward-compatibility
+///
+/// `Other(String)` is a catch-all for status strings received from a newer
+/// server. Serde deserialization is infallible: an unknown string becomes
+/// `Other(...)` rather than a parse error.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[cfg_attr(test, derive(strum::EnumIter))]
-#[serde(rename_all = "snake_case")]
 pub enum NotificationDeliveryStatus {
     Pending,
     Delivered,
     Failed,
+    /// An unknown delivery status received from a newer server.
+    ///
+    /// The inner string is the raw snake_case value as it appeared in the response.
+    Other(String),
 }
 
 impl NotificationDeliveryStatus {
-    pub fn as_str(&self) -> &'static str {
+    /// Returns the snake_case string representation.
+    ///
+    /// For [`NotificationDeliveryStatus::Other`], returns the inner string as-is.
+    pub fn as_str(&self) -> &str {
         match self {
             Self::Pending => "pending",
             Self::Delivered => "delivered",
             Self::Failed => "failed",
+            Self::Other(s) => s.as_str(),
         }
     }
 }
@@ -119,7 +191,43 @@ impl std::fmt::Display for NotificationDeliveryStatus {
     }
 }
 
+impl From<String> for NotificationDeliveryStatus {
+    /// Converts a snake_case string to a notification delivery status.
+    ///
+    /// Unknown strings map to [`NotificationDeliveryStatus::Other`] rather than failing.
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "pending" => Self::Pending,
+            "delivered" => Self::Delivered,
+            "failed" => Self::Failed,
+            _ => {
+                tracing::debug!(
+                    delivery_status = s,
+                    "received unknown notification delivery status"
+                );
+                Self::Other(s)
+            }
+        }
+    }
+}
+
+impl Serialize for NotificationDeliveryStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for NotificationDeliveryStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(NotificationDeliveryStatus::from)
+    }
+}
+
 /// Error returned when parsing an invalid [`NotificationDeliveryStatus`] string.
+///
+/// This error is only returned by [`FromStr`] (strict user-input parsing).
+/// Serde deserialization is infallible and maps unknown strings to
+/// [`NotificationDeliveryStatus::Other`].
 #[derive(Debug, Error)]
 #[error("invalid notification delivery status")]
 pub struct ParseNotificationDeliveryStatusError;
@@ -391,7 +499,6 @@ pub struct TestNotificationResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use strum::IntoEnumIterator;
     use time::macros::datetime;
 
     fn sample_uuid() -> Uuid {
@@ -399,16 +506,57 @@ mod tests {
             .expect("hard-coded UUID should be valid")
     }
 
+    /// All known (non-Other) NotificationEventType variants for iteration in tests.
+    const KNOWN_EVENT_TYPES: &[NotificationEventType] = &[
+        NotificationEventType::UpdateAvailable,
+        NotificationEventType::UpdateCompleted,
+        NotificationEventType::UpdateFailed,
+        NotificationEventType::NewSoftwareDiscovered,
+        NotificationEventType::NewServiceEnrolled,
+        NotificationEventType::CaRotated,
+        NotificationEventType::BatchUpdateCompleted,
+        NotificationEventType::BatchUpdatePartiallyCompleted,
+        NotificationEventType::StdinAttention,
+    ];
+
+    /// All known (non-Other) NotificationDeliveryStatus variants for iteration in tests.
+    const KNOWN_DELIVERY_STATUSES: &[NotificationDeliveryStatus] = &[
+        NotificationDeliveryStatus::Pending,
+        NotificationDeliveryStatus::Delivered,
+        NotificationDeliveryStatus::Failed,
+    ];
+
     // ── NotificationEventType ───────────────────────────────────────────
 
     #[test]
     fn event_type_serde_round_trip() {
-        for event in NotificationEventType::iter() {
-            let json = serde_json::to_string(&event).expect("serialization should succeed");
+        for event in KNOWN_EVENT_TYPES {
+            let json = serde_json::to_string(event).expect("serialization should succeed");
             let deserialized: NotificationEventType =
                 serde_json::from_str(&json).expect("deserialization should succeed");
-            assert_eq!(deserialized, event);
+            assert_eq!(&deserialized, event);
         }
+    }
+
+    #[test]
+    fn event_type_other_deserializes_gracefully() {
+        let json = r#""some_future_event_type""#;
+        let deserialized: NotificationEventType =
+            serde_json::from_str(json).expect("deserialization should succeed");
+        assert_eq!(
+            deserialized,
+            NotificationEventType::Other("some_future_event_type".to_string())
+        );
+    }
+
+    #[test]
+    fn event_type_other_roundtrips() {
+        let original = NotificationEventType::Other("future_event".to_string());
+        let json = serde_json::to_string(&original).expect("serialization should succeed");
+        assert_eq!(json, r#""future_event""#);
+        let deserialized: NotificationEventType =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(deserialized, original);
     }
 
     #[test]
@@ -475,19 +623,19 @@ mod tests {
 
     #[test]
     fn event_type_display_matches_as_str() {
-        for event in NotificationEventType::iter() {
+        for event in KNOWN_EVENT_TYPES {
             assert_eq!(format!("{event}"), event.as_str());
         }
     }
 
     #[test]
     fn event_type_as_str_round_trips_through_from_str() {
-        for event in NotificationEventType::iter() {
+        for event in KNOWN_EVENT_TYPES {
             let s = event.as_str();
             let parsed: NotificationEventType = s
                 .parse()
                 .expect("from_str should succeed for as_str output");
-            assert_eq!(parsed, event);
+            assert_eq!(&parsed, event);
         }
     }
 
@@ -501,12 +649,33 @@ mod tests {
 
     #[test]
     fn delivery_status_serde_round_trip() {
-        for status in NotificationDeliveryStatus::iter() {
-            let json = serde_json::to_string(&status).expect("serialization should succeed");
+        for status in KNOWN_DELIVERY_STATUSES {
+            let json = serde_json::to_string(status).expect("serialization should succeed");
             let deserialized: NotificationDeliveryStatus =
                 serde_json::from_str(&json).expect("deserialization should succeed");
-            assert_eq!(deserialized, status);
+            assert_eq!(&deserialized, status);
         }
+    }
+
+    #[test]
+    fn delivery_status_other_deserializes_gracefully() {
+        let json = r#""processing""#;
+        let deserialized: NotificationDeliveryStatus =
+            serde_json::from_str(json).expect("deserialization should succeed");
+        assert_eq!(
+            deserialized,
+            NotificationDeliveryStatus::Other("processing".to_string())
+        );
+    }
+
+    #[test]
+    fn delivery_status_other_roundtrips() {
+        let original = NotificationDeliveryStatus::Other("queued".to_string());
+        let json = serde_json::to_string(&original).expect("serialization should succeed");
+        assert_eq!(json, r#""queued""#);
+        let deserialized: NotificationDeliveryStatus =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(deserialized, original);
     }
 
     #[test]
@@ -541,19 +710,19 @@ mod tests {
 
     #[test]
     fn delivery_status_display_matches_as_str() {
-        for status in NotificationDeliveryStatus::iter() {
+        for status in KNOWN_DELIVERY_STATUSES {
             assert_eq!(format!("{status}"), status.as_str());
         }
     }
 
     #[test]
     fn delivery_status_as_str_round_trips_through_from_str() {
-        for status in NotificationDeliveryStatus::iter() {
+        for status in KNOWN_DELIVERY_STATUSES {
             let s = status.as_str();
             let parsed: NotificationDeliveryStatus = s
                 .parse()
                 .expect("from_str should succeed for as_str output");
-            assert_eq!(parsed, status);
+            assert_eq!(&parsed, status);
         }
     }
 

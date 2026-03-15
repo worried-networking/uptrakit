@@ -16,6 +16,7 @@ openapi = ["dep:utoipa", "uptrakit-shared-types/openapi"]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 time = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-shared-types = { workspace = true }
