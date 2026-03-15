@@ -52,6 +52,28 @@ pub struct OciPlatform {
     pub variant: Option<String>,
 }
 
+/// A single-arch OCI/Docker image manifest (not an index).
+///
+/// Used to extract the image config digest and creation-time annotation.
+#[derive(Debug, Deserialize)]
+pub(crate) struct OciSingleManifest {
+    pub config: OciContentDescriptor,
+    #[serde(default)]
+    pub annotations: std::collections::HashMap<String, String>,
+}
+
+/// Content descriptor — appears as the `config` and `layers` entries in manifests.
+#[derive(Debug, Deserialize)]
+pub(crate) struct OciContentDescriptor {
+    pub digest: String,
+}
+
+/// Relevant fields from an OCI image config blob.
+#[derive(Debug, Deserialize)]
+pub(crate) struct OciImageConfig {
+    pub created: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

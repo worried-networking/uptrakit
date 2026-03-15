@@ -58,14 +58,14 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin
                         .get_platform_manifest_digest(&ir.registry, &ir.repository, tag, p)
                         .await
                     {
-                        Ok(Some(platform_digest)) => {
+                        Ok(Some(info)) => {
                             tracing::debug!(
                                 platform = %p,
-                                digest = %platform_digest,
+                                digest = %info.digest,
                                 image = %ir.image,
                                 "resolved platform-specific digest"
                             );
-                            return Ok(Some(Version::new(&platform_digest)));
+                            return Ok(Some(Version::new(&info.digest)));
                         }
                         Ok(None) => {
                             // Platform removed from the manifest list.
@@ -182,7 +182,8 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin
                                     )
                                     .await
                                     .ok()
-                                    .flatten();
+                                    .flatten()
+                                    .map(|info| info.digest);
                                 e.insert(result.clone());
                                 result
                             }

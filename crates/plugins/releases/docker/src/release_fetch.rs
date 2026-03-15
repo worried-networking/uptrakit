@@ -21,14 +21,14 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for DockerPlugin 
 
         let tag = self.config.resolved_tracked_tag(&ir.tag);
 
-        let digest = if let Some(ref platform) = self.config.platform {
+        let info = if let Some(ref platform) = self.config.platform {
             match self
                 .registry_client
                 .get_platform_manifest_digest(&ir.registry, &ir.repository, tag, platform)
                 .await
                 .context_to()?
             {
-                Some(d) => d,
+                Some(info) => info,
                 None => {
                     return Err(
                         uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(
@@ -45,20 +45,22 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for DockerPlugin 
             }
         } else {
             self.registry_client
-                .get_manifest_digest(&ir.registry, &ir.repository, tag)
+                .get_manifest_info(&ir.registry, &ir.repository, tag)
                 .await
                 .context_to()?
         };
 
-        let release_url = ir.web_url(&digest);
+        let release_url = ir.web_url(&info.digest);
         let release = {
-            let mut r = UpstreamRelease::new(Version::new(&digest), tag.to_string(), false, "");
+            let mut r =
+                UpstreamRelease::new(Version::new(&info.digest), tag.to_string(), false, "");
             r.release_url = release_url;
+            r.published_at = info.created_at;
             r
         };
 
         tracing::debug!(
-            digest = %digest,
+            digest = %info.digest,
             tag = %tag,
             image = %ir.image,
             platform = ?self.config.platform,
