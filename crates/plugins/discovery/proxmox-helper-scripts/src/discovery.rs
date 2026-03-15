@@ -101,6 +101,58 @@ pub struct PhsScriptAnalysis {
     pub version_file_basename: Option<String>,
 }
 
+impl PhsScriptAnalysis {
+    /// Construct a GitHub-sourced analysis result.
+    fn github(
+        owner: String,
+        repo: String,
+        app_name: Option<String>,
+        version_file_basename: Option<String>,
+    ) -> Self {
+        Self {
+            github_owner: Some(owner),
+            github_repo: Some(repo),
+            app_name,
+            version_file_basename,
+            ..Self::default()
+        }
+    }
+
+    /// Construct a Codeberg-sourced analysis result.
+    fn codeberg(
+        owner: String,
+        repo: String,
+        app_name: Option<String>,
+        version_file_basename: Option<String>,
+    ) -> Self {
+        Self {
+            codeberg_owner: Some(owner),
+            codeberg_repo: Some(repo),
+            app_name,
+            version_file_basename,
+            ..Self::default()
+        }
+    }
+
+    /// Construct an npm-sourced analysis result.
+    fn npm(package: String, app_name: Option<String>) -> Self {
+        Self {
+            npm_package: Some(package),
+            app_name,
+            ..Self::default()
+        }
+    }
+
+    /// Construct an APT-sourced analysis result.
+    fn apt(package: Option<String>, app_name: Option<String>) -> Self {
+        Self {
+            apt_package: package,
+            app_name,
+            ..Self::default()
+        }
+    }
+}
+
 /// A discovered PHS script reference extracted from the update script.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PhsScript {
@@ -146,16 +198,12 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
             && is_valid_gh_component(owner)
             && is_valid_gh_component(repo)
         {
-            return PhsScriptAnalysis {
-                github_owner: Some(owner.clone()),
-                github_repo: Some(repo.clone()),
-                codeberg_owner: None,
-                codeberg_repo: None,
-                npm_package: None,
-                apt_package: None,
+            return PhsScriptAnalysis::github(
+                owner.clone(),
+                repo.clone(),
                 app_name,
-                version_file_basename: derive_version_file_basename(best_key, slug),
-            };
+                derive_version_file_basename(best_key, slug),
+            );
         }
     }
 
@@ -164,16 +212,7 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
         && is_valid_gh_component(&owner)
         && is_valid_gh_component(&repo)
     {
-        return PhsScriptAnalysis {
-            github_owner: Some(owner),
-            github_repo: Some(repo),
-            codeberg_owner: None,
-            codeberg_repo: None,
-            npm_package: None,
-            apt_package: None,
-            app_name,
-            version_file_basename: None,
-        };
+        return PhsScriptAnalysis::github(owner, repo, app_name, None);
     }
 
     // ── Codeberg detection ────────────────────────────────────────────────────
@@ -190,16 +229,12 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
             && is_valid_gh_component(owner)
             && is_valid_gh_component(repo)
         {
-            return PhsScriptAnalysis {
-                github_owner: None,
-                github_repo: None,
-                codeberg_owner: Some(owner.clone()),
-                codeberg_repo: Some(repo.clone()),
-                npm_package: None,
-                apt_package: None,
+            return PhsScriptAnalysis::codeberg(
+                owner.clone(),
+                repo.clone(),
                 app_name,
-                version_file_basename: derive_version_file_basename(best_key, slug),
-            };
+                derive_version_file_basename(best_key, slug),
+            );
         }
     }
 
@@ -208,43 +243,16 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
         && is_valid_gh_component(&owner)
         && is_valid_gh_component(&repo)
     {
-        return PhsScriptAnalysis {
-            github_owner: None,
-            github_repo: None,
-            codeberg_owner: Some(owner),
-            codeberg_repo: Some(repo),
-            npm_package: None,
-            apt_package: None,
-            app_name,
-            version_file_basename: None,
-        };
+        return PhsScriptAnalysis::codeberg(owner, repo, app_name, None);
     }
 
     // ── npm detection (priority over APT) ─────────────────────────────────────
     if let Some(npm_pkg) = extract_npm_package(content) {
-        return PhsScriptAnalysis {
-            github_owner: None,
-            github_repo: None,
-            codeberg_owner: None,
-            codeberg_repo: None,
-            npm_package: Some(npm_pkg),
-            apt_package: None,
-            app_name,
-            version_file_basename: None,
-        };
+        return PhsScriptAnalysis::npm(npm_pkg, app_name);
     }
 
     // ── APT detection (only when no GitHub, Codeberg, or npm upstream found) ──
-    PhsScriptAnalysis {
-        github_owner: None,
-        github_repo: None,
-        codeberg_owner: None,
-        codeberg_repo: None,
-        npm_package: None,
-        apt_package: extract_apt_package(content),
-        app_name,
-        version_file_basename: None,
-    }
+    PhsScriptAnalysis::apt(extract_apt_package(content), app_name)
 }
 
 /// Extract APT package candidates from an install script.

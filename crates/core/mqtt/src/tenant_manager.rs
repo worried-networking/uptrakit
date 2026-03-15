@@ -465,6 +465,131 @@ impl TenantManager {
         );
     }
 
+    /// Build a `host_id → MqttHostMetadata` lookup map for the given tenant.
+    fn build_meta_map(
+        &self,
+        tenant_id: uuid::Uuid,
+    ) -> std::collections::HashMap<uuid::Uuid, &uptrakit_internal_wire::MqttHostMetadata> {
+        self.host_metadata
+            .get(&tenant_id)
+            .map(|v| v.iter().map(|m| (m.host_id, m)).collect())
+            .unwrap_or_default()
+    }
+
+    /// Construct a [`HostOsInfo`] from the metadata map for a given host.
+    fn os_info_from_meta<'a>(
+        meta_map: &'a std::collections::HashMap<
+            uuid::Uuid,
+            &'a uptrakit_internal_wire::MqttHostMetadata,
+        >,
+        host_id: uuid::Uuid,
+    ) -> crate::ha_discovery::HostOsInfo<'a> {
+        let meta = meta_map.get(&host_id);
+        crate::ha_discovery::HostOsInfo {
+            os_type: meta.and_then(|m| m.os_type.as_deref()),
+            os_version: meta.and_then(|m| m.os_version.as_deref()),
+            architecture: meta.and_then(|m| m.architecture.as_deref()),
+        }
+    }
+
+    /// Publish the HA discovery config topic for a single software item×host pair.
+    ///
+    /// Shared by [`publish_software_states`] and [`publish_ha_configs_only`].
+    async fn publish_item_ha_config(
+        state: &ClientState,
+        mqtt_client_id: uuid::Uuid,
+        item: &uptrakit_internal_wire::MqttSoftwareStateItem,
+        host: &uptrakit_internal_wire::MqttSoftwareStateHostEntry,
+        meta_map: &std::collections::HashMap<uuid::Uuid, &uptrakit_internal_wire::MqttHostMetadata>,
+    ) {
+        let uid =
+            crate::ha_discovery::unique_id(state.tenant_id, item.software_item_id, host.host_id);
+        let config_topic =
+            crate::ha_discovery::discovery_config_topic(&state.ha_discovery_prefix, &uid);
+        let os_info = Self::os_info_from_meta(meta_map, host.host_id);
+        let config_json = crate::ha_discovery::build_discovery_config(
+            &state.topic_prefix,
+            state.tenant_id,
+            item.software_item_id,
+            host.host_id,
+            &item.name,
+            display_name(&host.friendly_name, &host.hostname),
+            crate::ha_discovery::ReleaseInfo {
+                url: host.release_url.as_deref(),
+                notes: host.release_notes.as_deref(),
+                icon_url: item.icon_url.as_deref(),
+            },
+            os_info,
+        );
+        let config_bytes = config_json.to_string().into_bytes();
+        publish_or_abort!(
+            state
+                .handle
+                .publish_retained(&config_topic, config_bytes)
+                .await,
+            mqtt_client_id,
+            "publish HA discovery config"
+        );
+    }
+
+    /// Publish HA discovery config topics for a host summary (packages + security entities).
+    ///
+    /// Shared by [`publish_host_summary_states`] and [`publish_host_summary_ha_configs_only`].
+    async fn publish_host_summary_ha_configs(
+        state: &ClientState,
+        mqtt_client_id: uuid::Uuid,
+        hs: &uptrakit_internal_wire::MqttHostSummary,
+        meta_map: &std::collections::HashMap<uuid::Uuid, &uptrakit_internal_wire::MqttHostMetadata>,
+    ) {
+        // Packages entity config.
+        let config_topic = crate::ha_discovery::host_packages_discovery_config_topic(
+            &state.ha_discovery_prefix,
+            state.tenant_id,
+            hs.host_id,
+        );
+        let os_info = Self::os_info_from_meta(meta_map, hs.host_id);
+        let config_json = crate::ha_discovery::build_host_packages_discovery_config(
+            &state.topic_prefix,
+            state.tenant_id,
+            hs.host_id,
+            display_name(&hs.friendly_name, &hs.hostname),
+            os_info,
+        );
+        let config_bytes = config_json.to_string().into_bytes();
+        publish_or_abort!(
+            state
+                .handle
+                .publish_retained(&config_topic, config_bytes)
+                .await,
+            mqtt_client_id,
+            "publish host package HA discovery config"
+        );
+
+        // Security entity config.
+        let sec_config_topic = crate::ha_discovery::host_security_discovery_config_topic(
+            &state.ha_discovery_prefix,
+            state.tenant_id,
+            hs.host_id,
+        );
+        let os_info = Self::os_info_from_meta(meta_map, hs.host_id);
+        let sec_config_json = crate::ha_discovery::build_host_security_discovery_config(
+            &state.topic_prefix,
+            state.tenant_id,
+            hs.host_id,
+            display_name(&hs.friendly_name, &hs.hostname),
+            os_info,
+        );
+        let sec_config_bytes = sec_config_json.to_string().into_bytes();
+        publish_or_abort!(
+            state
+                .handle
+                .publish_retained(&sec_config_topic, sec_config_bytes)
+                .await,
+            mqtt_client_id,
+            "publish host security HA discovery config"
+        );
+    }
+
     /// Publish software state topics and subscribe to command topics for all
     /// `(item, host)` pairs, then publish HA discovery config topics for clients
     /// that have `ha_discovery` enabled.
@@ -483,19 +608,7 @@ impl TenantManager {
             return;
         };
 
-        let tenant_id = state.tenant_id;
-        let topic_prefix = &state.topic_prefix;
-        let ha_prefix = &state.ha_discovery_prefix;
-
-        // Build a host_id → metadata lookup for enriching HA discovery configs.
-        let meta_map: std::collections::HashMap<
-            uuid::Uuid,
-            &uptrakit_internal_wire::MqttHostMetadata,
-        > = self
-            .host_metadata
-            .get(&tenant_id)
-            .map(|v| v.iter().map(|m| (m.host_id, m)).collect())
-            .unwrap_or_default();
+        let meta_map = self.build_meta_map(state.tenant_id);
 
         // Track which hosts we've already published hostname/friendly_name for.
         let mut published_hosts = std::collections::HashSet::new();
@@ -513,114 +626,87 @@ impl TenantManager {
                     .await;
                 }
 
-                // Always: publish installed version (empty string if unknown).
-                let st = crate::ha_discovery::state_topic(
-                    topic_prefix,
-                    item.software_item_id,
-                    host.host_id,
-                );
-                let installed = host
-                    .installed_version
-                    .as_deref()
-                    .unwrap_or("")
-                    .as_bytes()
-                    .to_vec();
-                publish_or_abort!(
-                    state.handle.publish_retained(&st, installed).await,
-                    mqtt_client_id,
-                    "publish state topic"
-                );
+                Self::publish_item_state_topics(state, mqtt_client_id, item, host).await;
 
-                // Always: publish latest version.
-                let lt = crate::ha_discovery::latest_version_topic(
-                    topic_prefix,
-                    item.software_item_id,
-                    host.host_id,
-                );
-                let latest = host
-                    .latest_version
-                    .as_deref()
-                    .unwrap_or("")
-                    .as_bytes()
-                    .to_vec();
-                publish_or_abort!(
-                    state.handle.publish_retained(&lt, latest).await,
-                    mqtt_client_id,
-                    "publish latest version topic"
-                );
-
-                // Always: subscribe to command topic.
-                let ct = crate::ha_discovery::command_topic(
-                    topic_prefix,
-                    item.software_item_id,
-                    host.host_id,
-                );
-                publish_or_abort!(
-                    state.handle.subscribe_topic(&ct).await,
-                    mqtt_client_id,
-                    "subscribe to command topic"
-                );
-
-                // Always: publish JSON attributes.
-                let at = crate::ha_discovery::json_attributes_topic(
-                    topic_prefix,
-                    item.software_item_id,
-                    host.host_id,
-                );
-                let attributes_bytes = crate::ha_discovery::build_attributes_payload(
-                    host.update_in_progress,
-                    host.update_category.as_deref(),
-                    host.release_date.as_deref(),
-                    host.last_checked_at.as_deref(),
-                )
-                .to_string()
-                .into_bytes();
-                publish_or_abort!(
-                    state.handle.publish_retained(&at, attributes_bytes).await,
-                    mqtt_client_id,
-                    "publish JSON attributes topic"
-                );
-
-                // HA-only: publish HA discovery config so HA creates an update entity.
                 if state.ha_discovery {
-                    let uid = crate::ha_discovery::unique_id(
-                        tenant_id,
-                        item.software_item_id,
-                        host.host_id,
-                    );
-                    let config_topic = crate::ha_discovery::discovery_config_topic(ha_prefix, &uid);
-                    let meta = meta_map.get(&host.host_id);
-                    let os_info = crate::ha_discovery::HostOsInfo {
-                        os_type: meta.and_then(|m| m.os_type.as_deref()),
-                        os_version: meta.and_then(|m| m.os_version.as_deref()),
-                        architecture: meta.and_then(|m| m.architecture.as_deref()),
-                    };
-                    let config_json = crate::ha_discovery::build_discovery_config(
-                        topic_prefix,
-                        tenant_id,
-                        item.software_item_id,
-                        host.host_id,
-                        &item.name,
-                        display_name(&host.friendly_name, &host.hostname),
-                        crate::ha_discovery::ReleaseInfo {
-                            url: host.release_url.as_deref(),
-                            notes: host.release_notes.as_deref(),
-                            icon_url: item.icon_url.as_deref(),
-                        },
-                        os_info,
-                    );
-                    let config_bytes = config_json.to_string().into_bytes();
-                    publish_or_abort!(
-                        state
-                            .handle
-                            .publish_retained(&config_topic, config_bytes)
-                            .await,
-                        mqtt_client_id,
-                        "publish HA discovery config"
-                    );
+                    Self::publish_item_ha_config(state, mqtt_client_id, item, host, &meta_map)
+                        .await;
                 }
             }
         }
+    }
+
+    /// Publish state, latest_version, command subscription, and attributes for
+    /// a single software item×host pair.
+    async fn publish_item_state_topics(
+        state: &ClientState,
+        mqtt_client_id: uuid::Uuid,
+        item: &uptrakit_internal_wire::MqttSoftwareStateItem,
+        host: &uptrakit_internal_wire::MqttSoftwareStateHostEntry,
+    ) {
+        let topic_prefix = &state.topic_prefix;
+
+        // Publish installed version (empty string if unknown).
+        let st =
+            crate::ha_discovery::state_topic(topic_prefix, item.software_item_id, host.host_id);
+        let installed = host
+            .installed_version
+            .as_deref()
+            .unwrap_or("")
+            .as_bytes()
+            .to_vec();
+        publish_or_abort!(
+            state.handle.publish_retained(&st, installed).await,
+            mqtt_client_id,
+            "publish state topic"
+        );
+
+        // Publish latest version.
+        let lt = crate::ha_discovery::latest_version_topic(
+            topic_prefix,
+            item.software_item_id,
+            host.host_id,
+        );
+        let latest = host
+            .latest_version
+            .as_deref()
+            .unwrap_or("")
+            .as_bytes()
+            .to_vec();
+        publish_or_abort!(
+            state.handle.publish_retained(&lt, latest).await,
+            mqtt_client_id,
+            "publish latest version topic"
+        );
+
+        // Subscribe to command topic.
+        let ct =
+            crate::ha_discovery::command_topic(topic_prefix, item.software_item_id, host.host_id);
+        publish_or_abort!(
+            state.handle.subscribe_topic(&ct).await,
+            mqtt_client_id,
+            "subscribe to command topic"
+        );
+
+        // Publish JSON attributes.
+        let at = crate::ha_discovery::json_attributes_topic(
+            topic_prefix,
+            item.software_item_id,
+            host.host_id,
+        );
+        let attributes_bytes = crate::ha_discovery::build_attributes_payload(
+            host.update_in_progress,
+            host.update_category.as_deref(),
+            host.release_date.as_deref(),
+            host.last_checked_at.as_deref(),
+        )
+        .to_string()
+        .into_bytes();
+        publish_or_abort!(
+            state.handle.publish_retained(&at, attributes_bytes).await,
+            mqtt_client_id,
+            "publish JSON attributes topic"
+        );
     }
 
     /// Publish retained `hostname` and `friendly_name` topics for a host.
@@ -678,54 +764,11 @@ impl TenantManager {
             return;
         }
 
-        let tenant_id = state.tenant_id;
-        let topic_prefix = &state.topic_prefix;
-        let ha_prefix = &state.ha_discovery_prefix;
-
-        // Build a host_id → metadata lookup for enriching HA discovery configs.
-        let meta_map: std::collections::HashMap<
-            uuid::Uuid,
-            &uptrakit_internal_wire::MqttHostMetadata,
-        > = self
-            .host_metadata
-            .get(&tenant_id)
-            .map(|v| v.iter().map(|m| (m.host_id, m)).collect())
-            .unwrap_or_default();
+        let meta_map = self.build_meta_map(state.tenant_id);
 
         for item in items {
             for host in &item.hosts {
-                let uid =
-                    crate::ha_discovery::unique_id(tenant_id, item.software_item_id, host.host_id);
-                let config_topic = crate::ha_discovery::discovery_config_topic(ha_prefix, &uid);
-                let meta = meta_map.get(&host.host_id);
-                let os_info = crate::ha_discovery::HostOsInfo {
-                    os_type: meta.and_then(|m| m.os_type.as_deref()),
-                    os_version: meta.and_then(|m| m.os_version.as_deref()),
-                    architecture: meta.and_then(|m| m.architecture.as_deref()),
-                };
-                let config_json = crate::ha_discovery::build_discovery_config(
-                    topic_prefix,
-                    tenant_id,
-                    item.software_item_id,
-                    host.host_id,
-                    &item.name,
-                    display_name(&host.friendly_name, &host.hostname),
-                    crate::ha_discovery::ReleaseInfo {
-                        url: host.release_url.as_deref(),
-                        notes: host.release_notes.as_deref(),
-                        icon_url: item.icon_url.as_deref(),
-                    },
-                    os_info,
-                );
-                let config_bytes = config_json.to_string().into_bytes();
-                publish_or_abort!(
-                    state
-                        .handle
-                        .publish_retained(&config_topic, config_bytes)
-                        .await,
-                    mqtt_client_id,
-                    "publish HA discovery config"
-                );
+                Self::publish_item_ha_config(state, mqtt_client_id, item, host, &meta_map).await;
             }
         }
     }
@@ -748,190 +791,131 @@ impl TenantManager {
             return;
         };
 
-        let tenant_id = state.tenant_id;
-        let topic_prefix = &state.topic_prefix;
-        let ha_prefix = &state.ha_discovery_prefix;
-
-        // Build a host_id → metadata lookup for enriching HA discovery configs.
-        let meta_map: std::collections::HashMap<
-            uuid::Uuid,
-            &uptrakit_internal_wire::MqttHostMetadata,
-        > = self
-            .host_metadata
-            .get(&tenant_id)
-            .map(|v| v.iter().map(|m| (m.host_id, m)).collect())
-            .unwrap_or_default();
+        let meta_map = self.build_meta_map(state.tenant_id);
 
         for hs in host_states {
             // Publish per-host identity topics (hostname, friendly_name).
             self.publish_host_identity(state, hs.host_id, &hs.hostname, &hs.friendly_name)
                 .await;
 
-            // Compute state string: "unknown" or "up-to-date".
-            let installed_str = crate::ha_discovery::host_packages_state_string(hs.pending_count);
+            Self::publish_host_summary_state_topics(state, mqtt_client_id, hs).await;
 
-            // Publish state topic.
-            let st = crate::ha_discovery::host_packages_state_topic(topic_prefix, hs.host_id);
-            publish_or_abort!(
-                state
-                    .handle
-                    .publish_retained(&st, installed_str.into_bytes())
-                    .await,
-                mqtt_client_id,
-                "publish host package state topic"
-            );
-
-            // Publish latest_version topic.
-            let lt =
-                crate::ha_discovery::host_packages_latest_version_topic(topic_prefix, hs.host_id);
-            let latest_str =
-                crate::ha_discovery::host_packages_latest_version_string(hs.pending_count);
-            publish_or_abort!(
-                state
-                    .handle
-                    .publish_retained(&lt, latest_str.into_bytes())
-                    .await,
-                mqtt_client_id,
-                "publish host package latest_version topic"
-            );
-
-            // Publish JSON attributes.
-            let at =
-                crate::ha_discovery::host_packages_json_attributes_topic(topic_prefix, hs.host_id);
-            let attributes_bytes = crate::ha_discovery::build_host_packages_attributes_payload(
-                hs.update_in_progress,
-                hs.pending_count,
-                hs.total_count,
-                hs.bugfix_count,
-                hs.feature_count,
-            )
-            .to_string()
-            .into_bytes();
-            publish_or_abort!(
-                state.handle.publish_retained(&at, attributes_bytes).await,
-                mqtt_client_id,
-                "publish host package attributes topic"
-            );
-
-            // Subscribe to command topic.
-            let ct = crate::ha_discovery::host_packages_command_topic(topic_prefix, hs.host_id);
-            publish_or_abort!(
-                state.handle.subscribe_topic(&ct).await,
-                mqtt_client_id,
-                "subscribe to host package command topic"
-            );
-
-            // HA-only: publish HA discovery config for packages entity.
             if state.ha_discovery {
-                let config_topic = crate::ha_discovery::host_packages_discovery_config_topic(
-                    ha_prefix, tenant_id, hs.host_id,
-                );
-                let meta = meta_map.get(&hs.host_id);
-                let os_info = crate::ha_discovery::HostOsInfo {
-                    os_type: meta.and_then(|m| m.os_type.as_deref()),
-                    os_version: meta.and_then(|m| m.os_version.as_deref()),
-                    architecture: meta.and_then(|m| m.architecture.as_deref()),
-                };
-                let config_json = crate::ha_discovery::build_host_packages_discovery_config(
-                    topic_prefix,
-                    tenant_id,
-                    hs.host_id,
-                    display_name(&hs.friendly_name, &hs.hostname),
-                    os_info,
-                );
-                let config_bytes = config_json.to_string().into_bytes();
-                publish_or_abort!(
-                    state
-                        .handle
-                        .publish_retained(&config_topic, config_bytes)
-                        .await,
-                    mqtt_client_id,
-                    "publish host package HA discovery config"
-                );
-            }
-
-            // Always: publish security entity state topic.
-            let sec_state_str =
-                crate::ha_discovery::host_security_state_string(hs.security_pending_count);
-            let sec_st = crate::ha_discovery::host_security_state_topic(topic_prefix, hs.host_id);
-            publish_or_abort!(
-                state
-                    .handle
-                    .publish_retained(&sec_st, sec_state_str.into_bytes())
-                    .await,
-                mqtt_client_id,
-                "publish host security state topic"
-            );
-
-            // Always: publish security entity latest_version topic.
-            let sec_lt =
-                crate::ha_discovery::host_security_latest_version_topic(topic_prefix, hs.host_id);
-            let sec_latest_str =
-                crate::ha_discovery::host_security_latest_version_string(hs.security_pending_count);
-            publish_or_abort!(
-                state
-                    .handle
-                    .publish_retained(&sec_lt, sec_latest_str.into_bytes())
-                    .await,
-                mqtt_client_id,
-                "publish host security latest_version topic"
-            );
-
-            // Always: publish security entity JSON attributes.
-            let sec_at =
-                crate::ha_discovery::host_security_json_attributes_topic(topic_prefix, hs.host_id);
-            let sec_attributes_bytes = crate::ha_discovery::build_host_security_attributes_payload(
-                hs.update_in_progress,
-                hs.security_pending_count,
-            )
-            .to_string()
-            .into_bytes();
-            publish_or_abort!(
-                state
-                    .handle
-                    .publish_retained(&sec_at, sec_attributes_bytes)
-                    .await,
-                mqtt_client_id,
-                "publish host security attributes topic"
-            );
-
-            // Always: subscribe to security command topic.
-            let sec_ct = crate::ha_discovery::host_security_command_topic(topic_prefix, hs.host_id);
-            publish_or_abort!(
-                state.handle.subscribe_topic(&sec_ct).await,
-                mqtt_client_id,
-                "subscribe to host security command topic"
-            );
-
-            // HA-only: publish HA discovery config for security entity.
-            if state.ha_discovery {
-                let sec_config_topic = crate::ha_discovery::host_security_discovery_config_topic(
-                    ha_prefix, tenant_id, hs.host_id,
-                );
-                let meta = meta_map.get(&hs.host_id);
-                let os_info = crate::ha_discovery::HostOsInfo {
-                    os_type: meta.and_then(|m| m.os_type.as_deref()),
-                    os_version: meta.and_then(|m| m.os_version.as_deref()),
-                    architecture: meta.and_then(|m| m.architecture.as_deref()),
-                };
-                let sec_config_json = crate::ha_discovery::build_host_security_discovery_config(
-                    topic_prefix,
-                    tenant_id,
-                    hs.host_id,
-                    display_name(&hs.friendly_name, &hs.hostname),
-                    os_info,
-                );
-                let sec_config_bytes = sec_config_json.to_string().into_bytes();
-                publish_or_abort!(
-                    state
-                        .handle
-                        .publish_retained(&sec_config_topic, sec_config_bytes)
-                        .await,
-                    mqtt_client_id,
-                    "publish host security HA discovery config"
-                );
+                Self::publish_host_summary_ha_configs(state, mqtt_client_id, hs, &meta_map).await;
             }
         }
+    }
+
+    /// Publish state, latest_version, attributes, and command subscription topics
+    /// for packages and security entities of a single host summary.
+    async fn publish_host_summary_state_topics(
+        state: &ClientState,
+        mqtt_client_id: uuid::Uuid,
+        hs: &uptrakit_internal_wire::MqttHostSummary,
+    ) {
+        let topic_prefix = &state.topic_prefix;
+
+        // Packages: state topic.
+        let installed_str = crate::ha_discovery::host_packages_state_string(hs.pending_count);
+        let st = crate::ha_discovery::host_packages_state_topic(topic_prefix, hs.host_id);
+        publish_or_abort!(
+            state
+                .handle
+                .publish_retained(&st, installed_str.into_bytes())
+                .await,
+            mqtt_client_id,
+            "publish host package state topic"
+        );
+
+        // Packages: latest_version topic.
+        let lt = crate::ha_discovery::host_packages_latest_version_topic(topic_prefix, hs.host_id);
+        let latest_str = crate::ha_discovery::host_packages_latest_version_string(hs.pending_count);
+        publish_or_abort!(
+            state
+                .handle
+                .publish_retained(&lt, latest_str.into_bytes())
+                .await,
+            mqtt_client_id,
+            "publish host package latest_version topic"
+        );
+
+        // Packages: JSON attributes.
+        let at = crate::ha_discovery::host_packages_json_attributes_topic(topic_prefix, hs.host_id);
+        let attributes_bytes = crate::ha_discovery::build_host_packages_attributes_payload(
+            hs.update_in_progress,
+            hs.pending_count,
+            hs.total_count,
+            hs.bugfix_count,
+            hs.feature_count,
+        )
+        .to_string()
+        .into_bytes();
+        publish_or_abort!(
+            state.handle.publish_retained(&at, attributes_bytes).await,
+            mqtt_client_id,
+            "publish host package attributes topic"
+        );
+
+        // Packages: command subscription.
+        let ct = crate::ha_discovery::host_packages_command_topic(topic_prefix, hs.host_id);
+        publish_or_abort!(
+            state.handle.subscribe_topic(&ct).await,
+            mqtt_client_id,
+            "subscribe to host package command topic"
+        );
+
+        // Security: state topic.
+        let sec_state_str =
+            crate::ha_discovery::host_security_state_string(hs.security_pending_count);
+        let sec_st = crate::ha_discovery::host_security_state_topic(topic_prefix, hs.host_id);
+        publish_or_abort!(
+            state
+                .handle
+                .publish_retained(&sec_st, sec_state_str.into_bytes())
+                .await,
+            mqtt_client_id,
+            "publish host security state topic"
+        );
+
+        // Security: latest_version topic.
+        let sec_lt =
+            crate::ha_discovery::host_security_latest_version_topic(topic_prefix, hs.host_id);
+        let sec_latest_str =
+            crate::ha_discovery::host_security_latest_version_string(hs.security_pending_count);
+        publish_or_abort!(
+            state
+                .handle
+                .publish_retained(&sec_lt, sec_latest_str.into_bytes())
+                .await,
+            mqtt_client_id,
+            "publish host security latest_version topic"
+        );
+
+        // Security: JSON attributes.
+        let sec_at =
+            crate::ha_discovery::host_security_json_attributes_topic(topic_prefix, hs.host_id);
+        let sec_attributes_bytes = crate::ha_discovery::build_host_security_attributes_payload(
+            hs.update_in_progress,
+            hs.security_pending_count,
+        )
+        .to_string()
+        .into_bytes();
+        publish_or_abort!(
+            state
+                .handle
+                .publish_retained(&sec_at, sec_attributes_bytes)
+                .await,
+            mqtt_client_id,
+            "publish host security attributes topic"
+        );
+
+        // Security: command subscription.
+        let sec_ct = crate::ha_discovery::host_security_command_topic(topic_prefix, hs.host_id);
+        publish_or_abort!(
+            state.handle.subscribe_topic(&sec_ct).await,
+            mqtt_client_id,
+            "subscribe to host security command topic"
+        );
     }
 
     /// Republish only the HA discovery config topics for host package and
@@ -954,74 +938,10 @@ impl TenantManager {
             return;
         }
 
-        let tenant_id = state.tenant_id;
-        let topic_prefix = &state.topic_prefix;
-        let ha_prefix = &state.ha_discovery_prefix;
-
-        // Build a host_id → metadata lookup for enriching HA discovery configs.
-        let meta_map: std::collections::HashMap<
-            uuid::Uuid,
-            &uptrakit_internal_wire::MqttHostMetadata,
-        > = self
-            .host_metadata
-            .get(&tenant_id)
-            .map(|v| v.iter().map(|m| (m.host_id, m)).collect())
-            .unwrap_or_default();
+        let meta_map = self.build_meta_map(state.tenant_id);
 
         for hs in host_states {
-            // Packages entity config.
-            let config_topic = crate::ha_discovery::host_packages_discovery_config_topic(
-                ha_prefix, tenant_id, hs.host_id,
-            );
-            let meta = meta_map.get(&hs.host_id);
-            let os_info = crate::ha_discovery::HostOsInfo {
-                os_type: meta.and_then(|m| m.os_type.as_deref()),
-                os_version: meta.and_then(|m| m.os_version.as_deref()),
-                architecture: meta.and_then(|m| m.architecture.as_deref()),
-            };
-            let config_json = crate::ha_discovery::build_host_packages_discovery_config(
-                topic_prefix,
-                tenant_id,
-                hs.host_id,
-                display_name(&hs.friendly_name, &hs.hostname),
-                os_info,
-            );
-            let config_bytes = config_json.to_string().into_bytes();
-            publish_or_abort!(
-                state
-                    .handle
-                    .publish_retained(&config_topic, config_bytes)
-                    .await,
-                mqtt_client_id,
-                "publish host package HA discovery config"
-            );
-
-            // Security entity config.
-            let sec_config_topic = crate::ha_discovery::host_security_discovery_config_topic(
-                ha_prefix, tenant_id, hs.host_id,
-            );
-            let meta = meta_map.get(&hs.host_id);
-            let os_info = crate::ha_discovery::HostOsInfo {
-                os_type: meta.and_then(|m| m.os_type.as_deref()),
-                os_version: meta.and_then(|m| m.os_version.as_deref()),
-                architecture: meta.and_then(|m| m.architecture.as_deref()),
-            };
-            let sec_config_json = crate::ha_discovery::build_host_security_discovery_config(
-                topic_prefix,
-                tenant_id,
-                hs.host_id,
-                display_name(&hs.friendly_name, &hs.hostname),
-                os_info,
-            );
-            let sec_config_bytes = sec_config_json.to_string().into_bytes();
-            publish_or_abort!(
-                state
-                    .handle
-                    .publish_retained(&sec_config_topic, sec_config_bytes)
-                    .await,
-                mqtt_client_id,
-                "publish host security HA discovery config"
-            );
+            Self::publish_host_summary_ha_configs(state, mqtt_client_id, hs, &meta_map).await;
         }
     }
 
