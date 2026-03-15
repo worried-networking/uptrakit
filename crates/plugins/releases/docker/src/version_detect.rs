@@ -22,12 +22,15 @@ impl DockerPlugin {
     ///
     /// `platform` — when `Some`, fetches the platform manifest digest and
     /// `created_at` to produce a human-readable display version. When `None`,
-    /// returns the image-index digest from `RepoDigests` with `display_version = None`.
+    /// the local image's `os`/`architecture` metadata is used to make a
+    /// best-effort registry call for `created_at` **for display purposes only**.
+    /// The canonical `version` always remains the image-index digest in this
+    /// case so the update comparison is unaffected.
     ///
     /// Return values:
     /// - `Ok(None)` — image not present locally.
     /// - `Ok(Some(resolved))` — installed; `display_version` is `None` when
-    ///   `platform` is `None` or a transient registry failure occurs.
+    ///   the local image has no `os`/`arch` metadata or the registry call fails.
     /// - `Err(PlatformNotAvailable)` — `platform` was `Some` but absent from
     ///   the manifest list (definitive; caller must surface this as an error).
     /// - `Err(...)` — Docker daemon error.
@@ -98,9 +101,35 @@ impl DockerPlugin {
             }
         }
 
+        // No explicit platform configured.  Attempt a best-effort, display-only
+        // registry call using the platform detected from the local image's
+        // os/arch metadata.  This gives multi-arch images (index manifests) a
+        // human-readable publish date without changing the canonical `version`,
+        // which stays as the image-index digest so update comparisons are
+        // unaffected.
+        let display_version = {
+            let detected = crate::config::form_platform_string(
+                digest_info.os.as_deref(),
+                digest_info.architecture.as_deref(),
+                digest_info.variant.as_deref(),
+            );
+            if let Some(ref p) = detected {
+                match self
+                    .registry_client
+                    .get_platform_manifest_digest(&ir.registry, &ir.repository, tag, p)
+                    .await
+                {
+                    Ok(Some(info)) => info.created_at.map(crate::registry::format_display_version),
+                    Ok(None) | Err(_) => None,
+                }
+            } else {
+                None
+            }
+        };
+
         Ok(Some(ResolvedImageVersion {
             version: digest_info.digest,
-            display_version: None,
+            display_version,
         }))
     }
 }
