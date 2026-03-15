@@ -99,6 +99,12 @@ pub async fn interactive_ws(
     };
 
     // 3. Check TriggerUpdates permission.
+    //
+    // NOTE: This is an intentional approved exception to the standard Axum extractor pattern
+    // (e.g. `CanTriggerUpdates`). WebSocket connections from the browser cannot set custom
+    // HTTP headers, so the auth token arrives as a `?token=` query parameter. The custom
+    // extraction logic above (steps 1-2) handles both sources. The permission check must
+    // therefore live inline here rather than in a middleware extractor.
     if !auth_user.has_permission(Permission::TriggerUpdates) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }

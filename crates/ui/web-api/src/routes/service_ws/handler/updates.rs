@@ -371,7 +371,9 @@ pub(super) async fn deliver_pending_updates(
             post_update_hook_plugins,
             release_info,
             timeout: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT,
-            interactive: false,
+            // Preserve the interactive flag that was set at original dispatch time
+            // so that a reconnecting agent receives a PTY when expected.
+            interactive: update_record.interactive,
         };
 
         let msg = ControllerMessage::ExecuteUpdate(Box::new(execute_payload));

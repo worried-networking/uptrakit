@@ -210,8 +210,7 @@ pub async fn register(
     request_body = LoginRequest,
     responses(
         (status = 200, description = "Login successful", body = AuthResponse),
-        (status = 401, description = "Invalid credentials"),
-        (status = 403, description = "User is deactivated")
+        (status = 401, description = "Invalid credentials or account deactivated")
     ),
     tag = "Authentication"
 )]
@@ -243,9 +242,11 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
         }
     };
 
-    // Check if user is active
+    // Check if user is active.
+    // Return 401 with the same generic message to avoid leaking whether an
+    // account exists at all (user-enumeration prevention).
     if !user.is_active {
-        return error_response(StatusCode::FORBIDDEN, "User is deactivated");
+        return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
     }
 
     // Verify password

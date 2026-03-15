@@ -22,14 +22,18 @@ pub(crate) struct OidcHttpClient {
 
 impl OidcHttpClient {
     /// Create a new OIDC HTTP client with project-standard timeouts.
-    pub(crate) fn new() -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`reqwest::Error`] if the underlying client cannot be built
+    /// (e.g. TLS initialisation failure).
+    pub(crate) fn new() -> Result<Self, reqwest::Error> {
         let inner = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(60))
             .dns_resolver(Arc::new(SsrfSafeResolver::new()))
-            .build()
-            .expect("failed to build OIDC HTTP client");
-        Self { inner }
+            .build()?;
+        Ok(Self { inner })
     }
 }
 
