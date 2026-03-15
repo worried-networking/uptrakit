@@ -345,10 +345,8 @@ would silently return all tenants' hosts. The clarifying comment should explicit
 
 ### Summary
 
-Four new findings added from the 2026-03-10 review pass covering code quality, security,
-extensibility, and allocation efficiency. Three positives confirmed. One medium-severity
-security finding (plain `String` for SSH credentials) is newly introduced and represents the
-most actionable item for this date.
+New findings added from the 2026-03-10 review pass covering code quality, security,
+extensibility, and allocation efficiency. Three positives confirmed.
 
 ### Strengths
 
@@ -362,16 +360,6 @@ most actionable item for this date.
   before every `.await` across the lock/unlock boundary.
 
 ### Concerns
-
-**[MEDIUM] Security — `BootstrapParams` and `SyncParams` hold SSH credentials as plain `String`**
-
-`src/commands/bootstrap.rs:44-49` — `BootstrapParams` contains `auth_password: Option<String>`,
-`auth_private_key_pem: Option<String>`, and `target_private_key_pem: Option<String>` as plain
-`String`. `SyncParams` (`sync.rs:48,50,403,405`) has the same pattern. SSH credentials stored
-as plain `String` are not zeroed on drop and are visible in `Debug` output unless a hand-written
-impl is present. Recommendation: apply `SecretString` to `auth_password`, `auth_private_key_pem`,
-and `target_private_key_pem` in both structs, consistent with the `MqttConfig` precedent in
-`uptrakit-mqtt`.
 
 **[MEDIUM] Architecture — No public extension guide for `ServiceHandler` UI extension pattern**
 

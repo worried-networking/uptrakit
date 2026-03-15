@@ -429,22 +429,9 @@ codebase per AGENTS.md invariant 13. Per the "Parameter Struct Pattern" standard
 struct should be introduced to batch related parameters. *Found in parallel coding standards
 review (2026-03-06).*
 
-**[HIGH]** `src/batch_progress_broadcaster.rs:114` and
-`src/routes/settings_global_combined.rs:76` -- `#[cfg(not(feature = "nats"))]` violates the
-additive-only feature flag rule. These should be converted to the approved `cfg!()` macro
-pattern or `if cfg!(feature = "...")` blocks. *Found in parallel coding standards review
-(2026-03-06).*
-
 **[LOW]** `src/test_harness/mod.rs:23` -- `#[allow(dead_code)]` on `TestApp` struct. While
 test-only code, the `#[allow]` is unnecessary if the fields are used by integration test
 modules. *Found in parallel coding standards review (2026-03-06).*
-
-**[HIGH]** `src/settings.rs:183,296` -- `write_mutex` uses `tokio::sync::Mutex` instead of
-`parking_lot::Mutex` in locations where the guard is not held across `.await`. This violates
-the project synchronous-locks-in-async standard. The two call sites at lines 183 and 296 must
-be audited; where the guard is not actually held across an `await`, switch to `parking_lot`.
-(Note: the existing `[INFO]` finding at line 259 documents a justified exception for the main
-write path — that exception does not cover all uses.)
 
 **[MEDIUM]** Several request types are missing `Validate` implementations — evaluate whether
 input validation is needed: `AssignHostsRequest`, `TriggerUpdateRequest`,
@@ -725,17 +712,6 @@ pagination, bare `Json(resp)` without explicit `StatusCode::OK`.
 
 ### Issues
 
-**[MEDIUM]** `src/routes/hosts.rs:217-227` -- `discover_host` handler uses
-`ServiceHost::find()` without tenant isolation. The `service_host` table has no `tenant_id`
-column, and per the project's documented pattern, queries on it must use
-`tenant_db.find_via_tenant_join()`. While the host was already verified as tenant-scoped, the
-subsequent `ServiceHost::find()` query could theoretically return links to services from other
-tenants. *Found in parallel consistency review (2026-03-06).*
-
-**[MEDIUM]** `src/routes/software_items.rs:1131` -- `ServiceHost::find()` without tenant
-join. Same pattern as `hosts.rs:217-227` above. *Found in parallel consistency review
-(2026-03-06).*
-
 **[LOW]** `src/queries/update_history.rs:213-255` -- `get_update_history` performs three
 sequential awaited queries: `UpdateHistory::find_by_id`, `tenant_db.find_by_id::<host::Entity>`,
 and `SoftwareItem::find_by_id`. The first two are necessary (the second enforces tenant scope),
@@ -746,19 +722,6 @@ issues three sequential round-trips to the DB.
 
 **[LOW]** `src/queries/update_batches.rs:617-651` -- Host/software item lookups in
 `get_batch_with_items` lack tenant filter (defense-in-depth).
-
-**[MEDIUM]** `src/queries/mqtt_software_states.rs:99` -- `Host::find()` without explicit
-`tenant_id` filter (defense-in-depth gap). Add a `.filter(host::Column::TenantId.eq(...))`.
-
-**[MEDIUM]** `src/queries/mqtt_software_states.rs:113` -- `UpdateHistory::find()` without
-`tenant_id` filter.
-
-**[MEDIUM]** `src/queries/services.rs:380` -- `ServiceHost::find()` without
-`find_via_tenant_join`. Per project standard, `service_host` has no `tenant_id` column.
-Replace with `tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(...)`.
-
-**[MEDIUM]** `src/queries/update_triggers.rs` -- Multiple `ServiceHost::find()` calls; verify
-all route through `find_via_tenant_join`.
 
 ## Logic Consistency
 
@@ -791,11 +754,6 @@ unconditionally sets status to `InProgress` without checking the current status.
 status before transitioning. Under concurrent controllers, two instances could both observe
 a "last item completed" condition and both attempt the terminal transition (double-transition
 risk).
-
-**[MEDIUM]** `src/routes/service_ws/handler/updates.rs` -- `deliver_pending_updates` hardcodes
-`interactive = false` on reconnect dispatch. This violates the persisted
-`update_history.interactive` invariant: an interactive update that was pending when the agent
-disconnected is re-dispatched as non-interactive.
 
 **[MEDIUM]** `src/routes/service_ws/handler/updates.rs` -- `deliver_pending_updates` silently
 skips items whose `execute_update` plugin config is missing without marking them as Failed.
@@ -1087,7 +1045,6 @@ Cross-referenced against the 2026-03-06 findings; items already recorded there a
 | Severity | Location | Finding |
 | --- | --- | --- |
 | **High** | `app_state.rs` | **God-object `AppState`** with 30+ `pub` fields gives every route handler full visibility into CA key store, credential sources, PKI, MQTT coordination, and extension proxy with no type-level access control. Introduce domain-scoped sub-state accessors (`AppState::auth()`, `AppState::pki()`, `AppState::notification()`); immediate step: mark `ca_key_store` and `credential_sources` `pub(crate)` with typed accessors. *Confirmed — extends prior god-crate finding.* |
-| **High** | `service_connections.rs` | **`tokio::sync::RwLock`** used for `ServiceConnectionRegistry`, violating the project standard requiring `parking_lot::RwLock`. Guards are correctly dropped before `await` today, but future maintainers adding `.await` inside a `write().await` guard will introduce a silent deadlock. Replace with `parking_lot::RwLock`. |
 | **High** | crate-wide | **God-crate size** (~36,459 LOC, 105 files, five concern domains). Recommended two-phase extraction: Phase 1 — `uptrakit-web-api-pki` (`ca_snapshot`, `cert_signer`, `pki_utils`, `ocsp`); Phase 2 — `uptrakit-web-api-push` (broadcaster modules + `service_connections`). *Confirmed — extends prior finding.* |
 | **Medium** | `router.rs` | **Flat 650-line router** with 80+ sequential `.routes()` calls. Decompose into domain sub-routers (`auth_router()`, `services_router()`, `hosts_router()`, `software_router()`, `notifications_router()`, `pki_router()`) merged in `build_router()`. |
 | **Low** | `server.rs:88-102` | **Counterintuitive middleware ordering**: layers listed later execute first. Use `tower::ServiceBuilder` to make execution order match declaration order. |
@@ -1096,7 +1053,6 @@ Cross-referenced against the 2026-03-06 findings; items already recorded there a
 
 | Severity | Location | Finding |
 | --- | --- | --- |
-| **High** | `routes/extensions.rs:143` | **Extension action permissions declared but never enforced**: `ActionDef::permission` and `ExtensionManifest::required_permission` are ignored at the invocation layer on both the plugin dispatch and the service proxy path. Any authenticated user can invoke any extension action. Resolve `ActionDef` for the requested `action_id`, verify caller permissions against `TenantContext` before dispatching. |
 | **Low** | `middleware/rate_limit.rs:187-189` | **Rate-limiter silent bypass** when `ClientIp` extension is absent: connections bypass rate limiting with no log entry. Add `tracing::warn!` on the `None` path. |
 | **Low** | entrypoint | **No production guard on `enable_plaintext_mode()`**: assert this flag is not set when the DB is non-SQLite or `UPTRAKIT_ENV=production`. |
 | **Info** | `security_headers.rs:31-34` | **Split-CSP**: HTTP-level CSP contains only `frame-ancestors 'none'`; full policy emitted by SvelteKit at build time. Add a CI check verifying the built frontend HTML contains the expected CSP meta tag. |
@@ -1105,7 +1061,6 @@ Cross-referenced against the 2026-03-06 findings; items already recorded there a
 
 | Severity | Location | Finding |
 | --- | --- | --- |
-| **High** | `routes/software_items.rs:1119`, `routes/hosts.rs:218` | **`ServiceHost::find()` without tenant join** bypasses tenant isolation. Per project standard, `service_host` has no `tenant_id` column. Replace with `tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(service_host::Relation::Service.def())`. |
 | **High** | `routes/software_items.rs:1300-1331` | **N+1 in `batch_software_items` approve branch**: one `SELECT` + one `UPDATE` per item; a batch of 100 items issues 200 sequential round-trips. Extract to `batch_approve_software_items` in `web-api-queries` using an `is_in()` filter. |
 | **High** | `settings.rs:167` | **`tokio::sync::Mutex` for `write_mutex`** holds the guard across `.await` in `reload_from_db`, violating the project standard. Restructure so async DB work completes before guard acquisition, then switch to `parking_lot::Mutex`. |
 | **Medium** | `routes/software_items.rs:791-1058` | **267-line `check_versions` handler** with all business logic inline. Extract to `check_versions_for_item` in `web-api-queries`. |
@@ -1144,11 +1099,6 @@ and maintainability. Only findings not already recorded above are listed.
 
 #### Issues
 
-**[MEDIUM]** `routes/auth.rs` (login handler) -- Login endpoint leaks deactivated user
-existence: a deactivated user receives HTTP 403 while a nonexistent user receives HTTP 401.
-An attacker can enumerate valid usernames by observing the status code difference. Return
-401 for both cases with an identical error message.
-
 **[LOW]** `routes/auth.rs` (register handler) -- Registration endpoint returns HTTP 409 on
 duplicate email, confirming that the email address is already registered. This is a user
 enumeration vector. Consider returning a generic 200 response that instructs the user to
@@ -1175,20 +1125,9 @@ Extract shared `apply_status_change` helpers in the query layer.
 - `event_broadcaster.rs` -- Subscriber tracking with per-topic `broadcast::Sender` channels
   allows targeted event delivery without scanning all connections.
 
-#### Issues
-
-**[MEDIUM]** `event_broadcaster.rs` -- `EventBroadcaster` uses `tokio::sync::RwLock` instead
-of `parking_lot::RwLock`. Guards are dropped before `await` today, but this violates the
-project-wide `parking_lot` standard and exposes the same future-maintenance risk as
-`ServiceConnectionRegistry`. Replace with `parking_lot::RwLock`.
-
 ### Dimension: Database (D6)
 
 #### Issues
-
-**[HIGH]** `routes/service_ws/interactive_ws.rs:143` -- `ServiceHost::find()` without tenant
-join. The interactive WebSocket handler queries `service_host` directly without routing
-through `tenant_db.find_via_tenant_join`. Replace with the standard tenant-join pattern.
 
 **[MEDIUM]** `routes/autodiscovery.rs` (discovery results handler) --
 `.unwrap_or_default()` silences database errors when loading discovery results. A transient
@@ -1198,26 +1137,6 @@ explicit error propagation via `context_to()?`.
 **[MEDIUM]** `routes/autodiscovery.rs` (discovery results handler) -- N+1 query pattern in
 discovery results host lookup: each discovery result triggers a separate host query. Batch
 the host lookups into a single `is_in()` query.
-
-### Dimension: Coding Standards (D7)
-
-#### Issues
-
-**[MEDIUM]** `notifications/dispatcher.rs`, `routes/notifications.rs`,
-`routes/settings.rs` -- Additional `#[cfg(not(feature = "..."))]` violations beyond those
-already noted for `batch_progress_broadcaster.rs` and `settings_global_combined.rs`. Convert
-to `cfg!()` macro or `if cfg!(feature = "...")` blocks per the additive-only feature flag
-rule.
-
-**[MEDIUM]** `oidc_http_client.rs` -- `.expect()` on `reqwest::Client::builder().build()`
-can panic if the system TLS backend is misconfigured. Replace with proper error propagation
-returning `Report`.
-
-**[MEDIUM]** `oidc_http_client.rs` -- Missing `SsrfSafeResolver` on the OIDC HTTP client.
-The OIDC provider URL is operator-configured and could resolve to a private IP in
-misconfigured environments. Add `.dns_resolver(Arc::new(SsrfSafeResolver::new()))` per the
-project HTTP client standard, or document the exception with a comment explaining why OIDC
-providers are trusted.
 
 ### Dimension: Consistency (D9)
 

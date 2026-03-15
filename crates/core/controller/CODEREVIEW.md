@@ -275,15 +275,6 @@ in-flight OCSP/CRL requests are terminated mid-response on shutdown.
 
 ### Issues
 
-~~**[HIGH]** (2026-03-06 parallel review) `src/main.rs:94` -- `#[cfg(not(feature = "journald"))]`
-violates the additive-only feature flag rule. The coding standard prohibits
-`#[cfg(not(feature = ...))]`. This should use the `cfg!()` macro pattern:
-`let wants_journald = cfg!(feature = "journald") && args.audit_log_backend.contains(...)`.~~ *(Fixed: replaced with `init_tracing` helper using only additive `#[cfg(feature)]`.)*
-
-~~**[HIGH]** (2026-03-06 parallel review) `src/main.rs:304` -- `#[cfg(not(feature = "nats"))]`
-violates the same additive-only feature flag rule. Should be converted to the approved `cfg!()`
-macro pattern or `if cfg!(feature = "...")` block as documented in the coding standards.~~ *(Fixed: unconditional base init, additive `#[cfg(feature = "nats")]` augments it.)*
-
 **[MEDIUM]** `src/pki.rs:700` -- `unwrap_or(0)` on CA version query. While the `None` case is
 intentional (default to 0 for new systems), it would benefit from a clarifying comment.
 

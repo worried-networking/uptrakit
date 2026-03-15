@@ -204,20 +204,6 @@ from the `register_plugins!` macro and the plugin's `capabilities()` method.
 
 ### Notifications
 
-#### Security
-
-**[HIGH] S6 — `uptrakit-notification-plugin-email` (`lib.rs:110-119`) — SMTP password leaked via `Debug`**
-
-The local `SmtpSettingsSnapshot` struct in the email plugin carries `#[derive(Clone, Debug)]` with a `password: Option<String>` field. Any `{:?}` format of this struct emits the SMTP password to the log sink. The project memory explicitly states that `SmtpSettingsSnapshot` must have a masked `Debug` implementation. The `web-api` version of this struct correctly uses a manual `Debug` that redacts the password; the email plugin has a separate, unprotected copy without that safeguard.
-
-Recommendation: replace `#[derive(Debug)]` on the email-plugin-local `SmtpSettingsSnapshot` with a manual `Debug` implementation that redacts the password field, or extract the struct into a shared crate so both sites share a single, correct implementation.
-
-**[MEDIUM] S2 — `uptrakit-notification-plugin-telegram` (`lib.rs:29-33`) — Missing `dns_resolver` on `reqwest::Client`**
-
-The Telegram plugin builds a `reqwest::Client` without a `dns_resolver` override, deviating from the project standard. If a custom bot-API-host option is added in future, this becomes a live SSRF vulnerability.
-
-Recommendation: add `.dns_resolver(Arc::new(SsrfSafeResolver::new()))` to `TelegramPlugin::new()`.
-
 #### Maintainability
 
 ~~**[HIGH] M1 — Notification plugin crates use `path` instead of workspace dependency for `uptrakit-notification-plugin-core`**
@@ -238,7 +224,7 @@ Recommendation: change all four references to `uptrakit-notification-plugin-core
 #### Positive findings
 
 - **S4 (confirmed)** — `uptrakit-notification-plugin-webhook` correctly applies `SsrfSafeResolver` for DNS-level protection, additionally guards against private hosts via `is_private_host()` at config-save time, and disables redirect following. This is defense-in-depth beyond the project baseline.
-- **S5 (confirmed)** — `SmtpSettingsSnapshot` in `uptrakit-web-api` (`settings.rs:109-121`) correctly implements a custom `Debug` that redacts the password field. (Note: the email plugin's local copy does not yet share this protection — see S6 above.)
+- **S5 (confirmed)** — `SmtpSettingsSnapshot` in `uptrakit-web-api` (`settings.rs:109-121`) correctly implements a custom `Debug` that redacts the password field.
 
 ---
 
@@ -336,12 +322,6 @@ Recommendation: either add `impl_report_conversion!(ShellError, PluginError)` an
 
 #### Coding Standards
 
-**[LOW] CS1 — `uptrakit-plugin-infrastructure-core` (`plugin_ops.rs:12`) — `PluginOpsError` missing `#[non_exhaustive]`**
-
-`PluginOpsError` is a public error enum used across crate boundaries but does not carry `#[non_exhaustive]`. New error conditions are plausible future additions. Without this attribute, any crate that exhaustively matches all current variants will fail to compile when a new variant is added, creating a breaking change without a semver bump.
-
-Recommendation: add `#[non_exhaustive]` to `PluginOpsError` and verify that all external match sites add a wildcard arm with appropriate handling.
-
 **[VIOLATION] CS3 — `crates/plugins/infrastructure/proxmox/src/agent/extension_actions.rs:285` — `#[allow(clippy::too_many_arguments)]` without justification**
 
 The suppression comment says "mirrors the many fields needed for bootstrap," which describes the symptom rather than justifying the allow. The correct fix is to introduce a parameter struct. This is a coding-standards violation per the workspace rule that `#[allow()]` on non-feature-gated items must have a mandatory justification comment explaining why refactoring is not feasible.
@@ -374,15 +354,6 @@ and maintainability.
 - `notifications/telegram/src/lib.rs:137-148` -- Telegram `mask_config_secrets` masks both
   `bot_token` and `webhook_secret`, and webhook secret comparison uses constant-time equality
   via the standard sentinel check pattern, preventing timing side-channel leaks.
-
-#### Issues
-
-**[MEDIUM]** `notifications/telegram/src/lib.rs:29-33` -- Telegram plugin builds
-`reqwest::Client` without `SsrfSafeResolver`. The bot API URL is currently hardcoded to
-`api.telegram.org` (line 86), but the `bot_token` is user-controlled and embedded in the URL
-path. If a custom API endpoint is added in future, this becomes a live SSRF vector. Already
-noted in the 2026-03-10 review section above; this entry confirms the finding from the
-12-dimension security pass.
 
 ### Dimension: Code Quality
 
@@ -504,8 +475,6 @@ produces unnecessary allocation pressure. A single-pass character-by-character a
 
 ### infrastructure/proxmox
 
-- **[HIGH D7]** `plugin.rs:28` -- `#[cfg(not(feature = "migrations"))]` -- prohibited pattern.
-  Negative feature gates are explicitly forbidden by the workspace coding standards.
 - **[LOW D7]** `extension_actions.rs:285` -- `#[allow(clippy::too_many_arguments)]` with
   comment (good practice). Previously noted as CS3 in the 2026-03-10 review; the comment
   exists but describes the symptom rather than justifying the suppression.
@@ -518,25 +487,14 @@ produces unnecessary allocation pressure. A single-pass character-by-character a
   download URLs are attacker-influenced. The primary client correctly applies SSRF protection,
   but the download-specific client does not.
 
-### notifications/telegram
-
-- **[MEDIUM D2]** HTTP client at `lib.rs:33` missing `SsrfSafeResolver` -- constrained to
-  `api.telegram.org` but split-horizon DNS could redirect. Previously noted in both the
-  2026-03-10 review and the S2 entry above; still outstanding.
-
 ### notifications/email
 
-- **[MEDIUM D2]** `SmtpSettingsSnapshot` at `lib.rs:142` uses `#[derive(Debug)]` leaking SMTP
-  password -- the web-api version correctly implements manual `Debug` that redacts the password.
-  Previously noted as S6 in the 2026-03-10 review; still outstanding.
 - **[LOW D3]** `lib.rs:89` -- `.expect("config is always an object")` in
   `merge_smtp_into_config` -- should return error. Previously noted as CS5 and in the
   2026-03-10 dimension review; still outstanding.
 
 ### releases/docker
 
-- **[HIGH D7]** `update.rs:79` -- `#[cfg(not(feature = "daemon"))]` -- prohibited pattern.
-  Negative feature gates are explicitly forbidden by the workspace coding standards.
 - **[LOW D4]** `daemon_client.rs`, `discovery.rs`, `update.rs`, `docker_proxy.rs` lack unit
   tests (~1,200 lines of untested code).
 

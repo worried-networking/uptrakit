@@ -165,20 +165,6 @@ services fetch re-applies tenant filtering, this violates the stated convention.
 single-host helper `load_host_agents` on line 43 correctly uses `find_via_tenant_join`.
 *Found in parallel database review (2026-03-06).*~~ *(Fixed: replaced with `tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(...)`.)*
 
-**[MEDIUM] DB-15:** `queries/services.rs:380` -- `ServiceHost::find()` without
-`find_via_tenant_join` when loading service-host links. Per project standard, `service_host`
-has no `tenant_id` column; replace with
-`tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(...)`.
-
-**[MEDIUM] DB-16:** `queries/mqtt_software_states.rs:99` -- `Host::find()` without explicit
-`tenant_id` filter. Defense-in-depth gap — add `.filter(host::Column::TenantId.eq(...))`.
-
-**[MEDIUM] DB-17:** `queries/mqtt_software_states.rs:113` -- `UpdateHistory::find()` without
-`tenant_id` filter. Same defense-in-depth gap.
-
-**[MEDIUM] DB-18:** `queries/update_triggers.rs` -- Verify all `ServiceHost::find()` calls
-route through `find_via_tenant_join`; at least one unguarded call has been identified.
-
 **[LOW] DB-2:** `queries/software_items.rs:237,255,269,284` -- `load_item_hosts` helper takes
 a raw `&DatabaseConnection` rather than `&TenantDb` and queries `HostSoftwareItem::find()`,
 `Host::find()`, `HostSoftwareItemPlugin::find()`, and `PluginConfig::find()` without tenant
@@ -374,11 +360,6 @@ Replace for consistency.
 
 #### Issues
 
-**[MEDIUM]** `queries/update_triggers.rs:271` -- `ServiceHost::find()` without tenant join.
-The `service_host` table has no `tenant_id` column; per project standard, queries must route
-through `find_via_tenant_join`. Replace with
-`tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(...)`.
-
 **[MEDIUM]** `queries/hosts.rs` -- `batch_deactivate_hosts` executes per-host soft-delete +
 certificate revocation without a wrapping transaction. A failure partway through leaves some
 hosts deactivated and others untouched. Wrap in `db.begin()` / `txn.commit()`.
@@ -387,14 +368,6 @@ hosts deactivated and others untouched. Wrap in `db.begin()` / `txn.commit()`.
 `validate_update_preconditions` during batch creation: each candidate host triggers a
 separate precondition-check query. Batch the host-level checks into a single query with
 `is_in()` to reduce round-trips for large batches.
-
-**[LOW]** `queries/services.rs:380` -- `ServiceHost::find()` without tenant join when
-loading service-host links for merge. Currently safe because the service ID is pre-scoped,
-but violates the structural convention. Replace with `find_via_tenant_join`.
-
-**[LOW]** `queries/mqtt_software_states.rs:332` -- `ServiceHost::find()` without tenant join
-when loading host links for MQTT state aggregation. Same structural convention gap. Replace
-with `find_via_tenant_join`.
 
 **[LOW]** `queries/update_triggers.rs` -- Duplicate `#[tracing::instrument]` attribute on
 `load_target_for_dispatch`. The function has the attribute applied twice, which causes the

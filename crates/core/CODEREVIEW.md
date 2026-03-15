@@ -107,7 +107,6 @@ Rust idioms, crate structure, database, documentation, and cross-cutting concern
 | Severity | Dim | Location / Finding |
 | --- | --- | --- |
 | HIGH | D7 | `#[allow(clippy::too_many_arguments)]` at `main.rs:610` without comment |
-| HIGH | D7 | `#[cfg(not(feature = "nats"))]` at `main.rs:777` — prohibited pattern |
 | MEDIUM | D1 | `run()` function is 365 lines — numbered phases should be extracted to `startup/` module functions |
 | MEDIUM | D12 | `reconcile_all_settings` (288 lines, nesting 7) — repetitive per-setting boilerplate, macro/helper candidate |
 | LOW | D5 | `ca_key_store.write().await` in `spawn_ca_reload`/`spawn_ca_rotation` not protected by timeout |
