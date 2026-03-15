@@ -778,6 +778,7 @@
 								{#each hookLists[hookRole] as entry, idx (entry.localKey)}
 									{@const hookFields = getHookFormFields(entry)}
 									{@const hasHookFormFields = hookFields.length > 0}
+									{@const hookOptions = hookConfigsForRole()}
 									<div class="rounded-md border border-surface-300 p-3 space-y-2 dark:border-surface-600">
 										<div class="flex items-center justify-between gap-2">
 											<span class="text-xs font-medium text-surface-500">Hook #{idx + 1}</span>
@@ -792,24 +793,32 @@
 
 										<div class="grid grid-cols-[7rem_1fr] items-center gap-2">
 											<label class="text-sm font-medium" for="hook-cfg-{entry.localKey}">Plugin Config</label>
-											<select
-												id="hook-cfg-{entry.localKey}"
-												class="select text-sm"
-												bind:value={entry.plugin_config_id}
-												onchange={() => {
-													const config = pluginConfigs.find((c) => c.id === entry.plugin_config_id);
-													const fields = config ? getFormFields(config.plugin_type) : [];
-													entry.overrideFormValues = flattenConfig({}, fields);
-													entry.overrideShowJson = false;
-													entry.config_override_text = '';
-													entry.config_override_error = null;
-												}}
-											>
-												<option value="">— not configured —</option>
-												{#each hookConfigsForRole() as cfg (cfg.id)}
-													<option value={cfg.id}>{cfg.name}</option>
-												{/each}
-											</select>
+											{#if hookOptions.length > 0}
+												<select
+													id="hook-cfg-{entry.localKey}"
+													class="select text-sm"
+													bind:value={entry.plugin_config_id}
+													onchange={() => {
+														const config = pluginConfigs.find((c) => c.id === entry.plugin_config_id);
+														const fields = config ? getFormFields(config.plugin_type) : [];
+														entry.overrideFormValues = flattenConfig({}, fields);
+														entry.overrideShowJson = false;
+														entry.config_override_text = '';
+														entry.config_override_error = null;
+													}}
+												>
+													<option value="">— not configured —</option>
+													{#each hookOptions as cfg (cfg.id)}
+														<option value={cfg.id}>{cfg.name}</option>
+													{/each}
+												</select>
+											{:else}
+												<p class="text-xs text-surface-500 rounded bg-surface-100 dark:bg-surface-800 px-2 py-1">
+													No hook configs found. Create a <strong>Systemd Hook</strong> or
+													<strong>Shell Hook</strong> plugin config in
+													<a href="/settings" class="underline">Settings → Plugin Configs</a> first.
+												</p>
+											{/if}
 										</div>
 
 										{#if entry.plugin_config_id}
