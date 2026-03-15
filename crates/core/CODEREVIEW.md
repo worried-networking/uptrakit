@@ -1,7 +1,7 @@
 # Code Review: crates/core — Aggregate Summary
 
 - **Review dates**: 2026-03-02, 2026-03-06, 2026-03-10, 2026-03-15
-- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure|14-dimension-parallel)
 - **Branch**: docs/codereview-backend
 
 ## Overview
@@ -95,3 +95,77 @@ feature-gating justification. Each should be refactored with a parameter struct.
 | `agent/src/client.rs:31,43,44` | `#[allow(unused_variables)]` | Approved — feature-gated with comment |
 | `agent/src/client.rs:37` | `#[allow(unreachable_code)]` | Approved — explains interactive feature |
 | `agent-ssh/src/client.rs:512` | `#[allow(unused_mut)]` | Approved — feature-gated |
+
+## 14-Dimension Parallel Review — 2026-03-15
+
+Findings from a 14-dimension parallel review covering architecture, security, quality,
+high-availability, coding standards, extensibility, testing, consistency, maintainability,
+Rust idioms, crate structure, database, documentation, and cross-cutting concerns.
+
+### Controller
+
+| Severity | Dim | Location / Finding |
+| --- | --- | --- |
+| HIGH | D7 | `#[allow(clippy::too_many_arguments)]` at `main.rs:610` without comment |
+| HIGH | D7 | `#[cfg(not(feature = "nats"))]` at `main.rs:777` — prohibited pattern |
+| MEDIUM | D1 | `run()` function is 365 lines — numbered phases should be extracted to `startup/` module functions |
+| MEDIUM | D12 | `reconcile_all_settings` (288 lines, nesting 7) — repetitive per-setting boilerplate, macro/helper candidate |
+| LOW | D5 | `ca_key_store.write().await` in `spawn_ca_reload`/`spawn_ca_rotation` not protected by timeout |
+| LOW | D5 | PKI HTTP server uses `track_abort()` rather than `track()` — in-flight OCSP/CRL requests may be interrupted |
+| LOW | D3 | Production `.expect()` at `main.rs:85` — `tracing_journald::layer().expect("failed to connect to journald")` |
+| LOW | D4 | Controller startup and PKI code has zero unit tests (6 files, ~1,200 lines) |
+| INFO | D5 | Graceful shutdown well-architected with ordered teardown, service drain, scattered restart notifications |
+| INFO | D5 | Zero-downtime restart via `SO_REUSEPORT` and `--takeover-from` PID signaling |
+| INFO | D5 | DB connection pool properly configured (connect_timeout 8s, acquire_timeout 8s, idle_timeout 300s) |
+
+### Agent
+
+| Severity | Dim | Location / Finding |
+| --- | --- | --- |
+| INFO | D5 | Background task channel uses bounded `mpsc::channel(32)` — appropriate backpressure |
+| INFO | D5 | Freeze file mechanism provides operator kill switch persisting across restarts |
+| LOW | D5 | Update cooldown rate limiter only protects against rapid-fire, not sustained throughput |
+
+### Agent-SSH
+
+| Severity | Dim | Location / Finding |
+| --- | --- | --- |
+| MEDIUM | D12 | `run_proxmox_bootstrap` 387 lines, nesting 5 — extract named phases |
+| MEDIUM | D1 | Contains own embedded database layer (entity definitions, 13 migrations) — migration machinery duplicated from `shared-db` |
+| LOW | D5 | SSH connection pool has no maximum size limit — no eviction of idle sessions except on next `acquire()` |
+| LOW | D10 | `Vec<&String>` at `bootstrap.rs:429` — `Vec<&str>` would be more idiomatic |
+| LOW | D4 | SSH commands lack unit tests (`host.rs`, `bootstrap_proxmox.rs`, `sync.rs`) |
+
+### MQTT
+
+| Severity | Dim | Location / Finding |
+| --- | --- | --- |
+| MEDIUM | D7 | `#[allow(clippy::too_many_arguments)]` at `ha_discovery/device.rs:88` without comment |
+| LOW | D5 | Event reporter uses `try_send()` dropping events on full channel — could miss command events |
+| INFO | D5 | Reconnection uses exponential backoff (2s base, 60s cap) with `CancellationToken` integration |
+| INFO | D5 | Operations have 5s timeout; `publish_or_abort!` prevents cascading delays |
+| INFO | D5 | `pending_online`/`pending_ha_subscribe` retry avoids self-deadlock in poll callback |
+
+### Scheduler
+
+| Severity | Dim | Location / Finding |
+| --- | --- | --- |
+| INFO | D5 | Optimistic locking for task claiming — HA-safe across multiple instances |
+| INFO | D5 | Stale claim recovery (600s timeout) handles crashed controllers |
+| INFO | D5 | External scheduler handoff via `external_scheduler_connected` flag |
+| LOW | D14 | Dead `oidc = []` feature flag — gates no code |
+
+### Integration Tests
+
+| Severity | Dim | Location / Finding |
+| --- | --- | --- |
+| INFO | D4 | Docker-based tests properly `#[ignore]`d with clear run instructions |
+
+### Cross-Crate Strengths (New)
+
+- All five binaries implement `ServiceHandler` from `service-sdk` — consistent
+  enrollment/reconnection/shutdown lifecycle.
+- `CancellationToken` hierarchy propagated to all background tasks uniformly.
+- Zero `unsafe` blocks across all five binaries.
+- Exponential backoff with jitter across all reconnection paths.
+- Interruptible backoff sleeps respond to shutdown signals within one interval.
