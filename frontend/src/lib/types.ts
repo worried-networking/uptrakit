@@ -538,6 +538,8 @@ export interface UpdateHostAssignmentRequest {
 	ordinal?: number;
 	plugin_config_id?: string;
 	plugin_config?: CreatePluginConfigRequest;
+	/** Plugin type for a truly inline assignment with no shared config row (mutually exclusive with plugin_config_id and plugin_config). */
+	plugin_type?: string;
 	package_identifier?: string;
 	config_override?: Record<string, unknown> | null;
 	execution_site?: string;

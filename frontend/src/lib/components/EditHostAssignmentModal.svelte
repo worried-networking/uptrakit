@@ -572,19 +572,15 @@
 					...(s.plugin_config_id
 						? { plugin_config_id: s.plugin_config_id, config_override: configOverride }
 						: {
-								plugin_config: {
-									name: `${softwareItemName} \u2013 ${role.replace(/_/g, ' ')}`,
-									plugin_type: s.plugin_type,
-									config: (() => {
-										if (hasFields && !s.overrideShowJson) {
-											return unflattenConfig(s.overrideFormValues, fields) as Record<string, unknown>;
-										}
-										const text = s.config_override_text.trim();
-										return text ? (JSON.parse(text) as Record<string, unknown>) : {};
-									})(),
-									enabled: true
-								},
-								config_override: null
+								plugin_type: s.plugin_type,
+								config_override: (() => {
+									if (hasFields && !s.overrideShowJson) {
+										const obj = unflattenConfig(s.overrideFormValues, fields) as Record<string, unknown>;
+										return Object.keys(obj).length > 0 ? obj : null;
+									}
+									const text = s.config_override_text.trim();
+									return text ? (JSON.parse(text) as Record<string, unknown>) : null;
+								})()
 							}),
 					package_identifier: s.package_identifier.trim() || undefined,
 					execution_site: s.execution_site
@@ -621,19 +617,15 @@
 						...(entry.plugin_config_id
 							? { plugin_config_id: entry.plugin_config_id, config_override: configOverride }
 							: {
-									plugin_config: {
-										name: `${softwareItemName} \u2013 ${role.replace(/_/g, ' ')} #${i + 1}`,
-										plugin_type: entry.plugin_type,
-										config: (() => {
-											if (hasFields && !entry.overrideShowJson) {
-												return unflattenConfig(entry.overrideFormValues, fields) as Record<string, unknown>;
-											}
-											const text = entry.config_override_text.trim();
-											return text ? (JSON.parse(text) as Record<string, unknown>) : {};
-										})(),
-										enabled: true
-									},
-									config_override: null
+									plugin_type: entry.plugin_type,
+									config_override: (() => {
+										if (hasFields && !entry.overrideShowJson) {
+											const obj = unflattenConfig(entry.overrideFormValues, fields) as Record<string, unknown>;
+											return Object.keys(obj).length > 0 ? obj : null;
+										}
+										const text = entry.config_override_text.trim();
+										return text ? (JSON.parse(text) as Record<string, unknown>) : null;
+									})()
 								})
 					};
 					lastResult = await updateHostAssignment(softwareItemId, hostId, req);

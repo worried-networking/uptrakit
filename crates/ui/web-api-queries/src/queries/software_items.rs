@@ -558,22 +558,30 @@ async fn resolve_plugin_config_txn(
     }
 }
 
-/// Validate plugin config, package identifier, and config_override for a host assignment.
+/// Validate plugin type, package identifier, and config/config_override for a host assignment.
+///
+/// When `base_config` is `Some`, `config_override` is validated as a partial override merged
+/// onto the base. When `base_config` is `None` (type-only inline assignment), `config_override`
+/// is validated as the full standalone config.
 fn validate_assignment(
     ops: &dyn PluginOps,
-    config: &plugin_config::Model,
+    plugin_type: &str,
+    base_config: Option<&serde_json::Value>,
     package_identifier: &str,
     config_override: Option<&serde_json::Value>,
 ) -> Result<()> {
-    if let Err(e) = ops.validate_package_identifier_str(&config.plugin_type, package_identifier) {
+    if let Err(e) = ops.validate_package_identifier_str(plugin_type, package_identifier) {
         bail!(SoftwareItemQueryError::InvalidPackageIdentifier(e));
     }
 
-    if let Some(override_val) = config_override
-        && let Err(e) =
-            validate_config_override(ops, &config.plugin_type, &config.config, override_val)
-    {
-        bail!(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
+    if let Some(override_val) = config_override {
+        if let Some(base) = base_config {
+            if let Err(e) = validate_config_override(ops, plugin_type, base, override_val) {
+                bail!(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
+            }
+        } else if let Err(e) = ops.validate_config_str(plugin_type, override_val) {
+            bail!(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
+        }
     }
 
     Ok(())
@@ -1148,7 +1156,8 @@ async fn upsert_role_assignment(
 
     validate_assignment(
         ops,
-        &config,
+        &config.plugin_type,
+        Some(&config.config),
         &role_assignment.package_identifier,
         role_assignment.config_override.as_ref(),
     )?;
@@ -1324,80 +1333,128 @@ pub async fn update_host_assignment(
             (None, None, None, None)
         };
 
-    let synthetic = HostPluginRoleAssignment {
-        role: req.role.clone(),
-        ordinal: req.ordinal,
-        plugin_config_id: req.plugin_config_id.or(existing_pcid),
-        plugin_config: req.plugin_config,
-        package_identifier: req
-            .package_identifier
-            .clone()
-            .or(existing_pkg.clone())
-            .unwrap_or_default(),
-        config_override: req.config_override.clone().or(existing_override),
-        execution_site: req
-            .execution_site
-            .clone()
-            .or(existing_exec_site)
-            .unwrap_or_else(|| "auto".to_string()),
-    };
+    let effective_pkg = req
+        .package_identifier
+        .clone()
+        .or(existing_pkg.clone())
+        .unwrap_or_default();
+    let effective_exec_site = req
+        .execution_site
+        .clone()
+        .or(existing_exec_site)
+        .unwrap_or_else(|| "auto".to_string());
 
     // Validate execution_site.
-    validate_execution_site(&synthetic.execution_site, &req.role)?;
+    validate_execution_site(&effective_exec_site, &req.role)?;
 
     let txn = tenant_db.db().begin().await.context_to()?;
-
-    let (plugin_config_id, config) =
-        resolve_plugin_config_txn(ops, &txn, tenant_db.tenant_id, &synthetic).await?;
-
-    validate_assignment(
-        ops,
-        &config,
-        &synthetic.package_identifier,
-        synthetic.config_override.as_ref(),
-    )?;
-
     let now = OffsetDateTime::now_utc();
 
-    match existing_plugin {
-        Some(existing) => {
-            let mut active: host_software_item_plugin::ActiveModel = existing.into();
-            active.plugin_config_id = Set(Some(plugin_config_id));
-            active.plugin_type = Set(config.plugin_type.clone());
-            active.package_identifier = Set(synthetic.package_identifier);
+    if let Some(pt) = req.plugin_type {
+        // Type-only inline assignment: no plugin_configs row is created.
+        // config_override holds the full standalone config for this assignment.
+        validate_assignment(
+            ops,
+            pt.as_str(),
+            None,
+            &effective_pkg,
+            req.config_override.as_ref(),
+        )?;
 
-            // Handle config: explicit null in request clears it.
-            if let Some(ref override_val) = req.config_override {
-                if override_val.is_null() {
-                    active.config = Set(None);
-                } else {
-                    active.config = Set(Some(override_val.clone()));
+        match existing_plugin {
+            Some(existing) => {
+                let mut active: host_software_item_plugin::ActiveModel = existing.into();
+                active.plugin_config_id = Set(None);
+                active.plugin_type = Set(pt.to_string());
+                active.package_identifier = Set(effective_pkg);
+                if let Some(ref ov) = req.config_override {
+                    active.config = Set(if ov.is_null() { None } else { Some(ov.clone()) });
                 }
+                active.execution_site = Set(effective_exec_site);
+                active.updated_at = Set(now);
+                active.update(&txn).await.context_to()?;
             }
-
-            active.execution_site = Set(synthetic.execution_site);
-            active.updated_at = Set(now);
-
-            active.update(&txn).await.context_to()?;
+            None => {
+                let plugin_row = host_software_item_plugin::ActiveModel {
+                    id: Set(generate_uuid()),
+                    host_id: Set(host_id),
+                    software_item_id: Set(id),
+                    host_software_item_id: Set(hsi_id),
+                    plugin_config_id: Set(None),
+                    plugin_type: Set(pt.to_string()),
+                    role: Set(req.role.as_str().to_string()),
+                    ordinal: Set(req.ordinal),
+                    package_identifier: Set(effective_pkg),
+                    config: Set(req.config_override),
+                    execution_site: Set(effective_exec_site),
+                    created_at: Set(now),
+                    updated_at: Set(now),
+                };
+                plugin_row.insert(&txn).await.context_to()?;
+            }
         }
-        None => {
-            // No existing plugin for this role -- create a new one.
-            let plugin_row = host_software_item_plugin::ActiveModel {
-                id: Set(generate_uuid()),
-                host_id: Set(host_id),
-                software_item_id: Set(id),
-                host_software_item_id: Set(hsi_id),
-                plugin_config_id: Set(Some(plugin_config_id)),
-                plugin_type: Set(config.plugin_type.clone()),
-                role: Set(req.role.as_str().to_string()),
-                ordinal: Set(req.ordinal),
-                package_identifier: Set(synthetic.package_identifier),
-                config: Set(synthetic.config_override),
-                execution_site: Set(synthetic.execution_site),
-                created_at: Set(now),
-                updated_at: Set(now),
-            };
-            plugin_row.insert(&txn).await.context_to()?;
+    } else {
+        // Config-based assignment: resolve via existing ID or inline plugin_config create.
+        let synthetic = HostPluginRoleAssignment {
+            role: req.role.clone(),
+            ordinal: req.ordinal,
+            plugin_config_id: req.plugin_config_id.or(existing_pcid),
+            plugin_config: req.plugin_config,
+            package_identifier: effective_pkg.clone(),
+            config_override: req.config_override.clone().or(existing_override),
+            execution_site: effective_exec_site.clone(),
+        };
+
+        let (plugin_config_id, config) =
+            resolve_plugin_config_txn(ops, &txn, tenant_db.tenant_id, &synthetic).await?;
+
+        validate_assignment(
+            ops,
+            &config.plugin_type,
+            Some(&config.config),
+            &synthetic.package_identifier,
+            synthetic.config_override.as_ref(),
+        )?;
+
+        match existing_plugin {
+            Some(existing) => {
+                let mut active: host_software_item_plugin::ActiveModel = existing.into();
+                active.plugin_config_id = Set(Some(plugin_config_id));
+                active.plugin_type = Set(config.plugin_type.clone());
+                active.package_identifier = Set(synthetic.package_identifier);
+
+                // Handle config: explicit null in request clears it.
+                if let Some(ref override_val) = req.config_override {
+                    if override_val.is_null() {
+                        active.config = Set(None);
+                    } else {
+                        active.config = Set(Some(override_val.clone()));
+                    }
+                }
+
+                active.execution_site = Set(synthetic.execution_site);
+                active.updated_at = Set(now);
+
+                active.update(&txn).await.context_to()?;
+            }
+            None => {
+                let plugin_row = host_software_item_plugin::ActiveModel {
+                    id: Set(generate_uuid()),
+                    host_id: Set(host_id),
+                    software_item_id: Set(id),
+                    host_software_item_id: Set(hsi_id),
+                    plugin_config_id: Set(Some(plugin_config_id)),
+                    plugin_type: Set(config.plugin_type.clone()),
+                    role: Set(req.role.as_str().to_string()),
+                    ordinal: Set(req.ordinal),
+                    package_identifier: Set(synthetic.package_identifier),
+                    config: Set(synthetic.config_override),
+                    execution_site: Set(synthetic.execution_site),
+                    created_at: Set(now),
+                    updated_at: Set(now),
+                };
+                plugin_row.insert(&txn).await.context_to()?;
+            }
         }
     }
 

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use uptrakit_shared_types::PluginRole;
+use uptrakit_shared_types::{PluginRole, PluginType};
 use uuid::Uuid;
 
 use crate::pagination::PaginationParams;
@@ -98,8 +98,13 @@ pub struct UpdateHostAssignmentRequest {
     pub ordinal: i32,
     /// UUID of an existing plugin config to use.
     pub plugin_config_id: Option<Uuid>,
-    /// Inline plugin config to create (mutually exclusive with `plugin_config_id`).
+    /// Inline plugin config to create and link (mutually exclusive with `plugin_config_id` and `plugin_type`).
     pub plugin_config: Option<CreatePluginConfigRequest>,
+    /// Plugin type for a truly inline assignment with no shared config row
+    /// (mutually exclusive with `plugin_config_id` and `plugin_config`).
+    /// The full plugin config is supplied via `config_override`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_type: Option<PluginType>,
     pub package_identifier: Option<String>,
     /// Send `null` to clear the override, an object to set it.
     pub config_override: Option<serde_json::Value>,
@@ -638,6 +643,7 @@ mod tests {
             ordinal: 0,
             plugin_config_id: Some(sample_uuid()),
             plugin_config: None,
+            plugin_type: None,
             package_identifier: Some("nginx".to_string()),
             config_override: None,
             execution_site: Some("controller".to_string()),
