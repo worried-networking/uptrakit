@@ -479,17 +479,19 @@ async fn batch_update_inner(
             }
         };
 
-        // Run pre-update hooks
-        for hook_cmd in &payload.pre_update_hooks {
-            tracing::debug!(hook = ?hook_cmd, "running batch pre-update hook");
-            match crate::update::run_hook_for_batch(hook_cmd).await {
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::warn!(error = %e, "batch pre-update hook failed");
-                    return Err(format!("Pre-update hook failed: {e}"));
-                }
-            }
-        }
+        // Run pre-update hook plugins
+        let pre_ctx = uptrakit_plugin_infrastructure_core::UpdateLifecycleContext::for_pre_hook(
+            "", // batch has no single package identifier
+            "", // batch has no single to_version
+            None, None,
+        );
+        crate::update::run_batch_pre_hook_plugins(
+            &payload.pre_update_hook_plugins,
+            &pre_ctx,
+            Arc::clone(&executor),
+        )
+        .await
+        .map_err(|e| format!("Pre-update hook failed: {e}"))?;
 
         // Execute batch update via UpdateExecutorPlugin subtrait
         let updater = plugin.as_update_executor().ok_or_else(|| {
@@ -505,13 +507,16 @@ async fn batch_update_inner(
             }
         };
 
-        // Run post-update hooks (non-fatal)
-        for hook_cmd in &payload.post_update_hooks {
-            tracing::debug!(hook = ?hook_cmd, "running batch post-update hook");
-            if let Err(e) = crate::update::run_hook_for_batch(hook_cmd).await {
-                tracing::warn!(error = %e, "batch post-update hook failed (non-fatal)");
-            }
-        }
+        // Run post-update hook plugins (non-fatal)
+        let post_ctx = uptrakit_plugin_infrastructure_core::UpdateLifecycleContext::for_post_hook(
+            "", "", None, None, true, // batch succeeded if we got here
+        );
+        crate::update::run_batch_post_hook_plugins(
+            &payload.post_update_hook_plugins,
+            &post_ctx,
+            Arc::clone(&executor),
+        )
+        .await;
 
         Ok(results)
     })
@@ -789,8 +794,8 @@ mod tests {
                 to_version: "1.0.0".to_string(),
                 release_info: None,
             }],
-            pre_update_hooks: vec![],
-            post_update_hooks: vec![],
+            pre_update_hook_plugins: vec![],
+            post_update_hook_plugins: vec![],
             timeout,
             interactive: false,
         }

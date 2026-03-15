@@ -3,19 +3,11 @@
 //! Handles the complete update flow:
 //! 1. Receive `ExecuteUpdate` message
 //! 2. Detect current version (`from_version`)
-//! 3. Run user shell pre-update hooks (from wire payload)
-//! 4. Run plugin's `pre_update_hook` — abort if `should_proceed` is false
-//! 5. Execute actual update (dispatched through Plugin Registry)
-//! 6. Run plugin's `post_update_hook` — errors logged, non-fatal
-//! 7. Run user shell post-update hooks (from wire payload)
-//! 8. Detect to_version post-update
-//! 9. Return `UpdateExecutionResult` with final status and accumulated output
-//!
-//! ## Shell Execution
-//!
-//! Commands are executed with fail-early shell settings:
-//! - **Bash**: `set -euo pipefail` (exit on error, undefined vars, pipe failures)
-//! - **Sh**: `set -eu` (exit on error, undefined vars)
+//! 3. Run pre-update lifecycle hook plugins (ordered by assignment)
+//! 4. Execute actual update (dispatched through Plugin Registry)
+//! 5. Run post-update lifecycle hook plugins (always, even on failure)
+//! 6. Detect to_version post-update
+//! 7. Return `UpdateExecutionResult` with final status and accumulated output
 
 use std::sync::Arc;
 
@@ -24,23 +16,16 @@ use thiserror::Error as ThisError;
 use tokio::sync::mpsc;
 use uptrakit_command::{CommandExecutor, UpdateOutputLine};
 use uptrakit_internal_wire::{
-    AttestationStatus, ExecuteUpdatePayload, HookCommand, OutputStreamType, ReleaseInfo,
+    AttestationStatus, ExecuteUpdatePayload, OutputStreamType, PluginAssignment, ReleaseInfo,
     UpdateFinalStatus, UpdateResultPayload,
 };
-use uptrakit_plugin_infrastructure_core::UpdateHookContext;
+use uptrakit_plugin_infrastructure_core::UpdateLifecycleContext;
 use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 
 use crate::error::AgentCoreError;
 
 /// Maximum accumulated output size (10 MB) to prevent OOM from runaway commands.
 const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
-
-/// Maximum execution time for a single hook command (5 minutes).
-///
-/// Prevents a single hook from consuming the entire update timeout budget.
-/// The child process is killed via `kill_on_drop(true)` when the timeout
-/// future is dropped.
-const HOOK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Marker appended when output is truncated at the limit.
 const TRUNCATION_MARKER: &str = "\n... [output truncated at 10 MB] ...\n";
@@ -83,8 +68,7 @@ pub struct UpdateOutputMessage {
     pub stream: OutputStreamType,
 }
 
-/// Run the three-phase update pipeline: user pre-hooks → plugin execution →
-/// user post-hooks.
+/// Run the update pipeline: pre-hook plugins → plugin execution → post-hook plugins.
 ///
 /// The caller wraps this in [`tokio::time::timeout`] so cancellation
 /// (`drop`) releases the `&mut accumulated_output` borrow cleanly.
@@ -94,14 +78,19 @@ async fn execute_update_pipeline(
     executor: Arc<dyn CommandExecutor>,
     accumulated_output: &mut String,
 ) -> std::result::Result<(), AgentCoreError> {
-    // Run pre-update hooks
-    run_hook_phase(
-        &payload.pre_update_hooks,
-        "pre-hook",
-        OutputStreamType::PreHook,
+    // Run pre-update lifecycle hook plugins
+    let lifecycle_ctx = UpdateLifecycleContext::for_pre_hook(
+        &payload.execute_update_plugin.package_identifier,
+        &payload.to_version,
+        None, // from_version not yet available at this stage
+        payload.release_info.clone(),
+    );
+    run_pre_hook_plugins(
+        &payload.pre_update_hook_plugins,
+        &lifecycle_ctx,
+        Arc::clone(&executor),
         output_tx,
         accumulated_output,
-        AgentCoreError::PreUpdateHookFailed,
     )
     .await?;
 
@@ -123,40 +112,54 @@ async fn execute_update_pipeline(
     .await;
 
     tracing::debug!("executing plugin update");
-    match execute_plugin_update(payload, output_tx, executor).await {
-        Ok(output) => {
-            tracing::debug!("plugin update returned successfully");
-            append_bounded(accumulated_output, &output, MAX_OUTPUT_BYTES);
-        }
-        Err(e) => {
-            let error_msg = e.to_string();
-            tracing::warn!(
-                software_item = %payload.software_item_name,
-                error = %error_msg,
-                "plugin update command failed"
-            );
-            let formatted = format!("[error] {error_msg}\n");
-            send_output(
-                output_tx,
-                &format!("[error] {error_msg}"),
-                OutputStreamType::Stderr,
-            )
-            .await;
-            append_bounded(accumulated_output, &formatted, MAX_OUTPUT_BYTES);
-            return Err(AgentCoreError::UpdateExecution(error_msg));
-        }
-    }
+    let update_succeeded =
+        match execute_plugin_update(payload, output_tx, Arc::clone(&executor)).await {
+            Ok(output) => {
+                tracing::debug!("plugin update returned successfully");
+                append_bounded(accumulated_output, &output, MAX_OUTPUT_BYTES);
+                true
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                tracing::warn!(
+                    software_item = %payload.software_item_name,
+                    error = %error_msg,
+                    "plugin update command failed"
+                );
+                let formatted = format!("[error] {error_msg}\n");
+                send_output(
+                    output_tx,
+                    &format!("[error] {error_msg}"),
+                    OutputStreamType::Stderr,
+                )
+                .await;
+                append_bounded(accumulated_output, &formatted, MAX_OUTPUT_BYTES);
+                false
+            }
+        };
 
-    // Run post-update hooks
-    run_hook_phase(
-        &payload.post_update_hooks,
-        "post-hook",
-        OutputStreamType::PostHook,
+    // Run post-update lifecycle hook plugins (always, even on failure)
+    let post_ctx = UpdateLifecycleContext::for_post_hook(
+        &payload.execute_update_plugin.package_identifier,
+        &payload.to_version,
+        None,
+        payload.release_info.clone(),
+        update_succeeded,
+    );
+    run_post_hook_plugins(
+        &payload.post_update_hook_plugins,
+        &post_ctx,
+        executor,
         output_tx,
         accumulated_output,
-        AgentCoreError::PostUpdateHookFailed,
     )
-    .await?;
+    .await;
+
+    if !update_succeeded {
+        return Err(AgentCoreError::UpdateExecution(
+            "plugin update command failed".to_string(),
+        ));
+    }
 
     Ok(())
 }
@@ -285,18 +288,10 @@ async fn detect_current_version(
     outcome.installed_version
 }
 
-/// Execute the plugin-specific update logic, including pre/post lifecycle hooks.
-///
-/// Plugin-level hooks run adjacent to `execute_update`:
-/// ```text
-/// hooks.pre_update_hook(ctx, tx)   ← abort if !should_proceed (skipped if not implemented)
-/// executor.execute_update(...)      ← the actual update (required)
-/// hooks.post_update_hook(ctx, tx)   ← errors logged at WARN, non-fatal (skipped if not implemented)
-/// ```
+/// Execute the plugin-specific update logic.
 ///
 /// The plugin is obtained via `PluginRegistry::create_plugin()` which returns `Box<dyn PluginBase>`.
-/// Subtrait accessors are used to obtain `UpdateExecutorPlugin` (required) and
-/// `UpdateHooksPlugin` (optional).
+/// The `UpdateExecutorPlugin` subtrait accessor is used to run the actual update.
 #[tracing::instrument(skip_all, fields(plugin_type = %payload.execute_update_plugin.plugin_type))]
 async fn execute_plugin_update(
     payload: &ExecuteUpdatePayload,
@@ -314,67 +309,8 @@ async fn execute_plugin_update(
             eu.plugin_type
         )))
     })?;
-    let update_hooks = plugin.as_update_hooks();
 
-    let hook_ctx = UpdateHookContext::new(
-        eu.package_identifier.clone(),
-        payload.to_version.clone(),
-        payload.release_info.clone(),
-    );
-
-    // Bridge plugin output (UpdateOutputLine) -> agent output (UpdateOutputMessage)
-    let make_bridge = |output_tx: &mpsc::Sender<UpdateOutputMessage>| {
-        let (plugin_tx, mut plugin_rx) = mpsc::channel::<UpdateOutputLine>(100);
-        let bridge_output_tx = output_tx.clone();
-        let bridge_handle = tokio::spawn(async move {
-            while let Some(line) = plugin_rx.recv().await {
-                let _ = bridge_output_tx
-                    .send(UpdateOutputMessage {
-                        output: line.text,
-                        stream: line.stream,
-                    })
-                    .await;
-            }
-        });
-        (plugin_tx, bridge_handle)
-    };
-
-    // --- Pre-update hook (only if the plugin implements UpdateHooksPlugin) ---
-    if let Some(hooks) = update_hooks {
-        let (plugin_tx, bridge_handle) = make_bridge(output_tx);
-        let pre_result = hooks
-            .pre_update_hook(&hook_ctx, &plugin_tx)
-            .await
-            .map_err(|e| {
-                // Avoid "install command failed: install command failed: ..." by
-                // extracting the inner message when the plugin already wrapped the
-                // error in PluginError::InstallFailed.
-                use uptrakit_plugin_infrastructure_core::PluginError;
-                let msg = match e.current_context() {
-                    PluginError::InstallFailed(s) => s.clone(),
-                    other => other.to_string(),
-                };
-                report!(UpdateError::InstallFailed(msg))
-            });
-        drop(plugin_tx);
-        let _ = bridge_handle.await;
-
-        let pre_result = pre_result?;
-        tracing::debug!(
-            should_proceed = pre_result.should_proceed,
-            "plugin pre_update_hook completed"
-        );
-        if !pre_result.should_proceed {
-            let reason = pre_result
-                .abort_reason
-                .unwrap_or_else(|| "plugin pre-update hook aborted the update".to_string());
-            tracing::warn!(reason, "plugin pre_update_hook aborted the update");
-            return Err(report!(UpdateError::InstallFailed(reason)));
-        }
-    }
-
-    // --- Execute update ---
-    let (plugin_tx, bridge_handle) = make_bridge(output_tx);
+    let (plugin_tx, bridge_handle) = make_output_bridge(output_tx);
     let update_result = update_executor
         .execute_update(
             &eu.package_identifier,
@@ -384,9 +320,6 @@ async fn execute_plugin_update(
         )
         .await
         .map_err(|e| {
-            // Avoid "install command failed: install command failed: ..." by
-            // extracting the inner message when the plugin already wrapped the
-            // error in PluginError::InstallFailed.
             use uptrakit_plugin_infrastructure_core::PluginError;
             let msg = match e.current_context() {
                 PluginError::InstallFailed(s) => s.clone(),
@@ -396,273 +329,339 @@ async fn execute_plugin_update(
         });
     drop(plugin_tx);
     let _ = bridge_handle.await;
-    let update_output = update_result?;
 
-    // --- Post-update hook (only if the plugin implements UpdateHooksPlugin) ---
-    if let Some(hooks) = update_hooks {
-        let (plugin_tx, bridge_handle) = make_bridge(output_tx);
-        let post_result = hooks.post_update_hook(&hook_ctx, &plugin_tx).await;
-        drop(plugin_tx);
-        let _ = bridge_handle.await;
-
-        match &post_result {
-            Ok(_) => tracing::debug!("plugin post_update_hook completed successfully"),
-            Err(e) => tracing::warn!(
-                error = %e,
-                "plugin post_update_hook failed (non-fatal); continuing"
-            ),
-        }
-    }
-
-    Ok(update_output)
+    update_result
 }
 
-/// Execute a sequence of hook commands, streaming output and collecting results.
+/// Bridge plugin output (`UpdateOutputLine`) to agent output (`UpdateOutputMessage`).
 ///
-/// Returns `Ok(())` if all hooks succeed, or `Err(AgentCoreError)` on the
-/// first failure (pre-hooks abort the update, post-hooks abort further hooks).
-async fn run_hook_phase(
-    hooks: &[HookCommand],
-    phase_label: &str,
-    stream_type: OutputStreamType,
+/// Returns the sender for the plugin side and a join handle for the bridge task.
+fn make_output_bridge(
+    output_tx: &mpsc::Sender<UpdateOutputMessage>,
+) -> (mpsc::Sender<UpdateOutputLine>, tokio::task::JoinHandle<()>) {
+    let (plugin_tx, mut plugin_rx) = mpsc::channel::<UpdateOutputLine>(100);
+    let bridge_output_tx = output_tx.clone();
+    let bridge_handle = tokio::spawn(async move {
+        while let Some(line) = plugin_rx.recv().await {
+            let _ = bridge_output_tx
+                .send(UpdateOutputMessage {
+                    output: line.text,
+                    stream: line.stream,
+                })
+                .await;
+        }
+    });
+    (plugin_tx, bridge_handle)
+}
+
+/// Run pre-update lifecycle hook plugins in order.
+///
+/// Each plugin is instantiated, and its `execute_pre_hook()` is called.
+/// If any hook returns `should_proceed = false`, the update is aborted.
+async fn run_pre_hook_plugins(
+    plugins: &[PluginAssignment],
+    ctx: &UpdateLifecycleContext,
+    executor: Arc<dyn CommandExecutor>,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
     accumulated_output: &mut String,
-    make_error: fn(String) -> AgentCoreError,
 ) -> Result<(), AgentCoreError> {
-    if hooks.is_empty() {
+    if plugins.is_empty() {
         return Ok(());
     }
-    tracing::warn!(
-        hook_count = hooks.len(),
-        commands = %hook_summaries(hooks),
-        "security_audit: executing {phase_label} hooks",
+    tracing::info!(
+        hook_count = plugins.len(),
+        "executing pre-update lifecycle hook plugins"
     );
     send_output(
         output_tx,
-        &format!("[{phase_label}] Starting {phase_label} hooks..."),
+        "[pre-hook] Starting pre-update hook plugins...",
         OutputStreamType::System,
     )
     .await;
 
-    for hook_cmd in hooks {
+    for assignment in plugins {
+        tracing::info!(
+            plugin_type = %assignment.plugin_type,
+            "running pre-update hook plugin"
+        );
         send_output(
             output_tx,
-            &format!("[{phase_label}] Running: {hook_cmd}"),
-            stream_type,
+            &format!("[pre-hook] Running plugin: {}", assignment.plugin_type),
+            OutputStreamType::PreHook,
         )
         .await;
 
-        match run_hook_command(hook_cmd, stream_type, output_tx).await {
-            Ok((output, exit_code)) => {
-                append_bounded(accumulated_output, &output, MAX_OUTPUT_BYTES);
+        let plugin = PluginRegistry::create_plugin(
+            assignment.plugin_type.clone(),
+            &assignment.config,
+            Arc::clone(&executor),
+        )
+        .await
+        .map_err(|e| {
+            AgentCoreError::PreUpdateHookFailed(format!(
+                "failed to create hook plugin {}: {e}",
+                assignment.plugin_type
+            ))
+        })?;
+
+        let lifecycle = plugin.as_update_lifecycle().ok_or_else(|| {
+            AgentCoreError::PreUpdateHookFailed(format!(
+                "plugin {} does not implement UpdateLifecyclePlugin",
+                assignment.plugin_type
+            ))
+        })?;
+
+        let (plugin_tx, bridge_handle) = make_output_bridge(output_tx);
+        let result = lifecycle.execute_pre_hook(ctx, &plugin_tx).await;
+        drop(plugin_tx);
+        let _ = bridge_handle.await;
+
+        match result {
+            Ok(pre_result) => {
+                if !pre_result.should_proceed {
+                    let reason = pre_result.abort_reason.unwrap_or_else(|| {
+                        format!(
+                            "pre-update hook plugin {} aborted the update",
+                            assignment.plugin_type
+                        )
+                    });
+                    tracing::warn!(reason, "pre-update hook plugin aborted the update");
+                    let msg = format!("[pre-hook] Aborted: {reason}");
+                    send_output(output_tx, &msg, OutputStreamType::PreHook).await;
+                    append_bounded(accumulated_output, &format!("{msg}\n"), MAX_OUTPUT_BYTES);
+                    return Err(AgentCoreError::PreUpdateHookFailed(reason));
+                }
                 send_output(
                     output_tx,
-                    &format!("[{phase_label}] (exit code {exit_code})"),
-                    stream_type,
+                    &format!("[pre-hook] Plugin {} completed", assignment.plugin_type),
+                    OutputStreamType::PreHook,
                 )
                 .await;
             }
             Err(e) => {
-                let error_msg = format!("[{phase_label}] Failed: {e}");
-                send_output(output_tx, &error_msg, OutputStreamType::System).await;
-                return Err(make_error(e.to_string()));
+                let error_msg = format!(
+                    "pre-update hook plugin {} failed: {e}",
+                    assignment.plugin_type
+                );
+                send_output(
+                    output_tx,
+                    &format!("[pre-hook] Failed: {error_msg}"),
+                    OutputStreamType::PreHook,
+                )
+                .await;
+                return Err(AgentCoreError::PreUpdateHookFailed(error_msg));
             }
+        }
+    }
+
+    Ok(())
+}
+
+/// Run post-update lifecycle hook plugins in order.
+///
+/// Each plugin is instantiated, and its `execute_post_hook()` is called.
+/// Errors are logged but non-fatal — all plugins are always attempted.
+async fn run_post_hook_plugins(
+    plugins: &[PluginAssignment],
+    ctx: &UpdateLifecycleContext,
+    executor: Arc<dyn CommandExecutor>,
+    output_tx: &mpsc::Sender<UpdateOutputMessage>,
+    accumulated_output: &mut String,
+) {
+    if plugins.is_empty() {
+        return;
+    }
+    tracing::info!(
+        hook_count = plugins.len(),
+        "executing post-update lifecycle hook plugins"
+    );
+    send_output(
+        output_tx,
+        "[post-hook] Starting post-update hook plugins...",
+        OutputStreamType::System,
+    )
+    .await;
+
+    for assignment in plugins {
+        tracing::info!(
+            plugin_type = %assignment.plugin_type,
+            "running post-update hook plugin"
+        );
+        send_output(
+            output_tx,
+            &format!("[post-hook] Running plugin: {}", assignment.plugin_type),
+            OutputStreamType::PostHook,
+        )
+        .await;
+
+        let plugin = match PluginRegistry::create_plugin(
+            assignment.plugin_type.clone(),
+            &assignment.config,
+            Arc::clone(&executor),
+        )
+        .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                let msg = format!(
+                    "failed to create post-hook plugin {}: {e}",
+                    assignment.plugin_type
+                );
+                tracing::warn!(msg, "skipping post-update hook plugin");
+                send_output(
+                    output_tx,
+                    &format!("[post-hook] Skipped (failed to create): {msg}"),
+                    OutputStreamType::PostHook,
+                )
+                .await;
+                append_bounded(accumulated_output, &format!("{msg}\n"), MAX_OUTPUT_BYTES);
+                continue;
+            }
+        };
+
+        let Some(lifecycle) = plugin.as_update_lifecycle() else {
+            tracing::warn!(
+                plugin_type = %assignment.plugin_type,
+                "plugin does not implement UpdateLifecyclePlugin; skipping"
+            );
+            continue;
+        };
+
+        let (plugin_tx, bridge_handle) = make_output_bridge(output_tx);
+        let result = lifecycle.execute_post_hook(ctx, &plugin_tx).await;
+        drop(plugin_tx);
+        let _ = bridge_handle.await;
+
+        match result {
+            Ok(()) => {
+                send_output(
+                    output_tx,
+                    &format!("[post-hook] Plugin {} completed", assignment.plugin_type),
+                    OutputStreamType::PostHook,
+                )
+                .await;
+            }
+            Err(e) => {
+                let msg = format!(
+                    "post-update hook plugin {} failed (non-fatal): {e}",
+                    assignment.plugin_type
+                );
+                tracing::warn!(msg);
+                send_output(
+                    output_tx,
+                    &format!("[post-hook] Warning: {msg}"),
+                    OutputStreamType::PostHook,
+                )
+                .await;
+                append_bounded(accumulated_output, &format!("{msg}\n"), MAX_OUTPUT_BYTES);
+            }
+        }
+    }
+}
+
+/// Run pre-update lifecycle hook plugins for batch operations.
+///
+/// Unlike single-update hooks, batch hooks do not stream output.
+/// Returns error on first failure (aborts the batch).
+pub(crate) async fn run_batch_pre_hook_plugins(
+    plugins: &[PluginAssignment],
+    ctx: &UpdateLifecycleContext,
+    executor: Arc<dyn CommandExecutor>,
+) -> UpdateResult<()> {
+    for assignment in plugins {
+        let plugin = PluginRegistry::create_plugin(
+            assignment.plugin_type.clone(),
+            &assignment.config,
+            Arc::clone(&executor),
+        )
+        .await
+        .map_err(|e| {
+            report!(UpdateError::HookFailed(format!(
+                "failed to create hook plugin {}: {e}",
+                assignment.plugin_type
+            )))
+        })?;
+
+        let lifecycle = plugin.as_update_lifecycle().ok_or_else(|| {
+            report!(UpdateError::HookFailed(format!(
+                "plugin {} does not implement UpdateLifecyclePlugin",
+                assignment.plugin_type
+            )))
+        })?;
+
+        let (plugin_tx, mut plugin_rx) = mpsc::channel::<UpdateOutputLine>(100);
+        let drain_handle = tokio::spawn(async move { while plugin_rx.recv().await.is_some() {} });
+
+        let result = lifecycle.execute_pre_hook(ctx, &plugin_tx).await;
+        drop(plugin_tx);
+        let _ = drain_handle.await;
+
+        let pre_result = result.map_err(|e| {
+            report!(UpdateError::HookFailed(format!(
+                "pre-update hook plugin {} failed: {e}",
+                assignment.plugin_type
+            )))
+        })?;
+
+        if !pre_result.should_proceed {
+            let reason = pre_result.abort_reason.unwrap_or_else(|| {
+                format!(
+                    "pre-update hook plugin {} aborted the batch",
+                    assignment.plugin_type
+                )
+            });
+            return Err(report!(UpdateError::HookFailed(reason)));
         }
     }
     Ok(())
 }
 
-/// Execute a `HookCommand`, dispatching to shell or direct exec as appropriate.
+/// Run post-update lifecycle hook plugins for batch operations.
 ///
-/// Each hook is wrapped in [`HOOK_TIMEOUT`] — if a single hook exceeds the
-/// limit, its child process is killed (`kill_on_drop(true)`) and a
-/// `HookFailed` error is returned.
-#[tracing::instrument(skip_all, fields(hook = ?hook_cmd))]
-async fn run_hook_command(
-    hook_cmd: &HookCommand,
-    stream_type: OutputStreamType,
-    output_tx: &mpsc::Sender<UpdateOutputMessage>,
-) -> UpdateResult<(String, i32)> {
-    tracing::debug!(hook = ?hook_cmd, "running update hook");
+/// Errors are logged but non-fatal.
+pub(crate) async fn run_batch_post_hook_plugins(
+    plugins: &[PluginAssignment],
+    ctx: &UpdateLifecycleContext,
+    executor: Arc<dyn CommandExecutor>,
+) {
+    for assignment in plugins {
+        let plugin = match PluginRegistry::create_plugin(
+            assignment.plugin_type.clone(),
+            &assignment.config,
+            Arc::clone(&executor),
+        )
+        .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(
+                    plugin_type = %assignment.plugin_type,
+                    error = %e,
+                    "failed to create post-hook plugin for batch; skipping"
+                );
+                continue;
+            }
+        };
 
-    match tokio::time::timeout(
-        HOOK_TIMEOUT,
-        run_hook_command_inner(hook_cmd, stream_type, output_tx),
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(_) => {
-            let summary = hook_summary(hook_cmd);
+        let Some(lifecycle) = plugin.as_update_lifecycle() else {
+            continue;
+        };
+
+        let (plugin_tx, mut plugin_rx) = mpsc::channel::<UpdateOutputLine>(100);
+        let drain_handle = tokio::spawn(async move { while plugin_rx.recv().await.is_some() {} });
+
+        let result = lifecycle.execute_post_hook(ctx, &plugin_tx).await;
+        drop(plugin_tx);
+        let _ = drain_handle.await;
+
+        if let Err(e) = result {
             tracing::warn!(
-                hook = summary,
-                timeout_secs = HOOK_TIMEOUT.as_secs(),
-                "security_audit: hook command timed out"
+                plugin_type = %assignment.plugin_type,
+                error = %e,
+                "batch post-update hook plugin failed (non-fatal)"
             );
-            Err(report!(UpdateError::HookFailed(format!(
-                "hook timed out after {} seconds: {summary}",
-                HOOK_TIMEOUT.as_secs()
-            ))))
         }
     }
-}
-
-/// Inner implementation of hook execution (no timeout wrapper).
-async fn run_hook_command_inner(
-    hook_cmd: &HookCommand,
-    stream_type: OutputStreamType,
-    output_tx: &mpsc::Sender<UpdateOutputMessage>,
-) -> UpdateResult<(String, i32)> {
-    // Bridge plugin output -> agent output
-    let (plugin_tx, mut plugin_rx) = mpsc::channel::<UpdateOutputLine>(100);
-    let bridge_output_tx = output_tx.clone();
-    let bridge_stream_type = stream_type;
-    let bridge_handle = tokio::spawn(async move {
-        while let Some(line) = plugin_rx.recv().await {
-            let stream = match line.stream {
-                OutputStreamType::Stdout => bridge_stream_type,
-                _ => OutputStreamType::Stderr,
-            };
-            let _ = bridge_output_tx
-                .send(UpdateOutputMessage {
-                    output: line.text,
-                    stream,
-                })
-                .await;
-        }
-    });
-
-    let result = match hook_cmd {
-        HookCommand::Shell { command, shell } => {
-            uptrakit_command::run_command_with_shell(command, *shell, &plugin_tx).await
-        }
-        HookCommand::Exec {
-            program,
-            args,
-            working_dir,
-        } => {
-            uptrakit_command::run_command_exec(program, args, working_dir.as_deref(), &plugin_tx)
-                .await
-        }
-        _ => {
-            // Unknown HookCommand variant — warn and skip. This is the forward-compatibility
-            // contract for #[non_exhaustive] HookCommand: an older agent must never abort an
-            // update when a newer controller sends a hook type it does not recognise. Skipping
-            // allows the rest of the update pipeline to proceed normally.
-            // See docs/development/coding-standards.md § "#[non_exhaustive] on public enums".
-            tracing::warn!("unknown HookCommand variant; skipping hook for forward-compatibility");
-            drop(plugin_tx);
-            let _ = bridge_handle.await;
-            return Ok((String::new(), 0));
-        }
-    };
-
-    // Drop the sender so the bridge task finishes
-    drop(plugin_tx);
-    let _ = bridge_handle.await;
-
-    let result = result.map_err(|e| report!(UpdateError::HookFailed(e.to_string())));
-    if let Ok((_, exit_code)) = &result {
-        tracing::debug!(exit_code, "hook completed");
-    }
-    result
-}
-
-/// Execute a hook command for batch operations.
-///
-/// Unlike `run_hook_command` (which streams output into an update output
-/// channel), this variant is fire-and-forget: it runs the hook, checks the
-/// exit code, and returns an error if non-zero.
-///
-/// Each hook is wrapped in [`HOOK_TIMEOUT`].
-#[tracing::instrument(skip_all, fields(hook = ?hook_cmd))]
-pub(crate) async fn run_hook_for_batch(hook_cmd: &HookCommand) -> UpdateResult<()> {
-    match tokio::time::timeout(HOOK_TIMEOUT, run_hook_for_batch_inner(hook_cmd)).await {
-        Ok(result) => result,
-        Err(_) => {
-            let summary = hook_summary(hook_cmd);
-            tracing::warn!(
-                hook = summary,
-                timeout_secs = HOOK_TIMEOUT.as_secs(),
-                "security_audit: batch hook command timed out"
-            );
-            Err(report!(UpdateError::HookFailed(format!(
-                "hook timed out after {} seconds: {summary}",
-                HOOK_TIMEOUT.as_secs()
-            ))))
-        }
-    }
-}
-
-/// Inner implementation of batch hook execution (no timeout wrapper).
-async fn run_hook_for_batch_inner(hook_cmd: &HookCommand) -> UpdateResult<()> {
-    let (plugin_tx, mut plugin_rx) = mpsc::channel::<UpdateOutputLine>(100);
-    // Drain output in the background — we don't stream it for batch hooks.
-    let drain_handle = tokio::spawn(async move { while plugin_rx.recv().await.is_some() {} });
-
-    let result = match hook_cmd {
-        HookCommand::Shell { command, shell } => {
-            uptrakit_command::run_command_with_shell(command, *shell, &plugin_tx).await
-        }
-        HookCommand::Exec {
-            program,
-            args,
-            working_dir,
-        } => {
-            uptrakit_command::run_command_exec(program, args, working_dir.as_deref(), &plugin_tx)
-                .await
-        }
-        _ => {
-            // Unknown HookCommand variant — warn and skip (see run_hook_command_inner for the
-            // full rationale). The forward-compatibility contract for #[non_exhaustive] enums
-            // requires skipping, not aborting, on unknown variants.
-            tracing::warn!(
-                "unknown HookCommand variant; skipping batch hook for forward-compatibility"
-            );
-            drop(plugin_tx);
-            let _ = drain_handle.await;
-            return Ok(());
-        }
-    };
-
-    drop(plugin_tx);
-    let _ = drain_handle.await;
-
-    result
-        .map(|(_, _)| ())
-        .map_err(|e| report!(UpdateError::HookFailed(e.to_string())))
-}
-
-/// Produce a short summary of a hook command for audit logging.
-fn hook_summary(hook_cmd: &HookCommand) -> String {
-    match hook_cmd {
-        HookCommand::Shell { command, shell } => {
-            let truncated = if command.len() > 80 {
-                format!("{}…", &command[..80])
-            } else {
-                command.clone()
-            };
-            format!("{shell:?}: {truncated}")
-        }
-        HookCommand::Exec { program, args, .. } => {
-            let args_summary = if args.len() > 3 {
-                format!("{} (+{} more)", args[..3].join(" "), args.len() - 3)
-            } else {
-                args.join(" ")
-            };
-            format!("exec: {program} {args_summary}")
-        }
-        _ => "unknown".to_string(),
-    }
-}
-
-/// Produce a comma-separated summary of all hooks for audit logging.
-fn hook_summaries(hooks: &[HookCommand]) -> String {
-    hooks
-        .iter()
-        .map(hook_summary)
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 /// Send an output message.
@@ -1046,7 +1045,7 @@ pub async fn execute_update_interactive(
 mod tests {
     use super::*;
     use uptrakit_command::LocalCommandExecutor;
-    use uptrakit_internal_wire::{HookShell, PluginType};
+    use uptrakit_internal_wire::PluginType;
 
     fn test_payload() -> ExecuteUpdatePayload {
         ExecuteUpdatePayload {
@@ -1061,8 +1060,8 @@ mod tests {
                 package_identifier: "test-app".to_string(),
                 config: serde_json::json!({}),
             },
-            pre_update_hooks: vec![],
-            post_update_hooks: vec![],
+            pre_update_hook_plugins: vec![],
+            post_update_hook_plugins: vec![],
             release_info: None,
             timeout: std::time::Duration::from_secs(60),
             interactive: false,
@@ -1106,22 +1105,21 @@ mod tests {
         assert_eq!(buf, "abc");
     }
 
-    // ── Hook execution tests ────────────────────────────────────────────────
+    // ── Lifecycle hook plugin tests ────────────────────────────────────────
 
     #[tokio::test]
-    async fn test_execute_update_with_pre_hook() {
+    async fn test_execute_update_with_shell_pre_hook_plugin() {
         let (tx, mut rx) = mpsc::channel(100);
 
         let mut payload = test_payload();
-        payload.pre_update_hooks = vec![HookCommand::Shell {
-            command: "echo 'pre-hook executed'".to_string(),
-            shell: HookShell::Bash,
+        payload.pre_update_hook_plugins = vec![uptrakit_internal_wire::PluginAssignment {
+            plugin_type: PluginType::HookShell,
+            package_identifier: String::new(),
+            config: serde_json::json!({"pre_command": "echo 'pre-hook executed'"}),
         }];
         payload.release_info = None;
-        payload.execute_update_plugin.config = serde_json::json!({});
 
         let result = execute_update(payload, test_executor(), tx).await;
-
         assert_eq!(result.result.update_history_id, uuid::Uuid::nil());
 
         rx.close();
@@ -1135,209 +1133,55 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_execute_update_pre_hook_failure() {
+    async fn test_execute_update_pre_hook_plugin_failure() {
         let (tx, mut rx) = mpsc::channel(100);
 
         let mut payload = test_payload();
-        payload.pre_update_hooks = vec![HookCommand::Shell {
-            command: "exit 1".to_string(),
-            shell: HookShell::Bash,
+        payload.pre_update_hook_plugins = vec![uptrakit_internal_wire::PluginAssignment {
+            plugin_type: PluginType::HookShell,
+            package_identifier: String::new(),
+            config: serde_json::json!({"pre_command": "exit 1"}),
         }];
 
         let result = execute_update(payload, test_executor(), tx).await;
 
         assert_eq!(result.result.status, UpdateFinalStatus::Failed);
         assert!(result.result.error.is_some(), "Expected error but got None");
-        let error_msg = result.result.error.as_ref().unwrap();
-        assert!(
-            error_msg.contains("Pre-update hook failed"),
-            "Expected error to contain 'Pre-update hook failed', got: {error_msg}"
-        );
 
         rx.close();
         while rx.recv().await.is_some() {}
     }
 
     #[tokio::test]
-    async fn test_execute_update_with_sh_shell() {
-        let (tx, mut rx) = mpsc::channel(100);
-
-        let mut payload = test_payload();
-        payload.pre_update_hooks = vec![HookCommand::Shell {
-            command: "echo 'using sh shell'".to_string(),
-            shell: HookShell::Sh,
-        }];
-
-        let result = execute_update(payload, test_executor(), tx).await;
-
-        assert_eq!(result.result.update_history_id, uuid::Uuid::nil());
-
-        rx.close();
-        let mut found_output = false;
-        while let Some(msg) = rx.recv().await {
-            if msg.output.contains("using sh shell") {
-                found_output = true;
-            }
-        }
-        assert!(found_output);
-    }
-
-    // ── Per-hook timeout tests ────────────────────────────────────────────
-
-    #[tokio::test(start_paused = true)]
-    async fn run_hook_command_timeout() {
+    async fn test_run_pre_hook_plugins_empty_is_noop() {
         let (tx, _rx) = mpsc::channel(100);
-        let hook = HookCommand::Shell {
-            command: "sleep 600".to_string(),
-            shell: HookShell::Bash,
-        };
-        let result = run_hook_command(&hook, OutputStreamType::PreHook, &tx).await;
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(
-            err_msg.contains("timed out"),
-            "expected timeout error, got: {err_msg}"
-        );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn run_hook_for_batch_timeout() {
-        let hook = HookCommand::Shell {
-            command: "sleep 600".to_string(),
-            shell: HookShell::Bash,
-        };
-        let result = run_hook_for_batch(&hook).await;
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(
-            err_msg.contains("timed out"),
-            "expected timeout error, got: {err_msg}"
-        );
-    }
-
-    #[tokio::test]
-    async fn run_hook_command_completes_within_timeout() {
-        let (tx, _rx) = mpsc::channel(100);
-        let hook = HookCommand::Shell {
-            command: "echo hello".to_string(),
-            shell: HookShell::Bash,
-        };
-        let result = run_hook_command(&hook, OutputStreamType::PreHook, &tx).await;
+        let ctx = UpdateLifecycleContext::for_pre_hook("pkg", "1.0", None, None);
+        let mut output = String::new();
+        let result = run_pre_hook_plugins(&[], &ctx, test_executor(), &tx, &mut output).await;
         assert!(result.is_ok());
-        let (output, exit_code) = result.unwrap();
-        assert_eq!(exit_code, 0);
-        assert!(output.contains("hello"));
     }
 
-    // ── Forward-compatibility: known variants must succeed ───────────────
-    //
-    // The `#[non_exhaustive]` contract on `HookCommand` requires that the
-    // wildcard arm in `run_hook_command_inner` / `run_hook_for_batch_inner`
-    // warns and skips rather than returning an error.  The unknown-variant
-    // path cannot be exercised directly within this crate (adding a new
-    // variant requires a recompile), but these tests confirm that every
-    // *known* variant is dispatched without error, and that the fallthrough
-    // `_ =>` arm is present and correct by code inspection.
-
     #[tokio::test]
-    async fn run_hook_command_shell_returns_ok() {
+    async fn test_run_post_hook_plugins_empty_is_noop() {
         let (tx, _rx) = mpsc::channel(100);
-        let hook = HookCommand::Shell {
-            command: "true".to_string(),
-            shell: HookShell::Sh,
-        };
-        assert!(
-            run_hook_command(&hook, OutputStreamType::PreHook, &tx)
-                .await
-                .is_ok()
-        );
+        let ctx = UpdateLifecycleContext::for_post_hook("pkg", "1.0", None, None, true);
+        let mut output = String::new();
+        run_post_hook_plugins(&[], &ctx, test_executor(), &tx, &mut output).await;
+        // No panic or error — noop
     }
 
     #[tokio::test]
-    async fn run_hook_command_exec_returns_ok() {
-        let (tx, _rx) = mpsc::channel(100);
-        let hook = HookCommand::Exec {
-            program: "true".to_string(),
-            args: vec![],
-            working_dir: None,
-        };
-        assert!(
-            run_hook_command(&hook, OutputStreamType::PreHook, &tx)
-                .await
-                .is_ok()
-        );
+    async fn test_run_batch_pre_hook_plugins_empty_is_noop() {
+        let ctx = UpdateLifecycleContext::for_pre_hook("", "", None, None);
+        let result = run_batch_pre_hook_plugins(&[], &ctx, test_executor()).await;
+        assert!(result.is_ok());
     }
 
     #[tokio::test]
-    async fn run_hook_for_batch_shell_returns_ok() {
-        let hook = HookCommand::Shell {
-            command: "true".to_string(),
-            shell: HookShell::Sh,
-        };
-        assert!(run_hook_for_batch(&hook).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn run_hook_for_batch_exec_returns_ok() {
-        let hook = HookCommand::Exec {
-            program: "true".to_string(),
-            args: vec![],
-            working_dir: None,
-        };
-        assert!(run_hook_for_batch(&hook).await.is_ok());
-    }
-
-    // ── Hook summary tests ───────────────────────────────────────────────
-
-    #[test]
-    fn hook_summary_shell() {
-        let hook = HookCommand::Shell {
-            command: "echo test".to_string(),
-            shell: HookShell::Bash,
-        };
-        let summary = hook_summary(&hook);
-        assert!(summary.contains("echo test"));
-    }
-
-    #[test]
-    fn hook_summary_long_command_truncated() {
-        let hook = HookCommand::Shell {
-            command: "a".repeat(200),
-            shell: HookShell::Bash,
-        };
-        let summary = hook_summary(&hook);
-        assert!(summary.len() < 200);
-        assert!(summary.contains('…'));
-    }
-
-    #[test]
-    fn hook_summary_exec() {
-        let hook = HookCommand::Exec {
-            program: "/usr/bin/test".to_string(),
-            args: vec!["--flag".to_string(), "value".to_string()],
-            working_dir: None,
-        };
-        let summary = hook_summary(&hook);
-        assert!(summary.contains("/usr/bin/test"));
-        assert!(summary.contains("--flag"));
-    }
-
-    #[test]
-    fn hook_summaries_multiple() {
-        let hooks = vec![
-            HookCommand::Shell {
-                command: "echo 1".to_string(),
-                shell: HookShell::Bash,
-            },
-            HookCommand::Shell {
-                command: "echo 2".to_string(),
-                shell: HookShell::Sh,
-            },
-        ];
-        let summaries = hook_summaries(&hooks);
-        assert!(summaries.contains("echo 1"));
-        assert!(summaries.contains("echo 2"));
-        assert!(summaries.contains(", "));
+    async fn test_run_batch_post_hook_plugins_empty_is_noop() {
+        let ctx = UpdateLifecycleContext::for_post_hook("", "", None, None, true);
+        run_batch_post_hook_plugins(&[], &ctx, test_executor()).await;
+        // No panic or error — noop
     }
 
     // ── Attestation gate tests ───────────────────────────────────────────
