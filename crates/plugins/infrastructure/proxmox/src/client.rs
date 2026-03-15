@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use rootcause::prelude::*;
 use std::sync::Arc;
-use uptrakit_shared_types::ssrf::SsrfSafeResolver;
+use uptrakit_shared_types::ssrf::{
+    SsrfSafeResolver, danger_accept_any_cert_client_config, webpki_client_config,
+};
 
 use crate::api_types::*;
 use crate::config::ProxmoxConfig;
@@ -35,11 +37,19 @@ impl ProxmoxClient {
 
         let auth_header = format!("PVEAPIToken={}", config.api_token.expose_secret());
 
+        // `use_preconfigured_tls` supersedes `danger_accept_invalid_certs` in
+        // reqwest 0.13 (the latter is silently ignored when the former is set).
+        // Select the appropriate config based on the user's `verify_tls` setting.
+        let tls_config = if config.verify_tls {
+            webpki_client_config()
+        } else {
+            danger_accept_any_cert_client_config()
+        };
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(60))
             .dns_resolver(Arc::new(SsrfSafeResolver::permissive()))
-            .danger_accept_invalid_certs(!config.verify_tls)
+            .use_preconfigured_tls(tls_config)
             .build()
             .map_err(|e| {
                 report!(ProxmoxError::Request(format!(

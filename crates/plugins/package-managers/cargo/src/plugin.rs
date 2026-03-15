@@ -12,7 +12,7 @@ use uptrakit_plugin_infrastructure_core::{
     DiscoveryTarget, HostCompatibility, OutputStreamType, PluginCapability, PluginError,
     PluginRole, PluginType, ReleaseInfo, Result, UpdateOutputLine, UpstreamRelease, Version,
 };
-use uptrakit_shared_types::ssrf::SsrfSafeResolver;
+use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
 use crate::config::CargoConfig;
 use crate::error::CargoError;
@@ -264,6 +264,7 @@ impl CargoPlugin {
                 "uptrakit-plugin-package-manager-cargo/",
                 env!("CARGO_PKG_VERSION")
             ))
+            .use_preconfigured_tls(webpki_client_config())
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(60))
             .dns_resolver(ssrf_resolver)

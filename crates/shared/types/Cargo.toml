@@ -10,7 +10,7 @@ version.workspace = true
 default = []
 sea-orm = ["dep:sea-orm"]
 openapi = ["dep:utoipa"]
-http-ssrf = ["dep:reqwest", "dep:tokio"]
+http-ssrf = ["dep:reqwest", "dep:tokio", "dep:rustls", "dep:webpki-roots"]
 
 [dependencies]
 serde = { workspace = true }
@@ -21,7 +21,9 @@ sea-orm = { workspace = true, optional = true }
 utoipa = { workspace = true, optional = true }
 zeroize = { workspace = true }
 reqwest = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["net"], optional = true }
+webpki-roots = { workspace = true, optional = true }
 
 [dev-dependencies]
 husky-rs = { workspace = true }

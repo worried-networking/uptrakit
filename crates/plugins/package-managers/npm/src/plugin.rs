@@ -17,7 +17,7 @@ use uptrakit_plugin_infrastructure_core::{
     SudoCommandEntry, UpdateExecutorPlugin, UpdateOutputLine, UpstreamRelease, Version,
     VersionDetectorPlugin,
 };
-use uptrakit_shared_types::ssrf::SsrfSafeResolver;
+use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
 use crate::config::NpmConfig;
 
@@ -200,6 +200,7 @@ impl NpmPlugin {
                 env!("CARGO_PKG_VERSION")
             ))
             .redirect(reqwest::redirect::Policy::none())
+            .use_preconfigured_tls(webpki_client_config())
             .dns_resolver(Arc::new(SsrfSafeResolver::new()))
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(60))

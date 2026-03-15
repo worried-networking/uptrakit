@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_shared_types::ssrf::SsrfSafeResolver;
+use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
 use crate::api_types::{OciManifestIndex, OciPlatform};
 use crate::auth::RegistryAuth;
@@ -103,6 +103,7 @@ impl RegistryClient {
                 env!("CARGO_PKG_VERSION")
             ))
             .redirect(reqwest::redirect::Policy::none())
+            .use_preconfigured_tls(webpki_client_config())
             .dns_resolver(Arc::new(SsrfSafeResolver::new()))
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(60))
@@ -119,6 +120,7 @@ impl RegistryClient {
                 env!("CARGO_PKG_VERSION")
             ))
             .redirect(reqwest::redirect::Policy::limited(5))
+            .use_preconfigured_tls(webpki_client_config())
             .dns_resolver(Arc::new(SsrfSafeResolver::new()))
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(30))

@@ -13,7 +13,7 @@ use hmac::Mac as _;
 use rootcause::prelude::*;
 use sha2::Sha256;
 use uptrakit_shared_types::network::is_private_host;
-use uptrakit_shared_types::ssrf::SsrfSafeResolver;
+use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
 use uptrakit_extension_framework::{
     ActionDef, ActionUi, ApiSubmitDef, ExtensionManifest, ExtensionPlacement, ExtensionUi,
@@ -84,6 +84,7 @@ impl WebhookPlugin {
         };
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
+            .use_preconfigured_tls(webpki_client_config())
             .dns_resolver(Arc::new(resolver))
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(60))

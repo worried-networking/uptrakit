@@ -5,7 +5,7 @@ use regex::Regex;
 use rootcause::prelude::*;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use uptrakit_shared_types::ssrf::SsrfSafeResolver;
+use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
 use uptrakit_plugin_infrastructure_core::{
     PluginCapability, PluginError, ReleaseAsset, UpstreamRelease, Version,
@@ -115,6 +115,7 @@ impl ForgejoPlugin {
             ))
             .default_headers(headers)
             .redirect(reqwest::redirect::Policy::none())
+            .use_preconfigured_tls(webpki_client_config())
             .dns_resolver(Arc::new(SsrfSafeResolver::new()))
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(60))

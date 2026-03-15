@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_shared_types::ssrf::SsrfSafeResolver;
+use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
 use uptrakit_extension_framework::{
     ActionDef, ActionUi, ApiSubmitDef, ExtensionManifest, ExtensionPlacement, ExtensionUi,
@@ -36,6 +36,7 @@ impl TelegramPlugin {
     /// cannot be constructed.
     pub fn new() -> Result<Self> {
         let http = reqwest::Client::builder()
+            .use_preconfigured_tls(webpki_client_config())
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(60))
             .dns_resolver(Arc::new(SsrfSafeResolver::new()))

@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::io::AsyncWriteExt;
-use uptrakit_shared_types::ssrf::SsrfSafeResolver;
+use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_plugin_infrastructure_core::mpsc;
@@ -127,6 +127,7 @@ impl GitHubPlugin {
             ))
             .default_headers(headers)
             .redirect(reqwest::redirect::Policy::none())
+            .use_preconfigured_tls(webpki_client_config())
             .dns_resolver(Arc::new(SsrfSafeResolver::new()))
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(60))
@@ -696,6 +697,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for GitHubPlugin 
                     env!("CARGO_PKG_VERSION")
                 ))
                 .default_headers(download_headers)
+                .use_preconfigured_tls(webpki_client_config())
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .timeout(std::time::Duration::from_secs(600))
                 .dns_resolver(Arc::new(SsrfSafeResolver::new()))
