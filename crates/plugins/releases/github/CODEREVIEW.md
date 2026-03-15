@@ -153,14 +153,12 @@ and maintainability.
 
 #### Issues
 
-**[MEDIUM]** `src/plugin.rs:639-647` -- The download client (built at `execute_update` time
+~~**[MEDIUM]** `src/plugin.rs:639-647` -- The download client (built at `execute_update` time
 for asset downloads) does not set `.dns_resolver(Arc::new(SsrfSafeResolver::new()))`. The
 download URL comes from the GitHub API response (`asset.download_url`), which is
 attacker-controllable for repositories with write access. A malicious release could point the
 download URL at a private network host. The API client (line 118) correctly applies the SSRF
-resolver, but the download client omits it.
-Recommendation: add `.dns_resolver(Arc::new(SsrfSafeResolver::new()))` to the download client
-builder at line 639.
+resolver, but the download client omits it.~~ *(Fixed: `.dns_resolver(Arc::new(SsrfSafeResolver::new()))` added to the download client builder.)*
 
 ### Dimension: Idiomatic Rust
 

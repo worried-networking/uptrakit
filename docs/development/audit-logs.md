@@ -24,7 +24,7 @@ HTTP Request
      │
      ▼ dispatcher.dispatch(AuditEntry)
 ┌────────────────────────┐
-│ AuditLogDispatcher     │  mpsc::UnboundedSender (fire-and-forget)
+│ AuditLogDispatcher     │  mpsc::Sender (bounded, 4096 — fire-and-forget)
 │ (background loop)      │
 └──────┬─────────────────┘
        ▼
@@ -139,11 +139,18 @@ Implementations:
 
 ### `AuditLogDispatcher`
 
-Fire-and-forget dispatcher using `mpsc::UnboundedSender<AuditEntry>`. The background loop reads
-entries and calls `backend.write()`. Write failures are logged at `warn` level.
+Fire-and-forget dispatcher using a bounded `mpsc::Sender<AuditEntry>` (capacity: 4096). The
+background loop reads entries and calls `backend.write()`. Write failures are logged at `warn`
+level but never propagate to callers.
 
-`dispatch()` never blocks and never returns an error. If the channel is closed, the entry is
-silently dropped with a `tracing::warn!`.
+`dispatch()` never blocks and never returns an error:
+
+- If the channel is **full** (backend lagging under high load), the entry is **dropped** and a
+  `tracing::warn!` is emitted. This matches the notification dispatcher overflow policy.
+- If the channel is **closed** (dispatcher shut down), the entry is silently dropped.
+
+The 4096-entry bound prevents unbounded memory growth during DB backend slowdowns or cascading
+failures. Under normal operation the channel is near-empty.
 
 ## CLI configuration
 

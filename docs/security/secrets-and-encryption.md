@@ -42,6 +42,40 @@ HTTP API fields using `SecretString` (in `uptrakit-web-api-types`): `RegisterReq
 `CreateApiTokenResponse.token`, `EnrollmentTokenResponse.token`,
 `MqttEnrollmentTokenResponse.token`, `DeviceAuthPollResponse.token`.
 
+### Credential-holding structs and `Debug`
+
+Any internal struct that holds a secret value **must** use `SecretString` (not `String`) for that
+field. This ensures the masking guarantee is enforced at the type level rather than relying on a
+hand-written `Debug` impl that could accidentally be removed or forgotten.
+
+**Required pattern:**
+
+```rust
+// ✓ Correct — Debug is auto-derived; SecretString's Debug impl emits "***"
+#[derive(Debug)]
+struct SmtpSettings {
+    host: String,
+    password: Option<SecretString>,
+}
+
+// ✗ Wrong — Debug leaks the password to tracing logs and panic messages
+#[derive(Debug)]
+struct SmtpSettings {
+    host: String,
+    password: Option<String>,
+}
+```
+
+When reading the password back (e.g., passing it to a mail client), call `.expose_secret()`:
+
+```rust
+if let Some(pw) = &config.password {
+    client.set_password(pw.expose_secret());
+}
+```
+
+See also: [Coding Standards — Credential-Holding Types and Debug](../development/coding-standards.md#credential-holding-types-and-debug).
+
 ### Entity field usage
 
 The `User` entity model (`crates/shared/db/src/entity/user.rs`) uses `SecretString` and `MaskedEmail`

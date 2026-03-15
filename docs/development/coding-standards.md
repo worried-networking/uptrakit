@@ -259,6 +259,7 @@ deserialization error.
 Apply this pattern to every `#[non_exhaustive]` enum that:
 
 - is transmitted over a network protocol (`ServiceMessage`, `ControllerMessage`, `EnrollmentStatus`, `ErrorCode`, etc.),
+- is returned as a JSON string in a REST API response (`NotificationEventType`, `NotificationDeliveryStatus`, etc.),
 - or is persisted in a column and read back by potentially older software versions.
 
 ### Required implementation
@@ -422,6 +423,44 @@ These enums are **internal** (not wire-protocol types) and therefore:
 - do **not** need `#[non_exhaustive]` (they are exhaustively matched in the same crate),
 - do **not** need `Other(String)` (they are never deserialised from untrusted input),
 - **do** implement `Copy` (no heap allocation).
+
+## Credential-Holding Types and Debug
+
+Any internal struct that contains a credential (password, token, secret key, etc.) **must** store
+it as `SecretString` (not `String`). This enforces the masking guarantee at the type level:
+
+- `SecretString`'s `Debug` impl emits `"***"` automatically — no hand-written `Debug` needed.
+- The value is zeroed from memory on drop (`ZeroizeOnDrop`).
+- `.expose_secret()` is the only way to access the inner value, making every access site explicit
+  and auditable.
+
+```rust
+// ✓ Correct — Debug is auto-derived; password never appears in logs
+#[derive(Debug)]
+struct SmtpSettings {
+    host: String,
+    password: Option<SecretString>,
+}
+
+// ✗ Wrong — Debug prints the password; requires a hand-written Debug impl that can drift
+#[derive(Debug)]
+struct SmtpSettings {
+    host: String,
+    password: Option<String>,
+}
+```
+
+When passing the secret to an external API, call `.expose_secret()`:
+
+```rust
+if let Some(pw) = &config.password {
+    mailer.set_password(pw.expose_secret());
+}
+```
+
+`SecretString` is re-exported from `uptrakit_shared_types`. It requires no feature flags.
+
+See also: [Secrets Handling and Encryption at Rest](../security/secrets-and-encryption.md#credential-holding-structs-and-debug).
 
 ## Feature Flags
 

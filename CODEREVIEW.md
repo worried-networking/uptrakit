@@ -177,6 +177,21 @@ shared `run_remote()` method. `DEFAULT_POLL_INTERVAL_SECS` in `scheduler-engine`
 proper `Duration` constant. `STALE_CLAIM_SECONDS` now has a doc comment explaining its
 relationship to `TASK_EXECUTION_TIMEOUT`. `uptrakit-backoff` and `uptrakit-web-api-types`
 now carry `publish = false`.
+The OIDC HTTP client (`oidc_http_client.rs`), the GitHub release download client
+(`releases/github/src/plugin.rs`), and the Telegram notification plugin (`notifications/telegram/src/lib.rs`)
+now use `SsrfSafeResolver::new()` on their `reqwest::Client` builders, closing the DNS rebinding attack
+surface on admin-controlled and API-response-derived URLs. The `SmtpSettingsSnapshot.password` field has been
+changed from `Option<String>` to `Option<SecretString>`, so SMTP credentials are automatically redacted in
+`Debug` output and zeroed on drop. `NotificationEventType` and `NotificationDeliveryStatus` in
+`uptrakit-web-api-types` now carry `Other(String)` catch-all variants with infallible custom
+`Serialize`/`Deserialize`, matching the canonical `EnrollmentStatus`/`ErrorCode` pattern — older clients
+receiving unknown values from a newer server no longer error. The audit log dispatcher
+(`crates/shared/audit-log/src/dispatcher.rs`) now uses a bounded `mpsc::channel(4096)` instead of
+`mpsc::unbounded_channel()`; `dispatch()` uses `try_send` and warns-and-drops on overflow, matching the
+notification dispatcher HA policy. The extension framework wire enums `ExtensionTargeting`, `PanelPosition`,
+`FieldType`, and `RowCondition` in `uptrakit-extension-framework` now carry `Other(String)` catch-all
+variants with custom `Serialize`/`Deserialize`; `PanelPosition` uses a map-visitor implementation to
+maintain the `{"type": "..."}` adjacently-tagged format.
 
 ## Per-Crate Review Files
 
@@ -281,21 +296,14 @@ source dimension [D1..D14].
 
 #### MEDIUM
 
-- **[D2 Security]** GitHub download client missing `SsrfSafeResolver` (`releases/github/src/plugin.rs:693`).
-- **[D2 Security]** OIDC HTTP client missing `SsrfSafeResolver` (`web-api/src/oidc_http_client.rs:24`).
-- **[D2 Security]** Telegram plugin HTTP client missing `SsrfSafeResolver` (`notifications/telegram/src/lib.rs:33`).
-- **[D2 Security]** Email plugin `SmtpSettingsSnapshot` has `#[derive(Debug)]` leaking SMTP password in logs.
 - **[D3 Quality]** 237 duplicated `error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")` calls across 35 route files.
 - **[D3 Quality]** Error logging lacks structured context in 240+ route handler locations.
 - **[D3 Quality]** 4 silent `let _ = sync_oidc_roles(...)` in `oidc_auth.rs` swallow DB errors.
-- **[D5 HA]** Audit log dispatcher uses `mpsc::unbounded_channel()` — unbounded memory growth risk.
 - **[D5 HA]** Orphaned in-progress update recovery missing after agent crash.
 - **[D6 Database]** Batch operations (`batch_deactivate_hosts`, `batch_approve_services`, `batch_reject_services`) lack transactions.
 - **[D6 Database]** `notification_rules.host_id` and `notification_rules.software_item_id` FK columns lack indexes (cascade delete perf on PostgreSQL).
 - **[D7 Standards]** 11 `#[allow(clippy::type_complexity)]` in `web-api-queries` without comments — need `BatchResult` type alias.
 - **[D7 Standards]** 7 `#[allow(clippy::too_many_arguments)]` without required comments.
-- **[D8 Extensibility]** `NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus` missing `Other(String)` catch-all.
-- **[D8 Extensibility]** Extension framework enums (`ExtensionTargeting`, `PanelPosition`, `FieldType`, etc.) lack catch-all for wire compatibility.
 - **[D9 Consistency]** 3 query modules (`enrollment_tokens`, `host_tags`, `hosts`) return raw `DbErr` instead of structured `rootcause::Report` errors.
 - **[D9 Consistency]** 12 list endpoints return flat `Vec<T>` instead of `PaginatedResponse<T>` (DB-sourced: users, api_tokens, oidc_providers, mqtt_settings, discovery_allowlist, plugin_type_settings).
 - **[D9 Consistency]** Mixed `get_*`/`find_*`/`load_*` naming for query functions — undocumented convention.

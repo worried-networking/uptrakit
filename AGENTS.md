@@ -1448,7 +1448,8 @@ See [Notifications Development](docs/development/notifications.md) for full deta
 ## Audit log subsystem
 
 The controller records all authenticated HTTP requests through a pluggable audit log subsystem. It follows the same
-fire-and-forget `mpsc::UnboundedSender` dispatcher pattern as notifications.
+fire-and-forget bounded dispatcher pattern as notifications. The channel capacity is 4096 entries (matching the
+notification dispatcher); `dispatch()` uses `try_send` and warns-and-drops on overflow rather than blocking.
 
 ### Key crates and modules
 
