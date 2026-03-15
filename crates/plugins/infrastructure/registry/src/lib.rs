@@ -247,7 +247,62 @@ impl PluginOps for PluginRegistry {
                 + 'a,
         >,
     > {
-        PluginRegistry::handle_extension_action(ctx, extension_id, action_id, params)
+        Box::pin(async move {
+            // First try the macro-generated dispatch (proxmox, etc.)
+            let result = PluginRegistry::handle_extension_action(
+                ctx,
+                extension_id,
+                action_id,
+                params.clone(),
+            )
+            .await;
+            if result.is_ok()
+                || !result
+                    .as_ref()
+                    .is_err_and(|e| e.starts_with("no plugin handles extension"))
+            {
+                return result;
+            }
+
+            // Then check notification plugins by extension prefix
+            #[cfg(feature = "notifications")]
+            {
+                #[cfg(feature = "notifications-webhook")]
+                if extension_id.starts_with("notifications.webhook") {
+                    return uptrakit_notification_plugin_webhook::extensions::handle_action(
+                        ctx,
+                        extension_id,
+                        action_id,
+                        params,
+                    )
+                    .await;
+                }
+
+                #[cfg(feature = "notifications-telegram")]
+                if extension_id.starts_with("notifications.telegram") {
+                    return uptrakit_notification_plugin_telegram::extensions::handle_action(
+                        ctx,
+                        extension_id,
+                        action_id,
+                        params,
+                    )
+                    .await;
+                }
+
+                #[cfg(feature = "notifications-email")]
+                if extension_id.starts_with("notifications.email") {
+                    return uptrakit_notification_plugin_email::extensions::handle_action(
+                        ctx,
+                        extension_id,
+                        action_id,
+                        params,
+                    )
+                    .await;
+                }
+            }
+
+            Err(format!("no plugin handles extension '{extension_id}'"))
+        })
     }
 
     fn notification_transport(

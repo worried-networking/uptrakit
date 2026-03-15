@@ -5,6 +5,8 @@
 //! and utility functions.
 
 mod error;
+#[cfg(feature = "extensions")]
+pub mod list_channels;
 mod traits;
 
 pub use error::{NotificationPluginError, Result};

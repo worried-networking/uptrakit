@@ -8,11 +8,21 @@ version.workspace = true
 publish = false
 description = "Core types for notification plugins"
 
+[features]
+default = []
+extensions = ["dep:sea-orm", "dep:uptrakit-shared-db", "dep:uuid", "dep:tracing"]
+
 [dependencies]
 rootcause = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+# Optional: only needed by plugin extension handlers (list_channels helper)
+sea-orm = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+uptrakit-shared-db = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
 

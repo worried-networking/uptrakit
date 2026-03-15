@@ -4,6 +4,8 @@
 //! with HMAC-SHA256 and includes the signature in the `X-Uptrakit-Signature`
 //! header.
 
+pub mod extensions;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;

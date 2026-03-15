@@ -3,6 +3,8 @@
 //! Sends messages to a configured Telegram chat via the Bot API. Renders
 //! action buttons as inline keyboard buttons.
 
+pub mod extensions;
+
 use async_trait::async_trait;
 use rootcause::prelude::*;
 

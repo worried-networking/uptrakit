@@ -4,6 +4,8 @@
 //! contains only the recipient addresses; SMTP server credentials and sender
 //! identity are supplied at delivery time from the merged global SMTP settings.
 
+pub mod extensions;
+
 use std::time::Duration;
 
 use async_trait::async_trait;

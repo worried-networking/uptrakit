@@ -6778,9 +6778,13 @@ name = "uptrakit-notification-plugin-core"
 version = "0.0.1"
 dependencies = [
  "rootcause",
+ "sea-orm",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tracing",
+ "uptrakit-shared-db",
+ "uuid",
 ]
 
 [[package]]
@@ -6791,13 +6795,18 @@ dependencies = [
  "mail-builder",
  "mail-send",
  "rootcause",
+ "sea-orm",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
+ "uptrakit-crypto",
  "uptrakit-extension-framework",
  "uptrakit-notification-plugin-core",
  "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-db",
+ "uptrakit-web-api-auth",
+ "uuid",
 ]
 
 [[package]]
@@ -6807,12 +6816,16 @@ dependencies = [
  "async-trait",
  "reqwest",
  "rootcause",
+ "sea-orm",
  "serde_json",
  "tokio",
  "tracing",
  "uptrakit-extension-framework",
  "uptrakit-notification-plugin-core",
  "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-db",
+ "uptrakit-web-api-auth",
+ "uuid",
 ]
 
 [[package]]
@@ -6830,8 +6843,10 @@ dependencies = [
  "uptrakit-extension-framework",
  "uptrakit-notification-plugin-core",
  "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-db",
  "uptrakit-shared-types",
  "url",
+ "uuid",
 ]
 
 [[package]]

@@ -15,8 +15,12 @@ rootcause = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 uptrakit-extension-framework = { workspace = true }
-uptrakit-notification-plugin-core = { workspace = true }
-uptrakit-plugin-infrastructure-core = { workspace = true }
+sea-orm = { workspace = true }
+uptrakit-notification-plugin-core = { workspace = true, features = ["extensions"] }
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
+uptrakit-shared-db = { workspace = true }
+uptrakit-web-api-auth = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

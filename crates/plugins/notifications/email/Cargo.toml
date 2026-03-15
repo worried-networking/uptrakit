@@ -13,12 +13,17 @@ async-trait = { workspace = true }
 mail-builder = { workspace = true }
 mail-send = { workspace = true, features = ["builder", "aws_lc_rs"] }
 rootcause = { workspace = true }
+sea-orm = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+uptrakit-crypto = { workspace = true }
 uptrakit-extension-framework = { workspace = true }
-uptrakit-notification-plugin-core = { workspace = true }
-uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-notification-plugin-core = { workspace = true, features = ["extensions"] }
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
+uptrakit-shared-db = { workspace = true }
+uptrakit-web-api-auth = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
