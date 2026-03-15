@@ -249,11 +249,15 @@ async fn send_email(cfg: &EmailConfig, message: MessageBuilder<'_>) -> Result<()
     let mut builder =
         SmtpClientBuilder::new(cfg.smtp_host.as_str(), cfg.smtp_port).timeout(SMTP_CONNECT_TIMEOUT);
 
-    if let (Some(user), Some(pass)) = (&cfg.smtp_username, &cfg.smtp_password)
+    let has_credentials = if let (Some(user), Some(_pass)) =
+        (&cfg.smtp_username, &cfg.smtp_password)
         && !user.is_empty()
     {
-        builder = builder.credentials((user.as_str(), pass.as_str()));
-    }
+        builder = builder.credentials((user.as_str(), _pass.as_str()));
+        true
+    } else {
+        false
+    };
 
     // Derive EHLO hostname: explicit config override → domain from from_address.
     // Never use gethostname() — short hostnames (e.g. Docker container names) are not
@@ -265,7 +269,16 @@ async fn send_email(cfg: &EmailConfig, message: MessageBuilder<'_>) -> Result<()
         .or_else(|| cfg.from_address.split_once('@').map(|(_, domain)| domain))
         .unwrap_or("localhost")
         .to_string();
-    builder = builder.helo_host(ehlo_host);
+    builder = builder.helo_host(ehlo_host.clone());
+
+    tracing::debug!(
+        smtp_host = %cfg.smtp_host,
+        smtp_port = cfg.smtp_port,
+        tls_mode = %cfg.tls_mode,
+        ehlo_host = %ehlo_host,
+        has_credentials,
+        "connecting to SMTP server"
+    );
 
     match cfg.tls_mode.as_str() {
         "tls" => {
@@ -275,6 +288,7 @@ async fn send_email(cfg: &EmailConfig, message: MessageBuilder<'_>) -> Result<()
                     "SMTP TLS connection failed: {e}"
                 )))
             })?;
+            tracing::trace!("SMTP TLS connection established, sending message");
             client.send(message).await.map_err(|e| {
                 report!(NotificationPluginError::DeliveryFailed(format!(
                     "SMTP send failed: {e}"
@@ -287,6 +301,7 @@ async fn send_email(cfg: &EmailConfig, message: MessageBuilder<'_>) -> Result<()
                     "SMTP plaintext connection failed: {e}"
                 )))
             })?;
+            tracing::trace!("SMTP plaintext connection established, sending message");
             client.send(message).await.map_err(|e| {
                 report!(NotificationPluginError::DeliveryFailed(format!(
                     "SMTP send failed: {e}"
@@ -301,6 +316,7 @@ async fn send_email(cfg: &EmailConfig, message: MessageBuilder<'_>) -> Result<()
                     "SMTP STARTTLS connection failed: {e}"
                 )))
             })?;
+            tracing::trace!("SMTP STARTTLS connection established, sending message");
             client.send(message).await.map_err(|e| {
                 report!(NotificationPluginError::DeliveryFailed(format!(
                     "SMTP send failed: {e}"
@@ -589,13 +605,6 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransportPlugin for EmailP
             ));
         }
 
-        // Build From header
-        let from_header = if let Some(ref name) = cfg.from_name {
-            format!("{name} <{}>", cfg.from_address)
-        } else {
-            cfg.from_address.clone()
-        };
-
         // Build the HTML body — use existing HTML if provided, otherwise escape plain text.
         let html_body = if let Some(ref html) = message.body_html {
             wrap_html(html)
@@ -603,10 +612,29 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransportPlugin for EmailP
             wrap_html(&escape_html(&message.body))
         };
 
+        tracing::debug!(
+            from_address = %cfg.from_address,
+            from_name = cfg.from_name.as_deref().unwrap_or("<none>"),
+            recipient_count = cfg.to_addresses.len(),
+            subject = %message.title,
+            "building email message"
+        );
+
         // Send one message per recipient.
+        // Use mail-builder's structured tuple API for From header so that
+        // display names with special characters (spaces, quotes, commas) are
+        // properly RFC 5322 encoded. Passing a pre-formatted string like
+        // `"Name <addr>"` requires mail-builder to re-parse it, which can
+        // produce malformed MAIL FROM commands rejected by strict servers
+        // (e.g. Gmail 555 5.5.2 Syntax error).
         for to_addr in &cfg.to_addresses {
-            let email = MessageBuilder::new()
-                .from(from_header.as_str())
+            let email = MessageBuilder::new();
+            let email = if let Some(ref name) = cfg.from_name {
+                email.from((name.as_str(), cfg.from_address.as_str()))
+            } else {
+                email.from(cfg.from_address.as_str())
+            };
+            let email = email
                 .to(to_addr.as_str())
                 .subject(&message.title)
                 .text_body(&message.body)

@@ -434,6 +434,18 @@ async fn handle_test_global_smtp_email(
         serde_json::json!({ "to_addresses": [to_address] }),
     );
 
+    tracing::debug!(
+        smtp_host = global_smtp.host.as_deref().unwrap_or("<none>"),
+        smtp_port = global_smtp.port.unwrap_or(587),
+        tls_mode = %global_smtp.tls_mode,
+        from_address = global_smtp.from_address.as_deref().unwrap_or("<none>"),
+        from_name = global_smtp.from_name.as_deref().unwrap_or("<none>"),
+        helo_host = global_smtp.helo_host.as_deref().unwrap_or("<auto>"),
+        has_password = global_smtp.password.is_some(),
+        to_address,
+        "sending test email with global SMTP settings"
+    );
+
     let plugin = EmailPlugin;
     let transport = plugin
         .as_notification_transport()
