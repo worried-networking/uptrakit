@@ -49,6 +49,23 @@ const MAX_CONSECUTIVE_SERVICE_EVENTS: u32 = 16;
 /// Default shutdown timeout when `ServiceSettings` does not provide one.
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Send a keepalive ping to the controller.
+///
+/// Returns `Some(LoopOutcome::Disconnected)` when the send fails (indicating
+/// the connection is lost), or `None` on success.
+async fn send_keepalive_ping(conn: &mut ControllerConnection) -> Option<LoopOutcome> {
+    let service_ts = now_millis();
+    tracing::trace!(service_ts, "sending ping");
+    if let Err(e) = conn
+        .send(ServiceMessage::Ping(PingPayload::new(service_ts)))
+        .await
+    {
+        tracing::warn!(error = %e, "ping send failed, treating as disconnection");
+        return Some(LoopOutcome::Disconnected);
+    }
+    None
+}
+
 /// Run the unified event loop for an authenticated service connection.
 ///
 /// Handles:
@@ -129,11 +146,8 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
             // of the `if let` return `()`, which tokio's select! requires.
             _ = async { if let Some(t) = ping_timer.as_mut() { t.tick().await; } }, if ping_timer.is_some() => {
                 consecutive_service_events = 0;
-                let service_ts = now_millis();
-                tracing::trace!(service_ts, "sending ping");
-                if let Err(e) = conn.send(ServiceMessage::Ping(PingPayload::new(service_ts))).await {
-                    tracing::warn!(error = %e, "ping send failed, treating as disconnection");
-                    break LoopOutcome::Disconnected;
+                if let Some(outcome) = send_keepalive_ping(&mut conn).await {
+                    break outcome;
                 }
             }
 

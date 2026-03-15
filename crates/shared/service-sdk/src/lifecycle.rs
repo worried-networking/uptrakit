@@ -133,6 +133,60 @@ async fn resolve_connection(
     Err("--url is required when zeroconf is not available".to_string())
 }
 
+/// Outcome of attempting to run the authenticated loop with an existing cert.
+enum ExistingCertOutcome {
+    /// No certificate on disk — proceed to enrollment.
+    NoCert,
+    /// Certificate was expired — state has been cleared, proceed to enrollment.
+    Expired,
+    /// Authenticated loop ran to completion.
+    Done,
+    /// Non-recoverable error from the authenticated loop.
+    Fatal(Report<EnrollmentError>),
+}
+
+/// Try to enter the authenticated event loop using the existing on-disk
+/// certificate, if one is present and not expired.
+///
+/// Returns [`ExistingCertOutcome::NoCert`] when there is no certificate,
+/// [`ExistingCertOutcome::Expired`] when it has expired (identity state is
+/// cleared before returning), or the loop outcome otherwise.
+async fn try_authenticated_with_existing_cert(
+    auth_params: &AuthLoopParams<'_>,
+    identity: &mut ServiceIdentityState,
+    handler: &mut impl ServiceHandler,
+    signals: &mut SignalWatcher,
+) -> ExistingCertOutcome {
+    if !identity.is_certified() {
+        return ExistingCertOutcome::NoCert;
+    }
+
+    let cert_not_after_ts = identity.cert_not_after_ms();
+    let cert_expired =
+        cert_not_after_ts.is_some_and(|ts| uptrakit_internal_wire::now_millis() >= ts);
+
+    if cert_expired {
+        tracing::warn!("certificate expired, falling back to fresh enrollment");
+        if let Err(e) = identity.clear_enrollment_state().await {
+            return ExistingCertOutcome::Fatal(e);
+        }
+        return ExistingCertOutcome::Expired;
+    }
+
+    tracing::info!("loaded existing certificate from disk");
+    match run_authenticated_with_reconnect(auth_params, identity, handler, signals).await {
+        Ok(()) => ExistingCertOutcome::Done,
+        Err(e) if is_cert_expired_report(&e) => {
+            tracing::warn!("certificate expired, falling back to enrollment");
+            if let Err(ce) = identity.clear_enrollment_state().await {
+                return ExistingCertOutcome::Fatal(ce);
+            }
+            ExistingCertOutcome::Expired
+        }
+        Err(e) => ExistingCertOutcome::Fatal(e),
+    }
+}
+
 /// Run the full service lifecycle: directory setup → identity load →
 /// CA bootstrap → enrollment → authenticated loop with reconnect.
 ///
@@ -217,36 +271,13 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
     };
 
     // Check for existing certificate.
-    if identity.is_certified() {
-        let cert_not_after_ts = identity.cert_not_after_ms();
-        let cert_expired =
-            cert_not_after_ts.is_some_and(|ts| uptrakit_internal_wire::now_millis() >= ts);
-
-        if cert_expired {
-            tracing::warn!("certificate expired, falling back to fresh enrollment");
-            identity.clear_enrollment_state().await?;
+    match try_authenticated_with_existing_cert(&auth_params, &mut identity, handler, &mut signals)
+        .await
+    {
+        ExistingCertOutcome::Done => return Ok(()),
+        ExistingCertOutcome::Fatal(e) => return Err(e),
+        ExistingCertOutcome::NoCert | ExistingCertOutcome::Expired => {
             // Fall through to enrollment below.
-        } else {
-            tracing::info!("loaded existing certificate from disk");
-            match run_authenticated_with_reconnect(
-                &auth_params,
-                &mut identity,
-                handler,
-                &mut signals,
-            )
-            .await
-            {
-                Ok(()) => return Ok(()),
-                Err(e) => {
-                    if is_cert_expired_report(&e) {
-                        tracing::warn!("certificate expired, falling back to enrollment");
-                        identity.clear_enrollment_state().await?;
-                        // Fall through to enrollment below.
-                    } else {
-                        return Err(e);
-                    }
-                }
-            }
         }
     }
 

@@ -866,32 +866,24 @@ async fn deploy_authorized_keys(
 
 // ── Sudoers and plugin setup ─────────────────────────────────────────
 
-/// Resolve plugin sudo commands, write the sudoers file, run infra plugin
-/// detection, and append any infra-discovered sudo entries.
+/// Resolve plugin-specific sudoers commands on the remote host.
 ///
-/// Returns `(sudoers_content, infra_results)` so the caller can verify
-/// sudo grants and report infrastructure detections.
-async fn setup_sudoers_and_plugins(
-    session: &Arc<SshSession>,
+/// For each entry in `plugin_sudo_cmds`: helper scripts are SCP'd and their
+/// install path is used directly; regular commands are resolved via
+/// `command -v` and appended with optional argument suffix.
+async fn resolve_plugin_sudo_commands(
     executor: &SshRemoteExecutor,
-    params: &BootstrapParams,
-    db: &DatabaseConnection,
-    state_dir: &Path,
+    plugin_sudo_cmds: &[(
+        uptrakit_plugin_infrastructure_core::PluginType,
+        Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry>,
+    )],
     use_sudo: bool,
-) -> Result<(Option<SudoersContent>, Vec<BootstrapInfraResult>)> {
-    // Run host-compatibility checks via an SSH executor so that only the
-    // commands applicable to *this* host are included.
-    tracing::info!("configuring sudoers");
-    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(session)))
-        as Arc<dyn uptrakit_command::CommandExecutor>;
-    let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
-    let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
-
-    for (_plugin_type, entries) in &plugin_sudo_cmds {
+) -> Result<Vec<ResolvedSudoCommand>> {
+    let mut resolved = Vec::new();
+    for (_plugin_type, entries) in plugin_sudo_cmds {
         for entry in entries {
             if let Some(helper) = &entry.helper_script {
-                // Install the helper script then use its known path directly
-                // as the sudoers command — no `command -v` resolution needed.
+                // Install the helper script then use its known path directly.
                 tracing::debug!(path = %helper.install_path, "installing helper script");
                 install_helper_script(executor, helper, use_sudo).await?;
                 resolved.push(ResolvedSudoCommand {
@@ -923,24 +915,16 @@ async fn setup_sudoers_and_plugins(
             }
         }
     }
+    Ok(resolved)
+}
 
-    let mut sudoers_content: Option<SudoersContent> = if !resolved.is_empty() {
-        Some(SudoersContent::SpecificCommands(resolved))
-    } else if params.allow_all {
-        tracing::warn!("no plugin commands resolved; using NOPASSWD: ALL (--allow-all)");
-        Some(SudoersContent::AllCommands)
-    } else {
-        tracing::warn!(
-            "no plugin-specific commands found for this host; no sudoers file will be written"
-        );
-        None
-    };
-
-    if let Some(ref content) = sudoers_content {
-        write_sudoers_file(executor, &params.target_username, content, use_sudo).await?;
-    }
-
-    // Run infra plugin detection.
+/// Run all infra plugins' `on_host_bootstrapped` and collect the results.
+async fn collect_infra_results(
+    executor: &SshRemoteExecutor,
+    params: &BootstrapParams,
+    db: &sea_orm::DatabaseConnection,
+    state_dir: &std::path::Path,
+) -> Vec<BootstrapInfraResult> {
     let infra_plugins = create_agent_infra_plugins();
     let noop_invoker = NoopInfraActionInvoker;
     let noop_bootstrap = NoopGuestBootstrap;
@@ -954,7 +938,7 @@ async fn setup_sudoers_and_plugins(
         action_invoker: &noop_invoker,
         guest_bootstrap: &noop_bootstrap,
     };
-    let mut infra_results: Vec<BootstrapInfraResult> = Vec::new();
+    let mut infra_results = Vec::new();
     for plugin in &infra_plugins {
         let Some(lifecycle) = plugin.as_host_lifecycle() else {
             continue;
@@ -978,9 +962,18 @@ async fn setup_sudoers_and_plugins(
             }
         }
     }
+    infra_results
+}
 
-    // Append infra-plugin sudo commands (e.g. PVE pct/qm) and re-write
-    // sudoers if any were returned.
+/// Append infra-plugin sudo commands to the existing sudoers content and
+/// rewrite the file if any new entries were added.
+async fn merge_infra_sudo_commands(
+    executor: &SshRemoteExecutor,
+    params: &BootstrapParams,
+    sudoers_content: Option<SudoersContent>,
+    infra_results: &[BootstrapInfraResult],
+    use_sudo: bool,
+) -> Result<Option<SudoersContent>> {
     let infra_sudo_cmds: Vec<_> = infra_results
         .iter()
         .flat_map(|r| r.sudo_commands.iter())
@@ -990,17 +983,65 @@ async fn setup_sudoers_and_plugins(
             needs_setenv: c.needs_setenv,
         })
         .collect();
-    if !infra_sudo_cmds.is_empty() {
-        let mut base_cmds = match sudoers_content {
-            Some(SudoersContent::SpecificCommands(cmds)) => cmds,
-            _ => Vec::new(),
-        };
-        base_cmds.extend(infra_sudo_cmds);
-        let updated = SudoersContent::SpecificCommands(base_cmds);
-        write_sudoers_file(executor, &params.target_username, &updated, use_sudo).await?;
-        tracing::info!("updated sudoers with infra-plugin entries (e.g. pct exec, qm guest exec)");
-        sudoers_content = Some(updated);
+
+    if infra_sudo_cmds.is_empty() {
+        return Ok(sudoers_content);
     }
+
+    let mut base_cmds = match sudoers_content {
+        Some(SudoersContent::SpecificCommands(cmds)) => cmds,
+        _ => Vec::new(),
+    };
+    base_cmds.extend(infra_sudo_cmds);
+    let updated = SudoersContent::SpecificCommands(base_cmds);
+    write_sudoers_file(executor, &params.target_username, &updated, use_sudo).await?;
+    tracing::info!("updated sudoers with infra-plugin entries (e.g. pct exec, qm guest exec)");
+    Ok(Some(updated))
+}
+
+/// Resolve plugin sudo commands, write the sudoers file, run infra plugin
+/// detection, and append any infra-discovered sudo entries.
+///
+/// Returns `(sudoers_content, infra_results)` so the caller can verify
+/// sudo grants and report infrastructure detections.
+async fn setup_sudoers_and_plugins(
+    session: &Arc<SshSession>,
+    executor: &SshRemoteExecutor,
+    params: &BootstrapParams,
+    db: &DatabaseConnection,
+    state_dir: &Path,
+    use_sudo: bool,
+) -> Result<(Option<SudoersContent>, Vec<BootstrapInfraResult>)> {
+    // Run host-compatibility checks via an SSH executor so that only the
+    // commands applicable to *this* host are included.
+    tracing::info!("configuring sudoers");
+    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(session)))
+        as Arc<dyn uptrakit_command::CommandExecutor>;
+    let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
+
+    let resolved = resolve_plugin_sudo_commands(executor, &plugin_sudo_cmds, use_sudo).await?;
+
+    let sudoers_content: Option<SudoersContent> = if !resolved.is_empty() {
+        Some(SudoersContent::SpecificCommands(resolved))
+    } else if params.allow_all {
+        tracing::warn!("no plugin commands resolved; using NOPASSWD: ALL (--allow-all)");
+        Some(SudoersContent::AllCommands)
+    } else {
+        tracing::warn!(
+            "no plugin-specific commands found for this host; no sudoers file will be written"
+        );
+        None
+    };
+
+    if let Some(ref content) = sudoers_content {
+        write_sudoers_file(executor, &params.target_username, content, use_sudo).await?;
+    }
+
+    let infra_results = collect_infra_results(executor, params, db, state_dir).await;
+
+    let sudoers_content =
+        merge_infra_sudo_commands(executor, params, sudoers_content, &infra_results, use_sudo)
+            .await?;
 
     Ok((sudoers_content, infra_results))
 }
