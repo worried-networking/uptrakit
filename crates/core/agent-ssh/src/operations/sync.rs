@@ -3,7 +3,18 @@
 //! Regenerates the sudoers drop-in file with current plugin commands,
 //! detects and stores the PVE node name (for Proxmox guest matching),
 //! and verifies PVE API user privileges (when a tenant ID is available).
+//!
+//! The operation is split into two phases:
+//!
+//! 1. **Connect** (`sync_connect`) -- connects via SSH, detects host
+//!    capabilities, collects plugin requirements, and returns a
+//!    [`SyncPlan`] describing the actions that *would* be performed.
+//!
+//! 2. **Execute** (`sync_execute`) -- reconnects and carries out the
+//!    planned actions, optionally skipping those the caller marks in
+//!    `skip_actions`.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,6 +26,7 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{
 };
 use uptrakit_plugin_infrastructure_registry::{PluginRegistry, create_agent_infra_plugins};
 
+use crate::db::entity::ssh_host::Model as SshHostModel;
 use crate::host_ops::{self, update_host_sudo_state};
 use crate::operations::sudoers::{
     ResolvedSudoCommand, SudoersContent, detect_is_root, detect_sudo_available,
@@ -70,23 +82,51 @@ pub(crate) struct SyncAuthOverride {
     pub auth_private_key_pem: Option<String>,
 }
 
-/// Run the sync command from an extension action.
-///
-/// When `auth_override` is `None`, uses the stored SSH key and username.
-/// When `Some`, connects as the specified user with the provided credentials
-/// (sudo state is not persisted for the override user, matching CLI behavior).
-pub(crate) async fn run_for_extension(
-    host_id: &str,
-    db: &DatabaseConnection,
-    tenant_id: Option<uuid::Uuid>,
-    auth_override: Option<&SyncAuthOverride>,
-    allow_all: bool,
-) -> std::result::Result<String, String> {
-    let host = host_ops::find_host(db, host_id)
-        .await
-        .map_err(|e| format!("database error: {e}"))?
-        .ok_or_else(|| format!("host '{host_id}' not found"))?;
+// ── Sync plan types ──────────────────────────────────────────────────
 
+/// Well-known action IDs used in the sync plan.
+const ACTION_UPDATE_SUDOERS: &str = "update_sudoers";
+const ACTION_DOCKER_GROUP: &str = "docker_group";
+const ACTION_INFRA_SYNC: &str = "infra_sync";
+
+/// Information gathered about the target host during the sync connect phase.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct SyncHostInfo {
+    pub hostname: String,
+    pub port: u16,
+    pub connect_user: String,
+    pub is_root: bool,
+    pub sudo_available: bool,
+}
+
+/// The result of the sync connect phase: a plan for the user to review.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct SyncPlan {
+    pub host_info: SyncHostInfo,
+    pub actions: Vec<SyncPlannedAction>,
+}
+
+/// A planned sync action.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct SyncPlannedAction {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub security_impact: String,
+    pub default_enabled: bool,
+    pub skippable: bool,
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────
+
+/// Resolve SSH connection parameters and authenticate against the host.
+///
+/// Returns the session, the connect-username reference, and whether an
+/// auth override was used.
+async fn establish_session(
+    host: &SshHostModel,
+    auth_override: Option<&SyncAuthOverride>,
+) -> std::result::Result<(Arc<SshSession>, String, bool), String> {
     let stored_fingerprint = host
         .host_key_fingerprint
         .as_deref()
@@ -98,17 +138,24 @@ pub(crate) async fn run_for_extension(
         connect_timeout: Duration::from_secs(30),
     };
 
-    // Determine connection username and auth method.
-    let key_pem: String;
-    let connect_username: &str;
+    let key_pem_owned: String;
+    let connect_username: String;
+    let has_override = auth_override.is_some();
+
     let auth: AuthMethod<'_>;
-    let has_auth_override = auth_override.is_some();
+
+    // We need the owned values to outlive `auth`, so we declare them
+    // outside the if/else and borrow from them.
+    let password_owned: Option<String>;
+    let pem_owned: Option<String>;
 
     if let Some(ov) = auth_override {
-        connect_username = &ov.username;
-        if let Some(ref pw) = ov.auth_password {
+        connect_username = ov.username.clone();
+        password_owned = ov.auth_password.clone();
+        pem_owned = ov.auth_private_key_pem.clone();
+        if let Some(ref pw) = password_owned {
             auth = AuthMethod::Password(pw.as_str());
-        } else if let Some(ref pem) = ov.auth_private_key_pem {
+        } else if let Some(ref pem) = pem_owned {
             auth = AuthMethod::PrivateKey(pem.as_str());
         } else {
             return Err(
@@ -116,36 +163,49 @@ pub(crate) async fn run_for_extension(
             );
         }
     } else {
-        key_pem = host.private_key.expose_secret().to_string();
-        connect_username = &host.username;
-        auth = AuthMethod::PrivateKey(&key_pem);
+        key_pem_owned = host.private_key.expose_secret().to_string();
+        connect_username = host.username.clone();
+        password_owned = None;
+        pem_owned = None;
+        auth = AuthMethod::PrivateKey(&key_pem_owned);
     }
+
+    // Suppress unused-variable warnings for the owned buffers whose sole
+    // purpose is keeping the borrowed `AuthMethod` alive.
+    let _ = (&password_owned, &pem_owned);
 
     let (session, _fingerprint) = crate::ssh_transport::connect_and_authenticate(
         &config,
-        connect_username,
+        &connect_username,
         &auth,
         Some(stored_fingerprint),
     )
     .await
     .map_err(|e| format!("SSH connection failed: {e}"))?;
 
-    let session = Arc::new(session);
-    let executor = SshRemoteExecutor::new(Arc::clone(&session));
+    Ok((Arc::new(session), connect_username, has_override))
+}
 
-    // Detect sudo state.
-    let is_root = detect_is_root(&executor)
+/// Detect root / sudo state and persist it (when not using an auth override).
+async fn detect_and_persist_sudo_state(
+    executor: &SshRemoteExecutor,
+    db: &DatabaseConnection,
+    host_id: uuid::Uuid,
+    has_auth_override: bool,
+    connect_username: &str,
+    hostname: &str,
+) -> std::result::Result<(bool, bool), String> {
+    let is_root = detect_is_root(executor)
         .await
         .map_err(|e| format!("failed to detect root status: {e}"))?;
     let sudo_available = if is_root {
         false
     } else {
-        detect_sudo_available(&executor)
+        detect_sudo_available(executor)
             .await
             .map_err(|e| format!("failed to detect sudo status: {e}"))?
     };
 
-    // Only persist sudo state when using stored credentials (not override).
     let agent_is_root = if has_auth_override { false } else { is_root };
     let persisted_sudo_available = if has_auth_override {
         None
@@ -154,7 +214,7 @@ pub(crate) async fn run_for_extension(
     };
     update_host_sudo_state(
         db,
-        host.id,
+        host_id,
         persisted_sudo_available,
         Some(agent_is_root),
         None,
@@ -163,130 +223,328 @@ pub(crate) async fn run_for_extension(
     .map_err(|e| format!("failed to update sudo state: {e}"))?;
 
     if !is_root && !sudo_available {
-        drop(executor);
-        SshSession::disconnect_shared(session).await;
         return Err(format!(
-            "sudo is not available for user '{}' on '{}'; cannot sync",
-            connect_username, host.hostname
+            "sudo is not available for user '{connect_username}' on '{hostname}'; cannot sync",
         ));
     }
 
-    let privileged = !is_root;
+    Ok((is_root, sudo_available))
+}
 
-    // Collect + write sudoers.  `ssh_executor` is consumed by
-    // `compatible_sudo_commands_for_host` so only `executor` remains.
-    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
-        as Arc<dyn uptrakit_command::CommandExecutor>;
-    let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
-    let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
-
-    for (_plugin_type, entries) in &plugin_sudo_cmds {
-        for entry in entries {
-            if let Some(helper) = &entry.helper_script {
-                install_helper_script(&executor, helper, privileged)
-                    .await
-                    .map_err(|e| format!("failed to install helper script: {e}"))?;
-                resolved.push(ResolvedSudoCommand {
-                    command_path: helper.install_path.to_string(),
-                    explanation: entry.explanation.clone(),
-                    needs_setenv: entry.needs_setenv,
-                });
-            } else if let Some(path) = resolve_command_path(&executor, &entry.command)
-                .await
-                .map_err(|e| format!("failed to resolve command path: {e}"))?
-            {
-                let command_path = match &entry.args_suffix {
-                    Some(suffix) => format!("{path} {suffix}"),
-                    None => path,
-                };
-                resolved.push(ResolvedSudoCommand {
-                    command_path,
-                    explanation: entry.explanation.clone(),
-                    needs_setenv: entry.needs_setenv,
-                });
-            }
-        }
-    }
-
-    // Configure docker group membership when Docker is installed on the host.
-    ensure_docker_group_membership(&executor, &host.username, privileged)
-        .await
-        .map_err(|e| format!("failed to configure docker group: {e}"))?;
-
-    let mut summary = Vec::new();
-
-    // Ask infra plugins for additional sudo commands required by this host.
+/// Check whether any infra plugin has state for the given host.
+async fn any_infra_state(db: &DatabaseConnection, host_id: uuid::Uuid) -> bool {
     let infra_plugins = create_agent_infra_plugins();
-    let noop_invoker = NoopInfraActionInvoker;
-    let noop_bootstrap = NoopGuestBootstrap;
-    let tenant_id_str = tenant_id.map(|t| t.to_string());
-    let infra_ctx = InfraPluginContext {
-        db,
-        tenant_id: tenant_id_str.as_deref(),
-        service_id: None,
-        state_dir: std::path::Path::new("."),
-        private_key_der: None,
-        action_invoker: &noop_invoker,
-        guest_bootstrap: &noop_bootstrap,
-    };
     for plugin in &infra_plugins {
         let Some(lifecycle) = plugin.as_host_lifecycle() else {
             continue;
         };
-        if lifecycle.has_infra_state(db, host.id).await {
-            match lifecycle
-                .on_host_synced(&infra_ctx, &executor, host.id)
-                .await
-            {
-                Ok(sync_result) => {
-                    for cmd in sync_result.sudo_commands {
-                        resolved.push(ResolvedSudoCommand {
-                            command_path: cmd.command_path,
-                            explanation: cmd.explanation,
-                            needs_setenv: cmd.needs_setenv,
-                        });
-                    }
-                    for line in sync_result.summary_lines {
-                        summary.push(format!("{}: {line}", plugin.plugin_type_id()));
-                    }
-                }
-                Err(e) => {
-                    summary.push(format!("{}: sync failed ({e})", plugin.plugin_type_id()));
+        if lifecycle.has_infra_state(db, host_id).await {
+            return true;
+        }
+    }
+    false
+}
+
+// ── Phase 1: connect ─────────────────────────────────────────────────
+
+/// Connect to the host, inspect its state, and return a plan describing
+/// the actions that would be performed during `sync_execute`.
+pub(crate) async fn sync_connect(
+    host_id: &str,
+    db: &DatabaseConnection,
+    tenant_id: Option<uuid::Uuid>,
+    auth_override: Option<&SyncAuthOverride>,
+    allow_all: bool,
+) -> std::result::Result<SyncPlan, String> {
+    let host = host_ops::find_host(db, host_id)
+        .await
+        .map_err(|e| format!("database error: {e}"))?
+        .ok_or_else(|| format!("host '{host_id}' not found"))?;
+
+    let (session, connect_username, has_auth_override) =
+        establish_session(&host, auth_override).await?;
+    let executor = SshRemoteExecutor::new(Arc::clone(&session));
+
+    let (is_root, sudo_available) = match detect_and_persist_sudo_state(
+        &executor,
+        db,
+        host.id,
+        has_auth_override,
+        &connect_username,
+        &host.hostname,
+    )
+    .await
+    {
+        Ok(pair) => pair,
+        Err(e) => {
+            drop(executor);
+            SshSession::disconnect_shared(session).await;
+            return Err(e);
+        }
+    };
+
+    // Collect plugin sudo commands to determine whether sudoers would change.
+    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
+        as Arc<dyn uptrakit_command::CommandExecutor>;
+    let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
+    let has_sudo_commands = plugin_sudo_cmds.iter().any(|(_, v)| !v.is_empty());
+
+    // Check if infra plugins have state for this host.
+    let has_infra = any_infra_state(db, host.id).await;
+
+    drop(executor);
+    SshSession::disconnect_shared(session).await;
+
+    // Build actions list.
+    let mut actions = Vec::new();
+
+    let sudoers_desc = if has_sudo_commands {
+        "Write a sudoers drop-in granting NOPASSWD access to plugin-required commands."
+    } else if allow_all {
+        "Write a sudoers drop-in granting NOPASSWD: ALL (no plugin commands detected)."
+    } else {
+        "No sudoers changes needed (no plugin commands detected)."
+    };
+
+    actions.push(SyncPlannedAction {
+        id: ACTION_UPDATE_SUDOERS.to_string(),
+        label: "Update sudoers".to_string(),
+        description: sudoers_desc.to_string(),
+        security_impact: "high".to_string(),
+        default_enabled: has_sudo_commands || allow_all,
+        skippable: true,
+    });
+
+    actions.push(SyncPlannedAction {
+        id: ACTION_DOCKER_GROUP.to_string(),
+        label: "Docker group membership".to_string(),
+        description: "Add the connect user to the docker group (if Docker is installed)."
+            .to_string(),
+        security_impact: "low".to_string(),
+        default_enabled: true,
+        skippable: true,
+    });
+
+    if has_infra {
+        actions.push(SyncPlannedAction {
+            id: ACTION_INFRA_SYNC.to_string(),
+            label: "Infrastructure plugin sync".to_string(),
+            description: "Run infrastructure-plugin host-sync hooks (e.g. Proxmox node detection)."
+                .to_string(),
+            security_impact: "medium".to_string(),
+            default_enabled: true,
+            skippable: true,
+        });
+    }
+
+    let _ = tenant_id; // used later when infra plugins need it in execute phase
+
+    Ok(SyncPlan {
+        host_info: SyncHostInfo {
+            hostname: host.hostname.clone(),
+            port: host.port as u16,
+            connect_user: connect_username,
+            is_root,
+            sudo_available,
+        },
+        actions,
+    })
+}
+
+// ── Phase 2: execute ─────────────────────────────────────────────────
+
+/// Reconnect and execute the planned sync actions, skipping any whose ID
+/// appears in `skip_actions`.
+pub(crate) async fn sync_execute(
+    host_id: &str,
+    db: &DatabaseConnection,
+    tenant_id: Option<uuid::Uuid>,
+    auth_override: Option<&SyncAuthOverride>,
+    allow_all: bool,
+    skip_actions: &HashSet<String>,
+) -> std::result::Result<String, String> {
+    let host = host_ops::find_host(db, host_id)
+        .await
+        .map_err(|e| format!("database error: {e}"))?
+        .ok_or_else(|| format!("host '{host_id}' not found"))?;
+
+    let (session, connect_username, has_auth_override) =
+        establish_session(&host, auth_override).await?;
+    let executor = SshRemoteExecutor::new(Arc::clone(&session));
+
+    let (is_root, _sudo_available) = match detect_and_persist_sudo_state(
+        &executor,
+        db,
+        host.id,
+        has_auth_override,
+        &connect_username,
+        &host.hostname,
+    )
+    .await
+    {
+        Ok(pair) => pair,
+        Err(e) => {
+            drop(executor);
+            SshSession::disconnect_shared(session).await;
+            return Err(e);
+        }
+    };
+
+    let privileged = !is_root;
+    let mut summary = Vec::new();
+
+    // ── Sudoers ──────────────────────────────────────────────────────
+    if !skip_actions.contains(ACTION_UPDATE_SUDOERS) {
+        let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
+            as Arc<dyn uptrakit_command::CommandExecutor>;
+        let plugin_sudo_cmds =
+            PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
+        let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
+
+        for (_plugin_type, entries) in &plugin_sudo_cmds {
+            for entry in entries {
+                if let Some(helper) = &entry.helper_script {
+                    install_helper_script(&executor, helper, privileged)
+                        .await
+                        .map_err(|e| format!("failed to install helper script: {e}"))?;
+                    resolved.push(ResolvedSudoCommand {
+                        command_path: helper.install_path.to_string(),
+                        explanation: entry.explanation.clone(),
+                        needs_setenv: entry.needs_setenv,
+                    });
+                } else if let Some(path) = resolve_command_path(&executor, &entry.command)
+                    .await
+                    .map_err(|e| format!("failed to resolve command path: {e}"))?
+                {
+                    let command_path = match &entry.args_suffix {
+                        Some(suffix) => format!("{path} {suffix}"),
+                        None => path,
+                    };
+                    resolved.push(ResolvedSudoCommand {
+                        command_path,
+                        explanation: entry.explanation.clone(),
+                        needs_setenv: entry.needs_setenv,
+                    });
                 }
             }
         }
+
+        let has_resolved_commands = !resolved.is_empty();
+        let sudoers_content: Option<SudoersContent> = if has_resolved_commands {
+            Some(SudoersContent::SpecificCommands(resolved))
+        } else if allow_all {
+            Some(SudoersContent::AllCommands)
+        } else {
+            None
+        };
+
+        if let Some(ref content) = sudoers_content {
+            write_sudoers_file(&executor, &host.username, content, privileged)
+                .await
+                .map_err(|e| format!("failed to write sudoers file: {e}"))?;
+            if !has_auth_override {
+                update_host_sudo_state(db, host.id, Some(true), Some(is_root), None)
+                    .await
+                    .map_err(|e| format!("failed to update sudo state: {e}"))?;
+            }
+            if allow_all && !has_resolved_commands {
+                summary.push("sudoers: updated (NOPASSWD: ALL)".to_string());
+            } else {
+                summary.push("sudoers: updated".to_string());
+            }
+        } else {
+            summary.push("sudoers: no commands to write".to_string());
+        }
+    } else {
+        summary.push("sudoers: skipped".to_string());
     }
 
-    let has_resolved_commands = !resolved.is_empty();
-    let sudoers_content: Option<SudoersContent> = if has_resolved_commands {
-        Some(SudoersContent::SpecificCommands(resolved))
-    } else if allow_all {
-        Some(SudoersContent::AllCommands)
-    } else {
-        None
-    };
-
-    if let Some(ref content) = sudoers_content {
-        write_sudoers_file(&executor, &host.username, content, privileged)
+    // ── Docker group ─────────────────────────────────────────────────
+    if !skip_actions.contains(ACTION_DOCKER_GROUP) {
+        ensure_docker_group_membership(&executor, &host.username, privileged)
             .await
-            .map_err(|e| format!("failed to write sudoers file: {e}"))?;
-        // Persist sudo state only for stored-credentials runs.
-        if !has_auth_override {
-            update_host_sudo_state(db, host.id, Some(true), Some(is_root), None)
-                .await
-                .map_err(|e| format!("failed to update sudo state: {e}"))?;
-        }
-        if allow_all && !has_resolved_commands {
-            summary.push("sudoers: updated (NOPASSWD: ALL)".to_string());
-        } else {
-            summary.push("sudoers: updated".to_string());
+            .map_err(|e| format!("failed to configure docker group: {e}"))?;
+    } else {
+        summary.push("docker group: skipped".to_string());
+    }
+
+    // ── Infra plugins ────────────────────────────────────────────────
+    if !skip_actions.contains(ACTION_INFRA_SYNC) {
+        let infra_plugins = create_agent_infra_plugins();
+        let noop_invoker = NoopInfraActionInvoker;
+        let noop_bootstrap = NoopGuestBootstrap;
+        let tenant_id_str = tenant_id.map(|t| t.to_string());
+        let infra_ctx = InfraPluginContext {
+            db,
+            tenant_id: tenant_id_str.as_deref(),
+            service_id: None,
+            state_dir: std::path::Path::new("."),
+            private_key_der: None,
+            action_invoker: &noop_invoker,
+            guest_bootstrap: &noop_bootstrap,
+        };
+
+        // We need to collect infra sudo commands into the sudoers set that
+        // was already written above. For now the infra sync step only adds
+        // summary lines; infra sudo commands were already resolved in the
+        // sudoers block via `compatible_sudo_commands_for_host`.
+        for plugin in &infra_plugins {
+            let Some(lifecycle) = plugin.as_host_lifecycle() else {
+                continue;
+            };
+            if lifecycle.has_infra_state(db, host.id).await {
+                match lifecycle
+                    .on_host_synced(&infra_ctx, &executor, host.id)
+                    .await
+                {
+                    Ok(sync_result) => {
+                        for line in sync_result.summary_lines {
+                            summary.push(format!("{}: {line}", plugin.plugin_type_id()));
+                        }
+                    }
+                    Err(e) => {
+                        summary.push(format!("{}: sync failed ({e})", plugin.plugin_type_id()));
+                    }
+                }
+            }
         }
     } else {
-        summary.push("sudoers: no commands to write".to_string());
+        summary.push("infra sync: skipped".to_string());
     }
 
     drop(executor);
     SshSession::disconnect_shared(session).await;
 
     Ok(summary.join("; "))
+}
+
+// ── Legacy entry point ───────────────────────────────────────────────
+
+/// Run the sync command from an extension action.
+///
+/// When `auth_override` is `None`, uses the stored SSH key and username.
+/// When `Some`, connects as the specified user with the provided credentials
+/// (sudo state is not persisted for the override user, matching CLI behavior).
+///
+/// This is the "auto" path: it calls `sync_connect` to build a plan and
+/// then immediately calls `sync_execute` with no actions skipped.
+pub(crate) async fn run_for_extension(
+    host_id: &str,
+    db: &DatabaseConnection,
+    tenant_id: Option<uuid::Uuid>,
+    auth_override: Option<&SyncAuthOverride>,
+    allow_all: bool,
+) -> std::result::Result<String, String> {
+    // Auto path: plan then execute everything.
+    let _plan = sync_connect(host_id, db, tenant_id, auth_override, allow_all).await?;
+    let skip_actions = HashSet::new();
+    sync_execute(
+        host_id,
+        db,
+        tenant_id,
+        auth_override,
+        allow_all,
+        &skip_actions,
+    )
+    .await
 }

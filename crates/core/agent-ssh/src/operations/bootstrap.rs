@@ -80,6 +80,44 @@ pub(crate) struct BootstrapResult {
     pub infra_results: Vec<BootstrapInfraResult>,
 }
 
+// ── Multi-step bootstrap types ───────────────────────────────────────
+
+/// A planned bootstrap action that the user can review and optionally skip.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct PlannedAction {
+    /// Machine-readable action identifier (e.g., "create_user", "deploy_key").
+    pub id: String,
+    /// Human-readable label for the action.
+    pub label: String,
+    /// Description of what this action does.
+    pub description: String,
+    /// Security impact level: "none", "low", "medium", "high".
+    pub security_impact: String,
+    /// Whether this action is enabled by default.
+    pub default_enabled: bool,
+    /// Whether the user can skip this action.
+    pub skippable: bool,
+}
+
+/// Information gathered about the target host during the connect phase.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct BootstrapHostInfo {
+    pub hostname: String,
+    pub port: u16,
+    pub auth_user: String,
+    pub is_root: bool,
+    pub os_info: Option<String>,
+    pub host_key_fingerprint: String,
+    pub target_user_exists: bool,
+}
+
+/// The result of the connect phase: a plan for the user to review.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct BootstrapPlan {
+    pub host_info: BootstrapHostInfo,
+    pub actions: Vec<PlannedAction>,
+}
+
 // ── Main orchestrator ────────────────────────────────────────────────
 
 /// Run the full bootstrap workflow.
@@ -87,27 +125,22 @@ pub(crate) async fn run_bootstrap(
     state_dir: &Path,
     params: BootstrapParams,
 ) -> Result<BootstrapResult> {
+    let _plan = bootstrap_connect(state_dir, &params).await?;
+    bootstrap_execute(state_dir, params, &HashSet::new()).await
+}
+
+// ── Multi-step: connect (read-only probe) ────────────────────────────
+
+/// Probe the remote host and build a plan of actions for the user to review.
+///
+/// This phase is non-destructive: it connects via SSH, gathers host
+/// information, determines which actions are applicable, then disconnects.
+pub(crate) async fn bootstrap_connect(
+    state_dir: &Path,
+    params: &BootstrapParams,
+) -> Result<BootstrapPlan> {
     // 1. VALIDATE INPUTS
-    if params.strict_host_key_checking && params.host_key_fingerprint.is_none() {
-        bail!(Error::InvalidInput(
-            "--strict-host-key-checking requires --host-key-fingerprint to be provided".to_string()
-        ));
-    }
-
-    validate_posix_username(&params.auth_username)?;
-    validate_posix_username(&params.target_username)?;
-
-    if params.auth_password.is_none()
-        && params.auth_private_key_pem.is_none()
-        && !params.use_ssh_agent
-    {
-        bail!(Error::InvalidInput(
-            "no authentication method available: use --auth-password, \
-             --auth-private-key-file, or ensure SSH_AUTH_SOCK is set for \
-             SSH agent forwarding"
-                .to_string()
-        ));
-    }
+    validate_bootstrap_inputs(params)?;
 
     // Fail fast: check host name is not in DB.
     let db = crate::db::init_db(state_dir).await.map_err(|e| {
@@ -120,7 +153,222 @@ pub(crate) async fn run_bootstrap(
         bail!(Error::HostNameConflict(params.name.clone()));
     }
 
-    // 2. PREPARE KEY MATERIAL
+    // 2. PREPARE KEY MATERIAL (validate only, not persisted)
+    if let Some(pem) = &params.target_private_key_pem {
+        ssh_key::extract_public_key_openssh(pem)?;
+    }
+
+    // 3. CONNECT & AUTHENTICATE (as auth_username)
+    let port = u16::try_from(params.port).map_err(|_| {
+        report!(Error::InvalidInput(format!(
+            "port must be 0-65535, got {}",
+            params.port
+        )))
+    })?;
+
+    let (session, observed_fp, executor, use_sudo) =
+        prepare_bootstrap_connection(params, port).await?;
+
+    // 4. GATHER HOST INFORMATION
+    let is_root = !use_sudo;
+
+    // Check if target user exists.
+    let target_same_as_auth = params.target_username == params.auth_username;
+    let target_user_exists = if target_same_as_auth {
+        true
+    } else {
+        let cmd = cmd_check_user_exists(&params.target_username, use_sudo);
+        let user_check = session.exec_command(&cmd).await?;
+        user_check.exit_code == 0
+    };
+
+    // Detect OS info (one-liner).
+    let os_result = session
+        .exec_command("cat /etc/os-release 2>/dev/null | head -1 || uname -s")
+        .await?;
+    let os_info = {
+        let raw = os_result.stdout.trim().to_string();
+        if raw.is_empty() { None } else { Some(raw) }
+    };
+
+    // Check if docker group exists on remote.
+    let docker_cmd = if use_sudo {
+        "sudo getent group docker".to_string()
+    } else {
+        "getent group docker".to_string()
+    };
+    let docker_result = session.exec_command(&docker_cmd).await?;
+    let docker_group_exists = docker_result.exit_code == 0;
+
+    // Check for stale Uptrakit keys in authorized_keys.
+    let stale_keys_found = if !target_same_as_auth || params.remove_stale_keys {
+        // Detect home directory to read authorized_keys.
+        let home_cmd = cmd_detect_home(&params.target_username, use_sudo);
+        let home_result = session.exec_command(&home_cmd).await?;
+        let home_dir = home_result.stdout.trim().to_string();
+        if !home_dir.is_empty() {
+            let read_cmd = cmd_read_authorized_keys(&home_dir, use_sudo);
+            let read_result = session.exec_command(&read_cmd).await?;
+            let existing_keys = parse_existing_authorized_keys(&read_result.stdout);
+            !existing_keys.uptrakit_key_lines.is_empty()
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    // Run infra plugin detection (read-only probing).
+    let infra_plugins = create_agent_infra_plugins();
+    let noop_invoker = NoopInfraActionInvoker;
+    let noop_bootstrap = NoopGuestBootstrap;
+    let tenant_id_str = params.tenant_id.map(|t| t.to_string());
+    let infra_ctx = InfraPluginContext {
+        db: &db,
+        tenant_id: tenant_id_str.as_deref(),
+        service_id: params.service_id,
+        state_dir,
+        private_key_der: None,
+        action_invoker: &noop_invoker,
+        guest_bootstrap: &noop_bootstrap,
+    };
+    let mut pve_detected = false;
+    for plugin in &infra_plugins {
+        let Some(lifecycle) = plugin.as_host_lifecycle() else {
+            continue;
+        };
+        match lifecycle
+            .on_host_bootstrapped(&infra_ctx, &executor, params.host_id, &params.name)
+            .await
+        {
+            Ok(result) => {
+                if result.detected {
+                    pve_detected = true;
+                }
+            }
+            Err(e) => {
+                tracing::debug!(
+                    error = %e,
+                    plugin = %plugin.plugin_type_id(),
+                    "infrastructure detection probe failed, skipping"
+                );
+            }
+        }
+    }
+
+    // 5. DISCONNECT
+    drop(executor);
+    SshSession::disconnect_shared(session).await;
+
+    // 6. BUILD PLAN
+    let host_info = BootstrapHostInfo {
+        hostname: params.hostname.clone(),
+        port,
+        auth_user: params.auth_username.clone(),
+        is_root,
+        os_info,
+        host_key_fingerprint: observed_fp,
+        target_user_exists,
+    };
+
+    let mut actions = Vec::new();
+
+    if !target_same_as_auth && !target_user_exists {
+        actions.push(PlannedAction {
+            id: "create_user".to_string(),
+            label: format!("Create user '{}'", params.target_username),
+            description: format!(
+                "Create a new system user '{}' with a home directory on the remote host.",
+                params.target_username
+            ),
+            security_impact: "medium".to_string(),
+            default_enabled: true,
+            skippable: true,
+        });
+    }
+
+    actions.push(PlannedAction {
+        id: "deploy_key".to_string(),
+        label: "Deploy SSH authorized key".to_string(),
+        description: format!(
+            "Install the Uptrakit SSH public key into ~{}/.ssh/authorized_keys.",
+            params.target_username
+        ),
+        security_impact: "medium".to_string(),
+        default_enabled: true,
+        skippable: false,
+    });
+
+    actions.push(PlannedAction {
+        id: "configure_sudoers".to_string(),
+        label: "Configure sudoers".to_string(),
+        description: format!(
+            "Write /etc/sudoers.d/uptrakit-{} with NOPASSWD entries for plugin commands.",
+            params.target_username
+        ),
+        security_impact: "high".to_string(),
+        default_enabled: true,
+        skippable: true,
+    });
+
+    if stale_keys_found {
+        actions.push(PlannedAction {
+            id: "remove_stale_keys".to_string(),
+            label: "Remove stale Uptrakit keys".to_string(),
+            description: "Remove previously-deployed Uptrakit SSH keys from authorized_keys."
+                .to_string(),
+            security_impact: "low".to_string(),
+            default_enabled: true,
+            skippable: true,
+        });
+    }
+
+    if docker_group_exists {
+        actions.push(PlannedAction {
+            id: "docker_group".to_string(),
+            label: "Add user to docker group".to_string(),
+            description: format!(
+                "Add '{}' to the docker group for container management without sudo.",
+                params.target_username
+            ),
+            security_impact: "low".to_string(),
+            default_enabled: true,
+            skippable: true,
+        });
+    }
+
+    if pve_detected {
+        actions.push(PlannedAction {
+            id: "pve_setup".to_string(),
+            label: "Proxmox VE setup".to_string(),
+            description:
+                "Configure Proxmox VE infrastructure integration (API credentials, sudoers for pct/qm)."
+                    .to_string(),
+            security_impact: "medium".to_string(),
+            default_enabled: true,
+            skippable: true,
+        });
+    }
+
+    Ok(BootstrapPlan { host_info, actions })
+}
+
+// ── Multi-step: execute (applies changes) ────────────────────────────
+
+/// Execute the bootstrap plan, skipping actions whose IDs are in
+/// `skip_actions`.
+///
+/// Reconnects via SSH, performs the requested modifications, verifies
+/// connectivity with the target key, and saves the host to the database.
+pub(crate) async fn bootstrap_execute(
+    state_dir: &Path,
+    params: BootstrapParams,
+    skip_actions: &HashSet<String>,
+) -> Result<BootstrapResult> {
+    // Re-validate (caller may have constructed params independently).
+    validate_bootstrap_inputs(&params)?;
+
+    // Prepare key material.
     let (target_private_pem, target_public_openssh, generated_key) =
         match &params.target_private_key_pem {
             Some(pem) => {
@@ -136,7 +384,13 @@ pub(crate) async fn run_bootstrap(
 
     let key_type = ssh_key::detect_key_type(&target_private_pem)?;
 
-    // 3. CONNECT & AUTHENTICATE (as auth_username)
+    let db = crate::db::init_db(state_dir).await.map_err(|e| {
+        report!(Error::Database(sea_orm::DbErr::Custom(format!(
+            "failed to initialize local database: {e}"
+        ))))
+    })?;
+
+    // Connect via SSH.
     let port = u16::try_from(params.port).map_err(|_| {
         report!(Error::InvalidInput(format!(
             "port must be 0-65535, got {}",
@@ -147,11 +401,11 @@ pub(crate) async fn run_bootstrap(
     let (session, observed_fp, executor, use_sudo) =
         prepare_bootstrap_connection(&params, port).await?;
 
-    // 5. REMOTE SETUP
+    // Execute non-skipped actions.
     let target_same_as_auth = params.target_username == params.auth_username;
 
-    if !target_same_as_auth {
-        // Check if target user exists.
+    // Create user (if applicable and not skipped).
+    if !target_same_as_auth && !skip_actions.contains("create_user") {
         let cmd = cmd_check_user_exists(&params.target_username, use_sudo);
         let user_check = session.exec_command(&cmd).await?;
 
@@ -171,11 +425,13 @@ pub(crate) async fn run_bootstrap(
         }
     }
 
-    // Configure docker group membership when Docker is installed on the host.
-    println!("Configuring docker group membership...");
-    ensure_docker_group_membership(&executor, &params.target_username, use_sudo).await?;
+    // Configure docker group membership (if not skipped).
+    if !skip_actions.contains("docker_group") {
+        tracing::info!("configuring docker group membership");
+        ensure_docker_group_membership(&executor, &params.target_username, use_sudo).await?;
+    }
 
-    // Detect home directory.
+    // Detect home directory (always needed for key deployment).
     let home_cmd = cmd_detect_home(&params.target_username, use_sudo);
     let home_result = session.exec_command(&home_cmd).await?;
     let home_dir = home_result.stdout.trim().to_string();
@@ -186,29 +442,40 @@ pub(crate) async fn run_bootstrap(
         )));
     }
 
-    // 5. DEPLOY authorized_keys.
-    deploy_authorized_keys(
-        &session,
-        &home_dir,
-        &target_public_openssh,
-        &params.target_username,
-        params.host_id,
-        params.service_id.as_ref(),
-        params.remove_stale_keys,
-        use_sudo,
-    )
-    .await?;
+    // Deploy authorized_keys (not skippable).
+    if !skip_actions.contains("deploy_key") {
+        let effective_remove_stale =
+            params.remove_stale_keys && !skip_actions.contains("remove_stale_keys");
+        deploy_authorized_keys(
+            &session,
+            &home_dir,
+            &target_public_openssh,
+            &params.target_username,
+            params.host_id,
+            params.service_id.as_ref(),
+            effective_remove_stale,
+            use_sudo,
+        )
+        .await?;
+    }
 
-    // Set up sudoers and run infra plugin detection.
-    let (sudoers_content, infra_results) =
-        setup_sudoers_and_plugins(&session, &executor, &params, &db, state_dir, use_sudo).await?;
+    // Set up sudoers and run infra plugin detection (if not skipped).
+    let skip_sudoers = skip_actions.contains("configure_sudoers");
+    let skip_pve = skip_actions.contains("pve_setup");
+    let (sudoers_content, infra_results) = if skip_sudoers && skip_pve {
+        (None, Vec::new())
+    } else {
+        let (sc, ir) =
+            setup_sudoers_and_plugins(&session, &executor, &params, &db, state_dir, use_sudo)
+                .await?;
+        if skip_sudoers { (None, ir) } else { (sc, ir) }
+    };
 
-    // 6. DISCONNECT auth session — drop the executor first so the session Arc
-    //    has a single owner (required by `disconnect_shared`).
+    // Disconnect auth session.
     drop(executor);
     SshSession::disconnect_shared(session).await;
 
-    // 7. VERIFY — reconnect as target_username with target key.
+    // Verify connectivity as target user.
     tracing::info!(user = %params.target_username, "verifying connectivity");
 
     let verify_config = SshConnectionConfig {
@@ -241,7 +508,7 @@ pub(crate) async fn run_bootstrap(
     .await?;
     verify_session.disconnect().await;
 
-    // 8. SAVE TO DATABASE
+    // Save to database.
     save_host(
         &db,
         &params,
@@ -252,7 +519,7 @@ pub(crate) async fn run_bootstrap(
     )
     .await?;
 
-    // 9. OUTPUT
+    // Log summary.
     tracing::info!(
         host = %params.name,
         hostname = %params.hostname,
@@ -279,6 +546,34 @@ pub(crate) async fn run_bootstrap(
     }
 
     Ok(BootstrapResult { infra_results })
+}
+
+// ── Shared input validation ──────────────────────────────────────────
+
+/// Validate bootstrap parameters common to both connect and execute phases.
+fn validate_bootstrap_inputs(params: &BootstrapParams) -> Result<()> {
+    if params.strict_host_key_checking && params.host_key_fingerprint.is_none() {
+        bail!(Error::InvalidInput(
+            "--strict-host-key-checking requires --host-key-fingerprint to be provided".to_string()
+        ));
+    }
+
+    validate_posix_username(&params.auth_username)?;
+    validate_posix_username(&params.target_username)?;
+
+    if params.auth_password.is_none()
+        && params.auth_private_key_pem.is_none()
+        && !params.use_ssh_agent
+    {
+        bail!(Error::InvalidInput(
+            "no authentication method available: use --auth-password, \
+             --auth-private-key-file, or ensure SSH_AUTH_SOCK is set for \
+             SSH agent forwarding"
+                .to_string()
+        ));
+    }
+
+    Ok(())
 }
 
 // ── Connection setup ─────────────────────────────────────────────────

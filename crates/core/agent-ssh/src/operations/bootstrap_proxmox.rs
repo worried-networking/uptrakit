@@ -1,6 +1,7 @@
 //! Proxmox guest bootstrap: set up an SSH host inside a PVE guest (LXC/QEMU)
 //! by executing commands through the PVE node via `pct exec` / `qm guest exec`.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -13,7 +14,7 @@ use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 use crate::db::entity::ssh_host::SshKeyType;
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams};
-use crate::operations::bootstrap;
+use crate::operations::bootstrap::{self, PlannedAction};
 use crate::operations::sudoers::{
     ResolvedSudoCommand, SudoersContent, install_helper_script, resolve_command_path,
     write_sudoers_file,
@@ -50,6 +51,15 @@ pub(crate) struct ProxmoxBootstrapParams {
     pub host_id: uuid::Uuid,
     /// Service UUID for the `authorized_keys` comment.
     pub service_id: Option<uuid::Uuid>,
+}
+
+/// The result of the Proxmox connect phase.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct ProxmoxBootstrapPlan {
+    pub pve_host_name: String,
+    pub vmid: u32,
+    pub guest_type: String,
+    pub actions: Vec<PlannedAction>,
 }
 
 /// Result of a successful Proxmox guest bootstrap.
@@ -124,7 +134,7 @@ impl GuestBootstrapExecutor for AgentGuestBootstrapExecutor {
     }
 }
 
-/// Run the Proxmox guest bootstrap workflow.
+/// Run the Proxmox guest bootstrap workflow (single-shot).
 ///
 /// 1. Load the PVE host from the local DB
 /// 2. Connect to the PVE node via SSH
@@ -133,11 +143,29 @@ impl GuestBootstrapExecutor for AgentGuestBootstrapExecutor {
 /// 5. Get the guest's IP address
 /// 6. Verify SSH connectivity to the guest
 /// 7. Save the host to the local DB
+///
+/// This is a convenience wrapper that calls [`proxmox_bootstrap_connect`]
+/// followed by [`proxmox_bootstrap_execute`] with an empty skip set.
 pub(crate) async fn run_proxmox_bootstrap(
     state_dir: &Path,
     params: ProxmoxBootstrapParams,
 ) -> Result<ProxmoxBootstrapResult> {
-    // 1. LOAD PVE HOST
+    let _plan = proxmox_bootstrap_connect(state_dir, &params).await?;
+    proxmox_bootstrap_execute(state_dir, params, &HashSet::new()).await
+}
+
+// ---------------------------------------------------------------------------
+// Helpers shared by connect and execute phases
+// ---------------------------------------------------------------------------
+
+/// Load the PVE host from the local DB and validate name uniqueness.
+async fn load_and_validate_pve_host(
+    state_dir: &Path,
+    params: &ProxmoxBootstrapParams,
+) -> Result<(
+    sea_orm::DatabaseConnection,
+    crate::db::entity::ssh_host::Model,
+)> {
     let db = crate::db::init_db(state_dir).await.map_err(|e| {
         report!(Error::Database(sea_orm::DbErr::Custom(format!(
             "failed to initialize local database: {e}"
@@ -159,7 +187,21 @@ pub(crate) async fn run_proxmox_bootstrap(
         bail!(Error::HostNameConflict(params.name.clone()));
     }
 
-    // 2. CONNECT TO PVE NODE
+    Ok((db, pve_host))
+}
+
+/// Connect to a PVE node via SSH and create the guest executors.
+///
+/// Returns `(session, pve_executor, guest_remote_executor, guest_cmd_executor)`.
+async fn connect_and_create_executors(
+    pve_host: &crate::db::entity::ssh_host::Model,
+    params: &ProxmoxBootstrapParams,
+) -> Result<(
+    Arc<SshSession>,
+    Arc<dyn RemoteExecutor>,
+    Arc<dyn RemoteExecutor>,
+    Arc<dyn uptrakit_command::CommandExecutor>,
+)> {
     let pve_key = pve_host.private_key.expose_secret();
 
     let port = u16::try_from(pve_host.port).map_err(|_| {
@@ -195,7 +237,6 @@ pub(crate) async fn run_proxmox_bootstrap(
     let pve_executor: Arc<dyn RemoteExecutor> =
         Arc::new(SshRemoteExecutor::new(Arc::clone(&session)));
 
-    // 3. CREATE GUEST EXECUTORS via infra plugins
     let infra_plugins = uptrakit_plugin_infrastructure_registry::create_agent_infra_plugins();
     let guest_exec_provider = infra_plugins
         .iter()
@@ -219,14 +260,29 @@ pub(crate) async fn run_proxmox_bootstrap(
         &params.guest_type,
     );
 
-    // 4. GENERATE KEY MATERIAL
-    let (target_private_pem, target_public_openssh) = ssh_key::generate_ed25519_keypair()?;
+    Ok((session, pve_executor, guest_executor, guest_cmd_executor))
+}
 
-    // 5. REMOTE SETUP INSIDE GUEST
-    // Commands inside LXC containers via `pct exec` run as root, so no sudo needed.
-    let use_sudo = false;
+// ---------------------------------------------------------------------------
+// Connect phase
+// ---------------------------------------------------------------------------
 
-    // Create user.
+/// Perform the Proxmox bootstrap *connect* phase.
+///
+/// Validates inputs, connects to the PVE node, probes the guest for existing
+/// state (user, docker group, stale keys) and returns a plan describing the
+/// actions that the execute phase will carry out.
+pub(crate) async fn proxmox_bootstrap_connect(
+    state_dir: &Path,
+    params: &ProxmoxBootstrapParams,
+) -> Result<ProxmoxBootstrapPlan> {
+    let (_db, pve_host) = load_and_validate_pve_host(state_dir, params).await?;
+    let pve_host_name = pve_host.name.clone();
+
+    let (session, pve_executor, guest_executor, _guest_cmd_executor) =
+        connect_and_create_executors(&pve_host, params).await?;
+
+    // Probe: does the target user exist?
     let user_check = guest_executor
         .exec_command(&format!(
             "id -u {}",
@@ -234,22 +290,164 @@ pub(crate) async fn run_proxmox_bootstrap(
         ))
         .await
         .context_to::<Error>()?;
+    let user_exists = user_check.exit_code == 0;
 
-    if user_check.exit_code != 0 {
-        tracing::info!(username = %params.target_username, "creating user in guest");
-        let create_result = guest_executor
+    // Probe: does the docker group exist?
+    let docker_check = guest_executor
+        .exec_command("getent group docker")
+        .await
+        .context_to::<Error>()?;
+    let docker_group_exists = docker_check.exit_code == 0;
+
+    // Probe: check existing authorized_keys for stale keys.
+    let has_stale_keys = if user_exists {
+        let home_result = guest_executor
             .exec_command(&format!(
-                "useradd --create-home --shell /bin/sh {}",
+                "getent passwd {} | cut -d: -f6",
                 uptrakit_command::shell_escape(&params.target_username)
             ))
             .await
             .context_to::<Error>()?;
-        if create_result.exit_code != 0 {
-            bail!(Error::SshCommand(format!(
-                "failed to create user '{}' in guest: {}",
-                params.target_username,
-                create_result.stderr.trim()
-            )));
+        let home_dir = home_result.stdout.trim();
+        if !home_dir.is_empty() {
+            let ak_path = format!("{home_dir}/.ssh/authorized_keys");
+            let escaped_ak_path = uptrakit_command::shell_escape(&ak_path);
+            let read_result = guest_executor
+                .exec_command(&format!("cat {escaped_ak_path} 2>/dev/null || true"))
+                .await
+                .context_to::<Error>()?;
+            let existing = bootstrap::parse_existing_authorized_keys(&read_result.stdout);
+            !existing.uptrakit_key_lines.is_empty()
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    // Disconnect.
+    drop(guest_executor);
+    drop(_guest_cmd_executor);
+    drop(pve_executor);
+    SshSession::disconnect_shared(session).await;
+
+    // Build actions.
+    let mut actions = Vec::new();
+
+    actions.push(PlannedAction {
+        id: "create_user".to_string(),
+        label: "Create user".to_string(),
+        description: format!(
+            "Create user '{}' inside the guest (VMID {}).",
+            params.target_username, params.vmid
+        ),
+        security_impact: "low".to_string(),
+        default_enabled: !user_exists,
+        skippable: true,
+    });
+
+    actions.push(PlannedAction {
+        id: "deploy_key".to_string(),
+        label: "Deploy SSH key".to_string(),
+        description: "Generate and deploy an Ed25519 SSH key pair for the new host.".to_string(),
+        security_impact: "medium".to_string(),
+        default_enabled: true,
+        skippable: false,
+    });
+
+    actions.push(PlannedAction {
+        id: "configure_sudoers".to_string(),
+        label: "Configure sudoers".to_string(),
+        description: format!(
+            "Write a sudoers drop-in for '{}' with the required commands.",
+            params.target_username
+        ),
+        security_impact: "high".to_string(),
+        default_enabled: true,
+        skippable: true,
+    });
+
+    actions.push(PlannedAction {
+        id: "remove_stale_keys".to_string(),
+        label: "Remove stale keys".to_string(),
+        description: "Remove previously deployed Uptrakit keys from authorized_keys.".to_string(),
+        security_impact: "low".to_string(),
+        default_enabled: has_stale_keys && params.remove_stale_keys,
+        skippable: true,
+    });
+
+    if docker_group_exists {
+        actions.push(PlannedAction {
+            id: "docker_group".to_string(),
+            label: "Add to docker group".to_string(),
+            description: format!("Add user '{}' to the docker group.", params.target_username),
+            security_impact: "medium".to_string(),
+            default_enabled: true,
+            skippable: true,
+        });
+    }
+
+    Ok(ProxmoxBootstrapPlan {
+        pve_host_name,
+        vmid: params.vmid,
+        guest_type: params.guest_type.clone(),
+        actions,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Execute phase
+// ---------------------------------------------------------------------------
+
+/// Perform the Proxmox bootstrap *execute* phase.
+///
+/// Reconnects to the PVE node, executes all actions whose IDs are **not** in
+/// `skip_actions`, then verifies connectivity and saves the host to the DB.
+pub(crate) async fn proxmox_bootstrap_execute(
+    state_dir: &Path,
+    params: ProxmoxBootstrapParams,
+    skip_actions: &HashSet<String>,
+) -> Result<ProxmoxBootstrapResult> {
+    // 1. LOAD PVE HOST
+    let (db, pve_host) = load_and_validate_pve_host(state_dir, &params).await?;
+
+    // 2. CONNECT TO PVE NODE
+    let (session, pve_executor, guest_executor, guest_cmd_executor) =
+        connect_and_create_executors(&pve_host, &params).await?;
+
+    // 3. GENERATE KEY MATERIAL
+    let (target_private_pem, target_public_openssh) = ssh_key::generate_ed25519_keypair()?;
+
+    // 4. REMOTE SETUP INSIDE GUEST
+    // Commands inside LXC containers via `pct exec` run as root, so no sudo needed.
+    let use_sudo = false;
+
+    // Create user (skippable).
+    if !skip_actions.contains("create_user") {
+        let user_check = guest_executor
+            .exec_command(&format!(
+                "id -u {}",
+                uptrakit_command::shell_escape(&params.target_username)
+            ))
+            .await
+            .context_to::<Error>()?;
+
+        if user_check.exit_code != 0 {
+            tracing::info!(username = %params.target_username, "creating user in guest");
+            let create_result = guest_executor
+                .exec_command(&format!(
+                    "useradd --create-home --shell /bin/sh {}",
+                    uptrakit_command::shell_escape(&params.target_username)
+                ))
+                .await
+                .context_to::<Error>()?;
+            if create_result.exit_code != 0 {
+                bail!(Error::SshCommand(format!(
+                    "failed to create user '{}' in guest: {}",
+                    params.target_username,
+                    create_result.stderr.trim()
+                )));
+            }
         }
     }
 
@@ -269,7 +467,7 @@ pub(crate) async fn run_proxmox_bootstrap(
         )));
     }
 
-    // Deploy authorized_keys (with stale key removal).
+    // Deploy authorized_keys (NOT skippable).
     let service_comment = match &params.service_id {
         Some(svc_id) => format!("uptrakit-svc:{svc_id}-host:{}", params.host_id),
         None => format!("uptrakit-host:{}", params.host_id),
@@ -312,9 +510,8 @@ pub(crate) async fn run_proxmox_bootstrap(
     // We never assume exclusive ownership of an account.
     let stale_lines = existing.uptrakit_key_lines.clone();
 
-    let mut to_remove: std::collections::HashSet<&str> =
-        same_service_lines.iter().map(String::as_str).collect();
-    if params.remove_stale_keys {
+    let mut to_remove: HashSet<&str> = same_service_lines.iter().map(String::as_str).collect();
+    if !skip_actions.contains("remove_stale_keys") && params.remove_stale_keys {
         for l in &stale_lines {
             to_remove.insert(l.as_str());
         }
@@ -379,54 +576,79 @@ pub(crate) async fn run_proxmox_bootstrap(
         }
     }
 
-    // Configure sudoers.
-    // Use the guest command executor so compatibility probes (e.g. `which apt`,
-    // `which brew`) run against the *guest* rather than the PVE host.
-    let plugin_sudo_cmds =
-        PluginRegistry::compatible_sudo_commands_for_host(guest_cmd_executor).await;
-    let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
+    // Configure sudoers (skippable).
+    if !skip_actions.contains("configure_sudoers") {
+        // Use the guest command executor so compatibility probes (e.g. `which apt`,
+        // `which brew`) run against the *guest* rather than the PVE host.
+        let plugin_sudo_cmds =
+            PluginRegistry::compatible_sudo_commands_for_host(guest_cmd_executor).await;
+        let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
-    for (_plugin_type, entries) in &plugin_sudo_cmds {
-        for entry in entries {
-            if let Some(helper) = &entry.helper_script {
-                install_helper_script(guest_executor.as_ref(), helper, use_sudo).await?;
-                resolved.push(ResolvedSudoCommand {
-                    command_path: helper.install_path.to_string(),
-                    explanation: entry.explanation.clone(),
-                    needs_setenv: entry.needs_setenv,
-                });
-            } else if let Some(path) =
-                resolve_command_path(guest_executor.as_ref(), &entry.command).await?
-            {
-                let command_path = match &entry.args_suffix {
-                    Some(suffix) => format!("{path} {suffix}"),
-                    None => path,
-                };
-                resolved.push(ResolvedSudoCommand {
-                    command_path,
-                    explanation: entry.explanation.clone(),
-                    needs_setenv: entry.needs_setenv,
-                });
+        for (_plugin_type, entries) in &plugin_sudo_cmds {
+            for entry in entries {
+                if let Some(helper) = &entry.helper_script {
+                    install_helper_script(guest_executor.as_ref(), helper, use_sudo).await?;
+                    resolved.push(ResolvedSudoCommand {
+                        command_path: helper.install_path.to_string(),
+                        explanation: entry.explanation.clone(),
+                        needs_setenv: entry.needs_setenv,
+                    });
+                } else if let Some(path) =
+                    resolve_command_path(guest_executor.as_ref(), &entry.command).await?
+                {
+                    let command_path = match &entry.args_suffix {
+                        Some(suffix) => format!("{path} {suffix}"),
+                        None => path,
+                    };
+                    resolved.push(ResolvedSudoCommand {
+                        command_path,
+                        explanation: entry.explanation.clone(),
+                        needs_setenv: entry.needs_setenv,
+                    });
+                }
             }
+        }
+
+        let sudoers_content: Option<SudoersContent> = if !resolved.is_empty() {
+            Some(SudoersContent::SpecificCommands(resolved))
+        } else if params.allow_all {
+            Some(SudoersContent::AllCommands)
+        } else {
+            None
+        };
+
+        if let Some(ref content) = sudoers_content {
+            write_sudoers_file(
+                guest_executor.as_ref(),
+                &params.target_username,
+                content,
+                use_sudo,
+            )
+            .await?;
         }
     }
 
-    let sudoers_content: Option<SudoersContent> = if !resolved.is_empty() {
-        Some(SudoersContent::SpecificCommands(resolved))
-    } else if params.allow_all {
-        Some(SudoersContent::AllCommands)
-    } else {
-        None
-    };
-
-    if let Some(ref content) = sudoers_content {
-        write_sudoers_file(
-            guest_executor.as_ref(),
-            &params.target_username,
-            content,
-            use_sudo,
-        )
-        .await?;
+    // Add user to docker group (skippable).
+    if !skip_actions.contains("docker_group") {
+        let docker_check = guest_executor
+            .exec_command("getent group docker")
+            .await
+            .context_to::<Error>()?;
+        if docker_check.exit_code == 0 {
+            let add_result = guest_executor
+                .exec_command(&format!(
+                    "usermod -aG docker {}",
+                    uptrakit_command::shell_escape(&params.target_username)
+                ))
+                .await
+                .context_to::<Error>()?;
+            if add_result.exit_code != 0 {
+                tracing::warn!(
+                    stderr = %add_result.stderr.trim(),
+                    "failed to add user to docker group (non-fatal)"
+                );
+            }
+        }
     }
 
     // Get host key fingerprint from guest.
@@ -444,7 +666,19 @@ pub(crate) async fn run_proxmox_bootstrap(
         .and_then(|line| line.split_whitespace().nth(1))
         .map(String::from);
 
-    // 6. GET GUEST IP
+    // 5. GET GUEST IP
+    let infra_plugins = uptrakit_plugin_infrastructure_registry::create_agent_infra_plugins();
+    let guest_exec_provider = infra_plugins
+        .iter()
+        .find(|p| p.plugin_type_id() == "infrastructure_proxmox")
+        .and_then(|p| p.as_guest_exec())
+        .and_then(|g| g.guest_exec_provider())
+        .ok_or_else(|| {
+            report!(Error::InvalidInput(
+                "no GuestExecProvider found for infrastructure_proxmox".to_string()
+            ))
+        })?;
+
     let guest_ip = guest_exec_provider
         .get_guest_ip(pve_executor.as_ref(), params.vmid, &params.guest_type)
         .await
@@ -452,7 +686,7 @@ pub(crate) async fn run_proxmox_bootstrap(
 
     tracing::info!(guest_ip = %guest_ip, "resolved guest IP address");
 
-    // 7. VERIFY SSH CONNECTIVITY
+    // 6. VERIFY SSH CONNECTIVITY
     let verify_config = SshConnectionConfig {
         hostname: guest_ip.clone(),
         port: 22,
@@ -491,7 +725,7 @@ pub(crate) async fn run_proxmox_bootstrap(
     drop(pve_executor);
     SshSession::disconnect_shared(session).await;
 
-    // 8. SAVE TO DATABASE
+    // 7. SAVE TO DATABASE
     let encrypted_key =
         EncryptedString::new(target_private_pem.clone(), "uptrakit:ssh_hosts:private_key")
             .map_err(|e| report!(Error::Crypto(format!("failed to encrypt private key: {e}"))))?;
