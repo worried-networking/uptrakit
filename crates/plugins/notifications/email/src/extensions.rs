@@ -11,7 +11,7 @@ use uptrakit_crypto::{decrypt_str, encrypt_str, is_encrypted};
 use uptrakit_notification_plugin_core::DeliveryMessage;
 use uptrakit_plugin_infrastructure_core::{ExtensionActionContext, PluginBase as _};
 use uptrakit_shared_db::entity::prelude::User;
-use uptrakit_web_api_auth::settings_store::{
+use uptrakit_shared_db::raw_settings::{
     load_global_settings_by_prefix, load_settings_by_prefix, upsert_global_setting_raw,
     upsert_setting_raw,
 };

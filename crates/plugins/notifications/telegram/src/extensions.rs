@@ -60,15 +60,13 @@ pub async fn handle_action(
 async fn handle_get_global_telegram(
     db: &sea_orm::DatabaseConnection,
 ) -> std::result::Result<serde_json::Value, String> {
-    let settings = uptrakit_web_api_auth::settings_store::load_global_settings_by_prefix(
-        db,
-        "global_telegram.",
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("failed to load global Telegram settings: {e:?}");
-        "Internal server error".to_string()
-    })?;
+    let settings =
+        uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(db, "global_telegram.")
+            .await
+            .map_err(|e| {
+                tracing::error!("failed to load global Telegram settings: {e:?}");
+                "Internal server error".to_string()
+            })?;
 
     let has_bot_token = settings
         .get("global_telegram.bot_token")
@@ -88,7 +86,7 @@ async fn handle_save_global_telegram(
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    uptrakit_web_api_auth::settings_store::upsert_global_setting_raw(
+    uptrakit_shared_db::raw_settings::upsert_global_setting_raw(
         db,
         "global_telegram.bot_token",
         serde_json::json!(bot_token),
