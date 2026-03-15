@@ -14,8 +14,8 @@ use async_trait::async_trait;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-use crate::executor::{CommandExecutor, CommandMode, CommandOutput, CommandSpec, StdioTunnel};
-use crate::types::UpdateOutputLine;
+use crate::executor::{CommandExecutor, StdioTunnel};
+use crate::types::{CommandMode, CommandOutput, CommandSpec, UpdateOutputLine};
 
 // ── SudoPolicy ─────────────────────────────────────────────────────────
 

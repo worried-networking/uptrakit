@@ -16,8 +16,7 @@ use tokio::sync::mpsc;
 
 use crate::command::send_output;
 use crate::error::CommandError;
-use crate::executor::{CommandOutput, CommandSpec, InteractiveHandle};
-use crate::types::UpdateOutputLine;
+use crate::types::{CommandOutput, CommandSpec, InteractiveHandle, UpdateOutputLine};
 use uptrakit_shared_types::OutputStreamType;
 
 /// Channels for an interactive session, bundled to reduce function argument count.
