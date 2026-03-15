@@ -86,9 +86,12 @@ impl ExtensionManifest {
 }
 
 /// How actions should be routed to service instances.
+///
+/// # Wire forward-compatibility
+///
+/// `Other(String)` preserves unknown targeting modes from newer peers.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ExtensionTargeting {
     /// Any connected instance of the source service type can handle actions.
     /// The controller picks one automatically.
@@ -96,6 +99,44 @@ pub enum ExtensionTargeting {
     Universal,
     /// Actions must be routed to a specific service instance selected by the user.
     Targeted,
+    /// An unknown targeting mode received from a newer peer.
+    Other(String),
+}
+
+impl ExtensionTargeting {
+    /// Returns the snake_case wire string for this targeting mode.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Universal => "universal",
+            Self::Targeted => "targeted",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+}
+
+impl From<String> for ExtensionTargeting {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "universal" => Self::Universal,
+            "targeted" => Self::Targeted,
+            _ => {
+                tracing::debug!(value = s, "received unknown ExtensionTargeting from peer");
+                Self::Other(s)
+            }
+        }
+    }
+}
+
+impl Serialize for ExtensionTargeting {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ExtensionTargeting {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(ExtensionTargeting::from)
+    }
 }
 
 /// Where an extension appears in the UI.
@@ -143,10 +184,10 @@ pub enum ExtensionPlacement {
 /// Position of a panel on an existing page.
 ///
 /// Serializes as `{"type": "tab"}`, `{"type": "below"}`, etc. to match
-/// the frontend `PanelPosition` TypeScript interface.
+/// the frontend `PanelPosition` TypeScript interface. Unknown positions
+/// from newer peers are preserved via `Other(String)`.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum PanelPosition {
     /// Rendered as a tab alongside existing tabs.
     #[default]
@@ -157,6 +198,63 @@ pub enum PanelPosition {
     Above,
     /// Forward-compatible catch-all for unknown positions.
     Other(String),
+}
+
+impl Serialize for PanelPosition {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let type_str = match self {
+            Self::Tab => "tab",
+            Self::Below => "below",
+            Self::Above => "above",
+            Self::Other(s) => s.as_str(),
+        };
+        let mut map = serializer.serialize_map(Some(1))?;
+        map.serialize_entry("type", type_str)?;
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for PanelPosition {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::{MapAccess, Visitor};
+
+        struct PanelPositionVisitor;
+
+        impl<'de> Visitor<'de> for PanelPositionVisitor {
+            type Value = PanelPosition;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a map with a \"type\" field")
+            }
+
+            fn visit_map<V: MapAccess<'de>>(self, mut map: V) -> Result<PanelPosition, V::Error> {
+                let mut type_str: Option<String> = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    if key == "type" {
+                        type_str = Some(map.next_value()?);
+                    } else {
+                        let _: serde::de::IgnoredAny = map.next_value()?;
+                    }
+                }
+                let type_str = type_str.ok_or_else(|| serde::de::Error::missing_field("type"))?;
+                Ok(match type_str.as_str() {
+                    "tab" => PanelPosition::Tab,
+                    "below" => PanelPosition::Below,
+                    "above" => PanelPosition::Above,
+                    _ => {
+                        tracing::debug!(
+                            value = %type_str,
+                            "received unknown PanelPosition from peer"
+                        );
+                        PanelPosition::Other(type_str)
+                    }
+                })
+            }
+        }
+
+        deserializer.deserialize_map(PanelPositionVisitor)
+    }
 }
 
 /// Extra column added to an existing table by a `TableColumns` extension.
@@ -822,9 +920,12 @@ impl FieldDef {
 }
 
 /// Input field type.
+///
+/// # Wire forward-compatibility
+///
+/// `Other(String)` preserves unknown field types from newer peers.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum FieldType {
     /// Single-line text input.
     #[default]
@@ -848,6 +949,54 @@ pub enum FieldType {
     Hidden,
     /// Forward-compatible catch-all for unknown field types.
     Other(String),
+}
+
+impl FieldType {
+    /// Returns the snake_case wire string for this field type.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Text => "text",
+            Self::Password => "password",
+            Self::Number => "number",
+            Self::Select => "select",
+            Self::MultiSelect => "multi_select",
+            Self::Textarea => "textarea",
+            Self::Toggle => "toggle",
+            Self::Hidden => "hidden",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+}
+
+impl From<String> for FieldType {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "text" => Self::Text,
+            "password" => Self::Password,
+            "number" => Self::Number,
+            "select" => Self::Select,
+            "multi_select" => Self::MultiSelect,
+            "textarea" => Self::Textarea,
+            "toggle" => Self::Toggle,
+            "hidden" => Self::Hidden,
+            _ => {
+                tracing::debug!(value = s, "received unknown FieldType from peer");
+                Self::Other(s)
+            }
+        }
+    }
+}
+
+impl Serialize for FieldType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for FieldType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(FieldType::from)
+    }
 }
 
 /// Condition for conditional field visibility.
@@ -887,14 +1036,55 @@ pub struct RowVisibleWhen {
 }
 
 /// Condition type for [`RowVisibleWhen`].
+///
+/// # Wire forward-compatibility
+///
+/// `Other(String)` preserves unknown condition types from newer peers.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowCondition {
     /// The field must be present and non-null (i.e., not `null`, not absent).
     Present,
     /// The field must be absent or `null`.
     Absent,
+    /// An unknown condition type received from a newer peer.
+    Other(String),
+}
+
+impl RowCondition {
+    /// Returns the snake_case wire string for this condition.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Present => "present",
+            Self::Absent => "absent",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+}
+
+impl From<String> for RowCondition {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "present" => Self::Present,
+            "absent" => Self::Absent,
+            _ => {
+                tracing::debug!(value = s, "received unknown RowCondition from peer");
+                Self::Other(s)
+            }
+        }
+    }
+}
+
+impl Serialize for RowCondition {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for RowCondition {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(RowCondition::from)
+    }
 }
 
 /// A single option in a `Select` field.
@@ -1179,12 +1369,21 @@ mod tests {
 
     #[test]
     fn panel_position_other_roundtrip() {
+        // Other(s) serializes as {"type": s} — not {"type":"other","value":s}
         let pos = PanelPosition::Other("sidebar".to_string());
         let json = serde_json::to_string(&pos).expect("serialize should succeed");
-        assert_eq!(json, r#"{"type":"other","value":"sidebar"}"#);
+        assert_eq!(json, r#"{"type":"sidebar"}"#);
         let roundtripped: PanelPosition =
             serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(pos, roundtripped);
+    }
+
+    #[test]
+    fn panel_position_unknown_type_deserializes_to_other() {
+        // A newer peer sending an unknown position type should be tolerated
+        let json = r#"{"type":"floating"}"#;
+        let pos: PanelPosition = serde_json::from_str(json).expect("deserialize should succeed");
+        assert_eq!(pos, PanelPosition::Other("floating".to_string()));
     }
 
     #[test]
@@ -1193,17 +1392,97 @@ mod tests {
     }
 
     #[test]
+    fn field_type_known_variants_serialize_as_plain_string() {
+        assert_eq!(
+            serde_json::to_string(&FieldType::Text).unwrap(),
+            r#""text""#
+        );
+        assert_eq!(
+            serde_json::to_string(&FieldType::MultiSelect).unwrap(),
+            r#""multi_select""#
+        );
+        assert_eq!(
+            serde_json::to_string(&FieldType::Toggle).unwrap(),
+            r#""toggle""#
+        );
+    }
+
+    #[test]
     fn field_type_other_roundtrip() {
         let ft = FieldType::Other("color_picker".to_string());
         let json = serde_json::to_string(&ft).expect("serialize should succeed");
+        assert_eq!(json, r#""color_picker""#);
         let roundtripped: FieldType =
             serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(ft, roundtripped);
     }
 
     #[test]
+    fn field_type_unknown_deserializes_to_other() {
+        let json = r#""date_picker""#;
+        let ft: FieldType = serde_json::from_str(json).expect("deserialize should succeed");
+        assert_eq!(ft, FieldType::Other("date_picker".to_string()));
+    }
+
+    #[test]
     fn extension_targeting_default_is_universal() {
         assert_eq!(ExtensionTargeting::default(), ExtensionTargeting::Universal);
+    }
+
+    #[test]
+    fn extension_targeting_known_variants_roundtrip() {
+        let variants = [ExtensionTargeting::Universal, ExtensionTargeting::Targeted];
+        for v in &variants {
+            let json = serde_json::to_string(v).expect("serialize should succeed");
+            let roundtripped: ExtensionTargeting =
+                serde_json::from_str(&json).expect("deserialize should succeed");
+            assert_eq!(v, &roundtripped);
+        }
+    }
+
+    #[test]
+    fn extension_targeting_other_roundtrip() {
+        let t = ExtensionTargeting::Other("scoped".to_string());
+        let json = serde_json::to_string(&t).expect("serialize should succeed");
+        assert_eq!(json, r#""scoped""#);
+        let roundtripped: ExtensionTargeting =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+        assert_eq!(t, roundtripped);
+    }
+
+    #[test]
+    fn extension_targeting_unknown_deserializes_to_other() {
+        let json = r#""tenant_specific""#;
+        let t: ExtensionTargeting = serde_json::from_str(json).expect("deserialize should succeed");
+        assert_eq!(t, ExtensionTargeting::Other("tenant_specific".to_string()));
+    }
+
+    #[test]
+    fn row_condition_known_variants_roundtrip() {
+        let variants = [RowCondition::Present, RowCondition::Absent];
+        for v in &variants {
+            let json = serde_json::to_string(v).expect("serialize should succeed");
+            let roundtripped: RowCondition =
+                serde_json::from_str(&json).expect("deserialize should succeed");
+            assert_eq!(v, &roundtripped);
+        }
+    }
+
+    #[test]
+    fn row_condition_other_roundtrip() {
+        let c = RowCondition::Other("non_empty".to_string());
+        let json = serde_json::to_string(&c).expect("serialize should succeed");
+        assert_eq!(json, r#""non_empty""#);
+        let roundtripped: RowCondition =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+        assert_eq!(c, roundtripped);
+    }
+
+    #[test]
+    fn row_condition_unknown_deserializes_to_other() {
+        let json = r#""matches_regex""#;
+        let c: RowCondition = serde_json::from_str(json).expect("deserialize should succeed");
+        assert_eq!(c, RowCondition::Other("matches_regex".to_string()));
     }
 
     #[test]
