@@ -6671,6 +6671,7 @@ version = "0.0.1"
 dependencies = [
  "serde",
  "serde_json",
+ "tracing",
  "uptrakit-shared-types",
 ]
 
@@ -6805,6 +6806,7 @@ dependencies = [
  "uptrakit-notification-plugin-core",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",
+ "uptrakit-shared-types",
  "uptrakit-web-api-auth",
  "uuid",
 ]
@@ -6826,6 +6828,7 @@ dependencies = [
  "uptrakit-notification-plugin-core",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",
+ "uptrakit-shared-types",
  "uptrakit-web-api-auth",
  "uuid",
 ]
@@ -7539,6 +7542,7 @@ dependencies = [
  "strum",
  "thiserror 2.0.18",
  "time",
+ "tracing",
  "uptrakit-internal-wire",
  "uptrakit-shared-types",
  "utoipa",
