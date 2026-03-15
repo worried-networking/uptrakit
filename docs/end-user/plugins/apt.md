@@ -30,12 +30,11 @@ reports itself as incompatible and is skipped for that host.
 This means APT plugin configs are automatically skipped on macOS, Windows, or any Linux
 distribution that does not use APT (e.g. Fedora, Arch).
 
-## Post-Update Hook
+## Reboot Detection
 
-The APT plugin implements `PluginCapability::PostUpdateHook`. After a successful package update,
-it checks whether `/var/run/reboot-required` exists on the host. If the file is present, a warning
-is logged indicating that a system reboot is required to complete the update. This check is
-non-fatal and does not mark the update as failed.
+To detect whether a reboot is required after an APT update, assign a `hook_shell` lifecycle
+plugin to the `post_update_hook` role with a command like `test -f /var/run/reboot-required`.
+See [Update Lifecycle Plugins](../../development/update-hooks.md) for details.
 
 ## Configuration
 

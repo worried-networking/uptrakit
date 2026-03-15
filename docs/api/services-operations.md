@@ -153,7 +153,9 @@ open for bidirectional terminal I/O. The controller provides a WebSocket endpoin
 `GET /api/v1/update-history/{id}/interactive` for admin clients to send keystrokes and receive
 output in real time. See [Interactive Updates API](interactive-updates.md) for the full protocol.
 
-## Update Hooks
+## Update Lifecycle Hooks
 
-Update hooks (systemd, Docker Compose, custom commands) inject metadata in `update_output`. Document any new hook configuration in
-[docs/development/plugin-guidelines.md](../development/plugin-guidelines.md).
+Update lifecycle hook plugins (`hook_systemd`, `hook_shell`) are standalone plugin assignments
+that run before and after software updates. They inject output into `update_output` with
+`[pre-hook]` and `[post-hook]` phase markers. See
+[Update Lifecycle Plugins](../development/update-hooks.md).

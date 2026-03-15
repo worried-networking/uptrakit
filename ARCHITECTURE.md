@@ -110,7 +110,7 @@ Each service sends a `BTreeSet<Capability>` in its `EnrollPayload` during enroll
 | Capability | Wire string | Description |
 | --- | --- | --- |
 | `SoftwareDiscovery` | `software_discovery` | Supports `discover_software` / `discovery_results` flow |
-| `UpdateHooks` | `update_hooks` | Pre/post-update hook execution |
+| `UpdateHooks` | `update_hooks` | Pre/post-update lifecycle hook plugin execution |
 | `GracefulShutdown` | `graceful_shutdown` | Supports coordinated shutdown |
 | `MqttBridge` | `mqtt_bridge` | MQTT bridge: handles `register`, `tenant_assignments`, `release_tenants`, etc. |
 | `SshRemote` | `ssh_remote` | Manages remote hosts over SSH |

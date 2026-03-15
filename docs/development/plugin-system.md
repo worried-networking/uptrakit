@@ -13,8 +13,8 @@ a richer capability model including host compatibility detection and per-plugin 
 The plugin system is composed of:
 
 - **`uptrakit-plugin-infrastructure-core`** (`crates/plugins/infrastructure/core/`) — the `PluginBase` and `PluginOps` traits, `PluginCapability` enum,
-  and supporting types (`HostCompatibility`, `UpdateHookContext`, `PreUpdateHookResult`,
-  `SecretMasking`).
+  `UpdateLifecyclePlugin` trait, and supporting types (`HostCompatibility`, `UpdateLifecycleContext`,
+  `PreUpdateHookResult`, `SecretMasking`).
 - **First-party plugin crates** (`crates/plugins/*/`) — one crate per plugin type, each implementing
   the `PluginBase` trait (and optionally `PluginOps` for runtime operations).
 - **`uptrakit-plugin-infrastructure-registry`** (`crates/plugins/infrastructure/registry/`) — centralized dispatch and validation
@@ -28,7 +28,7 @@ assignment links a software item to a specific host and tracks per-host state su
 
 ### Role-Based Plugin Assignments
 
-Each host assignment has up to three **plugin assignments** (`host_software_item_plugins`), one per
+Each host assignment has **plugin assignments** (`host_software_item_plugins`), one per
 **plugin role**:
 
 | Role | String value | Responsibility |
@@ -36,6 +36,8 @@ Each host assignment has up to three **plugin assignments** (`host_software_item
 | `DetectVersion` | `detect_version` | Detect the currently installed version on the agent host. |
 | `FetchReleases` | `fetch_releases` | Fetch the latest available version from an upstream source. |
 | `ExecuteUpdate` | `execute_update` | Execute the actual software update on the agent host. |
+| `PreUpdateHook` | `pre_update_hook` | Run logic before an update; can abort. Multiple allowed, ordered by `ordinal`. |
+| `PostUpdateHook` | `post_update_hook` | Run logic after an update; non-fatal. Multiple allowed, ordered by `ordinal`. |
 
 Each plugin assignment row carries:
 
@@ -45,9 +47,9 @@ Each plugin assignment row carries:
 - `package_identifier` — the package name or image reference within that plugin.
 - `config` — optional per-host JSON override merged on top of the profile config and type settings.
 - `execution_site` — where the operation runs: `auto` (default), `agent`, or `controller`.
-- `role` — one of the three role strings above.
-- `ordinal` — ordering within the same role (currently always 0; reserved for future multi-instance
-  roles such as hook chains).
+- `role` — one of the role strings above.
+- `ordinal` — ordering within the same role. Used by hook roles (`pre_update_hook`,
+  `post_update_hook`) to control execution order; always 0 for other roles.
 
 This design allows **mix-and-match** plugin configurations per role. For example, a host could use
 an APT plugin for `detect_version`, a GitHub plugin for `fetch_releases`, and a custom script
@@ -71,6 +73,8 @@ pub enum PluginRole {
     DetectVersion,
     FetchReleases,
     ExecuteUpdate,
+    PreUpdateHook,
+    PostUpdateHook,
     /// Unknown role from a newer peer — deserialized via From<String>, never fails.
     Other(String),
 }
@@ -173,12 +177,12 @@ The `PluginCapability` enum defines the optional behaviors a plugin may support:
 | `DiscoverLocalSoftware` | Plugin can enumerate locally installed software via `discover_software()`. |
 | `RefreshPackageIndex` | Plugin can refresh its local package index before version checks (e.g. `apt update`). |
 | `DetectHostCompatibility` | Plugin can determine if it is applicable to the current host via `detect_host_compatibility()`. |
-| `PreUpdateHook` | Plugin can run logic before an update via `pre_update_hook()`; can abort the update. |
-| `PostUpdateHook` | Plugin can run logic after an update via `post_update_hook()`; non-fatal. |
+| `UpdateLifecycle` | Plugin implements the `UpdateLifecyclePlugin` trait for pre/post-update hooks. See [Update Lifecycle Plugins](update-hooks.md). |
 | `ControllerSideFetchReleases` | Plugin's `fetch_releases()` does not require local system state and can run on the controller instead of the agent. See [Execution Site Decision Logic](#execution-site-decision-logic). |
 
-Each capability maps to an optional method on the `PluginOps` trait. Plugins that do not implement a
-method should not declare the corresponding capability, and vice versa.
+Each capability maps to an optional method on the `PluginOps` trait or a subtrait accessor
+(`as_update_lifecycle()` for `UpdateLifecycle`). Plugins that do not implement a method should
+not declare the corresponding capability, and vice versa.
 
 ### `ControllerSideFetchReleases` Capability
 
@@ -257,33 +261,41 @@ Current implementations:
 
 The controller can use compatibility results to surface per-host plugin status in the UI (planned).
 
-## Plugin Lifecycle Hooks
+## Update Lifecycle Hooks
 
-Plugin-level hooks (`PreUpdateHook`, `PostUpdateHook`) run as part of the update execution flow
-managed by `agent-core`. They are distinct from user-configured JSON hooks (configured in plugin
-config or per-assignment `config` under a `hooks` key -- see [Update Hooks](update-hooks.md)).
+Update lifecycle hooks are standalone plugin assignments with roles `PreUpdateHook` and
+`PostUpdateHook`. They implement the `UpdateLifecyclePlugin` trait and are executed by
+`agent-core` as part of the update pipeline.
 
 Order of operations during an update:
 
-1. User-configured pre-update hook (JSON `hooks.pre_update`) — runs shell commands.
-2. Plugin-level `pre_update_hook()` — can abort; failure aborts the update.
+1. **Pre-update hook plugins** (ordered by `ordinal` ASC) — each calls `execute_pre_hook()`.
+   First failure aborts the update.
+2. Attestation gate (if applicable).
 3. Main update execution (`execute_update()`).
-4. Plugin-level `post_update_hook()` — non-fatal; errors are logged as warnings.
-5. User-configured post-update hook (JSON `hooks.post_update`) — runs shell commands.
+4. **Post-update hook plugins** (ordered by `ordinal` ASC) — each calls `execute_post_hook()`
+   with `update_succeeded` set. Errors are logged as warnings, non-fatal.
+5. Version detection (`detect_installed_version()`).
 
-The `UpdateHookContext` passed to plugin hooks contains `package_identifier`, `to_version`, and
-`from_version` (the installed version before the update, if known).
+The `UpdateLifecycleContext` passed to hook plugins contains `package_identifier`, `to_version`,
+`from_version`, `release_info`, and `update_succeeded` (`None` during pre-hooks, `Some(bool)`
+during post-hooks).
+
+See [Update Lifecycle Plugins](update-hooks.md) for full details on the systemd and shell
+hook plugins.
 
 ## First-Party Plugin Crates
 
-| Plugin type | Crate | Host compat | Pre-hook | Post-hook | Discovery | Controller-side fetch |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| `releases_github` | `uptrakit-plugin-releases-github` | No | No | No | No | Yes |
-| `generic_shell` | `uptrakit-plugin-generic-shell` | No | No | No | No | No |
-| `releases_docker` | `uptrakit-plugin-releases-docker` | No | No | No | Yes | Yes |
-| `package_manager_homebrew` | `uptrakit-plugin-package-manager-homebrew` | Yes | No | No | Yes | No |
-| `discovery_proxmox_helper_scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | No | No | No | Yes | No |
-| `package_manager_apt` | `uptrakit-plugin-package-manager-apt` | Yes | No | Yes | Yes | No |
+| Plugin type | Crate | Host compat | Update lifecycle | Discovery | Controller-side fetch |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| `releases_github` | `uptrakit-plugin-releases-github` | No | No | No | Yes |
+| `generic_shell` | `uptrakit-plugin-generic-shell` | No | No | No | No |
+| `releases_docker` | `uptrakit-plugin-releases-docker` | No | No | Yes | Yes |
+| `package_manager_homebrew` | `uptrakit-plugin-package-manager-homebrew` | Yes | No | Yes | No |
+| `discovery_proxmox_helper_scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | No | No | Yes | No |
+| `package_manager_apt` | `uptrakit-plugin-package-manager-apt` | Yes | No | Yes | No |
+| `hook_systemd` | `uptrakit-plugin-hook-systemd` | No | Yes | No | No |
+| `hook_shell` | `uptrakit-plugin-hook-shell` | No | Yes | No | No |
 
 **Shell plugin** (`uptrakit-plugin-generic-shell`): agent-side plugin with two independently-optional
 shell commands. `version_command` detects the installed version (first non-empty trimmed stdout
@@ -296,14 +308,18 @@ agent-side.
 
 - **Compatibility detection results surfaced in UI** — display per-host plugin compatibility in the
   Hosts and Software dashboards.
-- **RebootRequired event system** — post-update events (e.g. APT `PostUpdateHook` detecting
-  `/var/run/reboot-required`) surfaced as controller-side notifications or Home Assistant entities.
+- **RebootRequired event system** — post-update events (e.g. detecting
+  `/var/run/reboot-required` via a shell hook plugin) surfaced as controller-side notifications or
+  Home Assistant entities.
 - **~~"Run arbitrary commands" plugin type~~** — completed. The `generic_shell` plugin (`uptrakit-plugin-generic-shell`)
   provides agent-side version detection and update execution via user-supplied shell commands,
   enabling one-off integrations without writing a Rust crate.
 - **~~Formal multi-plugin-config-synthesis protocol~~** — completed. Plugins now emit structured
   `DiscoveryTarget` values via `DiscoveredSoftware.targets`. The controller processes them
   generically without plugin-specific synthesis logic.
+- **~~Update lifecycle hooks as standalone plugins~~** — completed. The `hook_systemd` and
+  `hook_shell` plugins replace the old embedded hook system. Hooks are assigned via
+  `PreUpdateHook`/`PostUpdateHook` roles with ordinal-based ordering.
 - **Pre-update hook abort propagation** — surface abort reasons in the update history UI.
 
 ## Related Documentation
@@ -312,7 +328,7 @@ agent-side.
   testing guidance.
 - [Command Executor](command-executor.md) — `CommandExecutor` trait, `CommandSpec`, and
   `LocalCommandExecutor` / `SshCommandExecutor`.
-- [Update Hooks](update-hooks.md) — user-configured JSON hook format (separate from plugin-level hooks).
+- [Update Lifecycle Plugins](update-hooks.md) — systemd and shell hook plugins for pre/post-update hooks.
 - [Autodiscovery](../end-user/autodiscovery.md) — end-user discovery workflow and ignore rules.
 - [API: Autodiscovery](../api/autodiscovery.md) — REST endpoints and PHS config synthesis.
 - [Software Item Entity](../architecture/software-item-entity.md) — data model for software items,

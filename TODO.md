@@ -39,12 +39,17 @@ All foundation work is done. Summary of what was delivered:
   status, errors), serialization, routing, protocol versioning.
 - **Agent Registration & Discovery** — Enrollment flow (auto/manual approval), certificate
   issuance, inventory tracking, heartbeat, status monitoring, metadata collection.
-- **Plugin Trait System** — Plugin trait (detect, check, update, pre/post hooks, host
+- **Plugin Trait System** — Plugin trait (detect, check, update, update lifecycle hooks, host
   compatibility), `PluginRegistry` + `register_plugins!` macro, capability discovery
-  (`PluginCapability`, 5 variants), configuration storage (`plugin_configs` table).
+  (`PluginCapability`), configuration storage (`plugin_configs` table).
 - **Role-Based Plugin Assignment** — `host_software_item_plugins` table with per-role assignments
-  (`detect_version`, `fetch_releases`, `execute_update`), `execution_site` column, per-host latest
-  version tracking, controller-side and agent-side `fetch_releases`.
+  (`detect_version`, `fetch_releases`, `execute_update`, `pre_update_hook`, `post_update_hook`),
+  `execution_site` column, per-host latest version tracking, controller-side and agent-side
+  `fetch_releases`.
+- **Update Lifecycle Plugins** — Standalone `hook_systemd` and `hook_shell` plugins assigned via
+  `PreUpdateHook`/`PostUpdateHook` roles with ordinal-based ordering. `UpdateLifecyclePlugin`
+  trait with `execute_pre_hook()` / `execute_post_hook()` methods. Replaces the old embedded
+  hook system (predefined templates + custom commands in plugin config JSON).
 
 ### Plugin System: Follow-up Items
 
@@ -53,9 +58,9 @@ All foundation work is done. Summary of what was delivered:
   - Compatibility detection runs on agents but results are not yet sent to the controller. Wire a
     new message type or extend `DiscoveryResults` so the dashboard can show per-host plugin
     compatibility status.
-- [ ] Add `RebootRequired` wire message / post-update event system for APT plugin
+- [ ] Add `RebootRequired` wire message / post-update event system
   - **Category**: Plugins / Wire | **Impact**: Medium | **Effort**: Medium
-  - APT's `PostUpdateHook` already detects `/var/run/reboot-required`, but the result stays local.
+  - A shell hook plugin could detect `/var/run/reboot-required`, but the result stays local.
     Add a wire message so the controller can display reboot-needed status and optionally trigger
     notifications.
 - [x] ~~"Run arbitrary commands" plugin type (custom script plugin)~~ — Implemented as
@@ -362,9 +367,9 @@ Ranked by potential audience coverage and likeliness of using uptrakit for updat
   - Package manager plugin for Red Hat-family Linux — the dominant distribution family in
     enterprise environments. Detect via `dnf list installed`, fetch via `dnf check-update` after
     `dnf makecache` (`RefreshPackageIndex`), update via `sudo dnf upgrade -y`. Batch-capable
-    (space-separated package lists). `PostUpdateHook` checks `needs-restarting -r` or
-    `/var/run/reboot-required`. Discovery via `dnf list installed`. DetectHostCompatibility:
-    `which dnf`.
+    (space-separated package lists). Reboot detection (`needs-restarting -r` or
+    `/var/run/reboot-required`) can be handled by a `hook_shell` lifecycle plugin.
+    Discovery via `dnf list installed`. DetectHostCompatibility: `which dnf`.
 - [x] ~~Pacman plugin (Arch Linux, Manjaro, EndeavourOS)~~ — Implemented as
   `uptrakit-plugin-package-manager-pacman`.
   - **Category**: Plugins | **Impact**: High | **Effort**: Medium

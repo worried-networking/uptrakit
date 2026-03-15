@@ -34,10 +34,12 @@ the plugin reports itself as incompatible and is skipped for that host.
 This means DNF plugin configs are automatically skipped on Debian/Ubuntu, macOS, or any
 system that does not use DNF.
 
-## Post-Update Hook
+## Reboot Detection
 
-DNF does not use `/var/run/reboot-required`. The `PostUpdateHook` capability is
-**not** implemented for this plugin; no post-update notification is emitted.
+DNF does not use `/var/run/reboot-required`. To detect whether a reboot is required after a
+DNF update, assign a `hook_shell` lifecycle plugin to the `post_update_hook` role with a
+command like `needs-restarting -r`. See [Update Lifecycle Plugins](../../development/update-hooks.md)
+for details.
 
 ## Configuration
 

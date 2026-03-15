@@ -2,16 +2,17 @@
 
 A **plugin configuration** (plugin config) defines a software source that Uptrakit uses to
 resolve upstream versions, check installed versions, and optionally discover packages automatically.
-Each software item host assignment has up to three **role-based plugin assignments**
-(`detect_version`, `fetch_releases`, `execute_update`), each linking to a plugin config.
-This tells Uptrakit which plugin logic to run for each concern and which remote package to query.
+Each software item host assignment has **role-based plugin assignments**
+(`detect_version`, `fetch_releases`, `execute_update`, `pre_update_hook`, `post_update_hook`),
+each linking to a plugin config. This tells Uptrakit which plugin logic to run for each concern
+and which remote package to query.
 
 Plugin configs are tenant-scoped, reusable objects. Multiple software items can reference the
 same plugin config.
 
 ## Plugin Types
 
-Uptrakit ships with fifteen built-in plugin types:
+Uptrakit ships with seventeen built-in plugin types:
 
 | Plugin type | Description | Autodiscovery |
 | --- | --- | --- |
@@ -31,6 +32,8 @@ Uptrakit ships with fifteen built-in plugin types:
 | `package_manager_apk` | Tracks Alpine Linux packages managed by APK. Installed and latest versions are resolved locally by the agent using `apk`. Requires `sudo` access for updates and index refresh. | Yes |
 | `package_manager_snap` | Tracks Snap packages managed by `snapd` on Linux. Agent-side only. Discovers installed snaps, resolves upstream versions via `snap info`, and executes updates via `snap refresh`. Requires `sudo` access for updates. | Yes |
 | `package_manager_cargo` | Tracks Rust binaries installed via `cargo install`. Discovery and version detection run on the agent via `cargo install --list`; upstream versions are fetched controller-side from the crates.io sparse index. No `sudo` required. | Yes |
+| `hook_systemd` | Update lifecycle hook: stops/starts a systemd service around software updates. Assign to `pre_update_hook` and/or `post_update_hook` roles. | No |
+| `hook_shell` | Update lifecycle hook: runs arbitrary shell commands before/after software updates. Assign to `pre_update_hook` and/or `post_update_hook` roles. | No |
 
 ### `releases_github` configuration fields
 
@@ -66,9 +69,8 @@ field selects which asset to download -- exactly one must match per host (use pe
 OS/architecture).
 
 **Sudoers entries:** When `install_path` is configured, the plugin declares `install` as a
-required sudo command. When `pre_install_command` or `post_install_command` reference
-`systemctl`, the plugin additionally declares `systemctl stop *` and `systemctl start *` as
-restricted sudo entries (other systemctl subcommands are not permitted).
+required sudo command. For systemd service management around updates, use a `hook_systemd`
+lifecycle plugin assignment instead (see below).
 
 ### `releases_gitlab` configuration fields
 
@@ -414,6 +416,41 @@ versions (`version` containing `-`) are filtered out unless `include_prereleases
 **Private registries.** When `registry_url` is set to a private registry, Uptrakit relaxes its
 SSRF protection to allow private/LAN addresses. Only set this if you operate a private Cargo
 registry (e.g. [Cloudsmith](https://cloudsmith.io/), [Gitea](https://gitea.com/), Artifactory).
+
+### `hook_systemd` configuration fields
+
+The systemd hook plugin stops and starts a systemd service around software updates. Assign it
+to the `pre_update_hook` and/or `post_update_hook` roles on a host software item assignment.
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `service_name` | Yes | Systemd service unit name (e.g. `"nginx"`, `"my-app.service"`). Only `[a-zA-Z0-9._@:-]` characters allowed, max 256 chars. |
+
+**Pre-hook behaviour:** runs `systemctl stop <service_name>`. Failure aborts the update.
+
+**Post-hook behaviour:** runs `systemctl start <service_name>`. Always runs, even after a
+failed update, to restore service state.
+
+**Sudoers entries:** `systemctl stop *` and `systemctl start *`.
+
+### `hook_shell` configuration fields
+
+The shell hook plugin runs arbitrary shell commands before and/or after software updates.
+Assign it to the `pre_update_hook` and/or `post_update_hook` roles on a host software item
+assignment.
+
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `pre_command` | No | — | Shell command to run before the update. Non-zero exit aborts the update. |
+| `post_command` | No | — | Shell command to run after the update. |
+| `on_failure` | No | `true` | Whether to run `post_command` even when the update fails. |
+| `shell` | No | `"bash"` | Shell interpreter: `"bash"` or `"sh"`. |
+
+At least one of `pre_command` or `post_command` must be set. Commands are limited to 4096
+characters.
+
+**Sudoers entries:** None. Users are responsible for ensuring commands have the necessary
+permissions.
 
 ## Plugin Type Settings
 

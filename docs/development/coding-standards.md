@@ -123,7 +123,6 @@ Enums currently annotated with `#[non_exhaustive]`:
 
 **`uptrakit-internal-wire`:**
 
-- `HookCommand` (with `Other { raw: serde_json::Value }` catch-all)
 - `CloseReason`
 - `ServiceMessage`, `ControllerMessage`
 - `EnrollmentStatus` (with `Other(String)` catch-all)

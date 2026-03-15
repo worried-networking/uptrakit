@@ -36,8 +36,7 @@ for the implementation pattern.
 Plugin config fields that represent filesystem paths (`compose_file`, `working_dir`,
 `project_dir`) must reject `..` path segments to prevent directory traversal. The Docker plugin's
 `DockerConfig::validate()` enforces this for both `compose_restart.compose_file` and
-`compose_restart.working_dir`. The structured hook system's `DockerComposeHook::validate()`
-applies the same check to `compose_file` and `project_dir`.
+`compose_restart.working_dir`.
 
 Any new plugin config field that accepts a path must apply the same validation pattern:
 
@@ -100,12 +99,12 @@ Any new `ControllerMessage` variant that triggers command execution on agents
 
 ## Agent-Side Execution Hardening
 
-### Per-hook timeout
+### Per-hook plugin timeout
 
-Individual pre/post-update hooks have a 5-minute timeout (`HOOK_TIMEOUT =
-300s`). On timeout, the hook's child process is killed via `kill_on_drop(true)`
-and an `UpdateError::HookFailed` is returned. This prevents a single malicious
-or stuck hook from consuming the entire update timeout budget.
+Individual pre/post-update lifecycle hook plugin executions have a 5-minute
+timeout (`HOOK_TIMEOUT = 300s`). On timeout, the hook's child process is killed
+via `kill_on_drop(true)` and an error is returned. This prevents a single
+malicious or stuck hook from consuming the entire update timeout budget.
 
 ### Update rate limiting
 
@@ -114,11 +113,11 @@ update executions. For the SSH agent, cooldown is tracked per-host. Updates
 arriving within the cooldown window are rejected with a `security_audit:`
 warning. This limits the damage rate from a compromised controller.
 
-### Hook audit logging
+### Hook plugin audit logging
 
-Before executing pre/post-update hooks, agents emit a `security_audit:` warning
-listing the hook count and command summaries. This enables forensic analysis of
-all commands executed on managed hosts.
+Before executing pre/post-update lifecycle hook plugins, agents emit a
+`security_audit:` warning listing the hook plugin count. This enables forensic
+analysis of all commands executed on managed hosts.
 
 ## Wire Protocol Payload Validation
 
@@ -163,8 +162,8 @@ The rejection gate is in `crates/ui/web-api/src/routes/plugin_configs.rs`
 
 When disabled via `--allow-dangerous-commands`, detected patterns are still logged as
 `security_audit:` warnings. The underlying threat: an authenticated user with `manage_commands`
-permission can craft plugin configs (shell commands, Docker `post_pull_command`, or hook arrays)
-that execute arbitrary code on managed hosts. Mitigations include permission separation, dangerous
+permission can craft plugin configs (shell commands, Docker `post_pull_command`, or hook plugin
+commands) that execute arbitrary code on managed hosts. Mitigations include permission separation, dangerous
 pattern rejection, command length limits, and security audit logging.
 
 ## SSRF Protection

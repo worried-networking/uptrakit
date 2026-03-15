@@ -186,8 +186,8 @@ and is not sent to the agent.
     "package_identifier": "nginx",
     "config": {}
   },
-  "pre_update_hooks": [],
-  "post_update_hooks": [],
+  "pre_update_hook_plugins": [],
+  "post_update_hook_plugins": [],
   "release_info": {
     "tag": "v1.24.0",
     "release_url": "https://github.com/owner/repo/releases/tag/v1.24.0",
@@ -213,10 +213,10 @@ and is not sent to the agent.
 | `to_version` | string | Target version |
 | `detect_version_plugin` | `PluginAssignment?` | Plugin for before/after installed-version detection. Absent when no `detect_version` plugin is configured. |
 | `execute_update_plugin` | `PluginAssignment` | Plugin for the `execute_update` role (required) |
-| `pre_update_hooks` | `Vec<HookCommand>` | Pre-update hook commands |
-| `post_update_hooks` | `Vec<HookCommand>` | Post-update hook commands |
+| `pre_update_hook_plugins` | `Vec<PluginAssignment>` | Pre-update hook plugin assignments (role `pre_update_hook`) |
+| `post_update_hook_plugins` | `Vec<PluginAssignment>` | Post-update hook plugin assignments (role `post_update_hook`) |
 | `release_info` | `ReleaseInfo?` | Release metadata from the upstream source. Only present for GitHub Releases items. See [`ReleaseInfo` fields](#releaseinfo-fields). |
-| `timeout_seconds` | `Duration` | Maximum execution time for the entire update (including hooks). Rust field is `timeout`, serialized as seconds on the wire (`timeout_seconds`). Defaults to 7200 (2 hours) when omitted. |
+| `timeout_seconds` | `Duration` | Maximum execution time for the entire update (including hook plugins). Rust field is `timeout`, serialized as seconds on the wire (`timeout_seconds`). Defaults to 7200 (2 hours) when omitted. |
 | `interactive` | bool | When `true`, the agent allocates a PTY and keeps stdin open for forwarding. Defaults to `false`. Only honoured when the agent advertises `InteractiveUpdates`. See [Interactive Updates](interactive-updates.md). |
 
 #### `ReleaseInfo` fields
@@ -587,7 +587,7 @@ See [Tracing Conventions](../development/tracing.md) for the full tracing guide.
 | TCP connect timeout (client) | 30 seconds | The enrollment client aborts the TCP connection if it cannot be established within 30 seconds. |
 | Response timeout (client) | 60 seconds | The `Enroll` and `RequestCertificate` request-response exchanges time out after 60 seconds. |
 | Approval timeout (client) | 30 minutes | The `wait_for_approval` loop times out after 30 minutes. The caller retries the enrollment flow on timeout. |
-| Per-hook timeout (agent) | 5 minutes | Individual pre/post-update hooks are killed after 300 seconds. |
+| Per-hook plugin timeout (agent) | 5 minutes | Individual pre/post-update hook plugin executions are killed after 300 seconds. |
 | Update cooldown (agent) | 5 seconds | Agents reject consecutive updates within the cooldown period. |
 | Report pagination total timeout | 5 minutes | All pages of a paginated report must arrive within 5 minutes of the first page. |
 | Report pagination idle timeout | 15 seconds | Consecutive pages must arrive within 15 seconds of each other. |
@@ -607,13 +607,12 @@ deserialization failures (hard fail, connection close).
 | `MAX_REPORT_HOSTS` | 500 | `ReportHostsPayload.hosts` |
 | `MAX_VERSION_CHECK_ASSIGNMENTS` | 2,000 | `CheckVersionsPayload.assignments` |
 | `MAX_VERSION_CHECK_RESULTS` | 2,000 | `VersionCheckResultsPayload.results` |
-| `MAX_UPDATE_HOOKS` | 50 | `pre_update_hooks`, `post_update_hooks` |
+| `MAX_UPDATE_HOOKS` | 50 | `pre_update_hook_plugins`, `post_update_hook_plugins` |
 | `MAX_BATCH_UPDATES` | 500 | `ExecuteBatchUpdatePayload.updates` |
 | `MAX_BATCH_UPDATE_RESULTS` | 500 | `BatchUpdateResultPayload.results` |
 | `MAX_DISCOVERY_PLUGINS` | 50 | `DiscoverSoftwarePayload.plugins` |
 | `MAX_DISCOVERY_PLUGIN_RESULTS` | 50 | `DiscoveryResultsPayload.results` |
 | `MAX_DISCOVERIES_PER_PLUGIN` | 1,000 | `DiscoveryPluginResult.discoveries` |
-| `MAX_HOOK_ARGS` | 100 | `HookCommand::Exec.args` |
 | `MAX_RELEASE_ASSETS` | 500 | `ReleaseInfo.assets` |
 | `MAX_MQTT_HOSTS` | 5,000 | `MqttSoftwareStatesPayload.hosts` (host metadata entries) |
 | `MAX_HOST_TAGS` | 100 | `MqttHostMetadata.tags` (tags per host) |
@@ -858,7 +857,7 @@ The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incomp
 | Capability | Wire String | Description |
 | --- | --- | --- |
 | `SoftwareDiscovery` | `software_discovery` | Service supports `discover_software` → `discovery_results` flow. Controller gates autodiscovery requests on this capability. |
-| `UpdateHooks` | `update_hooks` | Service supports pre-/post-update hook commands in `execute_update`. Controller omits hooks when absent. |
+| `UpdateHooks` | `update_hooks` | Service supports pre-/post-update hook plugin assignments in `execute_update`. Controller omits hook plugins when absent. |
 | `GracefulShutdown` | `graceful_shutdown` | Service sends `disconnecting` before clean exit and honours `shutdown_timeout_seconds`. |
 | `MqttBridge` | `mqtt_bridge` | Service is an MQTT bridge: handles `register`, `tenant_assignments`, `release_tenants`, `mqtt_client_status`, etc. Maps to `ServiceProfile::MqttBridge`. |
 | `SshRemote` | `ssh_remote` | Service manages remote hosts over SSH. Combined with `SoftwareDiscovery`, maps to `ServiceProfile::Agent` with SSH label. |
@@ -1299,8 +1298,8 @@ Triggers a batch update for software items grouped by plugin type. The agent cal
       "release_info": null
     }
   ],
-  "pre_update_hooks": [],
-  "post_update_hooks": [],
+  "pre_update_hook_plugins": [],
+  "post_update_hook_plugins": [],
   "timeout_seconds": 600
 }
 ```

@@ -24,15 +24,12 @@ Five wire payload fields use typed enums instead of raw strings — invalid valu
 - `ErrorPayload.code: ErrorCode` — `BadRequest`, `EnrollmentFailed`, `NotApproved`, `Forbidden`, `CertificateError`,
   `InternalError`, `AgentVersionTooOld`, or `SequenceError` (serialized as snake_case strings)
 
-`ExecuteUpdatePayload` uses `HookCommand` enum for hook execution:
+`ExecuteUpdatePayload` uses `PluginAssignment` for lifecycle hooks:
 
-- `pre_update_hooks: Vec<HookCommand>` and `post_update_hooks: Vec<HookCommand>` replace the former
-  `pre_update_commands`/`post_update_commands`/`shell` fields
-- `HookCommand::Shell { command, shell }` — custom commands executed via shell interpreter
-- `HookCommand::Exec { program, args, working_dir }` — predefined hooks executed directly via `Command::new()` without
-  shell interpretation (prevents command injection)
-
-Other crates (`web-api-types`, `db`) keep their own parallel enums; conversion happens in consuming crates.
+- `pre_update_hook_plugins: Vec<PluginAssignment>` — hook plugins to execute before the update
+- `post_update_hook_plugins: Vec<PluginAssignment>` — hook plugins to execute after the update
+- Hook plugins (`hook_systemd`, `hook_shell`) implement `UpdateLifecyclePlugin` and are
+  instantiated from `PluginAssignment` entries by the agent's plugin registry.
 
 - `HostInfo` struct: `machine_id`, `os_type?`, `os_version?`, `architecture?`, `hostname?`, `ip_address?`
 - `EnrollPayload` includes `capabilities: BTreeSet<Capability>`. Host information is **not** part of enrollment — it is reported

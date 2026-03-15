@@ -2624,79 +2624,6 @@ components:
           description: Optional list of release assets
           default: []
 
-    hookShell:
-      type: string
-      enum:
-        - bash
-        - sh
-        - powershell
-      default: bash
-      description: |
-        Shell type for hook execution. Determines fail-early settings:
-        - **bash**: `set -euo pipefail` (exit on error, undefined vars, pipe failures)
-        - **sh**: `set -eu` (exit on error, undefined vars)
-        - **powershell**: `$ErrorActionPreference = 'Stop'` (future Windows support)
-
-    hookCommand:
-      oneOf:
-        - type: object
-          title: Shell command
-          required:
-            - Shell
-          properties:
-            Shell:
-              type: object
-              required:
-                - command
-                - shell
-              properties:
-                command:
-                  type: string
-                  description: The shell command to execute
-                  examples:
-                    - "echo 'Starting backup' && backup.sh"
-                shell:
-                  $ref: "#/components/schemas/hookShell"
-                  description: Shell interpreter to use
-          description: |
-            A custom shell command. Executed via the specified shell interpreter
-            with fail-early settings (e.g., `set -euo pipefail` for bash).
-        - type: object
-          title: Exec command
-          required:
-            - Exec
-          properties:
-            Exec:
-              type: object
-              required:
-                - program
-                - args
-              properties:
-                program:
-                  type: string
-                  description: Program to execute directly (no shell interpretation)
-                  examples:
-                    - systemctl
-                    - docker-compose
-                args:
-                  type: array
-                  items:
-                    type: string
-                  description: Arguments to pass to the program
-                  examples:
-                    - ["stop", "myapp"]
-                    - ["-f", "docker-compose.prod.yml", "up", "-d"]
-                working_dir:
-                  type: string
-                  description: Working directory for the command (optional)
-                  examples:
-                    - /opt/myapp
-          description: |
-            A structured command executed directly via the OS (no shell interpretation).
-            Used for predefined hook templates (systemd, docker-compose) to prevent
-            shell injection. The program and arguments are passed directly to the OS
-            exec syscall.
-
     executeUpdatePayload:
       type: object
       required:
@@ -2765,23 +2692,22 @@ components:
         execute_update_plugin:
           $ref: "#/components/schemas/pluginAssignment"
           description: Plugin for the execute_update role
-        pre_update_hooks:
+        pre_update_hook_plugins:
           type: array
           items:
-            $ref: "#/components/schemas/hookCommand"
+            $ref: "#/components/schemas/pluginAssignment"
           description: |
-            Hook commands to run before the update. Each item is either a
-            structured exec command (for predefined hooks like systemd/docker-compose)
-            or a shell command (for custom commands). Exec commands are run directly
-            without a shell interpreter; shell commands are wrapped with fail-early
-            settings and executed via the specified shell.
+            Hook plugins to run before the update. Each item is a plugin
+            assignment with plugin type and configuration. Plugins are executed
+            in order; if any plugin fails, the update is aborted.
           default: []
-        post_update_hooks:
+        post_update_hook_plugins:
           type: array
           items:
-            $ref: "#/components/schemas/hookCommand"
+            $ref: "#/components/schemas/pluginAssignment"
           description: |
-            Hook commands to run after the update. Same format as pre_update_hooks.
+            Hook plugins to run after the update. Same format as
+            pre_update_hook_plugins.
           default: []
         release_info:
           $ref: "#/components/schemas/releaseInfo"
@@ -4194,17 +4120,17 @@ components:
           items:
             $ref: "#/components/schemas/batchUpdateItem"
           description: List of software items to update in a single operation
-        pre_update_hooks:
+        pre_update_hook_plugins:
           type: array
           items:
-            $ref: "#/components/schemas/hookCommand"
-          description: Hook commands to run before the batch update
+            $ref: "#/components/schemas/pluginAssignment"
+          description: Hook plugins to run before the batch update
           default: []
-        post_update_hooks:
+        post_update_hook_plugins:
           type: array
           items:
-            $ref: "#/components/schemas/hookCommand"
-          description: Hook commands to run after the batch update
+            $ref: "#/components/schemas/pluginAssignment"
+          description: Hook plugins to run after the batch update
           default: []
         timeout_seconds:
           type: integer

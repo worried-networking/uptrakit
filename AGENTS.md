@@ -82,7 +82,7 @@ uptrakit/
 │   │   │   └── shell/                  # uptrakit-plugin-generic-shell                  (lib)  — generic agent-side plugin: version_command (detect_installed_version) + update_command (execute_update); supports {package_identifier}, {version}, {tag} placeholders; at least one field required
 │   │   ├── package-managers/
 │   │   │   ├── homebrew/               # uptrakit-plugin-package-manager-homebrew               (lib)  — Homebrew formulae/cask plugin; `HomebrewPackageType` enum: `Both` (default — discovers formulae + casks), `Formula`, `Cask`; implements DetectHostCompatibility (checks `which brew`); native batch_detect_installed_version + batch_fetch_releases (single `brew info --json=v2` call for all packages); DiscoveryTarget always emitted with `{"package_type": "formula"|"cask"}` in both plugin_config and config_override
-│   │   │   ├── apt/                    # uptrakit-plugin-package-manager-apt                    (lib)  — APT (Debian/Ubuntu) plugin (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install); implements DetectHostCompatibility (checks `which apt-get`) and PostUpdateHook (checks /var/run/reboot-required); native batch_detect_installed_version (dpkg-query with all packages) + batch_fetch_releases (apt-cache madison with all packages)
+│   │   │   ├── apt/                    # uptrakit-plugin-package-manager-apt                    (lib)  — APT (Debian/Ubuntu) plugin (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install); implements DetectHostCompatibility (checks `which apt-get`); native batch_detect_installed_version (dpkg-query with all packages) + batch_fetch_releases (apt-cache madison with all packages)
 │   │   │   ├── npm/                    # uptrakit-plugin-package-manager-npm                    (lib)  — npm global-package plugin; ControllerSideFetchReleases (queries registry.npmjs.org); discovery via `npm list -g --json`; updates via `sudo npm install -g <pkg>@<version>`; implements DetectHostCompatibility (checks `which npm`); validate_identifier exported for registry; native batch_detect_installed_version (single `npm list -g --depth=0 --json` call, filtered in memory)
 │   │   │   ├── mas/                    # uptrakit-plugin-package-manager-mas                    (lib)  — Mac App Store plugin via `mas` CLI; agent-side only (no ControllerSideFetchReleases); discovery via `mas list`; version detection + release fetch via `mas list` + `mas outdated`; updates via `mas upgrade <id>`; implements DetectHostCompatibility (checks `which mas`); package_identifier = numeric App Store ID (digits only, max 15 chars); no sudo needed; native batch_detect_installed_version + batch_fetch_releases (single `mas list` + `mas outdated` calls, mapped in memory)
 │   │   │   ├── pacman/                 # uptrakit-plugin-package-manager-pacman                 (lib)  — Arch Linux Pacman plugin; detection via `pacman -Q`; latest version via `pacman -Si`; updates via `sudo pacman -S --noconfirm`; database sync via `sudo pacman -Sy`; discovery via `pacman -Q` (all) or `pacman -Qe` (explicit); implements DetectHostCompatibility (checks `which pacman`); no PostUpdateHook (no /var/run/reboot-required on Arch); needs_setenv=false in sudoers; validate_identifier: lowercase [a-z0-9@._+-], starts with [a-z0-9], max 128 chars; batch_detect_installed_version (single `pacman -Q` call) + batch_fetch_releases (single `pacman -Si` call, output parsed as blank-line-separated blocks)
@@ -90,6 +90,9 @@ uptrakit/
 │   │   │   ├── apk/                    # uptrakit-plugin-package-manager-apk                    (lib)  — APK (Alpine Linux) plugin; discovery via `apk list --installed` (all mode) or `/etc/apk/world` (world mode); version detection via `apk info -v`; latest version via `apk version`; updates via `sudo apk add <pkg>=<ver>`; implements DetectHostCompatibility (checks `which apk`) and RefreshPackageIndex (`sudo apk update`); package_identifier = Alpine package name (lowercase+digits+._+-, min 2 chars, max 100 chars, no `..`); native batch_detect_installed_version + batch_fetch_releases (single `apk info -v` / `apk version` call for all packages)
 │   │   │   ├── snap/                   # uptrakit-plugin-package-manager-snap                   (lib)  — Snap (snapd) plugin for Linux; agent-side only; discovery via `snap list` (excludes system snaps: core*, snapd, bare); version detection via `snap list <name>`; batch_detect_installed_version via single `snap list` parsed into map; release fetch via `snap info <name>` (channels: section parsing); updates via `sudo snap refresh <name>` (optional --channel=); native execute_batch_update (single `snap refresh name1 name2 ...`); implements DetectHostCompatibility (checks `which snap`); package_identifier = snap name (lowercase, digits, hyphens, 2-40 chars); requires sudo for refresh; no package index refresh step (snapd manages cache internally)
 │   │   │   └── cargo/                  # uptrakit-plugin-package-manager-cargo                  (lib)  — Cargo install plugin; tracks Rust binaries installed via `cargo install`; discovery + version detection via `cargo install --list` (parse non-indented `<name> v<version>:` headers); ControllerSideFetchReleases via crates.io sparse index (`https://index.crates.io/{prefix}/{name}`, `tame-index` for URL/parsing); batch_fetch_releases bounded to 10 concurrent requests via `buffer_unordered(10)`; updates via `cargo install <name> --version <ver> --locked` (default, controlled by `use_locked` type setting) (no sudo, installs to `~/.cargo/bin`); implements DetectHostCompatibility (checks `which cargo` exit code); package_identifier = crate name (1–64 chars, starts with letter/underscore, `[A-Za-z0-9_-]`); DiscoveryTarget always emitted; type_settings_form_schema() for include_prereleases, registry_url, and use_locked; custom registry_url uses SsrfSafeResolver::permissive(), default uses SsrfSafeResolver::new()
+│   │   ├── hooks/
+│   │   │   ├── systemd/                # uptrakit-plugin-hook-systemd            (lib)  — Systemd hook plugin: stops/starts a systemd service around updates; UpdateLifecycle capability; pre-hook runs `systemctl stop`, post-hook runs `systemctl start` (always, to restore state); declares sudo commands for systemctl stop/start; validates service_name [a-zA-Z0-9._@:-]
+│   │   │   └── shell/                  # uptrakit-plugin-hook-shell              (lib)  — Shell hook plugin: runs arbitrary shell commands before/after updates; UpdateLifecycle capability; pre_command (abort on non-zero exit), post_command (respects on_failure flag); supports bash/sh shell types with fail-early settings; max command length 4096; no sudo requirements
 │   │   ├── notifications/
 │   │   │   ├── core/                   # uptrakit-notification-plugin-core       (lib)  — DeliveryMessage, MessageAction, NotificationPluginError, escape_html()
 │   │   │   ├── webhook/               # uptrakit-notification-plugin-webhook    (lib)  — Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing)
@@ -113,7 +116,7 @@ uptrakit/
 │   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, interval+jitter scheduling (interval.rs: compute_next_run_at), TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); tasks categorised as internal (CrlRenewal, CaRotationCheck, ServiceCertCheck — embedded scheduler only) vs external (AuthCleanup, StaleLeaseCleanup, FetchReleases, DetectVersion — deferrable to external scheduler); `external_scheduler_connected: Arc<AtomicBool>` flag skips external tasks when set; FetchReleasesExecutor Phase B sends fetch assignments for host_software_items so that latest_version is populated
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity (ServiceIdentityState: service_id + enrollment_secret + tenant_id in service.json), TLS, CA bootstrap, main helpers; default_resolve_shutdown(); `decrypt_sensitive_params<T>()` generic ECIES sealed-box decryption for extension sensitive params; `zeroconf` feature (default): mDNS/DNS-SD discovery module (browse for `_uptrakit._tcp.local.`, cache in `discovery.json` with 0o600 permissions); when `--url` omitted + feature enabled, auto-discovers controller on LAN
 │   │   ├── audit-log/                  # uptrakit-audit-log                      (lib)  — AuditLogBackend trait, AuditEntry, AuditFilter, AuditLogDispatcher; backends: NoopBackend, DatabaseBackend (cfg db), JournaldBackend (cfg journald), MultiplexBackend; fire-and-forget dispatcher pattern
-│   │   ├── update-hooks/               # uptrakit-update-hooks                  (lib)  — update hook resolution and config merge logic (extracted from web-api)
+│   │   ├── update-hooks/               # uptrakit-config-merge                  (lib)  — config merge utilities: resolve_effective_config(), merge_config(), shallow_merge_into()
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields; report pagination (`paginate.rs` Paginatable trait + `report_tracker.rs` ReportTracker); re-exports `uptrakit-extension-framework` as `extension` module
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, host-tags, services, software-items, plugin-configs, software-ignores, checks, updates, batch-updates, history, scheduler, settings); `update trigger --follow` and `history tail` use SSE streaming; `update batch-host/batch-item --follow` and `update-batches follow` use batch progress SSE; lib target exposes modules for integration tests
@@ -619,28 +622,21 @@ for user review. Key invariants:
      External match sites must include a wildcard arm (see `coding-standards.md` § Public Enum
      Extensibility). Implemented by:
      `AptPlugin` (checks `which apt-get`) and `HomebrewPlugin` (checks `which brew`).
-   - `PreUpdateHook` — the plugin implements `pre_update_hook(context: &UpdateHookContext)` which
-     returns `PreUpdateHookResult` (`Proceed` or `Abort { reason: String }`). An `Abort` cancels the
-     update before it executes.
-   - `PostUpdateHook` — the plugin implements `post_update_hook(context: &UpdateHookContext)` which
-     is non-fatal. Implemented by `AptPlugin` (checks `/var/run/reboot-required` and logs a warning).
+   - `UpdateLifecycle` — the plugin implements the `UpdateLifecyclePlugin` subtrait (via
+     `as_update_lifecycle()` accessor). Provides `execute_pre_hook()` (returns `PreUpdateHookResult`:
+     proceed or abort with reason) and `execute_post_hook()` (non-fatal, errors logged as warnings).
+     The `UpdateLifecycleContext` contains `package_identifier`, `to_version`, `from_version`,
+     `release_info`, and `update_succeeded` (`None` during pre-hooks, `Some(bool)` during post-hooks).
+     Implemented by `SystemdHookPlugin` and `ShellHookPlugin`.
    - `ControllerSideFetchReleases` — the plugin's `fetch_releases()` requires no local system state
      and can run on the controller instead of the agent. Implemented by `GithubPlugin` and
      `DockerPlugin`. This capability interacts with the `execution_site` field on
      `host_software_item_plugins`: `auto` (default) delegates to the controller when this capability
      is present, `agent` forces agent-side execution, `controller` forces controller-side execution.
 
-   The `UpdateHookContext` struct contains `package_identifier`, `to_version`, and `from_version`.
-   These plugin-level hooks are distinct from the user-configured `hooks` in plugin config JSON
-   (documented in [Update Hooks](docs/development/update-hooks.md)).
-
-   **`HookCommand` dispatch — skip-not-abort on unknown variants.** `HookCommand` is
-   `#[non_exhaustive]`. Both `run_hook_command_inner` and `run_hook_for_batch_inner` in
-   `crates/shared/agent-core/src/update.rs` contain a `_ =>` wildcard arm that **must** warn and
-   return `Ok` (skip the hook), never `Err`. An older agent that receives a hook variant added by a
-   newer controller must not abort the update — skipping the unrecognised hook preserves the ability
-   to roll out new hook types without requiring all agents to be updated first. Do not change these
-   arms to return errors.
+   Update lifecycle hooks are standalone plugin assignments with roles `PreUpdateHook` and
+   `PostUpdateHook` on `host_software_item_plugins`, ordered by `ordinal`. See
+   [Update Lifecycle Plugins](docs/development/update-hooks.md).
 
    **Batch trait methods** (all have default sequential fallbacks; override for efficiency):
 
@@ -1654,7 +1650,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Plugin Guidelines](docs/development/plugin-guidelines.md)
 - [Plugin System Architecture](docs/development/plugin-system.md)
 - [Command Executor](docs/development/command-executor.md)
-- [Update Hooks](docs/development/update-hooks.md)
+- [Update Lifecycle Plugins](docs/development/update-hooks.md)
 - [Service Lifecycle](docs/development/service-lifecycle.md)
 - [OpenAPI Client](docs/development/openapi-client.md)
 - [Embedded Frontend](docs/development/embedded-frontend.md)
