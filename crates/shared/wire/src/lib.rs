@@ -9,6 +9,7 @@ pub mod payloads;
 pub mod report_tracker;
 pub mod serde_helpers;
 pub mod service_profile;
+pub mod shared_types;
 pub mod trace_context;
 
 mod wire_validate_impls;
@@ -22,6 +23,7 @@ pub use paginate::Paginatable;
 pub use payloads::*;
 pub use report_tracker::ReportTracker;
 pub use service_profile::{ServiceProfile, parse_capabilities, serialize_capabilities};
+pub use shared_types::*;
 pub use trace_context::{TraceContext, current_trace_context};
 
 // Re-export shared types used directly in wire protocol messages.

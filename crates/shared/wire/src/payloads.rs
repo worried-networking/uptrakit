@@ -5,7 +5,7 @@ use time::UtcDateTime;
 use uuid::Uuid;
 
 use super::capabilities::{Capability, EnrollmentStatus};
-use super::messages::{DisconnectReason, HookCommand, UpdateFinalStatus};
+use super::shared_types::{DisconnectReason, HookCommand, UpdateFinalStatus};
 use crate::serde_helpers::{duration_seconds, option_duration_seconds, utc_datetime_millis};
 use uptrakit_shared_types::{
     DiscoveredSoftware, MqttClientConnectionStatus, MqttTransport, OutputStreamType, PluginType,
@@ -17,12 +17,12 @@ use uptrakit_shared_types::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PingPayload {
     /// Timestamp when the service sent the ping.
-    pub service_ts: super::messages::Timestamp,
+    pub service_ts: super::shared_types::Timestamp,
 }
 
 impl PingPayload {
     /// Creates a new `PingPayload` with the given service timestamp.
-    pub fn new(service_ts: super::messages::Timestamp) -> Self {
+    pub fn new(service_ts: super::shared_types::Timestamp) -> Self {
         Self { service_ts }
     }
 }
@@ -32,16 +32,16 @@ impl PingPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PongPayload {
     /// Original timestamp from the service's ping.
-    pub service_ts: super::messages::Timestamp,
+    pub service_ts: super::shared_types::Timestamp,
     /// Timestamp when the controller processed the ping.
-    pub controller_ts: super::messages::Timestamp,
+    pub controller_ts: super::shared_types::Timestamp,
 }
 
 impl PongPayload {
     /// Creates a new `PongPayload` with the given service and controller timestamps.
     pub fn new(
-        service_ts: super::messages::Timestamp,
-        controller_ts: super::messages::Timestamp,
+        service_ts: super::shared_types::Timestamp,
+        controller_ts: super::shared_types::Timestamp,
     ) -> Self {
         Self {
             service_ts,
@@ -403,7 +403,7 @@ pub struct ExecuteUpdatePayload {
     #[serde(
         with = "duration_seconds",
         rename = "timeout_seconds",
-        default = "super::messages::default_update_timeout"
+        default = "super::shared_types::default_update_timeout"
     )]
     pub timeout: std::time::Duration,
     /// When `true`, the agent allocates a PTY and keeps stdin open for forwarding.
@@ -482,7 +482,7 @@ pub struct ExecuteBatchUpdatePayload {
     #[serde(
         with = "duration_seconds",
         rename = "timeout_seconds",
-        default = "super::messages::default_update_timeout"
+        default = "super::shared_types::default_update_timeout"
     )]
     pub timeout: std::time::Duration,
     /// When `true`, the agent allocates a PTY and keeps stdin open for forwarding.
