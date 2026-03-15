@@ -634,6 +634,176 @@ pub(super) async fn handle_update_output(
 // handle_update_result
 // ---------------------------------------------------------------------------
 
+/// Map [`UpdateFinalStatus`] to a status string used by SSE events.
+fn final_status_str(status: &UpdateFinalStatus) -> &'static str {
+    match status {
+        UpdateFinalStatus::Completed => "completed",
+        _ => "failed",
+    }
+}
+
+/// Map [`UpdateFinalStatus`] to the DB enum.
+fn final_status_to_db(status: &UpdateFinalStatus) -> update_history::UpdateStatus {
+    match status {
+        UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
+        _ => update_history::UpdateStatus::Failed,
+    }
+}
+
+/// Compare controller-side streaming output against the agent payload and
+/// return `(best_output, was_agent_truncated)`.
+///
+/// On timeout the agent's `accumulated_output` is often incomplete, whereas
+/// the controller-side lines were collected in real time.
+async fn select_best_output(
+    state: &Arc<AppState>,
+    update_history_id: uuid::Uuid,
+    agent_output: String,
+) -> (String, bool) {
+    let db_output = {
+        let lines = update_output_line::Entity::find()
+            .filter(update_output_line::Column::UpdateHistoryId.eq(update_history_id))
+            .order_by_asc(update_output_line::Column::CreatedAt)
+            .order_by_asc(update_output_line::Column::Id)
+            .all(state.db())
+            .await
+            .unwrap_or_default();
+        let mut buf = String::new();
+        for line in lines {
+            if buf.len() + line.output.len() > MAX_UPDATE_OUTPUT_BYTES {
+                break;
+            }
+            buf.push_str(&line.output);
+        }
+        buf
+    };
+
+    if db_output.len() > agent_output.len() {
+        tracing::info!(
+            update_id = %update_history_id,
+            agent_bytes = agent_output.len(),
+            db_bytes = db_output.len(),
+            "using controller-side streaming output (more complete than agent payload)"
+        );
+        (db_output, false)
+    } else if agent_output.len() > MAX_UPDATE_OUTPUT_BYTES {
+        (agent_output[..MAX_UPDATE_OUTPUT_BYTES].to_string(), true)
+    } else {
+        (agent_output, false)
+    }
+}
+
+/// Update `host_software_item.installed_version` on successful completion.
+async fn update_installed_version_on_success(
+    state: &Arc<AppState>,
+    host_id: uuid::Uuid,
+    software_item_id: uuid::Uuid,
+    to_version: &str,
+) {
+    let now = time::OffsetDateTime::now_utc();
+    if let Err(e) = host_software_item::Entity::update_many()
+        .col_expr(
+            host_software_item::Column::InstalledVersion,
+            sea_orm::sea_query::Expr::value(Some(to_version.to_string())),
+        )
+        .col_expr(
+            host_software_item::Column::InstalledVersionDetectedAt,
+            sea_orm::sea_query::Expr::value(Some(now)),
+        )
+        .col_expr(
+            host_software_item::Column::LastUpdatedAt,
+            sea_orm::sea_query::Expr::value(Some(now)),
+        )
+        .filter(host_software_item::Column::HostId.eq(host_id))
+        .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
+        .exec(state.db())
+        .await
+    {
+        tracing::warn!(
+            error = %e,
+            "failed to update host_software_item installed_version"
+        );
+    }
+}
+
+/// Emit `AdminEvent::UpdateCompleted` for SSE subscribers.
+async fn emit_update_completed_event(
+    state: &Arc<AppState>,
+    tenant_id: uuid::Uuid,
+    update_history_id: uuid::Uuid,
+    host_id: uuid::Uuid,
+    software_item_id: uuid::Uuid,
+    status: &UpdateFinalStatus,
+) {
+    state
+        .event_broadcaster
+        .send(
+            tenant_id,
+            AdminEvent::UpdateCompleted {
+                update_history_id,
+                host_id,
+                software_item_id,
+                status: final_status_str(status).to_string(),
+            },
+        )
+        .await;
+}
+
+/// Dispatch a notification event for an update result.
+async fn dispatch_update_notification(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    record: &update_history::Model,
+    payload: &UpdateResultPayload,
+) {
+    let sw_name = software_item::Entity::find_by_id(record.software_item_id)
+        .one(state.db())
+        .await
+        .ok()
+        .flatten()
+        .map(|sw| sw.name.clone());
+    let host_name = host::Entity::find_by_id(record.host_id)
+        .one(state.db())
+        .await
+        .ok()
+        .flatten()
+        .map(|h| h.hostname.clone());
+
+    if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        let resolved_to_version = payload
+            .to_version
+            .clone()
+            .or_else(|| record.to_version.clone())
+            .unwrap_or_default();
+        let details = match payload.status {
+            UpdateFinalStatus::Completed => NotificationEventDetails::UpdateCompleted {
+                from_version: record.from_version.clone(),
+                to_version: resolved_to_version,
+                update_history_id: payload.update_history_id,
+            },
+            _ => NotificationEventDetails::UpdateFailed {
+                from_version: record.from_version.clone(),
+                to_version: resolved_to_version,
+                error: payload.error.clone(),
+                update_history_id: payload.update_history_id,
+            },
+        };
+
+        state.notification_dispatcher.dispatch(NotificationEvent {
+            tenant_id: svc.tenant_id,
+            host_id: Some(record.host_id),
+            host_name,
+            software_item_id: Some(record.software_item_id),
+            software_item_name: sw_name,
+            plugin_type: None,
+            details,
+        });
+    }
+}
+
 /// Handle an `UpdateResult` message: validate ownership, set final status,
 /// store output, update installed version on success, push software states.
 #[tracing::instrument(skip_all, fields(%service_id, update_id = %payload.update_history_id, status = ?payload.status))]
@@ -661,50 +831,14 @@ pub(super) async fn handle_update_result(
         Ok(r) => r,
         Err(_) => return ProcessorResponse::cont(),
     };
+
+    // Persist final status and output.
     let mut active: update_history::ActiveModel = record.clone().into();
-    active.status = Set(match payload.status {
-        UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
-        UpdateFinalStatus::Failed => update_history::UpdateStatus::Failed,
-        _ => update_history::UpdateStatus::Failed,
-    });
+    active.status = Set(final_status_to_db(&payload.status));
     active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
 
-    // Load controller-side streaming output lines and compare against the
-    // agent payload. On timeout the agent's accumulated_output is often
-    // incomplete, whereas the controller-side lines were collected in real
-    // time. Use whichever source is longer to preserve the most data.
-    let db_output = {
-        let lines = update_output_line::Entity::find()
-            .filter(update_output_line::Column::UpdateHistoryId.eq(payload.update_history_id))
-            .order_by_asc(update_output_line::Column::CreatedAt)
-            .order_by_asc(update_output_line::Column::Id)
-            .all(state.db())
-            .await
-            .unwrap_or_default();
-        let mut buf = String::new();
-        for line in lines {
-            if buf.len() + line.output.len() > MAX_UPDATE_OUTPUT_BYTES {
-                break;
-            }
-            buf.push_str(&line.output);
-        }
-        buf
-    };
-
-    let (final_output, agent_truncated) = if db_output.len() > payload.output.len() {
-        tracing::info!(
-            update_id = %payload.update_history_id,
-            agent_bytes = payload.output.len(),
-            db_bytes = db_output.len(),
-            "using controller-side streaming output (more complete than agent payload)"
-        );
-        // output_truncated already reflects the streaming phase; preserve it.
-        (db_output, false)
-    } else if payload.output.len() > MAX_UPDATE_OUTPUT_BYTES {
-        (payload.output[..MAX_UPDATE_OUTPUT_BYTES].to_string(), true)
-    } else {
-        (payload.output, false)
-    };
+    let (final_output, agent_truncated) =
+        select_best_output(state, payload.update_history_id, payload.output.clone()).await;
 
     active.output = Set(final_output.clone());
     active.output_bytes = Set(final_output.len() as i64);
@@ -712,70 +846,41 @@ pub(super) async fn handle_update_result(
         active.output_truncated = Set(true);
     }
     if payload.from_version.is_some() {
-        active.from_version = Set(payload.from_version);
+        active.from_version = Set(payload.from_version.clone());
     }
     if let Err(e) = active.update(state.db()).await {
-        tracing::warn!(
-            error = %e,
-            "failed to update update_history result"
-        );
+        tracing::warn!(error = %e, "failed to update update_history result");
     }
 
-    // Notify SSE subscribers that this update has completed.
-    {
-        let status_str = match payload.status {
-            UpdateFinalStatus::Completed => "completed",
-            UpdateFinalStatus::Failed => "failed",
-            _ => "failed",
-        };
-        state
-            .update_output_broadcaster
-            .send_completed(
-                payload.update_history_id,
-                status_str.to_string(),
-                payload.error.clone(),
-            )
-            .await;
-    }
+    // Notify SSE subscribers and clean up streaming output lines.
+    state
+        .update_output_broadcaster
+        .send_completed(
+            payload.update_history_id,
+            final_status_str(&payload.status).to_string(),
+            payload.error.clone(),
+        )
+        .await;
 
     if let Err(e) = update_output_line::Entity::delete_many()
         .filter(update_output_line::Column::UpdateHistoryId.eq(payload.update_history_id))
         .exec(state.db())
         .await
     {
-        tracing::warn!(
-            error = %e,
-            "failed to clear update output lines"
-        );
+        tracing::warn!(error = %e, "failed to clear update output lines");
     }
 
+    // Update installed version on success.
     if payload.status == UpdateFinalStatus::Completed
         && let Some(ref to_version) = payload.to_version
     {
-        let now = time::OffsetDateTime::now_utc();
-        if let Err(e) = host_software_item::Entity::update_many()
-            .col_expr(
-                host_software_item::Column::InstalledVersion,
-                sea_orm::sea_query::Expr::value(Some(to_version.clone())),
-            )
-            .col_expr(
-                host_software_item::Column::InstalledVersionDetectedAt,
-                sea_orm::sea_query::Expr::value(Some(now)),
-            )
-            .col_expr(
-                host_software_item::Column::LastUpdatedAt,
-                sea_orm::sea_query::Expr::value(Some(now)),
-            )
-            .filter(host_software_item::Column::HostId.eq(record.host_id))
-            .filter(host_software_item::Column::SoftwareItemId.eq(record.software_item_id))
-            .exec(state.db())
-            .await
-        {
-            tracing::warn!(
-                error = %e,
-                "failed to update host_software_item installed_version"
-            );
-        }
+        update_installed_version_on_success(
+            state,
+            record.host_id,
+            record.software_item_id,
+            to_version,
+        )
+        .await;
     }
 
     // Push updated software states to MQTT services.
@@ -792,8 +897,7 @@ pub(super) async fn handle_update_result(
         None
     };
 
-    // If this update is part of a batch, emit batch progress events and
-    // dispatch the next pending update for this host.
+    // Batch or queue dispatch.
     if let Some(batch_id) = record.batch_id {
         let event = match payload.status {
             UpdateFinalStatus::Completed => {
@@ -813,85 +917,25 @@ pub(super) async fn handle_update_result(
             },
         };
         emit_batch_progress_event(state, batch_id, event).await;
-
         dispatch_next_batch_update(state, service_id, batch_id, record.host_id).await;
     } else {
-        // Non-batch update completed: dispatch the next queued update for this host.
         dispatch_next_queued_update(state, service_id, record.host_id).await;
     }
 
-    // Emit AdminEvent::UpdateCompleted so the /software page SSE subscribers
-    // refresh the software list when an update finishes.
+    // Emit SSE admin event and notification.
     if let Some(tenant_id) = svc_tenant_id {
-        let status_str = match payload.status {
-            UpdateFinalStatus::Completed => "completed",
-            UpdateFinalStatus::Failed => "failed",
-            _ => "failed",
-        };
-        state
-            .event_broadcaster
-            .send(
-                tenant_id,
-                AdminEvent::UpdateCompleted {
-                    update_history_id: payload.update_history_id,
-                    host_id: record.host_id,
-                    software_item_id: record.software_item_id,
-                    status: status_str.to_string(),
-                },
-            )
-            .await;
+        emit_update_completed_event(
+            state,
+            tenant_id,
+            payload.update_history_id,
+            record.host_id,
+            record.software_item_id,
+            &payload.status,
+        )
+        .await;
     }
 
-    // Dispatch notification event for update result.
-    {
-        // Look up names for the notification message.
-        let sw_name = software_item::Entity::find_by_id(record.software_item_id)
-            .one(state.db())
-            .await
-            .ok()
-            .flatten()
-            .map(|sw| sw.name.clone());
-        let host_name = host::Entity::find_by_id(record.host_id)
-            .one(state.db())
-            .await
-            .ok()
-            .flatten()
-            .map(|h| h.hostname.clone());
-
-        if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
-            .one(state.db())
-            .await
-        {
-            let resolved_to_version = payload
-                .to_version
-                .clone()
-                .or_else(|| record.to_version.clone())
-                .unwrap_or_default();
-            let details = match payload.status {
-                UpdateFinalStatus::Completed => NotificationEventDetails::UpdateCompleted {
-                    from_version: record.from_version.clone(),
-                    to_version: resolved_to_version,
-                    update_history_id: payload.update_history_id,
-                },
-                _ => NotificationEventDetails::UpdateFailed {
-                    from_version: record.from_version.clone(),
-                    to_version: resolved_to_version,
-                    error: payload.error.clone(),
-                    update_history_id: payload.update_history_id,
-                },
-            };
-
-            state.notification_dispatcher.dispatch(NotificationEvent {
-                tenant_id: svc.tenant_id,
-                host_id: Some(record.host_id),
-                host_name,
-                software_item_id: Some(record.software_item_id),
-                software_item_name: sw_name,
-                plugin_type: None,
-                details,
-            });
-        }
-    }
+    dispatch_update_notification(state, service_id, &record, &payload).await;
 
     ProcessorResponse::cont()
 }
@@ -1218,6 +1262,101 @@ async fn resolve_host_name(state: &Arc<AppState>, host_id: uuid::Uuid) -> String
 // handle_batch_update_result
 // ---------------------------------------------------------------------------
 
+/// Process a single item result within a batch: validate ownership, persist
+/// status/output, and update the installed version on success.
+async fn process_single_batch_result(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    result: &uptrakit_internal_wire::BatchUpdateItemResult,
+    linked_host_ids: &HashSet<uuid::Uuid>,
+) {
+    let history_record = match update_history::Entity::find_by_id(result.update_history_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            tracing::warn!(
+                update_history_id = %result.update_history_id,
+                "update_history record not found"
+            );
+            return;
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                update_history_id = %result.update_history_id,
+                "failed to look up update_history"
+            );
+            return;
+        }
+    };
+
+    if !linked_host_ids.contains(&history_record.host_id) {
+        tracing::warn!(
+            %service_id,
+            update_history_id = %result.update_history_id,
+            host_id = %history_record.host_id,
+            "service attempted to update update_history for unlinked host"
+        );
+        return;
+    }
+
+    // Persist status and output.
+    let mut active: update_history::ActiveModel = history_record.into();
+    active.status = Set(final_status_to_db(&result.status));
+    active.output = Set(if result.output.is_empty() {
+        String::new()
+    } else {
+        result.output.clone()
+    });
+    active.output_bytes = Set(result.output.len() as i64);
+    active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
+    if let Some(ref error) = result.error {
+        if result.output.is_empty() {
+            active.output = Set(error.clone());
+            active.output_bytes = Set(error.len() as i64);
+        }
+    }
+    if let Err(e) = active.update(state.db()).await {
+        tracing::warn!(
+            error = %e,
+            update_history_id = %result.update_history_id,
+            "failed to update update_history"
+        );
+    }
+
+    // On success, update installed version by host_software_item ID.
+    if result.status == UpdateFinalStatus::Completed
+        && let Some(ref new_version) = result.installed_version
+    {
+        let now = time::OffsetDateTime::now_utc();
+        if let Err(e) = host_software_item::Entity::update_many()
+            .col_expr(
+                host_software_item::Column::InstalledVersion,
+                sea_orm::sea_query::Expr::value(Some(new_version.clone())),
+            )
+            .col_expr(
+                host_software_item::Column::InstalledVersionDetectedAt,
+                sea_orm::sea_query::Expr::value(Some(now)),
+            )
+            .col_expr(
+                host_software_item::Column::LastUpdatedAt,
+                sea_orm::sea_query::Expr::value(Some(now)),
+            )
+            .filter(host_software_item::Column::Id.eq(result.host_software_item_id))
+            .exec(state.db())
+            .await
+        {
+            tracing::warn!(
+                error = %e,
+                host_software_item_id = %result.host_software_item_id,
+                "failed to update host_software_item installed_version"
+            );
+        }
+    }
+}
+
 /// Handle a `BatchUpdateResult` message: update per-item
 /// `update_history` rows and `host_software_item.installed_version`
 /// for successful items.
@@ -1235,99 +1374,8 @@ pub(super) async fn handle_batch_update_result(
         "batch update result"
     );
 
-    let now = time::OffsetDateTime::now_utc();
-
     for result in &payload.results {
-        // Validate ownership: the update_history record must belong to a host
-        // linked to this service.
-        let history_record = match update_history::Entity::find_by_id(result.update_history_id)
-            .one(state.db())
-            .await
-        {
-            Ok(Some(r)) => r,
-            Ok(None) => {
-                tracing::warn!(
-                    update_history_id = %result.update_history_id,
-                    "update_history record not found"
-                );
-                continue;
-            }
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    update_history_id = %result.update_history_id,
-                    "failed to look up update_history"
-                );
-                continue;
-            }
-        };
-
-        if !linked_host_ids.contains(&history_record.host_id) {
-            tracing::warn!(
-                %service_id,
-                update_history_id = %result.update_history_id,
-                host_id = %history_record.host_id,
-                "service attempted to update update_history for unlinked host"
-            );
-            continue;
-        }
-
-        // Update the history record.
-        let db_status = match result.status {
-            UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
-            UpdateFinalStatus::Failed => update_history::UpdateStatus::Failed,
-            _ => update_history::UpdateStatus::Failed,
-        };
-        let mut active: update_history::ActiveModel = history_record.into();
-        active.status = Set(db_status);
-        active.output = Set(if result.output.is_empty() {
-            String::new()
-        } else {
-            result.output.clone()
-        });
-        active.output_bytes = Set(result.output.len() as i64);
-        active.completed_at = Set(Some(now));
-        if let Some(ref error) = result.error {
-            // Store error in output if no other output.
-            if result.output.is_empty() {
-                active.output = Set(error.clone());
-                active.output_bytes = Set(error.len() as i64);
-            }
-        }
-        if let Err(e) = active.update(state.db()).await {
-            tracing::warn!(
-                error = %e,
-                update_history_id = %result.update_history_id,
-                "failed to update update_history"
-            );
-        }
-
-        // On success, update host_software_item.installed_version.
-        if result.status == UpdateFinalStatus::Completed
-            && let Some(ref new_version) = result.installed_version
-            && let Err(e) = host_software_item::Entity::update_many()
-                .col_expr(
-                    host_software_item::Column::InstalledVersion,
-                    sea_orm::sea_query::Expr::value(Some(new_version.clone())),
-                )
-                .col_expr(
-                    host_software_item::Column::InstalledVersionDetectedAt,
-                    sea_orm::sea_query::Expr::value(Some(now)),
-                )
-                .col_expr(
-                    host_software_item::Column::LastUpdatedAt,
-                    sea_orm::sea_query::Expr::value(Some(now)),
-                )
-                .filter(host_software_item::Column::Id.eq(result.host_software_item_id))
-                .exec(state.db())
-                .await
-        {
-            tracing::warn!(
-                error = %e,
-                host_software_item_id = %result.host_software_item_id,
-                "failed to update host_software_item installed_version"
-            );
-        }
+        process_single_batch_result(state, service_id, result, &linked_host_ids).await;
     }
 
     // Push updated software states to MQTT so that `in_progress = false`
