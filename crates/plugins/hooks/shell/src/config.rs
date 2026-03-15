@@ -49,19 +49,19 @@ impl ShellHookConfig {
             return Err("at least one of pre_command or post_command must be set".to_string());
         }
 
-        if let Some(cmd) = &self.pre_command {
-            if cmd.len() > MAX_COMMAND_LEN {
-                return Err(format!(
-                    "pre_command exceeds maximum length of {MAX_COMMAND_LEN}"
-                ));
-            }
+        if let Some(cmd) = &self.pre_command
+            && cmd.len() > MAX_COMMAND_LEN
+        {
+            return Err(format!(
+                "pre_command exceeds maximum length of {MAX_COMMAND_LEN}"
+            ));
         }
-        if let Some(cmd) = &self.post_command {
-            if cmd.len() > MAX_COMMAND_LEN {
-                return Err(format!(
-                    "post_command exceeds maximum length of {MAX_COMMAND_LEN}"
-                ));
-            }
+        if let Some(cmd) = &self.post_command
+            && cmd.len() > MAX_COMMAND_LEN
+        {
+            return Err(format!(
+                "post_command exceeds maximum length of {MAX_COMMAND_LEN}"
+            ));
         }
 
         Ok(())

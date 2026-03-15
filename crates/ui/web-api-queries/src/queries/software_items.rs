@@ -565,12 +565,11 @@ fn validate_assignment(
         bail!(SoftwareItemQueryError::InvalidPackageIdentifier(e));
     }
 
-    if let Some(override_val) = config_override {
-        if let Err(e) =
+    if let Some(override_val) = config_override
+        && let Err(e) =
             validate_config_override(ops, &config.plugin_type, &config.config, override_val)
-        {
-            bail!(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
-        }
+    {
+        bail!(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
     }
 
     Ok(())
