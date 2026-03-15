@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { SvelteSet } from 'svelte/reactivity';
+	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
@@ -11,7 +11,8 @@
 		deleteService,
 		mergeService,
 		updateService,
-		batchServices
+		batchServices,
+		executeBatchChunked
 	} from '$lib/api';
 	import type { ServiceResponse, BatchActionResponse } from '$lib/types';
 	import { Permission, hasAnyPermission } from '$lib/types';
@@ -50,8 +51,18 @@
 	);
 
 	let selectedIds = new SvelteSet<string>();
+	const selectedItemsMap = new SvelteMap<string, ServiceResponse>();
 	let batchConfirmAction: string | null = $state(null);
 	let batchResult: BatchActionResponse | null = $state(null);
+	let selectingAllPages = $state(false);
+
+	const allPageSelected = $derived(services.length > 0 && services.every((s) => selectedIds.has(s.id)));
+
+	const selectAllPagesInfo = $derived(
+		allPageSelected && totalItems > services.length && selectedIds.size < totalItems
+			? { total: totalItems, loading: selectingAllPages, onSelect: selectAllPages }
+			: undefined
+	);
 
 	const canManage = $derived(
 		hasAnyPermission(
@@ -65,7 +76,7 @@
 
 	const batchActions = $derived.by(() => {
 		const acts: { id: string; label: string; destructive?: boolean }[] = [];
-		const selected = services.filter((s) => selectedIds.has(s.id));
+		const selected = [...selectedItemsMap.values()];
 		if (selected.some((s) => s.status === 'pending')) {
 			acts.push({ id: 'approve', label: 'Approve' });
 			acts.push({ id: 'reject', label: 'Reject', destructive: true });
@@ -111,6 +122,9 @@
 				page
 			});
 			services = result.items;
+			for (const service of result.items) {
+				if (selectedIds.has(service.id)) selectedItemsMap.set(service.id, service);
+			}
 			currentPage = result.page;
 			totalPages = result.total_pages;
 			totalItems = result.total;
@@ -137,6 +151,8 @@
 	}
 
 	function setFilter(filter: CapabilityFilter) {
+		selectedIds.clear();
+		selectedItemsMap.clear();
 		currentPage = 1;
 		capabilityFilter = filter;
 		closeMenu();
@@ -263,24 +279,56 @@
 	}
 
 	function toggleSelectAll() {
-		if (selectedIds.size === services.length) {
-			selectedIds.clear();
+		if (allPageSelected) {
+			for (const s of services) {
+				selectedIds.delete(s.id);
+				selectedItemsMap.delete(s.id);
+			}
 		} else {
-			selectedIds.clear();
-			for (const s of services) selectedIds.add(s.id);
+			for (const s of services) {
+				selectedIds.add(s.id);
+				selectedItemsMap.set(s.id, s);
+			}
 		}
 	}
 
 	function toggleSelect(id: string) {
 		if (selectedIds.has(id)) {
 			selectedIds.delete(id);
+			selectedItemsMap.delete(id);
 		} else {
 			selectedIds.add(id);
+			const service = services.find((s) => s.id === id);
+			if (service) selectedItemsMap.set(id, service);
 		}
 	}
 
 	function requestBatchAction(actionId: string) {
 		batchConfirmAction = actionId;
+	}
+
+	async function selectAllPages() {
+		selectingAllPages = true;
+		try {
+			let p = 1;
+			while (true) {
+				const result = await getServices({
+					capability: capabilityFilter === 'all' ? undefined : capabilityFilter,
+					page: p,
+					perPage: 100
+				});
+				for (const service of result.items) {
+					selectedIds.add(service.id);
+					selectedItemsMap.set(service.id, service);
+				}
+				if (p >= result.total_pages) break;
+				p++;
+			}
+		} catch {
+			showError('Failed to select all items');
+		} finally {
+			selectingAllPages = false;
+		}
 	}
 
 	async function executeBatchAction() {
@@ -289,13 +337,14 @@
 		batchConfirmAction = null;
 		submitting = true;
 		try {
-			const response = await batchServices(action, [...selectedIds]);
+			const response = await executeBatchChunked(action, [...selectedIds], batchServices);
 			if (response.failed.length > 0) {
 				batchResult = response;
 			} else {
 				showSuccess(`${response.succeeded.length} service(s) ${action}d successfully.`);
 			}
 			selectedIds.clear();
+			selectedItemsMap.clear();
 			await loadServices(currentPage);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : `Failed to ${action} services`);
@@ -359,8 +408,8 @@
 							<input
 								type="checkbox"
 								class="checkbox"
-								checked={services.length > 0 && selectedIds.size === services.length}
-								indeterminate={selectedIds.size > 0 && selectedIds.size < services.length}
+								checked={allPageSelected}
+								indeterminate={!allPageSelected && selectedIds.size > 0}
 								onchange={toggleSelectAll}
 								aria-label="Select all"
 							/>
@@ -447,7 +496,11 @@
 			selectedCount={selectedIds.size}
 			actions={batchActions}
 			onaction={requestBatchAction}
-			oncancel={() => selectedIds.clear()}
+			oncancel={() => {
+				selectedIds.clear();
+				selectedItemsMap.clear();
+			}}
+			selectAllPages={selectAllPagesInfo}
 		/>
 	{/if}
 
