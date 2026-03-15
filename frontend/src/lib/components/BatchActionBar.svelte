@@ -1,5 +1,6 @@
 <script lang="ts">
-	import ContextMenu from './ContextMenu.svelte';
+	import { fly } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
 
 	let {
 		selectedCount,
@@ -21,16 +22,59 @@
 	const secondaryActions = $derived(allDestructive ? [] : actions.filter((a) => a.destructive));
 
 	let showMoreMenu = $state(false);
-	let moreButtonEl: HTMLElement | undefined = $state();
-	let moreMenuPos = $state({ top: 0, left: 0 });
+	let moreMenuEl: HTMLElement | undefined = $state();
+	let focusedIndex = $state(-1);
 
-	function openMoreMenu() {
-		if (!moreButtonEl) return;
-		const rect = moreButtonEl.getBoundingClientRect();
-		const estimatedHeight = secondaryActions.length * 40 + 16;
-		moreMenuPos = { top: rect.top - estimatedHeight - 4, left: rect.left };
-		showMoreMenu = true;
+	function getMenuItems(): HTMLElement[] {
+		if (!moreMenuEl) return [];
+		return Array.from(moreMenuEl.querySelectorAll<HTMLElement>('[role="menuitem"]'));
 	}
+
+	function focusItem(index: number) {
+		const items = getMenuItems();
+		if (!items.length) return;
+		focusedIndex = Math.max(0, Math.min(index, items.length - 1));
+		items[focusedIndex]?.focus();
+	}
+
+	function handleMenuKeydown(event: KeyboardEvent) {
+		const items = getMenuItems();
+		switch (event.key) {
+			case 'ArrowDown':
+				event.preventDefault();
+				focusItem(focusedIndex < items.length - 1 ? focusedIndex + 1 : 0);
+				break;
+			case 'ArrowUp':
+				event.preventDefault();
+				focusItem(focusedIndex > 0 ? focusedIndex - 1 : items.length - 1);
+				break;
+			case 'Home':
+				event.preventDefault();
+				focusItem(0);
+				break;
+			case 'End':
+				event.preventDefault();
+				focusItem(items.length - 1);
+				break;
+			case 'Enter':
+			case ' ':
+				event.preventDefault();
+				items[focusedIndex]?.click();
+				break;
+			case 'Escape':
+				event.preventDefault();
+				closeMoreMenu();
+				break;
+		}
+	}
+
+	// Auto-focus first menu item when dropdown opens
+	$effect(() => {
+		if (showMoreMenu && moreMenuEl) {
+			focusedIndex = 0;
+			getMenuItems()[0]?.focus();
+		}
+	});
 
 	function closeMoreMenu() {
 		showMoreMenu = false;
@@ -38,11 +82,7 @@
 
 	function toggleMoreMenu(e: MouseEvent) {
 		e.stopPropagation();
-		if (showMoreMenu) {
-			closeMoreMenu();
-		} else {
-			openMoreMenu();
-		}
+		showMoreMenu = !showMoreMenu;
 	}
 
 	function handleWindowClick() {
@@ -87,38 +127,49 @@
 				</button>
 			{/each}
 			{#if secondaryActions.length > 0}
-				<button
-					bind:this={moreButtonEl}
-					class="btn btn-sm preset-tonal-surface"
-					onclick={toggleMoreMenu}
-					aria-label="More actions"
-					aria-haspopup="menu"
-					aria-expanded={showMoreMenu}
-				>
-					&hellip; More
-				</button>
+				<div class="relative">
+					<button
+						class="btn btn-sm preset-tonal-surface"
+						onclick={toggleMoreMenu}
+						aria-label="More actions"
+						aria-haspopup="menu"
+						aria-expanded={showMoreMenu}
+					>
+						&hellip; More
+					</button>
+
+					{#if showMoreMenu}
+						<div
+							bind:this={moreMenuEl}
+							transition:fly={{ y: 6, duration: 150, easing: cubicOut }}
+							class="absolute bottom-full left-0 mb-2 min-w-[10rem] overflow-hidden rounded-lg border border-surface-200 bg-surface-50 p-1 shadow-xl dark:border-surface-700 dark:bg-surface-900"
+							role="menu"
+							tabindex="-1"
+							onkeydown={handleMenuKeydown}
+							onclick={(e) => e.stopPropagation()}
+						>
+							<ul class="space-y-0.5">
+								{#each secondaryActions as action (action.id)}
+									<li>
+										<button
+											class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+											role="menuitem"
+											tabindex="-1"
+											onclick={() => {
+												closeMoreMenu();
+												onaction(action.id);
+											}}
+										>
+											{action.label}
+										</button>
+									</li>
+								{/each}
+							</ul>
+						</div>
+					{/if}
+				</div>
 			{/if}
 			<button class="btn btn-sm preset-tonal-surface" onclick={oncancel}>Deselect all</button>
 		</div>
 	</div>
-
-	{#if showMoreMenu && secondaryActions.length > 0}
-		<ContextMenu top={moreMenuPos.top} left={moreMenuPos.left} onclose={closeMoreMenu}>
-			{#each secondaryActions as action (action.id)}
-				<li>
-					<button
-						class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-						role="menuitem"
-						tabindex="-1"
-						onclick={() => {
-							closeMoreMenu();
-							onaction(action.id);
-						}}
-					>
-						{action.label}
-					</button>
-				</li>
-			{/each}
-		</ContextMenu>
-	{/if}
 {/if}
