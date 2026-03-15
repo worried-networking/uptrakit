@@ -159,9 +159,47 @@ pub(crate) async fn bootstrap_connect(
         prepare_bootstrap_connection(params, port).await?;
 
     // 4. GATHER HOST INFORMATION
-    let is_root = !use_sudo;
+    let remote_info =
+        gather_remote_host_info(&*session, &executor, params, use_sudo, state_dir, &db).await?;
 
-    // Check if target user exists.
+    // 5. DISCONNECT
+    drop(executor);
+    SshSession::disconnect_shared(session).await;
+
+    // 6. BUILD PLAN
+    let host_info = BootstrapHostInfo {
+        hostname: params.hostname.clone(),
+        port,
+        auth_user: params.auth_username.clone(),
+        is_root: !use_sudo,
+        os_info: remote_info.os_info.clone(),
+        host_key_fingerprint: observed_fp,
+        target_user_exists: remote_info.target_user_exists,
+    };
+    let actions = build_bootstrap_actions(params, &remote_info);
+
+    Ok(BootstrapPlan { host_info, actions })
+}
+
+/// Information gathered during the read-only remote probe phase.
+struct RemoteHostInfo {
+    target_user_exists: bool,
+    os_info: Option<String>,
+    docker_group_exists: bool,
+    stale_keys_found: bool,
+    pve_detected: bool,
+}
+
+/// Gather host information via SSH: user existence, OS, docker group,
+/// stale keys, and infrastructure plugin probing.
+async fn gather_remote_host_info(
+    session: &SshSession,
+    executor: &SshRemoteExecutor,
+    params: &BootstrapParams,
+    use_sudo: bool,
+    state_dir: &Path,
+    db: &DatabaseConnection,
+) -> Result<RemoteHostInfo> {
     let target_same_as_auth = params.target_username == params.auth_username;
     let target_user_exists = if target_same_as_auth {
         true
@@ -171,7 +209,6 @@ pub(crate) async fn bootstrap_connect(
         user_check.exit_code == 0
     };
 
-    // Detect OS info (one-liner).
     let os_result = session
         .exec_command("cat /etc/os-release 2>/dev/null | head -1 || uname -s")
         .await?;
@@ -180,7 +217,6 @@ pub(crate) async fn bootstrap_connect(
         if raw.is_empty() { None } else { Some(raw) }
     };
 
-    // Check if docker group exists on remote.
     let docker_cmd = if use_sudo {
         "sudo getent group docker".to_string()
     } else {
@@ -189,9 +225,7 @@ pub(crate) async fn bootstrap_connect(
     let docker_result = session.exec_command(&docker_cmd).await?;
     let docker_group_exists = docker_result.exit_code == 0;
 
-    // Check for stale Uptrakit keys in authorized_keys.
     let stale_keys_found = if !target_same_as_auth || params.remove_stale_keys {
-        // Detect home directory to read authorized_keys.
         let home_cmd = cmd_detect_home(&params.target_username, use_sudo);
         let home_result = session.exec_command(&home_cmd).await?;
         let home_dir = home_result.stdout.trim().to_string();
@@ -207,13 +241,30 @@ pub(crate) async fn bootstrap_connect(
         false
     };
 
-    // Run infra plugin detection (read-only probing).
+    let pve_detected = detect_infra_plugins(executor, params, state_dir, db).await;
+
+    Ok(RemoteHostInfo {
+        target_user_exists,
+        os_info,
+        docker_group_exists,
+        stale_keys_found,
+        pve_detected,
+    })
+}
+
+/// Run infrastructure plugin detection (read-only probing).
+async fn detect_infra_plugins(
+    executor: &SshRemoteExecutor,
+    params: &BootstrapParams,
+    state_dir: &Path,
+    db: &DatabaseConnection,
+) -> bool {
     let infra_plugins = create_agent_infra_plugins();
     let noop_invoker = NoopInfraActionInvoker;
     let noop_bootstrap = NoopGuestBootstrap;
     let tenant_id_str = params.tenant_id.map(|t| t.to_string());
     let infra_ctx = InfraPluginContext {
-        db: &db,
+        db,
         tenant_id: tenant_id_str.as_deref(),
         service_id: params.service_id,
         state_dir,
@@ -221,18 +272,18 @@ pub(crate) async fn bootstrap_connect(
         action_invoker: &noop_invoker,
         guest_bootstrap: &noop_bootstrap,
     };
-    let mut pve_detected = false;
+    let mut detected = false;
     for plugin in &infra_plugins {
         let Some(lifecycle) = plugin.as_host_lifecycle() else {
             continue;
         };
         match lifecycle
-            .on_host_bootstrapped(&infra_ctx, &executor, params.host_id, &params.name)
+            .on_host_bootstrapped(&infra_ctx, executor, params.host_id, &params.name)
             .await
         {
             Ok(result) => {
                 if result.detected {
-                    pve_detected = true;
+                    detected = true;
                 }
             }
             Err(e) => {
@@ -244,25 +295,15 @@ pub(crate) async fn bootstrap_connect(
             }
         }
     }
+    detected
+}
 
-    // 5. DISCONNECT
-    drop(executor);
-    SshSession::disconnect_shared(session).await;
-
-    // 6. BUILD PLAN
-    let host_info = BootstrapHostInfo {
-        hostname: params.hostname.clone(),
-        port,
-        auth_user: params.auth_username.clone(),
-        is_root,
-        os_info,
-        host_key_fingerprint: observed_fp,
-        target_user_exists,
-    };
-
+/// Build the list of planned bootstrap actions from gathered host info.
+fn build_bootstrap_actions(params: &BootstrapParams, info: &RemoteHostInfo) -> Vec<PlannedAction> {
+    let target_same_as_auth = params.target_username == params.auth_username;
     let mut actions = Vec::new();
 
-    if !target_same_as_auth && !target_user_exists {
+    if !target_same_as_auth && !info.target_user_exists {
         actions.push(PlannedAction {
             id: "create_user".to_string(),
             label: format!("Create user '{}'", params.target_username),
@@ -300,7 +341,7 @@ pub(crate) async fn bootstrap_connect(
         skippable: true,
     });
 
-    if stale_keys_found {
+    if info.stale_keys_found {
         actions.push(PlannedAction {
             id: "remove_stale_keys".to_string(),
             label: "Remove stale Uptrakit keys".to_string(),
@@ -312,7 +353,7 @@ pub(crate) async fn bootstrap_connect(
         });
     }
 
-    if docker_group_exists {
+    if info.docker_group_exists {
         actions.push(PlannedAction {
             id: "docker_group".to_string(),
             label: "Add user to docker group".to_string(),
@@ -326,7 +367,7 @@ pub(crate) async fn bootstrap_connect(
         });
     }
 
-    if pve_detected {
+    if info.pve_detected {
         actions.push(PlannedAction {
             id: "pve_setup".to_string(),
             label: "Proxmox VE setup".to_string(),
@@ -339,7 +380,7 @@ pub(crate) async fn bootstrap_connect(
         });
     }
 
-    Ok(BootstrapPlan { host_info, actions })
+    actions
 }
 
 // ── Multi-step: execute (applies changes) ────────────────────────────

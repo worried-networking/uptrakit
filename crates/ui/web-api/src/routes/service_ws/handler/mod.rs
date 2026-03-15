@@ -636,6 +636,71 @@ struct AuthenticatedSessionState {
 }
 
 // ---------------------------------------------------------------------------
+// MQTT post-registration helper
+// ---------------------------------------------------------------------------
+
+/// Send `Registered` + `TenantAssignments` messages and push initial software
+/// states for each assigned tenant. Returns `false` if the connection must be
+/// closed (write failure).
+async fn send_mqtt_post_registration(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    mctx: &mqtt::MqttContext,
+    out_seq: &mut OutgoingSeq,
+) -> bool {
+    // Send Registered acknowledgment.
+    let registered_msg = ControllerMessage::Registered(MqttRegisteredPayload {
+        instance_id: mctx.instance_id.clone(),
+    });
+    let Some(json) = serialize_controller_msg(out_seq, registered_msg) else {
+        state.service_connections.unregister(&service_id).await;
+        return false;
+    };
+    if sink.send(Message::Text(json.into())).await.is_err() {
+        state.service_connections.unregister(&service_id).await;
+        return false;
+    }
+
+    // Send initial tenant assignments.
+    if !mctx.tenant_configs.is_empty() {
+        let assignments_msg = ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload {
+            tenants: mctx.tenant_configs.clone(),
+        });
+        let Some(json) = serialize_controller_msg(out_seq, assignments_msg) else {
+            state.service_connections.unregister(&service_id).await;
+            return false;
+        };
+        if sink.send(Message::Text(json.into())).await.is_err() {
+            state.service_connections.unregister(&service_id).await;
+            return false;
+        }
+    }
+
+    // Push current software states and connectivity for each assigned tenant.
+    let mut seen = HashSet::new();
+    for cfg in &mctx.tenant_configs {
+        if seen.insert(cfg.tenant_id) {
+            state
+                .notification_service
+                .push_software_states_for_tenant(state.db(), cfg.tenant_id)
+                .await;
+            state
+                .notification_service
+                .push_connected_agent_states_for_tenant(state.db(), cfg.tenant_id)
+                .await;
+        }
+    }
+
+    tracing::info!(
+        %service_id,
+        instance_id = %mctx.instance_id,
+        "MQTT service registered"
+    );
+    true
+}
+
+// ---------------------------------------------------------------------------
 // setup_authenticated_session
 // ---------------------------------------------------------------------------
 
@@ -772,67 +837,10 @@ async fn setup_authenticated_session(
     // ------------------------------------------------------------------
     // MQTT post-registration: send Registered, TenantAssignments, push states
     // ------------------------------------------------------------------
-    if let Some(ref mctx) = mqtt_context {
-        // Send Registered acknowledgment.
-        let registered_msg = ControllerMessage::Registered(MqttRegisteredPayload {
-            instance_id: mctx.instance_id.clone(),
-        });
-        let Some(json) = serialize_controller_msg(out_seq, registered_msg) else {
-            state.service_connections.unregister(&service_id).await;
-            return None;
-        };
-        if sink.send(Message::Text(json.into())).await.is_err() {
-            state.service_connections.unregister(&service_id).await;
-            return None;
-        }
-
-        // Send initial tenant assignments.
-        if !mctx.tenant_configs.is_empty() {
-            let assignments_msg =
-                ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload {
-                    tenants: mctx.tenant_configs.clone(),
-                });
-            let Some(json) = serialize_controller_msg(out_seq, assignments_msg) else {
-                state.service_connections.unregister(&service_id).await;
-                return None;
-            };
-            if sink.send(Message::Text(json.into())).await.is_err() {
-                state.service_connections.unregister(&service_id).await;
-                return None;
-            }
-        }
-
-        // Push current software states for each newly assigned tenant.
-        {
-            let mut seen_tenants = HashSet::new();
-            for cfg in &mctx.tenant_configs {
-                if seen_tenants.insert(cfg.tenant_id) {
-                    state
-                        .notification_service
-                        .push_software_states_for_tenant(state.db(), cfg.tenant_id)
-                        .await;
-                }
-            }
-        }
-
-        // Push connectivity state for agents that are already connected.
-        {
-            let mut seen_tenants_conn = HashSet::new();
-            for cfg in &mctx.tenant_configs {
-                if seen_tenants_conn.insert(cfg.tenant_id) {
-                    state
-                        .notification_service
-                        .push_connected_agent_states_for_tenant(state.db(), cfg.tenant_id)
-                        .await;
-                }
-            }
-        }
-
-        tracing::info!(
-            %service_id,
-            instance_id = %mctx.instance_id,
-            "MQTT service registered"
-        );
+    if let Some(ref mctx) = mqtt_context
+        && !send_mqtt_post_registration(sink, state, service_id, mctx, out_seq).await
+    {
+        return None;
     }
 
     // ------------------------------------------------------------------
@@ -1009,6 +1017,108 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
 // handle_authenticated_loop
 // ---------------------------------------------------------------------------
 
+/// Action returned by [`handle_incoming_text`] to control the main event loop.
+enum TextAction {
+    /// Continue to the next iteration (message was handled inline).
+    Continue,
+    /// Break out of the loop.
+    Break,
+    /// Break out of the loop after closing the connection for rate limiting.
+    RateLimitBreak,
+    /// The message was forwarded to the processor; continue the loop.
+    Forwarded,
+}
+
+/// Handle a deserialized text frame: fast-path messages inline, forward
+/// everything else to the processor.
+async fn handle_incoming_text(
+    text: &str,
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    is_system: bool,
+    session: &mut AuthenticatedSessionState,
+    consecutive_unknown: &mut u32,
+) -> TextAction {
+    let deserialized = match deserialize_service_msg(in_seq, text) {
+        Ok(Some(m)) => m,
+        Ok(None) => return TextAction::Continue,
+        Err(e) => {
+            tracing::debug!(error = %e, "deserialize error");
+            return TextAction::Break;
+        }
+    };
+    let pagination = deserialized.pagination;
+    let service_msg = deserialized.message;
+
+    // Fast-path messages handled inline.
+    match &service_msg {
+        ServiceMessage::Ping(PingPayload { service_ts, .. }) => {
+            if messages::handle_ping(
+                sink,
+                out_seq,
+                state,
+                service_id,
+                *service_ts,
+                session.lease_coordinator.as_ref(),
+                is_system,
+            )
+            .await
+            .is_break()
+            {
+                return TextAction::Break;
+            }
+            *consecutive_unknown = 0;
+            return TextAction::Continue;
+        }
+        ServiceMessage::Disconnecting(payload) => {
+            tracing::info!(
+                %service_id,
+                reason = ?payload.reason,
+                "service disconnecting gracefully"
+            );
+            return TextAction::Break;
+        }
+        ServiceMessage::Unknown => {
+            *consecutive_unknown += 1;
+            tracing::warn!(
+                %service_id,
+                consecutive_unknown = *consecutive_unknown,
+                "received unknown service message type; \
+                 ignoring for forward compatibility"
+            );
+            if *consecutive_unknown >= MAX_CONSECUTIVE_UNKNOWN_MESSAGES {
+                tracing::warn!(
+                    %service_id,
+                    "closing connection: {MAX_CONSECUTIVE_UNKNOWN_MESSAGES} \
+                     consecutive unknown messages"
+                );
+                return TextAction::RateLimitBreak;
+            }
+            return TextAction::Continue;
+        }
+        _ => {}
+    }
+
+    // Known non-fast-path message: reset unknown counter and forward.
+    *consecutive_unknown = 0;
+    if session
+        .msg_tx
+        .send(ProcessorMessage {
+            message: service_msg,
+            pagination,
+        })
+        .await
+        .is_err()
+    {
+        tracing::debug!("processor channel closed, breaking main loop");
+        return TextAction::Break;
+    }
+    TextAction::Forwarded
+}
+
 /// Unified authenticated handler for all service types.
 ///
 /// Called by [`super::service_ws`] after certificate validation, service status
@@ -1063,68 +1173,16 @@ pub(crate) async fn handle_authenticated_loop(
                 }
                 match msg {
                     Message::Text(text) => {
-                        let deserialized =
-                            match deserialize_service_msg(in_seq, &text) {
-                                Ok(Some(m)) => m,
-                                Ok(None) => continue,
-                                Err(e) => {
-                                    tracing::debug!(error = %e, "deserialize error");
-                                    break;
-                                }
-                            };
-                        let pagination = deserialized.pagination;
-                        let service_msg = deserialized.message;
-
-                        // -- Inline fast-path messages --
-                        match &service_msg {
-                            ServiceMessage::Ping(PingPayload { service_ts, .. }) => {
-                                if messages::handle_ping(sink, out_seq, state, service_id, *service_ts, session.lease_coordinator.as_ref(), is_system).await.is_break() {
-                                    break;
-                                }
-                                consecutive_unknown = 0;
-                                continue;
-                            }
-                            ServiceMessage::Disconnecting(payload) => {
-                                tracing::info!(
-                                    %service_id,
-                                    reason = ?payload.reason,
-                                    "service disconnecting gracefully"
-                                );
+                        match handle_incoming_text(
+                            &text, sink, out_seq, in_seq, state, service_id,
+                            is_system, &mut session, &mut consecutive_unknown,
+                        ).await {
+                            TextAction::Continue | TextAction::Forwarded => {}
+                            TextAction::Break => break,
+                            TextAction::RateLimitBreak => {
+                                let _ = close_with_reason(sink, CloseReason::RateLimitExceeded).await;
                                 break;
                             }
-                            ServiceMessage::Unknown => {
-                                consecutive_unknown += 1;
-                                tracing::warn!(
-                                    %service_id,
-                                    consecutive_unknown,
-                                    "received unknown service message type; \
-                                     ignoring for forward compatibility"
-                                );
-                                if consecutive_unknown >= MAX_CONSECUTIVE_UNKNOWN_MESSAGES {
-                                    tracing::warn!(
-                                        %service_id,
-                                        "closing connection: {MAX_CONSECUTIVE_UNKNOWN_MESSAGES} \
-                                         consecutive unknown messages"
-                                    );
-                                    let _ = close_with_reason(
-                                        sink,
-                                        CloseReason::RateLimitExceeded,
-                                    )
-                                    .await;
-                                    break;
-                                }
-                                continue;
-                            }
-                            _ => {}
-                        }
-
-                        // Reset unknown counter -- any known message breaks the streak.
-                        consecutive_unknown = 0;
-
-                        // Forward to processor
-                        if session.msg_tx.send(ProcessorMessage { message: service_msg, pagination }).await.is_err() {
-                            tracing::debug!("processor channel closed, breaking main loop");
-                            break;
                         }
                     }
                     Message::Close(_) => break,
