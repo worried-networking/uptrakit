@@ -136,9 +136,7 @@ pub enum ServiceMessage {
 /// encountered, the service logs a warning and continues without closing the
 /// connection, allowing rolling upgrades where services and controllers are not
 /// updated simultaneously.
-// Note: Eq is not derived because ExecuteUpdate/ExecuteBatchUpdate contain
-// HookCommand which holds serde_json::Value in its Other variant (not Eq).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ControllerMessage {

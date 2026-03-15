@@ -784,15 +784,15 @@ fn execute_update_serialization_roundtrip() {
             package_identifier: "nodejs/node".to_string(),
             config: serde_json::json!({}),
         },
-        pre_update_hooks: vec![HookCommand::Exec {
-            program: "systemctl".to_string(),
-            args: vec!["stop".to_string(), "myapp".to_string()],
-            working_dir: None,
+        pre_update_hook_plugins: vec![PluginAssignment {
+            plugin_type: PluginType::HookSystemd,
+            package_identifier: String::new(),
+            config: serde_json::json!({"service_name": "myapp"}),
         }],
-        post_update_hooks: vec![HookCommand::Exec {
-            program: "systemctl".to_string(),
-            args: vec!["start".to_string(), "myapp".to_string()],
-            working_dir: None,
+        post_update_hook_plugins: vec![PluginAssignment {
+            plugin_type: PluginType::HookSystemd,
+            package_identifier: String::new(),
+            config: serde_json::json!({"service_name": "myapp"}),
         }],
         release_info: Some(ReleaseInfo {
             tag: "v20.10.0".to_string(),
@@ -813,7 +813,7 @@ fn execute_update_serialization_roundtrip() {
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""type":"execute_update"#));
     assert!(json.contains(r#""plugin_type":"releases_github"#));
-    assert!(json.contains(r#""exec"#));
+    assert!(json.contains(r#""hook_systemd"#));
     let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, msg);
 }
@@ -832,16 +832,16 @@ fn execute_update_minimal_serialization() {
             package_identifier: "redis-server".to_string(),
             config: serde_json::json!({}),
         },
-        pre_update_hooks: vec![],
-        post_update_hooks: vec![],
+        pre_update_hook_plugins: vec![],
+        post_update_hook_plugins: vec![],
         release_info: None,
         timeout: DEFAULT_UPDATE_TIMEOUT,
         interactive: false,
     }));
     let json = serde_json::to_string(&msg).unwrap();
     // Empty vectors should be omitted
-    assert!(!json.contains("pre_update_hooks"));
-    assert!(!json.contains("post_update_hooks"));
+    assert!(!json.contains("pre_update_hook_plugins"));
+    assert!(!json.contains("post_update_hook_plugins"));
     assert!(!json.contains("release_info"));
     // detect_version_plugin should be omitted when None
     assert!(!json.contains("detect_version_plugin"));
@@ -867,15 +867,15 @@ fn execute_update_default_timeout() {
     let msg: ControllerMessage = serde_json::from_str(json).unwrap();
     if let ControllerMessage::ExecuteUpdate(payload) = msg {
         assert_eq!(payload.timeout, DEFAULT_UPDATE_TIMEOUT);
-        assert!(payload.pre_update_hooks.is_empty());
-        assert!(payload.post_update_hooks.is_empty());
+        assert!(payload.pre_update_hook_plugins.is_empty());
+        assert!(payload.post_update_hook_plugins.is_empty());
     } else {
         panic!("Expected ExecuteUpdate");
     }
 }
 
 #[test]
-fn execute_update_with_shell_hook_command() {
+fn execute_update_with_shell_hook_plugin() {
     let msg = ControllerMessage::ExecuteUpdate(Box::new(ExecuteUpdatePayload {
         host_machine_id: "test-machine-id".to_string(),
         update_history_id: TEST_UUID_1,
@@ -888,35 +888,20 @@ fn execute_update_with_shell_hook_command() {
             package_identifier: "test".to_string(),
             config: serde_json::json!({}),
         },
-        pre_update_hooks: vec![HookCommand::Shell {
-            command: "echo hello".to_string(),
-            shell: HookShell::Sh,
+        pre_update_hook_plugins: vec![PluginAssignment {
+            plugin_type: PluginType::HookShell,
+            package_identifier: String::new(),
+            config: serde_json::json!({"pre_command": "echo hello", "shell": "sh"}),
         }],
-        post_update_hooks: vec![],
+        post_update_hook_plugins: vec![],
         release_info: None,
         timeout: DEFAULT_UPDATE_TIMEOUT,
         interactive: false,
     }));
     let json = serde_json::to_string(&msg).unwrap();
-    assert!(json.contains(r#""shell"#));
+    assert!(json.contains(r#""hook_shell"#));
     let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, msg);
-}
-
-#[test]
-fn hook_command_display() {
-    let shell = HookCommand::Shell {
-        command: "echo hello".to_string(),
-        shell: HookShell::Bash,
-    };
-    assert_eq!(shell.to_string(), "echo hello");
-
-    let exec = HookCommand::Exec {
-        program: "systemctl".to_string(),
-        args: vec!["restart".to_string(), "nginx".to_string()],
-        working_dir: Some("/opt".to_string()),
-    };
-    assert_eq!(exec.to_string(), "(in /opt) systemctl restart nginx");
 }
 
 #[test]
@@ -2147,8 +2132,8 @@ fn spec_conformance_execute_update() {
                 package_identifier: "nodejs/node".to_string(),
                 config: serde_json::json!({}),
             },
-            pre_update_hooks: vec![],
-            post_update_hooks: vec![],
+            pre_update_hook_plugins: vec![],
+            post_update_hook_plugins: vec![],
             release_info: None,
             timeout: DEFAULT_UPDATE_TIMEOUT,
             interactive: false,
@@ -2387,8 +2372,8 @@ fn execute_batch_update_serialization_roundtrip() {
             to_version: "1.24.0-2".to_string(),
             release_info: None,
         }],
-        pre_update_hooks: vec![],
-        post_update_hooks: vec![],
+        pre_update_hook_plugins: vec![],
+        post_update_hook_plugins: vec![],
         timeout: std::time::Duration::from_secs(7200),
         interactive: false,
     }));
@@ -2460,8 +2445,8 @@ fn spec_conformance_execute_batch_update() {
                 to_version: "1.24.0-2".to_string(),
                 release_info: None,
             }],
-            pre_update_hooks: vec![],
-            post_update_hooks: vec![],
+            pre_update_hook_plugins: vec![],
+            post_update_hook_plugins: vec![],
             timeout: std::time::Duration::from_secs(7200),
             interactive: false,
         },

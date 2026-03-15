@@ -52,7 +52,7 @@ pub const MAX_VERSION_CHECK_ASSIGNMENTS: usize = 2_000;
 /// Maximum number of version check results in a single message.
 pub const MAX_VERSION_CHECK_RESULTS: usize = 2_000;
 
-/// Maximum number of pre/post-update hooks in an update message.
+/// Maximum number of pre/post-update hook plugins in an update message.
 pub const MAX_UPDATE_HOOKS: usize = 50;
 
 /// Maximum number of packages in a batch update.
@@ -75,9 +75,6 @@ pub const MAX_DISCOVERED_QUALIFIER_LEN: usize = 256;
 
 /// Maximum number of capabilities in a capability set.
 pub const MAX_CAPABILITIES: usize = 50;
-
-/// Maximum number of args in a `HookCommand::Exec` variant.
-pub const MAX_HOOK_ARGS: usize = 100;
 
 /// Maximum number of MQTT tenants in an assignment message.
 pub const MAX_MQTT_TENANTS: usize = 500;

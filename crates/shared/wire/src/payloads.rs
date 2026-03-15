@@ -5,7 +5,7 @@ use time::UtcDateTime;
 use uuid::Uuid;
 
 use super::capabilities::{Capability, EnrollmentStatus};
-use super::shared_types::{DisconnectReason, HookCommand, UpdateFinalStatus};
+use super::shared_types::{DisconnectReason, UpdateFinalStatus};
 use crate::serde_helpers::{duration_seconds, option_duration_seconds, utc_datetime_millis};
 use uptrakit_shared_types::{
     DiscoveredSoftware, MqttClientConnectionStatus, MqttTransport, OutputStreamType, PluginType,
@@ -367,9 +367,7 @@ pub struct VersionCheckResult {
 // --- Update execution messages ---
 
 /// Controller -> Agent: Trigger an update.
-// Note: Eq is not derived because pre_update_hooks/post_update_hooks contain
-// HookCommand which may hold serde_json::Value (Other variant, not Eq).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecuteUpdatePayload {
     /// The machine_id of the host to run the update on.
     ///
@@ -389,12 +387,12 @@ pub struct ExecuteUpdatePayload {
     pub detect_version_plugin: Option<PluginAssignment>,
     /// Plugin for the execute_update role.
     pub execute_update_plugin: PluginAssignment,
-    /// Pre-update hook commands to execute before the update.
+    /// Pre-update hook plugins to execute before the update, ordered by priority.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pre_update_hooks: Vec<HookCommand>,
-    /// Post-update hook commands to execute after the update.
+    pub pre_update_hook_plugins: Vec<PluginAssignment>,
+    /// Post-update hook plugins to execute after the update, ordered by priority.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub post_update_hooks: Vec<HookCommand>,
+    pub post_update_hook_plugins: Vec<PluginAssignment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub release_info: Option<ReleaseInfo>,
     /// Timeout for the update execution.
@@ -456,9 +454,7 @@ pub struct UpdateResultPayload {
 ///
 /// Groups multiple items under a single plugin type so the agent can
 /// run a single bulk command (e.g., `apt-get upgrade`, `brew upgrade`).
-// Note: Eq is not derived because pre_update_hooks/post_update_hooks contain
-// HookCommand which may hold serde_json::Value (Other variant, not Eq).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecuteBatchUpdatePayload {
     /// The machine_id of the host to run the update on.
     pub host_machine_id: String,
@@ -470,12 +466,12 @@ pub struct ExecuteBatchUpdatePayload {
     pub plugin_config: serde_json::Value,
     /// Individual items to update.
     pub updates: Vec<BatchUpdateItem>,
-    /// Pre-update hook commands to execute before the batch.
+    /// Pre-update hook plugins to execute before the batch, ordered by priority.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pre_update_hooks: Vec<HookCommand>,
-    /// Post-update hook commands to execute after the batch.
+    pub pre_update_hook_plugins: Vec<PluginAssignment>,
+    /// Post-update hook plugins to execute after the batch, ordered by priority.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub post_update_hooks: Vec<HookCommand>,
+    pub post_update_hook_plugins: Vec<PluginAssignment>,
     /// Timeout for the entire batch operation.
     ///
     /// Wire field name: `timeout_seconds` (kept for backward compatibility).

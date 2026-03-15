@@ -43,8 +43,9 @@ pub enum Capability {
     ///
     /// Wire string: `ssh_remote`.
     SshRemote,
-    /// Service supports pre-/post-update hook commands (`HookCommand` in
-    /// `ExecuteUpdatePayload`). The controller omits hooks when absent.
+    /// Service supports pre-/post-update lifecycle hook plugins
+    /// (`PluginAssignment` in `ExecuteUpdatePayload`). The controller omits
+    /// hook plugins when absent.
     ///
     /// Wire string: `update_hooks`.
     UpdateHooks,

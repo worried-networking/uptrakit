@@ -57,9 +57,21 @@ pub fn encrypt_message_configs(mut msg: ControllerMessage) -> ControllerMessage 
             if let Some(dv) = &mut payload.detect_version_plugin {
                 dv.config = encrypt_config(&dv.config);
             }
+            for hook in &mut payload.pre_update_hook_plugins {
+                hook.config = encrypt_config(&hook.config);
+            }
+            for hook in &mut payload.post_update_hook_plugins {
+                hook.config = encrypt_config(&hook.config);
+            }
         }
         ControllerMessage::ExecuteBatchUpdate(payload) => {
             payload.plugin_config = encrypt_config(&payload.plugin_config);
+            for hook in &mut payload.pre_update_hook_plugins {
+                hook.config = encrypt_config(&hook.config);
+            }
+            for hook in &mut payload.post_update_hook_plugins {
+                hook.config = encrypt_config(&hook.config);
+            }
         }
         ControllerMessage::DiscoverSoftware(payload) => {
             for plugin in &mut payload.plugins {
@@ -94,9 +106,21 @@ pub fn decrypt_message_configs(mut msg: ControllerMessage) -> ControllerMessage 
             if let Some(dv) = &mut payload.detect_version_plugin {
                 dv.config = decrypt_config(&dv.config);
             }
+            for hook in &mut payload.pre_update_hook_plugins {
+                hook.config = decrypt_config(&hook.config);
+            }
+            for hook in &mut payload.post_update_hook_plugins {
+                hook.config = decrypt_config(&hook.config);
+            }
         }
         ControllerMessage::ExecuteBatchUpdate(payload) => {
             payload.plugin_config = decrypt_config(&payload.plugin_config);
+            for hook in &mut payload.pre_update_hook_plugins {
+                hook.config = decrypt_config(&hook.config);
+            }
+            for hook in &mut payload.post_update_hook_plugins {
+                hook.config = decrypt_config(&hook.config);
+            }
         }
         ControllerMessage::DiscoverSoftware(payload) => {
             for plugin in &mut payload.plugins {
@@ -247,8 +271,8 @@ mod tests {
                 package_identifier: "pkg".to_string(),
                 config: original_config.clone(),
             },
-            pre_update_hooks: vec![],
-            post_update_hooks: vec![],
+            pre_update_hook_plugins: vec![],
+            post_update_hook_plugins: vec![],
             release_info: None,
             timeout: std::time::Duration::from_secs(300),
             interactive: false,
@@ -285,8 +309,8 @@ mod tests {
             plugin_type: PluginType::PackageManagerApt,
             plugin_config: original_config.clone(),
             updates: vec![],
-            pre_update_hooks: vec![],
-            post_update_hooks: vec![],
+            pre_update_hook_plugins: vec![],
+            post_update_hook_plugins: vec![],
             timeout: std::time::Duration::from_secs(300),
             interactive: false,
         }));

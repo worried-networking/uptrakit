@@ -902,11 +902,15 @@ impl WireValidate for ExecuteUpdatePayload {
             "software_item_name",
         )?;
         check_string_len(&self.to_version, MAX_SHORT_STRING_LEN, "to_version")?;
-        check_vec_len(&self.pre_update_hooks, MAX_UPDATE_HOOKS, "pre_update_hooks")?;
         check_vec_len(
-            &self.post_update_hooks,
+            &self.pre_update_hook_plugins,
             MAX_UPDATE_HOOKS,
-            "post_update_hooks",
+            "pre_update_hook_plugins",
+        )?;
+        check_vec_len(
+            &self.post_update_hook_plugins,
+            MAX_UPDATE_HOOKS,
+            "post_update_hook_plugins",
         )?;
         self.execute_update_plugin.wire_validate()?;
         if let Some(ref detect) = self.detect_version_plugin {
@@ -915,49 +919,11 @@ impl WireValidate for ExecuteUpdatePayload {
         if let Some(ref ri) = self.release_info {
             ri.wire_validate()?;
         }
-        for hook in &self.pre_update_hooks {
-            hook.wire_validate()?;
+        for plugin in &self.pre_update_hook_plugins {
+            plugin.wire_validate()?;
         }
-        for hook in &self.post_update_hooks {
-            hook.wire_validate()?;
-        }
-        Ok(())
-    }
-}
-
-impl WireValidate for HookCommand {
-    fn wire_validate(&self) -> Result<(), WireValidationError> {
-        match self {
-            HookCommand::Shell { command, .. } => {
-                check_string_len(command, MAX_LONG_STRING_LEN, "hook_command.command")?;
-            }
-            HookCommand::Exec {
-                program,
-                args,
-                working_dir,
-            } => {
-                check_string_len(program, MAX_SHORT_STRING_LEN, "hook_command.program")?;
-                check_vec_len(args, MAX_HOOK_ARGS, "hook_command.args")?;
-                for (i, arg) in args.iter().enumerate() {
-                    if arg.len() > MAX_MEDIUM_STRING_LEN {
-                        return Err(WireValidationError {
-                            field: "hook_command.args",
-                            message: format!(
-                                "args[{i}] is {} bytes, max {MAX_MEDIUM_STRING_LEN}",
-                                arg.len()
-                            ),
-                        });
-                    }
-                }
-                check_opt_string_len(
-                    working_dir,
-                    MAX_SHORT_STRING_LEN,
-                    "hook_command.working_dir",
-                )?;
-            }
-            HookCommand::Other { .. } => {
-                tracing::warn!("received unknown HookCommand variant — skipping validation");
-            }
+        for plugin in &self.post_update_hook_plugins {
+            plugin.wire_validate()?;
         }
         Ok(())
     }
@@ -971,20 +937,24 @@ impl WireValidate for ExecuteBatchUpdatePayload {
             "host_machine_id",
         )?;
         check_vec_len(&self.updates, MAX_BATCH_UPDATES, "updates")?;
-        check_vec_len(&self.pre_update_hooks, MAX_UPDATE_HOOKS, "pre_update_hooks")?;
         check_vec_len(
-            &self.post_update_hooks,
+            &self.pre_update_hook_plugins,
             MAX_UPDATE_HOOKS,
-            "post_update_hooks",
+            "pre_update_hook_plugins",
+        )?;
+        check_vec_len(
+            &self.post_update_hook_plugins,
+            MAX_UPDATE_HOOKS,
+            "post_update_hook_plugins",
         )?;
         for update in &self.updates {
             update.wire_validate()?;
         }
-        for hook in &self.pre_update_hooks {
-            hook.wire_validate()?;
+        for plugin in &self.pre_update_hook_plugins {
+            plugin.wire_validate()?;
         }
-        for hook in &self.post_update_hooks {
-            hook.wire_validate()?;
+        for plugin in &self.post_update_hook_plugins {
+            plugin.wire_validate()?;
         }
         Ok(())
     }
@@ -1254,26 +1224,6 @@ mod tests {
     }
 
     #[test]
-    fn hook_command_shell_validates() {
-        let hook = HookCommand::Shell {
-            command: "echo hello".to_string(),
-            shell: HookShell::Bash,
-        };
-        assert!(hook.wire_validate().is_ok());
-    }
-
-    #[test]
-    fn hook_command_exec_too_many_args() {
-        let hook = HookCommand::Exec {
-            program: "test".to_string(),
-            args: vec!["arg".to_string(); MAX_HOOK_ARGS + 1],
-            working_dir: None,
-        };
-        let err = hook.wire_validate().unwrap_err();
-        assert_eq!(err.field, "hook_command.args");
-    }
-
-    #[test]
     fn set_update_freeze_validates() {
         let payload = SetUpdateFreezePayload {
             enabled: true,
@@ -1377,8 +1327,8 @@ mod tests {
                 package_identifier: "test".to_string(),
                 config: serde_json::json!({}),
             },
-            pre_update_hooks: vec![],
-            post_update_hooks: vec![],
+            pre_update_hook_plugins: vec![],
+            post_update_hook_plugins: vec![],
             release_info: Some(ReleaseInfo {
                 tag: "v1.0".to_string(),
                 release_url: "https://example.com".to_string(),
@@ -1393,11 +1343,12 @@ mod tests {
     }
 
     #[test]
-    fn execute_update_too_many_hooks() {
-        let hooks: Vec<HookCommand> = (0..MAX_UPDATE_HOOKS + 1)
-            .map(|_| HookCommand::Shell {
-                command: "echo".to_string(),
-                shell: HookShell::Bash,
+    fn execute_update_too_many_hook_plugins() {
+        let plugins: Vec<PluginAssignment> = (0..MAX_UPDATE_HOOKS + 1)
+            .map(|_| PluginAssignment {
+                plugin_type: PluginType::HookShell,
+                package_identifier: String::new(),
+                config: serde_json::json!({}),
             })
             .collect();
         let payload = ExecuteUpdatePayload {
@@ -1412,14 +1363,14 @@ mod tests {
                 package_identifier: "test".to_string(),
                 config: serde_json::json!({}),
             },
-            pre_update_hooks: hooks,
-            post_update_hooks: vec![],
+            pre_update_hook_plugins: plugins,
+            post_update_hook_plugins: vec![],
             release_info: None,
             timeout: std::time::Duration::from_secs(60),
             interactive: false,
         };
         let err = payload.wire_validate().unwrap_err();
-        assert_eq!(err.field, "pre_update_hooks");
+        assert_eq!(err.field, "pre_update_hook_plugins");
     }
 
     #[test]
