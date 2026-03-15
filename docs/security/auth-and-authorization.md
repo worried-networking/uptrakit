@@ -285,7 +285,7 @@ with HTTP 409 Conflict.
 
 ### How it works
 
-1. `get_user_permissions()` (`routes/auth.rs`) resolves a user's permissions: user -> user_roles -> role_permissions ->
+1. `get_user_permissions()` (`middleware/require_auth.rs`) resolves a user's permissions: user -> user_roles -> role_permissions ->
    permissions table.
 1. The resolved `Vec<Permission>` is embedded in the JWT access token (`permissions` claim) and returned in
    `UserResponse.permissions`.

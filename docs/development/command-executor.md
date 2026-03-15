@@ -12,7 +12,9 @@ The `CommandExecutor` trait decouples plugin logic from the command execution tr
 
 ## Key types
 
-All types live in `crates/shared/command/src/executor.rs` and are re-exported from `uptrakit_command` and
+Core data types (`CommandSpec`, `CommandMode`, `CommandOutput`, `InteractiveHandle`) live in
+`crates/shared/command/src/types.rs`. The `CommandExecutor` trait and its implementations live in
+`crates/shared/command/src/executor.rs`. All are re-exported from `uptrakit_command` and
 `uptrakit_plugin_infrastructure_core::command`.
 
 ### `CommandSpec`

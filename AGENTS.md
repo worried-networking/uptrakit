@@ -515,7 +515,7 @@ for user review. Key invariants:
         `prefer_interactive: true`. `sudo` is embedded because the Shell plugin uses
         `CommandSpec::shell()`, where `privileged` has no effect. `prefer_interactive: true`
         causes the controller to automatically set `interactive: true` in `ExecuteUpdatePayload`
-        (see `config_prefers_interactive` in `update_triggers.rs`), allocating a PTY so
+        (see `config_prefers_interactive` in `update_dispatch.rs`), allocating a PTY so
         `/dev/tty` is available for prompts that `PHS_SILENT=1` does not suppress (e.g. the
         low-storage warning `read -r prompt < /dev/tty`).
      The PHS shell constants live in `crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs`.
@@ -878,7 +878,8 @@ Published immediately on agent connect/disconnect via `ControllerMessage::HostCo
 | `crates/ui/web-api-queries/src/queries/mqtt_software_states.rs` | Bulk query loading enabled software items + host summaries (from `host_software_item`) + `build_host_metadata` (OS info, tags, agent info) |
 | `crates/ui/web-api/src/notification_service.rs` | `push_software_states_for_tenant` (local broadcast + optional NATS publish); `send_connectivity_update` (wraps `HostConnectivityUpdated`, local broadcast + NATS) |
 | `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs` | `MqttTriggerUpdate` and `MqttTriggerHostBatchUpdate` handlers |
-| `crates/ui/web-api-queries/src/queries/update_triggers.rs` | `trigger_update_for_host` (refactored into `validate_update_preconditions`, `create_update_history_record`, `dispatch_update_to_agent` layers); shared by REST, MQTT, and batch handlers; resolves `interactive` flag (caller + `config_prefers_interactive`) before `create_update_history_record` so the column is persisted accurately |
+| `crates/ui/web-api-queries/src/queries/update_dispatch.rs` | Shared update-dispatch primitives: `validate_update_preconditions`, `create_update_history_record`, `dispatch_update_to_agent`, `TriggerUpdateError`, `ValidatedUpdateTarget`, `config_prefers_interactive`; used by both `update_triggers.rs` and `update_batches/` |
+| `crates/ui/web-api-queries/src/queries/update_triggers.rs` | `trigger_update_for_host` convenience wrapper (calls all three dispatch layers); shared by REST and MQTT handlers; resolves `interactive` flag (caller + `config_prefers_interactive`) before `create_update_history_record` so the column is persisted accurately |
 | `crates/ui/web-api-queries/src/queries/update_batches.rs` | Batch update logic: `find_outdated_items_for_host`, `create_batch`, `dispatch_next_in_batch`, `trigger_all_host_batch_updates_for_host` |
 | `crates/ui/web-api/src/routes/update_batches.rs` | Batch update route handlers + SSE batch progress endpoint |
 | `crates/ui/web-api/src/batch_progress_broadcaster.rs` | `BatchProgressBroadcaster`: per-batch `broadcast` channels for SSE streaming |
@@ -1126,7 +1127,8 @@ The frontend filters services by capability instead of type and displays `servic
 | `crates/shared/service-sdk/src/connection.rs` | Split-stream WS architecture: `OutboundFrame`, background writer task, `send()`/`send_best_effort()`/`recv()`/`close()`, `agreed_capabilities` field + accessors |
 | `crates/shared/service-sdk/src/event_loop.rs` | Capability intersection in `ServiceSettings` handler |
 | `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` | `MessageProcessor`, `ProcessorMessage`, `handle_authenticated_loop` (spawns processor, 4-arm select) |
-| `crates/ui/web-api/src/routes/service_ws/handler/messages.rs` | `ProcessorResponse`, `ProcessorAction`, common message handlers |
+| `crates/ui/web-api/src/routes/service_ws/handler/shared_types.rs` | `ProcessorResponse`, `ProcessorAction`, `load_linked_host_ids` — shared types used by both `messages.rs` and `updates.rs` |
+| `crates/ui/web-api/src/routes/service_ws/handler/messages.rs` | Common message handlers (return `ProcessorResponse`) |
 | `crates/ui/web-api/src/routes/service_ws/handler/updates.rs` | Update lifecycle handlers (return `ProcessorResponse`) |
 | `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs` | MQTT-specific handlers (return `ProcessorResponse`) |
 | `crates/ui/web-api/src/routes/service_ws/protocol.rs` | `controller_capabilities()`, `ServiceSettingsPayload` construction, `CertIdentity` (Clone) |
@@ -1384,7 +1386,8 @@ overflow are dropped with a `tracing::warn!` rather than causing unbounded heap 
 | `crates/ui/web-api/src/notifications/` | Internal `NotificationEvent`, `NotificationDispatcher` (generic, no channel-type blocks), `message_builder` |
 | `crates/ui/web-api/src/routes/notifications.rs` | REST API route handlers (channels, rules, log, generic notification callback) |
 | `crates/ui/web-api-queries/src/queries/notifications.rs` | CRUD query helpers using `TenantDb` |
-| `crates/ui/web-api-auth/src/settings_store.rs` | Raw-key settings store functions (`upsert_setting_raw`, `load_settings_by_prefix`, etc.) |
+| `crates/shared/db/src/raw_settings.rs` | Raw-key settings store functions (`upsert_setting_raw`, `upsert_global_setting_raw`, `load_settings_by_prefix`, `load_global_settings_by_prefix`); used by notification plugins and `web-api-auth` |
+| `crates/ui/web-api-auth/src/settings_store.rs` | Typed settings store using `SettingKey` enum; delegates raw-key functions to `uptrakit_shared_db::raw_settings` |
 | `crates/shared/openapi-client/src/notifications.rs` | Typed HTTP client methods |
 | `crates/ui/cli/src/commands/notifications.rs` | CLI `notifications` command group |
 
@@ -1550,8 +1553,9 @@ web UI, REST API, and CLI with custom functionality. Extensions are described by
 | `crates/ui/web-api/src/extension_proxy.rs` | Controller-side request/response proxy via oneshot channels (frontend → service) |
 | `crates/shared/service-sdk/src/extension_proxy.rs` | Service-side proxy for invoking controller plugin actions (service → controller) |
 | `crates/ui/web-api/src/routes/extensions.rs` | REST endpoints: list, providers, invoke |
-| `crates/shared/service-sdk/src/lifecycle.rs` | `ServiceHandler::on_extension_request` + `on_extension_response` default impls |
-| `crates/shared/service-sdk/src/event_loop.rs` | Dispatches `ExtensionRequest` + `ExtensionResponse` to handler |
+| `crates/shared/service-sdk/src/shared_types.rs` | `ServiceHandler` trait (with `on_extension_request` + `on_extension_response` default impls), `EventLoopContext`, `LoopError`, `LoopOutcome`, `ShutdownCause` |
+| `crates/shared/service-sdk/src/lifecycle.rs` | `run_service_lifecycle` — orchestrates reconnect loop, calls `run_event_loop` |
+| `crates/shared/service-sdk/src/event_loop.rs` | `run_event_loop` — dispatches `ExtensionRequest` + `ExtensionResponse` to handler |
 | `crates/ui/cli/src/commands/extensions.rs` | CLI: `extensions list`, `providers`, `invoke` |
 | `frontend/src/lib/extensions.svelte.ts` | Svelte extension store |
 | `frontend/src/lib/components/extensions/` | Schema-driven UI components |

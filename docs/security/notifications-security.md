@@ -97,7 +97,7 @@ on the relevant action definitions.
 | `crates/plugins/notifications/email/src/lib.rs` | `EmailPlugin` -- SMTP delivery, config validation, internal SMTP merge |
 | `crates/plugins/notifications/email/src/extensions.rs` | SMTP settings handlers (global and per-tenant) with password encryption |
 | `crates/ui/web-api/src/settings.rs` | `SmtpSettingsSnapshot` with masked `Debug` impl |
-| `crates/ui/web-api-auth/src/settings_store.rs` | Raw-key settings store functions used by plugins |
+| `crates/shared/db/src/raw_settings.rs` | Raw-key settings store functions used by notification plugins |
 
 ## Webhook URL Validation and Header Blocklist
 

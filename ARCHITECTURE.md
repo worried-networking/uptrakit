@@ -396,7 +396,9 @@ The HTTP API is composed of three independent crates under `crates/ui/`:
 
 - **`uptrakit-web-api-auth`** (`crates/ui/web-api-auth/`): authentication subsystem (~5k lines).
   Contains the `auth` module (JWT, sessions, OIDC, tokens, permissions, registration), `SettingKey`,
-  and `settings_store`. The `oidc` feature gates `openidconnect` dependency. Authorization uses
+  and `settings_store`. Raw-key settings functions (`upsert_setting_raw`, `load_settings_by_prefix`,
+  etc.) live in `uptrakit-shared-db::raw_settings` so that notification plugins can access settings
+  without depending on `web-api-auth`. The `oidc` feature gates `openidconnect` dependency. Authorization uses
   32 granular permissions grouped into 8 built-in roles with 5 access presets. See
   [Authentication and Authorization](docs/security/auth-and-authorization.md).
 
