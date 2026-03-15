@@ -20,7 +20,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::middleware::permission::CanManageUsers;
-use crate::routes::auth::get_user_permissions;
+use crate::middleware::require_auth::get_user_permissions;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{permission, role, role_permission, user, user_role};
 

@@ -251,10 +251,13 @@ pub async fn apply_preset(
     }
 
     // Build response with updated roles/permissions.
-    let permissions =
-        crate::routes::auth::get_user_permissions(state.db(), state.default_tenant_id, user_id)
-            .await
-            .unwrap_or_default();
+    let permissions = crate::middleware::require_auth::get_user_permissions(
+        state.db(),
+        state.default_tenant_id,
+        user_id,
+    )
+    .await
+    .unwrap_or_default();
 
     let role_summaries: Vec<uptrakit_web_api_types::users::UserRoleSummary> = role_models
         .iter()

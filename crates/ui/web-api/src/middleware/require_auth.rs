@@ -4,15 +4,16 @@ use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use http::StatusCode;
-use sea_orm::EntityTrait;
+use rootcause::prelude::*;
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use uptrakit_shared_db::entity::prelude::*;
+use uptrakit_shared_db::entity::{permission, role_permission, user_role};
 
 use crate::AppState;
 use crate::auth::AuthMethod;
 use crate::auth::api_token::ApiTokenService;
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
-use crate::routes::auth::get_user_permissions;
 
 /// Extension type to carry the authenticated user ID, auth method, and permissions through the request.
 #[derive(Clone, Debug)]
@@ -170,6 +171,57 @@ pub(crate) async fn authenticate_jwt(
         auth_method,
         permissions: claims.permissions,
     })
+}
+
+/// Resolve the deduplicated set of permissions for a user via user_roles -> role_permissions -> permissions.
+pub async fn get_user_permissions(
+    db: &DatabaseConnection,
+    tenant_id: uuid::Uuid,
+    user_id: uuid::Uuid,
+) -> crate::auth::Result<Vec<Permission>> {
+    // Get user's role IDs
+    let user_roles = UserRole::find()
+        .filter(user_role::Column::TenantId.eq(tenant_id))
+        .filter(user_role::Column::UserId.eq(user_id))
+        .all(db)
+        .await
+        .context_to()?;
+
+    let role_ids: Vec<uuid::Uuid> = user_roles.iter().map(|ur| ur.role_id).collect();
+
+    if role_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Get permission IDs for those roles
+    let role_perms = RolePermission::find()
+        .filter(role_permission::Column::RoleId.is_in(role_ids))
+        .all(db)
+        .await
+        .context_to()?;
+
+    let perm_ids: Vec<uuid::Uuid> = role_perms.iter().map(|rp| rp.permission_id).collect();
+
+    if perm_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Get permission names
+    let perm_models = uptrakit_shared_db::entity::prelude::Permission::find()
+        .filter(permission::Column::Id.is_in(perm_ids))
+        .all(db)
+        .await
+        .context_to()?;
+
+    // Deduplicate and convert to enum
+    let mut seen = std::collections::HashSet::new();
+    let permissions: Vec<Permission> = perm_models
+        .into_iter()
+        .filter_map(|p| p.name.parse::<Permission>().ok())
+        .filter(|p| seen.insert(p.clone()))
+        .collect();
+
+    Ok(permissions)
 }
 
 fn extract_bearer_token(req: &Request) -> Option<String> {

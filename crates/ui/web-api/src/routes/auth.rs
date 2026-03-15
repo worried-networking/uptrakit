@@ -1,11 +1,10 @@
 use crate::AppState;
-use crate::auth::permissions::Permission;
 use crate::auth::refresh_cookie::{
     clear_refresh_token_cookie, extract_refresh_token_from_cookie, set_refresh_token_cookie,
 };
 use crate::auth::{AuthError, password, session::SessionService, token::generate_uuid};
 use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::require_auth::{AuthenticatedUser, get_user_permissions};
 use axum::{
     Json,
     extract::State,
@@ -14,13 +13,13 @@ use axum::{
 };
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
-    PaginatorTrait, QueryFilter, Set, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, Set,
+    TransactionTrait,
 };
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
-use uptrakit_shared_db::entity::{permission, role, role_permission, user, user_role};
+use uptrakit_shared_db::entity::{role, user, user_role};
 use uptrakit_shared_types::MaskedEmail;
 
 use crate::auth::AuthMethod;
@@ -419,6 +418,7 @@ pub async fn logout(
 mod tests {
     use super::*;
     use crate::ServiceCredentialSources;
+    use crate::auth::permissions::Permission;
     use axum::body::Body;
     use axum::http::Request;
     use sea_orm::{ConnectOptions, Database, DatabaseConnection};
@@ -913,55 +913,4 @@ pub async fn assign_viewer_role(
     };
     user_role_model.insert(db).await.context_to()?;
     Ok(())
-}
-
-/// Resolve the deduplicated set of permissions for a user via user_roles -> role_permissions -> permissions.
-pub async fn get_user_permissions(
-    db: &DatabaseConnection,
-    tenant_id: uuid::Uuid,
-    user_id: uuid::Uuid,
-) -> crate::auth::Result<Vec<Permission>> {
-    // Get user's role IDs
-    let user_roles = UserRole::find()
-        .filter(user_role::Column::TenantId.eq(tenant_id))
-        .filter(user_role::Column::UserId.eq(user_id))
-        .all(db)
-        .await
-        .context_to()?;
-
-    let role_ids: Vec<uuid::Uuid> = user_roles.iter().map(|ur| ur.role_id).collect();
-
-    if role_ids.is_empty() {
-        return Ok(vec![]);
-    }
-
-    // Get permission IDs for those roles
-    let role_perms = RolePermission::find()
-        .filter(role_permission::Column::RoleId.is_in(role_ids))
-        .all(db)
-        .await
-        .context_to()?;
-
-    let perm_ids: Vec<uuid::Uuid> = role_perms.iter().map(|rp| rp.permission_id).collect();
-
-    if perm_ids.is_empty() {
-        return Ok(vec![]);
-    }
-
-    // Get permission names
-    let perm_models = uptrakit_shared_db::entity::prelude::Permission::find()
-        .filter(permission::Column::Id.is_in(perm_ids))
-        .all(db)
-        .await
-        .context_to()?;
-
-    // Deduplicate and convert to enum
-    let mut seen = std::collections::HashSet::new();
-    let permissions: Vec<Permission> = perm_models
-        .into_iter()
-        .filter_map(|p| p.name.parse::<Permission>().ok())
-        .filter(|p| seen.insert(p.clone()))
-        .collect();
-
-    Ok(permissions)
 }

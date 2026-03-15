@@ -1334,10 +1334,13 @@ async fn mint_oidc_auth_response(state: &AppState, user_id: Uuid, provider_id: U
         _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
     };
 
-    let permissions =
-        super::auth::get_user_permissions(state.db(), state.default_tenant_id, user_id)
-            .await
-            .unwrap_or_default();
+    let permissions = crate::middleware::require_auth::get_user_permissions(
+        state.db(),
+        state.default_tenant_id,
+        user_id,
+    )
+    .await
+    .unwrap_or_default();
 
     let access_token =
         match state
