@@ -21,9 +21,9 @@ If any autodiscovery plugin already surfaces the software as a pending item, app
 the **Software → Pending** tab instead of setting up manual tracking — the plugin will have
 already configured the right role assignments.
 
-## Understanding the Three-Role Model
+## Understanding Plugin Roles
 
-Every software item host assignment has up to three **plugin roles**. Each role can use a
+Every software item host assignment has up to five **plugin roles**. Each role can use a
 different plugin:
 
 | Role | What it does |
@@ -31,11 +31,17 @@ different plugin:
 | `detect_version` | Runs on the agent to detect the currently installed version. |
 | `fetch_releases` | Fetches the latest available version from an upstream source. |
 | `execute_update` | Runs the actual update command on the agent. |
+| `pre_update_hook` | Runs before the update (e.g. stop a service). |
+| `post_update_hook` | Runs after the update (e.g. restart a service). |
 
-All three roles are optional individually, but at least `detect_version` should be configured
-to give Uptrakit something to report. Omitting `fetch_releases` means Uptrakit cannot determine
-whether an update is available. Omitting `execute_update` means Uptrakit can detect version drift
-but you must update the software manually outside Uptrakit.
+The three core roles are optional individually, but at least `detect_version` should be
+configured to give Uptrakit something to report. Omitting `fetch_releases` means Uptrakit
+cannot determine whether an update is available. Omitting `execute_update` means Uptrakit can
+detect version drift but you must update the software manually outside Uptrakit.
+
+The hook roles (`pre_update_hook`, `post_update_hook`) are optional and only accept hook-type
+plugin configs (`hook_systemd`, `hook_shell`). See [Plugin Configurations](plugin-configs.md)
+for details on hook plugin types.
 
 See [Plugin Configurations](plugin-configs.md) for the full reference on plugin types and their
 configuration fields.
@@ -87,7 +93,9 @@ Role assignments on the host (`auth.uk-home.yantsen.su`):
 | --- | --- | --- | --- |
 | `detect_version` | `Pocket ID (shell)` | `pocket-id` | _(none)_ |
 | `fetch_releases` | `GitHub Releases` | `pocket-id/pocket-id` | `{"tag_strip_prefix": "v"}` |
-| `execute_update` | `GitHub Releases` | `pocket-id/pocket-id` | `{"asset_patterns": ["pocket-id-linux-amd64"], "install_path": "/opt/pocket-id/pocket-id", "make_executable": true, "pre_install_command": "sudo /usr/bin/systemctl stop pocketid", "post_install_command": "sudo /usr/bin/systemctl start pocketid"}` |
+| `execute_update` | `GitHub Releases` | `pocket-id/pocket-id` | `{"asset_patterns": ["pocket-id-linux-amd64"], "install_path": "/opt/pocket-id/pocket-id", "make_executable": true}` |
+| `pre_update_hook` | `Systemd Hook` | — | `{"service_name": "pocketid"}` |
+| `post_update_hook` | `Systemd Hook` | — | `{"service_name": "pocketid"}` |
 
 The `execute_update` config override specifies:
 
@@ -95,18 +103,19 @@ The `execute_update` config override specifies:
   OS and architecture. Use a regex that matches exactly one asset per release.
 - `install_path` — the absolute path where the binary is written.
 - `make_executable` — sets the executable bit after installation.
-- `pre_install_command` / `post_install_command` — stop and restart the systemd service around
-  the binary replacement.
+
+The `pre_update_hook` and `post_update_hook` roles use the `hook_systemd` plugin to stop and
+restart the systemd service around the binary replacement. See
+[Update Lifecycle Plugins](../development/update-hooks.md) for details on hook plugins.
 
 Per-host config overrides let you reuse the same `releases_github` plugin config across multiple
 hosts or items while supplying host-specific asset patterns (e.g. `amd64` on one host, `arm64`
 on another).
 
-> **Sudoers note:** The `systemctl stop` and `systemctl start` commands in `pre_install_command`
-> and `post_install_command` must be allowlisted in the agent's sudoers file. Run
-> the **Sync Host** action in the web UI (or
-> `uptrakit extensions ssh-agent.hosts sync-host <host-id> --service-id <UUID>`)
-> after configuring these commands to regenerate the sudoers file on the host. See
+> **Sudoers note:** The `systemctl stop` and `systemctl start` commands used by the systemd
+> hook plugin must be allowlisted in the agent's sudoers file. Run the **Sync Host** action in
+> the web UI (or `uptrakit extensions ssh-agent.hosts sync-host <host-id> --service-id <UUID>`)
+> after configuring hook plugins to regenerate the sudoers file on the host. See
 > [Sudoers Management](../security/sudoers-management.md) for details.
 
 ### Pattern B: Generic shell for both detection and updates
@@ -212,11 +221,14 @@ In the **Execute Update** section, paste a JSON config override with the asset-s
 {
   "asset_patterns": ["pocket-id-linux-amd64"],
   "install_path": "/opt/pocket-id/pocket-id",
-  "make_executable": true,
-  "pre_install_command": "sudo /usr/bin/systemctl stop pocketid",
-  "post_install_command": "sudo /usr/bin/systemctl start pocketid"
+  "make_executable": true
 }
 ```
+
+To stop and restart a systemd service around the update, assign hook plugins:
+
+- **Pre-Update Hook** — select a `Systemd Hook` config with `{"service_name": "pocketid"}`.
+- **Post-Update Hook** — select the same `Systemd Hook` config.
 
 Click **Save Changes**.
 
@@ -281,12 +293,28 @@ uptrakit software-items update-assignment "$ITEM_ID" \
   --config-override '{
     "asset_patterns": ["pocket-id-linux-amd64"],
     "install_path": "/opt/pocket-id/pocket-id",
-    "make_executable": true,
-    "pre_install_command": "sudo /usr/bin/systemctl stop pocketid",
-    "post_install_command": "sudo /usr/bin/systemctl start pocketid"
+    "make_executable": true
   }'
 
-# 7. Trigger an immediate version check
+# 7. Create a systemd hook config for the service lifecycle
+HOOK_CONFIG_ID=$(uptrakit plugin-configs create \
+  --name "Pocket ID (systemd hook)" \
+  --type hook_systemd \
+  --config '{"service_name":"pocketid"}' \
+  --output json | jq -r '.id')
+
+# 8. Assign pre/post update hooks
+uptrakit software-items assign "$ITEM_ID" \
+  --host "$HOST_ID" \
+  --plugin-config "$HOOK_CONFIG_ID" \
+  --role pre_update_hook
+
+uptrakit software-items assign "$ITEM_ID" \
+  --host "$HOST_ID" \
+  --plugin-config "$HOOK_CONFIG_ID" \
+  --role post_update_hook
+
+# 9. Trigger an immediate version check
 uptrakit check item "$ITEM_ID"
 ```
 
@@ -313,11 +341,9 @@ Tips:
 
 ## Sudoers Considerations
 
-Commands in `pre_install_command` and `post_install_command` that require elevated privileges
-must be allowlisted in the agent's sudoers file. The GitHub Releases plugin automatically
-declares `install` as a required sudo command when `install_path` is configured. It also
-declares `systemctl stop *` and `systemctl start *` when those commands appear in the
-pre/post install fields.
+The GitHub Releases plugin automatically declares `install` as a required sudo command when
+`install_path` is configured. Hook plugins (e.g. `hook_systemd`) declare their own sudo
+requirements — the systemd hook declares `systemctl stop *` and `systemctl start *`.
 
 After adding or changing plugin configurations that affect sudoers, regenerate the sudoers file
 on the host using the **Sync Host** action in the web UI or by running:

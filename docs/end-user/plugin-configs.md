@@ -52,8 +52,6 @@ The `owner` and `repo` are **not** configuration fields — they are expressed a
 | `asset_patterns` | No | List of regex patterns to filter release assets. Only assets whose names match at least one pattern are included. An empty list includes all assets. Used by both `fetch_releases` (controller) and `execute_update` (agent). |
 | `install_path` | No | Absolute destination path for the downloaded asset (e.g. `/usr/local/bin/pocket-id`). Required for `execute_update`. Must not contain `..` or null bytes. Max 4096 characters. |
 | `make_executable` | No | Set the executable bit on the installed file (default: `true`). When `false`, the file is installed with mode `0644`. |
-| `pre_install_command` | No | Shell command to run before installing the asset (e.g. `sudo systemctl stop myapp`). Supports `{version}` and `{tag}` placeholders. |
-| `post_install_command` | No | Shell command to run after installing the asset (e.g. `sudo systemctl start myapp`). Supports `{version}` and `{tag}` placeholders. |
 | `verify_attestation` | No | Download the release checksums file and query the [GitHub Attestations API](https://docs.github.com/en/rest/repos/repos#list-attestations) for each release (default: `true`). Attestation status is stored in `latest_release_metadata` and shown in the UI. Set to `false` to disable entirely (not recommended for production use of public repositories). |
 | `require_attestation` | No | Abort the update on the agent if no GitHub Actions attestation is found for the release (default: `false`). When `true`, the agent independently re-verifies the attestation before install and blocks any release with `attestation_status = NotFound`. See [GitHub Actions Attestation Verification](../security/github-attestation.md) for details. |
 

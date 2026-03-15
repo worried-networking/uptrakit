@@ -169,6 +169,48 @@ The controller loads hook plugin assignments from `host_software_item_plugins` (
 and populates these arrays. The agent instantiates each plugin via the plugin registry and
 calls the lifecycle methods.
 
+## Web UI
+
+Hook plugins are assigned via the same plugin assignment modals used for core roles
+(`detect_version`, `fetch_releases`, `execute_update`). The **Configure Plugins** modal
+(opened from the host context menu on a software item detail page) and the **Assign to Host**
+modal both include `Pre-Update Hook` and `Post-Update Hook` role sections.
+
+The plugin config dropdown is filtered per role:
+
+- Hook roles only show plugin configs whose plugin type has `pre_update_hook` or
+  `post_update_hook` capability (i.e. `hook_systemd` and `hook_shell` configs).
+- Core roles exclude hook-type plugin configs.
+
+Hook roles do not show the **Package ID** or **Execution Site** fields, since hooks do not
+use package identifiers and always run on the agent.
+
+## CLI
+
+The CLI uses the same `PluginRole` enum as the API. Hook roles work with all existing
+commands:
+
+```bash
+# Create a systemd hook config
+HOOK_ID=$(uptrakit plugin-configs create \
+  --name "My Service Hook" \
+  --type hook_systemd \
+  --config '{"service_name":"myapp"}' \
+  --output json | jq -r '.id')
+
+# Assign pre-update hook
+uptrakit software-items assign "$ITEM_ID" \
+  --host "$HOST_ID" \
+  --plugin-config "$HOOK_ID" \
+  --role pre_update_hook
+
+# Assign post-update hook
+uptrakit software-items assign "$ITEM_ID" \
+  --host "$HOST_ID" \
+  --plugin-config "$HOOK_ID" \
+  --role post_update_hook
+```
+
 ## Key files
 
 | File | Purpose |
