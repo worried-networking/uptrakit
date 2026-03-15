@@ -157,12 +157,10 @@ pub(super) async fn deliver_pending_updates(
         .map(|h| (h.id, h))
         .collect();
 
-    // Batch 3: plugin assignments for the three relevant roles across all
+    // Batch 3: plugin assignments for all relevant roles across all
     // (host_id, software_item_id) combinations that appear in pending_updates.
     // The cross-product filter may include extra rows for pairs not in
     // pending_updates; those are silently ignored during the join below.
-    // `fetch_releases` is included so its plugin config can be used to extract
-    // the `require_attestation` flag when enriching `release_info`.
     let assignments: Vec<host_software_item_plugin::Model> =
         host_software_item_plugin::Entity::find()
             .filter(host_software_item_plugin::Column::HostId.is_in(host_ids.clone()))
@@ -171,24 +169,43 @@ pub(super) async fn deliver_pending_updates(
                 "execute_update",
                 "detect_version",
                 "fetch_releases",
+                "pre_update_hook",
+                "post_update_hook",
             ]))
+            .order_by_asc(host_software_item_plugin::Column::Ordinal)
             .all(state.db())
             .await
             .context_to::<HandlerError>()?;
 
-    // Index assignments by (host_id, software_item_id, role).
-    let assignments_map: HashMap<
+    // Index single-valued assignments by (host_id, software_item_id, role).
+    // Hook roles are collected separately as Vec since multiple can exist.
+    let mut assignments_map: HashMap<
         (uuid::Uuid, uuid::Uuid, String),
         host_software_item_plugin::Model,
-    > = assignments
-        .into_iter()
-        .map(|a| ((a.host_id, a.software_item_id, a.role.clone()), a))
-        .collect();
+    > = HashMap::new();
+    let mut hook_assignments_map: HashMap<
+        (uuid::Uuid, uuid::Uuid, String),
+        Vec<host_software_item_plugin::Model>,
+    > = HashMap::new();
+    for a in assignments {
+        let key = (a.host_id, a.software_item_id, a.role.clone());
+        if a.role == "pre_update_hook" || a.role == "post_update_hook" {
+            hook_assignments_map.entry(key).or_default().push(a);
+        } else {
+            assignments_map.insert(key, a);
+        }
+    }
 
     // Batch 4: plugin configs referenced by the assignments above.
     let plugin_config_ids: Vec<uuid::Uuid> = assignments_map
         .values()
         .filter_map(|a| a.plugin_config_id)
+        .chain(
+            hook_assignments_map
+                .values()
+                .flatten()
+                .filter_map(|a| a.plugin_config_id),
+        )
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
@@ -279,13 +296,41 @@ pub(super) async fn deliver_pending_updates(
             build_plugin_assignment_nullable(a, c)
         });
 
-        // Resolve hooks from the execute_update plugin config + per-role override.
-        let resolved_hooks = uptrakit_update_hooks::resolve_hooks(
-            exec_config
-                .map(|c| &c.config)
-                .unwrap_or(&serde_json::Value::Object(Default::default())),
-            exec_assignment.config.as_ref(),
+        // Resolve hook plugin assignments.
+        let pre_hook_key = (
+            update_record.host_id,
+            update_record.software_item_id,
+            "pre_update_hook".to_string(),
         );
+        let pre_update_hook_plugins: Vec<PluginAssignment> = hook_assignments_map
+            .get(&pre_hook_key)
+            .map(|assignments| {
+                assignments
+                    .iter()
+                    .filter_map(|a| {
+                        let c = a.plugin_config_id.and_then(|pc_id| configs_map.get(&pc_id));
+                        build_plugin_assignment_nullable(a, c)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let post_hook_key = (
+            update_record.host_id,
+            update_record.software_item_id,
+            "post_update_hook".to_string(),
+        );
+        let post_update_hook_plugins: Vec<PluginAssignment> = hook_assignments_map
+            .get(&post_hook_key)
+            .map(|assignments| {
+                assignments
+                    .iter()
+                    .filter_map(|a| {
+                        let c = a.plugin_config_id.and_then(|pc_id| configs_map.get(&pc_id));
+                        build_plugin_assignment_nullable(a, c)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
 
         let Some(host) = hosts_map.get(&update_record.host_id) else {
             tracing::warn!(
@@ -322,8 +367,8 @@ pub(super) async fn deliver_pending_updates(
             to_version: update_record.to_version.clone().unwrap_or_default(),
             detect_version_plugin,
             execute_update_plugin,
-            pre_update_hooks: resolved_hooks.pre_update_hooks,
-            post_update_hooks: resolved_hooks.post_update_hooks,
+            pre_update_hook_plugins,
+            post_update_hook_plugins,
             release_info,
             timeout: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT,
             interactive: false,

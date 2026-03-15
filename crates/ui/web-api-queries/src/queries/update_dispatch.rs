@@ -10,7 +10,7 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
-    PaginatorTrait, QueryFilter, Set,
+    PaginatorTrait, QueryFilter, QueryOrder, Set,
 };
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{
@@ -99,6 +99,10 @@ pub struct ValidatedUpdateTarget {
     /// Used to extract `require_attestation` at dispatch time without a
     /// hard dependency on any specific plugin crate.
     pub fetch_releases_config: Option<serde_json::Value>,
+    /// Pre-update hook plugin assignments, ordered by `ordinal`.
+    pub pre_update_hook_plugins: Vec<PluginAssignment>,
+    /// Post-update hook plugin assignments, ordered by `ordinal`.
+    pub post_update_hook_plugins: Vec<PluginAssignment>,
 }
 
 /// Parameters for [`create_update_history_record`].
@@ -186,6 +190,42 @@ async fn load_role_plugin(
     };
 
     Ok(Some((assignment, config)))
+}
+
+/// Load all plugin assignments for a given role, ordered by `ordinal ASC`.
+///
+/// Used for hook roles (`pre_update_hook`, `post_update_hook`) where multiple
+/// plugins can be assigned with ordering semantics.
+async fn load_role_plugins_ordered(
+    db: &DatabaseConnection,
+    host_id: Uuid,
+    software_item_id: Uuid,
+    role: &str,
+) -> Result<Vec<PluginAssignment>> {
+    let assignments = HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
+        .filter(host_software_item_plugin::Column::Role.eq(role))
+        .order_by_asc(host_software_item_plugin::Column::Ordinal)
+        .all(db)
+        .await
+        .context_to()?;
+
+    let mut result = Vec::with_capacity(assignments.len());
+    for assignment in &assignments {
+        let config = if let Some(pc_id) = assignment.plugin_config_id {
+            PluginConfig::find_by_id(pc_id)
+                .filter(plugin_config::Column::DeactivatedAt.is_null())
+                .one(db)
+                .await
+                .context_to()?
+        } else {
+            None
+        };
+        result.push(build_plugin_assignment(assignment, config.as_ref())?);
+    }
+
+    Ok(result)
 }
 
 /// Build a [`PluginAssignment`] from a role plugin row and its optional config.
@@ -302,6 +342,12 @@ pub(crate) async fn load_target_for_dispatch(
             )
         });
 
+    // Load hook plugin assignments (ordered by ordinal).
+    let pre_update_hook_plugins =
+        load_role_plugins_ordered(db, host_id, item_id, "pre_update_hook").await?;
+    let post_update_hook_plugins =
+        load_role_plugins_ordered(db, host_id, item_id, "post_update_hook").await?;
+
     Ok(ValidatedUpdateTarget {
         item,
         host: host_record,
@@ -310,6 +356,8 @@ pub(crate) async fn load_target_for_dispatch(
         execute_update_data,
         detect_version_data,
         fetch_releases_config,
+        pre_update_hook_plugins,
+        post_update_hook_plugins,
     })
 }
 
@@ -448,17 +496,6 @@ pub async fn dispatch_update_to_agent(
         .map(|(a, c)| build_plugin_assignment(a, c.as_ref()))
         .transpose()?;
 
-    let empty_config = serde_json::json!({});
-    let hooks_base_config = target
-        .execute_update_data
-        .1
-        .as_ref()
-        .map_or(&empty_config, |c| &c.config);
-    let resolved_hooks = uptrakit_update_hooks::resolve_hooks(
-        hooks_base_config,
-        target.execute_update_data.0.config.as_ref(),
-    );
-
     let enriched_release_info = enrich_release_info_with_attestation(
         params.release_info,
         target.hsi_link.latest_release_metadata.as_ref(),
@@ -481,8 +518,8 @@ pub async fn dispatch_update_to_agent(
         to_version: params.to_version,
         detect_version_plugin,
         execute_update_plugin,
-        pre_update_hooks: resolved_hooks.pre_update_hooks,
-        post_update_hooks: resolved_hooks.post_update_hooks,
+        pre_update_hook_plugins: target.pre_update_hook_plugins.clone(),
+        post_update_hook_plugins: target.post_update_hook_plugins.clone(),
         release_info: enriched_release_info,
         timeout: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT,
         interactive,
