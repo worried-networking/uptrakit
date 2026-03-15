@@ -12,6 +12,7 @@
 		SoftwareItemDetailResponse,
 		UpdateHostAssignmentRequest
 	} from '$lib/types';
+	import { PluginCapability } from '$lib/types';
 
 	// ---------------------------------------------------------------------------
 	// Types
@@ -50,6 +51,7 @@
 	};
 
 	interface StandardRoleState {
+		plugin_type: string;
 		plugin_config_id: string;
 		package_identifier: string;
 		execution_site: string;
@@ -68,6 +70,7 @@
 		 * this editing session).
 		 */
 		origOrdinal: number | null;
+		plugin_type: string;
 		plugin_config_id: string;
 		config_override_text: string;
 		config_override_error: string | null;
@@ -131,6 +134,7 @@
 			const existing = existingPlugins.find((p) => p.role === role);
 			result[role] = existing
 				? {
+						plugin_type: existing.plugin_type,
 						plugin_config_id: existing.plugin_config_id ?? '',
 						package_identifier: existing.package_identifier,
 						execution_site: existing.execution_site || 'auto',
@@ -140,6 +144,7 @@
 						overrideShowJson: false
 					}
 				: {
+						plugin_type: '',
 						plugin_config_id: '',
 						package_identifier: '',
 						execution_site: 'auto',
@@ -160,6 +165,7 @@
 			result[role] = hooks.map((h) => ({
 				localKey: nextKey(),
 				origOrdinal: h.ordinal,
+				plugin_type: h.plugin_type,
 				plugin_config_id: h.plugin_config_id ?? '',
 				config_override_text: h.config_override ? JSON.stringify(h.config_override, null, 2) : '',
 				config_override_error: null,
@@ -195,6 +201,15 @@
 							fields
 						);
 					}
+				} else if (existing?.plugin_type) {
+					const pt = pluginTypes.find((t) => t.plugin_type === existing.plugin_type);
+					if (pt) {
+						const fields = pt.config_form_fields ?? [];
+						standardStates[role].overrideFormValues = flattenConfig(
+							(existing.config_override as Record<string, unknown>) ?? pt.sample_config,
+							fields
+						);
+					}
 				}
 			}
 
@@ -212,6 +227,15 @@
 								fields
 							);
 						}
+					} else if (existing?.plugin_type) {
+						const pt = pluginTypes.find((t) => t.plugin_type === existing.plugin_type);
+						if (pt) {
+							const fields = pt.config_form_fields ?? [];
+							hookLists[role][i].overrideFormValues = flattenConfig(
+								(existing.config_override as Record<string, unknown>) ?? pt.sample_config,
+								fields
+							);
+						}
 					}
 				}
 			}
@@ -226,37 +250,22 @@
 	// Plugin-type helpers
 	// ---------------------------------------------------------------------------
 
-	function isHookPluginType(pluginType: string): boolean {
-		const pt = pluginTypes.find((t) => t.plugin_type === pluginType);
-		if (!pt) return false;
-		return pt.capabilities.some((c) => c === 'update_lifecycle');
+	function pluginTypesForRole(role: StandardRoleKey): PluginTypeInfo[] {
+		const capMap: Record<StandardRoleKey, string> = {
+			detect_version: 'version_detection',
+			fetch_releases: 'release_fetching',
+			execute_update: 'update_execution'
+		};
+		const cap = capMap[role];
+		return pluginTypes.filter((t) => t.capabilities.includes(cap as PluginCapability));
 	}
 
-	function hookConfigsForRole(): PluginConfigResponse[] {
-		return pluginConfigs.filter((c) => isHookPluginType(c.plugin_type));
+	function hookPluginTypes(): PluginTypeInfo[] {
+		return pluginTypes.filter((t) => t.capabilities.includes(PluginCapability.UpdateLifecycle));
 	}
 
-	const ROLE_CAPABILITY: Record<StandardRoleKey, string> = {
-		detect_version: 'version_detection',
-		fetch_releases: 'release_fetching',
-		execute_update: 'update_execution'
-	};
-
-	const ROLE_EMPTY_HINT: Record<StandardRoleKey, string> = {
-		detect_version:
-			'No version detection configs found. Create an APT, Homebrew, npm, or other package manager plugin config',
-		fetch_releases:
-			'No release fetching configs found. Create a GitHub Releases, GitLab Releases, Forgejo Releases, or Docker plugin config',
-		execute_update:
-			'No update execution configs found. Create an APT, Homebrew, npm, Shell, or other package manager plugin config'
-	};
-
-	function standardConfigsForRole(role: StandardRoleKey): PluginConfigResponse[] {
-		const cap = ROLE_CAPABILITY[role];
-		return pluginConfigs.filter((c) => {
-			const pt = pluginTypes.find((t) => t.plugin_type === c.plugin_type);
-			return pt?.capabilities.some((ca) => ca === cap) ?? false;
-		});
+	function savedConfigsForType(pluginType: string): PluginConfigResponse[] {
+		return pluginConfigs.filter((c) => c.plugin_type === pluginType);
 	}
 
 	function getFormFields(pluginType: string): FieldDef[] {
@@ -348,10 +357,13 @@
 	// ---------------------------------------------------------------------------
 
 	function getStdFormFields(role: StandardRoleKey): FieldDef[] {
-		const configId = standardStates[role].plugin_config_id;
-		if (!configId) return [];
-		const config = pluginConfigs.find((c) => c.id === configId);
-		return config ? getFormFields(config.plugin_type) : [];
+		const s = standardStates[role];
+		if (!s.plugin_type) return [];
+		if (s.plugin_config_id) {
+			const config = pluginConfigs.find((c) => c.id === s.plugin_config_id);
+			return config ? getFormFields(config.plugin_type) : [];
+		}
+		return getFormFields(s.plugin_type);
 	}
 
 	function isStdOverrideFieldVisible(field: FieldDef, role: StandardRoleKey): boolean {
@@ -398,9 +410,8 @@
 	// ---------------------------------------------------------------------------
 
 	function getHookFormFields(entry: HookEntry): FieldDef[] {
-		if (!entry.plugin_config_id) return [];
-		const config = pluginConfigs.find((c) => c.id === entry.plugin_config_id);
-		return config ? getFormFields(config.plugin_type) : [];
+		if (!entry.plugin_type) return [];
+		return getFormFields(entry.plugin_type);
 	}
 
 	function isHookOverrideFieldVisible(field: FieldDef, entry: HookEntry): boolean {
@@ -452,6 +463,7 @@
 			{
 				localKey: nextKey(),
 				origOrdinal: null,
+				plugin_type: '',
 				plugin_config_id: '',
 				config_override_text: '',
 				config_override_error: null,
@@ -484,7 +496,7 @@
 		}
 		if (!allValid) return;
 
-		const standardToUpdate = STANDARD_ROLES.filter((r) => standardStates[r].plugin_config_id);
+		const standardToUpdate = STANDARD_ROLES.filter((r) => standardStates[r].plugin_type);
 		const hasHooks = HOOK_ROLES.some((r) => hookLists[r].length > 0);
 
 		if (standardToUpdate.length === 0 && !hasHooks) {
@@ -514,10 +526,25 @@
 				const req: UpdateHostAssignmentRequest = {
 					role,
 					ordinal: 0,
-					plugin_config_id: s.plugin_config_id,
+					...(s.plugin_config_id
+						? { plugin_config_id: s.plugin_config_id, config_override: configOverride }
+						: {
+								plugin_config: {
+									name: `${softwareItemName} \u2013 ${role.replace(/_/g, ' ')}`,
+									plugin_type: s.plugin_type,
+									config: (() => {
+										if (hasFields && !s.overrideShowJson) {
+											return unflattenConfig(s.overrideFormValues, fields) as Record<string, unknown>;
+										}
+										const text = s.config_override_text.trim();
+										return text ? (JSON.parse(text) as Record<string, unknown>) : {};
+									})(),
+									enabled: true
+								},
+								config_override: null
+							}),
 					package_identifier: s.package_identifier.trim() || undefined,
-					execution_site: s.execution_site,
-					config_override: configOverride
+					execution_site: s.execution_site
 				};
 				lastResult = await updateHostAssignment(softwareItemId, hostId, req);
 			}
@@ -531,10 +558,11 @@
 				// Upsert desired entries (in order, so ordinal = list index).
 				for (let i = 0; i < hookLists[role].length; i++) {
 					const entry = hookLists[role][i];
-					if (!entry.plugin_config_id) continue;
+					if (!entry.plugin_type) continue;
 
 					const fields = getHookFormFields(entry);
 					const hasFields = fields.length > 0;
+
 					let configOverride: Record<string, unknown> | null = null;
 					if (hasFields && !entry.overrideShowJson) {
 						const obj = unflattenConfig(entry.overrideFormValues, fields);
@@ -547,8 +575,23 @@
 					const req: UpdateHostAssignmentRequest = {
 						role,
 						ordinal: i,
-						plugin_config_id: entry.plugin_config_id,
-						config_override: configOverride
+						...(entry.plugin_config_id
+							? { plugin_config_id: entry.plugin_config_id, config_override: configOverride }
+							: {
+									plugin_config: {
+										name: `${softwareItemName} \u2013 ${role.replace(/_/g, ' ')} #${i + 1}`,
+										plugin_type: entry.plugin_type,
+										config: (() => {
+											if (hasFields && !entry.overrideShowJson) {
+												return unflattenConfig(entry.overrideFormValues, fields) as Record<string, unknown>;
+											}
+											const text = entry.config_override_text.trim();
+											return text ? (JSON.parse(text) as Record<string, unknown>) : {};
+										})(),
+										enabled: true
+									},
+									config_override: null
+								})
 					};
 					lastResult = await updateHostAssignment(softwareItemId, hostId, req);
 				}
@@ -592,43 +635,70 @@
 					{@const s = standardStates[role]}
 					{@const roleFields = getStdFormFields(role)}
 					{@const hasFormFields = roleFields.length > 0}
-					{@const stdOptions = standardConfigsForRole(role)}
+					{@const typeOptions = pluginTypesForRole(role)}
 					<div class="rounded-lg border border-surface-200 p-4 space-y-3 dark:border-surface-700">
 						<div class="flex items-start gap-2">
 							<span class="badge preset-tonal shrink-0 text-xs">{ROLE_LABELS[role]}</span>
 							<span class="text-xs text-surface-500 leading-5">{ROLE_DESCRIPTIONS[role]}</span>
 						</div>
 
+						<!-- Plugin Type -->
 						<div class="grid grid-cols-[9rem_1fr] items-center gap-3">
-							<label class="text-sm font-medium" for="cfg-{role}">Plugin Config</label>
-							{#if stdOptions.length > 0}
-								<select
-									id="cfg-{role}"
-									class="select text-sm"
-									bind:value={standardStates[role].plugin_config_id}
-									onchange={() => {
-										const config = pluginConfigs.find((c) => c.id === standardStates[role].plugin_config_id);
-										const fields = config ? getFormFields(config.plugin_type) : [];
-										standardStates[role].overrideFormValues = flattenConfig({}, fields);
-										standardStates[role].overrideShowJson = false;
-										standardStates[role].config_override_text = '';
-										standardStates[role].config_override_error = null;
-									}}
-								>
-									<option value="">— not configured —</option>
-									{#each stdOptions as cfg (cfg.id)}
-										<option value={cfg.id}>{cfg.name}</option>
-									{/each}
-								</select>
-							{:else}
-								<p class="text-xs text-surface-500 rounded bg-surface-100 dark:bg-surface-800 px-2 py-1">
-									{ROLE_EMPTY_HINT[role]} in
-									<a href="/settings" class="underline">Settings → Plugin Configs</a> first.
-								</p>
-							{/if}
+							<label class="text-sm font-medium" for="type-{role}">Plugin Type</label>
+							<select
+								id="type-{role}"
+								class="select text-sm"
+								bind:value={standardStates[role].plugin_type}
+								onchange={() => {
+									standardStates[role].plugin_config_id = '';
+									const pt = pluginTypes.find((t) => t.plugin_type === standardStates[role].plugin_type);
+									const fields = pt?.config_form_fields ?? [];
+									standardStates[role].overrideFormValues = flattenConfig(pt?.sample_config ?? {}, fields);
+									standardStates[role].overrideShowJson = false;
+									standardStates[role].config_override_text = '';
+									standardStates[role].config_override_error = null;
+								}}
+							>
+								<option value="">— not configured —</option>
+								{#each typeOptions as pt (pt.plugin_type)}
+									<option value={pt.plugin_type}>{pt.display_name}</option>
+								{/each}
+							</select>
 						</div>
 
-						{#if s.plugin_config_id}
+						<!-- Optional Saved Config sub-select -->
+						{#if standardStates[role].plugin_type}
+							{@const savedForType = savedConfigsForType(standardStates[role].plugin_type)}
+							{#if savedForType.length > 0}
+								<div class="grid grid-cols-[9rem_1fr] items-center gap-3">
+									<label class="text-sm font-medium" for="cfg-{role}">Saved Config</label>
+									<select
+										id="cfg-{role}"
+										class="select text-sm"
+										bind:value={standardStates[role].plugin_config_id}
+										onchange={() => {
+											const config = pluginConfigs.find((c) => c.id === standardStates[role].plugin_config_id);
+											const pt = pluginTypes.find((t) => t.plugin_type === standardStates[role].plugin_type);
+											const fields = config ? getFormFields(config.plugin_type) : (pt?.config_form_fields ?? []);
+											const base = standardStates[role].plugin_config_id ? {} : (pt?.sample_config ?? {});
+											standardStates[role].overrideFormValues = flattenConfig(base, fields);
+											standardStates[role].overrideShowJson = false;
+											standardStates[role].config_override_text = '';
+											standardStates[role].config_override_error = null;
+										}}
+									>
+										<option value="">— use inline config —</option>
+										{#each savedForType as cfg (cfg.id)}
+											<option value={cfg.id}>{cfg.name}</option>
+										{/each}
+									</select>
+								</div>
+							{/if}
+						{/if}
+
+						{#if s.plugin_type}
+							{@const isInline = !s.plugin_config_id}
+
 							<!-- Package Identifier -->
 							<div class="grid grid-cols-[9rem_1fr] items-center gap-3">
 								<label class="text-sm font-medium" for="pkg-{role}">Package ID</label>
@@ -652,16 +722,10 @@
 								</div>
 							{/if}
 
-							<details>
-								<summary class="cursor-pointer select-none text-xs text-surface-500 hover:text-surface-700">
-									Config Override <span class="opacity-60">(advanced)</span>
-									{#if hasStdOverride(role)}
-										<span class="ml-1 badge preset-tonal-warning text-xs">set</span>
-									{/if}
-								</summary>
-
+							{#if isInline}
+								<!-- Inline config form — not collapsible, required -->
 								{#if hasFormFields && !standardStates[role].overrideShowJson}
-									<div class="mt-2 space-y-2">
+									<div class="space-y-2">
 										{#each roleFields as field (field.key)}
 											{#if isStdOverrideFieldVisible(field, role)}
 												<div>
@@ -672,7 +736,7 @@
 														<textarea
 															id="ovr-{role}-{field.key}"
 															bind:value={standardStates[role].overrideFormValues[field.key]}
-															placeholder={field.placeholder}
+															placeholder={field.placeholder ?? ''}
 															class="textarea font-mono text-xs w-full"
 															rows="3"
 														></textarea>
@@ -682,7 +746,7 @@
 															bind:value={standardStates[role].overrideFormValues[field.key]}
 															class="select text-xs w-full"
 														>
-															<option value="">— keep base config —</option>
+															<option value=""></option>
 															{#each resolvedOptions(field) as opt (opt.value)}
 																<option value={opt.value}>{opt.label}</option>
 															{/each}
@@ -707,7 +771,7 @@
 															id="ovr-{role}-{field.key}"
 															type={field.field_type === 'password' ? 'password' : 'text'}
 															bind:value={standardStates[role].overrideFormValues[field.key]}
-															placeholder={field.placeholder ?? 'Leave blank to keep base config value'}
+															placeholder={field.placeholder ?? ''}
 															class="input text-xs w-full"
 														/>
 													{/if}
@@ -717,7 +781,6 @@
 												</div>
 											{/if}
 										{/each}
-										<p class="text-xs text-surface-400">Leave fields blank to use the base plugin config value.</p>
 										<button
 											type="button"
 											class="btn btn-sm preset-tonal text-xs"
@@ -726,7 +789,7 @@
 												standardStates[role].config_override_text =
 													Object.keys(obj).length > 0 ? JSON.stringify(obj, null, 2) : '';
 												standardStates[role].overrideShowJson = true;
-											}}>Advanced: Edit as JSON</button
+											}}>Edit as JSON</button
 										>
 									</div>
 								{:else if hasFormFields && standardStates[role].overrideShowJson}
@@ -741,9 +804,7 @@
 										{#if s.config_override_error}
 											<p class="text-xs rounded px-2 py-1 preset-filled-error-500">{s.config_override_error}</p>
 										{/if}
-										<p class="text-xs text-surface-400">
-											JSON object merged on top of the plugin config. Leave empty to clear.
-										</p>
+										<p class="text-xs text-surface-400">Full plugin configuration as JSON.</p>
 										<button
 											type="button"
 											class="btn btn-sm preset-tonal text-xs"
@@ -762,7 +823,9 @@
 										>
 									</div>
 								{:else}
+									<!-- No form fields: plain JSON textarea -->
 									<div class="mt-2 space-y-1">
+										<p class="text-xs font-medium">Config</p>
 										<textarea
 											class="textarea font-mono text-xs"
 											rows={4}
@@ -773,12 +836,139 @@
 										{#if s.config_override_error}
 											<p class="text-xs rounded px-2 py-1 preset-filled-error-500">{s.config_override_error}</p>
 										{/if}
-										<p class="text-xs text-surface-400">
-											JSON object merged on top of the plugin config. Leave empty to clear.
-										</p>
+										<p class="text-xs text-surface-400">Full plugin configuration as JSON.</p>
 									</div>
 								{/if}
-							</details>
+							{:else}
+								<!-- Saved config: collapsible Config Override (advanced) -->
+								<details>
+									<summary class="cursor-pointer select-none text-xs text-surface-500 hover:text-surface-700">
+										Config Override <span class="opacity-60">(advanced)</span>
+										{#if hasStdOverride(role)}
+											<span class="ml-1 badge preset-tonal-warning text-xs">set</span>
+										{/if}
+									</summary>
+
+									{#if hasFormFields && !standardStates[role].overrideShowJson}
+										<div class="mt-2 space-y-2">
+											{#each roleFields as field (field.key)}
+												{#if isStdOverrideFieldVisible(field, role)}
+													<div>
+														<label for="ovr-{role}-{field.key}" class="mb-1 block text-xs font-medium"
+															>{field.label}</label
+														>
+														{#if field.field_type === 'textarea'}
+															<textarea
+																id="ovr-{role}-{field.key}"
+																bind:value={standardStates[role].overrideFormValues[field.key]}
+																placeholder={field.placeholder}
+																class="textarea font-mono text-xs w-full"
+																rows="3"
+															></textarea>
+														{:else if field.field_type === 'select'}
+															<select
+																id="ovr-{role}-{field.key}"
+																bind:value={standardStates[role].overrideFormValues[field.key]}
+																class="select text-xs w-full"
+															>
+																<option value="">— keep base config —</option>
+																{#each resolvedOptions(field) as opt (opt.value)}
+																	<option value={opt.value}>{opt.label}</option>
+																{/each}
+															</select>
+														{:else if field.field_type === 'toggle'}
+															<label class="flex items-center gap-2">
+																<input
+																	type="checkbox"
+																	id="ovr-{role}-{field.key}"
+																	checked={standardStates[role].overrideFormValues[field.key] === 'true'}
+																	onchange={(e) => {
+																		standardStates[role].overrideFormValues[field.key] = String(
+																			(e.target as HTMLInputElement).checked
+																		);
+																	}}
+																	class="checkbox"
+																/>
+																<span class="text-xs">{field.help_text ?? ''}</span>
+															</label>
+														{:else}
+															<input
+																id="ovr-{role}-{field.key}"
+																type={field.field_type === 'password' ? 'password' : 'text'}
+																bind:value={standardStates[role].overrideFormValues[field.key]}
+																placeholder={field.placeholder ?? 'Leave blank to keep base config value'}
+																class="input text-xs w-full"
+															/>
+														{/if}
+														{#if field.help_text && field.field_type !== 'toggle'}
+															<p class="mt-0.5 text-xs text-surface-400">{field.help_text}</p>
+														{/if}
+													</div>
+												{/if}
+											{/each}
+											<p class="text-xs text-surface-400">Leave fields blank to use the base plugin config value.</p>
+											<button
+												type="button"
+												class="btn btn-sm preset-tonal text-xs"
+												onclick={() => {
+													const obj = unflattenConfig(standardStates[role].overrideFormValues, roleFields);
+													standardStates[role].config_override_text =
+														Object.keys(obj).length > 0 ? JSON.stringify(obj, null, 2) : '';
+													standardStates[role].overrideShowJson = true;
+												}}>Advanced: Edit as JSON</button
+											>
+										</div>
+									{:else if hasFormFields && standardStates[role].overrideShowJson}
+										<div class="mt-2 space-y-1">
+											<textarea
+												class="textarea font-mono text-xs"
+												rows={4}
+												placeholder={'{\n  "example_field": "value"\n}'}
+												bind:value={standardStates[role].config_override_text}
+												onblur={() => validateStdOverride(role)}
+											></textarea>
+											{#if s.config_override_error}
+												<p class="text-xs rounded px-2 py-1 preset-filled-error-500">{s.config_override_error}</p>
+											{/if}
+											<p class="text-xs text-surface-400">
+												JSON object merged on top of the plugin config. Leave empty to clear.
+											</p>
+											<button
+												type="button"
+												class="btn btn-sm preset-tonal text-xs"
+												onclick={() => {
+													try {
+														const parsed = standardStates[role].config_override_text.trim()
+															? (JSON.parse(standardStates[role].config_override_text) as Record<string, unknown>)
+															: {};
+														standardStates[role].overrideFormValues = flattenConfig(parsed, roleFields);
+														standardStates[role].overrideShowJson = false;
+														standardStates[role].config_override_error = null;
+													} catch {
+														showError('Config must be valid JSON to switch back to form view.');
+													}
+												}}>Back to Form</button
+											>
+										</div>
+									{:else}
+										<div class="mt-2 space-y-1">
+											<textarea
+												class="textarea font-mono text-xs"
+												rows={4}
+												placeholder={'{\n  "example_field": "value"\n}'}
+												bind:value={standardStates[role].config_override_text}
+												onblur={() => validateStdOverride(role)}
+											></textarea>
+											{#if s.config_override_error}
+												<p class="text-xs rounded px-2 py-1 preset-filled-error-500">{s.config_override_error}</p>
+											{/if}
+											<p class="text-xs text-surface-400">
+												JSON object merged on top of the plugin config. Leave empty to clear.
+											</p>
+										</div>
+									{/if}
+								</details>
+							{/if}
 						{/if}
 					</div>
 				{:else}
@@ -805,7 +995,7 @@
 								{#each hookLists[hookRole] as entry, idx (entry.localKey)}
 									{@const hookFields = getHookFormFields(entry)}
 									{@const hasHookFormFields = hookFields.length > 0}
-									{@const hookOptions = hookConfigsForRole()}
+									{@const htOptions = hookPluginTypes()}
 									<div class="rounded-md border border-surface-300 p-3 space-y-2 dark:border-surface-600">
 										<div class="flex items-center justify-between gap-2">
 											<span class="text-xs font-medium text-surface-500">Hook #{idx + 1}</span>
@@ -818,47 +1008,69 @@
 											</button>
 										</div>
 
+										<!-- Plugin Type -->
 										<div class="grid grid-cols-[7rem_1fr] items-center gap-2">
-											<label class="text-sm font-medium" for="hook-cfg-{entry.localKey}">Plugin Config</label>
-											{#if hookOptions.length > 0}
-												<select
-													id="hook-cfg-{entry.localKey}"
-													class="select text-sm"
-													bind:value={entry.plugin_config_id}
-													onchange={() => {
-														const config = pluginConfigs.find((c) => c.id === entry.plugin_config_id);
-														const fields = config ? getFormFields(config.plugin_type) : [];
-														entry.overrideFormValues = flattenConfig({}, fields);
-														entry.overrideShowJson = false;
-														entry.config_override_text = '';
-														entry.config_override_error = null;
-													}}
-												>
-													<option value="">— not configured —</option>
-													{#each hookOptions as cfg (cfg.id)}
-														<option value={cfg.id}>{cfg.name}</option>
-													{/each}
-												</select>
-											{:else}
-												<p class="text-xs text-surface-500 rounded bg-surface-100 dark:bg-surface-800 px-2 py-1">
-													No hook configs found. Create a <strong>Systemd Hook</strong> or
-													<strong>Shell Hook</strong> plugin config in
-													<a href="/settings" class="underline">Settings → Plugin Configs</a> first.
-												</p>
-											{/if}
+											<label class="text-sm font-medium" for="hook-type-{entry.localKey}">Plugin Type</label>
+											<select
+												id="hook-type-{entry.localKey}"
+												class="select text-sm"
+												bind:value={entry.plugin_type}
+												onchange={() => {
+													entry.plugin_config_id = '';
+													const pt = pluginTypes.find((t) => t.plugin_type === entry.plugin_type);
+													const fields = pt?.config_form_fields ?? [];
+													entry.overrideFormValues = flattenConfig(pt?.sample_config ?? {}, fields);
+													entry.overrideShowJson = false;
+													entry.config_override_text = '';
+													entry.config_override_error = null;
+												}}
+											>
+												<option value="">— not configured —</option>
+												{#each htOptions as pt (pt.plugin_type)}
+													<option value={pt.plugin_type}>{pt.display_name}</option>
+												{/each}
+											</select>
 										</div>
 
-										{#if entry.plugin_config_id}
-											<details>
-												<summary class="cursor-pointer select-none text-xs text-surface-500 hover:text-surface-700">
-													Config Override <span class="opacity-60">(advanced)</span>
-													{#if hasHookOverride(entry)}
-														<span class="ml-1 badge preset-tonal-warning text-xs">set</span>
-													{/if}
-												</summary>
+										<!-- Optional saved config sub-select -->
+										{#if entry.plugin_type}
+											{@const savedHookForType = savedConfigsForType(entry.plugin_type)}
+											{#if savedHookForType.length > 0}
+												<div class="grid grid-cols-[7rem_1fr] items-center gap-2">
+													<label class="text-sm font-medium" for="hook-cfg-{entry.localKey}">Saved Config</label>
+													<select
+														id="hook-cfg-{entry.localKey}"
+														class="select text-sm"
+														bind:value={entry.plugin_config_id}
+														onchange={() => {
+															const config = pluginConfigs.find((c) => c.id === entry.plugin_config_id);
+															const pt = pluginTypes.find((t) => t.plugin_type === entry.plugin_type);
+															const fields = config
+																? getFormFields(config.plugin_type)
+																: (pt?.config_form_fields ?? []);
+															const base = entry.plugin_config_id ? {} : (pt?.sample_config ?? {});
+															entry.overrideFormValues = flattenConfig(base, fields);
+															entry.overrideShowJson = false;
+															entry.config_override_text = '';
+															entry.config_override_error = null;
+														}}
+													>
+														<option value="">— use inline config —</option>
+														{#each savedHookForType as cfg (cfg.id)}
+															<option value={cfg.id}>{cfg.name}</option>
+														{/each}
+													</select>
+												</div>
+											{/if}
+										{/if}
 
+										{#if entry.plugin_type}
+											{@const isHookInline = !entry.plugin_config_id}
+
+											{#if isHookInline}
+												<!-- Inline config form — not collapsible, required -->
 												{#if hasHookFormFields && !entry.overrideShowJson}
-													<div class="mt-2 space-y-2">
+													<div class="space-y-2">
 														{#each hookFields as field (field.key)}
 															{#if isHookOverrideFieldVisible(field, entry)}
 																<div>
@@ -870,7 +1082,7 @@
 																		<textarea
 																			id="hook-ovr-{entry.localKey}-{field.key}"
 																			bind:value={entry.overrideFormValues[field.key]}
-																			placeholder={field.placeholder}
+																			placeholder={field.placeholder ?? ''}
 																			class="textarea font-mono text-xs w-full"
 																			rows="3"
 																		></textarea>
@@ -880,7 +1092,7 @@
 																			bind:value={entry.overrideFormValues[field.key]}
 																			class="select text-xs w-full"
 																		>
-																			<option value="">— keep base config —</option>
+																			<option value=""></option>
 																			{#each resolvedOptions(field) as opt (opt.value)}
 																				<option value={opt.value}>{opt.label}</option>
 																			{/each}
@@ -905,7 +1117,7 @@
 																			id="hook-ovr-{entry.localKey}-{field.key}"
 																			type={field.field_type === 'password' ? 'password' : 'text'}
 																			bind:value={entry.overrideFormValues[field.key]}
-																			placeholder={field.placeholder ?? 'Leave blank to keep base config value'}
+																			placeholder={field.placeholder ?? ''}
 																			class="input text-xs w-full"
 																		/>
 																	{/if}
@@ -915,9 +1127,6 @@
 																</div>
 															{/if}
 														{/each}
-														<p class="text-xs text-surface-400">
-															Leave fields blank to use the base plugin config value.
-														</p>
 														<button
 															type="button"
 															class="btn btn-sm preset-tonal text-xs"
@@ -926,7 +1135,7 @@
 																entry.config_override_text =
 																	Object.keys(obj).length > 0 ? JSON.stringify(obj, null, 2) : '';
 																entry.overrideShowJson = true;
-															}}>Advanced: Edit as JSON</button
+															}}>Edit as JSON</button
 														>
 													</div>
 												{:else if hasHookFormFields && entry.overrideShowJson}
@@ -943,9 +1152,7 @@
 																{entry.config_override_error}
 															</p>
 														{/if}
-														<p class="text-xs text-surface-400">
-															JSON object merged on top of the plugin config. Leave empty to clear.
-														</p>
+														<p class="text-xs text-surface-400">Full plugin configuration as JSON.</p>
 														<button
 															type="button"
 															class="btn btn-sm preset-tonal text-xs"
@@ -964,7 +1171,9 @@
 														>
 													</div>
 												{:else}
+													<!-- No form fields: plain JSON textarea -->
 													<div class="mt-2 space-y-1">
+														<p class="text-xs font-medium">Config</p>
 														<textarea
 															class="textarea font-mono text-xs"
 															rows={4}
@@ -977,12 +1186,146 @@
 																{entry.config_override_error}
 															</p>
 														{/if}
-														<p class="text-xs text-surface-400">
-															JSON object merged on top of the plugin config. Leave empty to clear.
-														</p>
+														<p class="text-xs text-surface-400">Full plugin configuration as JSON.</p>
 													</div>
 												{/if}
-											</details>
+											{:else}
+												<!-- Saved config: collapsible Config Override (advanced) -->
+												<details>
+													<summary class="cursor-pointer select-none text-xs text-surface-500 hover:text-surface-700">
+														Config Override <span class="opacity-60">(advanced)</span>
+														{#if hasHookOverride(entry)}
+															<span class="ml-1 badge preset-tonal-warning text-xs">set</span>
+														{/if}
+													</summary>
+
+													{#if hasHookFormFields && !entry.overrideShowJson}
+														<div class="mt-2 space-y-2">
+															{#each hookFields as field (field.key)}
+																{#if isHookOverrideFieldVisible(field, entry)}
+																	<div>
+																		<label
+																			for="hook-ovr-{entry.localKey}-{field.key}"
+																			class="mb-1 block text-xs font-medium">{field.label}</label
+																		>
+																		{#if field.field_type === 'textarea'}
+																			<textarea
+																				id="hook-ovr-{entry.localKey}-{field.key}"
+																				bind:value={entry.overrideFormValues[field.key]}
+																				placeholder={field.placeholder}
+																				class="textarea font-mono text-xs w-full"
+																				rows="3"
+																			></textarea>
+																		{:else if field.field_type === 'select'}
+																			<select
+																				id="hook-ovr-{entry.localKey}-{field.key}"
+																				bind:value={entry.overrideFormValues[field.key]}
+																				class="select text-xs w-full"
+																			>
+																				<option value="">— keep base config —</option>
+																				{#each resolvedOptions(field) as opt (opt.value)}
+																					<option value={opt.value}>{opt.label}</option>
+																				{/each}
+																			</select>
+																		{:else if field.field_type === 'toggle'}
+																			<label class="flex items-center gap-2">
+																				<input
+																					type="checkbox"
+																					id="hook-ovr-{entry.localKey}-{field.key}"
+																					checked={entry.overrideFormValues[field.key] === 'true'}
+																					onchange={(e) => {
+																						entry.overrideFormValues[field.key] = String(
+																							(e.target as HTMLInputElement).checked
+																						);
+																					}}
+																					class="checkbox"
+																				/>
+																				<span class="text-xs">{field.help_text ?? ''}</span>
+																			</label>
+																		{:else}
+																			<input
+																				id="hook-ovr-{entry.localKey}-{field.key}"
+																				type={field.field_type === 'password' ? 'password' : 'text'}
+																				bind:value={entry.overrideFormValues[field.key]}
+																				placeholder={field.placeholder ?? 'Leave blank to keep base config value'}
+																				class="input text-xs w-full"
+																			/>
+																		{/if}
+																		{#if field.help_text && field.field_type !== 'toggle'}
+																			<p class="mt-0.5 text-xs text-surface-400">{field.help_text}</p>
+																		{/if}
+																	</div>
+																{/if}
+															{/each}
+															<p class="text-xs text-surface-400">
+																Leave fields blank to use the base plugin config value.
+															</p>
+															<button
+																type="button"
+																class="btn btn-sm preset-tonal text-xs"
+																onclick={() => {
+																	const obj = unflattenConfig(entry.overrideFormValues, hookFields);
+																	entry.config_override_text =
+																		Object.keys(obj).length > 0 ? JSON.stringify(obj, null, 2) : '';
+																	entry.overrideShowJson = true;
+																}}>Advanced: Edit as JSON</button
+															>
+														</div>
+													{:else if hasHookFormFields && entry.overrideShowJson}
+														<div class="mt-2 space-y-1">
+															<textarea
+																class="textarea font-mono text-xs"
+																rows={4}
+																placeholder={'{\n  "example_field": "value"\n}'}
+																bind:value={entry.config_override_text}
+																onblur={() => validateHookOverride(entry)}
+															></textarea>
+															{#if entry.config_override_error}
+																<p class="text-xs rounded px-2 py-1 preset-filled-error-500">
+																	{entry.config_override_error}
+																</p>
+															{/if}
+															<p class="text-xs text-surface-400">
+																JSON object merged on top of the plugin config. Leave empty to clear.
+															</p>
+															<button
+																type="button"
+																class="btn btn-sm preset-tonal text-xs"
+																onclick={() => {
+																	try {
+																		const parsed = entry.config_override_text.trim()
+																			? (JSON.parse(entry.config_override_text) as Record<string, unknown>)
+																			: {};
+																		entry.overrideFormValues = flattenConfig(parsed, hookFields);
+																		entry.overrideShowJson = false;
+																		entry.config_override_error = null;
+																	} catch {
+																		showError('Config must be valid JSON to switch back to form view.');
+																	}
+																}}>Back to Form</button
+															>
+														</div>
+													{:else}
+														<div class="mt-2 space-y-1">
+															<textarea
+																class="textarea font-mono text-xs"
+																rows={4}
+																placeholder={'{\n  "example_field": "value"\n}'}
+																bind:value={entry.config_override_text}
+																onblur={() => validateHookOverride(entry)}
+															></textarea>
+															{#if entry.config_override_error}
+																<p class="text-xs rounded px-2 py-1 preset-filled-error-500">
+																	{entry.config_override_error}
+																</p>
+															{/if}
+															<p class="text-xs text-surface-400">
+																JSON object merged on top of the plugin config. Leave empty to clear.
+															</p>
+														</div>
+													{/if}
+												</details>
+											{/if}
 										{/if}
 									</div>
 								{/each}
