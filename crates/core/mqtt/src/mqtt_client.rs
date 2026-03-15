@@ -121,6 +121,17 @@ impl MqttHandle {
         }
     }
 
+    /// Unsubscribe from a topic.
+    ///
+    /// Returns an error if the operation does not complete within
+    /// [`OPERATION_TIMEOUT`].
+    pub(crate) async fn unsubscribe_topic(&self, topic: &str) -> Result<()> {
+        match tokio::time::timeout(OPERATION_TIMEOUT, self.client.unsubscribe(topic)).await {
+            Ok(result) => result.context_to::<MqttError>(),
+            Err(_) => bail!(MqttError::OperationTimeout),
+        }
+    }
+
     /// Publish a retained `offline` message, disconnect, and wait for the
     /// event-loop task to finish.
     pub(crate) async fn shutdown(self) {
