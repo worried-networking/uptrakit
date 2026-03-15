@@ -648,6 +648,7 @@ fn build_discovered(name: String, version: String) -> DiscoveredSoftware {
         qualifier: None,
         plugin_package_identifier: None,
         featured: false,
+        installed_display_version: None,
     }
 }
 

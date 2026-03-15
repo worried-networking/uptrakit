@@ -371,6 +371,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for CargoPlugin {
                     qualifier: None,
                     plugin_package_identifier: None,
                     featured: true,
+                    installed_display_version: None,
                 }
             })
             .collect();

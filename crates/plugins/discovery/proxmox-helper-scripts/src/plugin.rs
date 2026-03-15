@@ -500,6 +500,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ProxmoxHelperScrip
                     qualifier: None,
                     plugin_package_identifier: None,
                     featured: true,
+                    installed_display_version: None,
                 });
             } else if let (Some(owner), Some(repo)) =
                 (&analysis.codeberg_owner, &analysis.codeberg_repo)
@@ -536,6 +537,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ProxmoxHelperScrip
                     qualifier: None,
                     plugin_package_identifier: None,
                     featured: true,
+                    installed_display_version: None,
                 });
             } else if let Some(ref npm_pkg) = analysis.npm_package {
                 // npm-managed: verify installed via `npm list -g`.
@@ -561,6 +563,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ProxmoxHelperScrip
                     qualifier: None,
                     plugin_package_identifier: None,
                     featured: true,
+                    installed_display_version: None,
                 });
             } else if let Some(ref apt_pkg) = analysis.apt_package {
                 // APT direct: verify installed via dpkg-query.
@@ -586,6 +589,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ProxmoxHelperScrip
                     qualifier: None,
                     plugin_package_identifier: None,
                     featured: true,
+                    installed_display_version: None,
                 });
             } else {
                 // Neither -- try install-script fallback.
@@ -624,6 +628,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ProxmoxHelperScrip
                         qualifier: None,
                         plugin_package_identifier: None,
                         featured: true,
+                        installed_display_version: None,
                     });
                     continue;
                 }
@@ -659,6 +664,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ProxmoxHelperScrip
                         qualifier: None,
                         plugin_package_identifier: None,
                         featured: true,
+                        installed_display_version: None,
                     });
                     found_any = true;
                 }

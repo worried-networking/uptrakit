@@ -178,6 +178,7 @@ mod tests {
             qualifier: None,
             plugin_package_identifier: None,
             featured: false,
+            installed_display_version: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         let deserialized: DiscoveredSoftware = serde_json::from_str(&json).expect("deserialize");
@@ -195,6 +196,7 @@ mod tests {
             qualifier: None,
             plugin_package_identifier: None,
             featured: false,
+            installed_display_version: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(!json.contains("extra"));

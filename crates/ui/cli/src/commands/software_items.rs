@@ -359,14 +359,26 @@ impl HumanOutput for SoftwareItemDetailResponse {
                     .first()
                     .map(|p| p.package_identifier.as_str())
                     .unwrap_or("-");
+                let installed_display = h
+                    .installed_display_version
+                    .as_deref()
+                    .or(h.installed_version.as_deref())
+                    .unwrap_or("-");
+                let latest_display = h
+                    .latest_release_metadata
+                    .as_ref()
+                    .and_then(|m| m.get("display_version"))
+                    .and_then(|v| v.as_str())
+                    .or(h.latest_version.as_deref())
+                    .unwrap_or("-");
                 out.push_str(&format!(
                     "  {:<38} {:<20} {:<20} {:<30} {:<15} {:<15} {:<16} {}\n",
                     h.host_id,
                     h.hostname,
                     plugin_type,
                     package_identifier,
-                    h.installed_version.as_deref().unwrap_or("-"),
-                    h.latest_version.as_deref().unwrap_or("-"),
+                    installed_display,
+                    latest_display,
                     status,
                     linked
                 ));
@@ -388,11 +400,23 @@ impl HumanOutput for SoftwareItemResponse {
         };
         out.push_str(&format!("Plugins:         {}\n", plugins_str));
         out.push_str(&format!("Featured:        {}\n", self.featured));
-        if let Some(ref iv) = self.installed_version {
-            out.push_str(&format!("Installed:       {}\n", iv));
+        if self.installed_version.is_some() || self.installed_display_version.is_some() {
+            let shown = self
+                .installed_display_version
+                .as_deref()
+                .or(self.installed_version.as_deref())
+                .unwrap_or("-");
+            out.push_str(&format!("Installed:       {}\n", shown));
         }
-        if let Some(ref lv) = self.latest_version {
-            out.push_str(&format!("Latest Version:  {}\n", lv));
+        if self.latest_version.is_some() || self.latest_release_metadata.is_some() {
+            let shown = self
+                .latest_release_metadata
+                .as_ref()
+                .and_then(|m| m.get("display_version"))
+                .and_then(|v| v.as_str())
+                .or(self.latest_version.as_deref())
+                .unwrap_or("-");
+            out.push_str(&format!("Latest Version:  {}\n", shown));
         }
         out.push_str(&format!(
             "Update Available:{}\n",
@@ -734,7 +758,9 @@ mod tests {
             last_checked_at: None,
             host_count: 2,
             installed_version: None,
+            installed_display_version: None,
             latest_version: None,
+            latest_release_metadata: None,
             update_available: false,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
@@ -753,7 +779,9 @@ mod tests {
             last_checked_at: None,
             host_count: 1,
             installed_version: None,
+            installed_display_version: None,
             latest_version: Some("3.0.0".to_string()),
+            latest_release_metadata: None,
             update_available: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
@@ -934,7 +962,9 @@ mod tests {
             last_checked_at: None,
             host_count: 0,
             installed_version: None,
+            installed_display_version: None,
             latest_version: Some("1.5.0".to_string()),
+            latest_release_metadata: None,
             update_available: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
@@ -960,7 +990,9 @@ mod tests {
             last_checked_at: None,
             host_count: 1,
             installed_version: None,
+            installed_display_version: None,
             latest_version: None,
+            latest_release_metadata: None,
             update_available: false,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),

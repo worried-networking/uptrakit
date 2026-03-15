@@ -195,6 +195,7 @@ impl HomebrewPlugin {
                     qualifier: None,
                     plugin_package_identifier: None,
                     featured: false,
+                    installed_display_version: None,
                 });
             }
         }
@@ -274,6 +275,7 @@ impl HomebrewPlugin {
                     qualifier: None,
                     plugin_package_identifier: None,
                     featured: false,
+                    installed_display_version: None,
                 });
             }
         }

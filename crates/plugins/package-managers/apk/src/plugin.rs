@@ -370,6 +370,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ApkPlugin {
                             qualifier: None,
                             plugin_package_identifier: None,
                             featured: false,
+                            installed_display_version: None,
                         }
                     })
                     .collect();
@@ -449,6 +450,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ApkPlugin {
                             qualifier: None,
                             plugin_package_identifier: None,
                             featured: false,
+                            installed_display_version: None,
                         })
                     })
                     .collect();

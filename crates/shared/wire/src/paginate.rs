@@ -304,6 +304,7 @@ mod tests {
             featured: false,
             targets: Vec::new(),
             extra: None,
+            installed_display_version: None,
         }
     }
 
