@@ -50,7 +50,7 @@
 </script>
 
 <div
-	class="fixed inset-0 z-50 overflow-y-auto bg-black/50"
+	class="fixed inset-0 z-[70] overflow-y-auto bg-black/50"
 	role="presentation"
 	bind:this={backdrop}
 	onkeydown={handleKeydown}

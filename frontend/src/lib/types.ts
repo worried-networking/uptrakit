@@ -402,6 +402,8 @@ export interface PaginatedResponse<T> {
 
 export interface HostPluginRoleSummary {
 	role: string;
+	/** Ordinal for hook roles (0-based). Always 0 for non-hook roles. */
+	ordinal: number;
 	plugin_config_id: string | null;
 	plugin_config_name: string | null;
 	plugin_type: string;
@@ -412,6 +414,8 @@ export interface HostPluginRoleSummary {
 
 export interface HostPluginRoleAssignment {
 	role: string;
+	/** Ordinal for hook roles; must be 0 for non-hook roles. Defaults to 0. */
+	ordinal?: number;
 	plugin_config_id?: string;
 	plugin_config?: CreatePluginConfigRequest;
 	package_identifier?: string;
@@ -423,8 +427,7 @@ export enum PluginCapability {
 	DiscoverLocalSoftware = 'discover_local_software',
 	RefreshPackageIndex = 'refresh_package_index',
 	DetectHostCompatibility = 'detect_host_compatibility',
-	PreUpdateHook = 'pre_update_hook',
-	PostUpdateHook = 'post_update_hook',
+	UpdateLifecycle = 'update_lifecycle',
 	ControllerSideFetchReleases = 'controller_side_fetch_releases'
 }
 
@@ -531,6 +534,8 @@ export interface AssignHostsRequest {
 
 export interface UpdateHostAssignmentRequest {
 	role: string;
+	/** Ordinal for hook roles; 0 for non-hook roles. Defaults to 0. */
+	ordinal?: number;
 	plugin_config_id?: string;
 	plugin_config?: CreatePluginConfigRequest;
 	package_identifier?: string;

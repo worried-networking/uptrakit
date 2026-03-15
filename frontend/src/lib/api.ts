@@ -756,6 +756,18 @@ export function updateHostAssignment(
 	});
 }
 
+export function deletePluginAssignment(
+	itemId: string,
+	hostId: string,
+	role: string,
+	ordinal: number
+): Promise<SoftwareItemDetailResponse> {
+	return request(
+		`/software-items/${encodeURIComponent(itemId)}/hosts/${encodeURIComponent(hostId)}/plugins/${encodeURIComponent(role)}/${ordinal}`,
+		{ method: 'DELETE' }
+	);
+}
+
 export function checkSoftwareItemVersions(itemId: string): Promise<TriggerVersionCheckResponse> {
 	return request(`/software-items/${encodeURIComponent(itemId)}/check-versions`, { method: 'POST' });
 }

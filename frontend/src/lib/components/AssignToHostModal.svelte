@@ -27,23 +27,24 @@
 		onsuccess: () => void;
 	} = $props();
 
-	type RoleKey = 'detect_version' | 'fetch_releases' | 'execute_update' | 'pre_update_hook' | 'post_update_hook';
+	type StandardRoleKey = 'detect_version' | 'fetch_releases' | 'execute_update';
+	type HookRoleKey = 'pre_update_hook' | 'post_update_hook';
 
-	const ROLE_LABELS: Record<RoleKey, string> = {
+	const ROLE_LABELS: Record<StandardRoleKey | HookRoleKey, string> = {
 		detect_version: 'Detect Version',
 		fetch_releases: 'Fetch Releases',
 		execute_update: 'Execute Update',
-		pre_update_hook: 'Pre-Update Hook',
-		post_update_hook: 'Post-Update Hook'
+		pre_update_hook: 'Pre-Update Hooks',
+		post_update_hook: 'Post-Update Hooks'
 	};
 
-	const ALL_ROLES: RoleKey[] = [
-		'detect_version',
-		'fetch_releases',
-		'execute_update',
-		'pre_update_hook',
-		'post_update_hook'
-	];
+	const STANDARD_ROLES: StandardRoleKey[] = ['detect_version', 'fetch_releases', 'execute_update'];
+	const HOOK_ROLES: HookRoleKey[] = ['pre_update_hook', 'post_update_hook'];
+
+	interface HookEntry {
+		localKey: number;
+		plugin_config_id: string;
+	}
 
 	let allHosts: HostResponse[] = $state([]);
 	const originalAssignedIds = new SvelteSet<string>();
@@ -55,30 +56,43 @@
 	let pluginConfigs: PluginConfigResponse[] = $state([]);
 	let pluginTypes: PluginTypeInfo[] = $state([]);
 
-	const HOOK_ROLES: RoleKey[] = ['pre_update_hook', 'post_update_hook'];
-
 	function isHookPluginType(pluginType: string): boolean {
 		const pt = pluginTypes.find((t) => t.plugin_type === pluginType);
 		if (!pt) return false;
-		return pt.capabilities.some((c) => c === 'pre_update_hook' || c === 'post_update_hook');
+		return pt.capabilities.some((c) => c === 'update_lifecycle');
 	}
 
-	function isConfigCompatibleWithRole(config: PluginConfigResponse, role: RoleKey): boolean {
-		const isHook = isHookPluginType(config.plugin_type);
-		if (HOOK_ROLES.includes(role)) return isHook;
-		return !isHook;
+	function hookConfigsForRole(_role: HookRoleKey): PluginConfigResponse[] {
+		return pluginConfigs.filter((c) => isHookPluginType(c.plugin_type));
 	}
 
-	let roleAssignments: Record<
-		RoleKey,
+	function standardConfigsForRole(_role: StandardRoleKey): PluginConfigResponse[] {
+		return pluginConfigs.filter((c) => !isHookPluginType(c.plugin_type));
+	}
+
+	let standardAssignments: Record<
+		StandardRoleKey,
 		{ enabled: boolean; plugin_config_id: string; package_identifier: string; execution_site: string }
 	> = $state({
 		detect_version: { enabled: true, plugin_config_id: '', package_identifier: '', execution_site: 'auto' },
 		fetch_releases: { enabled: false, plugin_config_id: '', package_identifier: '', execution_site: 'auto' },
-		execute_update: { enabled: false, plugin_config_id: '', package_identifier: '', execution_site: 'auto' },
-		pre_update_hook: { enabled: false, plugin_config_id: '', package_identifier: '', execution_site: 'auto' },
-		post_update_hook: { enabled: false, plugin_config_id: '', package_identifier: '', execution_site: 'auto' }
+		execute_update: { enabled: false, plugin_config_id: '', package_identifier: '', execution_site: 'auto' }
 	});
+
+	let hookLists: Record<HookRoleKey, HookEntry[]> = $state({
+		pre_update_hook: [],
+		post_update_hook: []
+	});
+
+	let nextKey = 0;
+
+	function addHook(role: HookRoleKey) {
+		hookLists[role] = [...hookLists[role], { localKey: nextKey++, plugin_config_id: '' }];
+	}
+
+	function removeHook(role: HookRoleKey, localKey: number) {
+		hookLists[role] = hookLists[role].filter((e) => e.localKey !== localKey);
+	}
 
 	const toAdd = $derived([...selectedIds].filter((id) => !originalAssignedIds.has(id)));
 
@@ -97,13 +111,26 @@
 			}
 			pluginConfigs = configsResult.items;
 			pluginTypes = typesResult;
-			const firstId = configsResult.items[0]?.id ?? '';
-			roleAssignments = {
-				detect_version: { enabled: true, plugin_config_id: firstId, package_identifier: '', execution_site: 'auto' },
-				fetch_releases: { enabled: false, plugin_config_id: firstId, package_identifier: '', execution_site: 'auto' },
-				execute_update: { enabled: false, plugin_config_id: firstId, package_identifier: '', execution_site: 'auto' },
-				pre_update_hook: { enabled: false, plugin_config_id: firstId, package_identifier: '', execution_site: 'auto' },
-				post_update_hook: { enabled: false, plugin_config_id: firstId, package_identifier: '', execution_site: 'auto' }
+			const firstStandardId = configsResult.items.find((c) => !isHookPluginType(c.plugin_type))?.id ?? '';
+			standardAssignments = {
+				detect_version: {
+					enabled: true,
+					plugin_config_id: firstStandardId,
+					package_identifier: '',
+					execution_site: 'auto'
+				},
+				fetch_releases: {
+					enabled: false,
+					plugin_config_id: firstStandardId,
+					package_identifier: '',
+					execution_site: 'auto'
+				},
+				execute_update: {
+					enabled: false,
+					plugin_config_id: firstStandardId,
+					package_identifier: '',
+					execution_site: 'auto'
+				}
 			};
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Failed to load data.';
@@ -130,15 +157,27 @@
 		try {
 			const tasks: Promise<unknown>[] = [];
 			if (toAdd.length > 0) {
-				const plugins: HostPluginRoleAssignment[] = ALL_ROLES.filter(
-					(role) => roleAssignments[role].enabled && roleAssignments[role].plugin_config_id
-				).map((role) => ({
-					role,
-					plugin_config_id: roleAssignments[role].plugin_config_id || undefined,
-					package_identifier: roleAssignments[role].package_identifier.trim() || undefined,
-					execution_site:
-						roleAssignments[role].execution_site !== 'auto' ? roleAssignments[role].execution_site : undefined
-				}));
+				const plugins: HostPluginRoleAssignment[] = [];
+
+				for (const role of STANDARD_ROLES) {
+					const a = standardAssignments[role];
+					if (a.enabled && a.plugin_config_id) {
+						plugins.push({
+							role,
+							plugin_config_id: a.plugin_config_id,
+							package_identifier: a.package_identifier.trim() || undefined,
+							execution_site: a.execution_site !== 'auto' ? a.execution_site : undefined
+						});
+					}
+				}
+
+				for (const role of HOOK_ROLES) {
+					hookLists[role].forEach((entry, idx) => {
+						if (entry.plugin_config_id) {
+							plugins.push({ role, ordinal: idx, plugin_config_id: entry.plugin_config_id });
+						}
+					});
+				}
 
 				tasks.push(
 					assignHostsToSoftwareItem(softwareItemId, {
@@ -179,8 +218,10 @@
 		<CheckboxList items={hostItems} selected={selectedIds} maxHeight="max-h-64" />
 
 		{#if toAdd.length > 0}
-			<div class="space-y-3 border-t border-surface-200 dark:border-surface-700 pt-3">
+			<div class="space-y-4 border-t border-surface-200 dark:border-surface-700 pt-3">
 				<p class="text-sm font-medium">Role assignments for new hosts</p>
+
+				<!-- detect_version + fetch_releases table -->
 				<div class="table-wrap">
 					<table class="table text-sm">
 						<thead>
@@ -192,62 +233,186 @@
 							</tr>
 						</thead>
 						<tbody>
-							{#each ALL_ROLES as role (role)}
-								{@const a = roleAssignments[role]}
+							{#each ['detect_version', 'fetch_releases'] as const as role (role)}
+								{@const a = standardAssignments[role]}
 								<tr>
 									<td>
 										<label class="flex items-center gap-2 cursor-pointer">
-											<input class="checkbox" type="checkbox" bind:checked={roleAssignments[role].enabled} />
+											<input class="checkbox" type="checkbox" bind:checked={standardAssignments[role].enabled} />
 											<span class="whitespace-nowrap">{ROLE_LABELS[role]}</span>
 										</label>
 									</td>
 									<td>
 										<select
 											class="select text-sm"
-											bind:value={roleAssignments[role].plugin_config_id}
+											bind:value={standardAssignments[role].plugin_config_id}
 											disabled={!a.enabled}
 										>
 											<option value="">— none —</option>
-											{#each pluginConfigs.filter((c) => isConfigCompatibleWithRole(c, role)) as cfg (cfg.id)}
+											{#each standardConfigsForRole(role) as cfg (cfg.id)}
 												<option value={cfg.id}>{cfg.name}</option>
 											{/each}
 										</select>
 									</td>
 									<td>
-										{#if HOOK_ROLES.includes(role)}
-											<span class="text-surface-400 text-xs">—</span>
-										{:else}
-											<input
-												class="input text-sm"
-												type="text"
-												placeholder="e.g. owner/repo"
-												bind:value={roleAssignments[role].package_identifier}
-												disabled={!a.enabled}
-											/>
-										{/if}
+										<input
+											class="input text-sm"
+											type="text"
+											placeholder="e.g. owner/repo"
+											bind:value={standardAssignments[role].package_identifier}
+											disabled={!a.enabled}
+										/>
 									</td>
 									<td>
-										{#if HOOK_ROLES.includes(role)}
-											<span class="text-surface-400 text-xs">—</span>
-										{:else}
-											<select
-												class="select text-sm"
-												bind:value={roleAssignments[role].execution_site}
-												disabled={!a.enabled}
-											>
-												<option value="auto">Auto</option>
-												<option value="agent">Agent</option>
-												{#if role === 'fetch_releases'}
-													<option value="controller">Controller</option>
-												{/if}
-											</select>
-										{/if}
+										<select
+											class="select text-sm"
+											bind:value={standardAssignments[role].execution_site}
+											disabled={!a.enabled}
+										>
+											<option value="auto">Auto</option>
+											<option value="agent">Agent</option>
+											{#if role === 'fetch_releases'}
+												<option value="controller">Controller</option>
+											{/if}
+										</select>
 									</td>
 								</tr>
 							{/each}
 						</tbody>
 					</table>
 				</div>
+
+				<!-- Pre-Update Hooks -->
+				{#each ['pre_update_hook'] as const as hookRole (hookRole)}
+					{@const entries = hookLists[hookRole]}
+					{@const hookConfigs = hookConfigsForRole(hookRole)}
+					<div class="space-y-2">
+						<div class="flex items-center justify-between">
+							<span class="text-sm font-medium">{ROLE_LABELS[hookRole]}</span>
+							<button type="button" class="btn btn-sm preset-tonal-surface text-xs" onclick={() => addHook(hookRole)}>
+								+ Add
+							</button>
+						</div>
+						{#if entries.length === 0}
+							<p class="text-xs text-surface-400">No pre-update hooks configured.</p>
+						{:else}
+							<div class="space-y-2">
+								{#each entries as entry (entry.localKey)}
+									<div class="flex items-center gap-2">
+										<select class="select text-sm flex-1" bind:value={entry.plugin_config_id}>
+											<option value="">— select plugin —</option>
+											{#each hookConfigs as cfg (cfg.id)}
+												<option value={cfg.id}>{cfg.name}</option>
+											{/each}
+										</select>
+										<button
+											type="button"
+											class="btn btn-sm preset-tonal-error text-xs shrink-0"
+											onclick={() => removeHook(hookRole, entry.localKey)}
+										>
+											Remove
+										</button>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/each}
+
+				<!-- execute_update table -->
+				<div class="table-wrap">
+					<table class="table text-sm">
+						<thead>
+							<tr>
+								<th class="w-36">Role</th>
+								<th>Plugin Config</th>
+								<th>Package ID</th>
+								<th class="w-36">Execution Site</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each ['execute_update'] as const as role (role)}
+								{@const a = standardAssignments[role]}
+								<tr>
+									<td>
+										<label class="flex items-center gap-2 cursor-pointer">
+											<input class="checkbox" type="checkbox" bind:checked={standardAssignments[role].enabled} />
+											<span class="whitespace-nowrap">{ROLE_LABELS[role]}</span>
+										</label>
+									</td>
+									<td>
+										<select
+											class="select text-sm"
+											bind:value={standardAssignments[role].plugin_config_id}
+											disabled={!a.enabled}
+										>
+											<option value="">— none —</option>
+											{#each standardConfigsForRole(role) as cfg (cfg.id)}
+												<option value={cfg.id}>{cfg.name}</option>
+											{/each}
+										</select>
+									</td>
+									<td>
+										<input
+											class="input text-sm"
+											type="text"
+											placeholder="e.g. owner/repo"
+											bind:value={standardAssignments[role].package_identifier}
+											disabled={!a.enabled}
+										/>
+									</td>
+									<td>
+										<select
+											class="select text-sm"
+											bind:value={standardAssignments[role].execution_site}
+											disabled={!a.enabled}
+										>
+											<option value="auto">Auto</option>
+											<option value="agent">Agent</option>
+										</select>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+
+				<!-- Post-Update Hooks -->
+				{#each ['post_update_hook'] as const as hookRole (hookRole)}
+					{@const entries = hookLists[hookRole]}
+					{@const hookConfigs = hookConfigsForRole(hookRole)}
+					<div class="space-y-2">
+						<div class="flex items-center justify-between">
+							<span class="text-sm font-medium">{ROLE_LABELS[hookRole]}</span>
+							<button type="button" class="btn btn-sm preset-tonal-surface text-xs" onclick={() => addHook(hookRole)}>
+								+ Add
+							</button>
+						</div>
+						{#if entries.length === 0}
+							<p class="text-xs text-surface-400">No post-update hooks configured.</p>
+						{:else}
+							<div class="space-y-2">
+								{#each entries as entry (entry.localKey)}
+									<div class="flex items-center gap-2">
+										<select class="select text-sm flex-1" bind:value={entry.plugin_config_id}>
+											<option value="">— select plugin —</option>
+											{#each hookConfigs as cfg (cfg.id)}
+												<option value={cfg.id}>{cfg.name}</option>
+											{/each}
+										</select>
+										<button
+											type="button"
+											class="btn btn-sm preset-tonal-error text-xs shrink-0"
+											onclick={() => removeHook(hookRole, entry.localKey)}
+										>
+											Remove
+										</button>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/each}
 			</div>
 		{/if}
 	{/if}
