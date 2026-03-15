@@ -4,6 +4,7 @@
 	import { getUser } from '$lib/auth.svelte';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import SchemaForm from './SchemaForm.svelte';
+	import WizardModal from './WizardModal.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { hasPermissionValue } from '$lib/types';
@@ -141,6 +142,25 @@
 			preLoadAction={action.ui.pre_load_action}
 		/>
 	</Modal>
+{/if}
+
+{#if showModal && action.ui?.type === 'wizard'}
+	<WizardModal
+		steps={action.ui.steps}
+		actionLabel={action.label}
+		{extensionId}
+		{serviceId}
+		{encryptionPublicKey}
+		{extraParams}
+		onclose={() => {
+			showModal = false;
+		}}
+		oncomplete={async (result) => {
+			showSuccess(`${action.label} completed`);
+			showModal = false;
+			await onComplete?.(result as Record<string, unknown> | undefined);
+		}}
+	/>
 {/if}
 
 {#if showConfirm}
