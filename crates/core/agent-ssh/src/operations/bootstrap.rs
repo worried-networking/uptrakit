@@ -118,17 +118,6 @@ pub(crate) struct BootstrapPlan {
     pub actions: Vec<PlannedAction>,
 }
 
-// ── Main orchestrator ────────────────────────────────────────────────
-
-/// Run the full bootstrap workflow.
-pub(crate) async fn run_bootstrap(
-    state_dir: &Path,
-    params: BootstrapParams,
-) -> Result<BootstrapResult> {
-    let _plan = bootstrap_connect(state_dir, &params).await?;
-    bootstrap_execute(state_dir, params, &HashSet::new()).await
-}
-
 // ── Multi-step: connect (read-only probe) ────────────────────────────
 
 /// Probe the remote host and build a plan of actions for the user to review.

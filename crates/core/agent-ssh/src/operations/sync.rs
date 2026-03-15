@@ -517,34 +517,3 @@ pub(crate) async fn sync_execute(
 
     Ok(summary.join("; "))
 }
-
-// ── Legacy entry point ───────────────────────────────────────────────
-
-/// Run the sync command from an extension action.
-///
-/// When `auth_override` is `None`, uses the stored SSH key and username.
-/// When `Some`, connects as the specified user with the provided credentials
-/// (sudo state is not persisted for the override user, matching CLI behavior).
-///
-/// This is the "auto" path: it calls `sync_connect` to build a plan and
-/// then immediately calls `sync_execute` with no actions skipped.
-pub(crate) async fn run_for_extension(
-    host_id: &str,
-    db: &DatabaseConnection,
-    tenant_id: Option<uuid::Uuid>,
-    auth_override: Option<&SyncAuthOverride>,
-    allow_all: bool,
-) -> std::result::Result<String, String> {
-    // Auto path: plan then execute everything.
-    let _plan = sync_connect(host_id, db, tenant_id, auth_override, allow_all).await?;
-    let skip_actions = HashSet::new();
-    sync_execute(
-        host_id,
-        db,
-        tenant_id,
-        auth_override,
-        allow_all,
-        &skip_actions,
-    )
-    .await
-}

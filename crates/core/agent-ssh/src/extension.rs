@@ -9,6 +9,7 @@
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -16,7 +17,7 @@ use uptrakit_internal_wire::ServiceMessage;
 use uptrakit_internal_wire::extension::{
     ActionDef, ActionUi, ExtensionManifest, ExtensionPlacement, ExtensionRegisterPayload,
     ExtensionRequestPayload, ExtensionResponsePayload, ExtensionTargeting, ExtensionUi, FieldDef,
-    FieldType, FormDef, SelectOption, TableColumn,
+    FieldType, FormDef, SelectOption, TableColumn, WizardStep,
 };
 use uptrakit_plugin_infrastructure_core::PluginBase;
 use uptrakit_plugin_infrastructure_core::agent_infra::{InfraActionInvoker, InfraPluginContext};
@@ -106,17 +107,30 @@ pub(crate) fn build_actions(infra_plugins: &[Arc<dyn PluginBase>]) -> Vec<Action
             .batch(),
         sync_host_action(),
         bootstrap_action(),
+        // Internal wizard-step actions (not shown in UI directly).
+        ActionDef::new("bootstrap-connect", "Bootstrap Connect")
+            .with_permission(Permission::UpdateHosts)
+            .with_timeout(60),
+        ActionDef::new("bootstrap-execute", "Bootstrap Execute")
+            .with_permission(Permission::UpdateHosts)
+            .with_timeout(120),
+        ActionDef::new("sync-connect", "Sync Connect")
+            .with_permission(Permission::UpdateHosts)
+            .with_timeout(60),
+        ActionDef::new("sync-execute", "Sync Execute")
+            .with_permission(Permission::UpdateHosts)
+            .with_timeout(120),
     ];
     actions.extend(infra_plugins.iter().flat_map(|p| p.extension_actions()));
     actions
 }
 
-/// Build the sync-host action definition with optional auth override form.
+/// Build the sync-host action definition as a 3-step wizard.
 fn sync_host_action() -> ActionDef {
-    ActionDef::new("sync-host", "Sync Host")
-        .with_permission(Permission::UpdateHosts)
-        .with_timeout(120)
-        .with_ui(ActionUi::Form(FormDef::new(vec![
+    let connect_step = WizardStep::new(
+        "connect",
+        "Connection & Authentication",
+        FormDef::new(vec![
             FieldDef::new("auth_method", "Auth Method")
                 .with_type(FieldType::Select)
                 .with_default_value("stored")
@@ -138,7 +152,7 @@ fn sync_host_action() -> ActionDef {
                 .sensitive()
                 .with_visible_when("auth_method", vec!["password".to_string()]),
             FieldDef::new("auth_private_key", "SSH Private Key")
-                .with_type(FieldType::Textarea)
+                .with_type(FieldType::SshPrivateKey)
                 .with_placeholder("-----BEGIN OPENSSH PRIVATE KEY-----")
                 .with_help_text(
                     "PEM-encoded private key. Required when auth method is 'private_key'.",
@@ -148,16 +162,34 @@ fn sync_host_action() -> ActionDef {
             FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
                 .with_type(FieldType::Toggle)
                 .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
-        ])))
+            FieldDef::new("auto", "Auto")
+                .with_type(FieldType::Toggle)
+                .with_help_text("Skip review and execute immediately."),
+        ]),
+    )
+    .with_submit_action("sync-connect");
+
+    let review_step = WizardStep::new("review", "Review Plan", FormDef::new(vec![]))
+        .with_render_previous_response();
+
+    let execute_step = WizardStep::new("execute", "Execute", FormDef::new(vec![]))
+        .with_submit_action("sync-execute");
+
+    ActionDef::new("sync-host", "Sync Host")
+        .with_permission(Permission::UpdateHosts)
+        .with_timeout(120)
+        .with_ui(ActionUi::Wizard {
+            steps: vec![connect_step, review_step, execute_step],
+        })
         .batch()
 }
 
-/// Build the bootstrap host action definition with its form UI.
+/// Build the bootstrap host action definition as a 3-step wizard.
 fn bootstrap_action() -> ActionDef {
-    ActionDef::new("bootstrap", "Bootstrap Host")
-        .with_permission(Permission::UpdateHosts)
-        .with_timeout(120)
-        .with_ui(ActionUi::Form(FormDef::new(vec![
+    let connect_step = WizardStep::new(
+        "connect",
+        "Connection & Authentication",
+        FormDef::new(vec![
             FieldDef::new("target", "SSH Target")
                 .required()
                 .with_placeholder("[user@]host[:port]")
@@ -181,7 +213,7 @@ fn bootstrap_action() -> ActionDef {
                 .sensitive()
                 .with_visible_when("auth_method", vec!["password".to_string()]),
             FieldDef::new("auth_private_key", "SSH Private Key")
-                .with_type(FieldType::Textarea)
+                .with_type(FieldType::SshPrivateKey)
                 .with_placeholder("-----BEGIN OPENSSH PRIVATE KEY-----")
                 .with_help_text(
                     "PEM-encoded private key. Required when auth method is 'private_key'.",
@@ -203,7 +235,25 @@ fn bootstrap_action() -> ActionDef {
             FieldDef::new("remove_stale_keys", "Remove Stale Keys")
                 .with_type(FieldType::Toggle)
                 .with_help_text("Remove existing Uptrakit-managed keys before writing new ones."),
-        ])))
+            FieldDef::new("auto", "Auto")
+                .with_type(FieldType::Toggle)
+                .with_help_text("Skip review and execute immediately."),
+        ]),
+    )
+    .with_submit_action("bootstrap-connect");
+
+    let review_step = WizardStep::new("review", "Review Plan", FormDef::new(vec![]))
+        .with_render_previous_response();
+
+    let execute_step = WizardStep::new("execute", "Execute", FormDef::new(vec![]))
+        .with_submit_action("bootstrap-execute");
+
+    ActionDef::new("bootstrap", "Bootstrap Host")
+        .with_permission(Permission::UpdateHosts)
+        .with_timeout(120)
+        .with_ui(ActionUi::Wizard {
+            steps: vec![connect_step, review_step, execute_step],
+        })
 }
 
 // ── Extension context ────────────────────────────────────────────────
@@ -367,11 +417,17 @@ pub(crate) async fn handle_extension_request(
             let response = handle_remove_host(&request.request_id, &request.params, ctx.db).await;
             send_response(conn, response).await;
         }
-        "sync-host" => {
-            spawn_sync_host(request, ctx);
+        "bootstrap-connect" => {
+            spawn_bootstrap_connect(request, ctx);
         }
-        "bootstrap" => {
-            spawn_bootstrap(request, ctx);
+        "bootstrap-execute" => {
+            spawn_bootstrap_execute(request, ctx);
+        }
+        "sync-connect" => {
+            spawn_sync_connect(request, ctx);
+        }
+        "sync-execute" => {
+            spawn_sync_execute(request, ctx);
         }
         _ => {
             // Delegate to infrastructure plugins.
@@ -455,8 +511,8 @@ async fn handle_remove_host(
 
 // ── Background tasks ─────────────────────────────────────────────────
 
-/// Spawn the bootstrap workflow as a background task.
-fn spawn_bootstrap(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+/// Spawn the bootstrap-connect (plan) step as a background task.
+fn spawn_bootstrap_connect(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
     let state_dir = ctx.state_dir.to_path_buf();
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
     let bg_tx = ctx.bg_tx.clone();
@@ -465,7 +521,34 @@ fn spawn_bootstrap(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>)
     let request_id = request.request_id.clone();
 
     tokio::spawn(async move {
-        let response = run_bootstrap_action(BootstrapActionArgs {
+        let response = run_bootstrap_connect(
+            &request_id,
+            &request.params,
+            request.sensitive_params.as_ref().map(|s| s.expose_secret()),
+            private_key_der.as_deref(),
+            service_id,
+            tenant_id,
+            &state_dir,
+        )
+        .await;
+        let msg = ServiceMessage::ExtensionResponse(response);
+        if bg_tx.send(msg).await.is_err() {
+            tracing::error!("failed to send bootstrap-connect result via bg_tx");
+        }
+    });
+}
+
+/// Spawn the bootstrap-execute step as a background task.
+fn spawn_bootstrap_execute(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+    let state_dir = ctx.state_dir.to_path_buf();
+    let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
+    let bg_tx = ctx.bg_tx.clone();
+    let service_id = ctx.service_id;
+    let tenant_id = ctx.tenant_id;
+    let request_id = request.request_id.clone();
+
+    tokio::spawn(async move {
+        let response = run_bootstrap_execute(BootstrapExecuteArgs {
             request_id: &request_id,
             params: &request.params,
             sensitive_params_sealed: request.sensitive_params.as_ref().map(|s| s.expose_secret()),
@@ -473,18 +556,18 @@ fn spawn_bootstrap(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>)
             service_id,
             tenant_id,
             state_dir: &state_dir,
-            bg_tx: Some(&bg_tx),
+            bg_tx: &bg_tx,
         })
         .await;
         let msg = ServiceMessage::ExtensionResponse(response);
         if bg_tx.send(msg).await.is_err() {
-            tracing::error!("failed to send bootstrap result via bg_tx");
+            tracing::error!("failed to send bootstrap-execute result via bg_tx");
         }
     });
 }
 
-/// Spawn the sync-host workflow as a background task.
-fn spawn_sync_host(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+/// Spawn the sync-connect (plan) step as a background task.
+fn spawn_sync_connect(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
     let db_state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
     let tenant_id = ctx.tenant_id;
@@ -493,16 +576,14 @@ fn spawn_sync_host(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>)
 
     tokio::spawn(async move {
         let host_id = match request.params.get("id").and_then(|v| v.as_str()) {
-            Some(id) => id,
+            Some(id) => id.to_string(),
             None => {
                 let resp = make_error_response(&request_id, "missing required field 'id'");
-                let msg = ServiceMessage::ExtensionResponse(resp);
-                let _ = bg_tx.send(msg).await;
+                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
                 return;
             }
         };
 
-        // Decrypt sensitive params (auth password / private key) if present.
         let sensitive: Option<SensitiveAuthParams> =
             match uptrakit_service_sdk::decrypt_sensitive_params(
                 request.sensitive_params.as_ref().map(|s| s.expose_secret()),
@@ -511,75 +592,16 @@ fn spawn_sync_host(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>)
                 Ok(s) => s,
                 Err(msg) => {
                     let resp = make_error_response(&request_id, &msg);
-                    let msg = ServiceMessage::ExtensionResponse(resp);
-                    let _ = bg_tx.send(msg).await;
+                    let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
                     return;
                 }
             };
 
-        let auth_method = request
-            .params
-            .get("auth_method")
-            .and_then(|v| v.as_str())
-            .unwrap_or("stored");
-
-        let auth_override = match auth_method {
-            "stored" => None,
-            "password" => {
-                let password = sensitive.as_ref().and_then(|s| s.auth_password.as_deref());
-                match password {
-                    Some(pw) => Some(sync::SyncAuthOverride {
-                        username: request
-                            .params
-                            .get("username")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("root")
-                            .to_string(),
-                        auth_password: Some(pw.to_string()),
-                        auth_private_key_pem: None,
-                    }),
-                    None => {
-                        let resp = make_error_response(
-                            &request_id,
-                            "auth_method is 'password' but no password provided",
-                        );
-                        let msg = ServiceMessage::ExtensionResponse(resp);
-                        let _ = bg_tx.send(msg).await;
-                        return;
-                    }
-                }
-            }
-            "private_key" => {
-                let key = sensitive
-                    .as_ref()
-                    .and_then(|s| s.auth_private_key.as_deref());
-                match key {
-                    Some(pem) => Some(sync::SyncAuthOverride {
-                        username: request
-                            .params
-                            .get("username")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("root")
-                            .to_string(),
-                        auth_password: None,
-                        auth_private_key_pem: Some(pem.to_string()),
-                    }),
-                    None => {
-                        let resp = make_error_response(
-                            &request_id,
-                            "auth_method is 'private_key' but no private key provided",
-                        );
-                        let msg = ServiceMessage::ExtensionResponse(resp);
-                        let _ = bg_tx.send(msg).await;
-                        return;
-                    }
-                }
-            }
-            other => {
-                let resp =
-                    make_error_response(&request_id, &format!("unknown auth_method '{other}'"));
-                let msg = ServiceMessage::ExtensionResponse(resp);
-                let _ = bg_tx.send(msg).await;
+        let auth_override = match build_sync_auth_override(&request.params, sensitive.as_ref()) {
+            Ok(ov) => ov,
+            Err(msg) => {
+                let resp = make_error_response(&request_id, &msg);
+                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
                 return;
             }
         };
@@ -593,18 +615,91 @@ fn spawn_sync_host(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>)
                     &request_id,
                     &format!("failed to initialize database: {e}"),
                 );
-                let msg = ServiceMessage::ExtensionResponse(resp);
-                let _ = bg_tx.send(msg).await;
+                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
                 return;
             }
         };
 
-        let response = match sync::run_for_extension(
-            host_id,
+        let response =
+            match sync::sync_connect(&host_id, &db, tenant_id, auth_override.as_ref(), allow_all)
+                .await
+            {
+                Ok(plan) => match serde_json::to_value(&plan) {
+                    Ok(data) => make_success_response(&request_id, data),
+                    Err(e) => {
+                        make_error_response(&request_id, &format!("failed to serialize plan: {e}"))
+                    }
+                },
+                Err(e) => make_error_response(&request_id, &e),
+            };
+        let _ = bg_tx
+            .send(ServiceMessage::ExtensionResponse(response))
+            .await;
+    });
+}
+
+/// Spawn the sync-execute step as a background task.
+fn spawn_sync_execute(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+    let db_state_dir = ctx.state_dir.to_path_buf();
+    let bg_tx = ctx.bg_tx.clone();
+    let tenant_id = ctx.tenant_id;
+    let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
+    let request_id = request.request_id.clone();
+
+    tokio::spawn(async move {
+        let host_id = match request.params.get("id").and_then(|v| v.as_str()) {
+            Some(id) => id.to_string(),
+            None => {
+                let resp = make_error_response(&request_id, "missing required field 'id'");
+                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
+                return;
+            }
+        };
+
+        let sensitive: Option<SensitiveAuthParams> =
+            match uptrakit_service_sdk::decrypt_sensitive_params(
+                request.sensitive_params.as_ref().map(|s| s.expose_secret()),
+                private_key_der.as_deref(),
+            ) {
+                Ok(s) => s,
+                Err(msg) => {
+                    let resp = make_error_response(&request_id, &msg);
+                    let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
+                    return;
+                }
+            };
+
+        let auth_override = match build_sync_auth_override(&request.params, sensitive.as_ref()) {
+            Ok(ov) => ov,
+            Err(msg) => {
+                let resp = make_error_response(&request_id, &msg);
+                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
+                return;
+            }
+        };
+
+        let allow_all = param_bool(&request.params, "allow_all");
+        let skip_actions = parse_skip_actions(&request.params);
+
+        let db = match crate::db::init_db(&db_state_dir).await {
+            Ok(db) => db,
+            Err(e) => {
+                let resp = make_error_response(
+                    &request_id,
+                    &format!("failed to initialize database: {e}"),
+                );
+                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
+                return;
+            }
+        };
+
+        let response = match sync::sync_execute(
+            &host_id,
             &db,
             tenant_id,
             auth_override.as_ref(),
             allow_all,
+            &skip_actions,
         )
         .await
         {
@@ -615,7 +710,7 @@ fn spawn_sync_host(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>)
         };
         let msg = ServiceMessage::ExtensionResponse(response);
         if bg_tx.send(msg).await.is_err() {
-            tracing::error!("failed to send sync-host result via bg_tx");
+            tracing::error!("failed to send sync-execute result via bg_tx");
         }
     });
 }
@@ -658,46 +753,21 @@ fn param_bool(params: &serde_json::Value, key: &str) -> bool {
     }
 }
 
-/// Arguments for the bootstrap action, bundled to stay within the 7-arg limit.
-struct BootstrapActionArgs<'a> {
-    request_id: &'a str,
-    params: &'a serde_json::Value,
-    sensitive_params_sealed: Option<&'a str>,
-    private_key_der: Option<&'a [u8]>,
+/// Parse `BootstrapParams` from extension request params and decrypted sensitive params.
+fn parse_bootstrap_params(
+    params: &serde_json::Value,
+    sensitive: Option<&SensitiveAuthParams>,
     service_id: Option<uuid::Uuid>,
     tenant_id: Option<uuid::Uuid>,
-    state_dir: &'a Path,
-    bg_tx: Option<&'a tokio::sync::mpsc::Sender<ServiceMessage>>,
-}
+) -> Result<BootstrapParams, String> {
+    let target_str = params
+        .get("target")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing required field 'target'".to_string())?;
 
-/// The actual bootstrap logic, run inside a spawned task.
-#[tracing::instrument(skip_all, fields(request_id = %args.request_id))]
-async fn run_bootstrap_action(args: BootstrapActionArgs<'_>) -> ExtensionResponsePayload {
-    let request_id = args.request_id;
-    let bg_tx = args.bg_tx;
-
-    // Decrypt sensitive params if present.
-    let sensitive: Option<SensitiveAuthParams> =
-        match uptrakit_service_sdk::decrypt_sensitive_params(
-            args.sensitive_params_sealed,
-            args.private_key_der,
-        ) {
-            Ok(s) => s,
-            Err(msg) => return make_error_response(request_id, &msg),
-        };
-
-    let params = args.params;
-
-    // Parse the SSH target.
-    let target_str = match params.get("target").and_then(|v| v.as_str()) {
-        Some(t) => t,
-        None => return make_error_response(request_id, "missing required field 'target'"),
-    };
-
-    let parsed_target: SshTarget = match target_str.parse() {
-        Ok(t) => t,
-        Err(e) => return make_error_response(request_id, &format!("invalid target: {e}")),
-    };
+    let parsed_target: SshTarget = target_str
+        .parse()
+        .map_err(|e| format!("invalid target: {e}"))?;
 
     let name = params
         .get("name")
@@ -711,22 +781,15 @@ async fn run_bootstrap_action(args: BootstrapActionArgs<'_>) -> ExtensionRespons
         .and_then(|v| v.as_str())
         .unwrap_or("password");
 
-    let auth_password = sensitive.as_ref().and_then(|s| s.auth_password.clone());
-    let auth_private_key = sensitive.as_ref().and_then(|s| s.auth_private_key.clone());
+    let auth_password = sensitive.and_then(|s| s.auth_password.clone());
+    let auth_private_key = sensitive.and_then(|s| s.auth_private_key.clone());
 
-    // Validate auth method matches provided credentials.
     match auth_method {
         "password" if auth_password.is_none() => {
-            return make_error_response(
-                request_id,
-                "auth_method is 'password' but no password provided",
-            );
+            return Err("auth_method is 'password' but no password provided".to_string());
         }
         "private_key" if auth_private_key.is_none() => {
-            return make_error_response(
-                request_id,
-                "auth_method is 'private_key' but no private key provided",
-            );
+            return Err("auth_method is 'private_key' but no private key provided".to_string());
         }
         _ => {}
     }
@@ -749,26 +812,104 @@ async fn run_bootstrap_action(args: BootstrapActionArgs<'_>) -> ExtensionRespons
 
     let host_id = uuid::Uuid::now_v7();
 
-    let bootstrap_params = BootstrapParams {
+    Ok(BootstrapParams {
         name,
         hostname: parsed_target.hostname,
         port: parsed_target.port.unwrap_or(22) as i32,
         auth_username: parsed_target.username.unwrap_or_else(|| "root".to_string()),
         auth_password,
         auth_private_key_pem: auth_private_key,
-        use_ssh_agent: false, // Not available in daemon mode.
+        use_ssh_agent: false,
         target_username,
         target_private_key_pem: None,
         host_key_fingerprint,
         strict_host_key_checking,
         allow_all,
         host_id,
-        service_id: args.service_id,
-        tenant_id: args.tenant_id,
+        service_id,
+        tenant_id,
         remove_stale_keys,
+    })
+}
+
+/// The bootstrap-connect handler: probe the host and return a plan.
+#[tracing::instrument(skip_all, fields(request_id = %request_id))]
+async fn run_bootstrap_connect(
+    request_id: &str,
+    params: &serde_json::Value,
+    sensitive_params_sealed: Option<&str>,
+    private_key_der: Option<&[u8]>,
+    service_id: Option<uuid::Uuid>,
+    tenant_id: Option<uuid::Uuid>,
+    state_dir: &Path,
+) -> ExtensionResponsePayload {
+    let sensitive: Option<SensitiveAuthParams> =
+        match uptrakit_service_sdk::decrypt_sensitive_params(
+            sensitive_params_sealed,
+            private_key_der,
+        ) {
+            Ok(s) => s,
+            Err(msg) => return make_error_response(request_id, &msg),
+        };
+
+    let bootstrap_params =
+        match parse_bootstrap_params(params, sensitive.as_ref(), service_id, tenant_id) {
+            Ok(p) => p,
+            Err(msg) => return make_error_response(request_id, &msg),
+        };
+
+    match bootstrap::bootstrap_connect(state_dir, &bootstrap_params).await {
+        Ok(plan) => match serde_json::to_value(&plan) {
+            Ok(data) => make_success_response(request_id, data),
+            Err(e) => make_error_response(request_id, &format!("failed to serialize plan: {e}")),
+        },
+        Err(e) => {
+            tracing::error!(error = %e, "bootstrap-connect failed");
+            make_error_response(request_id, &format!("bootstrap connect failed: {e}"))
+        }
+    }
+}
+
+/// Arguments for the bootstrap-execute handler, bundled to stay within the 7-arg clippy limit.
+struct BootstrapExecuteArgs<'a> {
+    request_id: &'a str,
+    params: &'a serde_json::Value,
+    sensitive_params_sealed: Option<&'a str>,
+    private_key_der: Option<&'a [u8]>,
+    service_id: Option<uuid::Uuid>,
+    tenant_id: Option<uuid::Uuid>,
+    state_dir: &'a Path,
+    bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
+}
+
+/// The bootstrap-execute handler: execute the bootstrap with optional skip set.
+#[tracing::instrument(skip_all, fields(request_id = %args.request_id))]
+async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> ExtensionResponsePayload {
+    let request_id = args.request_id;
+    let bg_tx = args.bg_tx;
+    let sensitive: Option<SensitiveAuthParams> =
+        match uptrakit_service_sdk::decrypt_sensitive_params(
+            args.sensitive_params_sealed,
+            args.private_key_der,
+        ) {
+            Ok(s) => s,
+            Err(msg) => return make_error_response(request_id, &msg),
+        };
+
+    let bootstrap_params = match parse_bootstrap_params(
+        args.params,
+        sensitive.as_ref(),
+        args.service_id,
+        args.tenant_id,
+    ) {
+        Ok(p) => p,
+        Err(msg) => return make_error_response(request_id, &msg),
     };
 
-    match bootstrap::run_bootstrap(args.state_dir, bootstrap_params).await {
+    let host_id = bootstrap_params.host_id;
+    let skip_actions = parse_skip_actions(args.params);
+
+    match bootstrap::bootstrap_execute(args.state_dir, bootstrap_params, &skip_actions).await {
         Ok(result) => {
             tracing::info!(%host_id, "bootstrap completed successfully");
 
@@ -776,19 +917,17 @@ async fn run_bootstrap_action(args: BootstrapActionArgs<'_>) -> ExtensionRespons
             // ReportPluginConfig if new credentials were created.
             for infra in &result.infra_results {
                 if let Some(report) = &infra.report_plugin_config {
-                    if let Some(bg_tx) = bg_tx {
-                        let payload: uptrakit_internal_wire::ReportPluginConfigPayload =
-                            serde_json::from_value(json!({
-                                "request_id": uuid::Uuid::now_v7().to_string(),
-                                "plugin_type": report.plugin_type,
-                                "name": report.name,
-                                "config": report.config,
-                            }))
-                            .expect("ReportPluginConfigPayload JSON is always valid");
-                        let msg = ServiceMessage::ReportPluginConfig(payload);
-                        if bg_tx.send(msg).await.is_err() {
-                            tracing::error!("failed to send ReportPluginConfig via bg_tx");
-                        }
+                    let payload: uptrakit_internal_wire::ReportPluginConfigPayload =
+                        serde_json::from_value(json!({
+                            "request_id": uuid::Uuid::now_v7().to_string(),
+                            "plugin_type": report.plugin_type,
+                            "name": report.name,
+                            "config": report.config,
+                        }))
+                        .expect("ReportPluginConfigPayload JSON is always valid");
+                    let msg = ServiceMessage::ReportPluginConfig(payload);
+                    if bg_tx.send(msg).await.is_err() {
+                        tracing::error!("failed to send ReportPluginConfig via bg_tx");
                     }
                 } else if let Some(config_id) = &infra.existing_plugin_config_id {
                     tracing::info!(
@@ -811,6 +950,68 @@ async fn run_bootstrap_action(args: BootstrapActionArgs<'_>) -> ExtensionRespons
             make_error_response(request_id, &format!("bootstrap failed: {e}"))
         }
     }
+}
+
+/// Build a `SyncAuthOverride` from extension params and decrypted sensitive params.
+fn build_sync_auth_override(
+    params: &serde_json::Value,
+    sensitive: Option<&SensitiveAuthParams>,
+) -> Result<Option<sync::SyncAuthOverride>, String> {
+    let auth_method = params
+        .get("auth_method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("stored");
+
+    match auth_method {
+        "stored" => Ok(None),
+        "password" => {
+            let password = sensitive.and_then(|s| s.auth_password.as_deref());
+            match password {
+                Some(pw) => Ok(Some(sync::SyncAuthOverride {
+                    username: params
+                        .get("username")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("root")
+                        .to_string(),
+                    auth_password: Some(pw.to_string()),
+                    auth_private_key_pem: None,
+                })),
+                None => Err("auth_method is 'password' but no password provided".to_string()),
+            }
+        }
+        "private_key" => {
+            let key = sensitive.and_then(|s| s.auth_private_key.as_deref());
+            match key {
+                Some(pem) => Ok(Some(sync::SyncAuthOverride {
+                    username: params
+                        .get("username")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("root")
+                        .to_string(),
+                    auth_password: None,
+                    auth_private_key_pem: Some(pem.to_string()),
+                })),
+                None => Err("auth_method is 'private_key' but no private key provided".to_string()),
+            }
+        }
+        other => Err(format!("unknown auth_method '{other}'")),
+    }
+}
+
+/// Parse `skip_actions` from params as a `HashSet<String>`.
+///
+/// Expects a JSON array of strings at `params["skip_actions"]`.
+/// Returns an empty set if the key is absent or not an array.
+fn parse_skip_actions(params: &serde_json::Value) -> HashSet<String> {
+    params
+        .get("skip_actions")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 // ── Sensitive params ─────────────────────────────────────────────────
