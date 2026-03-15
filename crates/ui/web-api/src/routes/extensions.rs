@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use uptrakit_internal_wire::extension::ActionDef;
 use uptrakit_plugin_infrastructure_registry::ExtensionActionContext;
+use uptrakit_shared_types::Permission;
 use uptrakit_web_api_types::extensions::InvokeExtensionActionRequest;
 
 use crate::AppState;
@@ -155,6 +156,31 @@ pub async fn invoke_action(
     );
 
     let owner = state.extension_registry.find_owner(&extension_id);
+
+    // Enforce the permission declared in the ActionDef before dispatching.
+    // An empty `permission` string means no extra permission is required.
+    let action_permission: Option<Permission> = state
+        .extension_registry
+        .actions_for_extension(&extension_id)
+        .into_iter()
+        .find(|a| a.action_id == action_id)
+        .and_then(|a| {
+            if a.permission.is_empty() {
+                None
+            } else {
+                a.permission.parse::<Permission>().ok()
+            }
+        });
+
+    if let Some(required_perm) = action_permission {
+        if !auth_user.has_permission(required_perm) {
+            return error_response_with_code(
+                StatusCode::FORBIDDEN,
+                "Insufficient permissions for this action",
+                "forbidden",
+            );
+        }
+    }
 
     match owner {
         ExtensionOwner::NotFound => {
