@@ -1,6 +1,6 @@
 # Code Review: Plugins (Umbrella)
 
-- **Review date**: 2026-03-06
+- **Review date**: 2026-03-06, 2026-03-15
 - **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
@@ -463,3 +463,106 @@ produces unnecessary allocation pressure. A single-pass character-by-character a
 - Plugin crates are well-scoped and independent: each notification plugin crate has a single
   responsibility (one channel type), minimal dependencies, and no cross-plugin coupling. The
   registry crate is the sole integration point.
+
+---
+
+## 14-Dimension Parallel Review — 2026-03-15
+
+- **Reviewer**: AI code review (14-dimension parallel analysis)
+- **Dimensions**: architecture, security, code quality, tests, HA, database, coding standards, extensibility, consistency, idiomatic Rust, references and heap, maintainability, crate structure, compilation impact
+- **Crates covered**: all plugin crates under `crates/plugins/`
+
+### infrastructure/core
+
+- **[LOW D1]** Depends on `notification-plugin-core` -- every plugin transitively includes
+  notification types even if irrelevant to its function.
+- **[LOW D7]** `agent_infra.rs:55` -- `#[allow(clippy::too_many_arguments)]` without comment.
+  Previously noted as CS4 in the 2026-03-10 review; still outstanding.
+- **[INFO D8]** `PluginBase` subtrait pattern is exemplary -- `DiscoveryPlugin`,
+  `VersionDetectorPlugin`, etc. with `as_*()` accessors provide clean capability separation.
+- **[INFO D8]** `PluginOps` trait provides clean abstraction between web-api and registry,
+  keeping the plugin internals fully decoupled from HTTP layer concerns.
+
+### infrastructure/registry
+
+- **[CRITICAL D14]** Forces full-workspace recompilation on any plugin change -- approximately
+  60,600 LoC across registry, web-api, controller, agent-core, and scheduler-engine are
+  invalidated. This is the single largest compilation bottleneck in the workspace.
+- **[MEDIUM D11]** `mask_secrets_for<T>` clones `config` up to 3 times -- clone for
+  `from_value`, clone on error fallback, clone on serialization failure. Previously noted as
+  architectural waste in the original review; this entry quantifies the allocation overhead.
+- **[LOW D11]** `format!("{plugin_type}")` allocates `String` via `Display` --
+  `plugin_type.to_string()` or passing the value directly would avoid the intermediate
+  `format!` allocation.
+- **[LOW D11]** `discovery_plugins()` and `known_plugin_types()` allocate `Vec` on each call --
+  static arrays would eliminate per-call heap allocation.
+- **[LOW D8]** Notification plugin registration uses manual `HashMap` insertion rather than the
+  `register_plugins!` macro -- a second registration path that bypasses the macro's
+  single-source-of-truth guarantees.
+- **[INFO D8]** `register_plugins!` macro is single source of truth for all dispatch --
+  exemplary design that eliminates manual dispatch boilerplate.
+
+### infrastructure/proxmox
+
+- **[HIGH D7]** `plugin.rs:28` -- `#[cfg(not(feature = "migrations"))]` -- prohibited pattern.
+  Negative feature gates are explicitly forbidden by the workspace coding standards.
+- **[LOW D7]** `extension_actions.rs:285` -- `#[allow(clippy::too_many_arguments)]` with
+  comment (good practice). Previously noted as CS3 in the 2026-03-10 review; the comment
+  exists but describes the symptom rather than justifying the suppression.
+- **[LOW D3]** `plugin.rs:437` -- `.expect("find_pve_host_with_config only returns hosts with config")`
+  in production code. The coding standard prohibits `.expect()` outside tests.
+
+### releases/github
+
+- **[MEDIUM D2]** Download client at `plugin.rs:693` missing `SsrfSafeResolver` -- asset
+  download URLs are attacker-influenced. The primary client correctly applies SSRF protection,
+  but the download-specific client does not.
+
+### notifications/telegram
+
+- **[MEDIUM D2]** HTTP client at `lib.rs:33` missing `SsrfSafeResolver` -- constrained to
+  `api.telegram.org` but split-horizon DNS could redirect. Previously noted in both the
+  2026-03-10 review and the S2 entry above; still outstanding.
+
+### notifications/email
+
+- **[MEDIUM D2]** `SmtpSettingsSnapshot` at `lib.rs:142` uses `#[derive(Debug)]` leaking SMTP
+  password -- the web-api version correctly implements manual `Debug` that redacts the password.
+  Previously noted as S6 in the 2026-03-10 review; still outstanding.
+- **[LOW D3]** `lib.rs:89` -- `.expect("config is always an object")` in
+  `merge_smtp_into_config` -- should return error. Previously noted as CS5 and in the
+  2026-03-10 dimension review; still outstanding.
+
+### releases/docker
+
+- **[HIGH D7]** `update.rs:79` -- `#[cfg(not(feature = "daemon"))]` -- prohibited pattern.
+  Negative feature gates are explicitly forbidden by the workspace coding standards.
+- **[LOW D4]** `daemon_client.rs`, `discovery.rs`, `update.rs`, `docker_proxy.rs` lack unit
+  tests (~1,200 lines of untested code).
+
+### package-managers (cross-cutting)
+
+- **[INFO D9]** All 10 package manager plugins follow identical 4-file structure (`lib.rs`,
+  `plugin.rs`, `config.rs`, `error.rs`) -- perfect consistency across the subsystem.
+- **[LOW D9]** `NpmConfig.validate()` returns `Result<(), String>` while all other 9 configs
+  return `crate::error::Result<()>` -- sole outlier. Previously noted as R2 in the 2026-03-10
+  review; still outstanding.
+- **[LOW D4]** All 14 plugin `error.rs` files across all categories have zero tests.
+
+### generic/shell
+
+- **[INFO]** Clean, minimal implementation -- no issues found across any dimension.
+
+### Cross-Crate Plugin Strengths (New)
+
+- Plugin isolation is effective -- each crate has focused dependency set, zero cross-plugin
+  dependencies.
+- All plugins building `reqwest::Client` set `.connect_timeout(10s)` and `.timeout(60s)` --
+  consistent HTTP client requirements across the entire plugin subsystem.
+- Plugin SSRF protection is sound across GitHub (HTTPS-only, private host rejection), Docker
+  (`is_private_host()`), GitLab/Forgejo (HTTPS + private/loopback rejection).
+- `SecretMasking` trait with `#[must_use]` prevents silent discard of masked results.
+- `register_plugins!` macro auto-generates `validate_package_identifier` -- no manual dispatch
+  tables required when adding new plugins.
+- Consistent use of `bail!`, `report!`, `thiserror`-derived errors across all plugins.
+- Zero `#[allow(clippy::...)]` suppressions across most plugin crates.
