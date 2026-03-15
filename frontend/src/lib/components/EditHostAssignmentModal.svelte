@@ -268,6 +268,49 @@
 		return pluginConfigs.filter((c) => c.plugin_type === pluginType);
 	}
 
+	function pluginSelection(s: { plugin_type: string; plugin_config_id: string }): string {
+		if (s.plugin_config_id) return `cfg:${s.plugin_config_id}`;
+		if (s.plugin_type) return `type:${s.plugin_type}`;
+		return '';
+	}
+
+	function applySelection(
+		target: {
+			plugin_type: string;
+			plugin_config_id: string;
+			overrideFormValues: Record<string, string>;
+			overrideShowJson: boolean;
+			config_override_text: string;
+			config_override_error: string | null;
+		},
+		value: string
+	): void {
+		if (value.startsWith('cfg:')) {
+			const id = value.slice(4);
+			target.plugin_config_id = id;
+			const config = pluginConfigs.find((c) => c.id === id);
+			if (config) {
+				target.plugin_type = config.plugin_type;
+				const fields = getFormFields(config.plugin_type);
+				target.overrideFormValues = flattenConfig({}, fields);
+			}
+		} else if (value.startsWith('type:')) {
+			const ptStr = value.slice(5);
+			target.plugin_type = ptStr;
+			target.plugin_config_id = '';
+			const pt = pluginTypes.find((t) => t.plugin_type === ptStr);
+			const fields = pt?.config_form_fields ?? [];
+			target.overrideFormValues = flattenConfig(pt?.sample_config ?? {}, fields);
+		} else {
+			target.plugin_type = '';
+			target.plugin_config_id = '';
+			target.overrideFormValues = {};
+		}
+		target.overrideShowJson = false;
+		target.config_override_text = '';
+		target.config_override_error = null;
+	}
+
 	function getFormFields(pluginType: string): FieldDef[] {
 		const t = pluginTypes.find((pt) => pt.plugin_type === pluginType);
 		return t?.config_form_fields ?? [];
@@ -635,66 +678,42 @@
 					{@const s = standardStates[role]}
 					{@const roleFields = getStdFormFields(role)}
 					{@const hasFormFields = roleFields.length > 0}
-					{@const typeOptions = pluginTypesForRole(role)}
+					{@const typeOpts = pluginTypesForRole(role)}
+					{@const savedRoleOpts = typeOpts.flatMap((pt) => savedConfigsForType(pt.plugin_type))}
 					<div class="rounded-lg border border-surface-200 p-4 space-y-3 dark:border-surface-700">
 						<div class="flex items-start gap-2">
 							<span class="badge preset-tonal shrink-0 text-xs">{ROLE_LABELS[role]}</span>
 							<span class="text-xs text-surface-500 leading-5">{ROLE_DESCRIPTIONS[role]}</span>
 						</div>
 
-						<!-- Plugin Type -->
+						<!-- Plugin Config -->
 						<div class="grid grid-cols-[9rem_1fr] items-center gap-3">
-							<label class="text-sm font-medium" for="type-{role}">Plugin Type</label>
+							<label class="text-sm font-medium" for="cfg-{role}">Plugin Config</label>
 							<select
-								id="type-{role}"
+								id="cfg-{role}"
 								class="select text-sm"
-								bind:value={standardStates[role].plugin_type}
-								onchange={() => {
-									standardStates[role].plugin_config_id = '';
-									const pt = pluginTypes.find((t) => t.plugin_type === standardStates[role].plugin_type);
-									const fields = pt?.config_form_fields ?? [];
-									standardStates[role].overrideFormValues = flattenConfig(pt?.sample_config ?? {}, fields);
-									standardStates[role].overrideShowJson = false;
-									standardStates[role].config_override_text = '';
-									standardStates[role].config_override_error = null;
-								}}
+								value={pluginSelection(s)}
+								onchange={(e) => applySelection(standardStates[role], (e.target as HTMLSelectElement).value)}
 							>
 								<option value="">— not configured —</option>
-								{#each typeOptions as pt (pt.plugin_type)}
-									<option value={pt.plugin_type}>{pt.display_name}</option>
-								{/each}
+								{#if savedRoleOpts.length > 0}
+									<optgroup label="Saved">
+										{#each savedRoleOpts as cfg (cfg.id)}
+											<option value="cfg:{cfg.id}">{cfg.name}</option>
+										{/each}
+									</optgroup>
+									<optgroup label="Inline">
+										{#each typeOpts as pt (pt.plugin_type)}
+											<option value="type:{pt.plugin_type}">{pt.display_name}</option>
+										{/each}
+									</optgroup>
+								{:else}
+									{#each typeOpts as pt (pt.plugin_type)}
+										<option value="type:{pt.plugin_type}">{pt.display_name}</option>
+									{/each}
+								{/if}
 							</select>
 						</div>
-
-						<!-- Optional Saved Config sub-select -->
-						{#if standardStates[role].plugin_type}
-							{@const savedForType = savedConfigsForType(standardStates[role].plugin_type)}
-							{#if savedForType.length > 0}
-								<div class="grid grid-cols-[9rem_1fr] items-center gap-3">
-									<label class="text-sm font-medium" for="cfg-{role}">Saved Config</label>
-									<select
-										id="cfg-{role}"
-										class="select text-sm"
-										bind:value={standardStates[role].plugin_config_id}
-										onchange={() => {
-											const config = pluginConfigs.find((c) => c.id === standardStates[role].plugin_config_id);
-											const pt = pluginTypes.find((t) => t.plugin_type === standardStates[role].plugin_type);
-											const fields = config ? getFormFields(config.plugin_type) : (pt?.config_form_fields ?? []);
-											const base = standardStates[role].plugin_config_id ? {} : (pt?.sample_config ?? {});
-											standardStates[role].overrideFormValues = flattenConfig(base, fields);
-											standardStates[role].overrideShowJson = false;
-											standardStates[role].config_override_text = '';
-											standardStates[role].config_override_error = null;
-										}}
-									>
-										<option value="">— use inline config —</option>
-										{#each savedForType as cfg (cfg.id)}
-											<option value={cfg.id}>{cfg.name}</option>
-										{/each}
-									</select>
-								</div>
-							{/if}
-						{/if}
 
 						{#if s.plugin_type}
 							{@const isInline = !s.plugin_config_id}
@@ -995,7 +1014,8 @@
 								{#each hookLists[hookRole] as entry, idx (entry.localKey)}
 									{@const hookFields = getHookFormFields(entry)}
 									{@const hasHookFormFields = hookFields.length > 0}
-									{@const htOptions = hookPluginTypes()}
+									{@const hookTypeOpts = hookPluginTypes()}
+									{@const savedHookOpts = hookTypeOpts.flatMap((pt) => savedConfigsForType(pt.plugin_type))}
 									<div class="rounded-md border border-surface-300 p-3 space-y-2 dark:border-surface-600">
 										<div class="flex items-center justify-between gap-2">
 											<span class="text-xs font-medium text-surface-500">Hook #{idx + 1}</span>
@@ -1008,61 +1028,34 @@
 											</button>
 										</div>
 
-										<!-- Plugin Type -->
+										<!-- Plugin Config (saved + inline in one select) -->
 										<div class="grid grid-cols-[7rem_1fr] items-center gap-2">
-											<label class="text-sm font-medium" for="hook-type-{entry.localKey}">Plugin Type</label>
+											<label class="text-sm font-medium" for="hook-cfg-{entry.localKey}">Plugin Config</label>
 											<select
-												id="hook-type-{entry.localKey}"
+												id="hook-cfg-{entry.localKey}"
 												class="select text-sm"
-												bind:value={entry.plugin_type}
-												onchange={() => {
-													entry.plugin_config_id = '';
-													const pt = pluginTypes.find((t) => t.plugin_type === entry.plugin_type);
-													const fields = pt?.config_form_fields ?? [];
-													entry.overrideFormValues = flattenConfig(pt?.sample_config ?? {}, fields);
-													entry.overrideShowJson = false;
-													entry.config_override_text = '';
-													entry.config_override_error = null;
-												}}
+												value={pluginSelection(entry)}
+												onchange={(e) => applySelection(entry, (e.target as HTMLSelectElement).value)}
 											>
 												<option value="">— not configured —</option>
-												{#each htOptions as pt (pt.plugin_type)}
-													<option value={pt.plugin_type}>{pt.display_name}</option>
-												{/each}
+												{#if savedHookOpts.length > 0}
+													<optgroup label="Saved">
+														{#each savedHookOpts as cfg (cfg.id)}
+															<option value="cfg:{cfg.id}">{cfg.name}</option>
+														{/each}
+													</optgroup>
+													<optgroup label="Inline">
+														{#each hookTypeOpts as pt (pt.plugin_type)}
+															<option value="type:{pt.plugin_type}">{pt.display_name}</option>
+														{/each}
+													</optgroup>
+												{:else}
+													{#each hookTypeOpts as pt (pt.plugin_type)}
+														<option value="type:{pt.plugin_type}">{pt.display_name}</option>
+													{/each}
+												{/if}
 											</select>
 										</div>
-
-										<!-- Optional saved config sub-select -->
-										{#if entry.plugin_type}
-											{@const savedHookForType = savedConfigsForType(entry.plugin_type)}
-											{#if savedHookForType.length > 0}
-												<div class="grid grid-cols-[7rem_1fr] items-center gap-2">
-													<label class="text-sm font-medium" for="hook-cfg-{entry.localKey}">Saved Config</label>
-													<select
-														id="hook-cfg-{entry.localKey}"
-														class="select text-sm"
-														bind:value={entry.plugin_config_id}
-														onchange={() => {
-															const config = pluginConfigs.find((c) => c.id === entry.plugin_config_id);
-															const pt = pluginTypes.find((t) => t.plugin_type === entry.plugin_type);
-															const fields = config
-																? getFormFields(config.plugin_type)
-																: (pt?.config_form_fields ?? []);
-															const base = entry.plugin_config_id ? {} : (pt?.sample_config ?? {});
-															entry.overrideFormValues = flattenConfig(base, fields);
-															entry.overrideShowJson = false;
-															entry.config_override_text = '';
-															entry.config_override_error = null;
-														}}
-													>
-														<option value="">— use inline config —</option>
-														{#each savedHookForType as cfg (cfg.id)}
-															<option value={cfg.id}>{cfg.name}</option>
-														{/each}
-													</select>
-												</div>
-											{/if}
-										{/if}
 
 										{#if entry.plugin_type}
 											{@const isHookInline = !entry.plugin_config_id}
