@@ -1273,8 +1273,11 @@ pub async fn check_versions_host(
         }
     };
 
-    // Find agent linked to host
-    let agent_link = match ServiceHost::find()
+    // Find agent linked to host (tenant-scoped via join on service)
+    let agent_link = match tenant_db
+        .find_via_tenant_join::<service_host::Entity, service::Entity>(
+            service_host::Relation::Service.def(),
+        )
         .filter(service_host::Column::HostId.eq(host_id))
         .one(tenant_db.db())
         .await

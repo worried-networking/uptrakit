@@ -269,7 +269,7 @@ pub async fn load_software_states_for_tenant(
     }
 
     // 8. Build MqttHostMetadata for all active hosts.
-    let host_metadata = build_host_metadata(db, &active_hosts).await?;
+    let host_metadata = build_host_metadata(db, tenant_id, &active_hosts).await?;
 
     Ok(MqttSoftwareStatesPayload {
         tenant_id,
@@ -314,6 +314,7 @@ struct ServiceHostConnRow {
 /// 2. `service_hosts JOIN services` to get agent version and last_seen_at.
 async fn build_host_metadata(
     db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
     active_hosts: &HashMap<Uuid, host::Model>,
 ) -> Result<Vec<MqttHostMetadata>, sea_orm::DbErr> {
     if active_hosts.is_empty() {
@@ -345,16 +346,16 @@ async fn build_host_metadata(
     }
 
     // 2. Load agent info (client_version, last_seen_at) for all hosts.
-    //    Uses service_hosts JOIN services, picking approved, non-deactivated agents.
-    let agent_rows: Vec<AgentInfoRow> = ServiceHost::find()
+    //    Tenant-scoped via join on service (service_host has no tenant_id column).
+    let tenant_db_local = crate::TenantDb::new(db.clone(), tenant_id);
+    let agent_rows: Vec<AgentInfoRow> = tenant_db_local
+        .find_via_tenant_join::<service_host::Entity, service::Entity>(
+            service_host::Relation::Service.def(),
+        )
         .select_only()
         .column(service_host::Column::HostId)
         .column_as(service::Column::ClientVersion, "client_version")
         .column_as(service::Column::LastSeenAt, "last_seen_at")
-        .join(
-            sea_orm::JoinType::InnerJoin,
-            service_host::Relation::Service.def(),
-        )
         .filter(service_host::Column::HostId.is_in(host_ids))
         .filter(service::Column::Status.eq(ServiceStatus::Approved))
         .filter(service::Column::DeactivatedAt.is_null())
@@ -468,17 +469,17 @@ pub async fn load_agent_connectivity_for_tenant(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
 ) -> Result<Vec<AgentConnectivityInfo>, sea_orm::DbErr> {
-    let rows: Vec<ServiceHostConnRow> = ServiceHost::find()
+    // Tenant-scoped via join on service (service_host has no tenant_id column).
+    let tenant_db_local = crate::TenantDb::new(db.clone(), tenant_id);
+    let rows: Vec<ServiceHostConnRow> = tenant_db_local
+        .find_via_tenant_join::<service_host::Entity, service::Entity>(
+            service_host::Relation::Service.def(),
+        )
         .select_only()
         .column(service_host::Column::ServiceId)
         .column(service_host::Column::HostId)
         .column_as(service::Column::ClientVersion, "client_version")
         .column_as(service::Column::LastSeenAt, "last_seen_at")
-        .join(
-            sea_orm::JoinType::InnerJoin,
-            service_host::Relation::Service.def(),
-        )
-        .filter(service::Column::TenantId.eq(tenant_id))
         .filter(service::Column::Status.eq(ServiceStatus::Approved))
         .filter(service::Column::DeactivatedAt.is_null())
         // Only services with the software_discovery capability.

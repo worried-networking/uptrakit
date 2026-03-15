@@ -10,7 +10,7 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
-    PaginatorTrait, QueryFilter, QueryOrder, Set,
+    PaginatorTrait, QueryFilter, QueryOrder, RelationTrait, Set,
 };
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{
@@ -302,8 +302,12 @@ pub(crate) async fn load_target_for_dispatch(
         .context_to()?
         .ok_or_else(|| report!(TriggerUpdateError::HostNotAssigned))?;
 
-    // 4. Find the agent linked to this host.
-    let agent_link = ServiceHost::find()
+    // 4. Find the agent linked to this host (tenant-scoped via join on service).
+    let tenant_db_local = crate::TenantDb::new(db.clone(), tenant_id);
+    let agent_link = tenant_db_local
+        .find_via_tenant_join::<service_host::Entity, service::Entity>(
+            service_host::Relation::Service.def(),
+        )
         .filter(service_host::Column::HostId.eq(host_id))
         .one(db)
         .await

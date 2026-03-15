@@ -139,10 +139,15 @@ pub async fn interactive_ws(
         );
     }
 
-    // 6. Look up the agent (service) linked to this update's host.
-    let service_id = match service_host::Entity::find()
+    // 6. Look up the agent (service) linked to this update's host (tenant-scoped via
+    //    join on service — service_host has no tenant_id column).
+    use uptrakit_shared_db::entity::service;
+    let service_id = match tenant_db
+        .find_via_tenant_join::<service_host::Entity, service::Entity>(
+            service_host::Relation::Service.def(),
+        )
         .filter(service_host::Column::HostId.eq(record.host_id))
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(link)) => link.service_id,

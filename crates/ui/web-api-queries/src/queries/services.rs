@@ -1,7 +1,7 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set, TransactionTrait,
+    QuerySelect, RelationTrait, Set, TransactionTrait,
     sea_query::{Expr, OnConflict},
 };
 use thiserror::Error;
@@ -376,10 +376,13 @@ pub async fn merge_service(
 
     let updated_target = target_active.update(&txn).await.context_to()?;
 
-    // Copy source service's host links to target (INSERT ON CONFLICT DO NOTHING).
-    let source_links = ServiceHost::find()
+    // Copy source service's host links to target (tenant-scoped via join on service).
+    let source_links = tenant_db
+        .find_via_tenant_join::<service_host::Entity, service::Entity>(
+            service_host::Relation::Service.def(),
+        )
         .filter(service_host::Column::ServiceId.eq(source_uuid))
-        .all(&txn)
+        .all(tenant_db.db())
         .await
         .context_to()?;
 

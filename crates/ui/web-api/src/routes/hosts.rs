@@ -12,9 +12,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, RelationTrait};
 use std::sync::Arc;
-use uptrakit_shared_db::entity::{host, prelude::*, service_host};
+use uptrakit_shared_db::entity::{host, prelude::*, service, service_host};
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
@@ -216,8 +216,11 @@ pub async fn discover_host(
         }
     };
 
-    // Find all agents linked to this host.
-    let links = match ServiceHost::find()
+    // Find all agents linked to this host (tenant-scoped via join on service).
+    let links = match tenant_db
+        .find_via_tenant_join::<service_host::Entity, service::Entity>(
+            service_host::Relation::Service.def(),
+        )
         .filter(service_host::Column::HostId.eq(host_id))
         .all(tenant_db.db())
         .await
