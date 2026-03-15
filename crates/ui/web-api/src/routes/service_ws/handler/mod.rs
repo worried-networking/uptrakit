@@ -65,7 +65,7 @@ use super::protocol::{
 };
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
-use crate::routes::agents::{do_sign_csr, do_sign_csr_for_system_service};
+use crate::routes::agent_operations::{do_sign_csr, do_sign_csr_for_system_service};
 use uptrakit_internal_wire::service_profile::parse_capabilities;
 
 // ---------------------------------------------------------------------------

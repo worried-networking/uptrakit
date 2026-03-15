@@ -1,4 +1,5 @@
 pub mod access_presets;
+pub(crate) mod agent_operations;
 pub(crate) mod agents;
 pub mod api_tokens;
 pub mod audit_logs;

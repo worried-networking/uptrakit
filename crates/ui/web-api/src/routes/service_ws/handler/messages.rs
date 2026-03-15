@@ -32,7 +32,7 @@ use uptrakit_web_api_types::events::AdminEvent;
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
-use crate::routes::agents::{
+use crate::routes::agent_operations::{
     find_or_create_host_and_link, revoke_certificate, revoke_system_certificate,
 };
 use crate::routes::service_ws::protocol::{

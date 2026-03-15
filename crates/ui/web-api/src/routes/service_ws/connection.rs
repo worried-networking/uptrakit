@@ -685,7 +685,7 @@ async fn enroll_service(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     out_seq: &mut OutgoingSeq,
 ) -> Option<(uuid::Uuid, bool)> {
-    use crate::routes::agents::{
+    use crate::routes::agent_operations::{
         EnrollParams, ServiceStatus, SystemServiceEnrollParams, do_enroll, do_enroll_system_service,
     };
     use uptrakit_internal_wire::Capability;
