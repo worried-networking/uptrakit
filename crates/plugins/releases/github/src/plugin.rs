@@ -92,8 +92,7 @@ impl GitHubPlugin {
     /// Create a new `GitHubPlugin` from the given configuration.
     ///
     /// Validates the configuration and pre-compiles asset filter regexes.
-    /// The executor is used for running `install(1)` and pre/post install
-    /// commands during `execute_update`.
+    /// The executor is used for running `install(1)` during `execute_update`.
     pub async fn new(config: GitHubConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
         config
             .validate()
@@ -626,27 +625,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for GitHubPlugin 
         )
         .await;
 
-        // ── 2. Run pre-install command ─────────────────────────────────
-
-        if let Some(ref cmd) = self.config.pre_install_command {
-            send_output(
-                output_tx,
-                &format!("Running pre-install command: {cmd}"),
-                OutputStreamType::Stdout,
-            )
-            .await;
-
-            self.executor
-                .execute(&CommandSpec::shell(cmd), output_tx)
-                .await
-                .map_err(|e| {
-                    report!(PluginError::InstallFailed(format!(
-                        "pre_install_command failed: {e}"
-                    )))
-                })?;
-        }
-
-        // ── 3. Download asset into memory ──────────────────────────────
+        // ── 2. Download asset into memory ──────────────────────────────
 
         send_output(
             output_tx,
@@ -718,7 +697,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for GitHubPlugin 
         )
         .await;
 
-        // ── 4. Verify SHA-256 checksum ─────────────────────────────────
+        // ── 3. Verify SHA-256 checksum ─────────────────────────────────
 
         // Always compute SHA-256: used for checksum verification and to derive
         // a unique remote temp-file name.
@@ -748,7 +727,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for GitHubPlugin 
             .await;
         }
 
-        // ── 5. Upload asset to remote temp file ────────────────────────
+        // ── 4. Upload asset to remote temp file ────────────────────────
 
         // Use the first 8 bytes of the SHA-256 as a unique suffix so that
         // concurrent uploads of different assets never collide.
@@ -787,7 +766,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for GitHubPlugin 
             })?;
         }
 
-        // ── 6. Install the file at the target path ─────────────────────
+        // ── 5. Install the file at the target path ─────────────────────
 
         let mode = if self.config.make_executable {
             "755"
@@ -826,26 +805,6 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for GitHubPlugin 
                 "install command failed: {e}"
             )))
         })?;
-
-        // ── 6. Run post-install command ────────────────────────────────
-
-        if let Some(ref cmd) = self.config.post_install_command {
-            send_output(
-                output_tx,
-                &format!("Running post-install command: {cmd}"),
-                OutputStreamType::Stdout,
-            )
-            .await;
-
-            self.executor
-                .execute(&CommandSpec::shell(cmd), output_tx)
-                .await
-                .map_err(|e| {
-                    report!(PluginError::InstallFailed(format!(
-                        "post_install_command failed: {e}"
-                    )))
-                })?;
-        }
 
         let summary = format!("Installed {} to {install_path}", asset.name);
         send_output(output_tx, &summary, OutputStreamType::Stdout).await;
