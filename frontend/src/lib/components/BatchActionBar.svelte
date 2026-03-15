@@ -35,7 +35,22 @@
 	function closeMoreMenu() {
 		showMoreMenu = false;
 	}
+
+	function toggleMoreMenu(e: MouseEvent) {
+		e.stopPropagation();
+		if (showMoreMenu) {
+			closeMoreMenu();
+		} else {
+			openMoreMenu();
+		}
+	}
+
+	function handleWindowClick() {
+		if (showMoreMenu) closeMoreMenu();
+	}
 </script>
+
+<svelte:window onclick={handleWindowClick} />
 
 {#if selectedCount > 0}
 	<div
@@ -75,7 +90,7 @@
 				<button
 					bind:this={moreButtonEl}
 					class="btn btn-sm preset-tonal-surface"
-					onclick={openMoreMenu}
+					onclick={toggleMoreMenu}
 					aria-label="More actions"
 					aria-haspopup="menu"
 					aria-expanded={showMoreMenu}
