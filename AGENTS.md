@@ -405,11 +405,11 @@ These are non-negotiable design constraints. Do not violate them.
    requirements in [docs/development/coding-standards.md](docs/development/coding-standards.md): define typed errors
    with `thiserror` and attach/propagate context with `rootcause` (including match-with-fallback and serialization
    helper patterns where applicable).
-   **Approved exceptions**: `RwLock::read().unwrap()` and `RwLock::write().unwrap()` on `std::sync::RwLock`
-   are safe because `panic = "abort"` in the release profile makes lock poisoning impossible. However,
-   prefer `parking_lot::Mutex` (workspace dependency) over `std::sync::Mutex` in all async code —
-   `parking_lot::Mutex::lock()` returns the guard directly with no `Result`, so no `.unwrap()` is
-   needed at all. See [Coding Standards — Synchronous Locks in Async Code](docs/development/coding-standards.md#synchronous-locks-in-async-code).
+   Use `parking_lot::Mutex` and `parking_lot::RwLock` (workspace dependency) in all async code.
+   Never use `std::sync::Mutex`, `std::sync::RwLock`, `tokio::sync::Mutex`, or `tokio::sync::RwLock`.
+   `parking_lot` primitives return the guard directly with no `Result`, and guards must always be
+   dropped before any `.await` point (clone/copy the value out first). See
+   [Coding Standards — Synchronous Locks in Async Code](docs/development/coding-standards.md#synchronous-locks-in-async-code).
 1. **Use `StatusCode` for HTTP status codes.** Never compare against numeric literals (`== 404`, `>= 400`). Use
    `reqwest::StatusCode` variants (`StatusCode::NOT_FOUND`, `StatusCode::FORBIDDEN`) and helper methods
    (`.is_client_error()`, `.is_success()`). Store status codes as `StatusCode`, not `u16`, in error enums and structs.
@@ -426,8 +426,15 @@ These are non-negotiable design constraints. Do not violate them.
    `CanApproveServices`, `CanCreateSoftware`, `CanTriggerUpdates`, `CanManageUsers`). The extractors are defined in
    `crates/ui/web-api/src/middleware/permission.rs` via the `permission_extractor!` macro. Each protected endpoint
    must also carry the matching `x-required-permission` OpenAPI extension in its `#[utoipa::path]` annotation (e.g.
-   `extensions(("x-required-permission" = json!("view_hosts")))`). See
+   `extensions(("x-required-permission" = json!("view_hosts")))`). **Approved exception:** handlers that perform
+   custom token extraction (e.g., reading `?token=` query param for WebSocket connections) may call
+   `auth_user.has_permission(perm)` inline — mark these with a `// APPROVED: custom auth path` comment. See
    [Authentication and Authorization](docs/security/auth-and-authorization.md).
+1. **Extension action permissions are enforced at invocation.** The `ActionDef::permission` field on any action
+   returned by `PluginOps::extension_actions()` or a service's `ExtensionRegister` is checked server-side by the
+   `invoke_action` route handler before dispatching to a plugin or service. New actions that modify state or access
+   sensitive data must always set `.with_permission(...)`. The permission check applies to both plugin-backed and
+   service-backed extension paths. See [Extension Security](docs/security/extensions.md#action-level-permissions).
 1. **Do not test upstream crate behavior.** Tests must verify internal logic only -- not the behavior of dependencies
    like `thiserror` formatting, `serde` roundtrips on plain derives, or `argon2` salt randomness. See the decision
    table in [Testing Expectations](docs/development/testing.md).
