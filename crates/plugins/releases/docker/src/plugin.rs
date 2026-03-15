@@ -6,7 +6,7 @@ use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use crate::config::DockerConfig;
 use crate::docker_client::{DockerClient, NoopDockerClient};
 use crate::error::Result;
-use crate::registry::RegistryClient;
+use crate::registry::{RegistryClient, RegistryClientOps};
 
 /// Type-erased RAII handle kept alive alongside the Docker client.
 pub(crate) type OpaqueHandle = Option<Box<dyn std::any::Any + Send + Sync>>;
@@ -20,7 +20,7 @@ pub(crate) type OpaqueHandle = Option<Box<dyn std::any::Any + Send + Sync>>;
 /// Also supports autodiscovery of running/stopped containers via Bollard.
 pub struct DockerPlugin {
     pub(crate) config: DockerConfig,
-    pub(crate) registry_client: RegistryClient,
+    pub(crate) registry_client: Arc<dyn RegistryClientOps>,
     pub(crate) docker_client: parking_lot::Mutex<Arc<dyn DockerClient>>,
     pub(crate) executor: Arc<dyn CommandExecutor>,
     /// RAII handle for the Docker socket proxy (Unix-only, daemon feature).
@@ -68,7 +68,8 @@ impl DockerPlugin {
     ) -> Result<Self> {
         config.validate()?;
 
-        let registry_client = RegistryClient::new(config.auth.clone())?;
+        let registry_client: Arc<dyn RegistryClientOps> =
+            Arc::new(RegistryClient::new(config.auth.clone())?);
 
         Ok(Self {
             config,
@@ -107,6 +108,31 @@ impl DockerPlugin {
         docker_client: Arc<dyn DockerClient>,
     ) -> Result<Self> {
         Self::init(config, executor, docker_client, None)
+    }
+
+    /// Test constructor that injects both a custom [`DockerClient`] and a
+    /// custom [`RegistryClientOps`] implementation, allowing registry calls
+    /// to be mocked without network access.
+    #[cfg(all(test, feature = "daemon"))]
+    pub(crate) fn new_for_test_with_registry(
+        config: DockerConfig,
+        executor: Arc<dyn CommandExecutor>,
+        docker_client: Arc<dyn DockerClient>,
+        registry_client: Arc<dyn RegistryClientOps>,
+    ) -> Result<Self> {
+        config.validate()?;
+        Ok(Self {
+            config,
+            registry_client,
+            docker_client: parking_lot::Mutex::new(docker_client),
+            executor,
+            #[cfg(feature = "daemon")]
+            proxy_handle: parking_lot::Mutex::new(None),
+            #[cfg(feature = "daemon")]
+            detected_runtime: parking_lot::Mutex::new(None),
+            #[cfg(feature = "daemon")]
+            credential_cache: crate::credentials::CredentialCache::new(),
+        })
     }
 
     /// Returns `true` when `labels` passes the configured include/exclude filters.

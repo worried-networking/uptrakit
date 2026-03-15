@@ -1200,6 +1200,98 @@ async fn detect_installed_version_returns_local_digest_not_platform_digest_when_
     );
 }
 
+// ── detect_installed_version — transient platform registry failure ────────────
+
+/// When `platform` is configured and `get_platform_manifest_digest` fails
+/// transiently, `detect_installed_version` must return `Err` rather than
+/// falling back to the image-index digest from the local Docker daemon.
+///
+/// **Regression guard:** the old fallback caused a permanent digest-namespace
+/// mismatch — `installed_version` held the index digest while `fetch_releases`
+/// always returned the platform-specific digest.  The two can never be equal,
+/// so the item appeared perpetually updatable even though nothing had changed.
+#[tokio::test]
+async fn detect_installed_version_errors_on_transient_platform_registry_failure() {
+    use crate::config::DockerConfig;
+    use crate::registry::MockRegistryClient;
+
+    let local_digest =
+        "sha256:7fbf01d7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string();
+    let mock_docker = Arc::new(MockDockerClient {
+        inspect_result: Some(local_digest.clone()),
+        ..Default::default()
+    });
+    let mock_registry = Arc::new(MockRegistryClient {
+        platform_digest_should_fail: true,
+        ..Default::default()
+    });
+    let config = DockerConfig {
+        platform: Some("linux/amd64".to_string()),
+        ..Default::default()
+    };
+    let plugin = DockerPlugin::new_for_test_with_registry(
+        config,
+        mock_executor(),
+        mock_docker,
+        mock_registry,
+    )
+    .unwrap();
+
+    let result = plugin
+        .detect_installed_version("adguard/adguardhome:latest")
+        .await;
+
+    // Must propagate the error — falling back to the index digest would create
+    // a permanent mismatch with the platform-specific digest from fetch_releases.
+    assert!(
+        result.is_err(),
+        "expected Err when platform registry call fails transiently, got Ok({result:?})"
+    );
+}
+
+/// Same regression guard for the batch path.
+#[tokio::test]
+async fn batch_detect_errors_on_transient_platform_registry_failure() {
+    use crate::config::DockerConfig;
+    use crate::registry::MockRegistryClient;
+
+    let local_digest =
+        "sha256:7fbf01d7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string();
+    let mock_docker = Arc::new(MockDockerClient {
+        inspect_result: Some(local_digest.clone()),
+        ..Default::default()
+    });
+    let mock_registry = Arc::new(MockRegistryClient {
+        platform_digest_should_fail: true,
+        ..Default::default()
+    });
+    let config = DockerConfig {
+        platform: Some("linux/amd64".to_string()),
+        ..Default::default()
+    };
+    let plugin = DockerPlugin::new_for_test_with_registry(
+        config,
+        mock_executor(),
+        mock_docker,
+        mock_registry,
+    )
+    .unwrap();
+
+    let items = vec![BatchDetectItem::new(
+        "adguard/adguardhome:latest".to_string(),
+    )];
+    let results = plugin.batch_detect_installed_version(&items).await.unwrap();
+
+    assert_eq!(results.len(), 1);
+    // Must record an error for the item — not return the index digest as
+    // installed_version, which would create a permanent spurious update signal.
+    assert!(
+        results[0].error.is_some(),
+        "expected batch result to carry an error when platform registry call fails"
+    );
+    assert!(results[0].installed_version.is_none());
+}
+
 /// Same regression guard for the batch path.
 #[tokio::test]
 async fn batch_detect_returns_local_digest_not_platform_digest_when_no_platform_config() {

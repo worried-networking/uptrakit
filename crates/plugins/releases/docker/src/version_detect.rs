@@ -33,7 +33,11 @@ impl DockerPlugin {
     ///   the local image has no `os`/`arch` metadata or the registry call fails.
     /// - `Err(PlatformNotAvailable)` — `platform` was `Some` but absent from
     ///   the manifest list (definitive; caller must surface this as an error).
-    /// - `Err(...)` — Docker daemon error.
+    /// - `Err(PluginInternal)` — Docker daemon error **or** transient registry
+    ///   failure when `platform` is `Some`. The caller should treat this as
+    ///   retryable: the last known `installed_version` stays in the DB until
+    ///   the registry is reachable again, preventing a false-positive mismatch
+    ///   with the platform-specific digest returned by `fetch_releases`.
     pub(crate) async fn resolve_image_info(
         &self,
         ir: &crate::image_ref::ImageRef,
@@ -90,13 +94,29 @@ impl DockerPlugin {
                     .into());
                 }
                 Err(e) => {
-                    // Transient registry failure — fall back to the image index digest.
+                    // When platform is configured, falling back to the image-index
+                    // digest would create a permanent digest-namespace mismatch:
+                    // `detect_installed_version` would return the index digest
+                    // while `fetch_releases` always returns the platform-specific
+                    // digest, making the item appear perpetually updatable.
+                    //
+                    // Instead, propagate the error as retryable so the scheduler
+                    // retries on the next cycle. The `installed_version` in the DB
+                    // keeps its last known good platform-specific digest until the
+                    // registry is reachable again.
                     tracing::warn!(
                         error = %e,
                         image = %ir.image,
-                        "failed to fetch platform manifest digest; \
-                         falling back to image index digest"
+                        platform = %p,
+                        "transient failure fetching platform manifest digest; \
+                         returning error to preserve digest-namespace consistency"
                     );
+                    return Err(PluginError::PluginInternal(format!(
+                        "transient failure fetching platform manifest for {}/{} \
+                         (platform: {p}): {e}",
+                        ir.registry, ir.repository,
+                    ))
+                    .into());
                 }
             }
         }

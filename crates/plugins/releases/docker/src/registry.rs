@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
@@ -44,6 +45,36 @@ pub(crate) fn format_display_version(dt: time::OffsetDateTime) -> String {
     dt.to_offset(time::UtcOffset::UTC)
         .format(FORMAT)
         .unwrap_or_else(|_| dt.to_string())
+}
+
+/// Registry operations needed by the Docker plugin.
+///
+/// Exists as a trait so tests can inject a [`MockRegistryClient`] without
+/// making real network calls, following the same pattern as [`crate::docker_client::DockerClient`].
+#[async_trait]
+pub(crate) trait RegistryClientOps: Send + Sync {
+    /// Get manifest info (digest + optional `created_at`) for a tag with no
+    /// platform configured.
+    async fn get_manifest_info(
+        &self,
+        registry: &str,
+        repository: &str,
+        tag: &str,
+    ) -> Result<ManifestInfo>;
+
+    /// Get the platform-specific manifest digest and optional `created_at` for
+    /// the given platform string (e.g. `"linux/amd64"`).
+    ///
+    /// Returns `Ok(None)` when the platform is not present in the manifest
+    /// index (definitive — not a transient error), or `Err` on any I/O or
+    /// protocol failure.
+    async fn get_platform_manifest_digest(
+        &self,
+        registry: &str,
+        repository: &str,
+        tag: &str,
+        platform: &str,
+    ) -> Result<Option<ManifestInfo>>;
 }
 
 /// Low-level HTTP client for OCI Distribution API operations.
@@ -531,6 +562,85 @@ impl RegistryClient {
                     "missing Docker-Content-Digest header".to_string()
                 ))
             })
+    }
+}
+
+#[async_trait]
+impl RegistryClientOps for RegistryClient {
+    async fn get_manifest_info(
+        &self,
+        registry: &str,
+        repository: &str,
+        tag: &str,
+    ) -> Result<ManifestInfo> {
+        self.get_manifest_info(registry, repository, tag).await
+    }
+
+    async fn get_platform_manifest_digest(
+        &self,
+        registry: &str,
+        repository: &str,
+        tag: &str,
+        platform: &str,
+    ) -> Result<Option<ManifestInfo>> {
+        self.get_platform_manifest_digest(registry, repository, tag, platform)
+            .await
+    }
+}
+
+// ── Test mock ────────────────────────────────────────────────────────────────
+
+/// Configurable mock registry client for use in unit tests.
+///
+/// Mirrors the pattern of [`crate::docker_client::MockDockerClient`].
+#[cfg(all(test, feature = "daemon"))]
+#[derive(Default)]
+pub(crate) struct MockRegistryClient {
+    /// When `true`, `get_platform_manifest_digest` returns an `Err`.
+    pub platform_digest_should_fail: bool,
+    /// Returned by `get_platform_manifest_digest` when `platform_digest_should_fail` is `false`.
+    /// `None` simulates the platform-not-found case.
+    pub platform_digest_result: Option<ManifestInfo>,
+    /// When `true`, `get_manifest_info` returns an `Err`.
+    pub manifest_info_should_fail: bool,
+    /// Returned by `get_manifest_info` when `manifest_info_should_fail` is `false`.
+    pub manifest_info_result: Option<ManifestInfo>,
+}
+
+#[cfg(all(test, feature = "daemon"))]
+#[async_trait]
+impl RegistryClientOps for MockRegistryClient {
+    async fn get_manifest_info(
+        &self,
+        _registry: &str,
+        _repository: &str,
+        _tag: &str,
+    ) -> Result<ManifestInfo> {
+        if self.manifest_info_should_fail {
+            bail!(DockerError::Request(
+                "mock registry: get_manifest_info failed".to_string()
+            ));
+        }
+        Ok(self.manifest_info_result.clone().unwrap_or(ManifestInfo {
+            digest: "sha256:mockindex000000000000000000000000000000000000000000000000000000"
+                .to_string(),
+            created_at: None,
+        }))
+    }
+
+    async fn get_platform_manifest_digest(
+        &self,
+        _registry: &str,
+        _repository: &str,
+        _tag: &str,
+        _platform: &str,
+    ) -> Result<Option<ManifestInfo>> {
+        if self.platform_digest_should_fail {
+            bail!(DockerError::Request(
+                "mock registry: get_platform_manifest_digest failed".to_string()
+            ));
+        }
+        Ok(self.platform_digest_result.clone())
     }
 }
 
