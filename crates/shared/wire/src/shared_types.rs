@@ -3,8 +3,6 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
 
-use uptrakit_shared_types::HookShell;
-
 /// Unix epoch timestamp in milliseconds.
 pub type Timestamp = i64;
 
@@ -12,110 +10,6 @@ pub type Timestamp = i64;
 pub fn now_millis() -> Timestamp {
     let now = UtcDateTime::now();
     now.unix_timestamp() * 1000 + i64::from(now.millisecond())
-}
-
-/// A single hook command to execute on the agent.
-///
-/// Predefined hooks use the `Exec` variant which avoids shell interpretation.
-/// Custom commands use the `Shell` variant which runs through a shell.
-///
-/// # Wire forward-compatibility
-///
-/// `Other { raw }` is a catch-all for hook command types introduced in a
-/// newer agent build. Serde deserialization is infallible: an unknown
-/// variant becomes `Other { raw: ... }` rather than a parse error, allowing
-/// older controllers to survive rolling upgrades.
-#[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-// Note: Eq is not derived because the Other variant contains serde_json::Value
-// which does not implement Eq.
-pub enum HookCommand {
-    /// Execute a command string through a shell interpreter.
-    Shell {
-        command: String,
-        #[serde(default)]
-        shell: HookShell,
-    },
-    /// Execute a program directly with arguments (no shell interpretation).
-    Exec {
-        program: String,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        args: Vec<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        working_dir: Option<String>,
-    },
-    /// Unknown hook command from a newer peer.
-    ///
-    /// The raw JSON value is preserved for logging. The receiver should
-    /// log a warning and skip execution.
-    #[serde(skip)]
-    Other { raw: serde_json::Value },
-}
-
-impl<'de> Deserialize<'de> for HookCommand {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let raw = serde_json::Value::deserialize(deserializer)?;
-        if let Some(obj) = raw.as_object() {
-            if let Some(shell_val) = obj.get("shell") {
-                #[derive(Deserialize)]
-                struct ShellFields {
-                    command: String,
-                    #[serde(default)]
-                    shell: HookShell,
-                }
-                if let Ok(f) = serde_json::from_value::<ShellFields>(shell_val.clone()) {
-                    return Ok(HookCommand::Shell {
-                        command: f.command,
-                        shell: f.shell,
-                    });
-                }
-            }
-            if let Some(exec_val) = obj.get("exec") {
-                #[derive(Deserialize)]
-                struct ExecFields {
-                    program: String,
-                    #[serde(default)]
-                    args: Vec<String>,
-                    #[serde(default)]
-                    working_dir: Option<String>,
-                }
-                if let Ok(f) = serde_json::from_value::<ExecFields>(exec_val.clone()) {
-                    return Ok(HookCommand::Exec {
-                        program: f.program,
-                        args: f.args,
-                        working_dir: f.working_dir,
-                    });
-                }
-            }
-        }
-        Ok(HookCommand::Other { raw })
-    }
-}
-
-/// Human-readable formatting for logging only. Not intended for round-trip
-/// serialization — use serde for machine-readable encoding.
-impl fmt::Display for HookCommand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Shell { command, .. } => write!(f, "{command}"),
-            Self::Exec {
-                program,
-                args,
-                working_dir,
-            } => {
-                if let Some(dir) = working_dir {
-                    write!(f, "(in {dir}) ")?;
-                }
-                write!(f, "{program}")?;
-                for arg in args {
-                    write!(f, " {arg}")?;
-                }
-                Ok(())
-            }
-            Self::Other { raw } => write!(f, "<unknown hook command: {raw}>"),
-        }
-    }
 }
 
 /// Final status of an update execution.

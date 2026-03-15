@@ -56,7 +56,6 @@ pub mod system_alerts;
 pub mod system_enrollment_tokens;
 pub mod update_batches;
 pub mod update_history;
-pub mod update_hooks;
 pub mod users;
 pub mod validation;
 

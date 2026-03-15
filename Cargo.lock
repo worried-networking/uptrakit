@@ -6471,6 +6471,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-config-merge"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "uptrakit-controller"
 version = "0.0.1"
 dependencies = [
@@ -7209,6 +7216,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uptrakit-command",
+ "uptrakit-config-merge",
  "uptrakit-crypto",
  "uptrakit-internal-wire",
  "uptrakit-plugin-infrastructure-core",
@@ -7216,7 +7224,6 @@ dependencies = [
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
- "uptrakit-update-hooks",
  "uuid",
  "x509-parser",
 ]
@@ -7309,16 +7316,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "uptrakit-update-hooks"
-version = "0.0.1"
-dependencies = [
- "serde_json",
- "tracing",
- "uptrakit-internal-wire",
- "uptrakit-web-api-types",
-]
-
-[[package]]
 name = "uptrakit-web-api"
 version = "0.0.1"
 dependencies = [
@@ -7362,6 +7359,7 @@ dependencies = [
  "uptrakit-audit-log",
  "uptrakit-backoff",
  "uptrakit-command",
+ "uptrakit-config-merge",
  "uptrakit-crypto",
  "uptrakit-directories",
  "uptrakit-internal-wire",
@@ -7371,7 +7369,6 @@ dependencies = [
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
- "uptrakit-update-hooks",
  "uptrakit-web-api-auth",
  "uptrakit-web-api-queries",
  "uptrakit-web-api-types",
@@ -7437,13 +7434,13 @@ dependencies = [
  "tracing",
  "uptrakit-audit-log",
  "uptrakit-command",
+ "uptrakit-config-merge",
  "uptrakit-crypto",
  "uptrakit-internal-wire",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
- "uptrakit-update-hooks",
  "uptrakit-web-api-types",
  "uuid",
 ]

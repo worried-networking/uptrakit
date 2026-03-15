@@ -15,7 +15,6 @@
 //! | [`ReleaseFetcherPlugin`] | `ReleaseFetching` | Fetch upstream releases |
 //! | [`PackageIndexPlugin`] | `RefreshPackageIndex` | Sync local package database |
 //! | [`UpdateExecutorPlugin`] | `UpdateExecution` | Execute updates |
-//! | [`UpdateHooksPlugin`] | `PreUpdateHook`/`PostUpdateHook` | Pre/post update lifecycle hooks (on executor plugin) |
 //! | [`UpdateLifecyclePlugin`] | `UpdateLifecycle` | Standalone update lifecycle hook plugins |
 //! | [`NotificationTransportPlugin`] | `NotificationDelivery` | Deliver notification messages |
 //! | [`HostLifecyclePlugin`] | `HostLifecycle` | Infrastructure host bootstrap/sync |
@@ -33,8 +32,7 @@ use crate::batch_fetch::{BatchFetchItem, BatchFetchResult};
 use crate::batch_update::{BatchUpdateItem, BatchUpdateResult};
 use crate::error::Result;
 use crate::traits::{
-    HostCompatibility, PreUpdateHookResult, SudoCommandEntry, UpdateHookContext,
-    UpdateLifecycleContext,
+    HostCompatibility, PreUpdateHookResult, SudoCommandEntry, UpdateLifecycleContext,
 };
 use crate::types::{DiscoveredSoftware, PluginCapability, ReleaseInfo, UpstreamRelease};
 use crate::version::Version;
@@ -220,11 +218,6 @@ pub trait PluginBase: Send + Sync {
         None
     }
 
-    /// Downcast to [`UpdateHooksPlugin`], if implemented.
-    fn as_update_hooks(&self) -> Option<&dyn UpdateHooksPlugin> {
-        None
-    }
-
     /// Downcast to [`UpdateLifecyclePlugin`], if implemented.
     fn as_update_lifecycle(&self) -> Option<&dyn UpdateLifecyclePlugin> {
         None
@@ -391,37 +384,14 @@ pub trait UpdateExecutorPlugin: PluginBase {
     }
 }
 
-/// Pre/post update lifecycle hooks.
-///
-/// Any plugin can implement this — it is not tied to package managers.
-/// For example, APT uses `pre_update_hook` to run `apt-get update` and
-/// `post_update_hook` to check for reboot-required.
-#[async_trait]
-pub trait UpdateHooksPlugin: PluginBase {
-    /// Run before an update is applied. May abort the update.
-    async fn pre_update_hook(
-        &self,
-        ctx: &UpdateHookContext,
-        output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<PreUpdateHookResult>;
-
-    /// Run after an update has been applied. Errors are logged, not fatal.
-    async fn post_update_hook(
-        &self,
-        ctx: &UpdateHookContext,
-        output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<()>;
-}
-
 /// Standalone update lifecycle hooks.
 ///
 /// Plugins implementing this trait are assigned via `PreUpdateHook` and
 /// `PostUpdateHook` roles on `host_software_item_plugins`. They run in
 /// `ordinal` order before/after the actual update execution.
 ///
-/// Unlike [`UpdateHooksPlugin`] (which is coupled to the update executor
-/// plugin), lifecycle plugins are independent, first-class plugin
-/// assignments that can be reused across software items.
+/// Lifecycle plugins are independent, first-class plugin assignments
+/// that can be reused across software items.
 #[async_trait]
 pub trait UpdateLifecyclePlugin: PluginBase {
     /// Run before an update is applied. May abort the update.
@@ -665,7 +635,6 @@ mod tests {
         assert!(plugin.as_release_fetcher().is_none());
         assert!(plugin.as_package_index().is_none());
         assert!(plugin.as_update_executor().is_none());
-        assert!(plugin.as_update_hooks().is_none());
         assert!(plugin.as_update_lifecycle().is_none());
         assert!(plugin.as_notification_transport().is_none());
     }

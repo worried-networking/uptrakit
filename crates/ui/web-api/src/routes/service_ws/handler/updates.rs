@@ -1483,7 +1483,7 @@ fn build_plugin_assignment_nullable(
     let plugin_type: uptrakit_internal_wire::PluginType =
         serde_json::from_value(serde_json::Value::String(plugin_type_str)).ok()?;
 
-    let merged_config = uptrakit_update_hooks::resolve_effective_config(
+    let merged_config = uptrakit_config_merge::resolve_effective_config(
         None,
         config.map(|c| &c.config),
         assignment.config.as_ref(),

@@ -97,7 +97,7 @@ uptrakit-notification-plugin-core = { path = "crates/plugins/notifications/core"
 uptrakit-notification-plugin-webhook = { path = "crates/plugins/notifications/webhook" }
 uptrakit-notification-plugin-telegram = { path = "crates/plugins/notifications/telegram" }
 uptrakit-notification-plugin-email = { path = "crates/plugins/notifications/email" }
-uptrakit-update-hooks = { path = "crates/shared/update-hooks" }
+uptrakit-config-merge = { path = "crates/shared/update-hooks" }
 uptrakit-extension-framework = { path = "crates/shared/extension-framework" }
 uptrakit-internal-wire = { path = "crates/shared/wire" }
 uptrakit-web-api = { path = "crates/ui/web-api", default-features = false }

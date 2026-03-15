@@ -129,7 +129,7 @@ pub(crate) async fn query_agent_assignment_rows(
 /// Performs a shallow (top-level key) merge: override keys replace base keys.
 /// If either value is not a JSON object the base is returned unchanged.
 ///
-/// Superseded by `uptrakit_update_hooks::resolve_effective_config` for the
+/// Superseded by `uptrakit_config_merge::resolve_effective_config` for the
 /// three-layer config merge (type_settings + profile + assignment). Retained
 /// for its unit tests and potential future use.
 #[cfg(test)]

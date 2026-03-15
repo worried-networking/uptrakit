@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -440,31 +439,11 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
         fn required_sudo_commands(
             &self,
         ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-            // Declare all commands that any GitHub releases config could need.
-            // Sync runs with empty config (install_path=None, pre/post=None), so
-            // conditional checks would silently omit entries. Declaring them
-            // unconditionally ensures `host sync` always produces a complete
-            // sudoers file regardless of what is in the stored config.
-            //
             // `install` — copies release assets to the target path.
-            // `systemctl stop/start *` — restricted to two safe subcommands so
-            //   the agent can manage service lifecycle without blanket systemctl.
-            vec![
-                SudoCommandEntry::new(
-                    "install",
-                    "Install downloaded GitHub release assets to the target path",
-                ),
-                SudoCommandEntry::new(
-                    "systemctl",
-                    "Stop services before GitHub release asset installation",
-                )
-                .with_args_suffix(Cow::Borrowed("stop *")),
-                SudoCommandEntry::new(
-                    "systemctl",
-                    "Start services after GitHub release asset installation",
-                )
-                .with_args_suffix(Cow::Borrowed("start *")),
-            ]
+            vec![SudoCommandEntry::new(
+                "install",
+                "Install downloaded GitHub release assets to the target path",
+            )]
         }
 
         fn as_release_fetcher(
@@ -1405,38 +1384,12 @@ mod tests {
 
     // ── required_sudo_commands tests ─────────────────────────────────────
 
-    // `required_sudo_commands` returns all three entries unconditionally so
-    // that `host sync` always produces a complete sudoers file regardless of
-    // what config (including empty config) is stored.
-
     #[tokio::test]
-    async fn required_sudo_commands_always_returns_all_three() {
+    async fn required_sudo_commands_returns_install_only() {
         let plugin = test_plugin().await;
         let cmds = plugin.required_sudo_commands();
-        assert_eq!(cmds.len(), 3);
+        assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0].command, "install");
-        assert_eq!(cmds[1].command, "systemctl");
-        assert_eq!(cmds[1].args_suffix.as_deref(), Some("stop *"));
-        assert_eq!(cmds[2].command, "systemctl");
-        assert_eq!(cmds[2].args_suffix.as_deref(), Some("start *"));
-    }
-
-    #[tokio::test]
-    async fn required_sudo_commands_unconditional_with_full_config() {
-        let config = GitHubConfig {
-            install_path: Some("/usr/local/bin/app".to_string()),
-            pre_install_command: Some("sudo systemctl stop myapp".to_string()),
-            post_install_command: Some("sudo systemctl start myapp".to_string()),
-            ..GitHubConfig::default()
-        };
-        let plugin = GitHubPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
-        let cmds = plugin.required_sudo_commands();
-        assert_eq!(cmds.len(), 3);
-        assert_eq!(cmds[0].command, "install");
-        assert_eq!(cmds[1].command, "systemctl");
-        assert_eq!(cmds[2].command, "systemctl");
     }
 
     // ── format_size tests ────────────────────────────────────────────────

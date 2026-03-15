@@ -33,9 +33,6 @@ pub enum PluginConfigError {
     /// Plugin-specific config validation failed.
     #[error("config validation error: {0}")]
     ConfigValidation(String),
-    /// Hook parameter validation failed (command-injection prevention).
-    #[error("hook validation error: {0}")]
-    HookValidation(String),
     /// A database error occurred.
     #[error("database error: {0}")]
     Db(sea_orm::DbErr),
@@ -84,77 +81,6 @@ fn plugin_config_to_response(
         created_at: m.created_at,
         updated_at: m.updated_at,
     })
-}
-
-/// Validate hooks configuration embedded in a plugin config or config_override JSON.
-///
-/// Parses the `"hooks"` key and validates all predefined hook parameters
-/// to reject shell metacharacters. Exposed as `pub(crate)` so other query
-/// modules (e.g. `software_items`) can reuse the check.
-pub fn validate_hooks_internal(
-    config: &serde_json::Value,
-) -> std::result::Result<(), uptrakit_web_api_types::update_hooks::HookValidationError> {
-    use uptrakit_web_api_types::update_hooks::HookValidationError;
-
-    // Validate structured "hooks" key.
-    if let Some(hooks_val) = config.get("hooks") {
-        match serde_json::from_value::<uptrakit_web_api_types::update_hooks::HooksConfig>(
-            hooks_val.clone(),
-        ) {
-            Ok(hooks_config) => hooks_config.validate()?,
-            Err(e) => {
-                return Err(HookValidationError {
-                    field: "hooks",
-                    message: format!("invalid hooks format: {e}"),
-                });
-            }
-        }
-    }
-
-    // Validate legacy flat hook arrays (pre_update_commands, post_update_commands).
-    for field in ["pre_update_commands", "post_update_commands"] {
-        if let Some(arr) = config.get(field).and_then(|v| v.as_array()) {
-            if arr.len() > uptrakit_shared_types::command_validation::MAX_HOOK_COMMANDS_PER_PHASE {
-                return Err(HookValidationError {
-                    field: if field == "pre_update_commands" {
-                        "pre_update_commands"
-                    } else {
-                        "post_update_commands"
-                    },
-                    message: format!(
-                        "too many commands ({}, max {})",
-                        arr.len(),
-                        uptrakit_shared_types::command_validation::MAX_HOOK_COMMANDS_PER_PHASE,
-                    ),
-                });
-            }
-            for (i, item) in arr.iter().enumerate() {
-                let cmd = item.as_str().ok_or_else(|| HookValidationError {
-                    field: if field == "pre_update_commands" {
-                        "pre_update_commands"
-                    } else {
-                        "post_update_commands"
-                    },
-                    message: format!("{field}[{i}] must be a string"),
-                })?;
-                if let Err(msg) = uptrakit_shared_types::command_validation::validate_command_length(
-                    cmd,
-                    &format!("{field}[{i}]"),
-                ) {
-                    return Err(HookValidationError {
-                        field: if field == "pre_update_commands" {
-                            "pre_update_commands"
-                        } else {
-                            "post_update_commands"
-                        },
-                        message: msg,
-                    });
-                }
-            }
-        }
-    }
-
-    Ok(())
 }
 
 // --- pub(crate) helpers ---
@@ -304,10 +230,6 @@ pub async fn update_plugin_config(
 
         if let Err(e) = ops.validate_config_str(&plugin_type, new_config) {
             bail!(PluginConfigError::ConfigValidation(e.to_string()));
-        }
-
-        if let Err(e) = validate_hooks_internal(new_config) {
-            bail!(PluginConfigError::HookValidation(e.to_string()));
         }
     }
 

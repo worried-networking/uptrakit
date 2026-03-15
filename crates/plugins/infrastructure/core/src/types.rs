@@ -91,12 +91,8 @@ mod tests {
             PluginCapability::DetectHostCompatibility
         );
         assert_eq!(
-            PluginCapability::PreUpdateHook,
-            PluginCapability::PreUpdateHook
-        );
-        assert_eq!(
-            PluginCapability::PostUpdateHook,
-            PluginCapability::PostUpdateHook
+            PluginCapability::UpdateLifecycle,
+            PluginCapability::UpdateLifecycle
         );
         // They should be distinct from the original two.
         assert_ne!(
@@ -104,7 +100,7 @@ mod tests {
             PluginCapability::DiscoverLocalSoftware
         );
         assert_ne!(
-            PluginCapability::PreUpdateHook,
+            PluginCapability::UpdateLifecycle,
             PluginCapability::RefreshPackageIndex
         );
         assert_eq!(

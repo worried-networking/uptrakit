@@ -220,7 +220,7 @@ impl FetchReleasesExecutor {
                 row.assignment_config.as_ref(),
             );
             let entry = groups.entry(group_key).or_insert_with(|| {
-                let merged_config = uptrakit_update_hooks::resolve_effective_config(
+                let merged_config = uptrakit_config_merge::resolve_effective_config(
                     None, // type_settings not loaded in scheduler query yet
                     row.profile_config.as_ref(),
                     row.assignment_config.as_ref(),
@@ -580,7 +580,7 @@ impl FetchReleasesExecutor {
                 )))
             })?;
 
-            let config = uptrakit_update_hooks::resolve_effective_config(
+            let config = uptrakit_config_merge::resolve_effective_config(
                 None, // type_settings not loaded in scheduler query yet
                 row.profile_config.as_ref(),
                 row.assignment_config.as_ref(),

@@ -36,7 +36,7 @@ uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-op
 uptrakit-shared-db = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
-uptrakit-update-hooks = { workspace = true }
+uptrakit-config-merge = { workspace = true }
 uptrakit-web-api-types = { workspace = true }
 
 [dev-dependencies]

@@ -118,11 +118,6 @@ pub async fn create_plugin_config(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    // Validate hooks (command-injection prevention).
-    if let Err(e) = pc_queries::validate_hooks_internal(&req.config) {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     // Reject dangerous command patterns when operator policy is enabled.
     if state.reject_dangerous_commands {
         let dangerous = collect_dangerous_patterns(&req.config);
@@ -334,9 +329,6 @@ pub async fn update_plugin_config(
                 error_response(StatusCode::BAD_REQUEST, "name must not be empty")
             }
             PluginConfigError::ConfigValidation(msg) => {
-                error_response(StatusCode::BAD_REQUEST, msg.clone())
-            }
-            PluginConfigError::HookValidation(msg) => {
                 error_response(StatusCode::BAD_REQUEST, msg.clone())
             }
             PluginConfigError::Db(_) => {

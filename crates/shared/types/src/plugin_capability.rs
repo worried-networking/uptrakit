@@ -20,10 +20,6 @@ pub enum PluginCapability {
     RefreshPackageIndex,
     /// Plugin can determine whether it is applicable to the current host.
     DetectHostCompatibility,
-    /// Plugin can run logic before an update is applied.
-    PreUpdateHook,
-    /// Plugin can run logic after an update is applied.
-    PostUpdateHook,
     /// Plugin's `fetch_releases()` does not require any local system state
     /// (no package index, no filesystem access, no local commands) and can
     /// be called from the controller process directly rather than through
@@ -83,8 +79,6 @@ mod tests {
                 PluginCapability::DetectHostCompatibility,
                 "detect_host_compatibility",
             ),
-            (PluginCapability::PreUpdateHook, "pre_update_hook"),
-            (PluginCapability::PostUpdateHook, "post_update_hook"),
             (
                 PluginCapability::ControllerSideFetchReleases,
                 "controller_side_fetch_releases",

@@ -20,7 +20,7 @@ use uptrakit_web_api_types::software_items::{
 };
 use uuid::Uuid;
 
-use crate::queries::plugin_configs::{find_raw_active_config_txn, validate_hooks_internal};
+use crate::queries::plugin_configs::find_raw_active_config_txn;
 use crate::tenant_db::TenantDb;
 use crate::token_utils::generate_uuid;
 
@@ -534,11 +534,6 @@ async fn resolve_plugin_config_txn(
                     e.to_string()
                 ));
             }
-            if let Err(e) = validate_hooks_internal(&inline.config) {
-                bail!(SoftwareItemQueryError::InvalidInlinePluginConfig(
-                    e.to_string()
-                ));
-            }
             let now = OffsetDateTime::now_utc();
             let pcid = generate_uuid();
             let model = plugin_config::ActiveModel {
@@ -574,9 +569,6 @@ fn validate_assignment(
         if let Err(e) =
             validate_config_override(ops, &config.plugin_type, &config.config, override_val)
         {
-            bail!(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
-        }
-        if let Err(e) = validate_hooks_internal(override_val) {
             bail!(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
         }
     }

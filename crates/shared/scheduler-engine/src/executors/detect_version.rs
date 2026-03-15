@@ -74,7 +74,7 @@ impl DetectVersionExecutor {
                 )))
             })?;
 
-            let config = uptrakit_update_hooks::resolve_effective_config(
+            let config = uptrakit_config_merge::resolve_effective_config(
                 None, // type_settings not loaded in scheduler query yet
                 row.profile_config.as_ref(),
                 row.assignment_config.as_ref(),

@@ -241,7 +241,7 @@ pub(crate) fn build_plugin_assignment(
         serde_json::from_value(serde_json::Value::String(assignment.plugin_type.clone()))
             .map_err(|_| TriggerUpdateError::UnknownPluginType(assignment.plugin_type.clone()))?;
 
-    let merged_config = uptrakit_update_hooks::resolve_effective_config(
+    let merged_config = uptrakit_config_merge::resolve_effective_config(
         None,
         config.map(|c| &c.config),
         assignment.config.as_ref(),
@@ -335,7 +335,7 @@ pub(crate) async fn load_target_for_dispatch(
     let fetch_releases_config = load_role_plugin(db, host_id, item_id, "fetch_releases")
         .await?
         .map(|(assignment, config)| {
-            uptrakit_update_hooks::resolve_effective_config(
+            uptrakit_config_merge::resolve_effective_config(
                 None,
                 config.as_ref().map(|c| &c.config),
                 assignment.config.as_ref(),

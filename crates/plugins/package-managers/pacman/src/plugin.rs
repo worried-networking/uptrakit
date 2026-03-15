@@ -103,9 +103,6 @@ pub struct PacmanPlugin {
 
 impl PacmanPlugin {
     /// Compile-time capabilities for the Pacman plugin.
-    ///
-    /// Note: No `PostUpdateHook` — Arch Linux does not use
-    /// `/var/run/reboot-required`.
     pub const CAPABILITIES: &'static [PluginCapability] = &[
         PluginCapability::DiscoverLocalSoftware,
         PluginCapability::RefreshPackageIndex,
@@ -1107,7 +1104,7 @@ mod tests {
         assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
         assert!(plugin.has_capability(PluginCapability::RefreshPackageIndex));
         assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
-        assert!(!plugin.has_capability(PluginCapability::PostUpdateHook));
+
         assert_eq!(plugin.capabilities().len(), 3);
     }
 

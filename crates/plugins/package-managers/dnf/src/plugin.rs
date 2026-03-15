@@ -1184,14 +1184,6 @@ mod tests {
         assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
     }
 
-    #[tokio::test]
-    async fn plugin_does_not_have_post_update_hook() {
-        let plugin = DnfPlugin::new(DnfConfig::default(), test_executor())
-            .await
-            .unwrap();
-        assert!(!plugin.has_capability(PluginCapability::PostUpdateHook));
-    }
-
     // ── host compatibility ────────────────────────────────────────────────
 
     #[tokio::test]

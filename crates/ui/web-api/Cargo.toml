@@ -44,7 +44,7 @@ uuid = { workspace = true, features = ["v7", "serde"] }
 uptrakit-directories = { workspace = true }
 uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
 uptrakit-shared-db = { workspace = true }
-uptrakit-update-hooks = { workspace = true }
+uptrakit-config-merge = { workspace = true }
 uptrakit-shared-types = { workspace = true, features = ["openapi", "http-ssrf"] }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["notifications", "notifications-webhook"] }

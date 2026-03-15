@@ -12,33 +12,6 @@ pub enum HostCompatibility {
     Incompatible(String),
 }
 
-/// Contextual data passed to plugin lifecycle hooks.
-#[non_exhaustive]
-#[derive(Debug, Clone)]
-pub struct UpdateHookContext {
-    /// The package identifier being updated.
-    pub package_identifier: String,
-    /// The target version being installed.
-    pub to_version: String,
-    /// Optional release metadata from the upstream source.
-    pub release_info: Option<ReleaseInfo>,
-}
-
-impl UpdateHookContext {
-    /// Create a new [`UpdateHookContext`].
-    pub fn new(
-        package_identifier: impl Into<String>,
-        to_version: impl Into<String>,
-        release_info: Option<ReleaseInfo>,
-    ) -> Self {
-        Self {
-            package_identifier: package_identifier.into(),
-            to_version: to_version.into(),
-            release_info,
-        }
-    }
-}
-
 /// Result of a pre-update hook.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -69,9 +42,8 @@ impl PreUpdateHookResult {
 
 /// Contextual data passed to update lifecycle hook plugins.
 ///
-/// Unlike [`UpdateHookContext`] (which is passed to the plugin that
-/// *performs* the update), this context is for standalone hook plugins
-/// assigned via `PreUpdateHook`/`PostUpdateHook` roles.
+/// Context for standalone hook plugins assigned via
+/// `PreUpdateHook`/`PostUpdateHook` roles.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct UpdateLifecycleContext {

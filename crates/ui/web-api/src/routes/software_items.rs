@@ -923,7 +923,7 @@ impl VersionCheckContext {
             .unwrap_or_else(|| plugin.plugin_type.clone());
         let plugin_type: uptrakit_internal_wire::PluginType =
             serde_json::from_value(serde_json::Value::String(plugin_type_str)).ok()?;
-        let merged = uptrakit_update_hooks::resolve_effective_config(
+        let merged = uptrakit_config_merge::resolve_effective_config(
             None,
             config_model.map(|c| &c.config),
             plugin.config.as_ref(),
@@ -1069,7 +1069,7 @@ async fn collect_and_run_controller_fetches(
         else {
             continue;
         };
-        let merged = uptrakit_update_hooks::resolve_effective_config(
+        let merged = uptrakit_config_merge::resolve_effective_config(
             None,
             config_model.map(|c| &c.config),
             pa.config.as_ref(),
@@ -1138,7 +1138,7 @@ async fn dispatch_agent_version_checks(
                     .unwrap_or_else(|| p.plugin_type.clone());
                 let plugin_type: PluginType =
                     serde_json::from_value(serde_json::Value::String(plugin_type_str)).ok()?;
-                let merged = uptrakit_update_hooks::resolve_effective_config(
+                let merged = uptrakit_config_merge::resolve_effective_config(
                     None,
                     config_model.map(|c| &c.config),
                     p.config.as_ref(),
@@ -1323,7 +1323,7 @@ pub async fn check_versions_host(
             tracing::error!("Unknown plugin type: {}", plugin.plugin_type);
             continue;
         };
-        let merged = uptrakit_update_hooks::resolve_effective_config(
+        let merged = uptrakit_config_merge::resolve_effective_config(
             None,
             config.as_ref().map(|c| &c.config),
             plugin.config.as_ref(),

@@ -9,14 +9,13 @@ use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType,
-    PluginCapability, PluginError, PluginRole, PluginType, PreUpdateHookResult, ReleaseInfo,
-    Result, SudoCommandEntry, UpdateCategory, UpdateHookContext, UpdateOutputLine, UpstreamRelease,
-    Version,
+    PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry,
+    UpdateCategory, UpdateOutputLine, UpstreamRelease, Version,
 };
 // Subtrait imports needed by tests (via `use super::*`) to resolve method calls.
 #[cfg(test)]
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveryPlugin, PluginBase, ReleaseFetcherPlugin, UpdateHooksPlugin, VersionDetectorPlugin,
+    DiscoveryPlugin, PluginBase, ReleaseFetcherPlugin, VersionDetectorPlugin,
 };
 
 use crate::config::{AptConfig, AptDiscoveryFilter};
@@ -121,7 +120,6 @@ impl AptPlugin {
         PluginCapability::DiscoverLocalSoftware,
         PluginCapability::RefreshPackageIndex,
         PluginCapability::DetectHostCompatibility,
-        PluginCapability::PostUpdateHook,
     ];
 
     /// Create a new APT plugin with the given configuration.
@@ -297,11 +295,6 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
         fn as_update_executor(
             &self,
         ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
-            Some(self)
-        }
-        fn as_update_hooks(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateHooksPlugin> {
             Some(self)
         }
     }
@@ -878,46 +871,6 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for AptPlugin {
     }
 }
 
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateHooksPlugin for AptPlugin {
-    async fn pre_update_hook(
-        &self,
-        _ctx: &UpdateHookContext,
-        _output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<PreUpdateHookResult> {
-        Ok(PreUpdateHookResult::proceed())
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn post_update_hook(
-        &self,
-        _ctx: &UpdateHookContext,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<()> {
-        // `test -f` exits 0 when the file exists, non-zero when absent.
-        // `execute_quiet` returns Err on any non-zero exit, so Ok(_) means
-        // the reboot-required file is present.
-        if self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "test",
-                ["-f".to_string(), "/var/run/reboot-required".to_string()],
-            ))
-            .await
-            .is_ok()
-        {
-            send_output(
-                output_tx,
-                "[post-hook] Reboot required to complete the update.",
-                OutputStreamType::Stdout,
-            )
-            .await;
-        }
-
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1266,8 +1219,7 @@ mod tests {
         assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
         assert!(plugin.has_capability(PluginCapability::RefreshPackageIndex));
         assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
-        assert!(plugin.has_capability(PluginCapability::PostUpdateHook));
-        assert_eq!(plugin.capabilities().len(), 4);
+        assert_eq!(plugin.capabilities().len(), 3);
     }
 
     // ── empty identifier guards ──────────────────────────────────────────
@@ -1322,55 +1274,6 @@ mod tests {
         }
     }
 
-    // ── post_update_hook ─────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn post_update_hook_emits_reboot_message_when_file_exists() {
-        // exit_code 0 means `test -f /var/run/reboot-required` succeeded (file exists)
-        let plugin = AptPlugin::new(
-            AptConfig::default(),
-            FixedExitCodeExecutor::with_exit_code(0),
-        )
-        .await
-        .expect("create");
-        let ctx = UpdateHookContext::new("nginx".to_string(), "1.24.0".to_string(), None);
-        let (tx, mut rx) = mpsc::channel(10);
-        plugin.post_update_hook(&ctx, &tx).await.expect("ok");
-        drop(tx);
-
-        let mut found_reboot_msg = false;
-        while let Some(line) = rx.recv().await {
-            if line.text.contains("Reboot required") {
-                found_reboot_msg = true;
-            }
-        }
-        assert!(found_reboot_msg, "expected reboot required message");
-    }
-
-    #[tokio::test]
-    async fn post_update_hook_silent_when_file_missing() {
-        // exit_code 1 means `test -f /var/run/reboot-required` failed (file absent)
-        let plugin = AptPlugin::new(
-            AptConfig::default(),
-            FixedExitCodeExecutor::with_exit_code(1),
-        )
-        .await
-        .expect("create");
-        let ctx = UpdateHookContext::new("nginx".to_string(), "1.24.0".to_string(), None);
-        let (tx, mut rx) = mpsc::channel(10);
-        plugin.post_update_hook(&ctx, &tx).await.expect("ok");
-        drop(tx);
-
-        let mut found_any = false;
-        while rx.recv().await.is_some() {
-            found_any = true;
-        }
-        assert!(
-            !found_any,
-            "expected no output when reboot-required file is absent"
-        );
-    }
-
     // ── validate_version ────────────────────────────────────────────────
 
     #[test]
@@ -1417,22 +1320,6 @@ mod tests {
     fn validate_version_max_length_ok() {
         let v = "1".repeat(256);
         assert!(validate_version(&v).is_ok());
-    }
-
-    #[tokio::test]
-    async fn post_update_hook_always_returns_ok() {
-        // Even when the executor returns a non-zero exit code (file missing),
-        // post_update_hook should return Ok(()) — it is non-fatal.
-        let plugin = AptPlugin::new(
-            AptConfig::default(),
-            FixedExitCodeExecutor::with_exit_code(1),
-        )
-        .await
-        .expect("create");
-        let ctx = UpdateHookContext::new("pkg".to_string(), "1.0".to_string(), None);
-        let (tx, _rx) = mpsc::channel(10);
-        let result = plugin.post_update_hook(&ctx, &tx).await;
-        assert!(result.is_ok());
     }
 
     // ── discover_software target emission ─────────────────────────────────────
