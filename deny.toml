@@ -312,8 +312,6 @@ skip = [
 
     # windows-sys 0.45.x via jni → rustls-platform-verifier → reqwest 0.13
     { crate = "windows-sys@0.45.0", reason = "pulled by jni → rustls-platform-verifier → reqwest 0.13; waiting for upstream update" },
-    # windows-sys 0.48.x via etcetera 0.8 (sqlx-postgres dep); newer 0.52+/0.61 used by tokio/clap
-    { crate = "windows-sys@0.48.0", reason = "pulled by etcetera 0.8 (sqlx-postgres); newer versions used by tokio, clap" },
     { crate = "windows-targets@0.42.2", reason = "pulled by windows-sys@0.45.0 via jni → rustls-platform-verifier" },
     { crate = "windows_aarch64_gnullvm@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
     { crate = "windows_aarch64_msvc@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
