@@ -534,7 +534,8 @@ async fn discover_software_emits_one_item_per_container() {
             .cmp(b.qualifier.as_deref().unwrap_or(""))
     });
     assert_eq!(discoveries[0].package_identifier, "nginx:latest");
-    assert_eq!(discoveries[0].name, "nginx:latest");
+    // Name is the image reference without the tag (tag-agnostic).
+    assert_eq!(discoveries[0].name, "nginx");
     assert_eq!(discoveries[0].installed_version, "sha256:abc123");
     assert_eq!(discoveries[0].qualifier.as_deref(), Some("api-proxy"));
     assert_eq!(
@@ -543,7 +544,7 @@ async fn discover_software_emits_one_item_per_container() {
     );
 
     assert_eq!(discoveries[1].package_identifier, "nginx:latest");
-    assert_eq!(discoveries[1].name, "nginx:latest");
+    assert_eq!(discoveries[1].name, "nginx");
     assert_eq!(discoveries[1].installed_version, "sha256:abc123");
     assert_eq!(discoveries[1].qualifier.as_deref(), Some("web-server"));
     assert_eq!(
@@ -568,10 +569,10 @@ async fn discover_software_single_container_uses_image_based_name() {
     let discoveries = plugin.discover_software().await.unwrap();
 
     assert_eq!(discoveries.len(), 1);
-    // Package identifier is the image reference (shared across containers).
+    // Package identifier is the full image reference (shared across containers).
     assert_eq!(discoveries[0].package_identifier, "nginx:latest");
-    // Name is just the image reference.
-    assert_eq!(discoveries[0].name, "nginx:latest");
+    // Name is the image without the tag so it stays stable across tag switches.
+    assert_eq!(discoveries[0].name, "nginx");
     assert_eq!(discoveries[0].installed_version, "sha256:abc123");
     // Container name is carried in qualifier and plugin_package_identifier.
     assert_eq!(discoveries[0].qualifier.as_deref(), Some("my-nginx"));

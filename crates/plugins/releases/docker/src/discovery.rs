@@ -131,8 +131,10 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
             // Image-level package identifier: shared by all containers using the same image.
             let pkg_id = ir.full_ref.clone();
 
-            // Software item name: just the image reference.
-            let name = ir.full_ref.clone();
+            // Software item name: image reference without the tag so the name
+            // remains stable across tag switches (e.g. "ghcr.io/xtls/xray-core"
+            // instead of "ghcr.io/xtls/xray-core:25.8.3").
+            let name = ir.image.clone();
 
             // Container-qualified identifier used for per-container plugin operations.
             // Stored in host_software_item_plugin.package_identifier so execute_update
