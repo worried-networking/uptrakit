@@ -575,35 +575,10 @@ fn spawn_sync_connect(request: ExtensionRequestPayload, ctx: &ExtensionContext<'
     let request_id = request.request_id.clone();
 
     tokio::spawn(async move {
-        let host_id = match request.params.get("id").and_then(|v| v.as_str()) {
-            Some(id) => id.to_string(),
-            None => {
-                let resp = make_error_response(&request_id, "missing required field 'id'");
-                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
-                return;
-            }
-        };
-
-        let sensitive: Option<SensitiveAuthParams> =
-            match uptrakit_service_sdk::decrypt_sensitive_params(
-                request.sensitive_params.as_ref().map(|s| s.expose_secret()),
-                private_key_der.as_deref(),
-            ) {
-                Ok(s) => s,
-                Err(msg) => {
-                    let resp = make_error_response(&request_id, &msg);
-                    let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
-                    return;
-                }
-            };
-
-        let auth_override = match build_sync_auth_override(&request.params, sensitive.as_ref()) {
-            Ok(ov) => ov,
-            Err(msg) => {
-                let resp = make_error_response(&request_id, &msg);
-                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
-                return;
-            }
+        let Some((host_id, auth_override)) =
+            resolve_sync_auth(&request, &request_id, private_key_der.as_deref(), &bg_tx).await
+        else {
+            return;
         };
 
         let allow_all = param_bool(&request.params, "allow_all");
@@ -647,35 +622,10 @@ fn spawn_sync_execute(request: ExtensionRequestPayload, ctx: &ExtensionContext<'
     let request_id = request.request_id.clone();
 
     tokio::spawn(async move {
-        let host_id = match request.params.get("id").and_then(|v| v.as_str()) {
-            Some(id) => id.to_string(),
-            None => {
-                let resp = make_error_response(&request_id, "missing required field 'id'");
-                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
-                return;
-            }
-        };
-
-        let sensitive: Option<SensitiveAuthParams> =
-            match uptrakit_service_sdk::decrypt_sensitive_params(
-                request.sensitive_params.as_ref().map(|s| s.expose_secret()),
-                private_key_der.as_deref(),
-            ) {
-                Ok(s) => s,
-                Err(msg) => {
-                    let resp = make_error_response(&request_id, &msg);
-                    let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
-                    return;
-                }
-            };
-
-        let auth_override = match build_sync_auth_override(&request.params, sensitive.as_ref()) {
-            Ok(ov) => ov,
-            Err(msg) => {
-                let resp = make_error_response(&request_id, &msg);
-                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
-                return;
-            }
+        let Some((host_id, auth_override)) =
+            resolve_sync_auth(&request, &request_id, private_key_der.as_deref(), &bg_tx).await
+        else {
+            return;
         };
 
         let allow_all = param_bool(&request.params, "allow_all");
@@ -916,28 +866,7 @@ async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> ExtensionRespo
 
             // For each infra plugin that detected infrastructure, send
             // ReportPluginConfig if new credentials were created.
-            for infra in &result.infra_results {
-                if let Some(report) = &infra.report_plugin_config {
-                    let payload: uptrakit_internal_wire::ReportPluginConfigPayload =
-                        serde_json::from_value(json!({
-                            "request_id": uuid::Uuid::now_v7().to_string(),
-                            "plugin_type": report.plugin_type,
-                            "name": report.name,
-                            "config": report.config,
-                        }))
-                        .expect("ReportPluginConfigPayload JSON is always valid");
-                    let msg = ServiceMessage::ReportPluginConfig(payload);
-                    if bg_tx.send(msg).await.is_err() {
-                        tracing::error!("failed to send ReportPluginConfig via bg_tx");
-                    }
-                } else if let Some(config_id) = &infra.existing_plugin_config_id {
-                    tracing::info!(
-                        %host_id,
-                        %config_id,
-                        "reusing existing plugin config for cluster node"
-                    );
-                }
-            }
+            send_infra_plugin_reports(bg_tx, host_id, &result.infra_results).await;
 
             let any_infra = result.infra_results.iter().any(|r| r.detected);
             let mut data = json!({ "host_id": host_id.to_string() });
@@ -1025,6 +954,88 @@ fn parse_skip_actions(params: &serde_json::Value) -> HashSet<String> {
 struct SensitiveAuthParams {
     auth_password: Option<String>,
     auth_private_key: Option<String>,
+}
+
+// ── Shared helpers ───────────────────────────────────────────────────
+
+/// Send a `ReportPluginConfig` message for each infra result that produced one.
+///
+/// Iterates `infra_results` and, for any result that carries a
+/// `report_plugin_config`, constructs the wire payload and sends it via
+/// `bg_tx`.  Results that refer to an existing config are logged at `info`
+/// level instead.  Send failures are logged at `error` level.
+async fn send_infra_plugin_reports(
+    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+    host_id: uuid::Uuid,
+    infra_results: &[uptrakit_plugin_infrastructure_core::agent_infra::BootstrapInfraResult],
+) {
+    for infra in infra_results {
+        if let Some(report) = &infra.report_plugin_config {
+            let payload: uptrakit_internal_wire::ReportPluginConfigPayload =
+                serde_json::from_value(json!({
+                    "request_id": uuid::Uuid::now_v7().to_string(),
+                    "plugin_type": report.plugin_type,
+                    "name": report.name,
+                    "config": report.config,
+                }))
+                .expect("ReportPluginConfigPayload JSON is always valid");
+            let msg = ServiceMessage::ReportPluginConfig(payload);
+            if bg_tx.send(msg).await.is_err() {
+                tracing::error!("failed to send ReportPluginConfig via bg_tx");
+            }
+        } else if let Some(config_id) = &infra.existing_plugin_config_id {
+            tracing::info!(
+                %host_id,
+                %config_id,
+                "reusing existing plugin config for cluster node"
+            );
+        }
+    }
+}
+
+/// Resolve `host_id`, decrypt sensitive params, and build the auth override.
+///
+/// This is the common setup for both `spawn_sync_connect` and
+/// `spawn_sync_execute`.  On any failure, an `ExtensionResponse` error is sent
+/// via `bg_tx` and `None` is returned so the caller can bail early.
+async fn resolve_sync_auth(
+    request: &ExtensionRequestPayload,
+    request_id: &str,
+    private_key_der: Option<&[u8]>,
+    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+) -> Option<(String, Option<sync::SyncAuthOverride>)> {
+    let host_id = match request.params.get("id").and_then(|v| v.as_str()) {
+        Some(id) => id.to_string(),
+        None => {
+            let resp = make_error_response(request_id, "missing required field 'id'");
+            let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
+            return None;
+        }
+    };
+
+    let sensitive: Option<SensitiveAuthParams> =
+        match uptrakit_service_sdk::decrypt_sensitive_params(
+            request.sensitive_params.as_ref().map(|s| s.expose_secret()),
+            private_key_der,
+        ) {
+            Ok(s) => s,
+            Err(msg) => {
+                let resp = make_error_response(request_id, &msg);
+                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
+                return None;
+            }
+        };
+
+    let auth_override = match build_sync_auth_override(&request.params, sensitive.as_ref()) {
+        Ok(ov) => ov,
+        Err(msg) => {
+            let resp = make_error_response(request_id, &msg);
+            let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
+            return None;
+        }
+    };
+
+    Some((host_id, auth_override))
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
