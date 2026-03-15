@@ -1,6 +1,46 @@
+/// Abort the current publish batch on first error.
+///
+/// When a publish or subscribe operation fails (typically due to a broker
+/// connection timeout), there is no point continuing with the remaining
+/// operations in the batch — the data will be automatically republished
+/// on the next `SoftwareStates` push or broker reconnect.  Aborting early
+/// prevents the service event loop from being blocked for
+/// `N × OPERATION_TIMEOUT` seconds, keeping signal handling responsive.
+macro_rules! publish_or_abort {
+    ($expr:expr, $client_id:expr, $what:expr) => {
+        if let Err(e) = $expr {
+            tracing::warn!(
+                error = %e,
+                mqtt_client_id = %$client_id,
+                concat!("failed to ", $what, "; aborting remaining publishes for this client"),
+            );
+            return;
+        }
+    };
+}
+
+/// Best-effort variant of `publish_or_abort!` for cleanup operations.
+///
+/// Cleanup must continue even if individual operations fail (e.g. broker
+/// connection down for one topic). Logs a warning on failure and continues
+/// with the remaining cleanup operations.
+macro_rules! publish_best_effort {
+    ($expr:expr, $client_id:expr, $what:expr) => {
+        if let Err(e) = $expr {
+            tracing::warn!(
+                error = %e,
+                mqtt_client_id = %$client_id,
+                concat!("failed to ", $what, " (cleanup, continuing)"),
+            );
+        }
+    };
+}
+
 mod cli;
+mod client_manager;
 mod ha_discovery;
 mod mqtt_client;
+mod state_publisher;
 mod tenant_manager;
 
 use clap::Parser;
