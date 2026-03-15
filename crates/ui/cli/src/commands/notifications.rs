@@ -185,12 +185,11 @@ async fn dispatch_channels(command: ChannelsCommands, ctx: &CliContext) -> Resul
             channel_type,
             config,
         } => {
-            let channel_type: uptrakit_openapi_client::types::notifications::NotificationChannelType =
-                channel_type.parse().map_err(|_| {
-                    report!(CliError::Other(format!(
-                        "unknown channel type: {channel_type} (expected webhook or telegram)"
-                    )))
-                })?;
+            if channel_type.trim().is_empty() {
+                return Err(report!(CliError::Other(
+                    "channel type must not be empty".to_string()
+                )));
+            }
             let config_value: serde_json::Value = serde_json::from_str(&config)
                 .map_err(|e| report!(CliError::Other(format!("invalid JSON for --config: {e}"))))?;
             let resp = channel_create(ChannelCreateParams {
@@ -352,9 +351,8 @@ use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::notifications::{
     CreateNotificationChannelRequest, CreateNotificationRuleRequest, NotificationChannelResponse,
-    NotificationChannelType, NotificationEventType, NotificationLogResponse,
-    NotificationRuleResponse, TestNotificationResponse, UpdateNotificationChannelRequest,
-    UpdateNotificationRuleRequest,
+    NotificationEventType, NotificationLogResponse, NotificationRuleResponse,
+    TestNotificationResponse, UpdateNotificationChannelRequest, UpdateNotificationRuleRequest,
 };
 use uptrakit_openapi_client::types::pagination::{PaginatedResponse, PaginationParams};
 
@@ -526,7 +524,7 @@ pub struct ChannelGetParams<'a> {
 
 pub struct ChannelCreateParams<'a> {
     pub name: String,
-    pub channel_type: NotificationChannelType,
+    pub channel_type: String,
     pub config: serde_json::Value,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
@@ -854,7 +852,7 @@ mod tests {
         NotificationChannelResponse {
             id: sample_uuid(),
             name: "My Webhook".to_string(),
-            channel_type: NotificationChannelType::Webhook,
+            channel_type: "webhook".to_string(),
             config: serde_json::json!({"url": "https://example.com/hook"}),
             enabled: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),

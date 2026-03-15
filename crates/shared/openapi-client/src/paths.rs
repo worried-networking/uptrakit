@@ -304,11 +304,6 @@ pub(crate) mod settings {
     pub(crate) const RESET_DATA: &str = "/api/v1/settings/reset-data";
 }
 
-pub(crate) mod settings_smtp {
-    /// `GET /api/v1/settings/smtp` · `PUT /api/v1/settings/smtp`
-    pub(crate) const BASE: &str = "/api/v1/settings/smtp";
-}
-
 pub(crate) mod settings_nats {
     /// `GET /api/v1/global-settings/nats` · `PUT /api/v1/global-settings/nats`
     pub(crate) const BASE: &str = "/api/v1/global-settings/nats";

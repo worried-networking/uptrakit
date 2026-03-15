@@ -18,9 +18,9 @@ use uuid::Uuid;
 
 pub use uptrakit_web_api_types::notifications::{
     CreateNotificationChannelRequest, CreateNotificationRuleRequest, NotificationChannelResponse,
-    NotificationChannelType, NotificationDeliveryStatus, NotificationEventType,
-    NotificationLogResponse, NotificationRuleResponse, TestNotificationResponse,
-    UpdateNotificationChannelRequest, UpdateNotificationRuleRequest,
+    NotificationDeliveryStatus, NotificationEventType, NotificationLogResponse,
+    NotificationRuleResponse, TestNotificationResponse, UpdateNotificationChannelRequest,
+    UpdateNotificationRuleRequest,
 };
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 
@@ -308,8 +308,9 @@ pub async fn test_channel(
         }
     };
 
-    // Build settings bag from cached settings
-    let settings_bag = crate::notifications::dispatcher::build_settings_bag(&state.settings);
+    // Build settings bag from database
+    let settings_bag =
+        crate::notifications::dispatcher::build_settings_bag(state.db(), tenant_db.tenant_id).await;
 
     // Build test message
     let test_msg = DeliveryMessage::new(

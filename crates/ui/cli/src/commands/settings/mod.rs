@@ -5,7 +5,6 @@ pub mod nats;
 pub mod network;
 pub mod oidc;
 pub mod registration;
-pub mod smtp;
 
 pub use authentication::AuthenticationCommands;
 pub use certificates::CertificateCommands;
@@ -14,7 +13,6 @@ pub use nats::NatsCommands;
 pub use network::NetworkCommands;
 pub use oidc::OidcCommands;
 pub use registration::RegistrationCommands;
-pub use smtp::SmtpCommands;
 
 use crate::client::authenticated_client;
 use crate::commands::CliContext;
@@ -36,7 +34,6 @@ use self::nats::{nats_clear, nats_set, nats_show};
 use self::network::{NetworkUpdateParams, network_show, network_update};
 use self::oidc::dispatch_oidc;
 use self::registration::{RegistrationUpdateParams, registration_show, registration_update};
-use self::smtp::{SmtpSetParams, smtp_set, smtp_show};
 
 #[derive(Debug, Subcommand)]
 pub enum SettingsCommands {
@@ -78,11 +75,6 @@ pub enum SettingsCommands {
     },
     /// Show system alerts
     Alerts,
-    /// SMTP settings for email notifications
-    Smtp {
-        #[command(subcommand)]
-        command: SmtpCommands,
-    },
     /// NATS server URL configuration
     Nats {
         #[command(subcommand)]
@@ -345,49 +337,6 @@ pub async fn dispatch(command: SettingsCommands, ctx: &CliContext) -> Result<()>
             .await?;
             crate::output::print_output(ctx.format, &resp)?;
         }
-        SettingsCommands::Smtp { command } => match command {
-            SmtpCommands::Show => {
-                let resp = smtp_show(
-                    ctx.server.as_deref(),
-                    ctx.token.as_deref(),
-                    ctx.insecure,
-                    ctx.request_timeout,
-                )
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-            }
-            SmtpCommands::Set {
-                host,
-                port,
-                username,
-                clear_username,
-                password,
-                clear_password,
-                from_address,
-                from_name,
-                clear_from_name,
-                tls_mode,
-            } => {
-                let resp = smtp_set(SmtpSetParams {
-                    server: ctx.server.as_deref(),
-                    token: ctx.token.as_deref(),
-                    insecure: ctx.insecure,
-                    request_timeout: ctx.request_timeout,
-                    host,
-                    port,
-                    username,
-                    clear_username,
-                    password,
-                    clear_password,
-                    from_address,
-                    from_name,
-                    clear_from_name,
-                    tls_mode,
-                })
-                .await?;
-                crate::output::print_output(ctx.format, &resp)?;
-            }
-        },
         SettingsCommands::Nats { command } => match command {
             NatsCommands::Show => {
                 let resp = nats_show(

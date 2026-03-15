@@ -9,8 +9,8 @@ use uuid::Uuid;
 
 use uptrakit_shared_db::entity::{notification_channel, notification_log, notification_rule};
 use uptrakit_web_api_types::notifications::{
-    NotificationChannelResponse, NotificationChannelType, NotificationDeliveryStatus,
-    NotificationEventType, NotificationLogResponse, NotificationRuleResponse,
+    NotificationChannelResponse, NotificationDeliveryStatus, NotificationEventType,
+    NotificationLogResponse, NotificationRuleResponse,
 };
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 
@@ -25,18 +25,17 @@ pub async fn create_channel(
     plugin_ops: &dyn uptrakit_plugin_infrastructure_core::PluginOps,
 ) -> ChannelResult<NotificationChannelResponse> {
     // Validate config with channel implementation
-    let channel_type_str = req.channel_type.as_str();
     if plugin_ops
-        .notification_transport(channel_type_str)
+        .notification_transport(&req.channel_type)
         .is_none()
     {
         return Err(report!(ChannelQueryError::UnsupportedType(
-            channel_type_str.to_string()
+            req.channel_type.clone()
         )));
     }
 
     plugin_ops
-        .notification_validate_config(channel_type_str, &req.config)
+        .notification_validate_config(&req.channel_type, &req.config)
         .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
 
     let config_str = serde_json::to_string(&req.config)
@@ -53,7 +52,7 @@ pub async fn create_channel(
         id: Set(id),
         tenant_id: Set(tenant_db.tenant_id),
         name: Set(req.name.clone()),
-        channel_type: Set(channel_type_str.to_string()),
+        channel_type: Set(req.channel_type.clone()),
         config: Set(encrypted_config),
         enabled: Set(req.enabled),
         created_at: Set(now),
@@ -63,7 +62,7 @@ pub async fn create_channel(
     let result = model.insert(tenant_db.db()).await.context_to()?;
 
     // Return with masked config
-    let masked_config = plugin_ops.notification_mask_config_secrets(channel_type_str, &req.config);
+    let masked_config = plugin_ops.notification_mask_config_secrets(&req.channel_type, &req.config);
     Ok(channel_to_response(result, masked_config))
 }
 
@@ -422,21 +421,10 @@ fn channel_to_response(
     model: notification_channel::Model,
     masked_config: serde_json::Value,
 ) -> NotificationChannelResponse {
-    let channel_type = model
-        .channel_type
-        .parse::<NotificationChannelType>()
-        .unwrap_or_else(|_| {
-            tracing::warn!(
-                channel_type = %model.channel_type,
-                "unknown channel type; defaulting to Webhook"
-            );
-            NotificationChannelType::Webhook
-        });
-
     NotificationChannelResponse {
         id: model.id,
         name: model.name,
-        channel_type,
+        channel_type: model.channel_type,
         config: masked_config,
         enabled: model.enabled,
         created_at: model.created_at,

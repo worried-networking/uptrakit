@@ -91,52 +91,6 @@ impl FromStr for NotificationEventType {
     }
 }
 
-/// The type of delivery channel for notifications.
-#[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[cfg_attr(test, derive(strum::EnumIter))]
-#[serde(rename_all = "snake_case")]
-pub enum NotificationChannelType {
-    Webhook,
-    Telegram,
-    Email,
-}
-
-impl NotificationChannelType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Webhook => "webhook",
-            Self::Telegram => "telegram",
-            Self::Email => "email",
-        }
-    }
-}
-
-impl std::fmt::Display for NotificationChannelType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// Error returned when parsing an invalid [`NotificationChannelType`] string.
-#[derive(Debug, Error)]
-#[error("invalid notification channel type")]
-pub struct ParseNotificationChannelTypeError;
-
-impl FromStr for NotificationChannelType {
-    type Err = ParseNotificationChannelTypeError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "webhook" => Ok(Self::Webhook),
-            "telegram" => Ok(Self::Telegram),
-            "email" => Ok(Self::Email),
-            _ => Err(ParseNotificationChannelTypeError),
-        }
-    }
-}
-
 /// The delivery status of a notification.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -189,7 +143,7 @@ impl FromStr for NotificationDeliveryStatus {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateNotificationChannelRequest {
     pub name: String,
-    pub channel_type: NotificationChannelType,
+    pub channel_type: String,
     pub config: serde_json::Value,
     #[serde(default = "crate::default_enabled")]
     pub enabled: bool,
@@ -200,6 +154,12 @@ impl Validate for CreateNotificationChannelRequest {
         if self.name.trim().is_empty() {
             return Err(ValidationError {
                 field: "name",
+                message: "must not be empty".to_string(),
+            });
+        }
+        if self.channel_type.trim().is_empty() {
+            return Err(ValidationError {
+                field: "channel_type",
                 message: "must not be empty".to_string(),
             });
         }
@@ -360,7 +320,7 @@ impl Validate for UpdateNotificationRuleRequest {
 pub struct NotificationChannelResponse {
     pub id: Uuid,
     pub name: String,
-    pub channel_type: NotificationChannelType,
+    pub channel_type: String,
     pub config: serde_json::Value,
     pub enabled: bool,
     #[serde(with = "time::serde::rfc3339")]
@@ -537,72 +497,6 @@ mod tests {
         assert_eq!(err.to_string(), "invalid notification event type");
     }
 
-    // ── NotificationChannelType ─────────────────────────────────────────
-
-    #[test]
-    fn channel_type_serde_round_trip() {
-        for ct in NotificationChannelType::iter() {
-            let json = serde_json::to_string(&ct).expect("serialization should succeed");
-            let deserialized: NotificationChannelType =
-                serde_json::from_str(&json).expect("deserialization should succeed");
-            assert_eq!(deserialized, ct);
-        }
-    }
-
-    #[test]
-    fn channel_type_as_str_values() {
-        assert_eq!(NotificationChannelType::Webhook.as_str(), "webhook");
-        assert_eq!(NotificationChannelType::Telegram.as_str(), "telegram");
-        assert_eq!(NotificationChannelType::Email.as_str(), "email");
-    }
-
-    #[test]
-    fn channel_type_from_str_valid() {
-        assert_eq!(
-            "webhook".parse::<NotificationChannelType>().ok(),
-            Some(NotificationChannelType::Webhook)
-        );
-        assert_eq!(
-            "telegram".parse::<NotificationChannelType>().ok(),
-            Some(NotificationChannelType::Telegram)
-        );
-        assert_eq!(
-            "email".parse::<NotificationChannelType>().ok(),
-            Some(NotificationChannelType::Email)
-        );
-    }
-
-    #[test]
-    fn channel_type_from_str_invalid_returns_err() {
-        assert!("sms".parse::<NotificationChannelType>().is_err());
-        assert!("".parse::<NotificationChannelType>().is_err());
-        assert!("WEBHOOK".parse::<NotificationChannelType>().is_err());
-    }
-
-    #[test]
-    fn channel_type_display_matches_as_str() {
-        for ct in NotificationChannelType::iter() {
-            assert_eq!(format!("{ct}"), ct.as_str());
-        }
-    }
-
-    #[test]
-    fn channel_type_as_str_round_trips_through_from_str() {
-        for ct in NotificationChannelType::iter() {
-            let s = ct.as_str();
-            let parsed: NotificationChannelType = s
-                .parse()
-                .expect("from_str should succeed for as_str output");
-            assert_eq!(parsed, ct);
-        }
-    }
-
-    #[test]
-    fn parse_channel_type_error_display_message() {
-        let err = ParseNotificationChannelTypeError;
-        assert_eq!(err.to_string(), "invalid notification channel type");
-    }
-
     // ── NotificationDeliveryStatus ──────────────────────────────────────
 
     #[test]
@@ -675,7 +569,7 @@ mod tests {
     fn create_channel_request_round_trip() {
         let req = CreateNotificationChannelRequest {
             name: "My Webhook".to_string(),
-            channel_type: NotificationChannelType::Webhook,
+            channel_type: "webhook".to_string(),
             config: serde_json::json!({"url": "https://example.com/hook"}),
             enabled: true,
         };
@@ -683,7 +577,7 @@ mod tests {
         let deserialized: CreateNotificationChannelRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deserialized.name, "My Webhook");
-        assert_eq!(deserialized.channel_type, NotificationChannelType::Webhook);
+        assert_eq!(deserialized.channel_type, "webhook");
         assert!(deserialized.config.is_object());
         assert!(deserialized.enabled);
     }
@@ -717,7 +611,7 @@ mod tests {
     fn validate_create_channel_valid() {
         let req = CreateNotificationChannelRequest {
             name: "My Webhook".to_string(),
-            channel_type: NotificationChannelType::Webhook,
+            channel_type: "webhook".to_string(),
             config: serde_json::json!({"url": "https://example.com/hook"}),
             enabled: true,
         };
@@ -728,7 +622,7 @@ mod tests {
     fn validate_create_channel_empty_name() {
         let req = CreateNotificationChannelRequest {
             name: "".to_string(),
-            channel_type: NotificationChannelType::Webhook,
+            channel_type: "webhook".to_string(),
             config: serde_json::json!({}),
             enabled: true,
         };
@@ -740,7 +634,7 @@ mod tests {
     fn validate_create_channel_whitespace_name() {
         let req = CreateNotificationChannelRequest {
             name: "   ".to_string(),
-            channel_type: NotificationChannelType::Webhook,
+            channel_type: "webhook".to_string(),
             config: serde_json::json!({}),
             enabled: true,
         };
@@ -749,10 +643,22 @@ mod tests {
     }
 
     #[test]
+    fn validate_create_channel_empty_channel_type() {
+        let req = CreateNotificationChannelRequest {
+            name: "Test".to_string(),
+            channel_type: "".to_string(),
+            config: serde_json::json!({}),
+            enabled: true,
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "channel_type");
+    }
+
+    #[test]
     fn validate_create_channel_non_object_config() {
         let req = CreateNotificationChannelRequest {
             name: "Test".to_string(),
-            channel_type: NotificationChannelType::Webhook,
+            channel_type: "webhook".to_string(),
             config: serde_json::json!("not an object"),
             enabled: true,
         };
@@ -764,7 +670,7 @@ mod tests {
     fn validate_create_channel_array_config() {
         let req = CreateNotificationChannelRequest {
             name: "Test".to_string(),
-            channel_type: NotificationChannelType::Webhook,
+            channel_type: "webhook".to_string(),
             config: serde_json::json!([1, 2, 3]),
             enabled: true,
         };
@@ -1004,7 +910,7 @@ mod tests {
         let resp = NotificationChannelResponse {
             id: sample_uuid(),
             name: "My Webhook".to_string(),
-            channel_type: NotificationChannelType::Webhook,
+            channel_type: "webhook".to_string(),
             config: serde_json::json!({"url": "https://example.com/hook"}),
             enabled: true,
             created_at: datetime!(2025-01-01 0:00:00 UTC),
@@ -1015,7 +921,7 @@ mod tests {
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deserialized.id, sample_uuid());
         assert_eq!(deserialized.name, "My Webhook");
-        assert_eq!(deserialized.channel_type, NotificationChannelType::Webhook);
+        assert_eq!(deserialized.channel_type, "webhook");
         assert!(deserialized.config.is_object());
         assert!(deserialized.enabled);
     }
@@ -1025,7 +931,7 @@ mod tests {
         let resp = NotificationChannelResponse {
             id: sample_uuid(),
             name: "Test".to_string(),
-            channel_type: NotificationChannelType::Telegram,
+            channel_type: "telegram".to_string(),
             config: serde_json::json!({}),
             enabled: true,
             created_at: datetime!(2025-01-01 0:00:00 UTC),

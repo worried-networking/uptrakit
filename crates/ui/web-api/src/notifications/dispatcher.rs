@@ -7,7 +7,6 @@ use uuid::Uuid;
 use uptrakit_plugin_infrastructure_registry::PluginOps;
 
 use super::events::NotificationEvent;
-use crate::settings::Settings;
 
 /// Bounded capacity for the notification dispatcher channel.
 ///
@@ -33,16 +32,9 @@ impl NotificationDispatcher {
         db: DatabaseConnection,
         notification_ops: Arc<dyn PluginOps>,
         callback_base_url: String,
-        settings: crate::settings::Settings,
     ) -> Self {
         let (tx, rx) = mpsc::channel(NOTIFICATION_DISPATCHER_CAPACITY);
-        tokio::spawn(dispatch_loop(
-            db,
-            notification_ops,
-            callback_base_url,
-            settings,
-            rx,
-        ));
+        tokio::spawn(dispatch_loop(db, notification_ops, callback_base_url, rx));
         Self { tx }
     }
 
@@ -67,73 +59,48 @@ impl NotificationDispatcher {
     }
 }
 
-/// Build a generic settings bag from the cached [`Settings`] snapshot.
+/// Build a generic settings bag by loading SMTP and Telegram settings
+/// directly from the database.
 ///
 /// The resulting JSON has `{ "tenant": { ... }, "global": { ... } }` with
 /// dot-prefixed keys matching the setting names used by each notification
 /// plugin's `deliver()` implementation. Plugins extract only the keys they
 /// recognise and ignore the rest, so every plugin receives the full bag.
-pub(crate) fn build_settings_bag(settings: &Settings) -> serde_json::Value {
-    let snap = settings.snapshot();
+pub(crate) async fn build_settings_bag(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+) -> serde_json::Value {
+    let tenant =
+        uptrakit_web_api_auth::settings_store::load_settings_by_prefix(db, tenant_id, "smtp.")
+            .await
+            .unwrap_or_default();
 
-    let mut tenant = serde_json::Map::new();
-    // SMTP tenant settings
-    if let Some(ref h) = snap.smtp.host {
-        tenant.insert("smtp.host".into(), serde_json::json!(h));
-    }
-    if let Some(p) = snap.smtp.port {
-        tenant.insert("smtp.port".into(), serde_json::json!(p));
-    }
-    if let Some(ref u) = snap.smtp.username {
-        tenant.insert("smtp.username".into(), serde_json::json!(u));
-    }
-    if let Some(ref pw) = snap.smtp.password {
-        tenant.insert("smtp.password".into(), serde_json::json!(pw));
-    }
-    if let Some(ref f) = snap.smtp.from_address {
-        tenant.insert("smtp.from_address".into(), serde_json::json!(f));
-    }
-    if let Some(ref n) = snap.smtp.from_name {
-        tenant.insert("smtp.from_name".into(), serde_json::json!(n));
-    }
-    tenant.insert(
-        "smtp.tls_mode".into(),
-        serde_json::json!(snap.smtp.tls_mode),
-    );
+    let global_smtp =
+        uptrakit_web_api_auth::settings_store::load_global_settings_by_prefix(db, "global_smtp.")
+            .await
+            .unwrap_or_default();
+
+    let global_telegram = uptrakit_web_api_auth::settings_store::load_global_settings_by_prefix(
+        db,
+        "global_telegram.",
+    )
+    .await
+    .unwrap_or_default();
 
     let mut global = serde_json::Map::new();
-    // Global SMTP settings
-    if let Some(ref h) = snap.global_smtp.host {
-        global.insert("global_smtp.host".into(), serde_json::json!(h));
+    for (k, v) in &global_smtp {
+        global.insert(k.clone(), v.clone());
     }
-    if let Some(p) = snap.global_smtp.port {
-        global.insert("global_smtp.port".into(), serde_json::json!(p));
-    }
-    if let Some(ref u) = snap.global_smtp.username {
-        global.insert("global_smtp.username".into(), serde_json::json!(u));
-    }
-    if let Some(ref pw) = snap.global_smtp.password {
-        global.insert("global_smtp.password".into(), serde_json::json!(pw));
-    }
-    if let Some(ref f) = snap.global_smtp.from_address {
-        global.insert("global_smtp.from_address".into(), serde_json::json!(f));
-    }
-    if let Some(ref n) = snap.global_smtp.from_name {
-        global.insert("global_smtp.from_name".into(), serde_json::json!(n));
-    }
-    global.insert(
-        "global_smtp.tls_mode".into(),
-        serde_json::json!(snap.global_smtp.tls_mode),
-    );
-    if let Some(ref h) = snap.global_smtp.helo_host {
-        global.insert("global_smtp.helo_host".into(), serde_json::json!(h));
-    }
-    // Global Telegram settings
-    if let Some(ref t) = snap.global_telegram.bot_token {
-        global.insert("global_telegram.bot_token".into(), serde_json::json!(t));
+    for (k, v) in &global_telegram {
+        global.insert(k.clone(), v.clone());
     }
 
-    serde_json::json!({ "tenant": tenant, "global": global })
+    let mut tenant_map = serde_json::Map::new();
+    for (k, v) in &tenant {
+        tenant_map.insert(k.clone(), v.clone());
+    }
+
+    serde_json::json!({ "tenant": tenant_map, "global": global })
 }
 
 #[tracing::instrument(skip_all)]
@@ -141,7 +108,6 @@ async fn dispatch_loop(
     db: DatabaseConnection,
     notification_ops: Arc<dyn PluginOps>,
     callback_base_url: String,
-    settings: crate::settings::Settings,
     mut rx: mpsc::Receiver<NotificationEvent>,
 ) {
     use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
@@ -237,9 +203,9 @@ async fn dispatch_loop(
                     }
                 };
 
-            // Build a generic settings bag from the cached settings.
+            // Build a generic settings bag from the database.
             // Each plugin's `deliver()` extracts only the keys it needs.
-            let settings_bag = build_settings_bag(&settings);
+            let settings_bag = build_settings_bag(&db, tenant_id).await;
 
             // Generate action token if the event is actionable
             let action_token = event.action_params().map(|_| Uuid::now_v7());

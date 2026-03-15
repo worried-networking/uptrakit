@@ -27,13 +27,6 @@ pub enum SettingKey {
     MqttMaxClientsPerTenant,
     JwtSigningKey,
     MasterKeyVerification,
-    SmtpHost,
-    SmtpPort,
-    SmtpUsername,
-    SmtpPassword,
-    SmtpFromAddress,
-    SmtpFromName,
-    SmtpTlsMode,
     NatsUrl,
     /// Per-tenant audit log filter mode (`all`, `mutations`, `none`).
     ///
@@ -47,49 +40,6 @@ pub enum SettingKey {
     ///
     /// DB key: `audit_log.retention_days`
     AuditLogRetentionDays,
-    /// Global SMTP server hostname (shared across all tenants).
-    ///
-    /// Per-tenant SMTP settings (if set) override these global defaults.
-    ///
-    /// DB key: `global_smtp.host`
-    GlobalSmtpHost,
-    /// Global SMTP server port.
-    ///
-    /// DB key: `global_smtp.port`
-    GlobalSmtpPort,
-    /// Global SMTP authentication username.
-    ///
-    /// DB key: `global_smtp.username`
-    GlobalSmtpUsername,
-    /// Global SMTP authentication password (stored encrypted).
-    ///
-    /// DB key: `global_smtp.password`
-    GlobalSmtpPassword,
-    /// Global default "From" email address.
-    ///
-    /// DB key: `global_smtp.from_address`
-    GlobalSmtpFromAddress,
-    /// Global default "From" display name.
-    ///
-    /// DB key: `global_smtp.from_name`
-    GlobalSmtpFromName,
-    /// Global SMTP TLS mode (`starttls`, `tls`, `none`).
-    ///
-    /// DB key: `global_smtp.tls_mode`
-    GlobalSmtpTlsMode,
-    /// Global SMTP EHLO hostname override.
-    ///
-    /// When set, this value is sent in the SMTP EHLO command instead of deriving
-    /// the hostname from the `from_address` domain. Tenants cannot override this setting.
-    ///
-    /// DB key: `global_smtp.helo_host`
-    GlobalSmtpHeloHost,
-    /// Global Telegram bot token (shared across all tenants as a fallback).
-    ///
-    /// Per-channel `bot_token` overrides this when set.
-    ///
-    /// DB key: `global_telegram.bot_token`
-    GlobalTelegramBotToken,
     /// Whether mDNS/DNS-SD zero-configuration advertising is enabled.
     ///
     /// DB key: `zeroconf.enabled`
@@ -127,22 +77,6 @@ impl SettingKey {
             Self::MqttMaxClientsPerTenant => "mqtt.max_clients_per_tenant",
             Self::JwtSigningKey => "auth.jwt_signing_key",
             Self::MasterKeyVerification => "crypto.master_key_verification",
-            Self::SmtpHost => "smtp.host",
-            Self::SmtpPort => "smtp.port",
-            Self::SmtpUsername => "smtp.username",
-            Self::SmtpPassword => "smtp.password",
-            Self::SmtpFromAddress => "smtp.from_address",
-            Self::SmtpFromName => "smtp.from_name",
-            Self::SmtpTlsMode => "smtp.tls_mode",
-            Self::GlobalSmtpHost => "global_smtp.host",
-            Self::GlobalSmtpPort => "global_smtp.port",
-            Self::GlobalSmtpUsername => "global_smtp.username",
-            Self::GlobalSmtpPassword => "global_smtp.password",
-            Self::GlobalSmtpFromAddress => "global_smtp.from_address",
-            Self::GlobalSmtpFromName => "global_smtp.from_name",
-            Self::GlobalSmtpTlsMode => "global_smtp.tls_mode",
-            Self::GlobalSmtpHeloHost => "global_smtp.helo_host",
-            Self::GlobalTelegramBotToken => "global_telegram.bot_token",
             Self::NatsUrl => "nats.url",
             Self::AuditLogFilter => "audit_log.filter",
             Self::AuditLogRetentionDays => "audit_log.retention_days",
@@ -176,22 +110,6 @@ impl SettingKey {
             "mqtt.max_clients_per_tenant" => Some(Self::MqttMaxClientsPerTenant),
             "auth.jwt_signing_key" => Some(Self::JwtSigningKey),
             "crypto.master_key_verification" => Some(Self::MasterKeyVerification),
-            "smtp.host" => Some(Self::SmtpHost),
-            "smtp.port" => Some(Self::SmtpPort),
-            "smtp.username" => Some(Self::SmtpUsername),
-            "smtp.password" => Some(Self::SmtpPassword),
-            "smtp.from_address" => Some(Self::SmtpFromAddress),
-            "smtp.from_name" => Some(Self::SmtpFromName),
-            "smtp.tls_mode" => Some(Self::SmtpTlsMode),
-            "global_smtp.host" => Some(Self::GlobalSmtpHost),
-            "global_smtp.port" => Some(Self::GlobalSmtpPort),
-            "global_smtp.username" => Some(Self::GlobalSmtpUsername),
-            "global_smtp.password" => Some(Self::GlobalSmtpPassword),
-            "global_smtp.from_address" => Some(Self::GlobalSmtpFromAddress),
-            "global_smtp.from_name" => Some(Self::GlobalSmtpFromName),
-            "global_smtp.tls_mode" => Some(Self::GlobalSmtpTlsMode),
-            "global_smtp.helo_host" => Some(Self::GlobalSmtpHeloHost),
-            "global_telegram.bot_token" => Some(Self::GlobalTelegramBotToken),
             "nats.url" => Some(Self::NatsUrl),
             "audit_log.filter" => Some(Self::AuditLogFilter),
             "audit_log.retention_days" => Some(Self::AuditLogRetentionDays),
@@ -219,15 +137,6 @@ impl SettingKey {
                 | Self::MqttMaxClientsPerTenant
                 | Self::JwtSigningKey
                 | Self::MasterKeyVerification
-                | Self::GlobalSmtpHost
-                | Self::GlobalSmtpPort
-                | Self::GlobalSmtpUsername
-                | Self::GlobalSmtpPassword
-                | Self::GlobalSmtpFromAddress
-                | Self::GlobalSmtpFromName
-                | Self::GlobalSmtpTlsMode
-                | Self::GlobalSmtpHeloHost
-                | Self::GlobalTelegramBotToken
                 | Self::NatsUrl
                 | Self::ZeroconfEnabled
                 | Self::ZeroconfUrl

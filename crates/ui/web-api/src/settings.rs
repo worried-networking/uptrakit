@@ -1,4 +1,3 @@
-use std::fmt;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -79,63 +78,6 @@ impl Default for NetworkSettings {
     }
 }
 
-/// SMTP settings snapshot for sending email notifications.
-///
-/// Per-tenant: each tenant configures their own SMTP server. The password is
-/// stored encrypted at rest in the `settings` table and decrypted into memory
-/// here at load time. It is never returned over the API; callers receive
-/// `has_password: bool` instead.
-#[derive(Clone, Default)]
-pub struct SmtpSettingsSnapshot {
-    pub host: Option<String>,
-    pub port: Option<u16>,
-    pub username: Option<String>,
-    /// Decrypted SMTP password — never logged or sent over the API.
-    pub password: Option<String>,
-    pub from_address: Option<String>,
-    pub from_name: Option<String>,
-    /// TLS mode: `"starttls"` (default), `"tls"`, or `"none"`.
-    pub tls_mode: String,
-    /// Optional EHLO hostname override for the SMTP EHLO command.
-    ///
-    /// When `None`, the email plugin derives the hostname from the `from_address` domain.
-    pub helo_host: Option<String>,
-}
-
-impl SmtpSettingsSnapshot {
-    /// Returns `true` when the minimum required fields (host + from_address) are present.
-    pub fn is_configured(&self) -> bool {
-        self.host.as_ref().is_some_and(|h| !h.is_empty())
-            && self.from_address.as_ref().is_some_and(|f| !f.is_empty())
-    }
-}
-
-impl fmt::Debug for SmtpSettingsSnapshot {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SmtpSettingsSnapshot")
-            .field("host", &self.host)
-            .field("port", &self.port)
-            .field("username", &self.username)
-            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
-            .field("from_address", &self.from_address)
-            .field("from_name", &self.from_name)
-            .field("tls_mode", &self.tls_mode)
-            .field("helo_host", &self.helo_host)
-            .finish()
-    }
-}
-
-/// Telegram settings snapshot for sending Telegram notifications.
-///
-/// The global bot token is used as a fallback when a per-channel bot token
-/// is not configured. The token is stored as plaintext since it is already
-/// a Telegram API token (not a password).
-#[derive(Clone, Default, Debug)]
-pub struct TelegramSettingsSnapshot {
-    /// Global bot token used as fallback when per-channel token is absent.
-    pub bot_token: Option<String>,
-}
-
 /// Zero-configuration discovery settings for mDNS/DNS-SD advertising.
 #[derive(Clone, Debug, Default)]
 pub struct ZeroconfSnapshot {
@@ -159,12 +101,6 @@ pub struct SettingsSnapshot {
     pub renewal_window_hours_override: Option<u16>,
     pub network: NetworkSettings,
     pub mqtt_max_clients_per_tenant: u16,
-    /// Per-tenant SMTP settings.
-    pub smtp: SmtpSettingsSnapshot,
-    /// Global SMTP defaults shared across all tenants.
-    pub global_smtp: SmtpSettingsSnapshot,
-    /// Global Telegram settings shared across all tenants.
-    pub global_telegram: TelegramSettingsSnapshot,
     /// NATS server URL (raw, decrypted). `None` when not configured.
     /// Stored as `Option<MaskedUrl>` so `Debug` automatically masks any password.
     pub nats_url: Option<MaskedUrl>,
@@ -212,9 +148,6 @@ impl Settings {
             renewal_window_hours_override,
             network: NetworkSettings::default(),
             mqtt_max_clients_per_tenant: DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT,
-            smtp: SmtpSettingsSnapshot::default(),
-            global_smtp: SmtpSettingsSnapshot::default(),
-            global_telegram: TelegramSettingsSnapshot::default(),
             nats_url: None,
             zeroconf: ZeroconfSnapshot::default(),
         };
@@ -268,11 +201,8 @@ impl Settings {
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
 
-        let smtp = Self::load_smtp_settings(&combined);
-        let global_smtp = Self::load_global_smtp_settings(&global_raw);
         let nats_url = Self::load_nats_url(&global_raw);
         let zeroconf = Self::load_zeroconf_settings(&global_raw);
-        let global_telegram = Self::load_global_telegram_settings(&global_raw);
 
         // Read initial version counters
         let (version, global_version) =
@@ -285,9 +215,6 @@ impl Settings {
             renewal_window_hours_override,
             network,
             mqtt_max_clients_per_tenant,
-            smtp,
-            global_smtp,
-            global_telegram,
             nats_url,
             zeroconf,
         };
@@ -403,13 +330,10 @@ impl Settings {
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
 
-        let smtp = Self::load_smtp_settings(&combined);
-        let global_smtp = Self::load_global_smtp_settings(&global_raw);
         // NatsUrl is a global-only key, so it is present in `combined` (which
         // started as a copy of global_raw extended with per-tenant rows).
         let nats_url = Self::load_nats_url(&combined);
         let zeroconf = Self::load_zeroconf_settings(&combined);
-        let global_telegram = Self::load_global_telegram_settings(&global_raw);
 
         // Publish complete snapshot atomically
         let _guard = self.inner.write_mutex.lock().await;
@@ -420,9 +344,6 @@ impl Settings {
             renewal_window_hours_override,
             network,
             mqtt_max_clients_per_tenant,
-            smtp,
-            global_smtp,
-            global_telegram,
             nats_url,
             zeroconf,
         });
@@ -686,60 +607,6 @@ impl Settings {
             .send_modify(|snap| snap.mqtt_max_clients_per_tenant = max);
     }
 
-    // --- SMTP settings ---
-
-    /// Read the SMTP settings snapshot (synchronous).
-    pub fn smtp(&self) -> SmtpSettingsSnapshot {
-        self.inner.snapshot_rx.borrow().smtp.clone()
-    }
-
-    /// Replace SMTP settings (acquires write mutex for atomic publish).
-    pub async fn set_smtp(&self, smtp: SmtpSettingsSnapshot) {
-        let _guard = self.inner.write_mutex.lock().await;
-        self.inner.snapshot_tx.send_modify(|snap| snap.smtp = smtp);
-    }
-
-    // --- Global SMTP settings ---
-
-    /// Read the global SMTP settings snapshot (synchronous).
-    pub fn global_smtp(&self) -> SmtpSettingsSnapshot {
-        self.inner.snapshot_rx.borrow().global_smtp.clone()
-    }
-
-    /// Replace global SMTP settings (acquires write mutex for atomic publish).
-    pub async fn set_global_smtp(&self, smtp: SmtpSettingsSnapshot) {
-        let _guard = self.inner.write_mutex.lock().await;
-        self.inner
-            .snapshot_tx
-            .send_modify(|snap| snap.global_smtp = smtp);
-    }
-
-    // --- Global Telegram settings ---
-
-    /// Read the global Telegram settings snapshot (synchronous).
-    pub fn global_telegram(&self) -> TelegramSettingsSnapshot {
-        self.inner.snapshot_rx.borrow().global_telegram.clone()
-    }
-
-    /// Replace global Telegram settings (acquires write mutex for atomic publish).
-    pub async fn set_global_telegram(&self, telegram: TelegramSettingsSnapshot) {
-        let _guard = self.inner.write_mutex.lock().await;
-        self.inner
-            .snapshot_tx
-            .send_modify(|snap| snap.global_telegram = telegram);
-    }
-
-    /// Load global Telegram settings from a [`RawSettings`] map.
-    pub fn load_global_telegram_settings(raw: &RawSettings) -> TelegramSettingsSnapshot {
-        let bot_token = raw
-            .get_setting(SettingKey::GlobalTelegramBotToken)
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        TelegramSettingsSnapshot { bot_token }
-    }
-
     // --- NATS settings ---
 
     /// Read the NATS URL snapshot (synchronous).
@@ -822,151 +689,6 @@ impl Settings {
             enabled,
             url,
             pki_addr,
-        }
-    }
-
-    /// Load global SMTP defaults from the global settings map.
-    ///
-    /// Uses the `global_smtp.*` keys. Password is stored encrypted.
-    pub fn load_global_smtp_settings(raw: &RawSettings) -> SmtpSettingsSnapshot {
-        let host = raw
-            .get_setting(SettingKey::GlobalSmtpHost)
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        let port = raw
-            .get_setting(SettingKey::GlobalSmtpPort)
-            .and_then(|v| v.as_u64()?.try_into().ok());
-
-        let username = raw
-            .get_setting(SettingKey::GlobalSmtpUsername)
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        let password = raw
-            .get_setting(SettingKey::GlobalSmtpPassword)
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .and_then(|stored| {
-                if uptrakit_crypto::is_encrypted(stored) {
-                    uptrakit_crypto::decrypt_str(stored, "uptrakit:settings:global_smtp_password")
-                        .map_err(|e| {
-                            tracing::warn!("failed to decrypt global SMTP password: {e}");
-                        })
-                        .ok()
-                } else {
-                    Some(stored.to_string())
-                }
-            });
-
-        let from_address = raw
-            .get_setting(SettingKey::GlobalSmtpFromAddress)
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        let from_name = raw
-            .get_setting(SettingKey::GlobalSmtpFromName)
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        let tls_mode = raw
-            .get_setting(SettingKey::GlobalSmtpTlsMode)
-            .and_then(|v| v.as_str())
-            .filter(|s| matches!(*s, "starttls" | "tls" | "none"))
-            .unwrap_or("starttls")
-            .to_string();
-
-        let helo_host = raw
-            .get_setting(SettingKey::GlobalSmtpHeloHost)
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        SmtpSettingsSnapshot {
-            host,
-            port,
-            username,
-            password,
-            from_address,
-            from_name,
-            tls_mode,
-            helo_host,
-        }
-    }
-
-    /// Load SMTP settings from a [`RawSettings`] map.
-    ///
-    /// The `smtp.password` key is expected to be stored encrypted; it is
-    /// transparently decrypted here. Unrecognised or unparseable values are
-    /// silently ignored so that a bad DB row never prevents the server from
-    /// starting.
-    pub fn load_smtp_settings(raw: &RawSettings) -> SmtpSettingsSnapshot {
-        let host = raw
-            .get_setting(SettingKey::SmtpHost)
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        let port = raw
-            .get_setting(SettingKey::SmtpPort)
-            .and_then(|v| v.as_u64()?.try_into().ok());
-
-        let username = raw
-            .get_setting(SettingKey::SmtpUsername)
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        let password = raw
-            .get_setting(SettingKey::SmtpPassword)
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .and_then(|stored| {
-                if uptrakit_crypto::is_encrypted(stored) {
-                    uptrakit_crypto::decrypt_str(stored, "uptrakit:settings:smtp_password")
-                        .map_err(|e| {
-                            tracing::warn!("failed to decrypt SMTP password: {e}");
-                        })
-                        .ok()
-                } else {
-                    // Legacy plaintext — use as-is (migration happens on next write)
-                    Some(stored.to_string())
-                }
-            });
-
-        let from_address = raw
-            .get_setting(SettingKey::SmtpFromAddress)
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        let from_name = raw
-            .get_setting(SettingKey::SmtpFromName)
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        let tls_mode = raw
-            .get_setting(SettingKey::SmtpTlsMode)
-            .and_then(|v| v.as_str())
-            .filter(|s| matches!(*s, "starttls" | "tls" | "none"))
-            .unwrap_or("starttls")
-            .to_string();
-
-        SmtpSettingsSnapshot {
-            host,
-            port,
-            username,
-            password,
-            from_address,
-            from_name,
-            tls_mode,
-            // helo_host is a global-only setting; tenants cannot override it.
-            helo_host: None,
         }
     }
 }

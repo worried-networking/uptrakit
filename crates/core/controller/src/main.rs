@@ -342,7 +342,6 @@ async fn run(args: cli::Args) -> Result<()> {
             db_conn.clone(),
             Arc::clone(&plugin_ops),
             callback_base_url,
-            settings.clone(),
         );
 
     // Build credential sources for external services that need direct infrastructure access.

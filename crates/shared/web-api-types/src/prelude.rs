@@ -53,15 +53,12 @@ pub use crate::autodiscovery::{
     CreateSoftwareIgnoreRequest, SoftwareIgnoreResponse, TriggerDiscoveryResponse,
 };
 
-// ── SMTP Settings ────────────────────────────────────────────────────
-pub use crate::settings_smtp::{SmtpSettingsResponse, UpdateSmtpSettingsRequest};
-
 // ── Notifications ───────────────────────────────────────────────────
 pub use crate::notifications::{
     CreateNotificationChannelRequest, CreateNotificationRuleRequest, NotificationChannelResponse,
-    NotificationChannelType, NotificationDeliveryStatus, NotificationEventType,
-    NotificationLogResponse, NotificationRuleResponse, TestNotificationResponse,
-    UpdateNotificationChannelRequest, UpdateNotificationRuleRequest,
+    NotificationDeliveryStatus, NotificationEventType, NotificationLogResponse,
+    NotificationRuleResponse, TestNotificationResponse, UpdateNotificationChannelRequest,
+    UpdateNotificationRuleRequest,
 };
 
 // ── Common ───────────────────────────────────────────────────────────

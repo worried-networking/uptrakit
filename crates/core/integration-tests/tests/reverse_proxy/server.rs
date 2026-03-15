@@ -198,7 +198,6 @@ async fn build_state(
             db.clone(),
             Arc::clone(&plugin_ops),
             "https://localhost".to_string(),
-            settings.clone(),
         );
 
     let builder = AppState::builder()

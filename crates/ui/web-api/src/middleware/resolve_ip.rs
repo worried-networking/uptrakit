@@ -221,7 +221,6 @@ mod tests {
             db.clone(),
             Arc::clone(&plugin_ops),
             "https://localhost".to_string(),
-            settings.clone(),
         );
 
         Arc::new(AppState {

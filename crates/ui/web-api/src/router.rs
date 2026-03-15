@@ -156,8 +156,6 @@ use crate::AppState;
         crate::routes::notifications::update_rule,
         crate::routes::notifications::delete_rule,
         crate::routes::notifications::list_log,
-        crate::routes::settings_smtp::get_smtp_settings,
-        crate::routes::settings_smtp::update_smtp_settings,
         // System enrollment tokens
         crate::routes::system_enrollment_tokens::create_system_enrollment_token,
         crate::routes::system_enrollment_tokens::list_system_enrollment_tokens,
@@ -284,7 +282,6 @@ use crate::AppState;
             crate::routes::notifications::CreateNotificationChannelRequest,
             crate::routes::notifications::UpdateNotificationChannelRequest,
             crate::routes::notifications::NotificationChannelResponse,
-            crate::routes::notifications::NotificationChannelType,
             crate::routes::notifications::CreateNotificationRuleRequest,
             crate::routes::notifications::UpdateNotificationRuleRequest,
             crate::routes::notifications::NotificationRuleResponse,
@@ -292,8 +289,6 @@ use crate::AppState;
             crate::routes::notifications::NotificationLogResponse,
             crate::routes::notifications::NotificationDeliveryStatus,
             crate::routes::notifications::TestNotificationResponse,
-            crate::routes::settings_smtp::SmtpSettingsResponse,
-            crate::routes::settings_smtp::UpdateSmtpSettingsRequest,
             // System enrollment tokens
             crate::routes::system_enrollment_tokens::CreateSystemEnrollmentTokenRequest,
             crate::routes::system_enrollment_tokens::SystemEnrollmentTokenCreatedResponse,
@@ -666,11 +661,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             crate::routes::notifications::delete_rule
         ))
         .routes(routes!(crate::routes::notifications::list_log))
-        // SMTP settings
-        .routes(routes!(
-            crate::routes::settings_smtp::get_smtp_settings,
-            crate::routes::settings_smtp::update_smtp_settings
-        ))
         // System enrollment tokens
         .routes(routes!(
             crate::routes::system_enrollment_tokens::create_system_enrollment_token,

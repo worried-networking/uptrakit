@@ -181,7 +181,6 @@ pub(crate) async fn build_test_state(
         db.clone(),
         Arc::clone(&plugin_ops),
         "https://localhost".to_string(),
-        settings.clone(),
     );
 
     let state = Arc::new(AppState {

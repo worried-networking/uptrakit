@@ -50,7 +50,6 @@ pub mod settings_reset;
 pub mod system_services;
 pub use masked_url::MaskedUrl;
 pub mod settings_nats;
-pub mod settings_smtp;
 pub mod settings_zeroconf;
 pub mod software_items;
 pub mod system_alerts;
@@ -773,7 +772,6 @@ mod tests {
 
         // Notifications
         let _ = NotificationEventType::UpdateAvailable;
-        let _ = NotificationChannelType::Webhook;
         let _ = NotificationDeliveryStatus::Pending;
         let _: NotificationChannelResponse;
         let _: NotificationRuleResponse;
@@ -1061,20 +1059,6 @@ mod tests {
     }
 
     #[test]
-    fn notification_channel_type_serde_round_trip() {
-        use crate::notifications::NotificationChannelType;
-        let variants = [
-            NotificationChannelType::Webhook,
-            NotificationChannelType::Telegram,
-        ];
-        for ct in &variants {
-            let json = serde_json::to_string(ct).unwrap();
-            let deserialized: NotificationChannelType = serde_json::from_str(&json).unwrap();
-            assert_eq!(&deserialized, ct);
-        }
-    }
-
-    #[test]
     fn notification_delivery_status_serde_round_trip() {
         use crate::notifications::NotificationDeliveryStatus;
         let variants = [
@@ -1156,11 +1140,11 @@ mod tests {
 
     #[test]
     fn create_notification_channel_valid() {
-        use crate::notifications::{CreateNotificationChannelRequest, NotificationChannelType};
+        use crate::notifications::CreateNotificationChannelRequest;
         use crate::validation::Validate;
         let req = CreateNotificationChannelRequest {
             name: "My Webhook".to_string(),
-            channel_type: NotificationChannelType::Webhook,
+            channel_type: "webhook".to_string(),
             config: serde_json::json!({"url": "https://example.com/hook"}),
             enabled: true,
         };
@@ -1169,11 +1153,11 @@ mod tests {
 
     #[test]
     fn create_notification_channel_empty_name() {
-        use crate::notifications::{CreateNotificationChannelRequest, NotificationChannelType};
+        use crate::notifications::CreateNotificationChannelRequest;
         use crate::validation::Validate;
         let req = CreateNotificationChannelRequest {
             name: "".to_string(),
-            channel_type: NotificationChannelType::Webhook,
+            channel_type: "webhook".to_string(),
             config: serde_json::json!({}),
             enabled: true,
         };
@@ -1183,11 +1167,11 @@ mod tests {
 
     #[test]
     fn create_notification_channel_non_object_config() {
-        use crate::notifications::{CreateNotificationChannelRequest, NotificationChannelType};
+        use crate::notifications::CreateNotificationChannelRequest;
         use crate::validation::Validate;
         let req = CreateNotificationChannelRequest {
             name: "Test".to_string(),
-            channel_type: NotificationChannelType::Webhook,
+            channel_type: "webhook".to_string(),
             config: serde_json::json!("not an object"),
             enabled: true,
         };
