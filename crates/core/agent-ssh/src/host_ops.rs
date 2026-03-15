@@ -328,25 +328,6 @@ pub(crate) async fn find_host_by_machine_id(
         .context_to::<Error>()
 }
 
-/// Find SSH hosts by hostname, optionally narrowing by port.
-///
-/// Returns all matching hosts. When `port` is `Some`, only rows with that
-/// port value are returned. Returns an empty `Vec` if there are no matches.
-/// Used by the `sync` command to resolve an SSH address target to
-/// a local DB entry.
-pub(crate) async fn find_hosts_by_hostname(
-    db: &DatabaseConnection,
-    hostname: &str,
-    port: Option<u16>,
-) -> Result<Vec<Model>> {
-    use sea_orm::QueryFilter;
-    let mut query = Entity::find().filter(Column::Hostname.eq(hostname));
-    if let Some(p) = port {
-        query = query.filter(Column::Port.eq(i32::from(p)));
-    }
-    query.all(db).await.context_to::<Error>()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -722,95 +703,6 @@ mod tests {
             result.unwrap_err().current_context(),
             Error::HostNotFound(_)
         ));
-    }
-
-    // ── find_hosts_by_hostname tests ────────────────────────────────────────
-
-    #[tokio::test]
-    async fn find_hosts_by_hostname_returns_matching_host() {
-        let (_dir, db) = setup_db().await;
-
-        add_host(
-            &db,
-            add_params("myhost", "10.0.0.1", 22, "uptrakit", SshKeyType::Ed25519),
-        )
-        .await
-        .expect("add");
-
-        let results = find_hosts_by_hostname(&db, "10.0.0.1", None)
-            .await
-            .expect("find");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].name, "myhost");
-    }
-
-    #[tokio::test]
-    async fn find_hosts_by_hostname_with_port_filter() {
-        let (_dir, db) = setup_db().await;
-
-        add_host(
-            &db,
-            add_params(
-                "host-22",
-                "srv.example.com",
-                22,
-                "uptrakit",
-                SshKeyType::Ed25519,
-            ),
-        )
-        .await
-        .expect("add host-22");
-        add_host(
-            &db,
-            add_params(
-                "host-2222",
-                "srv.example.com",
-                2222,
-                "uptrakit",
-                SshKeyType::Ed25519,
-            ),
-        )
-        .await
-        .expect("add host-2222");
-
-        let results = find_hosts_by_hostname(&db, "srv.example.com", Some(2222))
-            .await
-            .expect("find");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].name, "host-2222");
-    }
-
-    #[tokio::test]
-    async fn find_hosts_by_hostname_no_match_returns_empty() {
-        let (_dir, db) = setup_db().await;
-
-        let results = find_hosts_by_hostname(&db, "nonexistent.example.com", None)
-            .await
-            .expect("find");
-        assert!(results.is_empty());
-    }
-
-    #[tokio::test]
-    async fn find_hosts_by_hostname_multiple_matches_without_port_filter() {
-        let (_dir, db) = setup_db().await;
-
-        add_host(
-            &db,
-            add_params("h1", "shared.host", 22, "u1", SshKeyType::Ed25519),
-        )
-        .await
-        .expect("add h1");
-        add_host(
-            &db,
-            add_params("h2", "shared.host", 2222, "u2", SshKeyType::Ed25519),
-        )
-        .await
-        .expect("add h2");
-
-        let results = find_hosts_by_hostname(&db, "shared.host", None)
-            .await
-            .expect("find");
-        assert_eq!(results.len(), 2);
     }
 
     // ── list_host_snapshots tests ────────────────────────────────────────────

@@ -1,13 +1,13 @@
 mod cli;
 mod client;
-mod commands;
 pub mod db;
 mod error;
 mod extension;
+mod host_cli;
 mod host_info;
 mod host_ops;
+mod operations;
 mod remote_exec;
-mod ssh_config;
 mod ssh_executor;
 mod ssh_key;
 mod ssh_pool;
@@ -779,7 +779,7 @@ impl SshAgentHandler {
                 state_dir: &state_dir,
                 private_key_der: private_key_der.as_deref(),
                 action_invoker: &action_invoker,
-                guest_bootstrap: &crate::commands::bootstrap_proxmox::NoopGuestBootstrapExecutor,
+                guest_bootstrap: &crate::operations::bootstrap_proxmox::NoopGuestBootstrapExecutor,
             };
             for plugin in infra_plugins.iter() {
                 if let Some(report) = plugin.as_host_report()
@@ -1338,7 +1338,7 @@ async fn main() {
             }
         }
 
-        if let Err(e) = commands::host::run(&state_dir, command).await {
+        if let Err(e) = host_cli::run(&state_dir, command).await {
             eprintln!("error: {e}");
             std::process::exit(1);
         }

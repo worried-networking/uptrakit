@@ -23,10 +23,10 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{InfraActionInvoker, Infra
 use uptrakit_service_sdk::ControllerConnection;
 use uptrakit_shared_types::Permission;
 
-use crate::commands::bootstrap::{self, BootstrapParams};
-use crate::commands::bootstrap_proxmox::AgentGuestBootstrapExecutor;
-use crate::commands::sync;
 use crate::host_ops;
+use crate::operations::bootstrap::{self, BootstrapParams};
+use crate::operations::bootstrap_proxmox::AgentGuestBootstrapExecutor;
+use crate::operations::sync;
 use crate::ssh_target::SshTarget;
 
 /// Extension ID for the SSH host management extension.

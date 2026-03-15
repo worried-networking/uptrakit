@@ -16,18 +16,15 @@ reset-data = []
 [dependencies]
 base64 = { workspace = true }
 clap = { workspace = true }
-dirs = { workspace = true }
 futures-util = { workspace = true }
 rootcause = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-rpassword = { workspace = true }
 russh = { workspace = true }
 ssh-key = { workspace = true, features = ["ed25519", "rand_core", "std"] }
 strum = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 rustls = { workspace = true }
-ssh2-config = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "fs", "sync", "time"] }
