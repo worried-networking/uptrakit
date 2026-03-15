@@ -943,41 +943,55 @@ async fn fail_in_progress_on_reconnect(
     let reason = "Update interrupted: agent restarted".to_string();
 
     for record in &records {
-        tracing::warn!(
-            update_id = %record.id,
-            host_id = %record.host_id,
-            "in-progress update marked failed due to agent restart"
-        );
-
-        state
-            .update_output_broadcaster
-            .send_completed(record.id, "failed".to_string(), Some(reason.clone()))
-            .await;
-
-        state
-            .event_broadcaster
-            .send(
-                tenant_id,
-                AdminEvent::UpdateCompleted {
-                    update_history_id: record.id,
-                    host_id: record.host_id,
-                    software_item_id: record.software_item_id,
-                    status: "failed".to_string(),
-                },
-            )
-            .await;
-
-        if let Some(batch_id) = record.batch_id {
-            dispatch_next_batch_update(state, service_id, batch_id, record.host_id).await;
-        } else {
-            dispatch_next_queued_update(state, service_id, record.host_id).await;
-        }
+        notify_failed_reconnect_update(state, service_id, tenant_id, record, &reason).await;
     }
 
     state
         .notification_service
         .push_software_states_for_tenant(state.db(), tenant_id)
         .await;
+}
+
+/// Notify all subscribers about a single update that was marked failed on reconnect.
+///
+/// Sends the output-stream completion, broadcasts the SSE event, and dispatches
+/// the next update in the queue (batch or standalone).
+async fn notify_failed_reconnect_update(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    tenant_id: uuid::Uuid,
+    record: &uptrakit_shared_db::entity::update_history::Model,
+    reason: &str,
+) {
+    tracing::warn!(
+        update_id = %record.id,
+        host_id = %record.host_id,
+        "in-progress update marked failed due to agent restart"
+    );
+
+    state
+        .update_output_broadcaster
+        .send_completed(record.id, "failed".to_string(), Some(reason.to_string()))
+        .await;
+
+    state
+        .event_broadcaster
+        .send(
+            tenant_id,
+            AdminEvent::UpdateCompleted {
+                update_history_id: record.id,
+                host_id: record.host_id,
+                software_item_id: record.software_item_id,
+                status: "failed".to_string(),
+            },
+        )
+        .await;
+
+    if let Some(batch_id) = record.batch_id {
+        dispatch_next_batch_update(state, service_id, batch_id, record.host_id).await;
+    } else {
+        dispatch_next_queued_update(state, service_id, record.host_id).await;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1013,54 +1027,7 @@ async fn dispatch_next_batch_update(
     .await
     {
         Ok(Some(completion)) => {
-            use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
-            use uptrakit_shared_types::BatchStatus;
-
-            // Emit final progress summary via broadcaster.
-            emit_batch_progress_event(
-                state,
-                batch_id,
-                crate::batch_progress_broadcaster::BatchProgressEvent::Progress {
-                    completed: completion.completed_count,
-                    failed: completion.failed_count,
-                    pending: 0,
-                    total: completion.total_count,
-                },
-            )
-            .await;
-
-            // Send batch completed event via broadcaster (removes the channel).
-            state
-                .batch_progress_broadcaster
-                .send_batch_completed(batch_id, completion.status.as_str().to_string())
-                .await;
-
-            let details = match completion.status {
-                BatchStatus::Completed => NotificationEventDetails::BatchUpdateCompleted {
-                    batch_id: completion.batch_id,
-                    total_count: completion.total_count,
-                    completed_count: completion.completed_count,
-                },
-                BatchStatus::PartiallyCompleted => {
-                    NotificationEventDetails::BatchUpdatePartiallyCompleted {
-                        batch_id: completion.batch_id,
-                        total_count: completion.total_count,
-                        completed_count: completion.completed_count,
-                        failed_count: completion.failed_count,
-                    }
-                }
-                _ => return,
-            };
-
-            state.notification_dispatcher.dispatch(NotificationEvent {
-                tenant_id: completion.tenant_id,
-                host_id: None,
-                host_name: None,
-                software_item_id: None,
-                software_item_name: None,
-                plugin_type: None,
-                details,
-            });
+            handle_batch_completion(state, batch_id, &completion).await;
         }
         Ok(None) => {
             // Batch still in progress — emit updated progress summary.
@@ -1075,6 +1042,62 @@ async fn dispatch_next_batch_update(
             );
         }
     }
+}
+
+/// Handle a completed batch: emit progress events, send completion, and
+/// dispatch a notification if the batch finished or partially finished.
+async fn handle_batch_completion(
+    state: &Arc<AppState>,
+    batch_id: uuid::Uuid,
+    completion: &crate::queries::update_batches::BatchCompletionInfo,
+) {
+    use uptrakit_shared_types::BatchStatus;
+
+    // Emit final progress summary via broadcaster.
+    emit_batch_progress_event(
+        state,
+        batch_id,
+        crate::batch_progress_broadcaster::BatchProgressEvent::Progress {
+            completed: completion.completed_count,
+            failed: completion.failed_count,
+            pending: 0,
+            total: completion.total_count,
+        },
+    )
+    .await;
+
+    // Send batch completed event via broadcaster (removes the channel).
+    state
+        .batch_progress_broadcaster
+        .send_batch_completed(batch_id, completion.status.as_str().to_string())
+        .await;
+
+    let details = match completion.status {
+        BatchStatus::Completed => NotificationEventDetails::BatchUpdateCompleted {
+            batch_id: completion.batch_id,
+            total_count: completion.total_count,
+            completed_count: completion.completed_count,
+        },
+        BatchStatus::PartiallyCompleted => {
+            NotificationEventDetails::BatchUpdatePartiallyCompleted {
+                batch_id: completion.batch_id,
+                total_count: completion.total_count,
+                completed_count: completion.completed_count,
+                failed_count: completion.failed_count,
+            }
+        }
+        _ => return,
+    };
+
+    state.notification_dispatcher.dispatch(NotificationEvent {
+        tenant_id: completion.tenant_id,
+        host_id: None,
+        host_name: None,
+        software_item_id: None,
+        software_item_name: None,
+        plugin_type: None,
+        details,
+    });
 }
 
 /// Dispatch the next queued update for the given host after a non-batch
