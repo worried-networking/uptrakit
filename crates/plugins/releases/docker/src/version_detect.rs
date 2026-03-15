@@ -7,6 +7,104 @@ use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, PluginError, Version,
 };
 
+/// The locally installed version and display version for a Docker image.
+#[derive(Clone, Debug)]
+pub(crate) struct ResolvedImageVersion {
+    /// Canonical version: platform manifest digest (when platform configured) or image-index digest.
+    pub version: String,
+    /// Human-readable display version from the manifest's `created_at`, or `None`.
+    pub display_version: Option<String>,
+}
+
+impl DockerPlugin {
+    /// Inspect the locally installed image and optionally resolve the
+    /// platform-specific manifest from the registry.
+    ///
+    /// `platform` — when `Some`, fetches the platform manifest digest and
+    /// `created_at` to produce a human-readable display version. When `None`,
+    /// returns the image-index digest from `RepoDigests` with `display_version = None`.
+    ///
+    /// Return values:
+    /// - `Ok(None)` — image not present locally.
+    /// - `Ok(Some(resolved))` — installed; `display_version` is `None` when
+    ///   `platform` is `None` or a transient registry failure occurs.
+    /// - `Err(PlatformNotAvailable)` — `platform` was `Some` but absent from
+    ///   the manifest list (definitive; caller must surface this as an error).
+    /// - `Err(...)` — Docker daemon error.
+    pub(crate) async fn resolve_image_info(
+        &self,
+        ir: &crate::image_ref::ImageRef,
+        tag: &str,
+        docker_client: std::sync::Arc<dyn crate::docker_client::DockerClient>,
+        platform: Option<&str>,
+    ) -> uptrakit_plugin_infrastructure_core::Result<Option<ResolvedImageVersion>> {
+        use uptrakit_plugin_infrastructure_core::PluginError;
+
+        let full_ref = format!("{}:{tag}", ir.image);
+        let Some(digest_info) = docker_client
+            .inspect_image(&full_ref)
+            .await
+            .map_err(|e| PluginError::PluginInternal(e.to_string()))?
+        else {
+            return Ok(None);
+        };
+
+        tracing::debug!(
+            digest = %digest_info.digest,
+            image = %ir.image,
+            "detected installed digest"
+        );
+
+        if let Some(p) = platform {
+            match self
+                .registry_client
+                .get_platform_manifest_digest(&ir.registry, &ir.repository, tag, p)
+                .await
+            {
+                Ok(Some(info)) => {
+                    tracing::debug!(
+                        platform = %p,
+                        digest = %info.digest,
+                        image = %ir.image,
+                        "resolved platform-specific digest"
+                    );
+                    return Ok(Some(ResolvedImageVersion {
+                        version: info.digest.clone(),
+                        display_version: info
+                            .created_at
+                            .map(crate::registry::format_display_version),
+                    }));
+                }
+                Ok(None) => {
+                    return Err(PluginError::PluginInternal(
+                        crate::error::DockerError::PlatformNotAvailable {
+                            platform: p.to_string(),
+                            image: ir.image.clone(),
+                            tag: tag.to_string(),
+                        }
+                        .to_string(),
+                    )
+                    .into());
+                }
+                Err(e) => {
+                    // Transient registry failure — fall back to the image index digest.
+                    tracing::warn!(
+                        error = %e,
+                        image = %ir.image,
+                        "failed to fetch platform manifest digest; \
+                         falling back to image index digest"
+                    );
+                }
+            }
+        }
+
+        Ok(Some(ResolvedImageVersion {
+            version: digest_info.digest,
+            display_version: None,
+        }))
+    }
+}
+
 #[async_trait]
 impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin {
     #[tracing::instrument(skip_all)]
@@ -22,85 +120,13 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin
                 })?;
 
         let tag = self.config.resolved_tracked_tag(&ir.tag);
-        let full_ref = format!("{}:{tag}", ir.image);
-
         let client = Arc::clone(&*self.docker_client.lock());
-        match client.inspect_image(&full_ref).await {
-            Ok(Some(digest_info)) => {
-                tracing::debug!(
-                    digest = %digest_info.digest,
-                    image = %ir.image,
-                    "detected installed digest"
-                );
-
-                // When a platform is **explicitly** configured, fetch the
-                // platform-specific manifest digest so the comparison with
-                // `fetch_releases` (which also uses the configured platform) is
-                // apple-to-apple.
-                //
-                // When no platform is configured, `fetch_releases` returns the
-                // image-index digest (the manifest-list sha256). `digest_info.digest`
-                // comes from Docker's `RepoDigests`, which stores the same
-                // image-index digest that the registry returned during `docker pull`.
-                // Returning it directly keeps installed_version and latest_version
-                // in the same digest namespace and avoids a spurious "update
-                // available" that would otherwise appear because a per-platform
-                // manifest digest can never equal an image-index digest.
-                //
-                // Do NOT auto-detect the platform from the local image's os/arch
-                // metadata — doing so causes detect_installed_version to return a
-                // platform manifest digest while fetch_releases returns the index
-                // digest, which permanently appears as an outstanding update even
-                // when the image is already up to date.
-                if let Some(ref p) = self.config.platform {
-                    match self
-                        .registry_client
-                        .get_platform_manifest_digest(&ir.registry, &ir.repository, tag, p)
-                        .await
-                    {
-                        Ok(Some(info)) => {
-                            tracing::debug!(
-                                platform = %p,
-                                digest = %info.digest,
-                                image = %ir.image,
-                                "resolved platform-specific digest"
-                            );
-                            return Ok(Some(Version::new(&info.digest)));
-                        }
-                        Ok(None) => {
-                            // Platform removed from the manifest list.
-                            return Err(
-                                uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(
-                                    crate::error::DockerError::PlatformNotAvailable {
-                                        platform: p.clone(),
-                                        image: ir.image.clone(),
-                                        tag: tag.to_string(),
-                                    }
-                                    .to_string(),
-                                )
-                                .into(),
-                            );
-                        }
-                        Err(e) => {
-                            // Transient registry failure — fall back to the image index digest
-                            // so that a network hiccup does not block version detection.
-                            tracing::warn!(
-                                error = %e,
-                                image = %ir.image,
-                                "failed to fetch platform manifest digest; \
-                                 falling back to image index digest"
-                            );
-                        }
-                    }
-                }
-
-                Ok(Some(Version::new(&digest_info.digest)))
-            }
-            Ok(None) => Ok(None),
-            Err(e) => Err(
-                uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(e.to_string())
-                    .into(),
-            ),
+        match self
+            .resolve_image_info(&ir, tag, client, self.config.platform.as_deref())
+            .await?
+        {
+            Some(resolved) => Ok(Some(Version::new(&resolved.version))),
+            None => Ok(None),
         }
     }
 
@@ -116,36 +142,32 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin
     ) -> uptrakit_plugin_infrastructure_core::Result<Vec<BatchDetectResult>> {
         use std::collections::HashMap;
 
-        // Daemon inspect cache: "image:tag" → Result<Option<LocalImageDigest>, String>.
-        let mut inspect_cache: HashMap<
+        // Resolution cache: "image:tag::platform" → Ok(Some(ResolvedImageVersion)) | Ok(None) | Err(String)
+        let mut resolution_cache: HashMap<
             String,
-            std::result::Result<Option<crate::docker_client::LocalImageDigest>, String>,
+            std::result::Result<Option<ResolvedImageVersion>, String>,
         > = HashMap::new();
 
-        // Platform digest cache: "image:tag::platform" → Option<ManifestInfo>.
-        let mut platform_cache: HashMap<String, Option<crate::registry::ManifestInfo>> =
-            HashMap::new();
-
-        // Populate inspect cache.
+        // Pre-populate cache for all unique (image, tag, platform) combos.
         for item in items {
             let ir: ImageRef = match item.package_identifier.parse::<ImageRef>() {
                 Ok(r) => r,
                 Err(_) => continue,
             };
             let tag = self.config.resolved_tracked_tag(&ir.tag);
-            let resolved = format!("{}:{tag}", ir.image);
+            let platform = self.config.platform.as_deref();
+            let cache_key = format!("{}:{}::{}", ir.image, tag, platform.unwrap_or(""));
 
-            if inspect_cache.contains_key(&resolved) {
+            if resolution_cache.contains_key(&cache_key) {
                 continue;
             }
 
             let client = Arc::clone(&*self.docker_client.lock());
-            let outcome = match client.inspect_image(&resolved).await {
-                Ok(Some(d)) => Ok(Some(d)),
-                Ok(None) => Ok(None),
+            let outcome = match self.resolve_image_info(&ir, tag, client, platform).await {
+                Ok(r) => Ok(r),
                 Err(e) => Err(e.to_string()),
             };
-            inspect_cache.insert(resolved, outcome);
+            resolution_cache.insert(cache_key, outcome);
         }
 
         let mut results = Vec::with_capacity(items.len());
@@ -161,60 +183,18 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin
                 }
             };
             let tag = self.config.resolved_tracked_tag(&ir.tag);
-            let resolved = format!("{}:{tag}", ir.image);
+            let platform = self.config.platform.as_deref();
+            let cache_key = format!("{}:{}::{}", ir.image, tag, platform.unwrap_or(""));
 
-            match inspect_cache.get(&resolved) {
-                Some(Ok(Some(digest_info))) => {
-                    // See the comment in `detect_installed_version` for the
-                    // rationale: only use the configured platform, never
-                    // auto-detect from the local image's os/arch fields.
-                    if let Some(ref p) = self.config.platform {
-                        let cache_key = format!("{resolved}::{p}");
-                        let platform_info = match platform_cache.entry(cache_key) {
-                            std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
-                            std::collections::hash_map::Entry::Vacant(e) => {
-                                let result = self
-                                    .registry_client
-                                    .get_platform_manifest_digest(
-                                        &ir.registry,
-                                        &ir.repository,
-                                        tag,
-                                        p,
-                                    )
-                                    .await
-                                    .ok()
-                                    .flatten();
-                                e.insert(result.clone());
-                                result
-                            }
-                        };
-
-                        match platform_info {
-                            Some(info) => {
-                                let display_version =
-                                    info.created_at.map(crate::registry::format_display_version);
-                                let mut r = BatchDetectResult::found(
-                                    item.package_identifier.clone(),
-                                    Version::new(&info.digest),
-                                );
-                                r.display_version = display_version;
-                                results.push(r);
-                                continue;
-                            }
-                            None => {
-                                // Platform not in manifest list — treat as not found.
-                                results.push(BatchDetectResult::not_found(
-                                    item.package_identifier.clone(),
-                                ));
-                                continue;
-                            }
-                        }
-                    }
-
-                    results.push(BatchDetectResult::found(
+            match resolution_cache.get(&cache_key) {
+                Some(Ok(Some(resolved))) => {
+                    let display_version = resolved.display_version.clone();
+                    let mut r = BatchDetectResult::found(
                         item.package_identifier.clone(),
-                        Version::new(&digest_info.digest),
-                    ));
+                        Version::new(&resolved.version),
+                    );
+                    r.display_version = display_version;
+                    results.push(r);
                 }
                 Some(Ok(None)) | None => {
                     results.push(BatchDetectResult::not_found(

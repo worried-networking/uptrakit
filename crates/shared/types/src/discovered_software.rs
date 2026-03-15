@@ -78,6 +78,10 @@ pub struct DiscoveredSoftware {
     /// first creation. Default `false` — item starts unfeatured.
     #[serde(default)]
     pub featured: bool,
+    /// Plugin-provided display version for the installed version (e.g. Docker image publish date).
+    /// `None` when the plugin cannot determine a display version during discovery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_display_version: Option<String>,
 }
 
 #[cfg(test)]
@@ -96,6 +100,7 @@ mod tests {
             qualifier: None,
             plugin_package_identifier: None,
             featured: false,
+            installed_display_version: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         let deserialized: DiscoveredSoftware = serde_json::from_str(&json).expect("deserialize");
@@ -113,6 +118,7 @@ mod tests {
             qualifier: None,
             plugin_package_identifier: None,
             featured: false,
+            installed_display_version: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(!json.contains("extra"));
@@ -132,6 +138,7 @@ mod tests {
             qualifier: None,
             plugin_package_identifier: None,
             featured: false,
+            installed_display_version: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(!json.contains("targets"));
@@ -156,6 +163,7 @@ mod tests {
             qualifier: None,
             plugin_package_identifier: None,
             featured: true,
+            installed_display_version: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(json.contains("targets"));
@@ -189,6 +197,7 @@ mod tests {
             qualifier: Some("web-container".to_string()),
             plugin_package_identifier: None,
             featured: false,
+            installed_display_version: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(json.contains("qualifier"));
@@ -208,6 +217,7 @@ mod tests {
             qualifier: None,
             plugin_package_identifier: None,
             featured: false,
+            installed_display_version: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(!json.contains("qualifier"));
@@ -225,6 +235,7 @@ mod tests {
             qualifier: Some("app-container".to_string()),
             plugin_package_identifier: Some("my-app:2.0.0".to_string()),
             featured: false,
+            installed_display_version: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(json.contains("plugin_package_identifier"));
@@ -247,6 +258,7 @@ mod tests {
             qualifier: None,
             plugin_package_identifier: None,
             featured: true,
+            installed_display_version: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(json.contains("\"featured\":true"));

@@ -37,6 +37,10 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
         let mut digest_cache: HashMap<String, Option<crate::docker_client::LocalImageDigest>> =
             HashMap::new();
 
+        // Cache for display versions fetched from the registry during discovery.
+        // Key: `ir.full_ref`. Value: `Option<String>` (None = not available or no platform).
+        let mut display_cache: HashMap<String, Option<String>> = HashMap::new();
+
         let mut discoveries = Vec::new();
 
         for container in containers {
@@ -133,6 +137,43 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
             );
             let config_override = platform.as_deref().map(|p| json!({"platform": p}));
 
+            // Fetch the display version from the registry (fault-tolerant: errors → None).
+            let display_version = match display_cache.entry(ir.full_ref.clone()) {
+                std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    let dv = if let Some(ref p) = platform {
+                        match self
+                            .registry_client
+                            .get_platform_manifest_digest(&ir.registry, &ir.repository, &ir.tag, p)
+                            .await
+                        {
+                            Ok(Some(info)) => {
+                                info.created_at.map(crate::registry::format_display_version)
+                            }
+                            Ok(None) | Err(_) => None,
+                        }
+                    } else {
+                        match self
+                            .registry_client
+                            .get_manifest_info(&ir.registry, &ir.repository, &ir.tag)
+                            .await
+                        {
+                            Ok(info) => {
+                                info.created_at.map(crate::registry::format_display_version)
+                            }
+                            Err(_) => None,
+                        }
+                    };
+                    tracing::debug!(
+                        image = %ir.full_ref,
+                        display_version = ?dv,
+                        "fetched display version during discovery"
+                    );
+                    e.insert(dv.clone());
+                    dv
+                }
+            };
+
             let targets = vec![DiscoveryTarget {
                 plugin_type: PluginType::ReleasesDocker,
                 plugin_config: json!({}),
@@ -156,6 +197,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
                 qualifier: Some(container_name.clone()),
                 plugin_package_identifier: Some(plugin_pkg_id),
                 featured: true,
+                installed_display_version: display_version,
             });
         }
 
