@@ -116,10 +116,18 @@ pub struct SoftwareItemResponse {
     /// query filter is used; `None` otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
+    /// Plugin-provided display version for the installed version. Present only
+    /// when the `host_id` query filter is used and the plugin provides one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_display_version: Option<String>,
     /// Latest known version derived as the maximum across all hosts'
     /// `latest_version` values. `None` when no host has a known latest version yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_version: Option<String>,
+    /// Rich release metadata (notes, date, assets) from the latest fetch. Present
+    /// only when the `host_id` query filter is used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_release_metadata: Option<serde_json::Value>,
     /// `true` when at least one assigned host has an `installed_version` that differs
     /// from its per-host `latest_version` (and both values are known). Uses string
     /// equality — no semver parsing — because version formats are plugin-specific.
@@ -637,7 +645,9 @@ mod tests {
             last_checked_at: Some(datetime!(2025-06-01 12:00:00 UTC)),
             host_count: 5,
             installed_version: Some("8.9.0".to_string()),
+            installed_display_version: None,
             latest_version: Some("8.10.0".to_string()),
+            latest_release_metadata: None,
             update_available: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-06-01 12:00:00 UTC),
@@ -667,7 +677,9 @@ mod tests {
             last_checked_at: None,
             host_count: 1,
             installed_version: None,
+            installed_display_version: None,
             latest_version: None,
+            latest_release_metadata: None,
             update_available: false,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
@@ -697,7 +709,9 @@ mod tests {
             last_checked_at: None,
             host_count: 0,
             installed_version: None,
+            installed_display_version: None,
             latest_version: None,
+            latest_release_metadata: None,
             update_available: false,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),

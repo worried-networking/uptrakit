@@ -79,12 +79,15 @@ struct ItemPluginType {
 
 // --- Private helpers ---
 
+#[allow(clippy::too_many_arguments)]
 fn build_list_response(
     item: &software_item::Model,
     plugins: Vec<String>,
     host_count: u64,
     installed_version: Option<String>,
+    installed_display_version: Option<String>,
     latest_version: Option<String>,
+    latest_release_metadata: Option<serde_json::Value>,
     update_available: bool,
 ) -> SoftwareItemResponse {
     SoftwareItemResponse {
@@ -95,7 +98,9 @@ fn build_list_response(
         last_checked_at: item.last_checked_at,
         host_count,
         installed_version,
+        installed_display_version,
         latest_version,
+        latest_release_metadata,
         update_available,
         created_at: item.created_at,
         updated_at: item.updated_at,
@@ -591,7 +596,16 @@ pub async fn create_software_item(
 
     txn.commit().await.context_to()?;
 
-    Ok(build_list_response(&inserted, vec![], 0, None, None, false))
+    Ok(build_list_response(
+        &inserted,
+        vec![],
+        0,
+        None,
+        None,
+        None,
+        None,
+        false,
+    ))
 }
 
 #[tracing::instrument(skip_all)]
@@ -762,6 +776,8 @@ pub async fn list_software_items(
         software_item_id: Uuid,
         installed_version: Option<String>,
         latest_version: Option<String>,
+        installed_display_version: Option<String>,
+        latest_release_metadata: Option<serde_json::Value>,
     }
 
     let mut installed_query = HostSoftwareItem::find()
@@ -769,6 +785,8 @@ pub async fn list_software_items(
         .column(host_software_item::Column::SoftwareItemId)
         .column(host_software_item::Column::InstalledVersion)
         .column(host_software_item::Column::LatestVersion)
+        .column(host_software_item::Column::InstalledDisplayVersion)
+        .column(host_software_item::Column::LatestReleaseMetadata)
         .join(
             sea_orm::JoinType::InnerJoin,
             host_software_item::Relation::Host.def(),
@@ -786,13 +804,24 @@ pub async fn list_software_items(
         .await
         .context_to()?;
 
-    type VersionPair = (Option<String>, Option<String>);
+    // (installed_version, latest_version, installed_display_version, latest_release_metadata)
+    type VersionPair = (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<serde_json::Value>,
+    );
     let mut installed_map: HashMap<Uuid, Vec<VersionPair>> = HashMap::new();
     for row in installed_rows {
         installed_map
             .entry(row.software_item_id)
             .or_default()
-            .push((row.installed_version, row.latest_version));
+            .push((
+                row.installed_version,
+                row.latest_version,
+                row.installed_display_version,
+                row.latest_release_metadata,
+            ));
     }
 
     let host_id_filter = params.host_id;
@@ -808,24 +837,28 @@ pub async fn list_software_items(
                 .map(|pairs| {
                     pairs
                         .iter()
-                        .any(|(iv, lv)| host_update_available(iv.as_deref(), lv.as_deref()))
+                        .any(|(iv, lv, _, _)| host_update_available(iv.as_deref(), lv.as_deref()))
                 })
                 .unwrap_or(false);
-            // When filtered by host_id, expose the per-host installed version.
-            let installed_version = if host_id_filter.is_some() {
-                installed_map
-                    .get(&item.id)
-                    .and_then(|pairs| pairs.first())
-                    .and_then(|(iv, _)| iv.clone())
-            } else {
-                None
-            };
+            // When filtered by host_id, expose the per-host installed version and extra fields.
+            let (installed_version, installed_display_version, latest_release_metadata) =
+                if host_id_filter.is_some() {
+                    installed_map
+                        .get(&item.id)
+                        .and_then(|pairs| pairs.first())
+                        .map(|(iv, _lv, idv, lrm)| (iv.clone(), idv.clone(), lrm.clone()))
+                        .unwrap_or((None, None, None))
+                } else {
+                    (None, None, None)
+                };
             build_list_response(
                 item,
                 plugins,
                 host_count,
                 installed_version,
+                installed_display_version,
                 latest_version,
+                latest_release_metadata,
                 update_available,
             )
         })
@@ -944,7 +977,9 @@ pub async fn update_software_item(
         plugins,
         host_count,
         None,
+        None,
         latest_version,
+        None,
         update_available,
     ))
 }
@@ -1420,7 +1455,9 @@ mod tests {
             vec!["releases_github".to_string()],
             3,
             None,
+            None,
             Some("22.0.0".to_string()),
+            None,
             true,
         );
 
@@ -1448,7 +1485,7 @@ mod tests {
             deactivated_at: None,
         };
 
-        let resp = build_list_response(&item, vec![], 0, None, None, false);
+        let resp = build_list_response(&item, vec![], 0, None, None, None, None, false);
 
         assert!(!resp.update_available);
         assert!(resp.installed_version.is_none());
@@ -1475,7 +1512,9 @@ mod tests {
             vec!["package_manager_apt".to_string()],
             1,
             Some("1.24.0".to_string()),
+            None,
             Some("1.26.0".to_string()),
+            None,
             true,
         );
 
@@ -1576,7 +1615,7 @@ mod tests {
             deactivated_at: None,
         };
 
-        let resp = build_list_response(&item, vec![], 0, None, None, false);
+        let resp = build_list_response(&item, vec![], 0, None, None, None, None, false);
 
         assert!(!resp.featured);
         assert!(resp.last_checked_at.is_none());
