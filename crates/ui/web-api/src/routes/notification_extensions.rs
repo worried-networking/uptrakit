@@ -22,6 +22,7 @@ use crate::middleware::tenant_context::TenantContext;
 pub async fn handle(
     state: &Arc<AppState>,
     tenant_ctx: &TenantContext,
+    caller_user_id: uuid::Uuid,
     extension_id: &str,
     action_id: &str,
     params: serde_json::Value,
@@ -39,7 +40,7 @@ pub async fn handle(
         "save_global_smtp" => save_global_smtp_settings(state, &params).await,
         "get_global_telegram" => get_global_telegram_settings(state).await,
         "save_global_telegram" => save_global_telegram_settings(state, &params).await,
-        "test_global_smtp_email" => test_global_smtp_email(state, &params).await,
+        "test_global_smtp_email" => test_global_smtp_email(state, caller_user_id).await,
         _ => error_response_with_code(StatusCode::NOT_FOUND, "Unknown action", "not_found"),
     }
 }
@@ -154,6 +155,7 @@ async fn get_smtp_settings(state: &Arc<AppState>, _tenant_ctx: &TenantContext) -
         "has_password": smtp.password.is_some(),
         "from_address": smtp.from_address.as_deref().unwrap_or(""),
         "from_name": smtp.from_name.as_deref().unwrap_or(""),
+        "helo_host": smtp.helo_host.as_deref().unwrap_or(""),
         "tls_mode": smtp.tls_mode,
         "effective_host": smtp.host.as_ref().or(global.host.as_ref()).cloned().unwrap_or_default(),
         "effective_from_address": smtp.from_address.as_ref().or(global.from_address.as_ref()).cloned().unwrap_or_default(),
@@ -303,6 +305,21 @@ async fn save_smtp_settings(
         smtp.tls_mode = tls_mode.to_string();
     }
 
+    if let Some(helo_host) = params.get("helo_host").and_then(|v| v.as_str()) {
+        if let Err(e) = upsert_setting(
+            state.db(),
+            tenant_id,
+            SettingKey::SmtpHeloHost,
+            serde_json::json!(helo_host),
+        )
+        .await
+        {
+            tracing::error!("Failed to save smtp.helo_host: {e:?}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        smtp.helo_host = Some(helo_host.to_string()).filter(|h| !h.is_empty());
+    }
+
     state.settings.set_smtp(smtp.clone()).await;
 
     let response = serde_json::json!({
@@ -312,6 +329,7 @@ async fn save_smtp_settings(
         "has_password": smtp.password.is_some(),
         "from_address": smtp.from_address.as_deref().unwrap_or(""),
         "from_name": smtp.from_name.as_deref().unwrap_or(""),
+        "helo_host": smtp.helo_host.as_deref().unwrap_or(""),
         "tls_mode": smtp.tls_mode,
     });
 
@@ -328,6 +346,7 @@ async fn get_global_smtp_settings(state: &Arc<AppState>) -> Response {
         "has_password": smtp.password.is_some(),
         "from_address": smtp.from_address.as_deref().unwrap_or(""),
         "from_name": smtp.from_name.as_deref().unwrap_or(""),
+        "helo_host": smtp.helo_host.as_deref().unwrap_or(""),
         "tls_mode": smtp.tls_mode,
     });
     (StatusCode::OK, Json(response)).into_response()
@@ -457,6 +476,20 @@ async fn save_global_smtp_settings(state: &Arc<AppState>, params: &serde_json::V
         smtp.tls_mode = tls_mode.to_string();
     }
 
+    if let Some(helo_host) = params.get("helo_host").and_then(|v| v.as_str()) {
+        if let Err(e) = upsert_global_setting(
+            state.db(),
+            SettingKey::GlobalSmtpHeloHost,
+            serde_json::json!(helo_host),
+        )
+        .await
+        {
+            tracing::error!("Failed to save global_smtp.helo_host: {e:?}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        smtp.helo_host = Some(helo_host.to_string()).filter(|h| !h.is_empty());
+    }
+
     state.settings.set_global_smtp(smtp.clone()).await;
 
     let response = serde_json::json!({
@@ -466,6 +499,7 @@ async fn save_global_smtp_settings(state: &Arc<AppState>, params: &serde_json::V
         "has_password": smtp.password.is_some(),
         "from_address": smtp.from_address.as_deref().unwrap_or(""),
         "from_name": smtp.from_name.as_deref().unwrap_or(""),
+        "helo_host": smtp.helo_host.as_deref().unwrap_or(""),
         "tls_mode": smtp.tls_mode,
     });
 
@@ -548,93 +582,88 @@ async fn save_global_telegram_settings(
 }
 
 /// Send a test email using the global SMTP defaults.
-async fn test_global_smtp_email(
-    // Only used by the `#[cfg(feature = "notifications-email")]` path below.
-    // Cannot be removed: caller passes it unconditionally via `handle_extension_action`.
-    #[allow(unused_variables)] state: &Arc<AppState>,
-    // Only used by the `#[cfg(feature = "notifications-email")]` path below.
-    // Cannot be removed: caller passes it unconditionally via `handle_extension_action`.
-    #[allow(unused_variables)] params: &serde_json::Value,
-) -> Response {
-    #[cfg(feature = "notifications-email")]
-    {
-        let to_address = match params
-            .get("to_address")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-        {
-            Some(addr) => addr.to_string(),
-            None => {
-                return error_response(StatusCode::BAD_REQUEST, "to_address is required");
-            }
-        };
+///
+/// The recipient address is derived from the calling user's profile email — no
+/// separate `to_address` input is required.
+#[cfg(feature = "notifications-email")]
+async fn test_global_smtp_email(state: &Arc<AppState>, caller_user_id: uuid::Uuid) -> Response {
+    use sea_orm::EntityTrait;
+    use uptrakit_shared_db::entity::prelude::User;
 
-        let global_smtp = state.settings.global_smtp();
-        let empty_smtp = crate::settings::SmtpSettingsSnapshot::default();
+    let user = match User::find_by_id(caller_user_id).one(state.db()).await {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            return error_response(StatusCode::UNAUTHORIZED, "User not found");
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "failed to load user for test email");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
-        if !global_smtp.is_configured() {
+    let to_address = user.email.expose_email().to_string();
+
+    let global_smtp = state.settings.global_smtp();
+    let empty_smtp = crate::settings::SmtpSettingsSnapshot::default();
+
+    if !global_smtp.is_configured() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "Global SMTP is not configured. Set SMTP host and from address before sending a test email.",
+        );
+    }
+
+    let config = crate::notifications::dispatcher::merge_smtp_into_config_pub(
+        &global_smtp,
+        &empty_smtp,
+        serde_json::json!({ "to_addresses": [to_address] }),
+    );
+
+    let email_plugin = match state.plugin_ops.notification_transport("email") {
+        Some(plugin) => plugin,
+        None => {
             return error_response(
-                StatusCode::BAD_REQUEST,
-                "Global SMTP is not configured. Set SMTP host and from address before sending a test email.",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Email plugin not available",
             );
         }
+    };
+    let transport = match email_plugin.as_notification_transport() {
+        Some(t) => t,
+        None => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Email plugin does not support delivery",
+            );
+        }
+    };
 
-        let config = crate::notifications::dispatcher::merge_smtp_into_config_pub(
-            &global_smtp,
-            &empty_smtp,
-            serde_json::json!({ "to_addresses": [to_address] }),
-        );
+    let test_msg = uptrakit_notification_plugin_core::DeliveryMessage::new(
+        "Test Email from Uptrakit",
+        "This is a test email sent from the Global SMTP settings page.",
+        None,
+        serde_json::json!({}),
+        vec![],
+    );
 
-        let email_plugin = match state.plugin_ops.notification_transport("email") {
-            Some(plugin) => plugin,
-            None => {
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Email plugin not available",
-                );
-            }
-        };
-        let transport = match email_plugin.as_notification_transport() {
-            Some(t) => t,
-            None => {
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Email plugin does not support delivery",
-                );
-            }
-        };
-
-        let test_msg = uptrakit_notification_plugin_core::DeliveryMessage::new(
-            "Test Email from Uptrakit",
-            "This is a test email sent from the Global SMTP settings page.",
-            None,
-            serde_json::json!({}),
-            vec![],
-        );
-
-        match transport.deliver(&config, &test_msg).await {
-            Ok(()) => (
-                StatusCode::OK,
-                Json(serde_json::json!({
-                    "success": true,
-                    "message": format!("Test email sent successfully to {to_address}")
-                })),
-            )
-                .into_response(),
-            Err(e) => {
-                tracing::warn!(error = ?e, to_address, "test global smtp email failed");
-                (
-                    StatusCode::OK,
-                    Json(serde_json::json!({
-                        "success": false,
-                        "message": e.to_string()
-                    })),
-                )
-                    .into_response()
-            }
+    match transport.deliver(&config, &test_msg).await {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "success": true,
+                "message": format!("Test email sent successfully to {to_address}")
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::warn!(error = ?e, to_address, "test global smtp email failed");
+            error_response(StatusCode::UNPROCESSABLE_ENTITY, e.to_string())
         }
     }
-    #[cfg(not(feature = "notifications-email"))]
+}
+
+#[cfg(not(feature = "notifications-email"))]
+async fn test_global_smtp_email(_state: &Arc<AppState>, _caller_user_id: uuid::Uuid) -> Response {
     error_response_with_code(
         StatusCode::NOT_FOUND,
         "Email notifications not enabled",

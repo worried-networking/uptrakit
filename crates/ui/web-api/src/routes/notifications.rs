@@ -356,11 +356,8 @@ pub async fn test_channel(
             (StatusCode::OK, Json(resp)).into_response()
         }
         Err(e) => {
-            let resp = TestNotificationResponse {
-                success: false,
-                message: e.to_string(),
-            };
-            (StatusCode::OK, Json(resp)).into_response()
+            tracing::warn!(error = ?e, "test channel notification delivery failed");
+            error_response(StatusCode::UNPROCESSABLE_ENTITY, e.to_string())
         }
     }
 }
