@@ -388,228 +388,175 @@ pub(super) async fn handle_report_hosts(
 // handle_version_check_results
 // ---------------------------------------------------------------------------
 
-/// Handle a `VersionCheckResults` message: update installed versions, upsert
-/// available versions, batch update `last_checked_at`, push software states.
-#[tracing::instrument(skip_all, fields(%service_id, result_count = payload.results.len()))]
-pub(super) async fn handle_version_check_results(
-    state: &Arc<AppState>,
+/// Resolve the `host_software_item` rows that a version check result targets.
+///
+/// Prefers the targeted path (`host_software_item_id` present) and falls back
+/// to a host-ids scan for old agent versions that do not set the field.
+async fn resolve_matching_host_software_items(
+    db: &sea_orm::DatabaseConnection,
     service_id: uuid::Uuid,
-    payload: &VersionCheckResultsPayload,
-) -> ProcessorResponse {
-    tracing::debug!(
-        %service_id,
-        count = payload.results.len(),
-        "received VersionCheckResults"
-    );
+    result: &uptrakit_internal_wire::VersionCheckResult,
+    host_ids: &[uuid::Uuid],
+) -> Vec<host_software_item::Model> {
+    let software_item_id = result.software_item_id;
 
-    let host_ids: Vec<uuid::Uuid> = match service_host::Entity::find()
-        .filter(service_host::Column::ServiceId.eq(service_id))
-        .all(state.db())
-        .await
-    {
-        Ok(links) => links.into_iter().map(|l| l.host_id).collect(),
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "failed to look up service hosts"
-            );
-            return ProcessorResponse::cont();
-        }
-    };
-
-    if host_ids.is_empty() {
-        tracing::debug!(
-            %service_id,
-            "no hosts linked, skipping version updates"
-        );
-        return ProcessorResponse::cont();
-    }
-
-    let now = time::OffsetDateTime::now_utc();
-
-    // Look up tenant_id and service details once; reused per-result for notifications.
-    let svc_tenant_id = match service::Entity::find_by_id(service_id)
-        .one(state.db())
-        .await
-    {
-        Ok(Some(svc)) => Some(svc.tenant_id),
-        Ok(None) => {
-            tracing::warn!(%service_id, "service not found for version check results");
-            None
-        }
-        Err(e) => {
-            tracing::warn!(%service_id, error = %e, "failed to look up service");
-            None
-        }
-    };
-
-    // Collect (host_id, software_item_id) pairs for successful results so we
-    // can emit VersionCheckCompleted SSE events after the DB work is done.
-    let mut completed_pairs: Vec<(uuid::Uuid, uuid::Uuid)> = Vec::new();
-
-    for result in &payload.results {
-        if result.error.is_some() {
-            tracing::debug!(
-                software_item_id = %result.software_item_id,
-                host_software_item_id = ?result.host_software_item_id,
-                error = ?result.error,
-                "skipping version result with error"
-            );
-            continue;
-        }
-
-        let software_item_id = result.software_item_id;
-
-        // Resolve the rows to update.
-        //
-        // Targeted path: `host_software_item_id` is present (all current agents
-        // set it). Use the explicit ID, guarded by `host_ids` so a rogue service
-        // cannot touch rows belonging to other services.
-        //
-        // Legacy fallback: `host_software_item_id` is absent (old agent versions).
-        // Fall back to matching by (host_ids, software_item_id) and warn.
-        let matching_rows: Vec<host_software_item::Model> =
-            if let Some(hsi_id) = result.host_software_item_id {
-                match host_software_item::Entity::find_by_id(hsi_id)
-                    .filter(host_software_item::Column::HostId.is_in(host_ids.clone()))
-                    .filter(host_software_item::Column::DeactivatedAt.is_null())
-                    .one(state.db())
-                    .await
-                {
-                    Ok(Some(row)) => vec![row],
-                    Ok(None) => {
-                        tracing::debug!(
-                            %software_item_id,
-                            host_software_item_id = %hsi_id,
-                            "targeted host_software_item not found or not owned by this service"
-                        );
-                        vec![]
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            error = %e,
-                            %software_item_id,
-                            host_software_item_id = %hsi_id,
-                            "failed to look up targeted host_software_item"
-                        );
-                        vec![]
-                    }
-                }
-            } else {
-                // Legacy path: scan all hosts linked to this service.
-                tracing::warn!(
-                    %service_id,
+    if let Some(hsi_id) = result.host_software_item_id {
+        match host_software_item::Entity::find_by_id(hsi_id)
+            .filter(host_software_item::Column::HostId.is_in(host_ids.to_vec()))
+            .filter(host_software_item::Column::DeactivatedAt.is_null())
+            .one(db)
+            .await
+        {
+            Ok(Some(row)) => vec![row],
+            Ok(None) => {
+                tracing::debug!(
                     %software_item_id,
-                    "VersionCheckResult missing host_software_item_id; \
-                     falling back to host_ids scan (cross-host contamination risk)"
+                    host_software_item_id = %hsi_id,
+                    "targeted host_software_item not found or not owned by this service"
                 );
-                match host_software_item::Entity::find()
-                    .filter(host_software_item::Column::HostId.is_in(host_ids.clone()))
-                    .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
-                    .filter(host_software_item::Column::DeactivatedAt.is_null())
-                    .all(state.db())
-                    .await
-                {
-                    Ok(rows) => rows,
-                    Err(e) => {
-                        tracing::warn!(
-                            error = %e,
-                            %software_item_id,
-                            "failed to look up host_software_items"
-                        );
-                        vec![]
-                    }
-                }
-            };
-
-        if matching_rows.is_empty() {
-            continue;
+                vec![]
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    %software_item_id,
+                    host_software_item_id = %hsi_id,
+                    "failed to look up targeted host_software_item"
+                );
+                vec![]
+            }
         }
-
-        let matching_host_ids: Vec<uuid::Uuid> = matching_rows.iter().map(|r| r.host_id).collect();
-        let matching_ids: Vec<uuid::Uuid> = matching_rows.iter().map(|r| r.id).collect();
-
-        // Record one (host_id, software_item_id) pair per result
-        // so we can emit VersionCheckCompleted events after DB writes complete.
-        if let Some(&first_host_id) = matching_host_ids.first() {
-            completed_pairs.push((first_host_id, software_item_id));
-        }
-
-        // Build and run the targeted update, filtered by primary key.
-        let mut update = host_software_item::Entity::update_many()
-            .filter(host_software_item::Column::Id.is_in(matching_ids.clone()));
-        update = update.col_expr(
-            host_software_item::Column::UpdateCategory,
-            sea_orm::sea_query::Expr::value(result.update_category.to_string()),
+    } else {
+        // Legacy path: scan all hosts linked to this service.
+        tracing::warn!(
+            %service_id,
+            %software_item_id,
+            "VersionCheckResult missing host_software_item_id; \
+             falling back to host_ids scan (cross-host contamination risk)"
         );
-        if let Some(ref installed_version) = result.installed_version {
-            update = update
-                .col_expr(
-                    host_software_item::Column::InstalledVersion,
-                    sea_orm::sea_query::Expr::value(Some(installed_version.clone())),
-                )
-                .col_expr(
-                    host_software_item::Column::InstalledVersionDetectedAt,
-                    sea_orm::sea_query::Expr::value(Some(now)),
-                )
-                .col_expr(
-                    host_software_item::Column::InstalledDisplayVersion,
-                    sea_orm::sea_query::Expr::value(result.installed_display_version.clone()),
+        match host_software_item::Entity::find()
+            .filter(host_software_item::Column::HostId.is_in(host_ids.to_vec()))
+            .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
+            .filter(host_software_item::Column::DeactivatedAt.is_null())
+            .all(db)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    %software_item_id,
+                    "failed to look up host_software_items"
                 );
-        }
-        if let Some(ref latest_version) = result.latest_version {
-            update = update
-                .col_expr(
-                    host_software_item::Column::LatestVersion,
-                    sea_orm::sea_query::Expr::value(Some(latest_version.clone())),
-                )
-                .col_expr(
-                    host_software_item::Column::LatestVersionFetchedAt,
-                    sea_orm::sea_query::Expr::value(Some(now)),
-                );
-        }
-        if let Err(e) = update.exec(state.db()).await {
-            tracing::warn!(
-                error = %e,
-                %software_item_id,
-                row_count = matching_ids.len(),
-                "failed to update host_software_items"
-            );
-        }
-
-        // Dispatch notification per matched host when a new version is detected.
-        if let (Some(latest_version), Some(tenant_id)) = (&result.latest_version, svc_tenant_id) {
-            let sw_name = software_item::Entity::find_by_id(software_item_id)
-                .one(state.db())
-                .await
-                .ok()
-                .flatten()
-                .map(|sw| sw.name.clone());
-
-            for host_id in matching_host_ids {
-                let host_name = host::Entity::find_by_id(host_id)
-                    .one(state.db())
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|h| h.hostname.clone());
-
-                state.notification_dispatcher.dispatch(NotificationEvent {
-                    tenant_id,
-                    host_id: Some(host_id),
-                    host_name,
-                    software_item_id: Some(software_item_id),
-                    software_item_name: sw_name.clone(),
-                    plugin_type: None,
-                    details: NotificationEventDetails::UpdateAvailable {
-                        installed_version: result.installed_version.clone(),
-                        latest_version: latest_version.clone(),
-                    },
-                });
+                vec![]
             }
         }
     }
+}
 
+/// Build and execute the `update_many` query for a version check result.
+async fn apply_version_update_to_db(
+    db: &sea_orm::DatabaseConnection,
+    result: &uptrakit_internal_wire::VersionCheckResult,
+    matching_ids: Vec<uuid::Uuid>,
+    now: time::OffsetDateTime,
+) {
+    let software_item_id = result.software_item_id;
+    let mut update = host_software_item::Entity::update_many()
+        .filter(host_software_item::Column::Id.is_in(matching_ids.clone()));
+    update = update.col_expr(
+        host_software_item::Column::UpdateCategory,
+        sea_orm::sea_query::Expr::value(result.update_category.to_string()),
+    );
+    if let Some(ref installed_version) = result.installed_version {
+        update = update
+            .col_expr(
+                host_software_item::Column::InstalledVersion,
+                sea_orm::sea_query::Expr::value(Some(installed_version.clone())),
+            )
+            .col_expr(
+                host_software_item::Column::InstalledVersionDetectedAt,
+                sea_orm::sea_query::Expr::value(Some(now)),
+            )
+            .col_expr(
+                host_software_item::Column::InstalledDisplayVersion,
+                sea_orm::sea_query::Expr::value(result.installed_display_version.clone()),
+            );
+    }
+    if let Some(ref latest_version) = result.latest_version {
+        update = update
+            .col_expr(
+                host_software_item::Column::LatestVersion,
+                sea_orm::sea_query::Expr::value(Some(latest_version.clone())),
+            )
+            .col_expr(
+                host_software_item::Column::LatestVersionFetchedAt,
+                sea_orm::sea_query::Expr::value(Some(now)),
+            );
+    }
+    if let Err(e) = update.exec(db).await {
+        tracing::warn!(
+            error = %e,
+            %software_item_id,
+            row_count = matching_ids.len(),
+            "failed to update host_software_items"
+        );
+    }
+}
+
+/// Dispatch update-available notifications for each matched host when a new
+/// latest version is detected.
+async fn dispatch_version_update_notification(
+    state: &Arc<AppState>,
+    tenant_id: uuid::Uuid,
+    result: &uptrakit_internal_wire::VersionCheckResult,
+    matching_host_ids: Vec<uuid::Uuid>,
+) {
+    let Some(ref latest_version) = result.latest_version else {
+        return;
+    };
+    let software_item_id = result.software_item_id;
+
+    let sw_name = software_item::Entity::find_by_id(software_item_id)
+        .one(state.db())
+        .await
+        .ok()
+        .flatten()
+        .map(|sw| sw.name.clone());
+
+    for host_id in matching_host_ids {
+        let host_name = host::Entity::find_by_id(host_id)
+            .one(state.db())
+            .await
+            .ok()
+            .flatten()
+            .map(|h| h.hostname.clone());
+
+        state.notification_dispatcher.dispatch(NotificationEvent {
+            tenant_id,
+            host_id: Some(host_id),
+            host_name,
+            software_item_id: Some(software_item_id),
+            software_item_name: sw_name.clone(),
+            plugin_type: None,
+            details: NotificationEventDetails::UpdateAvailable {
+                installed_version: result.installed_version.clone(),
+                latest_version: latest_version.clone(),
+            },
+        });
+    }
+}
+
+/// Post-loop finalization: batch-update `last_checked_at`, push MQTT states,
+/// and emit `VersionCheckCompleted` SSE events.
+async fn finalize_version_check_results(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    payload: &VersionCheckResultsPayload,
+    now: time::OffsetDateTime,
+    svc_tenant_id: Option<uuid::Uuid>,
+    completed_pairs: Vec<(uuid::Uuid, uuid::Uuid)>,
+) {
     // Batch-update last_checked_at for successful results.
     let checked_ids: Vec<uuid::Uuid> = payload
         .results
@@ -660,6 +607,110 @@ pub(super) async fn handle_version_check_results(
                 .await;
         }
     }
+}
+
+/// Handle a `VersionCheckResults` message: update installed versions, upsert
+/// available versions, batch update `last_checked_at`, push software states.
+#[tracing::instrument(skip_all, fields(%service_id, result_count = payload.results.len()))]
+pub(super) async fn handle_version_check_results(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    payload: &VersionCheckResultsPayload,
+) -> ProcessorResponse {
+    tracing::debug!(
+        %service_id,
+        count = payload.results.len(),
+        "received VersionCheckResults"
+    );
+
+    let host_ids: Vec<uuid::Uuid> = match service_host::Entity::find()
+        .filter(service_host::Column::ServiceId.eq(service_id))
+        .all(state.db())
+        .await
+    {
+        Ok(links) => links.into_iter().map(|l| l.host_id).collect(),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "failed to look up service hosts"
+            );
+            return ProcessorResponse::cont();
+        }
+    };
+
+    if host_ids.is_empty() {
+        tracing::debug!(
+            %service_id,
+            "no hosts linked, skipping version updates"
+        );
+        return ProcessorResponse::cont();
+    }
+
+    let now = time::OffsetDateTime::now_utc();
+
+    // Look up tenant_id once; reused per-result for notifications.
+    let svc_tenant_id = match service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(svc)) => Some(svc.tenant_id),
+        Ok(None) => {
+            tracing::warn!(%service_id, "service not found for version check results");
+            None
+        }
+        Err(e) => {
+            tracing::warn!(%service_id, error = %e, "failed to look up service");
+            None
+        }
+    };
+
+    // Collect (host_id, software_item_id) pairs for successful results so we
+    // can emit VersionCheckCompleted SSE events after the DB work is done.
+    let mut completed_pairs: Vec<(uuid::Uuid, uuid::Uuid)> = Vec::new();
+
+    for result in &payload.results {
+        if result.error.is_some() {
+            tracing::debug!(
+                software_item_id = %result.software_item_id,
+                host_software_item_id = ?result.host_software_item_id,
+                error = ?result.error,
+                "skipping version result with error"
+            );
+            continue;
+        }
+
+        let matching_rows =
+            resolve_matching_host_software_items(state.db(), service_id, result, &host_ids).await;
+
+        if matching_rows.is_empty() {
+            continue;
+        }
+
+        let matching_host_ids: Vec<uuid::Uuid> = matching_rows.iter().map(|r| r.host_id).collect();
+        let matching_ids: Vec<uuid::Uuid> = matching_rows.iter().map(|r| r.id).collect();
+
+        // Record one (host_id, software_item_id) pair per result
+        // so we can emit VersionCheckCompleted events after DB writes complete.
+        if let Some(&first_host_id) = matching_host_ids.first() {
+            completed_pairs.push((first_host_id, result.software_item_id));
+        }
+
+        apply_version_update_to_db(state.db(), result, matching_ids, now).await;
+
+        if let Some(tenant_id) = svc_tenant_id {
+            dispatch_version_update_notification(state, tenant_id, result, matching_host_ids).await;
+        }
+    }
+
+    finalize_version_check_results(
+        state,
+        service_id,
+        payload,
+        now,
+        svc_tenant_id,
+        completed_pairs,
+    )
+    .await;
 
     ProcessorResponse::cont()
 }

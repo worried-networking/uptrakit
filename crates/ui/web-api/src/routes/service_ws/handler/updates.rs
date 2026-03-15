@@ -353,36 +353,44 @@ pub(super) async fn deliver_pending_updates(
 // handle_update_started
 // ---------------------------------------------------------------------------
 
-/// Handle an `UpdateStarted` message: validate ownership, set status to
-/// `InProgress`, clear previous output lines.
-#[tracing::instrument(skip_all, fields(%service_id, update_id = %payload.update_history_id))]
-pub(super) async fn handle_update_started(
+/// Metadata extracted from an `update_history` record when marking it
+/// in-progress. Used by the subsequent broadcast phase.
+struct UpdateStartedInfo {
+    batch_id: Option<uuid::Uuid>,
+    host_id: uuid::Uuid,
+    software_item_id: uuid::Uuid,
+    tenant_id: uuid::Uuid,
+}
+
+/// Validate ownership, transition the record to `InProgress`, and clear
+/// previous output lines.
+///
+/// Returns `None` if the record does not belong to a host linked to this
+/// service, or if the DB update fails in a way that warrants skipping the
+/// broadcast phase.
+async fn mark_update_in_progress(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     payload: &UpdateStartedPayload,
-    linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
-) -> ProcessorResponse {
-    let linked_host_ids = linked_host_ids.lock().clone();
-    tracing::info!(
-        update_id = %payload.update_history_id,
-        from_version = ?payload.from_version,
-        "update started"
-    );
-    let record = match validate_update_ownership(
+    linked_host_ids: &HashSet<uuid::Uuid>,
+) -> Option<UpdateStartedInfo> {
+    let record = validate_update_ownership(
         state.db(),
         service_id,
         payload.update_history_id,
         linked_host_ids,
     )
     .await
-    {
-        Ok(r) => r,
-        Err(_) => return ProcessorResponse::cont(),
+    .ok()?;
+
+    let info = UpdateStartedInfo {
+        batch_id: record.batch_id,
+        host_id: record.host_id,
+        software_item_id: record.software_item_id,
+        tenant_id: record.tenant_id,
     };
-    let record_batch_id = record.batch_id;
-    let record_host_id = record.host_id;
-    let record_software_item_id = record.software_item_id;
-    let record_tenant_id = record.tenant_id;
+
+    let update_id = record.id;
     let mut active: update_history::ActiveModel = record.into();
     active.status = Set(update_history::UpdateStatus::InProgress);
     active.started_at = Set(Some(time::OffsetDateTime::now_utc()));
@@ -399,7 +407,7 @@ pub(super) async fn handle_update_started(
         );
     }
     if let Err(e) = update_output_line::Entity::delete_many()
-        .filter(update_output_line::Column::UpdateHistoryId.eq(payload.update_history_id))
+        .filter(update_output_line::Column::UpdateHistoryId.eq(update_id))
         .exec(state.db())
         .await
     {
@@ -409,12 +417,17 @@ pub(super) async fn handle_update_started(
         );
     }
 
-    // Create a broadcast channel so SSE subscribers can receive live output.
-    state
-        .update_output_broadcaster
-        .create_channel(payload.update_history_id)
-        .await;
+    Some(info)
+}
 
+/// Push MQTT state updates, broadcast `AdminEvent::UpdateStarted`, and emit
+/// optional batch progress — all fire-and-forget side-effects.
+async fn broadcast_update_started_events(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    payload: &UpdateStartedPayload,
+    info: &UpdateStartedInfo,
+) {
     // Push updated software states to MQTT services so that the
     // in_progress flag transitions to true immediately.
     if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
@@ -432,30 +445,59 @@ pub(super) async fn handle_update_started(
     state
         .event_broadcaster
         .send(
-            record_tenant_id,
+            info.tenant_id,
             AdminEvent::UpdateStarted {
                 update_history_id: payload.update_history_id,
-                host_id: record_host_id,
-                software_item_id: record_software_item_id,
+                host_id: info.host_id,
+                software_item_id: info.software_item_id,
                 interactive: payload.interactive,
             },
         )
         .await;
 
     // Emit batch progress event if this update is part of a batch.
-    if let Some(batch_id) = record_batch_id {
+    if let Some(batch_id) = info.batch_id {
         emit_batch_progress_event(
             state,
             batch_id,
             crate::batch_progress_broadcaster::BatchProgressEvent::UpdateStarted {
                 update_history_id: payload.update_history_id,
-                software_item_name: resolve_software_item_name(state, record_software_item_id)
-                    .await,
-                host_name: resolve_host_name(state, record_host_id).await,
+                software_item_name: resolve_software_item_name(state, info.software_item_id).await,
+                host_name: resolve_host_name(state, info.host_id).await,
             },
         )
         .await;
     }
+}
+
+/// Handle an `UpdateStarted` message: validate ownership, set status to
+/// `InProgress`, clear previous output lines.
+#[tracing::instrument(skip_all, fields(%service_id, update_id = %payload.update_history_id))]
+pub(super) async fn handle_update_started(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    payload: &UpdateStartedPayload,
+    linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+) -> ProcessorResponse {
+    let linked_host_ids = linked_host_ids.lock().clone();
+    tracing::info!(
+        update_id = %payload.update_history_id,
+        from_version = ?payload.from_version,
+        "update started"
+    );
+
+    let Some(info) = mark_update_in_progress(state, service_id, payload, &linked_host_ids).await
+    else {
+        return ProcessorResponse::cont();
+    };
+
+    // Create a broadcast channel so SSE subscribers can receive live output.
+    state
+        .update_output_broadcaster
+        .create_channel(payload.update_history_id)
+        .await;
+
+    broadcast_update_started_events(state, service_id, payload, &info).await;
 
     ProcessorResponse::cont()
 }
