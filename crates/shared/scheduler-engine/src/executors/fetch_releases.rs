@@ -423,20 +423,10 @@ impl FetchReleasesExecutor {
                 );
             }
 
-            // Load software states then push to MQTT services.
-            match crate::software_states::load_software_states_for_tenant(&self.db, tenant_id).await
-            {
-                Ok(payload) => {
-                    self.notifier.push_software_states_for_tenant(payload).await;
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        %tenant_id,
-                        "failed to load software states for MQTT push after controller-side fetch"
-                    );
-                }
-            }
+            // Push software states to MQTT services.
+            self.notifier
+                .push_software_states_for_tenant(&self.db, tenant_id)
+                .await;
         }
 
         Ok(())

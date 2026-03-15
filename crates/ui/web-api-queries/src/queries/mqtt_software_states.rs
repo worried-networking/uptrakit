@@ -36,7 +36,14 @@ struct ActiveUpdateRow {
 
 /// Load all software state data for a tenant and assemble a [`MqttSoftwareStatesPayload`].
 ///
-/// This function executes four bulk queries (no N+1) and is safe to call on
+/// This is the canonical implementation used by all web-API code paths
+/// (WebSocket handlers, REST routes, `NotificationService`).
+///
+/// `uptrakit_scheduler_engine::software_states::load_software_states_for_tenant`
+/// is the parallel implementation used by the external-scheduler path and must
+/// be kept functionally in sync with this function.
+///
+/// This function executes five bulk queries (no N+1) and is safe to call on
 /// every version-check result, update-trigger, or update completion event.
 ///
 /// # Errors

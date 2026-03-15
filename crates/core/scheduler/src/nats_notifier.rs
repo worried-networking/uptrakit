@@ -5,8 +5,7 @@
 //! appropriate connected services via their WebSocket connections.
 
 use uptrakit_internal_wire::{
-    ControllerMessage, MqttSoftwareStatesPayload, RequestCaRotationPayload,
-    RequestCrlRenewalPayload,
+    ControllerMessage, RequestCaRotationPayload, RequestCrlRenewalPayload,
 };
 use uptrakit_nats::NatsConnection;
 use uptrakit_scheduler_engine::SchedulerNotifier;
@@ -56,11 +55,30 @@ impl SchedulerNotifier for NatsSchedulerNotifier {
             .await;
     }
 
-    async fn push_software_states_for_tenant(&self, payload: MqttSoftwareStatesPayload) {
-        let msg = ControllerMessage::SoftwareStates(payload);
-        self.nats
-            .publish(self.scheduler_id, None, Some("mqtt_bridge"), msg)
-            .await;
+    async fn push_software_states_for_tenant(
+        &self,
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: uuid::Uuid,
+    ) {
+        match uptrakit_scheduler_engine::software_states::load_software_states_for_tenant(
+            db, tenant_id,
+        )
+        .await
+        {
+            Ok(payload) => {
+                let msg = ControllerMessage::SoftwareStates(payload);
+                self.nats
+                    .publish(self.scheduler_id, None, Some("mqtt_bridge"), msg)
+                    .await;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    %tenant_id,
+                    "failed to load software states for MQTT push"
+                );
+            }
+        }
     }
 
     async fn signal_crl_renewal(&self) {

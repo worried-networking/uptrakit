@@ -108,7 +108,6 @@ mod tests {
     use super::*;
     use sea_orm::{ActiveModelTrait, ConnectOptions, Database, Set};
     use uptrakit_crypto::EncryptedString;
-    use uptrakit_internal_wire::MqttSoftwareStatesPayload;
     use uptrakit_shared_db::entity::{ca_certificate, service, service_certificate, tenant};
     use uptrakit_shared_db::migration::run_migrations;
     use uuid::Uuid;
@@ -233,7 +232,12 @@ mod tests {
         async fn broadcast(&self, _msg: ControllerMessage) {}
         async fn send_by_capability(&self, _cap: &str, _msg: ControllerMessage) {}
         async fn signal_ca_rotation(&self, _reason: &str) {}
-        async fn push_software_states_for_tenant(&self, _payload: MqttSoftwareStatesPayload) {}
+        async fn push_software_states_for_tenant(
+            &self,
+            _db: &sea_orm::DatabaseConnection,
+            _tenant_id: uuid::Uuid,
+        ) {
+        }
         async fn signal_crl_renewal(&self) {}
     }
 

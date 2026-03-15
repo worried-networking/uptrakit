@@ -33,7 +33,7 @@ impl TaskExecutor for CrlRenewalExecutor {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use uptrakit_internal_wire::{ControllerMessage, MqttSoftwareStatesPayload};
+    use uptrakit_internal_wire::ControllerMessage;
     use uuid::Uuid;
 
     struct MockNotifier {
@@ -46,7 +46,12 @@ mod tests {
         async fn broadcast(&self, _msg: ControllerMessage) {}
         async fn send_by_capability(&self, _capability: &str, _msg: ControllerMessage) {}
         async fn signal_ca_rotation(&self, _reason: &str) {}
-        async fn push_software_states_for_tenant(&self, _payload: MqttSoftwareStatesPayload) {}
+        async fn push_software_states_for_tenant(
+            &self,
+            _db: &sea_orm::DatabaseConnection,
+            _tenant_id: uuid::Uuid,
+        ) {
+        }
         async fn signal_crl_renewal(&self) {
             self.called.store(true, Ordering::Release);
         }

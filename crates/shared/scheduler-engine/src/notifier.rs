@@ -1,4 +1,4 @@
-use uptrakit_internal_wire::{ControllerMessage, MqttSoftwareStatesPayload};
+use uptrakit_internal_wire::ControllerMessage;
 use uuid::Uuid;
 
 /// Abstraction over message delivery for scheduled task executors.
@@ -19,12 +19,16 @@ pub trait SchedulerNotifier: Send + Sync {
     /// Signal the controller(s) to perform CA certificate rotation.
     async fn signal_ca_rotation(&self, reason: &str);
 
-    /// Deliver pre-loaded software states to all MQTT services.
+    /// Load software states for a tenant and push to MQTT services.
     ///
-    /// The caller is responsible for loading the payload from the database
-    /// before invoking this method, keeping the notification interface
-    /// decoupled from the ORM layer.
-    async fn push_software_states_for_tenant(&self, payload: MqttSoftwareStatesPayload);
+    /// Each concrete implementation is responsible for loading the payload
+    /// from the database and delivering it via the appropriate transport
+    /// (in-process `NotificationService` or NATS publish).
+    async fn push_software_states_for_tenant(
+        &self,
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+    );
 
     /// Signal all controller instances to rebuild the CRL immediately.
     ///
@@ -48,6 +52,11 @@ impl SchedulerNotifier for NoopSchedulerNotifier {
     async fn broadcast(&self, _msg: ControllerMessage) {}
     async fn send_by_capability(&self, _capability: &str, _msg: ControllerMessage) {}
     async fn signal_ca_rotation(&self, _reason: &str) {}
-    async fn push_software_states_for_tenant(&self, _payload: MqttSoftwareStatesPayload) {}
+    async fn push_software_states_for_tenant(
+        &self,
+        _db: &sea_orm::DatabaseConnection,
+        _tenant_id: Uuid,
+    ) {
+    }
     async fn signal_crl_renewal(&self) {}
 }
