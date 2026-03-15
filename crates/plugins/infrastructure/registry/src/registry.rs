@@ -7,6 +7,8 @@ use uptrakit_plugin_discovery_proxmox_helper_scripts::{
     ProxmoxHelperScriptsConfig, ProxmoxHelperScriptsPlugin,
 };
 use uptrakit_plugin_generic_shell::{ShellConfig, ShellPlugin};
+use uptrakit_plugin_hook_shell::{ShellHookConfig, ShellHookPlugin};
+use uptrakit_plugin_hook_systemd::{SystemdHookConfig, SystemdHookPlugin};
 use uptrakit_plugin_infrastructure_core::{
     ConfigFormSchema, PluginBase, PluginType, SecretMasking, SudoCommandEntry,
 };
@@ -570,6 +572,8 @@ register_plugins! {
     PackageManagerSnap            => { config: SnapConfig,                 plugin: SnapPlugin },
     PackageManagerCargo           => { config: CargoConfig,               plugin: CargoPlugin },
     GenericShell                  => { config: ShellConfig,                plugin: ShellPlugin },
+    HookSystemd                   => { config: SystemdHookConfig,          plugin: SystemdHookPlugin },
+    HookShell                     => { config: ShellHookConfig,            plugin: ShellHookPlugin },
     InfrastructureProxmox         => {
         config: ProxmoxConfig,
         plugin: ProxmoxPlugin,

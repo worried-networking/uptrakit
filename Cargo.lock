@@ -6792,6 +6792,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-plugin-hook-shell"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uptrakit-command",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-types",
+]
+
+[[package]]
+name = "uptrakit-plugin-hook-systemd"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uptrakit-command",
+ "uptrakit-plugin-infrastructure-core",
+]
+
+[[package]]
 name = "uptrakit-plugin-infrastructure-core"
 version = "0.0.1"
 dependencies = [
@@ -6860,6 +6889,8 @@ dependencies = [
  "uptrakit-notification-plugin-webhook",
  "uptrakit-plugin-discovery-proxmox-helper-scripts",
  "uptrakit-plugin-generic-shell",
+ "uptrakit-plugin-hook-shell",
+ "uptrakit-plugin-hook-systemd",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-plugin-infrastructure-proxmox",
  "uptrakit-plugin-package-manager-apk",

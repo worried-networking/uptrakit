@@ -45,6 +45,8 @@ uptrakit-plugin-package-manager-apk = { workspace = true }
 uptrakit-plugin-package-manager-snap = { workspace = true }
 uptrakit-plugin-package-manager-cargo = { workspace = true }
 uptrakit-plugin-generic-shell = { workspace = true }
+uptrakit-plugin-hook-systemd = { workspace = true }
+uptrakit-plugin-hook-shell = { workspace = true }
 uptrakit-plugin-infrastructure-proxmox = { workspace = true }
 uptrakit-extension-framework = { workspace = true }
 futures-util = { workspace = true }
