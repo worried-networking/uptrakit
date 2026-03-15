@@ -379,6 +379,20 @@ ActionDef::new("add-config", "Add Configuration")
     )
 ```
 
+### Permission enforcement
+
+The `permission` field on `ActionDef` (and `required_permission` on `ExtensionManifest`) is
+enforced server-side in the `invoke_action` route handler before the request is dispatched to
+either a plugin or a service. A caller without the required permission receives HTTP 403. This
+check applies to both plugin-backed and service-backed extensions.
+
+When adding a new action, always set `.with_permission(...)` on any action that modifies state
+or accesses sensitive data. Read-only listing actions may omit it if the extension's manifest
+already gates access via `required_permission`.
+
+See [Extension Security](../security/extensions.md#action-level-permissions) for the full
+enforcement model.
+
 ### `Permission` enum
 
 Use `uptrakit_shared_types::Permission` (not raw strings) when calling `.with_permission()`:

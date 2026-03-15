@@ -104,6 +104,12 @@ The bootstrap operation introduces additional security considerations.
 
 ### Transient credentials
 
+All credential fields in `BootstrapParams` and `SyncParams`
+(`auth_password`, `auth_private_key_pem`, `target_private_key_pem`) are typed as
+`Option<SecretString>` rather than `Option<String>`. `SecretString` prevents these values from
+appearing in `Debug` output, log messages, or panic traces. Use `.expose_secret()` only at the
+point where the raw value is needed (e.g., passing to the SSH transport layer).
+
 - **Auth passwords** are held only in process memory for the duration of the
   bootstrap. They are never written to disk or stored in the database. When
   submitted via the web UI, passwords are encrypted end-to-end via ECIES and

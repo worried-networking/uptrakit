@@ -725,18 +725,22 @@ statistics where stale reads have no correctness impact.
 
 ## Synchronous Locks in Async Code
 
-When a synchronous mutex is required anywhere in async code (e.g., a cached token, a fallback
-rate limiter, or any short-lived critical section without `.await` across the lock), use
-`parking_lot::Mutex` rather than `std::sync::Mutex`:
+When a synchronous lock is required anywhere in async code, use `parking_lot::Mutex` or
+`parking_lot::RwLock`. **Never use `std::sync::Mutex`, `std::sync::RwLock`,
+`tokio::sync::Mutex`, or `tokio::sync::RwLock`.**
 
-- **Sub-microsecond critical sections** with no `.await` across the lock make a sync mutex
+- **Sub-microsecond critical sections** with no `.await` across the lock make a sync lock
   correct (no risk of holding across a yield point).
-- `parking_lot::Mutex` is faster under contention and returns the guard directly — no
+- `parking_lot` primitives are faster under contention and return the guard directly — no
   `Result`/`.unwrap()` needed, which aligns with the workspace panic policy.
-- `tokio::sync::Mutex` is unnecessary overhead for non-async critical sections.
+- `tokio::sync::Mutex`/`RwLock` are unnecessary overhead for critical sections that do not
+  span `.await` points, and their guards are not `Send`, preventing use in `tokio::spawn`
+  closures unless the guard is dropped before the first `.await`.
+- **Always drop `parking_lot` guards before any `.await` point.** Clone or copy the
+  protected value out of the guard, drop the guard, then `.await`.
 
 ```rust
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 
 // ✓ Correct — parking_lot::Mutex, no .unwrap() needed
 static FALLBACK: LazyLock<Mutex<HashMap<String, Entry>>> =
@@ -744,8 +748,18 @@ static FALLBACK: LazyLock<Mutex<HashMap<String, Entry>>> =
 
 let mut guard = FALLBACK.lock(); // direct guard, no Result
 
+// ✓ Correct — parking_lot::RwLock, drop guard before .await
+let value = {
+    let guard = self.inner.read(); // synchronous, no .await
+    guard.get(&key).cloned()        // copy/clone out of the guard
+}; // guard dropped here, before any .await
+do_something_async(value).await;
+
 // ✗ Wrong — std::sync::Mutex requires .unwrap() and is slower under contention
 let mut guard = FALLBACK.lock().unwrap();
+
+// ✗ Wrong — tokio::sync::RwLock; use parking_lot::RwLock instead
+let guard = self.inner.read().await;
 ```
 
 **Amortize expensive operations under the lock.** If the critical section includes cleanup
@@ -1030,6 +1044,21 @@ pub async fn list_hosts(
     ...
 }
 ```
+
+### Approved exception: custom authentication paths
+
+Handlers that perform their own token extraction (e.g., reading a `token` query parameter or
+`Authorization` header because browser WebSocket connections cannot set custom headers) cannot
+use Axum extractors for authentication. In these handlers, `auth_user.has_permission(perm)` is
+acceptable **only** when:
+
+1. The token validation is already done manually (JWT or API token, same logic as the standard
+   middleware), **and**
+2. No typed extractor exists that covers the custom auth path.
+
+Any such handler must include a `// APPROVED: custom auth path — extractor not applicable`
+comment alongside the `has_permission` call. The `interactive_ws` WebSocket endpoint is the
+canonical example.
 
 See also: [Authentication and Authorization](../security/auth-and-authorization.md).
 
