@@ -215,10 +215,10 @@
 				{@const info = plan.host_info as Record<string, unknown>}
 				<div class="card preset-tonal-surface mb-4 p-4">
 					<h4 class="mb-2 text-sm font-semibold">Host Information</h4>
-					<dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+					<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
 						{#each Object.entries(info) as [key, value] (key)}
-							<dt class="text-surface-500">{key.replace(/_/g, ' ')}</dt>
-							<dd class="font-mono">{String(value)}</dd>
+							<dt class="text-surface-500 whitespace-nowrap">{key.replace(/_/g, ' ')}</dt>
+							<dd class="font-mono break-all">{String(value)}</dd>
 						{/each}
 					</dl>
 				</div>
