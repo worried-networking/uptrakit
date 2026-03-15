@@ -236,8 +236,27 @@
 		return pluginConfigs.filter((c) => isHookPluginType(c.plugin_type));
 	}
 
-	function standardConfigsForRole(_role: StandardRoleKey): PluginConfigResponse[] {
-		return pluginConfigs.filter((c) => !isHookPluginType(c.plugin_type));
+	const ROLE_CAPABILITY: Record<StandardRoleKey, string> = {
+		detect_version: 'version_detection',
+		fetch_releases: 'release_fetching',
+		execute_update: 'update_execution'
+	};
+
+	const ROLE_EMPTY_HINT: Record<StandardRoleKey, string> = {
+		detect_version:
+			'No version detection configs found. Create an APT, Homebrew, npm, or other package manager plugin config',
+		fetch_releases:
+			'No release fetching configs found. Create a GitHub Releases, GitLab Releases, Forgejo Releases, or Docker plugin config',
+		execute_update:
+			'No update execution configs found. Create an APT, Homebrew, npm, Shell, or other package manager plugin config'
+	};
+
+	function standardConfigsForRole(role: StandardRoleKey): PluginConfigResponse[] {
+		const cap = ROLE_CAPABILITY[role];
+		return pluginConfigs.filter((c) => {
+			const pt = pluginTypes.find((t) => t.plugin_type === c.plugin_type);
+			return pt?.capabilities.some((ca) => ca === cap) ?? false;
+		});
 	}
 
 	function getFormFields(pluginType: string): FieldDef[] {
@@ -573,6 +592,7 @@
 					{@const s = standardStates[role]}
 					{@const roleFields = getStdFormFields(role)}
 					{@const hasFormFields = roleFields.length > 0}
+					{@const stdOptions = standardConfigsForRole(role)}
 					<div class="rounded-lg border border-surface-200 p-4 space-y-3 dark:border-surface-700">
 						<div class="flex items-start gap-2">
 							<span class="badge preset-tonal shrink-0 text-xs">{ROLE_LABELS[role]}</span>
@@ -581,24 +601,31 @@
 
 						<div class="grid grid-cols-[9rem_1fr] items-center gap-3">
 							<label class="text-sm font-medium" for="cfg-{role}">Plugin Config</label>
-							<select
-								id="cfg-{role}"
-								class="select text-sm"
-								bind:value={standardStates[role].plugin_config_id}
-								onchange={() => {
-									const config = pluginConfigs.find((c) => c.id === standardStates[role].plugin_config_id);
-									const fields = config ? getFormFields(config.plugin_type) : [];
-									standardStates[role].overrideFormValues = flattenConfig({}, fields);
-									standardStates[role].overrideShowJson = false;
-									standardStates[role].config_override_text = '';
-									standardStates[role].config_override_error = null;
-								}}
-							>
-								<option value="">— not configured —</option>
-								{#each standardConfigsForRole(role) as cfg (cfg.id)}
-									<option value={cfg.id}>{cfg.name}</option>
-								{/each}
-							</select>
+							{#if stdOptions.length > 0}
+								<select
+									id="cfg-{role}"
+									class="select text-sm"
+									bind:value={standardStates[role].plugin_config_id}
+									onchange={() => {
+										const config = pluginConfigs.find((c) => c.id === standardStates[role].plugin_config_id);
+										const fields = config ? getFormFields(config.plugin_type) : [];
+										standardStates[role].overrideFormValues = flattenConfig({}, fields);
+										standardStates[role].overrideShowJson = false;
+										standardStates[role].config_override_text = '';
+										standardStates[role].config_override_error = null;
+									}}
+								>
+									<option value="">— not configured —</option>
+									{#each stdOptions as cfg (cfg.id)}
+										<option value={cfg.id}>{cfg.name}</option>
+									{/each}
+								</select>
+							{:else}
+								<p class="text-xs text-surface-500 rounded bg-surface-100 dark:bg-surface-800 px-2 py-1">
+									{ROLE_EMPTY_HINT[role]} in
+									<a href="/settings" class="underline">Settings → Plugin Configs</a> first.
+								</p>
+							{/if}
 						</div>
 
 						{#if s.plugin_config_id}
