@@ -89,8 +89,8 @@ pub async fn check_version(
     }
 }
 
-/// Per-item detect result: `(installed_version, error)`.
-type DetectItemResult = (Option<String>, Option<String>);
+/// Per-item detect result: `(installed_version, display_version, error)`.
+type DetectItemResult = (Option<String>, Option<String>, Option<String>);
 
 /// Per-item fetch result: `(latest_version, update_category, error)`.
 type FetchItemResult = (Option<String>, UpdateCategory, Option<String>);
@@ -153,7 +153,7 @@ fn error_for_all_detect_items(
 ) -> Vec<(usize, DetectItemResult)> {
     items
         .iter()
-        .map(|(idx, _)| (*idx, (None, Some(err.clone()))))
+        .map(|(idx, _)| (*idx, (None, None, Some(err.clone()))))
         .collect()
 }
 
@@ -228,8 +228,9 @@ async fn run_detect_group(
         .into_iter()
         .map(|r| {
             let version = r.installed_version.map(|v| v.to_string());
+            let display_version = r.display_version;
             let error = r.error.map(|e| format!("detection failed: {e}"));
-            (r.package_identifier, (version, error))
+            (r.package_identifier, (version, display_version, error))
         })
         .collect();
 
@@ -240,7 +241,7 @@ async fn run_detect_group(
             let outcome = result_map
                 .get(pkg.as_str())
                 .cloned()
-                .unwrap_or((None, None));
+                .unwrap_or((None, None, None));
             (*idx, outcome)
         })
         .collect()
@@ -460,8 +461,8 @@ pub async fn batch_check_versions(
         .iter()
         .enumerate()
         .map(|(idx, assignment)| {
-            let (installed_version, detect_error) =
-                detect_map.get(&idx).cloned().unwrap_or((None, None));
+            let (installed_version, installed_display_version, detect_error) =
+                detect_map.get(&idx).cloned().unwrap_or((None, None, None));
             let (latest_version, update_category, fetch_error) = fetch_map
                 .get(&idx)
                 .cloned()
@@ -471,6 +472,7 @@ pub async fn batch_check_versions(
                 software_item_id: assignment.software_item_id,
                 host_software_item_id: assignment.host_software_item_id,
                 installed_version,
+                installed_display_version,
                 latest_version,
                 error: merge_errors(detect_error, fetch_error),
                 update_category,

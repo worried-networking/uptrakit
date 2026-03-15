@@ -13,6 +13,9 @@ pub struct Model {
     pub package_identifier: Option<String>,
     pub installed_version: Option<String>,
     pub installed_version_detected_at: Option<OffsetDateTime>,
+    /// Plugin-provided display version for the installed version.
+    /// Set when `installed_version` is opaque (e.g. Docker SHA256 → publish date).
+    pub installed_display_version: Option<String>,
     pub latest_version: Option<String>,
     pub latest_version_fetched_at: Option<OffsetDateTime>,
     #[sea_orm(column_type = "JsonBinary", nullable)]

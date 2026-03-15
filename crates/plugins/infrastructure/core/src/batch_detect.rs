@@ -41,6 +41,11 @@ pub struct BatchDetectResult {
     /// `None` indicates success (even if `installed_version` is also `None`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Human-readable installed version for display when `installed_version`
+    /// is opaque (e.g. a Docker SHA256 digest → image publish date).
+    /// Propagated from the plugin through the agent wire type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_version: Option<String>,
 }
 
 impl BatchDetectResult {
@@ -54,6 +59,7 @@ impl BatchDetectResult {
             package_identifier: package_identifier.into(),
             installed_version,
             error,
+            display_version: None,
         }
     }
 
@@ -63,6 +69,7 @@ impl BatchDetectResult {
             package_identifier: package_identifier.into(),
             installed_version: Some(version),
             error: None,
+            display_version: None,
         }
     }
 
@@ -72,6 +79,7 @@ impl BatchDetectResult {
             package_identifier: package_identifier.into(),
             installed_version: None,
             error: None,
+            display_version: None,
         }
     }
 
@@ -81,6 +89,7 @@ impl BatchDetectResult {
             package_identifier: package_identifier.into(),
             installed_version: None,
             error: Some(error.into()),
+            display_version: None,
         }
     }
 }
@@ -105,6 +114,7 @@ mod tests {
             package_identifier: "nginx".to_string(),
             installed_version: Some(Version::new("1.24.0")),
             error: None,
+            display_version: None,
         };
         let json = serde_json::to_string(&result).expect("serialize");
         let deserialized: BatchDetectResult = serde_json::from_str(&json).expect("deserialize");
@@ -117,10 +127,12 @@ mod tests {
             package_identifier: "curl".to_string(),
             installed_version: None,
             error: None,
+            display_version: None,
         };
         let json = serde_json::to_string(&result).expect("serialize");
         assert!(!json.contains("installed_version"));
         assert!(!json.contains("error"));
+        assert!(!json.contains("display_version"));
     }
 
     #[test]
@@ -129,6 +141,7 @@ mod tests {
             package_identifier: "broken".to_string(),
             installed_version: None,
             error: Some("dpkg-query failed".to_string()),
+            display_version: None,
         };
         let json = serde_json::to_string(&result).expect("serialize");
         assert!(!json.contains("installed_version"));

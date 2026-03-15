@@ -14,7 +14,7 @@
 		unassignHostFromSoftwareItem,
 		getUpdateHistoryEntry
 	} from '$lib/api';
-	import { formatDate, formatVersion, isValidExternalUrl, isValidLogoUrl } from '$lib/utils';
+	import { formatDate, formatVersion, isValidExternalUrl, isValidLogoUrl, resolveDisplayVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -91,6 +91,7 @@
 		tag?: string;
 		published_at?: string;
 		attestation_status?: AttestationStatus;
+		display_version?: string;
 	}
 	let releaseNotesModal: {
 		softwareName: string;
@@ -461,7 +462,8 @@
 			release_notes: typeof meta.release_notes === 'string' ? meta.release_notes : undefined,
 			tag: typeof meta.tag === 'string' ? meta.tag : undefined,
 			published_at: typeof meta.published_at === 'string' ? meta.published_at : undefined,
-			attestation_status
+			attestation_status,
+			display_version: typeof meta.display_version === 'string' ? meta.display_version : undefined
 		};
 	}
 
@@ -627,10 +629,17 @@
 										<span class="mt-1 block text-xs italic text-surface-400">No plugins configured</span>
 									{/if}
 								</td>
-								<td title={host.installed_version ?? undefined}>{formatVersion(host.installed_version)}</td>
+								<td title={host.installed_version ?? undefined}
+									>{formatVersion(resolveDisplayVersion(host.installed_version, host.installed_display_version))}</td
+								>
 								<td>
 									<span title={host.latest_version ?? item.latest_version ?? undefined}
-										>{formatVersion(host.latest_version ?? item.latest_version)}</span
+										>{formatVersion(
+											resolveDisplayVersion(
+												host.latest_version ?? item.latest_version,
+												getReleaseMeta(host)?.display_version
+											)
+										)}</span
 									>
 									{#if getReleaseMeta(host)}
 										<button
@@ -763,7 +772,11 @@
 			</div>
 			<div>
 				<p class="text-surface-500">To</p>
-				<p class="font-medium" title={updateModal.toVersion}>{formatVersion(updateModal.toVersion)}</p>
+				<p class="font-medium" title={updateModal.toVersion}>
+					{formatVersion(
+						resolveDisplayVersion(updateModal.toVersion, getReleaseMeta(updateModal.host)?.display_version)
+					)}
+				</p>
 			</div>
 		</div>
 

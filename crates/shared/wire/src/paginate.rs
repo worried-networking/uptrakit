@@ -393,6 +393,7 @@ mod tests {
             .map(|i| VersionCheckResult {
                 software_item_id: Uuid::new_v4(),
                 installed_version: Some(format!("1.0.{i}")),
+                installed_display_version: None,
                 latest_version: Some(format!("2.0.{i}")),
                 error: None,
                 host_software_item_id: None,
@@ -412,6 +413,7 @@ mod tests {
                 .map(|i| VersionCheckResult {
                     software_item_id: Uuid::new_v4(),
                     installed_version: Some(format!("1.0.{i}")),
+                    installed_display_version: None,
                     latest_version: Some(format!("2.0.{i}")),
                     error: None,
                     host_software_item_id: None,

@@ -41,14 +41,23 @@ pub struct UpstreamRelease {
     /// `ExecuteUpdatePayload.release_info.attestation_status` at trigger time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attestation_status: Option<AttestationStatus>,
+    /// Human-readable version string for display when the canonical `version`
+    /// is opaque (e.g. a Docker SHA256 digest). Plugins set this to something
+    /// more useful (e.g. the image publish date `"2025-01-15"`). `None` means
+    /// the canonical `version.to_string()` should be shown directly.
+    ///
+    /// Stored in `latest_release_metadata` alongside all other release fields.
+    /// Never used for version comparison — only for display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_version: Option<String>,
 }
 
 impl UpstreamRelease {
     /// Create a new [`UpstreamRelease`] with required fields.
     ///
     /// Optional fields (`release_notes`, `published_at`, `assets`, `category`,
-    /// `attestation_status`) are set to their defaults and can be set via the
-    /// public fields after construction.
+    /// `attestation_status`, `display_version`) are set to their defaults and
+    /// can be set via the public fields after construction.
     pub fn new(
         version: Version,
         tag: impl Into<String>,
@@ -65,6 +74,7 @@ impl UpstreamRelease {
             assets: Vec::new(),
             category: None,
             attestation_status: None,
+            display_version: None,
         }
     }
 }
@@ -127,6 +137,7 @@ mod tests {
             }],
             category: None,
             attestation_status: None,
+            display_version: None,
         };
         let json = serde_json::to_string(&release).expect("serialize");
         let deserialized: UpstreamRelease = serde_json::from_str(&json).expect("deserialize");
@@ -148,6 +159,7 @@ mod tests {
             assets: vec![],
             category: None,
             attestation_status: None,
+            display_version: None,
         };
         let json = serde_json::to_string(&release).expect("serialize");
         assert!(!json.contains("release_notes"));

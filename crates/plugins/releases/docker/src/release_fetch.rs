@@ -56,6 +56,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for DockerPlugin 
                 UpstreamRelease::new(Version::new(&info.digest), tag.to_string(), false, "");
             r.release_url = release_url;
             r.published_at = info.created_at;
+            r.display_version = info.created_at.map(crate::registry::format_display_version);
             r
         };
 

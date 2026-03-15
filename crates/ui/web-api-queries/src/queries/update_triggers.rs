@@ -984,6 +984,7 @@ mod tests {
             package_identifier: Set(Some("test-pkg".to_string())),
             installed_version: Set(Some("1.0.0".to_string())),
             installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
             latest_version: Set(Some("1.1.0".to_string())),
             latest_version_fetched_at: Set(None),
             latest_release_metadata: Set(None),

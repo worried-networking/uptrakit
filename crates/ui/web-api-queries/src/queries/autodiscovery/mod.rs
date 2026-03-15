@@ -218,6 +218,7 @@ pub(crate) mod tests_common {
             package_identifier: Set(Some(package_identifier.to_string())),
             installed_version: Set(Some("1.0.0".to_string())),
             installed_version_detected_at: Set(Some(now)),
+            installed_display_version: Set(None),
             latest_version: Set(None),
             latest_version_fetched_at: Set(None),
             latest_release_metadata: Set(None),

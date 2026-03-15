@@ -15,7 +15,7 @@
 		batchSoftwareItems,
 		executeBatchChunked
 	} from '$lib/api';
-	import { formatDate, formatVersion, parseUrlPage, isValidLogoUrl } from '$lib/utils';
+	import { formatDate, formatVersion, parseUrlPage, isValidLogoUrl, resolveDisplayVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
@@ -637,7 +637,12 @@
 										{formatDate(item.last_checked_at)}
 										{#if item.latest_version}
 											<span class="block text-xs text-surface-500" title={item.latest_version}
-												>{formatVersion(item.latest_version)} available</span
+												>{formatVersion(
+													resolveDisplayVersion(
+														item.latest_version,
+														item.latest_release_metadata?.display_version as string | undefined
+													)
+												)} available</span
 											>
 										{/if}
 									</td>

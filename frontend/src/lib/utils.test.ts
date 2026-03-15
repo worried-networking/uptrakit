@@ -8,6 +8,7 @@ import {
 	parseUrlPage,
 	parseUrlParam,
 	renderApiSubmitTemplate,
+	resolveDisplayVersion,
 	safeRedirect
 } from './utils';
 
@@ -213,6 +214,26 @@ describe('formatVersion', () => {
 		// "sha256:" (7) + exactly 12 hex chars = boundary: no truncation needed
 		const short = 'sha256:123456789012';
 		expect(formatVersion(short)).toBe('sha256:123456789012\u2026');
+	});
+});
+
+// ── resolveDisplayVersion ─────────────────────────────────────────────────────
+
+describe('resolveDisplayVersion', () => {
+	it('returns displayVersion when set', () => {
+		expect(resolveDisplayVersion('sha256:abc', '2025-01-15')).toBe('2025-01-15');
+	});
+	it('falls back to canonicalVersion when displayVersion is null', () => {
+		expect(resolveDisplayVersion('1.2.3', null)).toBe('1.2.3');
+	});
+	it('falls back to canonicalVersion when displayVersion is undefined', () => {
+		expect(resolveDisplayVersion('1.2.3', undefined)).toBe('1.2.3');
+	});
+	it('handles null canonical with set displayVersion', () => {
+		expect(resolveDisplayVersion(null, '2025-01-15')).toBe('2025-01-15');
+	});
+	it('returns undefined when both are undefined', () => {
+		expect(resolveDisplayVersion(undefined, undefined)).toBeUndefined();
 	});
 });
 

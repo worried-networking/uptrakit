@@ -20,12 +20,30 @@ const MANIFEST_ACCEPT: &str = concat!(
 const OCI_CREATED_ANNOTATION: &str = "org.opencontainers.image.created";
 
 /// Result of a manifest fetch: digest plus optional image creation timestamp.
+#[derive(Clone)]
 pub struct ManifestInfo {
     /// SHA-256 digest of the manifest (platform-specific or index digest).
     pub digest: String,
     /// When the image was created, if available from the manifest annotations
     /// or the image config blob.
     pub created_at: Option<time::OffsetDateTime>,
+}
+
+/// Format an OCI image creation timestamp as a human-readable display version.
+///
+/// Produces a full ISO 8601 timestamp truncated to whole seconds and
+/// normalised to UTC, e.g. `"2025-01-15T14:30:00Z"`. Used as
+/// `display_version` on `UpstreamRelease` and `BatchDetectResult` so the UI
+/// can show something meaningful instead of a raw SHA-256 digest.
+pub(crate) fn format_display_version(dt: time::OffsetDateTime) -> String {
+    // Seconds-precision UTC format: YYYY-MM-DDTHH:MM:SSZ.
+    // time::format_description::well_known::Rfc3339 includes sub-second digits
+    // when present, so we use a custom format_description to get a clean string.
+    const FORMAT: &[time::format_description::BorrowedFormatItem<'_>] =
+        time::macros::format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]Z");
+    dt.to_offset(time::UtcOffset::UTC)
+        .format(FORMAT)
+        .unwrap_or_else(|_| dt.to_string())
 }
 
 /// Low-level HTTP client for OCI Distribution API operations.
@@ -551,6 +569,29 @@ mod tests {
     #[test]
     fn client_creation_succeeds() {
         assert!(RegistryClient::new(None).is_ok());
+    }
+
+    #[test]
+    fn format_display_version_full_timestamp() {
+        // Verify seconds-precision UTC output: sub-second digits are stripped,
+        // the offset is normalised to Z, and the format is YYYY-MM-DDTHH:MM:SSZ.
+        let dt = time::OffsetDateTime::parse(
+            "2025-01-15T14:30:00.987654321Z",
+            &time::format_description::well_known::Rfc3339,
+        )
+        .unwrap();
+        assert_eq!(format_display_version(dt), "2025-01-15T14:30:00Z");
+    }
+
+    #[test]
+    fn format_display_version_non_utc_offset() {
+        // A non-UTC offset must be converted to UTC before formatting.
+        let dt = time::OffsetDateTime::parse(
+            "2025-06-01T10:00:00+02:00",
+            &time::format_description::well_known::Rfc3339,
+        )
+        .unwrap();
+        assert_eq!(format_display_version(dt), "2025-06-01T08:00:00Z");
     }
 
     #[test]

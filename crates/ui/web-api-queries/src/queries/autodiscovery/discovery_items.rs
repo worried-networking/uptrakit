@@ -429,6 +429,7 @@ async fn find_or_create_software_item(
         package_identifier: Set(Some(item.effective_plugin_pkg_id().to_string())),
         installed_version: Set(Some(installed_version.to_string())),
         installed_version_detected_at: Set(Some(now)),
+        installed_display_version: Set(None),
         latest_version: Set(None),
         latest_version_fetched_at: Set(None),
         latest_release_metadata: Set(None),

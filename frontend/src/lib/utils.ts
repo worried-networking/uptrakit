@@ -85,6 +85,18 @@ export function formatVersion(version: string | null | undefined, fallback = 'â€
 }
 
 /**
+ * Returns the most informative version string for display.
+ * Prefers `displayVersion` when set by the plugin (e.g. Docker publish date).
+ * Falls back to `canonicalVersion` for plugins that use human-readable versions.
+ */
+export function resolveDisplayVersion(
+	canonicalVersion: string | null | undefined,
+	displayVersion: string | null | undefined
+): string | null | undefined {
+	return displayVersion ?? canonicalVersion;
+}
+
+/**
  * Copies text to the clipboard. Returns true on success, false on failure.
  */
 export async function copyToClipboard(text: string): Promise<boolean> {

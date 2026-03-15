@@ -122,8 +122,9 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin
             std::result::Result<Option<crate::docker_client::LocalImageDigest>, String>,
         > = HashMap::new();
 
-        // Platform digest cache: "image:tag::platform" → Option<String>.
-        let mut platform_cache: HashMap<String, Option<String>> = HashMap::new();
+        // Platform digest cache: "image:tag::platform" → Option<ManifestInfo>.
+        let mut platform_cache: HashMap<String, Option<crate::registry::ManifestInfo>> =
+            HashMap::new();
 
         // Populate inspect cache.
         for item in items {
@@ -169,7 +170,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin
                     // auto-detect from the local image's os/arch fields.
                     if let Some(ref p) = self.config.platform {
                         let cache_key = format!("{resolved}::{p}");
-                        let platform_digest = match platform_cache.entry(cache_key) {
+                        let platform_info = match platform_cache.entry(cache_key) {
                             std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
                             std::collections::hash_map::Entry::Vacant(e) => {
                                 let result = self
@@ -182,19 +183,22 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin
                                     )
                                     .await
                                     .ok()
-                                    .flatten()
-                                    .map(|info| info.digest);
+                                    .flatten();
                                 e.insert(result.clone());
                                 result
                             }
                         };
 
-                        match platform_digest {
-                            Some(pd) => {
-                                results.push(BatchDetectResult::found(
+                        match platform_info {
+                            Some(info) => {
+                                let display_version =
+                                    info.created_at.map(crate::registry::format_display_version);
+                                let mut r = BatchDetectResult::found(
                                     item.package_identifier.clone(),
-                                    Version::new(&pd),
-                                ));
+                                    Version::new(&info.digest),
+                                );
+                                r.display_version = display_version;
+                                results.push(r);
                                 continue;
                             }
                             None => {

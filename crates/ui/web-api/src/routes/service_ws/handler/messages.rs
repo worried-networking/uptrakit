@@ -581,6 +581,10 @@ pub(super) async fn handle_version_check_results(
                 .col_expr(
                     host_software_item::Column::InstalledVersionDetectedAt,
                     sea_orm::sea_query::Expr::value(Some(now)),
+                )
+                .col_expr(
+                    host_software_item::Column::InstalledDisplayVersion,
+                    sea_orm::sea_query::Expr::value(result.installed_display_version.clone()),
                 );
         }
         if let Some(ref latest_version) = result.latest_version {
@@ -1051,6 +1055,7 @@ mod tests {
             package_identifier: Set(None),
             installed_version: Set(None),
             installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
             latest_version: Set(None),
             latest_version_fetched_at: Set(None),
             latest_release_metadata: Set(None),
@@ -1089,6 +1094,7 @@ mod tests {
             results: vec![VersionCheckResult {
                 software_item_id: sw.id,
                 installed_version: Some("2.0.0".to_string()),
+                installed_display_version: None,
                 latest_version: None,
                 error: None,
                 update_category: Default::default(),
@@ -1140,6 +1146,7 @@ mod tests {
             results: vec![VersionCheckResult {
                 software_item_id: sw.id,
                 installed_version: Some("evil".to_string()),
+                installed_display_version: None,
                 latest_version: None,
                 error: None,
                 update_category: Default::default(),

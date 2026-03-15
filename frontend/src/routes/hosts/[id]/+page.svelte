@@ -18,7 +18,7 @@
 		setHostTags,
 		getSoftwareItems
 	} from '$lib/api';
-	import { formatDate, formatVersion } from '$lib/utils';
+	import { formatDate, formatVersion, resolveDisplayVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -485,8 +485,17 @@
 								{#each assignedSoftware as item (item.id)}
 									<tr>
 										<td class="font-medium">{item.name}</td>
-										<td class="text-sm text-surface-500">{item.installed_version ?? '—'}</td>
-										<td class="text-sm text-surface-500">{item.latest_version ?? '—'}</td>
+										<td class="text-sm text-surface-500" title={item.installed_version ?? undefined}
+											>{formatVersion(resolveDisplayVersion(item.installed_version, undefined)) ?? '—'}</td
+										>
+										<td class="text-sm text-surface-500" title={item.latest_version ?? undefined}
+											>{formatVersion(
+												resolveDisplayVersion(
+													item.latest_version,
+													item.latest_release_metadata?.display_version as string | undefined
+												)
+											) ?? '—'}</td
+										>
 										<td>
 											{#if item.update_available}
 												<span class="badge preset-filled-warning-500">Update Available</span>

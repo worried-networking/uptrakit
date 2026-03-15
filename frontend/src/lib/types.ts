@@ -490,6 +490,7 @@ export interface SoftwareItemResponse {
 	host_count: number;
 	installed_version?: string | null;
 	latest_version?: string | null;
+	latest_release_metadata?: Record<string, unknown> | null;
 	update_available: boolean;
 	created_at: string;
 	updated_at: string;
@@ -504,6 +505,7 @@ export interface SoftwareItemHostSummary {
 	qualifier?: string | null;
 	installed_version: string | null;
 	installed_version_detected_at: string | null;
+	installed_display_version?: string | null;
 	latest_version?: string | null;
 	latest_release_metadata?: Record<string, unknown> | null;
 	update_available: boolean;

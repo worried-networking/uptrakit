@@ -282,11 +282,13 @@ pub trait VersionDetectorPlugin: PluginBase {
                     package_identifier: item.package_identifier.clone(),
                     installed_version: v,
                     error: None,
+                    display_version: None,
                 }),
                 Err(e) => results.push(BatchDetectResult {
                     package_identifier: item.package_identifier.clone(),
                     installed_version: None,
                     error: Some(e.to_string()),
+                    display_version: None,
                 }),
             }
         }

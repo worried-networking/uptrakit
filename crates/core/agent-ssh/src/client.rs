@@ -974,6 +974,7 @@ fn error_results_for_check(payload: &CheckVersionsPayload, error: &str) -> Vec<V
             software_item_id: a.software_item_id,
             host_software_item_id: a.host_software_item_id,
             installed_version: None,
+            installed_display_version: None,
             latest_version: None,
             error: Some(error.to_string()),
             update_category: UpdateCategory::Unknown,

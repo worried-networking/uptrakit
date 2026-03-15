@@ -184,6 +184,10 @@ pub struct SoftwareItemHostSummary {
     #[serde(with = "time::serde::rfc3339::option")]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
     pub installed_version_detected_at: Option<OffsetDateTime>,
+    /// Plugin-provided display version for the installed version (e.g. Docker image publish date).
+    /// `None` when the installed version is self-explanatory (semver, etc.).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_display_version: Option<String>,
     /// Per-host latest known version (from the `fetch_releases` role plugin).
     /// `None` when no upstream version has been resolved yet for this host.
     #[serde(default, skip_serializing_if = "Option::is_none")]

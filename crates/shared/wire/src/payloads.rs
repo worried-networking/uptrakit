@@ -356,6 +356,12 @@ pub struct VersionCheckResult {
         alias = "host_package_id"
     )]
     pub host_software_item_id: Option<Uuid>,
+    /// Human-readable installed version for display when `installed_version`
+    /// is opaque (e.g. a Docker SHA256 digest → the image publish date).
+    /// Set by the agent from `BatchDetectResult.display_version`.
+    /// `None` when the plugin does not provide a display version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_display_version: Option<String>,
 }
 
 // --- Update execution messages ---

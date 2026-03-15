@@ -97,6 +97,7 @@ mod tests {
                 assets: vec![],
                 category: None,
                 attestation_status: None,
+                display_version: None,
             }],
             error: None,
         };
