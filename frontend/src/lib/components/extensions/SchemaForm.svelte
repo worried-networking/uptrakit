@@ -10,6 +10,8 @@
 		onsubmit,
 		submitLabel = 'Submit',
 		loading = false,
+		formId = undefined,
+		hideSubmit = false,
 		extensionId,
 		serviceId,
 		extraParams = {},
@@ -19,6 +21,8 @@
 		onsubmit: (values: Record<string, unknown>) => Promise<void>;
 		submitLabel?: string;
 		loading?: boolean;
+		formId?: string;
+		hideSubmit?: boolean;
 		extensionId?: string;
 		serviceId?: string;
 		extraParams?: Record<string, unknown>;
@@ -182,7 +186,7 @@
 	}
 </script>
 
-<form onsubmit={handleSubmit} class="space-y-4">
+<form id={formId} onsubmit={handleSubmit} class="space-y-4">
 	{#each fields as field (field.key)}
 		{#if field.field_type !== 'hidden' && isFieldVisible(field)}
 			{#if field.field_type === 'textarea'}
@@ -198,6 +202,23 @@
 						required={field.required}
 						class="textarea"
 						rows="3"
+					></textarea>
+				</label>
+			{:else if field.field_type === 'ssh_private_key'}
+				<label class="label">
+					<span>
+						{field.label}
+						{#if field.required}<span class="text-error-500">*</span>{/if}
+					</span>
+					<textarea
+						id={field.key}
+						bind:value={values[field.key]}
+						placeholder={field.placeholder}
+						required={field.required}
+						class="textarea font-mono text-xs"
+						rows="8"
+						spellcheck="false"
+						autocomplete="off"
 					></textarea>
 				</label>
 			{:else if field.field_type === 'select'}
@@ -275,13 +296,15 @@
 		{/if}
 	{/each}
 
-	<button type="submit" class="btn preset-filled-primary-500" disabled={loading || preLoading}>
-		{#if preLoading}
-			Loading...
-		{:else if loading}
-			Processing...
-		{:else}
-			{submitLabel}
-		{/if}
-	</button>
+	{#if !hideSubmit}
+		<button type="submit" class="btn preset-filled-primary-500" disabled={loading || preLoading}>
+			{#if preLoading}
+				Loading...
+			{:else if loading}
+				Processing...
+			{:else}
+				{submitLabel}
+			{/if}
+		</button>
+	{/if}
 </form>

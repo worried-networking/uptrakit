@@ -26,6 +26,9 @@
 		oncomplete: (result?: unknown) => void | Promise<void>;
 	} = $props();
 
+	/** Form element ID used to link the footer submit button to the SchemaForm. */
+	const WIZARD_FORM_ID = 'wizard-step-form';
+
 	let currentStep: number = $state(0);
 	let loading: boolean = $state(false);
 	/** Accumulated form values across all steps. */
@@ -64,9 +67,15 @@
 		const regularParams: Record<string, unknown> = {};
 		const sensitiveParams: Record<string, unknown> = {};
 
+		// Keys that are declared fields in this step's form must always be
+		// taken from the form submission, even if they share a name with a
+		// key in extraParams (e.g. `username` present on both the SSH host
+		// row and the auth-override form step).
+		const formFieldKeys = new Set(step.form.fields.map((f) => f.key));
+
 		for (const [k, v] of Object.entries(formValues)) {
-			// Don't include extraParams that SchemaForm merges in — we manage those separately.
-			if (k in extraParams) continue;
+			// Skip extraParams keys that are NOT a declared form field.
+			if (!formFieldKeys.has(k) && k in extraParams) continue;
 			if (sensitive.has(k)) {
 				sensitiveParams[k] = v;
 			} else {
@@ -219,6 +228,19 @@
 			{#if Array.isArray(plan.actions)}
 				<div class="space-y-2">
 					<h4 class="text-sm font-semibold">Planned Actions</h4>
+					<div class="mb-3 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-surface-500">
+						<span>Security impact:</span>
+						<span
+							><span class="badge preset-filled-error-500 text-xs">high</span> — grants direct privileged access (e.g. sudoers
+							NOPASSWD)</span
+						>
+						<span
+							><span class="badge preset-filled-warning-500 text-xs">medium</span> — modifies system or infrastructure configuration</span
+						>
+						<span
+							><span class="badge preset-filled-primary-500 text-xs">low</span> — minor privilege change (e.g. group membership)</span
+						>
+					</div>
 					{#each plan.actions as action, idx (idx)}
 						{@const actionObj = action as Record<string, unknown>}
 						{@const unchecked = (accumulatedParams._unchecked_actions as string[]) ?? []}
@@ -247,6 +269,13 @@
 									{/if}
 								</div>
 								<p class="mt-0.5 text-xs text-surface-500">{actionObj.description}</p>
+								{#if Array.isArray(actionObj.commands) && (actionObj.commands as string[]).length > 0}
+									<ul class="mt-1 space-y-0.5 text-xs text-surface-500">
+										{#each actionObj.commands as cmd (cmd)}
+											<li class="font-mono">{cmd}</li>
+										{/each}
+									</ul>
+								{/if}
 							</div>
 						</label>
 					{/each}
@@ -256,11 +285,12 @@
 			<p class="text-surface-500">No plan data available.</p>
 		{/if}
 	{:else if step.form.fields.length > 0}
-		<!-- Form step -->
+		<!-- Form step: submit button lives in the footer via form ID association -->
 		<SchemaForm
 			fields={step.form.fields}
 			onsubmit={handleStepSubmit}
-			submitLabel={isLastStep ? 'Execute' : 'Next'}
+			formId={WIZARD_FORM_ID}
+			hideSubmit={true}
 			{loading}
 			{extensionId}
 			{serviceId}
@@ -278,13 +308,18 @@
 	{/if}
 
 	{#snippet footer()}
-		<button class="btn preset-tonal-surface" onclick={onclose} disabled={loading}> Cancel </button>
+		<button class="btn preset-tonal-surface" onclick={onclose} disabled={loading}>Cancel</button>
 		{#if currentStep > 0}
-			<button class="btn preset-tonal-surface" onclick={handleBack} disabled={loading}> Back </button>
+			<button class="btn preset-tonal-surface" onclick={handleBack} disabled={loading}>Back</button>
 		{/if}
 		{#if step.render_previous_response}
 			<button class="btn preset-filled-primary-500" onclick={handleReviewNext} disabled={loading}>
 				{isLastStep ? 'Done' : 'Execute'}
+			</button>
+		{:else if step.form.fields.length > 0}
+			<!-- Submit button linked to the SchemaForm by ID — lives in the footer next to Cancel -->
+			<button form={WIZARD_FORM_ID} type="submit" class="btn preset-filled-primary-500" disabled={loading}>
+				{isLastStep ? 'Execute' : 'Next'}
 			</button>
 		{/if}
 	{/snippet}
