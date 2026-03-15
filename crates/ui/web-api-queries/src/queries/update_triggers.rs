@@ -20,15 +20,15 @@ use uuid::Uuid;
 use crate::notifier::ServiceNotifier;
 use crate::queries::update_types::ActorType;
 
-// Re-export everything from update_dispatch so existing callers that import
-// from `update_triggers` continue to work.
-pub use super::update_dispatch::{
-    CreateUpdateRecordParams, DispatchUpdateParams, TriggerUpdateError, ValidatedUpdateTarget,
-    create_update_history_record, dispatch_update_to_agent, enrich_release_info_with_attestation,
+use super::update_dispatch::{
+    CreateUpdateRecordParams, DispatchUpdateParams, TriggerUpdateError, build_plugin_assignment,
+    config_prefers_interactive, create_update_history_record, dispatch_update_to_agent,
     has_active_update_for_host, validate_update_preconditions,
 };
 
-pub(crate) use super::update_dispatch::{build_plugin_assignment, config_prefers_interactive};
+// Re-export for tests that exercise the enrichment logic.
+#[cfg(test)]
+use super::update_dispatch::enrich_release_info_with_attestation;
 
 // ---------------------------------------------------------------------------
 // Public structs

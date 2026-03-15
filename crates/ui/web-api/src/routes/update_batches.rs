@@ -37,7 +37,7 @@ use crate::error_response::error_response;
 use crate::middleware::permission::{CanTriggerUpdates, CanViewSoftware};
 use crate::queries::{
     update_batches as batch_queries,
-    update_triggers::TriggerUpdateError,
+    update_dispatch::TriggerUpdateError,
     update_types::{ActorType, BatchType},
 };
 use crate::tenant_db::TenantDb;

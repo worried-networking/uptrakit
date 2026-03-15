@@ -327,7 +327,7 @@ pub(super) async fn deliver_pending_updates(
             .and_then(|a| a.plugin_config_id)
             .and_then(|pc_id| configs_map.get(&pc_id))
             .map(|c| &c.config);
-        let release_info = crate::queries::update_triggers::enrich_release_info_with_attestation(
+        let release_info = crate::queries::update_dispatch::enrich_release_info_with_attestation(
             None,
             hsi_metadata,
             fetch_config,

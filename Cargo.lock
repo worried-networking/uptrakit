@@ -6691,7 +6691,6 @@ dependencies = [
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",
  "uptrakit-shared-types",
- "uptrakit-web-api-auth",
  "uuid",
 ]
 
@@ -6713,7 +6712,6 @@ dependencies = [
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",
  "uptrakit-shared-types",
- "uptrakit-web-api-auth",
  "uuid",
 ]
 

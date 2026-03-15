@@ -788,9 +788,9 @@ pub async fn trigger_update(
 /// Map a [`TriggerUpdateError`] to an HTTP error response with the appropriate
 /// status code and user-facing message.
 fn trigger_update_error_response(
-    report: &rootcause::Report<crate::queries::update_triggers::TriggerUpdateError>,
+    report: &rootcause::Report<crate::queries::update_dispatch::TriggerUpdateError>,
 ) -> Response {
-    use crate::queries::update_triggers::TriggerUpdateError;
+    use crate::queries::update_dispatch::TriggerUpdateError;
 
     let (status, msg) = match report.current_context() {
         TriggerUpdateError::SoftwareItemNotFound => {
