@@ -160,7 +160,7 @@ pub(crate) async fn bootstrap_connect(
 
     // 4. GATHER HOST INFORMATION
     let remote_info =
-        gather_remote_host_info(&*session, &executor, params, use_sudo, state_dir, &db).await?;
+        gather_remote_host_info(&session, &executor, params, use_sudo, state_dir, &db).await?;
 
     // 5. DISCONNECT
     drop(executor);

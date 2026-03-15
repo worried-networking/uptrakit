@@ -1312,11 +1312,11 @@ async fn process_single_batch_result(
     });
     active.output_bytes = Set(result.output.len() as i64);
     active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
-    if let Some(ref error) = result.error {
-        if result.output.is_empty() {
-            active.output = Set(error.clone());
-            active.output_bytes = Set(error.len() as i64);
-        }
+    if let Some(ref error) = result.error
+        && result.output.is_empty()
+    {
+        active.output = Set(error.clone());
+        active.output_bytes = Set(error.len() as i64);
     }
     if let Err(e) = active.update(state.db()).await {
         tracing::warn!(

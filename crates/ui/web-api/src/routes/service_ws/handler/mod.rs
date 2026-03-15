@@ -1031,6 +1031,9 @@ enum TextAction {
 
 /// Handle a deserialized text frame: fast-path messages inline, forward
 /// everything else to the processor.
+// All parameters originate from the main event loop and cannot be meaningfully
+// grouped without duplicating the AuthenticatedSessionState struct.
+#[allow(clippy::too_many_arguments)]
 async fn handle_incoming_text(
     text: &str,
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
