@@ -166,26 +166,6 @@ pub async fn invoke_action(
             );
         }
         ExtensionOwner::Plugin => {
-            // Notification extensions (prefixed with "notifications.") are
-            // compiled-in plugin extensions but have their own controller-side
-            // handler that performs DB queries and SMTP settings management.
-            if extension_id.starts_with("notifications.") {
-                tracing::debug!(
-                    extension_id = %extension_id,
-                    action_id = %action_id,
-                    "dispatching to notification extension handler"
-                );
-                return crate::routes::notification_extensions::handle(
-                    &state,
-                    &tenant_ctx,
-                    auth_user.user_id,
-                    &extension_id,
-                    &action_id,
-                    body.params.clone(),
-                )
-                .await;
-            }
-
             tracing::debug!(
                 extension_id = %extension_id,
                 action_id = %action_id,

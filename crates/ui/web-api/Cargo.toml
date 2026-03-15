@@ -14,7 +14,7 @@ swagger-ui = ["dep:utoipa-swagger-ui"]
 nats = ["dep:async-nats", "dep:uptrakit-nats"]
 interactive = []
 notifications-telegram = ["uptrakit-plugin-infrastructure-registry/notifications-telegram"]
-notifications-email = ["dep:uptrakit-notification-plugin-email", "uptrakit-plugin-infrastructure-registry/notifications-email"]
+notifications-email = ["uptrakit-plugin-infrastructure-registry/notifications-email"]
 notifications-all = ["notifications-telegram", "notifications-email"]
 db-all = ["db-sqlite", "db-postgres", "db-mysql"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-web-api-queries/db-sqlite"]
@@ -80,7 +80,6 @@ async-nats = { workspace = true, optional = true }
 uptrakit-nats = { workspace = true, optional = true }
 uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-notification-plugin-core = { workspace = true }
-uptrakit-notification-plugin-email = { workspace = true, optional = true }
 uptrakit-backoff = { workspace = true }
 uptrakit-web-api-auth = { workspace = true }
 uptrakit-web-api-queries = { workspace = true }

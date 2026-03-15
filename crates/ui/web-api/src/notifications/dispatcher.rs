@@ -7,6 +7,7 @@ use uuid::Uuid;
 use uptrakit_plugin_infrastructure_registry::PluginOps;
 
 use super::events::NotificationEvent;
+use crate::settings::Settings;
 
 /// Bounded capacity for the notification dispatcher channel.
 ///
@@ -66,52 +67,73 @@ impl NotificationDispatcher {
     }
 }
 
-/// Convert web-api's SmtpSettingsSnapshot to the email plugin's SmtpSettingsSnapshot
-/// and merge SMTP settings into a per-channel email config object.
+/// Build a generic settings bag from the cached [`Settings`] snapshot.
 ///
-/// Per-tenant settings override global defaults on a field-by-field basis.
-#[cfg(feature = "notifications-email")]
-#[tracing::instrument(skip_all)]
-fn merge_smtp_into_config(
-    global_smtp: &crate::settings::SmtpSettingsSnapshot,
-    tenant_smtp: &crate::settings::SmtpSettingsSnapshot,
-    config: serde_json::Value,
-) -> serde_json::Value {
-    let plugin_global = to_plugin_smtp_snapshot(global_smtp);
-    let plugin_tenant = to_plugin_smtp_snapshot(tenant_smtp);
-    uptrakit_notification_plugin_email::merge_smtp_into_config(
-        &plugin_global,
-        &plugin_tenant,
-        config,
-    )
-}
+/// The resulting JSON has `{ "tenant": { ... }, "global": { ... } }` with
+/// dot-prefixed keys matching the setting names used by each notification
+/// plugin's `deliver()` implementation. Plugins extract only the keys they
+/// recognise and ignore the rest, so every plugin receives the full bag.
+pub(crate) fn build_settings_bag(settings: &Settings) -> serde_json::Value {
+    let snap = settings.snapshot();
 
-/// Public (crate-visible) re-export for use in route handlers (e.g. `test_channel`).
-#[cfg(feature = "notifications-email")]
-#[tracing::instrument(skip_all)]
-pub(crate) fn merge_smtp_into_config_pub(
-    global_smtp: &crate::settings::SmtpSettingsSnapshot,
-    tenant_smtp: &crate::settings::SmtpSettingsSnapshot,
-    config: serde_json::Value,
-) -> serde_json::Value {
-    merge_smtp_into_config(global_smtp, tenant_smtp, config)
-}
-
-/// Convert web-api's SmtpSettingsSnapshot to the email plugin's version.
-#[cfg(feature = "notifications-email")]
-fn to_plugin_smtp_snapshot(
-    smtp: &crate::settings::SmtpSettingsSnapshot,
-) -> uptrakit_notification_plugin_email::SmtpSettingsSnapshot {
-    uptrakit_notification_plugin_email::SmtpSettingsSnapshot {
-        host: smtp.host.clone(),
-        port: smtp.port,
-        username: smtp.username.clone(),
-        password: smtp.password.clone(),
-        from_address: smtp.from_address.clone(),
-        from_name: smtp.from_name.clone(),
-        tls_mode: smtp.tls_mode.clone(),
-        helo_host: smtp.helo_host.clone(),
+    let mut tenant = serde_json::Map::new();
+    // SMTP tenant settings
+    if let Some(ref h) = snap.smtp.host {
+        tenant.insert("smtp.host".into(), serde_json::json!(h));
     }
+    if let Some(p) = snap.smtp.port {
+        tenant.insert("smtp.port".into(), serde_json::json!(p));
+    }
+    if let Some(ref u) = snap.smtp.username {
+        tenant.insert("smtp.username".into(), serde_json::json!(u));
+    }
+    if let Some(ref pw) = snap.smtp.password {
+        tenant.insert("smtp.password".into(), serde_json::json!(pw));
+    }
+    if let Some(ref f) = snap.smtp.from_address {
+        tenant.insert("smtp.from_address".into(), serde_json::json!(f));
+    }
+    if let Some(ref n) = snap.smtp.from_name {
+        tenant.insert("smtp.from_name".into(), serde_json::json!(n));
+    }
+    tenant.insert(
+        "smtp.tls_mode".into(),
+        serde_json::json!(snap.smtp.tls_mode),
+    );
+
+    let mut global = serde_json::Map::new();
+    // Global SMTP settings
+    if let Some(ref h) = snap.global_smtp.host {
+        global.insert("global_smtp.host".into(), serde_json::json!(h));
+    }
+    if let Some(p) = snap.global_smtp.port {
+        global.insert("global_smtp.port".into(), serde_json::json!(p));
+    }
+    if let Some(ref u) = snap.global_smtp.username {
+        global.insert("global_smtp.username".into(), serde_json::json!(u));
+    }
+    if let Some(ref pw) = snap.global_smtp.password {
+        global.insert("global_smtp.password".into(), serde_json::json!(pw));
+    }
+    if let Some(ref f) = snap.global_smtp.from_address {
+        global.insert("global_smtp.from_address".into(), serde_json::json!(f));
+    }
+    if let Some(ref n) = snap.global_smtp.from_name {
+        global.insert("global_smtp.from_name".into(), serde_json::json!(n));
+    }
+    global.insert(
+        "global_smtp.tls_mode".into(),
+        serde_json::json!(snap.global_smtp.tls_mode),
+    );
+    if let Some(ref h) = snap.global_smtp.helo_host {
+        global.insert("global_smtp.helo_host".into(), serde_json::json!(h));
+    }
+    // Global Telegram settings
+    if let Some(ref t) = snap.global_telegram.bot_token {
+        global.insert("global_telegram.bot_token".into(), serde_json::json!(t));
+    }
+
+    serde_json::json!({ "tenant": tenant, "global": global })
 }
 
 #[tracing::instrument(skip_all)]
@@ -215,59 +237,9 @@ async fn dispatch_loop(
                     }
                 };
 
-            // For telegram channels, inject global bot_token if per-channel config lacks one.
-            #[cfg(feature = "notifications-telegram")]
-            let config_json = if channel_model.channel_type == "telegram"
-                && config_json
-                    .get("bot_token")
-                    .and_then(|v| v.as_str())
-                    .is_none_or(str::is_empty)
-            {
-                let global_telegram = settings.global_telegram();
-                if let Some(token) = global_telegram.bot_token {
-                    let mut merged = config_json;
-                    if let Some(obj) = merged.as_object_mut() {
-                        obj.insert("bot_token".to_string(), serde_json::json!(token));
-                    }
-                    merged
-                } else {
-                    config_json
-                }
-            } else {
-                config_json
-            };
-
-            // For email channels, merge SMTP settings (global + per-tenant)
-            // into the per-channel config (which only stores `to_addresses`).
-            let config_json = if channel_model.channel_type == "email" {
-                #[cfg(feature = "notifications-email")]
-                {
-                    let global_smtp = settings.global_smtp();
-                    let tenant_smtp = settings.smtp();
-                    if !tenant_smtp.is_configured() && !global_smtp.is_configured() {
-                        tracing::warn!(
-                            channel_id = %channel_model.id,
-                            "skipping email notification: SMTP settings not configured"
-                        );
-                        continue;
-                    }
-                    merge_smtp_into_config(&global_smtp, &tenant_smtp, config_json)
-                }
-                #[cfg(not(feature = "notifications-email"))]
-                {
-                    // Email plugin not compiled in — the channel won't be in the
-                    // registry so delivery will be skipped below, but handle it
-                    // defensively.
-                    let _ = &settings;
-                    tracing::warn!(
-                        channel_id = %channel_model.id,
-                        "email notification requested but email plugin is not enabled"
-                    );
-                    continue;
-                }
-            } else {
-                config_json
-            };
+            // Build a generic settings bag from the cached settings.
+            // Each plugin's `deliver()` extracts only the keys it needs.
+            let settings_bag = build_settings_bag(&settings);
 
             // Generate action token if the event is actionable
             let action_token = event.action_params().map(|_| Uuid::now_v7());
@@ -321,9 +293,8 @@ async fn dispatch_loop(
                     );
                     return;
                 };
-                // TODO: build a proper settings bag from tenant/global settings
                 match transport
-                    .deliver(&config_json, &serde_json::json!({}), &message)
+                    .deliver(&config_json, &settings_bag, &message)
                     .await
                 {
                     Ok(()) => {
@@ -371,150 +342,5 @@ async fn dispatch_loop(
                 }
             });
         }
-    }
-}
-
-#[cfg(all(test, feature = "notifications-email"))]
-mod tests {
-    use super::*;
-    use crate::settings::SmtpSettingsSnapshot;
-
-    fn make_smtp(
-        host: Option<&str>,
-        port: Option<u16>,
-        from: Option<&str>,
-    ) -> SmtpSettingsSnapshot {
-        SmtpSettingsSnapshot {
-            host: host.map(|s| s.to_string()),
-            port,
-            username: None,
-            password: None,
-            from_address: from.map(|s| s.to_string()),
-            from_name: None,
-            tls_mode: "starttls".to_string(),
-            helo_host: None,
-        }
-    }
-
-    // ── merge_smtp_into_config ────────────────────────────────────────────────
-
-    fn empty_smtp() -> SmtpSettingsSnapshot {
-        make_smtp(None, None, None)
-    }
-
-    /// The SMTP host and default port (587) are injected into the config object.
-    #[test]
-    fn merge_smtp_sets_host_and_default_port() {
-        let smtp = make_smtp(Some("mail.example.com"), None, Some("noreply@example.com"));
-        let config = serde_json::json!({ "to_addresses": ["user@test.local"] });
-        let merged = merge_smtp_into_config(&empty_smtp(), &smtp, config);
-
-        assert_eq!(merged["smtp_host"], "mail.example.com");
-        assert_eq!(
-            merged["smtp_port"], 587,
-            "default port must be 587 when port is None"
-        );
-        assert_eq!(merged["from_address"], "noreply@example.com");
-        // Original fields are preserved.
-        assert!(merged["to_addresses"].is_array());
-    }
-
-    /// When a non-default port is set it is used verbatim.
-    #[test]
-    fn merge_smtp_uses_explicit_port() {
-        let smtp = make_smtp(
-            Some("smtp.corp.internal"),
-            Some(465),
-            Some("alerts@corp.internal"),
-        );
-        let config = serde_json::json!({});
-        let merged = merge_smtp_into_config(&empty_smtp(), &smtp, config);
-
-        assert_eq!(merged["smtp_port"], 465);
-    }
-
-    /// Username, password, from_name, and tls_mode are all propagated.
-    #[test]
-    fn merge_smtp_propagates_all_optional_fields() {
-        let mut smtp = make_smtp(Some("smtp.example.com"), None, Some("from@example.com"));
-        smtp.username = Some("smtpuser".to_string());
-        smtp.password = Some("secret".to_string());
-        smtp.from_name = Some("Uptrakit Alerts".to_string());
-        smtp.tls_mode = "tls".to_string();
-
-        let config = serde_json::json!({});
-        let merged = merge_smtp_into_config(&empty_smtp(), &smtp, config);
-
-        assert_eq!(merged["smtp_username"], "smtpuser");
-        assert_eq!(merged["smtp_password"], "secret");
-        assert_eq!(merged["from_name"], "Uptrakit Alerts");
-        assert_eq!(merged["tls_mode"], "tls");
-    }
-
-    /// When no host is set the `smtp_host` key is not inserted.
-    #[test]
-    fn merge_smtp_omits_host_when_none() {
-        let smtp = make_smtp(None, None, None);
-        let config = serde_json::json!({});
-        let merged = merge_smtp_into_config(&empty_smtp(), &smtp, config);
-
-        assert!(
-            merged.get("smtp_host").is_none(),
-            "smtp_host must not be set when host is None"
-        );
-    }
-
-    /// Non-email channel configs are returned unchanged by the caller-side guard
-    /// in `dispatch_loop`.  We test this by verifying `merge_smtp_into_config`
-    /// does not inspect the channel type — the guard is purely at the call site.
-    /// The function is only called for email channels, so this test documents the
-    /// assumption: passing a non-email config object still works (no panic).
-    #[test]
-    fn merge_smtp_works_on_any_json_object() {
-        let smtp = make_smtp(Some("smtp.example.com"), None, Some("from@example.com"));
-        // A webhook-style config with no email fields.
-        let config = serde_json::json!({ "url": "https://webhook.example.com" });
-        let merged = merge_smtp_into_config(&empty_smtp(), &smtp, config);
-
-        // SMTP fields are merged in but the original webhook field is still there.
-        assert_eq!(merged["url"], "https://webhook.example.com");
-        assert_eq!(merged["smtp_host"], "smtp.example.com");
-    }
-
-    /// Per-tenant settings override global defaults field-by-field.
-    #[test]
-    fn merge_smtp_tenant_overrides_global() {
-        let global = make_smtp(
-            Some("global.smtp.com"),
-            Some(587),
-            Some("global@example.com"),
-        );
-        let tenant = make_smtp(Some("tenant.smtp.com"), None, None);
-        let config = serde_json::json!({});
-        let merged = merge_smtp_into_config(&global, &tenant, config);
-
-        // Tenant host overrides global
-        assert_eq!(merged["smtp_host"], "tenant.smtp.com");
-        // Global port inherited since tenant has None
-        assert_eq!(merged["smtp_port"], 587);
-        // Global from_address inherited since tenant has None
-        assert_eq!(merged["from_address"], "global@example.com");
-    }
-
-    /// Global defaults are used when tenant settings are empty.
-    #[test]
-    fn merge_smtp_global_defaults_used_when_tenant_empty() {
-        let global = make_smtp(
-            Some("global.smtp.com"),
-            Some(465),
-            Some("global@example.com"),
-        );
-        let tenant = empty_smtp();
-        let config = serde_json::json!({});
-        let merged = merge_smtp_into_config(&global, &tenant, config);
-
-        assert_eq!(merged["smtp_host"], "global.smtp.com");
-        assert_eq!(merged["smtp_port"], 465);
-        assert_eq!(merged["from_address"], "global@example.com");
     }
 }

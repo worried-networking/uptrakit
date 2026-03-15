@@ -7448,7 +7448,6 @@ dependencies = [
  "uptrakit-internal-wire",
  "uptrakit-nats",
  "uptrakit-notification-plugin-core",
- "uptrakit-notification-plugin-email",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",

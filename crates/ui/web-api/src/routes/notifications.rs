@@ -308,34 +308,8 @@ pub async fn test_channel(
         }
     };
 
-    // For email channels, merge SMTP settings (global + per-tenant) into the per-channel config.
-    #[cfg(feature = "notifications-email")]
-    let config_json = if channel_model.channel_type == "email" {
-        let global_smtp = state.settings.global_smtp();
-        let tenant_smtp = state.settings.smtp();
-        if !tenant_smtp.is_configured() && !global_smtp.is_configured() {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "SMTP is not configured. Set SMTP settings before testing an email channel.",
-            );
-        }
-        crate::notifications::dispatcher::merge_smtp_into_config_pub(
-            &global_smtp,
-            &tenant_smtp,
-            config_json,
-        )
-    } else {
-        config_json
-    };
-    #[cfg(not(feature = "notifications-email"))]
-    let config_json = if channel_model.channel_type == "email" {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "Email notifications are not enabled in this build.",
-        );
-    } else {
-        config_json
-    };
+    // Build settings bag from cached settings
+    let settings_bag = crate::notifications::dispatcher::build_settings_bag(&state.settings);
 
     // Build test message
     let test_msg = DeliveryMessage::new(
@@ -347,9 +321,8 @@ pub async fn test_channel(
     );
 
     // Deliver
-    // TODO: build a proper settings bag from tenant/global settings
     match channel_transport
-        .deliver(&config_json, &serde_json::json!({}), &test_msg)
+        .deliver(&config_json, &settings_bag, &test_msg)
         .await
     {
         Ok(()) => {
