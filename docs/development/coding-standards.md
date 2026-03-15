@@ -618,6 +618,45 @@ let mut client: Arc<dyn DockerClient> = Arc::new(NoopDockerClient);
 
 See also: [Security — Secure Development](../security/secure-development.md).
 
+### Lint suppressions for feature-gated items
+
+When a function, type, field, or constant is *only reachable* via a `#[cfg(feature = "X")]`
+additive block, the compiler may emit `dead_code` (or a related lint) when that feature is
+disabled. Because `#[cfg(not(feature = "X"))]` is prohibited and the item is genuinely needed
+under the feature, suppressing the lint with `#[allow(dead_code)]` is the approved solution.
+
+**Requirement:** every such suppression must carry a detailed inline comment that:
+
+1. Names the Cargo feature that gates the sole caller or user of the item.
+2. Explains why the item cannot be removed or restructured to avoid the suppression.
+
+```rust
+// ✓ Correct — suppression with mandatory explanation
+/// Upgrades a no-op stub client to a real bollard client.
+// Only called from the `daemon` feature block in `DockerPlugin::new`. Without the `daemon`
+// feature the function is unreferenced, but it must remain compiled for the feature to work.
+#[allow(dead_code)]
+#[cfg(feature = "daemon")]
+fn upgrade_to_daemon_client(
+    _stub: Arc<dyn DockerClient>,
+    config: &Config,
+) -> Result<Arc<dyn DockerClient>> {
+    Ok(Arc::new(RealDockerClient::new(config)?))
+}
+
+// ✗ Wrong — suppression without any comment
+#[allow(dead_code)]
+fn upgrade_to_daemon_client(...) { ... }
+```
+
+Note: when the item is already behind `#[cfg(feature = "X")]`, the dead-code lint only fires
+under a build that enables `X` but not the specific caller — which is rare. If the item and
+its sole caller are both inside the same `#[cfg(feature = "X")]` block, no suppression is
+needed (the compiler sees them together). Use `#[allow(dead_code)]` only after confirming the
+lint is genuine.
+
+No other `#[allow()]` suppressions are permitted without explicit approval.
+
 ## Atomic Ordering Requirements
 
 Security-critical `AtomicBool` flags (such as `PLAINTEXT_MODE` in `uptrakit-crypto`) must use

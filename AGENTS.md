@@ -368,10 +368,15 @@ These are non-negotiable design constraints. Do not violate them.
    metadata output. Enabled features are derived at
    build time from `CARGO_CFG_FEATURE` via `uptrakit_build_info::emit_enabled_features_env()` and passed through
    `UPTRAKIT_BUILD_ENABLED_FEATURES`; do not hardcode feature lists per binary.
-1. **Do not add any `#[allow()]`** without explicit confirmation. There are currently no approved exceptions in the
-   codebase; all previously allowed lints have been resolved via parameter structs, `FromStr` implementations, or dead
-   code removal. Workspace lints (`[workspace.lints]` in root `Cargo.toml`) enforce `warnings = "deny"` and
-   `clippy::all = "deny"` across all crates via `[lints] workspace = true`.
+1. **Do not add any `#[allow()]`** without explicit confirmation. Workspace lints (`[workspace.lints]` in root
+   `Cargo.toml`) enforce `warnings = "deny"` and `clippy::all = "deny"` across all crates via `[lints] workspace = true`.
+   All previously allowed lints have been resolved via parameter structs, `FromStr` implementations, or dead code removal.
+   **One approved exception:** `#[allow(dead_code)]` (and analogous lint suppressions such as `#[allow(unused)]`) are
+   permitted when a function, type, field, or constant is only reachable through a `#[cfg(feature = "X")]` additive block
+   and genuinely appears unused when that feature is disabled. Each such suppression **must** include a detailed inline
+   comment that: (a) names the feature that gates the sole caller/user, (b) explains why the item cannot be removed or
+   restructured to avoid the suppression. No other `#[allow()]` exceptions are permitted without explicit approval.
+   See [Feature Flags — Lint Suppressions for Feature-Gated Items](docs/development/coding-standards.md#lint-suppressions-for-feature-gated-items).
 1. **Feature flags are additive only.** `#[cfg(not(feature = "X"))]` is **prohibited**. This attribute makes feature
    `X` subtract from the binary, breaking additive semantics and producing incorrect builds when features are combined.
    Use the `cfg!()` macro in expression position instead: `if !cfg!(feature = "embed-frontend") { ... }`. The expression
