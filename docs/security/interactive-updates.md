@@ -102,7 +102,7 @@ pattern).
 - The SSH connection itself is already authenticated via mTLS between the controller
   and the SSH agent, and the SSH agent authenticates to the target host using its
   enrolled key pair.
-- Running `host sync` with an interactive-enabled build updates existing
+- Running sync-host with an interactive-enabled build updates existing
   `authorized_keys` entries.
 
 ## Graceful Degradation

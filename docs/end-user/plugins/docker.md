@@ -233,14 +233,14 @@ first. When either is set, automatic container recreation is disabled.
 
 ## Docker Group Membership
 
-When bootstrapping or syncing a host, `uptrakit-agent-ssh` automatically adds the managed user
+When bootstrapping or syncing a host, the SSH agent automatically adds the managed user
 to the `docker` group if Docker is installed. It detects Docker by checking whether the `docker`
 group exists on the remote host (`getent group docker`). If the group is not found (Docker is not
 installed), this step is silently skipped and has no effect.
 
-This means you do **not** need to manually run `usermod -aG docker <user>` — it is handled
-as part of [`host bootstrap`](../../architecture/ssh-agent.md) and every subsequent
-[`host sync`](../../architecture/ssh-agent.md).
+This means you do **not** need to manually run `usermod -aG docker <user>` -- it is handled
+as part of the [bootstrap](../../architecture/ssh-agent.md) and every subsequent
+[sync-host](../../architecture/ssh-agent.md) operation.
 
 > **Note:** Group membership changes take effect at the next login. If the agent was already
 > connected when membership was added, it may need to reconnect or open a new session before

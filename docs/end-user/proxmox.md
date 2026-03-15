@@ -176,13 +176,14 @@ connects directly to it for version checks and updates.
 
 The "Bootstrap via Discovered Guest" action matches guests discovered by the
 Proxmox plugin to PVE hosts using the stored **PVE node name** and
-**plugin config ID**. This requires that PVE hosts have been synced (via
-`host sync` or during initial bootstrap) so the short node name (e.g.
+**plugin config ID**. This requires that PVE hosts have been synced (via the
+**Sync Host** action or during initial bootstrap) so the short node name (e.g.
 `optiplex2`) is stored in the local database. Without a stored node name,
 matching will fail.
 
-If matching fails, run `host sync <pve-host>` (or use the **Sync Host** row
-action in the UI) to populate the node name, then retry.
+If matching fails, use the **Sync Host** row action in the web UI (or run
+`uptrakit extensions ssh-agent.hosts sync-host <host-id> --service-id <UUID>`)
+to populate the node name, then retry.
 
 ## Security Considerations
 

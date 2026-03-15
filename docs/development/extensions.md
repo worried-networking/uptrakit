@@ -410,7 +410,7 @@ Internally tagged with `"type"`:
 | --- | --- | --- | --- |
 | `key` | string | yes | Field key in form submission |
 | `label` | string | yes | Display label |
-| `field_type` | `FieldType` | no | `text` (default), `password`, `number`, `select`, `textarea`, `toggle`, `hidden` |
+| `field_type` | `FieldType` | no | `text` (default), `password`, `number`, `select`, `textarea`, `toggle`, `hidden`, `ssh_private_key` |
 | `required` | bool | no | Default `false` |
 | `placeholder` | string | no | Input placeholder |
 | `help_text` | string | no | Help text below the field |
@@ -549,6 +549,34 @@ See [Extensions Security](../security/extensions.md) for the full trust model.
 | `label` | string | yes | Step indicator label |
 | `form` | `FormDef` | yes | Fields for this step |
 | `submit_action` | string | no | Action to submit before proceeding |
+| `render_previous_response` | bool | no | When `true`, the frontend renders the previous step's response data in the step UI (e.g., showing a plan for review before execution). Default `false`. |
+
+### `ssh_private_key` field type
+
+The `ssh_private_key` field type renders a file input that accepts PEM-encoded
+SSH private key files. The field value is the key content (not the file path).
+This is used by the bootstrap wizard's authentication step to accept a private
+key for SSH authentication.
+
+```rust
+FieldDef::new("ssh_private_key", "SSH Private Key")
+    .with_type(FieldType::SshPrivateKey)
+    .sensitive()
+```
+
+The field is always marked `sensitive` since private keys must be encrypted
+end-to-end via ECIES before transmission.
+
+### Wizard UI type
+
+The `wizard` action UI variant (`ActionUi::Wizard`) renders a multi-step modal
+with a step indicator, form fields per step, and navigation buttons. Steps can
+submit actions between transitions (via `submit_action`), and the response from
+one step can be rendered in the next step (via `render_previous_response`).
+
+This is used by the SSH agent's bootstrap and sync-host wizards to implement the
+Connect -> Review -> Execute flow. The review step displays the plan gathered
+during the connect step with toggles for each action.
 
 ## Creating a service-backed extension
 

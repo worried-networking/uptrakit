@@ -12,11 +12,13 @@ The SSH agent is feature-complete for version checks and updates. The implementa
 - Controller-side enrollment and WebSocket dispatch for SSH agents (identified by `Capability::SshRemote`)
 - A standalone binary (`uptrakit-agent-ssh`) with the `ServiceHandler` trait
 - A local SQLite database for storing SSH host credentials (encrypted at rest)
-- CLI subcommands for managing SSH host entries locally (`host add/list/show/update/remove/bootstrap/sync`)
+- CLI subcommands for managing SSH host entries locally (`host add/list/show/update/remove`)
 - SSH transport layer (`russh`) for the bootstrap workflow (connect, authenticate, execute remote commands)
 - Ed25519 keypair generation for automated key deployment
-- A `host bootstrap` command that automates remote host setup (user creation, key deployment, sudoers configuration)
-- A `host sync` command that regenerates sudoers entries, detects PVE node name, and verifies PVE privileges
+- A `bootstrap` wizard action (via web UI or CLI) that automates remote host setup
+  with a multi-step review flow: Connect (gather plan) -> Review (approve actions) -> Execute
+- A `sync-host` wizard action (via web UI or CLI) that regenerates sudoers entries,
+  detects PVE node name, and verifies PVE privileges
 - A `bootstrap-proxmox-guest` extension action that bootstraps discovered Proxmox VE guests
   (LXC/QEMU) via `pct exec`/`qm guest exec` through an already-bootstrapped PVE node
 - Per-host sudo state tracking (`is_root`, `sudo_available`, `sudo_policy`) in the local database
@@ -89,13 +91,13 @@ The SSH agent uses a local SQLite database (`agent-ssh.db` in the state director
 | `sudo_policy` | TEXT | `"auto"` / `"force_with"` / `"force_without"` — runtime sudo execution policy |
 | `is_pve_node` | BOOLEAN | Whether this host is a Proxmox VE node (default: false) |
 | `pve_plugin_config_id` | TEXT | Plugin config ID for PVE credentials, nullable |
-| `pve_node_name` | TEXT | Short Proxmox VE node name (e.g. `"optiplex2"`), nullable; detected by `host sync` and `host bootstrap` |
+| `pve_node_name` | TEXT | Short Proxmox VE node name (e.g. `"optiplex2"`), nullable; detected by `sync-host` and `bootstrap` |
 | `created_at` | INTEGER | Unix timestamp |
 | `updated_at` | INTEGER | Unix timestamp |
 
 The `name` column has a UNIQUE index to prevent duplicate host names.
 
-The three sudo columns are populated by `host bootstrap` and `host sync`. When `NULL`,
+The three sudo columns are populated by the `bootstrap` and `sync-host` operations. When `NULL`,
 `Model::resolved_sudo_context()` applies backward-compatible defaults (`sudo_available = true`,
 `is_root = false`, `policy = auto`) so hosts enrolled before the sudo tracking migration continue to work.
 
@@ -136,8 +138,10 @@ directly on the local SQLite database.
 | `host show <name_or_id>` | Display detailed information for a specific host (includes sudo state) |
 | `host update <name_or_id>` | Update one or more fields of an existing host (includes `--sudo-policy`) |
 | `host remove <name_or_id>` | Remove an SSH host from the local database |
-| `host bootstrap` | Automate remote host setup and save the host entry (see [Bootstrap](#bootstrap-workflow)) |
-| `host sync <name_or_id>` | Synchronize host configuration: regenerate sudoers, detect PVE node name, verify PVE privileges (see [Sudo Context](#sudo-context-and-dynamic-execution)) |
+
+Bootstrap and sync operations are available through the extension framework as multi-step wizard
+actions (see [UI Extension](#ui-extension)). The `uptrakit-agent-ssh host bootstrap` and
+`host sync` CLI subcommands have been removed in favor of the wizard-based flow.
 
 Host identification accepts either the host's friendly name or UUID. The code tries UUID parse first, then falls back to a name lookup.
 
@@ -167,10 +171,12 @@ For detailed usage instructions, see [SSH Agent Host Management](../end-user/ssh
 
 ### Bootstrap Workflow
 
-The `host bootstrap` subcommand automates the full remote host setup in a single
-command. It accepts a positional target in standard SSH format
-(`[user@]host[:port]` or `ssh://[user@]host[:port]`) and resolves defaults from
-`~/.ssh/config`.
+The `bootstrap` wizard action automates the full remote host setup through a
+multi-step flow (Connect -> Review -> Execute). It accepts a target in standard
+SSH format (`[user@]host[:port]` or `ssh://[user@]host[:port]`) and resolves
+defaults from `~/.ssh/config`. Users can review the planned actions (create user,
+deploy key, configure sudoers, etc.) and selectively approve each one before
+execution. An `auto` toggle allows skipping the review step for automation/CI use.
 
 ```text
 1. PARSE TARGET & RESOLVE DEFAULTS (target string → SSH config → $USER/port 22)
@@ -320,13 +326,13 @@ CommandSpec { Exec { program: "sudo", args: ["apt-get", "install", ...] } }
 
 ### Updating sudo state
 
-- **`host bootstrap`** — detects and stores `is_root` and `sudo_available` during the bootstrap workflow.
-- **`host sync`** — re-detects `is_root` and `sudo_available` on every run (always
+- **`bootstrap`** — detects and stores `is_root` and `sudo_available` during the bootstrap workflow.
+- **`sync-host`** — re-detects `is_root` and `sudo_available` on every run (always
   refreshes), writes or refreshes the sudoers drop-in file, detects PVE node name, and
   verifies PVE privileges.
 - **Regular operations** (`CheckVersions`, `ExecuteUpdate`) — read from the database without any SSH detection round-trip.
 
-### `host sync` workflow
+### `sync-host` workflow
 
 ```text
 1. Load SSH host from DB by name or UUID
@@ -688,15 +694,15 @@ crates/core/agent-ssh/
     │                    # update_host_sudo_state, update_host_pve_state, find_pve_hosts,
     │                    # list_host_snapshots, ...)
     ├── remote_exec.rs   # SshRemoteExecutor, PveGuestExecutor (RemoteExecutor impls)
-    ├── commands/
-    │   ├── mod.rs         # Command module declarations
+    ├── operations/
+    │   ├── mod.rs         # Operations module declarations
     │   ├── host.rs        # Host subcommand handlers (dispatch, SSH config resolution, formatting)
     │   ├── bootstrap.rs   # Bootstrap workflow (remote setup, verification, DB save; PVE detection, BootstrapResult; uses sudoers.rs)
     │   ├── bootstrap_proxmox.rs  # Proxmox guest bootstrap via PVE exec
     │   ├── sudoers.rs     # Shared sudoers helpers: detect_is_root, detect_sudo_available,
     │   │                  # resolve_command_path, generate_sudoers_content, write_sudoers_file;
     │   │                  # uses &dyn RemoteExecutor
-    │   └── sync.rs            # sync command (re-detect, resolve, write sudoers, detect PVE node name, verify PVE privileges)
+    │   └── sync.rs            # sync operation (re-detect, resolve, write sudoers, detect PVE node name, verify PVE privileges)
     └── db/
         ├── mod.rs       # SQLite init (init_db) + tests
         ├── entity/
@@ -813,8 +819,8 @@ handler's `on_extension_response` method calls `proxy.complete()` to deliver the
 | Action | Type | Timeout | Description |
 | --- | --- | --- | --- |
 | `list-hosts` | data_action | 30s | Query local DB for all SSH hosts |
-| `bootstrap` | primary_action (form) | 120s | Bootstrap a new remote host |
-| `sync-host` | row_action (form) | 120s | Sync host: update sudoers, detect PVE node name, verify PVE privileges; optional auth override |
+| `bootstrap` | primary_action (wizard) | 120s | Bootstrap a new remote host via multi-step wizard: Connect -> Review -> Execute |
+| `sync-host` | row_action (wizard) | 120s | Sync host via multi-step wizard: update sudoers, detect PVE node name, verify PVE privileges; optional auth override |
 | `remove-host` | row_action (destructive) | 30s | Remove a host from local DB |
 | `list-discovered-guests` | select_source (action) | 15s | List unmatched Proxmox guests (via ServiceExtensionProxy) |
 | `bootstrap-proxmox-guest` | primary_action (form) | 120s | Bootstrap a discovered Proxmox guest with auto-matching |
@@ -858,7 +864,7 @@ See [Extensions Security](../security/extensions.md) for the trust model and
   hostname from the guest's Proxmox hostname (with user override), bootstraps the guest
   via `pct exec` (LXC) or `qm guest exec` (QEMU), then defers the Proxmox host mapping
   match via the `proxmox_pending_matches` table (resolved on the next `ReportHosts`).
-  Hosts must have been synced (via `host sync` or bootstrap) to populate `pve_node_name`
+  Hosts must have been synced (via `sync-host` or bootstrap) to populate `pve_node_name`
   for matching to succeed.
 
 ### CLI usage

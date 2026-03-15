@@ -447,9 +447,9 @@ from the profile and the presence of `Capability::SshRemote`. It is not stored i
 
 The `tenant_id` field uses `#[serde(default, skip_serializing_if = "Option::is_none")]` for backward
 compatibility with existing `service.json` files that predate the field. Services persist the
-tenant_id by calling `identity.save_tenant_id(tid)` when they receive it in `on_settings()`. CLI
-commands (e.g. the SSH agent's `host sync` and `host bootstrap`) load the persisted tenant_id from
-the identity state instead of requiring a live controller connection.
+tenant_id by calling `identity.save_tenant_id(tid)` when they receive it in `on_settings()`. The
+SSH agent's bootstrap and sync-host operations load the persisted tenant_id from the identity
+state instead of requiring a live controller connection.
 
 ## Background tasks
 

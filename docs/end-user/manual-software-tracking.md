@@ -104,8 +104,9 @@ on another).
 
 > **Sudoers note:** The `systemctl stop` and `systemctl start` commands in `pre_install_command`
 > and `post_install_command` must be allowlisted in the agent's sudoers file. Run
-> `uptrakit host sync <HOST_ID>` (or re-run bootstrap) after configuring these commands to
-> regenerate the sudoers file on the host. See
+> the **Sync Host** action in the web UI (or
+> `uptrakit extensions ssh-agent.hosts sync-host <host-id> --service-id <UUID>`)
+> after configuring these commands to regenerate the sudoers file on the host. See
 > [Sudoers Management](../security/sudoers-management.md) for details.
 
 ### Pattern B: Generic shell for both detection and updates
@@ -319,10 +320,10 @@ declares `systemctl stop *` and `systemctl start *` when those commands appear i
 pre/post install fields.
 
 After adding or changing plugin configurations that affect sudoers, regenerate the sudoers file
-on the host by running:
+on the host using the **Sync Host** action in the web UI or by running:
 
 ```bash
-uptrakit host sync <HOST_ID>
+uptrakit extensions ssh-agent.hosts sync-host <host-id> --service-id <UUID>
 ```
 
 This rewrites `/etc/sudoers.d/uptrakit` on the managed host to reflect the current plugin

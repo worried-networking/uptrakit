@@ -100,17 +100,14 @@ This stores SSH private keys as plaintext in the database and logs a warning. It
 
 ## Bootstrap Security Model
 
-The `host bootstrap` command introduces additional security considerations.
+The bootstrap operation introduces additional security considerations.
 
 ### Transient credentials
 
-- **Auth passwords (prompted)** are read from stdin via `rpassword` (no echo)
-  and held only in process memory for the duration of the bootstrap. They are
-  never written to disk or stored in the database.
-- **Auth passwords (inline)** passed as `--auth-password <VALUE>` are visible in
-  the process listing (`/proc/*/cmdline`) and may appear in shell history. Use
-  the prompted mode (`--auth-password` without a value), key-based, or SSH agent
-  authentication in environments where this is a concern.
+- **Auth passwords** are held only in process memory for the duration of the
+  bootstrap. They are never written to disk or stored in the database. When
+  submitted via the web UI, passwords are encrypted end-to-end via ECIES and
+  decrypted only on the SSH agent.
 - **SSH agent keys** are used transiently via the `SSH_AUTH_SOCK` Unix socket.
   Private key material never leaves the SSH agent process — the bootstrap
   command only receives signatures. The agent connection is dropped when
@@ -122,7 +119,7 @@ The `host bootstrap` command introduces additional security considerations.
 
 ### Host key verification
 
-The `host add` and `host bootstrap` commands support two host key verification
+The `host add` and bootstrap operations support two host key verification
 modes, controlled by the `--strict-host-key-checking` flag:
 
 | Mode | Flags | Security Level |
@@ -198,12 +195,12 @@ non-interactive command execution.
 
 ### Sudoers configuration
 
-The bootstrap command writes `/etc/sudoers.d/uptrakit-<target_username>` with
+The bootstrap operation writes `/etc/sudoers.d/uptrakit-<target_username>` with
 minimal per-command entries derived from registered plugins. For example:
 
 ```text
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
-# Regenerate: uptrakit-agent-ssh host sync <host>
+# Regenerate: uptrakit extensions invoke ssh-agent.hosts sync-host
 # /usr/bin/apt-get: Package installation and index refresh require root privileges
 uptrakit ALL=(root) NOPASSWD: /usr/bin/apt-get
 ```
@@ -215,10 +212,11 @@ access.
 The `--allow-all` flag writes `NOPASSWD: ALL` instead (legacy behavior; less
 secure). Avoid using `--allow-all` in production.
 
-Refresh the sudoers file after adding new plugins with:
+Refresh the sudoers file after adding new plugins using the **Sync Host** action
+in the web UI or by running:
 
 ```bash
-uptrakit-agent-ssh host sync <host>
+uptrakit extensions ssh-agent.hosts sync-host <host-id> --service-id <UUID>
 ```
 
 See [Sudoers Management](sudoers-management.md) for the full security model,

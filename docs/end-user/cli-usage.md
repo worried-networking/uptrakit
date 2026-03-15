@@ -874,6 +874,17 @@ uptrakit extensions proxmox.hosts discover --plugin-config-id <UUID>
 
 # Example: list Proxmox VE hosts.
 uptrakit extensions proxmox.hosts list --plugin-config-id <UUID>
+
+# Example: bootstrap an SSH host (multi-step wizard).
+uptrakit extensions ssh-agent.hosts bootstrap \
+  --target root@192.168.1.100 --service-id <UUID>
+
+# Example: sync host configuration.
+uptrakit extensions ssh-agent.hosts sync-host <host-id> --service-id <UUID>
+
+# Example: preview the bootstrap plan without executing.
+uptrakit extensions ssh-agent.hosts bootstrap \
+  --target root@192.168.1.100 --service-id <UUID> --preview
 ```
 
 Extensions with a **context selector** (e.g., a dropdown in the web UI to pick a

@@ -84,7 +84,7 @@ that uses the same field) will trigger interactive dispatch automatically.
 
 **Important**: The SSH agent bootstrap writes `authorized_keys` entries. When the
 `interactive` feature is enabled, the `no-pty` restriction is omitted so `sshd` allows
-PTY allocation. Running `host sync` with an interactive-enabled build updates existing
+PTY allocation. Running sync-host with an interactive-enabled build updates existing
 hosts.
 
 ### Stdin Attention Detection

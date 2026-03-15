@@ -91,7 +91,7 @@ or override with manual matching via the "Manual Match" action.
 
 ## See also
 
-- [SSH Agent Architecture](../architecture/ssh-agent.md) -- bootstrap flow,
-  PVE detection, extension actions
+- [SSH Agent Architecture](../architecture/ssh-agent.md) -- bootstrap flow
+  (operations/ directory), PVE detection, extension actions
 - [SSH Agent Secrets](../security/ssh-agent-secrets.md) -- encryption model,
   sudoers configuration, host key verification

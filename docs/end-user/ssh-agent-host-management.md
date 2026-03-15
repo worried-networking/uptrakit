@@ -99,12 +99,13 @@ Accepts either the host name or UUID. Returns an error if the host is not found.
 ### Bootstrap a host
 
 For automated remote host setup (user creation, key deployment, sudoers), use
-the `host bootstrap` command with a positional target in standard SSH format:
+the bootstrap wizard via the web UI or the extension CLI command:
 
 ```bash
-uptrakit-agent-ssh host bootstrap root@192.168.1.100 \
-  --auth-password \
-  --master-key-file /etc/uptrakit/master.key
+uptrakit extensions ssh-agent.hosts bootstrap \
+  --target root@192.168.1.100 \
+  --service-id <UUID> \
+  --auth-method password
 ```
 
 The target accepts `[user@]host[:port]` or `ssh://[user@]host[:port]` format.
@@ -112,27 +113,31 @@ The host name defaults to the target hostname (overridable with `--name`).
 Username, port, and hostname defaults are resolved from `~/.ssh/config` when not
 specified in the target.
 
-This connects to the remote host, creates a target user, deploys an SSH key,
-configures sudoers, verifies connectivity, and saves the host entry.
+The bootstrap wizard uses a multi-step flow: Connect (gather plan) -> Review
+(approve actions) -> Execute. An `auto` toggle allows skipping the review step.
+The `--preview` flag shows the plan without executing.
 
 For detailed options and troubleshooting, see
 [SSH Agent Bootstrap](ssh-agent-bootstrap.md).
 
 ### Sync host configuration
 
-The `host sync` command synchronizes the host configuration with the remote
-host. It is a superset of the previous `update-sudoers` command -- in addition
-to regenerating the sudoers drop-in file, it also detects the PVE node name
-(for Proxmox VE hosts) and verifies PVE privileges. Use this after enabling
-new plugins, when installed command paths on the remote host have changed, or
-when Proxmox VE configuration needs to be refreshed.
+The sync-host operation synchronizes the host configuration with the remote
+host. In addition to regenerating the sudoers drop-in file, it also detects the
+PVE node name (for Proxmox VE hosts) and verifies PVE privileges. Use this
+after enabling new plugins, when installed command paths on the remote host have
+changed, or when Proxmox VE configuration needs to be refreshed.
+
+**Web UI:** Use the "Sync Host" row action on the SSH Hosts extension page.
+
+**CLI:**
 
 ```bash
-uptrakit-agent-ssh host sync my-server \
-  --master-key-file /etc/uptrakit/master.key
+uptrakit extensions ssh-agent.hosts sync-host <host-id> \
+  --service-id <UUID>
 ```
 
-The command:
+The operation:
 
 1. Connects to the remote host using the stored credentials (or custom auth).
 2. Detects the agent user's privilege context (`id -u`, `sudo -n true`).
@@ -148,43 +153,29 @@ By default, sync uses the stored agent credentials. Since the agent user
 (typically `uptrakit`) has limited privileges, you often need to authenticate
 as a user with full sudo access (e.g. `root`) to write the sudoers file.
 
-**CLI:** Supply a username via the SSH address format and provide credentials:
-
-```bash
-uptrakit-agent-ssh host sync root@my-server \
-  --auth-password \
-  --master-key-file /etc/uptrakit/master.key
-```
-
 **Web UI:** When invoking "Sync Host" from the extensions page, select
 "Password" or "Private Key" as the auth method to connect as a custom user
 (defaults to `root`). Credentials are encrypted end-to-end via ECIES and
 never stored.
 
-When using custom auth, sudo state is **not** persisted — the detected state
-reflects the override user, not the stored agent user.
-
-#### Optional flags
-
-| Flag | Description |
-| --- | --- |
-| `--allow-all` | Write `NOPASSWD: ALL` instead of specific entries (less secure) |
-| `--dry-run` | Preview the sudoers file without writing it to the remote host |
-
-Example (dry-run):
+**CLI:** Supply auth credentials via CLI flags:
 
 ```bash
-uptrakit-agent-ssh host sync my-server \
-  --dry-run \
-  --master-key-file /etc/uptrakit/master.key
+uptrakit extensions ssh-agent.hosts sync-host <host-id> \
+  --service-id <UUID> \
+  --auth-method password \
+  --auth-username root
 ```
+
+When using custom auth, sudo state is **not** persisted -- the detected state
+reflects the override user, not the stored agent user.
 
 For the security model, see [Sudoers Management](../security/sudoers-management.md).
 
 ## Dynamic Reload: No Restart Required
 
 When the SSH agent daemon is running and connected to the controller, changes made
-via `host add`, `host bootstrap`, `host update`, or `host remove` are picked up
+via `host add`, bootstrap, `host update`, or `host remove` are picked up
 **automatically within 10 seconds** — no daemon restart is needed.
 
 ### How it works
@@ -200,7 +191,7 @@ The controller processes `ReportHosts` idempotently, so sending it mid-session i
 
 ### Adding or updating a host
 
-After `host add`, `host bootstrap`, or `host update`, the running daemon will SSH into the
+After `host add`, bootstrap, or `host update`, the running daemon will SSH into the
 affected host within 10 seconds, collect its `machine_id`, and report it to the controller.
 The host will appear in the controller UI without restarting the daemon.
 
