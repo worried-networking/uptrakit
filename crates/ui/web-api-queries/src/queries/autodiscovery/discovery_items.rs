@@ -1,327 +1,49 @@
-//! Database query helpers for the autodiscovery feature.
-//!
-//! Covers:
-//! - Ignore rule management (create / list / delete)
-//! - Auto-creation of default plugin configs from discovery targets
-//! - Processing incoming `DiscoveryResults` payloads (creating pending software
-//!   items and upserting host-software-item links)
-//!
-//! The controller is completely generic: plugins return structured
-//! [`DiscoveryTarget`](uptrakit_shared_types::DiscoveryTarget) values that
-//! specify exactly which plugin configs and roles to create — no plugin-specific
-//! synthesis logic lives here.
+//! Processing incoming discovery results: creating pending software items
+//! and upserting host-software-item links.
 
+use super::default_configs::find_or_create_default_plugin_config;
+use super::{AutodiscoveryError, Result};
 use rootcause::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use std::collections::HashSet;
 use time::OffsetDateTime;
-use uptrakit_internal_wire::DiscoveryTarget;
-use uptrakit_internal_wire::{DiscoveryPluginResult, DiscoveryResultsPayload};
+use uptrakit_internal_wire::{DiscoveryPluginResult, DiscoveryTarget};
 use uptrakit_shared_db::entity::{
-    host_software_item, host_software_item_plugin, plugin_config, prelude::*, software_ignore,
-    software_item,
+    host_software_item, host_software_item_plugin, prelude::*, software_ignore, software_item,
 };
 use uptrakit_shared_db::is_unique_constraint_violation;
-use uptrakit_shared_macros::impl_report_conversion;
-use uptrakit_web_api_types::autodiscovery::SoftwareIgnoreResponse;
-use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uuid::Uuid;
 
-/// Error returned by autodiscovery query helpers.
-#[derive(Debug, thiserror::Error)]
-pub enum AutodiscoveryError {
-    #[error("database error: {0}")]
-    Db(sea_orm::DbErr),
+/// Grouped arguments for a discovered item's identity fields.
+pub(super) struct DiscoveredItemInfo<'a> {
+    pub package_identifier: &'a str,
+    pub name: &'a str,
+    pub installed_version: &'a str,
+    pub featured: bool,
+    /// Qualifier for the `host_software_items` row (e.g. Docker container name).
+    /// `None` = unqualified (default for non-Docker items).
+    pub qualifier: Option<&'a str>,
+    /// Package identifier stored in `host_software_item_plugins` for per-container operations.
+    /// `None` = use `package_identifier` (existing behavior for non-Docker items).
+    pub plugin_package_identifier: Option<&'a str>,
 }
 
-pub type Result<T> = std::result::Result<T, rootcause::Report<AutodiscoveryError>>;
-impl_report_conversion!(sea_orm::DbErr => AutodiscoveryError::Db);
-
-// ── Ignore rules ─────────────────────────────────────────────────────────────
-
-/// Insert an autodiscovery ignore rule by software item name (idempotent).
-///
-/// Returns `true` if a new rule was inserted, `false` if the rule already
-/// existed (including the case where a concurrent request inserted the same
-/// rule between our call and the DB write).
-#[tracing::instrument(skip_all, fields(%tenant_id))]
-pub async fn create_or_ignore_ignore_rule(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
-    name: &str,
-    host_id: Option<Uuid>,
-) -> Result<bool> {
-    let record = software_ignore::ActiveModel {
-        id: Set(Uuid::now_v7()),
-        tenant_id: Set(tenant_id),
-        host_id: Set(host_id),
-        name: Set(name.to_string()),
-        created_at: Set(OffsetDateTime::now_utc()),
-    };
-
-    match SoftwareIgnore::insert(record).exec(db).await {
-        Ok(_) => Ok(true),
-        Err(e) if is_unique_constraint_violation(&e) => Ok(false),
-        Err(e) => Err(report!(AutodiscoveryError::Db(e))),
+impl<'a> DiscoveredItemInfo<'a> {
+    /// Returns the package identifier to store in `host_software_item_plugin.package_identifier`.
+    ///
+    /// For Docker items, this is `plugin_package_identifier` (e.g. `nginx:latest#web-server`).
+    /// For all other items, this falls back to `package_identifier`.
+    fn effective_plugin_pkg_id(&self) -> &str {
+        self.plugin_package_identifier
+            .unwrap_or(self.package_identifier)
     }
-}
-
-/// List autodiscovery ignore rules for a tenant.
-#[tracing::instrument(skip_all, fields(%tenant_id))]
-pub async fn list_ignore_rules(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
-    params: &PaginationParams,
-) -> Result<PaginatedResponse<SoftwareIgnoreResponse>> {
-    use sea_orm::PaginatorTrait;
-
-    let page = params.page.unwrap_or(1).max(1);
-    let per_page = params.per_page.unwrap_or(20).clamp(1, 1000);
-
-    let paginator = SoftwareIgnore::find()
-        .filter(software_ignore::Column::TenantId.eq(tenant_id))
-        .order_by_desc(software_ignore::Column::CreatedAt)
-        .paginate(db, per_page);
-
-    let total = paginator.num_items().await.context_to()?;
-    let items_raw = paginator.fetch_page(page - 1).await.context_to()?;
-
-    let items = items_raw
-        .into_iter()
-        .map(|r| SoftwareIgnoreResponse {
-            id: r.id,
-            name: r.name,
-            host_id: r.host_id,
-            created_at: r.created_at,
-        })
-        .collect::<Vec<_>>();
-
-    let total_pages = total.div_ceil(per_page);
-
-    Ok(PaginatedResponse {
-        items,
-        total,
-        page,
-        per_page,
-        total_pages,
-    })
-}
-
-/// Hard-delete an autodiscovery ignore rule.
-///
-/// Returns `true` if a row was deleted, `false` if the rule was not found
-/// for this tenant.
-#[tracing::instrument(skip_all, fields(%tenant_id))]
-pub async fn delete_ignore_rule(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
-    id: Uuid,
-) -> Result<bool> {
-    let result = SoftwareIgnore::delete_many()
-        .filter(software_ignore::Column::Id.eq(id))
-        .filter(software_ignore::Column::TenantId.eq(tenant_id))
-        .exec(db)
-        .await
-        .context_to()?;
-    Ok(result.rows_affected > 0)
-}
-
-/// Hard-delete multiple autodiscovery ignore rules.
-///
-/// Returns `(succeeded_ids, failed)` where `failed` contains `(id, reason)` pairs.
-#[allow(clippy::type_complexity)]
-#[tracing::instrument(skip_all, fields(%tenant_id))]
-pub async fn batch_delete_ignore_rules(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
-    ids: &[Uuid],
-) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
-    // Load existing rules to determine which IDs are valid.
-    let rules = SoftwareIgnore::find()
-        .filter(software_ignore::Column::Id.is_in(ids.iter().copied()))
-        .filter(software_ignore::Column::TenantId.eq(tenant_id))
-        .all(db)
-        .await
-        .context_to()?;
-
-    let found: std::collections::HashSet<Uuid> = rules.into_iter().map(|r| r.id).collect();
-
-    let mut succeeded = Vec::new();
-    let mut failed: Vec<(Uuid, String)> = Vec::new();
-
-    for id in ids {
-        if !found.contains(id) {
-            failed.push((*id, "not found".to_string()));
-        }
-    }
-
-    // Delete all found rules in one query.
-    if !found.is_empty() {
-        SoftwareIgnore::delete_many()
-            .filter(software_ignore::Column::Id.is_in(found.iter().copied()))
-            .filter(software_ignore::Column::TenantId.eq(tenant_id))
-            .exec(db)
-            .await
-            .context_to()?;
-        succeeded.extend(found);
-    }
-
-    Ok((succeeded, failed))
-}
-
-// ── Auto-create default plugin configs ───────────────────────────────────────
-
-/// Find or create a plugin config matched by `(plugin_type, name)`.
-///
-/// Lookup order:
-///
-/// 1. **Name match, JSON match** — returns the existing ID unchanged.
-/// 2. **Name match, JSON differs** — updates the config JSON in-place and
-///    returns the same ID. This is the self-healing path for plugin updates
-///    that change default command templates (e.g. adding `sudo` to a PHS
-///    update command after commit `8695cbc`): existing role assignments that
-///    reference the config by ID automatically pick up the new command on the
-///    next discovery run without requiring manual re-linking.
-/// 3. **No match** — creates a new config row.
-///
-/// Idempotent and safe under concurrent calls: the `uq_plugin_configs_active_name`
-/// partial unique index (`WHERE deactivated_at IS NULL`) guarantees that at most one
-/// active config with a given `(tenant_id, name)` pair exists at any time. On a
-/// unique-constraint violation (two concurrent auto-creates racing), the function
-/// re-queries by name and returns the winner's ID.
-#[tracing::instrument(skip_all, fields(%tenant_id))]
-pub async fn find_or_create_default_plugin_config(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
-    plugin_type: &str,
-    config_json: &serde_json::Value,
-    display_name: &str,
-) -> Result<Uuid> {
-    // Search by the natural identity key: (tenant_id, plugin_type, name).
-    // Matching on name — rather than JSON content — means that when a plugin
-    // update rewrites a default command template, the existing row is updated
-    // in-place so all current role assignments automatically pick up the change.
-    let existing = PluginConfig::find()
-        .filter(plugin_config::Column::TenantId.eq(tenant_id))
-        .filter(plugin_config::Column::PluginType.eq(plugin_type))
-        .filter(plugin_config::Column::Name.eq(display_name))
-        .filter(plugin_config::Column::DeactivatedAt.is_null())
-        .one(db)
-        .await
-        .context_to()?;
-
-    if let Some(cfg) = existing {
-        let id = cfg.id;
-        if &cfg.config == config_json {
-            // Config is already up-to-date.
-            return Ok(id);
-        }
-        // Config JSON has changed. Update in-place so existing role assignments
-        // referencing this ID continue to work with the new configuration.
-        let now = OffsetDateTime::now_utc();
-        let mut active: plugin_config::ActiveModel = cfg.into();
-        active.config = Set(config_json.clone());
-        active.updated_at = Set(now);
-        active.update(db).await.context_to()?;
-        tracing::debug!(
-            %id,
-            plugin_type = %plugin_type,
-            name = %display_name,
-            "updated auto-generated plugin config to reflect new defaults"
-        );
-        return Ok(id);
-    }
-
-    // None found — try to create one.
-    let now = OffsetDateTime::now_utc();
-    let new_id = Uuid::now_v7();
-    let record = plugin_config::ActiveModel {
-        id: Set(new_id),
-        tenant_id: Set(tenant_id),
-        name: Set(display_name.to_string()),
-        plugin_type: Set(plugin_type.to_string()),
-        config: Set(config_json.clone()),
-        enabled: Set(true),
-        created_at: Set(now),
-        updated_at: Set(now),
-        deactivated_at: Set(None),
-    };
-
-    match PluginConfig::insert(record).exec(db).await {
-        Ok(_) => Ok(new_id),
-        Err(e) if is_unique_constraint_violation(&e) => {
-            // A concurrent task created this config at the same time.
-            // Re-query by name to get the winner's ID.
-            PluginConfig::find()
-                .filter(plugin_config::Column::TenantId.eq(tenant_id))
-                .filter(plugin_config::Column::PluginType.eq(plugin_type))
-                .filter(plugin_config::Column::Name.eq(display_name))
-                .filter(plugin_config::Column::DeactivatedAt.is_null())
-                .one(db)
-                .await
-                .context_to()?
-                .map(|c| c.id)
-                .ok_or_else(|| report!(AutodiscoveryError::Db(e)))
-        }
-        Err(e) => Err(report!(AutodiscoveryError::Db(e))),
-    }
-}
-
-// ── Process discovery results ─────────────────────────────────────────────────
-
-/// Process a `DiscoveryResultsPayload` received from an agent.
-///
-/// For each plugin result, delegates to one of two generic processing paths:
-///
-/// 1. **Target-based**: Items with non-empty `targets` are processed via
-///    [`process_targets_discovery`] — each target drives plugin-config
-///    find-or-create and role-assignment creation.
-/// 2. **Config-ID-based**: Items with empty `targets` use the pre-existing
-///    `plugin_config_id` from the result for all three standard roles.
-#[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
-pub async fn process_discovery_results(
-    db: &sea_orm::DatabaseConnection,
-    agent_id: Uuid,
-    tenant_id: Uuid,
-    host_id: Uuid,
-    payload: DiscoveryResultsPayload,
-) -> Result<()> {
-    let now = OffsetDateTime::now_utc();
-
-    // Load the tenant-wide ignore set once for the entire discovery run.
-    let ignore_set = load_ignore_set(db, tenant_id).await?;
-
-    for result in payload.results {
-        if let Some(ref err) = result.error {
-            tracing::warn!(
-                %agent_id,
-                plugin_type = %result.plugin_type,
-                error = %err,
-                "discovery plugin reported an error, skipping"
-            );
-            continue;
-        }
-
-        if result.discoveries.is_empty() {
-            tracing::debug!(
-                %agent_id,
-                plugin_type = %result.plugin_type,
-                "discovery plugin returned no items"
-            );
-            continue;
-        }
-
-        process_plugin_result(db, tenant_id, host_id, now, &result, &ignore_set).await?;
-    }
-
-    Ok(())
 }
 
 /// Process a single plugin's discovery results.
 ///
 /// Routes each item to the correct processing path based on its `targets`
 /// and the result's `plugin_config_id`.
-async fn process_plugin_result(
+pub(super) async fn process_plugin_result(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
     host_id: Uuid,
@@ -374,29 +96,20 @@ async fn process_plugin_result(
     Ok(())
 }
 
-/// Grouped arguments for a discovered item's identity fields.
-struct DiscoveredItemInfo<'a> {
-    package_identifier: &'a str,
-    name: &'a str,
-    installed_version: &'a str,
-    featured: bool,
-    /// Qualifier for the `host_software_items` row (e.g. Docker container name).
-    /// `None` = unqualified (default for non-Docker items).
-    qualifier: Option<&'a str>,
-    /// Package identifier stored in `host_software_item_plugins` for per-container operations.
-    /// `None` = use `package_identifier` (existing behavior for non-Docker items).
-    plugin_package_identifier: Option<&'a str>,
-}
-
-impl<'a> DiscoveredItemInfo<'a> {
-    /// Returns the package identifier to store in `host_software_item_plugin.package_identifier`.
-    ///
-    /// For Docker items, this is `plugin_package_identifier` (e.g. `nginx:latest#web-server`).
-    /// For all other items, this falls back to `package_identifier`.
-    fn effective_plugin_pkg_id(&self) -> &str {
-        self.plugin_package_identifier
-            .unwrap_or(self.package_identifier)
-    }
+/// Pre-load the tenant-wide autodiscovery ignore set.
+///
+/// Returns a `HashSet` of software item display names that should be skipped.
+/// Bounded by the number of names explicitly ignored by the user (typically small).
+pub(super) async fn load_ignore_set(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
+) -> Result<HashSet<String>> {
+    let rules = SoftwareIgnore::find()
+        .filter(software_ignore::Column::TenantId.eq(tenant_id))
+        .all(db)
+        .await
+        .context_to()?;
+    Ok(rules.into_iter().map(|r| r.name).collect())
 }
 
 /// Process a discovered item that carries explicit `DiscoveryTarget` values.
@@ -495,22 +208,6 @@ async fn process_targets_discovery(
     }
 
     Ok(())
-}
-
-/// Pre-load the tenant-wide autodiscovery ignore set.
-///
-/// Returns a `HashSet` of software item display names that should be skipped.
-/// Bounded by the number of names explicitly ignored by the user (typically small).
-async fn load_ignore_set(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
-) -> Result<HashSet<String>> {
-    let rules = SoftwareIgnore::find()
-        .filter(software_ignore::Column::TenantId.eq(tenant_id))
-        .all(db)
-        .await
-        .context_to()?;
-    Ok(rules.into_iter().map(|r| r.name).collect())
 }
 
 /// Find-or-create a software item + host link.
@@ -757,7 +454,7 @@ async fn find_or_create_software_item(
             if let Some(existing_id) = existing_hsi_id {
                 return Ok(Some((software_item_id, existing_id)));
             }
-            // Row disappeared between insert failure and lookup — return None to skip.
+            // Row disappeared between insert failure and lookup -- return None to skip.
             return Ok(None);
         }
         Err(e) => return Err(report!(AutodiscoveryError::Db(e))),
@@ -823,317 +520,17 @@ async fn process_one_discovery(
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
     use super::*;
-    use sea_orm::{ConnectOptions, Database, DatabaseConnection, PaginatorTrait};
+    use crate::queries::autodiscovery::tests_common::{
+        all_roles, insert_host, insert_host_link, insert_plugin_config, insert_software_item,
+        insert_tenant, phs_result_no_targets, phs_result_with_apt_target,
+        phs_result_with_github_target, phs_result_with_two_targets, setup_db,
+    };
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
     use uptrakit_internal_wire::{
         DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, DiscoveryTarget,
-        PluginRole, PluginType,
+        PluginType,
     };
-    use uptrakit_shared_db::entity::{host, plugin_config, tenant};
-
-    async fn setup_db() -> DatabaseConnection {
-        let opt = ConnectOptions::new("sqlite::memory:");
-        let db = Database::connect(opt).await.expect("test db");
-        uptrakit_shared_db::migration::run_migrations(&db)
-            .await
-            .expect("migrations");
-        db
-    }
-
-    // ── FK-setup helpers ──────────────────────────────────────────────────────
-
-    async fn insert_tenant(db: &DatabaseConnection, id: Uuid) {
-        let now = time::OffsetDateTime::now_utc();
-        tenant::ActiveModel {
-            id: Set(id),
-            name: Set("Test Tenant".to_string()),
-            slug: Set(id.to_string()),
-            is_default: Set(false),
-            created_at: Set(now),
-            updated_at: Set(now),
-            deactivated_at: Set(None),
-        }
-        .insert(db)
-        .await
-        .expect("insert tenant");
-    }
-
-    async fn insert_host(db: &DatabaseConnection, id: Uuid, tenant_id: Uuid) {
-        let now = time::OffsetDateTime::now_utc();
-        host::ActiveModel {
-            id: Set(id),
-            tenant_id: Set(tenant_id),
-            machine_id: Set(id.to_string()),
-            hostname: Set("test-host".to_string()),
-            friendly_name: Set("Test Host".to_string()),
-            os_type: Set(None),
-            os_version: Set(None),
-            architecture: Set(None),
-            ip_address: Set(None),
-            last_seen_at: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-            deactivated_at: Set(None),
-        }
-        .insert(db)
-        .await
-        .expect("insert host");
-    }
-
-    async fn insert_plugin_config(db: &DatabaseConnection, id: Uuid, tenant_id: Uuid) {
-        let now = time::OffsetDateTime::now_utc();
-        plugin_config::ActiveModel {
-            id: Set(id),
-            tenant_id: Set(tenant_id),
-            name: Set(format!("Test Plugin Config {id}")),
-            plugin_type: Set("package_manager_homebrew".to_string()),
-            config: Set(serde_json::json!({})),
-            enabled: Set(true),
-            created_at: Set(now),
-            updated_at: Set(now),
-            deactivated_at: Set(None),
-        }
-        .insert(db)
-        .await
-        .expect("insert plugin_config");
-    }
-
-    // ── query helpers ─────────────────────────────────────────────────────────
-
-    async fn insert_software_item(
-        db: &DatabaseConnection,
-        id: Uuid,
-        tenant_id: Uuid,
-        name: &str,
-        deactivated_at: Option<time::OffsetDateTime>,
-    ) {
-        let now = time::OffsetDateTime::now_utc();
-        let model = software_item::ActiveModel {
-            id: Set(id),
-            tenant_id: Set(tenant_id),
-            name: Set(name.to_string()),
-            featured: Set(false),
-            icon_url: Set(None),
-            last_checked_at: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-            deactivated_at: Set(deactivated_at),
-        };
-        SoftwareItem::insert(model)
-            .exec(db)
-            .await
-            .expect("insert software_item");
-    }
-
-    async fn insert_host_link(
-        db: &DatabaseConnection,
-        host_id: Uuid,
-        software_item_id: Uuid,
-        plugin_config_id: Uuid,
-        package_identifier: &str,
-    ) {
-        let now = time::OffsetDateTime::now_utc();
-        let hsi_id = Uuid::now_v7();
-        let link = host_software_item::ActiveModel {
-            id: Set(hsi_id),
-            host_id: Set(host_id),
-            software_item_id: Set(software_item_id),
-            qualifier: Set(None),
-            plugin_config_id: Set(Some(plugin_config_id)),
-            package_identifier: Set(Some(package_identifier.to_string())),
-            installed_version: Set(Some("1.0.0".to_string())),
-            installed_version_detected_at: Set(Some(now)),
-            latest_version: Set(None),
-            latest_version_fetched_at: Set(None),
-            latest_release_metadata: Set(None),
-            last_updated_at: Set(None),
-            linked_at: Set(now),
-            update_category: Set("unknown".to_string()),
-            deactivated_at: Set(None),
-        };
-        HostSoftwareItem::insert(link)
-            .exec(db)
-            .await
-            .expect("insert host_software_item");
-
-        // Also create plugin link rows for all three roles to match the new schema.
-        for role in ["detect_version", "fetch_releases", "execute_update"] {
-            let plugin_link = host_software_item_plugin::ActiveModel {
-                id: Set(Uuid::now_v7()),
-                host_id: Set(host_id),
-                software_item_id: Set(software_item_id),
-                host_software_item_id: Set(hsi_id),
-                plugin_config_id: Set(Some(plugin_config_id)),
-                plugin_type: Set("package_manager_homebrew".to_string()),
-                role: Set(role.to_string()),
-                ordinal: Set(0),
-                package_identifier: Set(package_identifier.to_string()),
-                config: Set(None),
-                execution_site: Set("auto".to_string()),
-                created_at: Set(now),
-                updated_at: Set(now),
-            };
-            HostSoftwareItemPlugin::insert(plugin_link)
-                .exec(db)
-                .await
-                .expect("insert host_software_item_plugin");
-        }
-    }
-
-    // ── Helper: make DiscoveryPluginResult with targets ───────────────────────
-
-    fn all_roles() -> Vec<PluginRole> {
-        vec![
-            PluginRole::DetectVersion,
-            PluginRole::FetchReleases,
-            PluginRole::ExecuteUpdate,
-        ]
-    }
-
-    fn phs_result_with_github_target(
-        pkg_id: &str,
-        name: &str,
-        version: &str,
-        owner: &str,
-        repo: &str,
-    ) -> DiscoveryPluginResult {
-        DiscoveryPluginResult {
-            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
-            plugin_config_id: None,
-            error: None,
-            discoveries: vec![WireDiscoveredSoftware {
-                package_identifier: pkg_id.to_string(),
-                name: name.to_string(),
-                installed_version: version.to_string(),
-                targets: vec![DiscoveryTarget {
-                    plugin_type: PluginType::ReleasesGithub,
-                    plugin_config: serde_json::json!({
-                        "owner": owner,
-                        "repo": repo,
-                        "tag_strip_prefix": "v",
-                        "include_prereleases": false,
-                        "asset_patterns": [],
-                        "detect_installed_version_command":
-                            r#"cat -- "${HOME}/.{package_identifier}""#,
-                        "install_command": "env PHS_SILENT=1 /usr/bin/update",
-                    }),
-                    plugin_config_name: format!("{owner}/{repo}"),
-                    roles: all_roles(),
-                    package_identifier: None,
-                    config_override: None,
-                    execution_site: None,
-                }],
-                extra: None,
-                featured: false,
-                qualifier: None,
-                plugin_package_identifier: None,
-            }],
-        }
-    }
-
-    fn phs_result_with_apt_target(
-        pkg_id: &str,
-        name: &str,
-        version: &str,
-    ) -> DiscoveryPluginResult {
-        DiscoveryPluginResult {
-            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
-            plugin_config_id: None,
-            error: None,
-            discoveries: vec![WireDiscoveredSoftware {
-                package_identifier: pkg_id.to_string(),
-                name: name.to_string(),
-                installed_version: version.to_string(),
-                targets: vec![DiscoveryTarget {
-                    plugin_type: PluginType::PackageManagerApt,
-                    plugin_config: serde_json::json!({}),
-                    plugin_config_name: "APT (auto)".to_string(),
-                    roles: all_roles(),
-                    package_identifier: None,
-                    config_override: None,
-                    execution_site: None,
-                }],
-                extra: None,
-                featured: false,
-                qualifier: None,
-                plugin_package_identifier: None,
-            }],
-        }
-    }
-
-    fn phs_result_no_targets(pkg_id: &str) -> DiscoveryPluginResult {
-        DiscoveryPluginResult {
-            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
-            plugin_config_id: None,
-            error: None,
-            discoveries: vec![WireDiscoveredSoftware {
-                package_identifier: pkg_id.to_string(),
-                name: pkg_id.to_string(),
-                installed_version: "1.0.0".to_string(),
-                targets: vec![],
-                extra: None,
-                featured: false,
-                qualifier: None,
-                plugin_package_identifier: None,
-            }],
-        }
-    }
-
-    /// Mirrors the *actual* PHS plugin output for a GitHub-managed LXC container:
-    /// - Target 1: `ReleasesGithub`, `FetchReleases` only,
-    ///   `package_identifier = Some("owner/repo")`
-    /// - Target 2: `GenericShell`, `[DetectVersion, ExecuteUpdate]`,
-    ///   `package_identifier = None` (falls back to `pkg_id`)
-    fn phs_result_with_two_targets(
-        pkg_id: &str,
-        name: &str,
-        version: &str,
-        owner: &str,
-        repo: &str,
-    ) -> DiscoveryPluginResult {
-        DiscoveryPluginResult {
-            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
-            plugin_config_id: None,
-            error: None,
-            discoveries: vec![WireDiscoveredSoftware {
-                package_identifier: pkg_id.to_string(),
-                name: name.to_string(),
-                installed_version: version.to_string(),
-                targets: vec![
-                    DiscoveryTarget {
-                        plugin_type: PluginType::ReleasesGithub,
-                        plugin_config: serde_json::json!({
-                            "tag_strip_prefix": "v",
-                            "include_prereleases": false,
-                            "asset_patterns": [],
-                        }),
-                        plugin_config_name: "GitHub Releases".to_string(),
-                        roles: vec![PluginRole::FetchReleases],
-                        package_identifier: Some(format!("{owner}/{repo}")),
-                        config_override: None,
-                        execution_site: None,
-                    },
-                    DiscoveryTarget {
-                        plugin_type: PluginType::GenericShell,
-                        plugin_config: serde_json::json!({
-                            "version_command": "phs-app --version",
-                            "update_command": "phs-update",
-                        }),
-                        plugin_config_name: "PHS Shell".to_string(),
-                        roles: vec![PluginRole::DetectVersion, PluginRole::ExecuteUpdate],
-                        package_identifier: None,
-                        config_override: None,
-                        execution_site: None,
-                    },
-                ],
-                extra: None,
-                featured: false,
-                qualifier: None,
-                plugin_package_identifier: None,
-            }],
-        }
-    }
-
-    // ── tests ─────────────────────────────────────────────────────────────────
+    use uptrakit_shared_db::entity::plugin_config;
 
     /// When `find_or_create_software_item` encounters a host link pointing to a
     /// deactivated software item, it must delete the orphaned link and create a
@@ -1419,7 +816,7 @@ mod tests {
         );
     }
 
-    // ── Target-based processing tests ─────────────────────────────────────────
+    // -- Target-based processing tests --
 
     /// A GitHub PHS item (with target) must create a `github_releases` plugin config.
     #[tokio::test]
@@ -1856,7 +1253,7 @@ mod tests {
             .expect("first process");
 
         // Add "Wget" to the tenant-wide name-based ignore list.
-        create_or_ignore_ignore_rule(&db, tenant_id, "Wget", None)
+        super::super::ignore_rules::create_or_ignore_ignore_rule(&db, tenant_id, "Wget", None)
             .await
             .expect("create ignore rule");
 
@@ -1990,332 +1387,5 @@ mod tests {
             .expect("execute_update role must exist");
         assert_eq!(update.plugin_config_id, Some(shell_config_id));
         assert_eq!(update.package_identifier, "booklore");
-    }
-
-    /// When a plugin config with the same `(plugin_type, name)` already exists
-    /// but with different JSON, `find_or_create_default_plugin_config` must
-    /// update the config in-place and return the original ID.
-    ///
-    /// This is the self-healing mechanism for the case where a plugin update
-    /// changes default command templates — e.g. `8695cbc` rewrote the PHS
-    /// update command from `"env PHS_SILENT=1 /usr/bin/update"` (runs without
-    /// root and fails) to `"sudo /usr/local/bin/uptrakit-phs-update"`. Without
-    /// this in-place update, existing role assignments would keep pointing to
-    /// the old config ID and continue executing the broken command.
-    #[tokio::test]
-    async fn find_or_create_updates_config_json_on_name_match() {
-        let db = setup_db().await;
-        let tenant_id = Uuid::now_v7();
-        insert_tenant(&db, tenant_id).await;
-
-        let old_config = serde_json::json!({
-            "update_command": "env PHS_SILENT=1 /usr/bin/update",
-        });
-        let new_config = serde_json::json!({
-            "update_command": "sudo /usr/local/bin/uptrakit-phs-update",
-        });
-
-        // Create the config with the old JSON.
-        let first_id = find_or_create_default_plugin_config(
-            &db,
-            tenant_id,
-            "generic_shell",
-            &old_config,
-            "PHS Shell",
-        )
-        .await
-        .expect("create first");
-
-        // Call again with the same name but updated JSON.
-        let second_id = find_or_create_default_plugin_config(
-            &db,
-            tenant_id,
-            "generic_shell",
-            &new_config,
-            "PHS Shell",
-        )
-        .await
-        .expect("update in-place");
-
-        // Must return the same ID — no new row.
-        assert_eq!(
-            first_id, second_id,
-            "must return the existing config ID, not create a new one"
-        );
-
-        // The stored config must reflect the new JSON.
-        let stored = PluginConfig::find()
-            .filter(plugin_config::Column::Id.eq(first_id))
-            .one(&db)
-            .await
-            .expect("query config")
-            .expect("config must still exist");
-        assert_eq!(
-            stored.config, new_config,
-            "config JSON must be updated in-place"
-        );
-
-        // Exactly one active config with this name must exist.
-        let count = PluginConfig::find()
-            .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::Name.eq("PHS Shell"))
-            .filter(plugin_config::Column::DeactivatedAt.is_null())
-            .count(&db)
-            .await
-            .expect("count");
-        assert_eq!(count, 1, "must not create a duplicate config");
-    }
-
-    /// Calling `find_or_create_default_plugin_config` twice with identical
-    /// `(name, JSON)` must return the same ID and leave exactly one row.
-    #[tokio::test]
-    async fn find_or_create_is_idempotent_when_json_unchanged() {
-        let db = setup_db().await;
-        let tenant_id = Uuid::now_v7();
-        insert_tenant(&db, tenant_id).await;
-
-        let config = serde_json::json!({"tag_strip_prefix": "v"});
-
-        let id1 = find_or_create_default_plugin_config(
-            &db,
-            tenant_id,
-            "releases_github",
-            &config,
-            "GitHub Releases",
-        )
-        .await
-        .expect("first call");
-
-        let id2 = find_or_create_default_plugin_config(
-            &db,
-            tenant_id,
-            "releases_github",
-            &config,
-            "GitHub Releases",
-        )
-        .await
-        .expect("second call");
-
-        assert_eq!(id1, id2, "must return the same ID on repeated calls");
-
-        let count = PluginConfig::find()
-            .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::Name.eq("GitHub Releases"))
-            .filter(plugin_config::Column::DeactivatedAt.is_null())
-            .count(&db)
-            .await
-            .expect("count");
-        assert_eq!(count, 1, "must not create duplicate rows");
-    }
-
-    // ── create_or_ignore_ignore_rule ──────────────────────────────────────────
-
-    #[tokio::test]
-    async fn insert_new_rule_returns_true() {
-        let db = setup_db().await;
-        let tenant_id = Uuid::now_v7();
-        insert_tenant(&db, tenant_id).await;
-
-        let inserted = create_or_ignore_ignore_rule(&db, tenant_id, "FreshRSS", None)
-            .await
-            .expect("should succeed");
-
-        assert!(inserted, "first insert must return true");
-
-        let count = SoftwareIgnore::find()
-            .filter(software_ignore::Column::TenantId.eq(tenant_id))
-            .filter(software_ignore::Column::Name.eq("FreshRSS"))
-            .count(&db)
-            .await
-            .expect("count");
-        assert_eq!(count, 1, "must have created exactly one row");
-    }
-
-    #[tokio::test]
-    async fn insert_duplicate_rule_returns_false() {
-        let db = setup_db().await;
-        let tenant_id = Uuid::now_v7();
-        insert_tenant(&db, tenant_id).await;
-
-        let first = create_or_ignore_ignore_rule(&db, tenant_id, "FreshRSS", None)
-            .await
-            .expect("first call");
-        assert!(first, "first call must return true (new row)");
-
-        let second = create_or_ignore_ignore_rule(&db, tenant_id, "FreshRSS", None)
-            .await
-            .expect("second call");
-        assert!(
-            !second,
-            "second call must return false (duplicate suppressed)"
-        );
-
-        // Exactly one row must exist after both calls.
-        let count = SoftwareIgnore::find()
-            .filter(software_ignore::Column::TenantId.eq(tenant_id))
-            .filter(software_ignore::Column::Name.eq("FreshRSS"))
-            .count(&db)
-            .await
-            .expect("count");
-        assert_eq!(count, 1, "duplicate insert must not create a second row");
-    }
-
-    // ── Target-based first-run path ────────────────────────────────────────────
-
-    /// When an item arrives with `plugin_config_id: None` but carries a
-    /// `DiscoveryTarget`, the server must auto-create the plugin config and
-    /// create a `host_software_items` link row.
-    ///
-    /// This covers the first-run Homebrew / APT discovery path where no plugin
-    /// config exists for the tenant yet.
-    #[tokio::test]
-    async fn target_based_auto_creates_config_and_host_link() {
-        let db = setup_db().await;
-        let tenant_id = Uuid::now_v7();
-        let host_id = Uuid::now_v7();
-        let agent_id = Uuid::now_v7();
-        insert_tenant(&db, tenant_id).await;
-        insert_host(&db, host_id, tenant_id).await;
-
-        let payload = DiscoveryResultsPayload {
-            host_machine_id: "test-machine".to_string(),
-            results: vec![DiscoveryPluginResult {
-                plugin_type: PluginType::PackageManagerHomebrew,
-                plugin_config_id: None,
-                error: None,
-                discoveries: vec![WireDiscoveredSoftware {
-                    package_identifier: "wget".to_string(),
-                    name: "wget".to_string(),
-                    installed_version: "1.24.4".to_string(),
-                    targets: vec![DiscoveryTarget {
-                        plugin_type: PluginType::PackageManagerHomebrew,
-                        plugin_config: serde_json::json!({"package_type": "formula"}),
-                        plugin_config_name: "Homebrew (Formulae)".to_string(),
-                        roles: all_roles(),
-                        package_identifier: None,
-                        config_override: None,
-                        execution_site: None,
-                    }],
-                    extra: None,
-                    featured: false,
-                    qualifier: None,
-                    plugin_package_identifier: None,
-                }],
-            }],
-        };
-
-        process_discovery_results(&db, agent_id, tenant_id, host_id, payload)
-            .await
-            .expect("process must succeed");
-
-        // No plugin_config should be created for package manager types.
-        let configs = PluginConfig::find()
-            .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq("package_manager_homebrew"))
-            .all(&db)
-            .await
-            .expect("query plugin configs");
-        assert!(
-            configs.is_empty(),
-            "package managers no longer create plugin_configs"
-        );
-
-        // host_software_items link must have been created.
-        let hsi_links = HostSoftwareItem::find()
-            .filter(host_software_item::Column::HostId.eq(host_id))
-            .all(&db)
-            .await
-            .expect("query host software items");
-        assert_eq!(
-            hsi_links.len(),
-            1,
-            "exactly one host_software_items row must exist"
-        );
-        assert_eq!(
-            hsi_links[0].installed_version.as_deref(),
-            Some("1.24.4"),
-            "installed version must be recorded"
-        );
-    }
-
-    /// Repeated discoveries with the same target are idempotent:
-    /// the plugin config is reused and the host_software_items version is updated in place.
-    #[tokio::test]
-    async fn target_based_idempotent_on_second_run() {
-        let db = setup_db().await;
-        let tenant_id = Uuid::now_v7();
-        let host_id = Uuid::now_v7();
-        let agent_id = Uuid::now_v7();
-        insert_tenant(&db, tenant_id).await;
-        insert_host(&db, host_id, tenant_id).await;
-
-        let make_payload = |version: &str| {
-            let version = version.to_string();
-            DiscoveryResultsPayload {
-                host_machine_id: "test-machine".to_string(),
-                results: vec![DiscoveryPluginResult {
-                    plugin_type: PluginType::PackageManagerHomebrew,
-                    plugin_config_id: None,
-                    error: None,
-                    discoveries: vec![WireDiscoveredSoftware {
-                        package_identifier: "wget".to_string(),
-                        name: "wget".to_string(),
-                        installed_version: version,
-                        targets: vec![DiscoveryTarget {
-                            plugin_type: PluginType::PackageManagerHomebrew,
-                            plugin_config: serde_json::json!({"package_type": "formula"}),
-                            plugin_config_name: "Homebrew (Formulae)".to_string(),
-                            roles: all_roles(),
-                            package_identifier: None,
-                            config_override: None,
-                            execution_site: None,
-                        }],
-                        extra: None,
-                        featured: false,
-                        qualifier: None,
-                        plugin_package_identifier: None,
-                    }],
-                }],
-            }
-        };
-
-        // First run.
-        process_discovery_results(&db, agent_id, tenant_id, host_id, make_payload("1.24.4"))
-            .await
-            .expect("first run");
-
-        // Second run with an updated version.
-        process_discovery_results(&db, agent_id, tenant_id, host_id, make_payload("1.24.5"))
-            .await
-            .expect("second run");
-
-        // No plugin_config should be created for package manager types.
-        let config_count = PluginConfig::find()
-            .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq("package_manager_homebrew"))
-            .count(&db)
-            .await
-            .expect("count configs");
-        assert_eq!(
-            config_count, 0,
-            "package managers no longer create plugin_configs"
-        );
-
-        // Still exactly one host_software_items link, but with the updated version.
-        let hsi_links = HostSoftwareItem::find()
-            .filter(host_software_item::Column::HostId.eq(host_id))
-            .all(&db)
-            .await
-            .expect("query host software items");
-        assert_eq!(
-            hsi_links.len(),
-            1,
-            "must not create duplicate host_software_items rows"
-        );
-        assert_eq!(
-            hsi_links[0].installed_version.as_deref(),
-            Some("1.24.5"),
-            "installed version must be updated on second run"
-        );
     }
 }
