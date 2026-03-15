@@ -150,7 +150,7 @@ impl SecretMasking for ForgejoConfig {
     ///
     /// Unset secrets become `Some("***")` so the field always appears in JSON.
     fn with_secrets_masked(mut self) -> Self {
-        self.auth_token = Some(SecretString::new(SECRET_MASK.to_string()));
+        self.auth_token = Some(SecretString::new(SECRET_MASK));
         self
     }
 
@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn serialization_roundtrip() {
         let config = ForgejoConfig {
-            auth_token: Some(SecretString::new("my_token".to_string())),
+            auth_token: Some(SecretString::new("my_token")),
             api_base_url: Some("https://forgejo.example.com".to_string()),
             include_prereleases: true,
             tag_strip_prefix: "release-".to_string(),
@@ -271,7 +271,7 @@ mod tests {
     #[test]
     fn with_secrets_masked_replaces_real_token() {
         let config = ForgejoConfig {
-            auth_token: Some(SecretString::new("real_token".to_string())),
+            auth_token: Some(SecretString::new("real_token")),
             ..ForgejoConfig::default()
         };
         let masked = config.with_secrets_masked();
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn restore_secrets_from_restores_masked_token() {
         let existing = ForgejoConfig {
-            auth_token: Some(SecretString::new("real_token".to_string())),
+            auth_token: Some(SecretString::new("real_token")),
             ..ForgejoConfig::default()
         };
         let mut incoming = existing.clone().with_secrets_masked();
@@ -292,11 +292,11 @@ mod tests {
     #[test]
     fn restore_secrets_from_keeps_new_token() {
         let existing = ForgejoConfig {
-            auth_token: Some(SecretString::new("old_token".to_string())),
+            auth_token: Some(SecretString::new("old_token")),
             ..ForgejoConfig::default()
         };
         let mut incoming = ForgejoConfig {
-            auth_token: Some(SecretString::new("new_token".to_string())),
+            auth_token: Some(SecretString::new("new_token")),
             ..ForgejoConfig::default()
         };
         incoming.restore_secrets_from(&existing);

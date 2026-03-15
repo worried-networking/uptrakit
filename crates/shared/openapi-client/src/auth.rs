@@ -101,7 +101,7 @@ mod tests {
             email: "admin@example.com".to_string(),
             first_name: "Admin".to_string(),
             last_name: "User".to_string(),
-            password: SecretString::new("SecurePass123".to_string()),
+            password: SecretString::new("SecurePass123"),
             registration_token: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
@@ -117,8 +117,8 @@ mod tests {
             email: "admin@example.com".to_string(),
             first_name: "Admin".to_string(),
             last_name: "User".to_string(),
-            password: SecretString::new("SecurePass123".to_string()),
-            registration_token: Some(SecretString::new("invite-tok-abc".to_string())),
+            password: SecretString::new("SecurePass123"),
+            registration_token: Some(SecretString::new("invite-tok-abc")),
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["registration_token"], "invite-tok-abc");
@@ -128,7 +128,7 @@ mod tests {
     fn login_request_serialization() {
         let req = LoginRequest {
             email: "admin@example.com".to_string(),
-            password: SecretString::new("SecurePass123".to_string()),
+            password: SecretString::new("SecurePass123"),
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["email"], "admin@example.com");
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn logout_request_serialization() {
         let req = LogoutRequest {
-            refresh_token: Some(SecretString::new("refresh-tok-xyz".to_string())),
+            refresh_token: Some(SecretString::new("refresh-tok-xyz")),
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["refresh_token"], "refresh-tok-xyz");
@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn refresh_request_serialization() {
         let req = RefreshRequest {
-            refresh_token: Some(SecretString::new("refresh-tok-xyz".to_string())),
+            refresh_token: Some(SecretString::new("refresh-tok-xyz")),
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["refresh_token"], "refresh-tok-xyz");

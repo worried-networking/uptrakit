@@ -236,7 +236,7 @@ fn decode_auth_entry(auth_b64: &str) -> Option<DockerAuth> {
     }
     Some(DockerAuth::Basic {
         username: username.to_string(),
-        password: SecretString::new(password.to_string()),
+        password: SecretString::new(password),
     })
 }
 

@@ -382,7 +382,7 @@ impl ServiceIdentityState {
     ) -> Result<()> {
         let state = ServiceState {
             service_id,
-            enrollment_secret: SecretString::new(enrollment_secret.to_string()),
+            enrollment_secret: SecretString::new(enrollment_secret),
             tenant_id: self.tenant_id,
         };
         let json = serde_json::to_string_pretty(&state).context_to::<EnrollmentError>()?;
@@ -392,7 +392,7 @@ impl ServiceIdentityState {
             .context_to::<EnrollmentError>()?;
 
         self.service_id = Some(service_id);
-        self.enrollment_secret = Some(SecretString::new(enrollment_secret.to_string()));
+        self.enrollment_secret = Some(SecretString::new(enrollment_secret));
         Ok(())
     }
 

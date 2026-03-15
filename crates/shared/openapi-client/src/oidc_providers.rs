@@ -69,7 +69,7 @@ mod tests {
             logo_url: None,
             issuer_url: "https://accounts.google.com".to_string(),
             client_id: "client-id-123".to_string(),
-            client_secret: SecretString::new("client-secret-456".to_string()),
+            client_secret: SecretString::new("client-secret-456"),
             scopes: "openid email profile groups".to_string(),
             auto_create_users: true,
             role_claim_path: None,

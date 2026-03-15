@@ -443,7 +443,7 @@ pub(crate) async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
         EnrollPayload {
             hostname: hostname.to_string(),
             friendly_name: friendly_name.to_string(),
-            enrollment_token: enrollment_token.map(|s| SecretString::new(s.to_string())),
+            enrollment_token: enrollment_token.map(SecretString::new),
             capabilities,
             service_app_name: service_app_name.to_string(),
         },

@@ -62,7 +62,7 @@ fn enroll_agent_serialization_roundtrip() {
     let msg = ServiceMessage::Enroll(EnrollPayload {
         hostname: "node-1".to_string(),
         friendly_name: "Node One".to_string(),
-        enrollment_token: Some(SecretString::new("tok-123".into())),
+        enrollment_token: Some(SecretString::new("tok-123")),
         capabilities: agent_capabilities(),
         service_app_name: "uptrakit-agent".to_string(),
     });
@@ -78,7 +78,7 @@ fn enroll_mqtt_serialization_roundtrip() {
     let msg = ServiceMessage::Enroll(EnrollPayload {
         hostname: "mqtt-service-1".to_string(),
         friendly_name: "MQTT Service Node 1".to_string(),
-        enrollment_token: Some(SecretString::new("tok-456".into())),
+        enrollment_token: Some(SecretString::new("tok-456")),
         capabilities: mqtt_capabilities(),
         service_app_name: "uptrakit-mqtt".to_string(),
     });
@@ -95,7 +95,7 @@ fn enroll_ssh_agent_serialization_roundtrip() {
     let msg = ServiceMessage::Enroll(EnrollPayload {
         hostname: "ssh-agent-1".to_string(),
         friendly_name: "SSH Agent Node 1".to_string(),
-        enrollment_token: Some(SecretString::new("tok-789".into())),
+        enrollment_token: Some(SecretString::new("tok-789")),
         capabilities: ssh_agent_capabilities(),
         service_app_name: "uptrakit-agent-ssh".to_string(),
     });
@@ -528,7 +528,7 @@ fn pong_serialization_roundtrip() {
 fn enrolled_serialization_roundtrip() {
     let msg = ControllerMessage::Enrolled(EnrolledPayload {
         service_id: TEST_UUID_1,
-        enrollment_secret: SecretString::new("secret-abc".into()),
+        enrollment_secret: SecretString::new("secret-abc"),
         status: EnrollmentStatus::Pending,
     });
     let json = serde_json::to_string(&msg).unwrap();
@@ -964,8 +964,8 @@ fn tenant_assignments_serialization_roundtrip() {
             host: "broker.example.com".to_string(),
             port: 8883,
             client_id: "uptrakit".to_string(),
-            username: Some(SecretString::new("user".into())),
-            password: Some(SecretString::new("pass".into())),
+            username: Some(SecretString::new("user")),
+            password: Some(SecretString::new("pass")),
             ca_pem: None,
             topic_prefix: "home/uptrakit".to_string(),
             ha_discovery: false,
@@ -1844,7 +1844,7 @@ fn spec_conformance_enroll() {
     let json = service_envelope_json(ServiceMessage::Enroll(EnrollPayload {
         hostname: "node-1".to_string(),
         friendly_name: "Node One".to_string(),
-        enrollment_token: Some(SecretString::new("tok-123".into())),
+        enrollment_token: Some(SecretString::new("tok-123")),
         capabilities: agent_capabilities(),
         service_app_name: "uptrakit-agent".to_string(),
     }));
@@ -2010,7 +2010,7 @@ fn spec_conformance_enrolled() {
     let spec = AsyncApiSpec::load();
     let json = controller_envelope_json(ControllerMessage::Enrolled(EnrolledPayload {
         service_id: TEST_UUID_1,
-        enrollment_secret: SecretString::new("secret-abc".into()),
+        enrollment_secret: SecretString::new("secret-abc"),
         status: EnrollmentStatus::Pending,
     }));
     spec.validate("enrolledPayload", &json);
@@ -2179,8 +2179,8 @@ fn spec_conformance_tenant_assignments() {
                 host: "broker.example.com".to_string(),
                 port: 8883,
                 client_id: "uptrakit".to_string(),
-                username: Some(SecretString::new("user".into())),
-                password: Some(SecretString::new("pass".into())),
+                username: Some(SecretString::new("user")),
+                password: Some(SecretString::new("pass")),
                 ca_pem: None,
                 topic_prefix: "home/uptrakit".to_string(),
                 ha_discovery: false,
@@ -2809,7 +2809,7 @@ fn reset_data_capability_roundtrip() {
 #[test]
 fn service_credentials_serialization_roundtrip() {
     let msg = ControllerMessage::ServiceCredentials(ServiceCredentialsPayload {
-        db_url: Some(SecretString::new("postgres://localhost/uptrakit".into())),
+        db_url: Some(SecretString::new("postgres://localhost/uptrakit")),
         master_key_hex: Some(SecretString::new("aa".repeat(32))),
         nats_url: Some("nats://localhost:4222".to_string()),
     });
@@ -2825,7 +2825,7 @@ fn service_credentials_serialization_roundtrip() {
 #[test]
 fn service_credentials_omits_none_fields() {
     let msg = ControllerMessage::ServiceCredentials(ServiceCredentialsPayload {
-        db_url: Some(SecretString::new("sqlite://test.db".into())),
+        db_url: Some(SecretString::new("sqlite://test.db")),
         master_key_hex: None,
         nats_url: None,
     });
@@ -2854,7 +2854,7 @@ fn is_nats_publishable_blocks_credential_bearing_variants() {
     // ServiceCredentials must never be published to NATS.
     assert!(
         !ControllerMessage::ServiceCredentials(ServiceCredentialsPayload {
-            db_url: Some(SecretString::new("postgres://localhost/db".into())),
+            db_url: Some(SecretString::new("postgres://localhost/db")),
             master_key_hex: None,
             nats_url: None,
         })

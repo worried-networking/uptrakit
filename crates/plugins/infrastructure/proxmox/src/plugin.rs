@@ -68,7 +68,7 @@ mod tests {
     async fn plugin_type_is_infrastructure_proxmox() {
         let config = ProxmoxConfig {
             api_url: "https://pve.local:8006".to_string(),
-            api_token: SecretString::new("root@pam!tok=secret".to_string()),
+            api_token: SecretString::new("root@pam!tok=secret"),
             ..ProxmoxConfig::default()
         };
         let plugin = ProxmoxPlugin::new(config, test_executor())

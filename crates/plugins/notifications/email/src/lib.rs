@@ -886,7 +886,7 @@ mod tests {
     fn merge_smtp_propagates_all_optional_fields() {
         let mut smtp = make_smtp(Some("smtp.example.com"), None, Some("from@example.com"));
         smtp.username = Some("smtpuser".to_string());
-        smtp.password = Some(SecretString::new("secret".to_string()));
+        smtp.password = Some(SecretString::new("secret"));
         smtp.from_name = Some("Uptrakit Alerts".to_string());
         smtp.tls_mode = "tls".to_string();
 

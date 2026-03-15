@@ -744,11 +744,11 @@ fn model_to_config(client: &mqtt_client::Model) -> MqttTenantConfig {
         password: client
             .password
             .as_ref()
-            .map(|p| SecretString::new(p.expose_secret().to_string())),
+            .map(|p| SecretString::new(p.expose_secret())),
         ca_pem: client
             .ca_cert_pem
             .as_ref()
-            .map(|c| SecretString::new(c.expose_secret().to_string())),
+            .map(|c| SecretString::new(c.expose_secret())),
         topic_prefix: client.topic_prefix.clone(),
         ha_discovery: client.ha_discovery,
         ha_discovery_prefix: client.ha_discovery_prefix.clone(),

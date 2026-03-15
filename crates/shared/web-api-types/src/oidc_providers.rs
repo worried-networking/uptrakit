@@ -134,7 +134,7 @@ mod tests {
             logo_url: None,
             issuer_url: "https://auth.example.com/realms/main".to_string(),
             client_id: "uptrakit".to_string(),
-            client_secret: SecretString::new("super-secret".to_string()),
+            client_secret: SecretString::new("super-secret"),
             scopes: default_scopes(),
             auto_create_users: true,
             role_claim_path: None,

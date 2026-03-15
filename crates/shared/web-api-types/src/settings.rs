@@ -41,7 +41,7 @@ mod tests {
     fn update_registration_settings_request_round_trip() {
         let req = UpdateRegistrationSettingsRequest {
             mode: RegistrationMode::Open,
-            token: Some(SecretString::new("invite-token".to_string())),
+            token: Some(SecretString::new("invite-token")),
             require_token_for_oidc: Some(false),
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");

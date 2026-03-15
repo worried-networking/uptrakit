@@ -31,8 +31,8 @@ pub struct SecretString(String);
 
 impl SecretString {
     /// Wrap a plaintext value.
-    pub fn new(value: String) -> Self {
-        Self(value)
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
     }
 
     /// Borrow the plaintext secret.
@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn debug_redacts() {
-        let s = SecretString::new("my-secret".into());
+        let s = SecretString::new("my-secret");
         let debug = format!("{s:?}");
         assert!(!debug.contains("my-secret"));
         assert!(debug.contains("***"));
@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn display_redacts() {
-        let s = SecretString::new("my-secret".into());
+        let s = SecretString::new("my-secret");
         let display = format!("{s}");
         assert!(!display.contains("my-secret"));
         assert!(display.contains("REDACTED"));
@@ -142,13 +142,13 @@ mod tests {
 
     #[test]
     fn expose_secret_returns_value() {
-        let s = SecretString::new("token-123".into());
+        let s = SecretString::new("token-123");
         assert_eq!(s.expose_secret(), "token-123");
     }
 
     #[test]
     fn serde_roundtrip() {
-        let s = SecretString::new("secret-value".into());
+        let s = SecretString::new("secret-value");
         let json = serde_json::to_string(&s).unwrap();
         assert_eq!(json, r#""secret-value""#);
         let deserialized: SecretString = serde_json::from_str(&json).unwrap();
@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn serde_in_option() {
-        let some: Option<SecretString> = Some(SecretString::new("val".into()));
+        let some: Option<SecretString> = Some(SecretString::new("val"));
         let json = serde_json::to_string(&some).unwrap();
         assert_eq!(json, r#""val""#);
 
@@ -168,9 +168,9 @@ mod tests {
 
     #[test]
     fn equality() {
-        let a = SecretString::new("same".into());
-        let b = SecretString::new("same".into());
-        let c = SecretString::new("other".into());
+        let a = SecretString::new("same");
+        let b = SecretString::new("same");
+        let c = SecretString::new("other");
         assert_eq!(a, b);
         assert_ne!(a, c);
     }
@@ -178,8 +178,8 @@ mod tests {
     #[test]
     fn hash_consistent() {
         use std::collections::hash_map::DefaultHasher;
-        let a = SecretString::new("token".into());
-        let b = SecretString::new("token".into());
+        let a = SecretString::new("token");
+        let b = SecretString::new("token");
         let hash_a = {
             let mut h = DefaultHasher::new();
             a.hash(&mut h);
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn clone_preserves_value() {
-        let s = SecretString::new("value".into());
+        let s = SecretString::new("value");
         let cloned = s.clone();
         assert_eq!(cloned.expose_secret(), "value");
     }
@@ -205,7 +205,7 @@ mod tests {
     fn sea_orm_value_roundtrip() {
         use sea_orm::entity::prelude::*;
         use sea_orm::sea_query::ValueType;
-        let s = SecretString::new("db-secret".into());
+        let s = SecretString::new("db-secret");
         let value: Value = s.into();
         let recovered = <SecretString as ValueType>::try_from(value).expect("should recover");
         assert_eq!(recovered.expose_secret(), "db-secret");

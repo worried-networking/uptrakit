@@ -374,7 +374,7 @@ mod tests {
             id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
                 .parse::<Uuid>()
                 .unwrap(),
-            token: SecretString::new("upt_abc123def456".to_string()),
+            token: SecretString::new("upt_abc123def456"),
             name: "CI Token".to_string(),
             allowed_capabilities: Some(vec!["software_discovery".to_string()]),
             max_uses: Some(10),

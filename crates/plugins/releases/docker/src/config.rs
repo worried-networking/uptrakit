@@ -399,10 +399,10 @@ impl SecretMasking for DockerConfig {
         self.auth = self.auth.map(|a| match a {
             DockerAuth::Basic { username, .. } => DockerAuth::Basic {
                 username,
-                password: SecretString::new(SECRET_MASK.to_string()),
+                password: SecretString::new(SECRET_MASK),
             },
             DockerAuth::Bearer { .. } => DockerAuth::Bearer {
-                token: SecretString::new(SECRET_MASK.to_string()),
+                token: SecretString::new(SECRET_MASK),
             },
         });
         self
@@ -581,7 +581,7 @@ mod tests {
         let config = DockerConfig {
             auth: Some(DockerAuth::Basic {
                 username: "user".to_string(),
-                password: SecretString::new("secret123".to_string()),
+                password: SecretString::new("secret123"),
             }),
             ..Default::default()
         };
@@ -599,7 +599,7 @@ mod tests {
     fn with_secrets_masked_bearer_auth() {
         let config = DockerConfig {
             auth: Some(DockerAuth::Bearer {
-                token: SecretString::new("ghcr_token".to_string()),
+                token: SecretString::new("ghcr_token"),
             }),
             ..Default::default()
         };
@@ -624,7 +624,7 @@ mod tests {
         let existing = DockerConfig {
             auth: Some(DockerAuth::Basic {
                 username: "user".to_string(),
-                password: SecretString::new("real_password".to_string()),
+                password: SecretString::new("real_password"),
             }),
             ..Default::default()
         };
@@ -642,7 +642,7 @@ mod tests {
     fn restore_secrets_from_bearer_token() {
         let existing = DockerConfig {
             auth: Some(DockerAuth::Bearer {
-                token: SecretString::new("real_token".to_string()),
+                token: SecretString::new("real_token"),
             }),
             ..Default::default()
         };
@@ -661,14 +661,14 @@ mod tests {
         let existing = DockerConfig {
             auth: Some(DockerAuth::Basic {
                 username: "user".to_string(),
-                password: SecretString::new("old_password".to_string()),
+                password: SecretString::new("old_password"),
             }),
             ..Default::default()
         };
         let mut incoming = DockerConfig {
             auth: Some(DockerAuth::Basic {
                 username: "user".to_string(),
-                password: SecretString::new("new_password".to_string()),
+                password: SecretString::new("new_password"),
             }),
             ..Default::default()
         };
@@ -685,7 +685,7 @@ mod tests {
     fn auth_basic_serialization() {
         let auth = DockerAuth::Basic {
             username: "user".to_string(),
-            password: SecretString::new("pass".to_string()),
+            password: SecretString::new("pass"),
         };
         let json = serde_json::to_string(&auth).expect("serialize");
         assert!(json.contains(r#""type":"basic""#));
@@ -703,7 +703,7 @@ mod tests {
     #[test]
     fn auth_bearer_serialization() {
         let auth = DockerAuth::Bearer {
-            token: SecretString::new("my-token".to_string()),
+            token: SecretString::new("my-token"),
         };
         let json = serde_json::to_string(&auth).expect("serialize");
         assert!(json.contains(r#""type":"bearer""#));
@@ -728,7 +728,7 @@ mod tests {
         let config = DockerConfig {
             auth: Some(DockerAuth::Basic {
                 username: "user".to_string(),
-                password: SecretString::new("pass".to_string()),
+                password: SecretString::new("pass"),
             }),
             tracked_tag: Some("main".to_string()),
             compose_restart: Some(ComposeRestartConfig {

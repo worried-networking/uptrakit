@@ -520,8 +520,8 @@ mod tests {
     #[test]
     fn mqtt_options_sets_credentials_when_provided() {
         let config = MqttConfig {
-            username: Some(SecretString::new("user".into())),
-            password: Some(SecretString::new("pass".into())),
+            username: Some(SecretString::new("user")),
+            password: Some(SecretString::new("pass")),
             ..tcp_config()
         };
 
@@ -547,8 +547,8 @@ mod tests {
     #[test]
     fn credentials_redacted_in_debug() {
         let config = MqttConfig {
-            password: Some(SecretString::new("super-secret-password".into())),
-            username: Some(SecretString::new("user".into())),
+            password: Some(SecretString::new("super-secret-password")),
+            username: Some(SecretString::new("user")),
             ..tcp_config()
         };
 
@@ -631,7 +631,7 @@ mod tests {
             transport: MqttTransport::Tls,
             port: 8883,
             ca_pem: Some(SecretString::new(
-                "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----".into(),
+                "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----",
             )),
             ..tcp_config()
         };

@@ -158,7 +158,7 @@ mod tests {
             email: "user@example.com".to_string(),
             first_name: "Alice".to_string(),
             last_name: "Smith".to_string(),
-            password: SecretString::new("password123".to_string()),
+            password: SecretString::new("password123"),
             registration_token: None,
         }
     }
@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn register_password_too_short() {
         let mut req = valid_register();
-        req.password = SecretString::new("short".to_string());
+        req.password = SecretString::new("short");
         let err = req.validate().unwrap_err();
         assert_eq!(err.field, "password");
     }
@@ -213,7 +213,7 @@ mod tests {
     fn valid_login() -> LoginRequest {
         LoginRequest {
             email: "user@example.com".to_string(),
-            password: SecretString::new("password123".to_string()),
+            password: SecretString::new("password123"),
         }
     }
 

@@ -144,7 +144,7 @@ impl SecretMasking for GitLabConfig {
     ///
     /// Unset secrets become `Some("***")` so the field always appears in JSON.
     fn with_secrets_masked(mut self) -> Self {
-        self.auth_token = Some(SecretString::new(SECRET_MASK.to_string()));
+        self.auth_token = Some(SecretString::new(SECRET_MASK));
         self
     }
 
@@ -228,7 +228,7 @@ mod tests {
     #[test]
     fn serialization_roundtrip() {
         let config = GitLabConfig {
-            auth_token: Some(SecretString::new("glpat-test".to_string())),
+            auth_token: Some(SecretString::new("glpat-test")),
             api_base_url: Some("https://gitlab.corp.com".to_string()),
             include_prereleases: true,
             tag_strip_prefix: "release-".to_string(),
@@ -253,7 +253,7 @@ mod tests {
     #[test]
     fn with_secrets_masked_replaces_real_token() {
         let config = GitLabConfig {
-            auth_token: Some(SecretString::new("glpat-real".to_string())),
+            auth_token: Some(SecretString::new("glpat-real")),
             ..GitLabConfig::default()
         };
         let masked = config.with_secrets_masked();
@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn restore_secrets_from_restores_masked_token() {
         let existing = GitLabConfig {
-            auth_token: Some(SecretString::new("glpat-real".to_string())),
+            auth_token: Some(SecretString::new("glpat-real")),
             ..GitLabConfig::default()
         };
         let mut incoming = existing.clone().with_secrets_masked();
@@ -274,11 +274,11 @@ mod tests {
     #[test]
     fn restore_secrets_from_keeps_new_token() {
         let existing = GitLabConfig {
-            auth_token: Some(SecretString::new("glpat-old".to_string())),
+            auth_token: Some(SecretString::new("glpat-old")),
             ..GitLabConfig::default()
         };
         let mut incoming = GitLabConfig {
-            auth_token: Some(SecretString::new("glpat-new".to_string())),
+            auth_token: Some(SecretString::new("glpat-new")),
             ..GitLabConfig::default()
         };
         incoming.restore_secrets_from(&existing);

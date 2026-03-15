@@ -304,7 +304,7 @@ impl SecretMasking for GitHubConfig {
     ///
     /// Unset secrets become `Some("***")` so the field always appears in JSON.
     fn with_secrets_masked(mut self) -> Self {
-        self.auth_token = Some(SecretString::new(SECRET_MASK.to_string()));
+        self.auth_token = Some(SecretString::new(SECRET_MASK));
         self
     }
 
@@ -403,7 +403,7 @@ mod tests {
     #[test]
     fn serialization_roundtrip() {
         let config = GitHubConfig {
-            auth_token: Some(SecretString::new("ghp_test".to_string())),
+            auth_token: Some(SecretString::new("ghp_test")),
             api_base_url: Some("https://ghe.corp.com/api/v3".to_string()),
             include_prereleases: true,
             tag_strip_prefix: "release-".to_string(),
@@ -443,7 +443,7 @@ mod tests {
     #[test]
     fn with_secrets_masked_replaces_real_token() {
         let config = GitHubConfig {
-            auth_token: Some(SecretString::new("ghp_real".to_string())),
+            auth_token: Some(SecretString::new("ghp_real")),
             ..GitHubConfig::default()
         };
         let masked = config.with_secrets_masked();
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn restore_secrets_from_restores_masked_token() {
         let existing = GitHubConfig {
-            auth_token: Some(SecretString::new("ghp_real_token".to_string())),
+            auth_token: Some(SecretString::new("ghp_real_token")),
             ..GitHubConfig::default()
         };
         let mut incoming = existing.clone().with_secrets_masked();
@@ -467,11 +467,11 @@ mod tests {
     #[test]
     fn restore_secrets_from_keeps_new_token() {
         let existing = GitHubConfig {
-            auth_token: Some(SecretString::new("ghp_old".to_string())),
+            auth_token: Some(SecretString::new("ghp_old")),
             ..GitHubConfig::default()
         };
         let mut incoming = GitHubConfig {
-            auth_token: Some(SecretString::new("ghp_new".to_string())),
+            auth_token: Some(SecretString::new("ghp_new")),
             ..GitHubConfig::default()
         };
         incoming.restore_secrets_from(&existing);

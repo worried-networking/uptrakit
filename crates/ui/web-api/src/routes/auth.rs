@@ -433,7 +433,7 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         let user = user::ActiveModel {
             id: Set(generate_uuid()),
-            email: Set(MaskedEmail::new("test@example.com".to_string())),
+            email: Set(MaskedEmail::new("test@example.com")),
             first_name: Set("Test".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),
@@ -634,7 +634,7 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         let other_user = user::ActiveModel {
             id: Set(generate_uuid()),
-            email: Set(MaskedEmail::new("other@example.com".to_string())),
+            email: Set(MaskedEmail::new("other@example.com")),
             first_name: Set("Other".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),

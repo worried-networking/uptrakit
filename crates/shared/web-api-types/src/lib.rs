@@ -341,7 +341,7 @@ mod tests {
     fn device_auth_poll_response_includes_some_fields() {
         let resp = DeviceAuthPollResponse {
             status: DeviceAuthStatus::Authorized,
-            token: Some(SecretString::new("secret-token-value".to_string())),
+            token: Some(SecretString::new("secret-token-value")),
             token_name: Some("my-device".to_string()),
         };
         let json = serde_json::to_value(&resp).unwrap();
@@ -370,7 +370,7 @@ mod tests {
     fn device_auth_poll_response_round_trip_with_some() {
         let resp = DeviceAuthPollResponse {
             status: DeviceAuthStatus::Authorized,
-            token: Some(SecretString::new("tok".to_string())),
+            token: Some(SecretString::new("tok")),
             token_name: Some("dev".to_string()),
         };
         let json = serde_json::to_string(&resp).unwrap();
@@ -439,8 +439,8 @@ mod tests {
     fn auth_response_round_trip() {
         let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").expect("valid uuid");
         let auth = AuthResponse {
-            access_token: SecretString::new("eyJhbGciOiJIUzI1NiJ9.test".to_string()),
-            refresh_token: SecretString::new("refresh-token-value".to_string()),
+            access_token: SecretString::new("eyJhbGciOiJIUzI1NiJ9.test"),
+            refresh_token: SecretString::new("refresh-token-value"),
             expires_in: 3600,
             token_type: "Bearer".to_string(),
             user: UserResponse {
@@ -796,7 +796,7 @@ mod tests {
             email: "user@example.com".to_string(),
             first_name: "John".to_string(),
             last_name: "Doe".to_string(),
-            password: SecretString::new("password12345678".to_string()),
+            password: SecretString::new("password12345678"),
             registration_token: None,
         };
         assert!(req.validate().is_ok());
@@ -810,7 +810,7 @@ mod tests {
             email: "invalid-email".to_string(),
             first_name: "John".to_string(),
             last_name: "Doe".to_string(),
-            password: SecretString::new("password12345678".to_string()),
+            password: SecretString::new("password12345678"),
             registration_token: None,
         };
         let err = req.validate().unwrap_err();
@@ -825,7 +825,7 @@ mod tests {
             email: "user@example.com".to_string(),
             first_name: "John".to_string(),
             last_name: "Doe".to_string(),
-            password: SecretString::new("short".to_string()),
+            password: SecretString::new("short"),
             registration_token: None,
         };
         let err = req.validate().unwrap_err();
@@ -840,7 +840,7 @@ mod tests {
             email: "user@example.com".to_string(),
             first_name: "".to_string(),
             last_name: "Doe".to_string(),
-            password: SecretString::new("password12345678".to_string()),
+            password: SecretString::new("password12345678"),
             registration_token: None,
         };
         let err = req.validate().unwrap_err();
@@ -853,7 +853,7 @@ mod tests {
         use crate::validation::Validate;
         let req = LoginRequest {
             email: "user@example.com".to_string(),
-            password: SecretString::new("any-password".to_string()),
+            password: SecretString::new("any-password"),
         };
         assert!(req.validate().is_ok());
     }
@@ -864,7 +864,7 @@ mod tests {
         use crate::validation::Validate;
         let req = LoginRequest {
             email: "user@example.com".to_string(),
-            password: SecretString::new("".to_string()),
+            password: SecretString::new(""),
         };
         let err = req.validate().unwrap_err();
         assert_eq!(err.field, "password");
@@ -879,7 +879,7 @@ mod tests {
             logo_url: None,
             issuer_url: "https://issuer.example.com".to_string(),
             client_id: "client-id".to_string(),
-            client_secret: SecretString::new("secret".to_string()),
+            client_secret: SecretString::new("secret"),
             scopes: "openid email".to_string(),
             auto_create_users: true,
             role_claim_path: None,
@@ -897,7 +897,7 @@ mod tests {
             logo_url: None,
             issuer_url: "https://issuer.example.com".to_string(),
             client_id: "client-id".to_string(),
-            client_secret: SecretString::new("secret".to_string()),
+            client_secret: SecretString::new("secret"),
             scopes: "openid".to_string(),
             auto_create_users: true,
             role_claim_path: None,
@@ -916,7 +916,7 @@ mod tests {
             logo_url: None,
             issuer_url: "ftp://issuer.example.com".to_string(),
             client_id: "client-id".to_string(),
-            client_secret: SecretString::new("secret".to_string()),
+            client_secret: SecretString::new("secret"),
             scopes: "openid".to_string(),
             auto_create_users: true,
             role_claim_path: None,
@@ -1185,7 +1185,7 @@ mod tests {
     fn device_auth_authorized_sse_round_trip() {
         use crate::device_auth::DeviceAuthAuthorizedSse;
         let event = DeviceAuthAuthorizedSse {
-            token: SecretString::new("secret-api-token".to_string()),
+            token: SecretString::new("secret-api-token"),
             token_name: "my-device".to_string(),
         };
         let json = serde_json::to_string(&event).unwrap();

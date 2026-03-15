@@ -236,7 +236,7 @@ mod tests {
     fn client_creation_with_valid_config() {
         let config = ProxmoxConfig {
             api_url: "https://pve.local:8006".to_string(),
-            api_token: SecretString::new("root@pam!tok=secret".to_string()),
+            api_token: SecretString::new("root@pam!tok=secret"),
             verify_tls: false,
             node_filter: vec![],
         };
@@ -248,7 +248,7 @@ mod tests {
     fn client_strips_trailing_slash() {
         let config = ProxmoxConfig {
             api_url: "https://pve.local:8006/".to_string(),
-            api_token: SecretString::new("root@pam!tok=secret".to_string()),
+            api_token: SecretString::new("root@pam!tok=secret"),
             verify_tls: true,
             node_filter: vec![],
         };

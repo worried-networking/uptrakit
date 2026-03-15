@@ -131,7 +131,7 @@ mod tests {
     fn create_api_token_response_round_trip() {
         let resp = CreateApiTokenResponse {
             id: sample_uuid(),
-            token: SecretString::new("secret-token-value".to_string()),
+            token: SecretString::new("secret-token-value"),
             created_at: datetime!(2025-01-01 0:00:00 UTC),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
@@ -152,7 +152,7 @@ mod tests {
     fn create_api_token_response_secret_string_serializes_plaintext() {
         let resp = CreateApiTokenResponse {
             id: sample_uuid(),
-            token: SecretString::new("plaintext-token".to_string()),
+            token: SecretString::new("plaintext-token"),
             created_at: datetime!(2025-06-15 12:00:00 UTC),
         };
         let json_value =

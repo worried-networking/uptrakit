@@ -19,7 +19,7 @@ pub(crate) async fn register_user(
         email: email.to_string(),
         first_name: "Test".to_string(),
         last_name: "User".to_string(),
-        password: SecretString::new(password.to_string()),
+        password: SecretString::new(password),
         registration_token: None,
     };
     client
@@ -43,7 +43,7 @@ pub(crate) async fn login_user(
 ) -> (http::StatusCode, AuthResponse) {
     let req = LoginRequest {
         email: email.to_string(),
-        password: SecretString::new(password.to_string()),
+        password: SecretString::new(password),
     };
     client
         .post_json("/api/v1/auth/login", &req)

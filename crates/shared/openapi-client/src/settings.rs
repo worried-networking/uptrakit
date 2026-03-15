@@ -116,7 +116,7 @@ mod tests {
     fn update_registration_settings_serialization() {
         let req = UpdateRegistrationSettingsRequest {
             mode: RegistrationMode::Invite,
-            token: Some(SecretString::new("my-invite-token".to_string())),
+            token: Some(SecretString::new("my-invite-token")),
             require_token_for_oidc: Some(true),
         };
         let json = serde_json::to_value(&req).expect("serialize");

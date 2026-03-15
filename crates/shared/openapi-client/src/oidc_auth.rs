@@ -59,8 +59,8 @@ mod tests {
     #[test]
     fn oidc_link_request_serialization() {
         let req = OidcLinkRequest {
-            link_token: SecretString::new("link-tok-abc".to_string()),
-            password: Some(SecretString::new("SecurePass123".to_string())),
+            link_token: SecretString::new("link-tok-abc"),
+            password: Some(SecretString::new("SecurePass123")),
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["link_token"], "link-tok-abc");
@@ -70,7 +70,7 @@ mod tests {
     #[test]
     fn oidc_link_request_without_password() {
         let req = OidcLinkRequest {
-            link_token: SecretString::new("link-tok-abc".to_string()),
+            link_token: SecretString::new("link-tok-abc"),
             password: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
@@ -81,8 +81,8 @@ mod tests {
     #[test]
     fn oidc_complete_registration_request_serialization() {
         let req = OidcCompleteRegistrationRequest {
-            registration_code: SecretString::new("reg-code-123".to_string()),
-            registration_token: SecretString::new("reg-tok-456".to_string()),
+            registration_code: SecretString::new("reg-code-123"),
+            registration_token: SecretString::new("reg-tok-456"),
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["registration_code"], "reg-code-123");

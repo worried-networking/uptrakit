@@ -104,8 +104,8 @@ mod tests {
     #[test]
     fn oidc_link_request_secret_string_round_trip() {
         let req = OidcLinkRequest {
-            link_token: SecretString::new("tok-abc".to_string()),
-            password: Some(SecretString::new("pass123".to_string())),
+            link_token: SecretString::new("tok-abc"),
+            password: Some(SecretString::new("pass123")),
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
         let de: OidcLinkRequest =
@@ -122,8 +122,8 @@ mod tests {
     #[test]
     fn oidc_complete_registration_request_round_trip() {
         let req = OidcCompleteRegistrationRequest {
-            registration_code: SecretString::new("code-xyz".to_string()),
-            registration_token: SecretString::new("token-123".to_string()),
+            registration_code: SecretString::new("code-xyz"),
+            registration_token: SecretString::new("token-123"),
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
         let de: OidcCompleteRegistrationRequest =

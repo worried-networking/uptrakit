@@ -47,8 +47,8 @@ impl std::error::Error for ParseMaskedEmailError {}
 
 impl MaskedEmail {
     /// Wrap a raw email address.
-    pub fn new(email: String) -> Self {
-        Self(email)
+    pub fn new(email: impl Into<String>) -> Self {
+        Self(email.into())
     }
 
     /// Borrow the full, unmasked email address.
@@ -181,49 +181,49 @@ mod tests {
 
     #[test]
     fn mask_simple_email() {
-        let email = MaskedEmail::new("andrey@example.com".into());
+        let email = MaskedEmail::new("andrey@example.com");
         assert_eq!(format!("{email}"), "an***@example.com");
     }
 
     #[test]
     fn mask_dot_separated() {
-        let email = MaskedEmail::new("andrey.johnson@example.org".into());
+        let email = MaskedEmail::new("andrey.johnson@example.org");
         assert_eq!(format!("{email}"), "an***.joh***@example.org");
     }
 
     #[test]
     fn mask_single_char() {
-        let email = MaskedEmail::new("a@example.com".into());
+        let email = MaskedEmail::new("a@example.com");
         assert_eq!(format!("{email}"), "a***@example.com");
     }
 
     #[test]
     fn mask_two_char() {
-        let email = MaskedEmail::new("ab@example.com".into());
+        let email = MaskedEmail::new("ab@example.com");
         assert_eq!(format!("{email}"), "a***@example.com");
     }
 
     #[test]
     fn mask_underscore() {
-        let email = MaskedEmail::new("john_doe@example.com".into());
+        let email = MaskedEmail::new("john_doe@example.com");
         assert_eq!(format!("{email}"), "jo***_d***@example.com");
     }
 
     #[test]
     fn mask_plus_tag() {
-        let email = MaskedEmail::new("user+tag@example.com".into());
+        let email = MaskedEmail::new("user+tag@example.com");
         assert_eq!(format!("{email}"), "us***+t***@example.com");
     }
 
     #[test]
     fn mask_hyphen() {
-        let email = MaskedEmail::new("first-last@example.com".into());
+        let email = MaskedEmail::new("first-last@example.com");
         assert_eq!(format!("{email}"), "fi***-la***@example.com");
     }
 
     #[test]
     fn debug_shows_masked() {
-        let email = MaskedEmail::new("secret@test.com".into());
+        let email = MaskedEmail::new("secret@test.com");
         let debug = format!("{email:?}");
         assert!(!debug.contains("secret@"));
         assert!(debug.contains("se***@test.com"));
@@ -231,13 +231,13 @@ mod tests {
 
     #[test]
     fn expose_email_returns_full() {
-        let email = MaskedEmail::new("user@test.com".into());
+        let email = MaskedEmail::new("user@test.com");
         assert_eq!(email.expose_email(), "user@test.com");
     }
 
     #[test]
     fn serde_roundtrip() {
-        let email = MaskedEmail::new("test@example.com".into());
+        let email = MaskedEmail::new("test@example.com");
         let json = serde_json::to_string(&email).expect("serialize");
         assert_eq!(json, r#""test@example.com""#);
         let recovered: MaskedEmail = serde_json::from_str(&json).expect("deserialize");
@@ -272,9 +272,9 @@ mod tests {
 
     #[test]
     fn equality() {
-        let a = MaskedEmail::new("same@test.com".into());
-        let b = MaskedEmail::new("same@test.com".into());
-        let c = MaskedEmail::new("other@test.com".into());
+        let a = MaskedEmail::new("same@test.com");
+        let b = MaskedEmail::new("same@test.com");
+        let c = MaskedEmail::new("other@test.com");
         assert_eq!(a, b);
         assert_ne!(a, c);
     }
@@ -283,8 +283,8 @@ mod tests {
     fn hash_consistent() {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::Hasher;
-        let a = MaskedEmail::new("test@test.com".into());
-        let b = MaskedEmail::new("test@test.com".into());
+        let a = MaskedEmail::new("test@test.com");
+        let b = MaskedEmail::new("test@test.com");
         let hash_a = {
             let mut h = DefaultHasher::new();
             a.hash(&mut h);
@@ -303,7 +303,7 @@ mod tests {
     fn sea_orm_value_roundtrip() {
         use sea_orm::entity::prelude::*;
         use sea_orm::sea_query::ValueType;
-        let e = MaskedEmail::new("db@test.com".into());
+        let e = MaskedEmail::new("db@test.com");
         let value: Value = e.into();
         let recovered = <MaskedEmail as ValueType>::try_from(value).expect("should recover");
         assert_eq!(recovered.expose_email(), "db@test.com");

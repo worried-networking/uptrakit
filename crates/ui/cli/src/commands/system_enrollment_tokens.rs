@@ -353,7 +353,7 @@ mod tests {
             id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
                 .parse::<Uuid>()
                 .unwrap(),
-            token: SecretString::new("upt_sys_abc123def456".to_string()),
+            token: SecretString::new("upt_sys_abc123def456"),
             name: "MQTT Bridge Token".to_string(),
             max_uses: Some(10),
             current_uses: 0,

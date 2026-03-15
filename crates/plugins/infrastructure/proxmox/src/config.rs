@@ -146,7 +146,7 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ProxmoxConfig {
 
 impl SecretMasking for ProxmoxConfig {
     fn with_secrets_masked(mut self) -> Self {
-        self.api_token = SecretString::new(SECRET_MASK.to_string());
+        self.api_token = SecretString::new(SECRET_MASK);
         self
     }
 
@@ -184,7 +184,7 @@ mod tests {
     fn validation_rejects_http() {
         let config = ProxmoxConfig {
             api_url: "http://pve.local:8006".to_string(),
-            api_token: SecretString::new("root@pam!tok=secret".to_string()),
+            api_token: SecretString::new("root@pam!tok=secret"),
             ..ProxmoxConfig::default()
         };
         let err = config.validate().unwrap_err();
@@ -195,7 +195,7 @@ mod tests {
     fn validation_rejects_invalid_token_format() {
         let config = ProxmoxConfig {
             api_url: "https://pve.local:8006".to_string(),
-            api_token: SecretString::new("just-a-random-string".to_string()),
+            api_token: SecretString::new("just-a-random-string"),
             ..ProxmoxConfig::default()
         };
         let err = config.validate().unwrap_err();
@@ -219,7 +219,7 @@ mod tests {
     fn secret_masking() {
         let config = ProxmoxConfig {
             api_url: "https://pve.local:8006".to_string(),
-            api_token: SecretString::new("root@pam!tok=real-secret".to_string()),
+            api_token: SecretString::new("root@pam!tok=real-secret"),
             ..ProxmoxConfig::default()
         };
         let masked = config.clone().with_secrets_masked();
@@ -231,7 +231,7 @@ mod tests {
     fn restore_secrets() {
         let existing = ProxmoxConfig {
             api_url: "https://pve.local:8006".to_string(),
-            api_token: SecretString::new("root@pam!tok=real-secret".to_string()),
+            api_token: SecretString::new("root@pam!tok=real-secret"),
             ..ProxmoxConfig::default()
         };
         let mut incoming = existing.clone().with_secrets_masked();
@@ -246,12 +246,12 @@ mod tests {
     fn restore_secrets_keeps_new_token() {
         let existing = ProxmoxConfig {
             api_url: "https://pve.local:8006".to_string(),
-            api_token: SecretString::new("root@pam!tok=old-secret".to_string()),
+            api_token: SecretString::new("root@pam!tok=old-secret"),
             ..ProxmoxConfig::default()
         };
         let mut incoming = ProxmoxConfig {
             api_url: "https://pve.local:8006".to_string(),
-            api_token: SecretString::new("root@pam!tok=new-secret".to_string()),
+            api_token: SecretString::new("root@pam!tok=new-secret"),
             ..ProxmoxConfig::default()
         };
         incoming.restore_secrets_from(&existing);
@@ -265,7 +265,7 @@ mod tests {
     fn serialization_roundtrip() {
         let config = ProxmoxConfig {
             api_url: "https://pve.local:8006".to_string(),
-            api_token: SecretString::new("root@pam!tok=secret".to_string()),
+            api_token: SecretString::new("root@pam!tok=secret"),
             verify_tls: false,
             node_filter: vec!["pve1".to_string()],
         };
@@ -292,7 +292,7 @@ mod tests {
     fn private_hosts_allowed() {
         let config = ProxmoxConfig {
             api_url: "https://192.168.1.1:8006".to_string(),
-            api_token: SecretString::new("root@pam!tok=secret".to_string()),
+            api_token: SecretString::new("root@pam!tok=secret"),
             ..ProxmoxConfig::default()
         };
         assert!(
