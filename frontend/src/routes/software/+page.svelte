@@ -15,7 +15,14 @@
 		batchSoftwareItems,
 		executeBatchChunked
 	} from '$lib/api';
-	import { formatDate, formatVersion, parseUrlPage, isValidLogoUrl, resolveDisplayVersion } from '$lib/utils';
+	import {
+		formatDate,
+		formatVersion,
+		parseUrlPage,
+		isValidLogoUrl,
+		resolveDisplayVersion,
+		nextValidPage
+	} from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
@@ -266,7 +273,9 @@
 		submitting = true;
 		try {
 			await deleteSoftwareItem(id);
-			items = items.filter((i) => i.id !== id);
+			await loadAll(currentPage);
+			const p = nextValidPage(currentPage, totalPages);
+			if (p !== null) await loadAll(p);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to delete software item.');
 			loadAll(currentPage);
@@ -454,6 +463,8 @@
 			batchSelectedIds.clear();
 			batchSelectedItemsMap.clear();
 			await loadAll(currentPage);
+			const p = nextValidPage(currentPage, totalPages);
+			if (p !== null) await loadAll(p);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : `Failed to ${action} software items`);
 		} finally {

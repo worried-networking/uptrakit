@@ -14,7 +14,7 @@
 	} from '$lib/api';
 	import type { HostTagResponse, BatchActionResponse } from '$lib/types';
 	import { Permission, hasAnyPermission } from '$lib/types';
-	import { formatDate, parseUrlPage } from '$lib/utils';
+	import { formatDate, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
@@ -201,6 +201,8 @@
 			await deleteHostTag(tagId);
 			showSuccess('Tag deleted');
 			await loadTags(currentPage);
+			const p = nextValidPage(currentPage, totalPages);
+			if (p !== null) await loadTags(p);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to delete tag');
 		} finally {
@@ -259,6 +261,8 @@
 			}
 			selectedIds.clear();
 			await loadTags(currentPage);
+			const p = nextValidPage(currentPage, totalPages);
+			if (p !== null) await loadTags(p);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : `Failed to ${action} tags`);
 		} finally {

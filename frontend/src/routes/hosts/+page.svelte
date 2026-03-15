@@ -13,7 +13,7 @@
 	} from '$lib/api';
 	import type { HostResponse, BatchActionResponse } from '$lib/types';
 	import { Permission, hasAnyPermission } from '$lib/types';
-	import { formatDate, parseUrlPage } from '$lib/utils';
+	import { formatDate, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
@@ -158,7 +158,9 @@
 		try {
 			error = null;
 			await deactivateHost(hostId);
-			hosts = hosts.filter((h) => h.id !== hostId);
+			await loadHosts(currentPage);
+			const p = nextValidPage(currentPage, totalPages);
+			if (p !== null) await loadHosts(p);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to deactivate host';
 		} finally {
@@ -236,6 +238,8 @@
 			}
 			selectedIds.clear();
 			await loadHosts(currentPage);
+			const p = nextValidPage(currentPage, totalPages);
+			if (p !== null) await loadHosts(p);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : `Failed to ${action} hosts`);
 		} finally {

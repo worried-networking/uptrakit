@@ -16,7 +16,7 @@
 	} from '$lib/api';
 	import type { ServiceResponse, BatchActionResponse } from '$lib/types';
 	import { Permission, hasAnyPermission } from '$lib/types';
-	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
+	import { formatDate, parseUrlParam, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
@@ -207,9 +207,11 @@
 		try {
 			error = null;
 			await mergeService(mergeTargetId, sourceId);
-			services = services.filter((service) => service.id !== sourceId);
 			mergeSource = null;
 			mergeTargetId = null;
+			await loadServices(currentPage);
+			const p = nextValidPage(currentPage, totalPages);
+			if (p !== null) await loadServices(p);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to merge service';
 		} finally {
@@ -230,10 +232,14 @@
 				services = services.map((service) => (service.id === serviceId ? updated : service));
 			} else if (action === 'reject') {
 				await rejectService(serviceId);
-				services = services.filter((service) => service.id !== serviceId);
+				await loadServices(currentPage);
+				const p = nextValidPage(currentPage, totalPages);
+				if (p !== null) await loadServices(p);
 			} else if (action === 'delete') {
 				await deleteService(serviceId);
-				services = services.filter((service) => service.id !== serviceId);
+				await loadServices(currentPage);
+				const p = nextValidPage(currentPage, totalPages);
+				if (p !== null) await loadServices(p);
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : `Failed to ${action} service`;
@@ -346,6 +352,8 @@
 			selectedIds.clear();
 			selectedItemsMap.clear();
 			await loadServices(currentPage);
+			const p = nextValidPage(currentPage, totalPages);
+			if (p !== null) await loadServices(p);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : `Failed to ${action} services`);
 		} finally {

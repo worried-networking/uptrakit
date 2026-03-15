@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { getSoftwareIgnores, createSoftwareIgnore, deleteSoftwareIgnore, batchSoftwareIgnores } from '$lib/api';
-	import { formatDate } from '$lib/utils';
+	import { formatDate, nextValidPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -82,8 +82,10 @@
 		ignoreDeleteConfirm = null;
 		try {
 			await deleteSoftwareIgnore(id);
-			ignores = ignores.filter((i) => i.id !== id);
 			showSuccess('Ignore rule deleted.');
+			await loadIgnores(ignoresPage);
+			const p = nextValidPage(ignoresPage, ignoresTotalPages);
+			if (p !== null) await loadIgnores(p);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to delete ignore rule');
 		}
@@ -119,6 +121,8 @@
 			}
 			ignoreSelectedIds.clear();
 			await loadIgnores(ignoresPage);
+			const p = nextValidPage(ignoresPage, ignoresTotalPages);
+			if (p !== null) await loadIgnores(p);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to delete ignore rules');
 		} finally {

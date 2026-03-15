@@ -15,7 +15,7 @@
 	} from '$lib/api';
 	import type { SystemServiceResponse, BatchActionResponse } from '$lib/types';
 	import { Permission, hasAnyPermission } from '$lib/types';
-	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
+	import { formatDate, parseUrlParam, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
@@ -208,10 +208,14 @@
 				services = services.map((s) => (s.id === serviceId ? updated : s));
 			} else if (action === 'reject') {
 				await rejectSystemService(serviceId);
-				services = services.filter((s) => s.id !== serviceId);
+				await loadServices(currentPage);
+				const p = nextValidPage(currentPage, totalPages);
+				if (p !== null) await loadServices(p);
 			} else if (action === 'delete') {
 				await deleteSystemService(serviceId);
-				services = services.filter((s) => s.id !== serviceId);
+				await loadServices(currentPage);
+				const p = nextValidPage(currentPage, totalPages);
+				if (p !== null) await loadServices(p);
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : `Failed to ${action} system service`;
@@ -324,6 +328,8 @@
 			selectedIds.clear();
 			selectedItemsMap.clear();
 			await loadServices(currentPage);
+			const p = nextValidPage(currentPage, totalPages);
+			if (p !== null) await loadServices(p);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : `Failed to ${action} system services`);
 		} finally {

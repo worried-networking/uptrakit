@@ -37,6 +37,16 @@ export function formatDate(date: string | null | undefined): string {
 }
 
 /**
+ * Returns the page to navigate to after items have been removed, or null if no
+ * redirect is needed. Call this after a post-delete reload using the freshly
+ * updated currentPage and totalPages state variables.
+ */
+export function nextValidPage(currentPage: number, totalPages: number): number | null {
+	if (totalPages > 0 && currentPage > totalPages) return totalPages;
+	return null;
+}
+
+/**
  * Validates a redirect path: allows paths that start with "/" but not "//".
  * Rejects null, absolute URLs, and protocol-relative URLs to prevent open
  * redirect vulnerabilities. Returns "/" as the safe fallback.
