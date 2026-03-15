@@ -121,6 +121,28 @@ pub async fn create_batch(
         });
     }
 
+    // Determine initial status per host before opening the transaction.
+    // Doing this outside the transaction avoids a pool-exhaustion deadlock on
+    // single-connection pools (e.g. SQLite in-memory): db.begin() takes the
+    // sole connection, and a subsequent query on `db` would block forever
+    // waiting for a connection that is never released.
+    //
+    // - If the host already has an active (Pending/InProgress) update outside
+    //   this batch, ALL items on that host start as Queued.
+    // - Among hosts that are free, only the first item per host is Pending;
+    //   subsequent items on the same host are Queued.
+    let mut externally_busy_hosts: HashSet<Uuid> = HashSet::new();
+    for (candidate, _) in &validated {
+        if !externally_busy_hosts.contains(&candidate.host_id) {
+            let busy = has_active_update_for_host(db, candidate.host_id)
+                .await
+                .unwrap_or(false);
+            if busy {
+                externally_busy_hosts.insert(candidate.host_id);
+            }
+        }
+    }
+
     // Insert the batch record and all update_history rows atomically so that a
     // mid-flight failure cannot leave a batch record with an incorrect total_count.
     // Dispatch (WebSocket sends) happens outside the transaction because it cannot
@@ -141,23 +163,6 @@ pub async fn create_batch(
         completed_at: Set(None),
     };
     batch_record.insert(&txn).await.context_to()?;
-
-    // Determine initial status per host:
-    // - If the host already has an active (Pending/InProgress) update outside
-    //   this batch, ALL items on that host start as Queued.
-    // - Among hosts that are free, only the first item per host is Pending;
-    //   subsequent items on the same host are Queued.
-    let mut externally_busy_hosts: HashSet<Uuid> = HashSet::new();
-    for (candidate, _) in &validated {
-        if !externally_busy_hosts.contains(&candidate.host_id) {
-            let busy = has_active_update_for_host(db, candidate.host_id)
-                .await
-                .unwrap_or(false);
-            if busy {
-                externally_busy_hosts.insert(candidate.host_id);
-            }
-        }
-    }
 
     let mut first_per_free_host: HashSet<Uuid> = HashSet::new();
 
