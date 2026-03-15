@@ -377,12 +377,14 @@ pub async fn merge_service(
     let updated_target = target_active.update(&txn).await.context_to()?;
 
     // Copy source service's host links to target (tenant-scoped via join on service).
+    // Run within the transaction so the join sees the same snapshot as the
+    // other DML in this function.
     let source_links = tenant_db
         .find_via_tenant_join::<service_host::Entity, service::Entity>(
             service_host::Relation::Service.def(),
         )
         .filter(service_host::Column::ServiceId.eq(source_uuid))
-        .all(tenant_db.db())
+        .all(&txn)
         .await
         .context_to()?;
 

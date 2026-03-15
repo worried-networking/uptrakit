@@ -172,14 +172,12 @@ pub async fn invoke_action(
             }
         });
 
-    if let Some(required_perm) = action_permission {
-        if !auth_user.has_permission(required_perm) {
-            return error_response_with_code(
-                StatusCode::FORBIDDEN,
-                "Insufficient permissions for this action",
-                "forbidden",
-            );
-        }
+    if action_permission.is_some_and(|p| !auth_user.has_permission(p)) {
+        return error_response_with_code(
+            StatusCode::FORBIDDEN,
+            "Insufficient permissions for this action",
+            "forbidden",
+        );
     }
 
     match owner {

@@ -268,6 +268,7 @@ mod tests {
             ordinal: 0,
             plugin_config_id: Some(pc_id),
             plugin_config: None,
+            plugin_type: None,
             package_identifier: Some("homebrew/cask/firefox".to_string()),
             config_override: None,
             execution_site: None,
