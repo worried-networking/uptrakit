@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::SettingKey;
 use crate::error_response::error_response;
+use crate::extract::Validated;
 use crate::middleware::permission::CanManageGlobalSettings;
 use crate::settings_store::upsert_global_setting;
 use axum::{
@@ -17,7 +18,6 @@ use std::sync::Arc;
 pub use uptrakit_web_api_types::settings_network::{
     NetworkSettingsResponse, UpdateNetworkSettingsRequest,
 };
-use uptrakit_web_api_types::validation::Validate;
 
 /// Persist a single global setting to the database, returning an error response
 /// on failure. The `setting_name` is used only for the error log message.
@@ -139,7 +139,7 @@ pub async fn get_network_settings(
 pub async fn update_network_settings(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
-    Json(req): Json<UpdateNetworkSettingsRequest>,
+    Validated(req): Validated<UpdateNetworkSettingsRequest>,
 ) -> Response {
     match update_network_settings_inner(&state, req).await {
         Ok(resp) | Err(resp) => resp,
@@ -150,10 +150,6 @@ async fn update_network_settings_inner(
     state: &AppState,
     req: UpdateNetworkSettingsRequest,
 ) -> Result<Response, Response> {
-    if let Err(e) = req.validate() {
-        return Err(error_response(StatusCode::BAD_REQUEST, e.to_string()));
-    }
-
     let db = state.db();
 
     // Validate and apply trusted proxies (runtime-changeable)

@@ -6,6 +6,7 @@
 //! - `DELETE /api/v1/autodiscovery/ignores/{id}` — remove rule
 
 use crate::error_response::error_response;
+use crate::extract::Validated;
 use crate::middleware::permission::{CanManageIgnores, CanViewSoftware};
 use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::tenant_db::TenantDb;
@@ -15,7 +16,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
 pub use uptrakit_web_api_types::autodiscovery::{
@@ -83,14 +83,10 @@ pub async fn list_autodiscovery_ignores(
 pub async fn create_autodiscovery_ignore(
     tenant_db: TenantDb,
     CanManageIgnores(_user): CanManageIgnores,
-    Json(req): Json<CreateSoftwareIgnoreRequest>,
+    Validated(req): Validated<CreateSoftwareIgnoreRequest>,
 ) -> Response {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use uptrakit_shared_db::entity::{prelude::*, software_ignore};
-
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
 
     let name = req.name.trim().to_string();
 
@@ -206,12 +202,8 @@ pub async fn delete_autodiscovery_ignore(
 pub async fn batch_autodiscovery_ignores(
     tenant_db: TenantDb,
     CanManageIgnores(_user): CanManageIgnores,
-    Json(body): Json<BatchActionRequest>,
+    Validated(body): Validated<BatchActionRequest>,
 ) -> Response {
-    if let Err(e) = body.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     let (succeeded_ids, failed) = match body.action.as_str() {
         "delete" => {
             match autodiscovery_queries::batch_delete_ignore_rules(

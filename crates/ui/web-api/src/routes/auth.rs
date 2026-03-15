@@ -23,8 +23,8 @@ use uptrakit_shared_db::entity::{role, user, user_role};
 use uptrakit_shared_types::MaskedEmail;
 
 use crate::auth::AuthMethod;
+use crate::extract::Validated;
 use uptrakit_web_api_types::SecretString;
-use uptrakit_web_api_types::validation::Validate;
 
 pub use uptrakit_web_api_types::auth::{
     AuthResponse, LoginRequest, LogoutRequest, RefreshRequest, RefreshResponse, RegisterRequest,
@@ -46,15 +46,11 @@ pub use uptrakit_web_api_types::auth::{
 #[tracing::instrument(skip_all)]
 pub async fn register(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<RegisterRequest>,
+    Validated(req): Validated<RegisterRequest>,
 ) -> Response {
     // Check if password auth is enabled
     if !state.settings.authentication().password_auth_enabled {
         return error_response(StatusCode::FORBIDDEN, "Password authentication is disabled");
-    }
-
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     // Validate password length
@@ -215,14 +211,13 @@ pub async fn register(
     tag = "Authentication"
 )]
 #[tracing::instrument(skip_all)]
-pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequest>) -> Response {
+pub async fn login(
+    State(state): State<Arc<AppState>>,
+    Validated(req): Validated<LoginRequest>,
+) -> Response {
     // Check if password auth is enabled
     if !state.settings.authentication().password_auth_enabled {
         return error_response(StatusCode::FORBIDDEN, "Password authentication is disabled");
-    }
-
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     // Validate password length early to avoid expensive hashing on absurd inputs

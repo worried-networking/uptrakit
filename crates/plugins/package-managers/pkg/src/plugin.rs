@@ -17,7 +17,17 @@ use uptrakit_plugin_infrastructure_core::{
 #[cfg(test)]
 use uptrakit_plugin_infrastructure_core::PluginBase;
 
+use uptrakit_shared_types::PackageIdentifierRules;
+
 use crate::config::{PkgConfig, PkgDiscoveryFilter};
+
+const IDENTIFIER_RULES: PackageIdentifierRules = PackageIdentifierRules {
+    min_len: 1,
+    max_len: 200,
+    first_char_valid: |c| c.is_ascii_alphanumeric(),
+    char_valid: |c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-' | '_'),
+    reject_double_dot: true,
+};
 
 /// Validate a BSD pkg package identifier.
 ///
@@ -29,37 +39,13 @@ use crate::config::{PkgConfig, PkgDiscoveryFilter};
 /// - Must not contain `..` (path traversal protection).
 /// - Must not start or end with `-` or `.`.
 pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-    if value.is_empty() {
-        return Err("package_identifier must not be empty".to_string());
-    }
-    if value.len() > 200 {
-        return Err("package_identifier must not exceed 200 characters".to_string());
-    }
-
-    let first = value.chars().next().unwrap_or('\0');
-    if !first.is_ascii_alphanumeric() {
-        return Err(format!(
-            "package_identifier must start with an alphanumeric character, found '{first}'"
-        ));
-    }
+    IDENTIFIER_RULES.validate(value)?;
 
     let last = value.chars().next_back().unwrap_or('\0');
     if last == '-' || last == '.' {
         return Err(format!(
             "package_identifier must not end with '-' or '.', found '{last}'"
         ));
-    }
-
-    for ch in value.chars() {
-        if !ch.is_ascii_alphanumeric() && !matches!(ch, '.' | '+' | '-' | '_') {
-            return Err(format!(
-                "package_identifier contains invalid character: '{ch}'"
-            ));
-        }
-    }
-
-    if value.contains("..") {
-        return Err("package_identifier must not contain '..'".to_string());
     }
 
     Ok(())

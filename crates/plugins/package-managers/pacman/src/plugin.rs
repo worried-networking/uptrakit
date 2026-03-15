@@ -19,7 +19,19 @@ use uptrakit_plugin_infrastructure_core::{
     DiscoveryPlugin, PluginBase, ReleaseFetcherPlugin, VersionDetectorPlugin,
 };
 
+use uptrakit_shared_types::PackageIdentifierRules;
+
 use crate::config::{PacmanConfig, PacmanDiscoveryFilter};
+
+const IDENTIFIER_RULES: PackageIdentifierRules = PackageIdentifierRules {
+    min_len: 1,
+    max_len: 128,
+    first_char_valid: |c| c.is_ascii_lowercase() || c.is_ascii_digit(),
+    char_valid: |c| {
+        c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '@' | '.' | '_' | '+' | '-')
+    },
+    reject_double_dot: true,
+};
 
 /// Validate an Arch Linux Pacman package identifier.
 ///
@@ -29,39 +41,7 @@ use crate::config::{PacmanConfig, PacmanDiscoveryFilter};
 /// - May only contain lowercase letters, digits, `@`, `.`, `_`, `+`, or `-`.
 /// - Must not contain `..` (path traversal protection).
 pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-    if value.is_empty() {
-        return Err("package_identifier must not be empty".to_string());
-    }
-    if value.len() > 128 {
-        return Err("package_identifier must not exceed 128 characters".to_string());
-    }
-
-    // Must start with [a-z0-9].
-    let first = value.chars().next().unwrap_or('\0');
-    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
-        return Err(format!(
-            "package_identifier must start with a lowercase letter or digit, found '{first}'"
-        ));
-    }
-
-    // All characters must be in [a-z0-9@._+-].
-    for ch in value.chars() {
-        if !ch.is_ascii_lowercase()
-            && !ch.is_ascii_digit()
-            && !matches!(ch, '@' | '.' | '_' | '+' | '-')
-        {
-            return Err(format!(
-                "package_identifier contains invalid character: '{ch}'"
-            ));
-        }
-    }
-
-    // No path traversal via '..'.
-    if value.contains("..") {
-        return Err("package_identifier must not contain '..'".to_string());
-    }
-
-    Ok(())
+    IDENTIFIER_RULES.validate(value)
 }
 
 /// Validate a Pacman package version string before it is interpolated into

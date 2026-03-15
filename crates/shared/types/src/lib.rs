@@ -1,4 +1,6 @@
 mod access_preset;
+pub mod package_identifier;
+pub use package_identifier::PackageIdentifierRules;
 mod batch_status;
 pub mod command_validation;
 mod device_auth_status;

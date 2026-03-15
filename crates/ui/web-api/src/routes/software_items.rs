@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::error_response::error_response;
+use crate::extract::Validated;
 use crate::middleware::permission::{
     CanCreateSoftware, CanDeleteSoftware, CanTriggerChecks, CanTriggerUpdates, CanUpdateSoftware,
     CanViewSoftware,
@@ -30,7 +31,6 @@ use uptrakit_shared_db::entity::{
     service_host, software_item,
 };
 use uptrakit_web_api_types::events::AdminEvent;
-use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
 use uptrakit_web_api_types::PluginRole;
@@ -308,11 +308,8 @@ pub async fn create_software_item(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanCreateSoftware(_user): CanCreateSoftware,
-    Json(req): Json<CreateSoftwareItemRequest>,
+    Validated(req): Validated<CreateSoftwareItemRequest>,
 ) -> Response {
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
     match item_queries::create_software_item(&tenant_db, req).await {
         Ok(resp) => {
             state
@@ -1469,12 +1466,8 @@ pub async fn batch_software_items(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanDeleteSoftware(_user): CanDeleteSoftware,
-    Json(body): Json<BatchActionRequest>,
+    Validated(body): Validated<BatchActionRequest>,
 ) -> Response {
-    if let Err(e) = body.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     let (succeeded_ids, failed) = match body.action.as_str() {
         "approve" => {
             // Inline batch approve: set featured = true for matching items.

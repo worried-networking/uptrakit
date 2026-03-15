@@ -10,6 +10,7 @@ publish = false
 [features]
 default = []
 agent-infra = ["dep:sea-orm", "dep:sea-orm-migration", "dep:uuid", "migrations"]
+http-client = ["dep:reqwest", "uptrakit-shared-types/http-ssrf"]
 migrations = ["dep:sea-orm-migration"]
 plugin-ops = ["dep:sea-orm", "dep:uuid"]
 
@@ -28,6 +29,7 @@ uptrakit-extension-framework = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-notification-plugin-core = { workspace = true }
 uptrakit-shared-types = { workspace = true }
+reqwest = { workspace = true, optional = true }
 sea-orm = { workspace = true, optional = true }
 sea-orm-migration = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }

@@ -17,8 +17,9 @@ use time::OffsetDateTime;
 use uptrakit_internal_wire::{ControllerMessage, MqttClientCreatedPayload};
 use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease};
 use uptrakit_web_api_types::mqtt_url::MqttUrl;
-use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
+
+use crate::extract::Validated;
 
 pub use uptrakit_web_api_types::settings_mqtt::{
     CreateMqttClientRequest, MqttClientConnectionStatus, MqttClientResponse, MqttLimitResponse,
@@ -163,12 +164,8 @@ pub async fn create_mqtt_settings(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
     tenant_db: TenantDb,
-    Json(req): Json<CreateMqttClientRequest>,
+    Validated(req): Validated<CreateMqttClientRequest>,
 ) -> Response {
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     let tenant_id = tenant_db.tenant_id;
     let max_clients = state.settings.mqtt_max_clients_per_tenant();
 
@@ -445,12 +442,8 @@ pub async fn update_mqtt_settings(
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
     tenant_db: TenantDb,
     Path(mqtt_client_id): Path<Uuid>,
-    Json(req): Json<UpdateMqttClientRequest>,
+    Validated(req): Validated<UpdateMqttClientRequest>,
 ) -> Response {
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     let existing = match mqtt_client_store::load_mqtt_client_by_id(
         state.db(),
         mqtt_client_id,

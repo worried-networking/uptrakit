@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::auth::api_token::ApiTokenService;
 use crate::error_response::error_response;
+use crate::extract::Validated;
 use crate::middleware::require_auth::AuthenticatedUser;
 use axum::{
     Json,
@@ -9,7 +10,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
-use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
 use uptrakit_web_api_types::SecretString;
@@ -34,12 +34,8 @@ pub use uptrakit_web_api_types::api_tokens::{
 pub async fn create_api_token(
     State(state): State<Arc<AppState>>,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
-    Json(req): Json<CreateApiTokenRequest>,
+    Validated(req): Validated<CreateApiTokenRequest>,
 ) -> Response {
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     let service = ApiTokenService::new(state.db().clone());
 
     match service.create_token(auth_user.user_id, &req.name).await {

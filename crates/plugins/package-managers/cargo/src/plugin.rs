@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
@@ -12,10 +11,21 @@ use uptrakit_plugin_infrastructure_core::{
     DiscoveryTarget, HostCompatibility, OutputStreamType, PluginCapability, PluginError,
     PluginRole, PluginType, ReleaseInfo, Result, UpdateOutputLine, UpstreamRelease, Version,
 };
-use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
+use uptrakit_plugin_infrastructure_core::{
+    PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
+};
+use uptrakit_shared_types::PackageIdentifierRules;
 
 use crate::config::CargoConfig;
 use crate::error::CargoError;
+
+const IDENTIFIER_RULES: PackageIdentifierRules = PackageIdentifierRules {
+    min_len: 1,
+    max_len: 64,
+    first_char_valid: |c| c.is_ascii_alphabetic() || c == '_',
+    char_valid: |c| c.is_ascii_alphanumeric() || c == '_' || c == '-',
+    reject_double_dot: true,
+};
 
 /// Validate a Cargo crate package identifier.
 ///
@@ -25,42 +35,7 @@ use crate::error::CargoError;
 /// - Remaining characters: `[A-Za-z0-9_-]` only.
 /// - Must not contain `..` or path separators (`/`, `\`).
 pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-    if value.is_empty() {
-        return Err("package_identifier must not be empty".to_string());
-    }
-    if value.len() > 64 {
-        return Err("package_identifier must not exceed 64 characters".to_string());
-    }
-
-    // Must start with ASCII letter or underscore.
-    let first = value.chars().next().unwrap_or('\0');
-    if !first.is_ascii_alphabetic() && first != '_' {
-        return Err(format!(
-            "package_identifier must start with a letter or underscore, found '{first}'"
-        ));
-    }
-
-    // All characters must be in [A-Za-z0-9_-].
-    for ch in value.chars() {
-        if !ch.is_ascii_alphanumeric() && ch != '_' && ch != '-' {
-            return Err(format!(
-                "package_identifier contains invalid character: '{ch}' \
-                 (only ASCII letters, digits, underscores, and hyphens are allowed)"
-            ));
-        }
-    }
-
-    // Belt-and-suspenders: reject path traversal and separators.
-    // These are already rejected by the character set above, but we keep
-    // the checks explicit so the error message is unambiguous.
-    if value.contains("..") {
-        return Err("package_identifier must not contain '..'".to_string());
-    }
-    if value.contains('/') || value.contains('\\') {
-        return Err("package_identifier must not contain path separators".to_string());
-    }
-
-    Ok(())
+    IDENTIFIER_RULES.validate(value)
 }
 
 /// Returns `true` if the given version string is a semver pre-release.
@@ -253,27 +228,22 @@ impl CargoPlugin {
 
         // Use a permissive SSRF resolver for custom (potentially private/LAN)
         // registries and a strict resolver for the default crates.io index.
-        let ssrf_resolver: Arc<dyn reqwest::dns::Resolve> = if config.registry_url.is_some() {
-            Arc::new(SsrfSafeResolver::permissive())
+        let ssrf_mode = if config.registry_url.is_some() {
+            SsrfMode::Permissive
         } else {
-            Arc::new(SsrfSafeResolver::new())
+            SsrfMode::Strict
         };
 
-        let client = reqwest::Client::builder()
-            .user_agent(concat!(
+        let client = build_plugin_http_client(PluginHttpClientConfig {
+            user_agent: concat!(
                 "uptrakit-plugin-package-manager-cargo/",
                 env!("CARGO_PKG_VERSION")
-            ))
-            .use_preconfigured_tls(webpki_client_config())
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(60))
-            .dns_resolver(ssrf_resolver)
-            .build()
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "failed to build HTTP client: {e}"
-                )))
-            })?;
+            ),
+            ssrf_mode,
+            redirect_policy: reqwest::redirect::Policy::limited(10),
+            ..Default::default()
+        })
+        .map_err(|e| report!(PluginError::PluginInternal(e)))?;
 
         Ok(Self {
             config,

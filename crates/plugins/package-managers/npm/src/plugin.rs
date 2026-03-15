@@ -17,7 +17,7 @@ use uptrakit_plugin_infrastructure_core::{
     SudoCommandEntry, UpdateExecutorPlugin, UpdateOutputLine, UpstreamRelease, Version,
     VersionDetectorPlugin,
 };
-use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
+use uptrakit_plugin_infrastructure_core::{PluginHttpClientConfig, build_plugin_http_client};
 
 use crate::config::NpmConfig;
 
@@ -194,22 +194,14 @@ impl NpmPlugin {
             .validate()
             .map_err(|e| report!(PluginError::Configuration(e.to_string())))?;
 
-        let client = reqwest::Client::builder()
-            .user_agent(concat!(
+        let client = build_plugin_http_client(PluginHttpClientConfig {
+            user_agent: concat!(
                 "uptrakit-plugin-package-manager-npm/",
                 env!("CARGO_PKG_VERSION")
-            ))
-            .redirect(reqwest::redirect::Policy::none())
-            .use_preconfigured_tls(webpki_client_config())
-            .dns_resolver(Arc::new(SsrfSafeResolver::new()))
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(60))
-            .build()
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "failed to build HTTP client: {e}"
-                )))
-            })?;
+            ),
+            ..Default::default()
+        })
+        .map_err(|e| report!(PluginError::PluginInternal(e)))?;
 
         Ok(Self {
             config,

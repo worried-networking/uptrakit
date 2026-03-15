@@ -8,7 +8,8 @@ version.workspace = true
 publish = false
 
 [dependencies]
-uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["http-client"] }
+uptrakit-shared-types = { workspace = true }
 rootcause = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
@@ -18,7 +19,6 @@ tracing = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 time = { workspace = true }
 reqwest = { workspace = true }
-uptrakit-shared-types = { workspace = true, features = ["http-ssrf"] }
 tame-index = { workspace = true }
 futures-util = { workspace = true, features = ["alloc"] }
 

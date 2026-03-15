@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::error_response::error_response;
+use crate::extract::Validated;
 use crate::middleware::permission::{CanManageCommands, CanTriggerChecks, CanViewSoftware};
 use crate::queries::plugin_configs::{self as pc_queries, PluginConfigError};
 use crate::tenant_db::TenantDb;
@@ -15,7 +16,6 @@ use sea_orm::{
 use std::sync::Arc;
 use uptrakit_shared_db::entity::{host, plugin_config, prelude::*, service, service_host};
 use uptrakit_web_api_types::autodiscovery::TriggerDiscoveryResponse;
-use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
 pub use uptrakit_web_api_types::batch_actions::{
@@ -98,12 +98,8 @@ pub async fn create_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageCommands(user): CanManageCommands,
-    Json(req): Json<CreatePluginConfigRequest>,
+    Validated(req): Validated<CreatePluginConfigRequest>,
 ) -> Response {
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     let plugin_type_str = req.plugin_type.to_string();
     let config_name = req.name.clone();
     let command_fields = detect_command_fields(&req.config);
@@ -718,12 +714,8 @@ fn detect_command_fields(config: &serde_json::Value) -> Vec<&'static str> {
 pub async fn batch_plugin_configs(
     tenant_db: TenantDb,
     CanManageCommands(_user): CanManageCommands,
-    Json(body): Json<BatchActionRequest>,
+    Validated(body): Validated<BatchActionRequest>,
 ) -> Response {
-    if let Err(e) = body.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     let (succeeded_ids, failed) = match body.action.as_str() {
         "delete" => match pc_queries::batch_delete_plugin_configs(&tenant_db, &body.ids).await {
             Ok(r) => r,

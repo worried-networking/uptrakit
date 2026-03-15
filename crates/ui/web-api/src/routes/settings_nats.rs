@@ -15,11 +15,11 @@ use axum::{
 
 use uptrakit_web_api_types::MaskedUrl;
 pub use uptrakit_web_api_types::settings_nats::{NatsSettingsResponse, UpdateNatsSettingsRequest};
-use uptrakit_web_api_types::validation::Validate;
 
 use crate::AppState;
 use crate::SettingKey;
 use crate::error_response::error_response;
+use crate::extract::Validated;
 use crate::middleware::permission::CanManageGlobalSettings;
 use crate::settings_store::upsert_global_setting;
 
@@ -83,12 +83,8 @@ pub async fn get_nats_settings(
 pub async fn update_nats_settings(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
-    Json(req): Json<UpdateNatsSettingsRequest>,
+    Validated(req): Validated<UpdateNatsSettingsRequest>,
 ) -> Response {
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     let mut nats_url = state.settings.nats_url();
 
     if let Some(ref val) = req.url {

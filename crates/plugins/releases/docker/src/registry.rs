@@ -1,8 +1,6 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
+use uptrakit_plugin_infrastructure_core::{PluginHttpClientConfig, build_plugin_http_client};
 
 use crate::api_types::{OciManifestIndex, OciPlatform};
 use crate::auth::RegistryAuth;
@@ -97,39 +95,29 @@ pub struct RegistryClient {
 impl RegistryClient {
     /// Create a new registry client with optional authentication.
     pub fn new(auth: Option<DockerAuth>) -> Result<Self> {
-        let client = reqwest::Client::builder()
-            .user_agent(concat!(
+        let client = build_plugin_http_client(PluginHttpClientConfig {
+            user_agent: concat!(
                 "uptrakit-plugin-releases-docker/",
                 env!("CARGO_PKG_VERSION")
-            ))
-            .redirect(reqwest::redirect::Policy::none())
-            .use_preconfigured_tls(webpki_client_config())
-            .dns_resolver(Arc::new(SsrfSafeResolver::new()))
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .map_err(|e| {
-                report!(DockerError::Request(format!(
-                    "failed to build HTTP client: {e}"
-                )))
-            })?;
+            ),
+            ..Default::default()
+        })
+        .map_err(|e| report!(DockerError::Request(e)))?;
 
-        let blob_client = reqwest::Client::builder()
-            .user_agent(concat!(
+        let blob_client = build_plugin_http_client(PluginHttpClientConfig {
+            user_agent: concat!(
                 "uptrakit-plugin-releases-docker/",
                 env!("CARGO_PKG_VERSION")
-            ))
-            .redirect(reqwest::redirect::Policy::limited(5))
-            .use_preconfigured_tls(webpki_client_config())
-            .dns_resolver(Arc::new(SsrfSafeResolver::new()))
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| {
-                report!(DockerError::Request(format!(
-                    "failed to build blob HTTP client: {e}"
-                )))
-            })?;
+            ),
+            redirect_policy: reqwest::redirect::Policy::limited(5),
+            request_timeout_secs: 30,
+            ..Default::default()
+        })
+        .map_err(|e| {
+            report!(DockerError::Request(format!(
+                "failed to build blob HTTP client: {e}"
+            )))
+        })?;
 
         Ok(Self {
             client,

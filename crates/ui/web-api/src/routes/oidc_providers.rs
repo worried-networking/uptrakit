@@ -1,5 +1,6 @@
 use crate::auth::token::generate_uuid;
 use crate::error_response::error_response;
+use crate::extract::Validated;
 use crate::middleware::permission::{CanManageAuthSettings, CanViewSettings};
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -13,7 +14,6 @@ use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{oidc_provider, oidc_provider::RoleMapping};
 
 use crate::auth::AuthMethod;
-use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
 pub use uptrakit_web_api_types::oidc_providers::{
@@ -57,12 +57,8 @@ fn oidc_provider_response_from(m: oidc_provider::Model) -> OidcProviderResponse 
 pub async fn create_provider(
     tenant_db: TenantDb,
     CanManageAuthSettings(_user): CanManageAuthSettings,
-    Json(req): Json<CreateOidcProviderRequest>,
+    Validated(req): Validated<CreateOidcProviderRequest>,
 ) -> Response {
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     // Check slug uniqueness among non-deleted providers within tenant
     let existing = tenant_db
         .find::<oidc_provider::Entity>()

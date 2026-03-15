@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::error_response::error_response;
+use crate::extract::Validated;
 use crate::middleware::permission::CanManageGlobalSettings;
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -12,7 +13,6 @@ use std::sync::Arc;
 use uptrakit_internal_wire::{Capability, ControllerMessage};
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::settings_reset::{ResetDataRequest, ResetDataResponse};
-use uptrakit_web_api_types::validation::Validate;
 
 /// Reset all tenant-scoped data (hosts, software items, configs, history, etc.)
 #[utoipa::path(
@@ -34,12 +34,8 @@ pub async fn reset_data(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
     tenant_db: TenantDb,
-    Json(req): Json<ResetDataRequest>,
+    Validated(_req): Validated<ResetDataRequest>,
 ) -> Response {
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     let tenant_id = tenant_db.tenant_id;
 
     let counts =

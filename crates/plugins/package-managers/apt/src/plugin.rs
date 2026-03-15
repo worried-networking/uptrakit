@@ -18,6 +18,8 @@ use uptrakit_plugin_infrastructure_core::{
     DiscoveryPlugin, PluginBase, ReleaseFetcherPlugin, VersionDetectorPlugin,
 };
 
+use uptrakit_shared_types::PackageIdentifierRules;
+
 use crate::config::{AptConfig, AptDiscoveryFilter};
 
 /// Fixed path for the temporary APT preferences file used during batch updates.
@@ -28,6 +30,14 @@ use crate::config::{AptConfig, AptDiscoveryFilter};
 /// no other. Changing this value requires updating both uses simultaneously.
 pub(crate) const APT_BATCH_PREF_FILE: &str = "/tmp/uptrakit-apt-batch.pref";
 
+const IDENTIFIER_RULES: PackageIdentifierRules = PackageIdentifierRules {
+    min_len: 2,
+    max_len: 64,
+    first_char_valid: |c| c.is_ascii_lowercase() || c.is_ascii_digit(),
+    char_valid: |c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '+' | '-' | '.'),
+    reject_double_dot: true,
+};
+
 /// Validate a Debian APT package identifier.
 ///
 /// Enforces Debian package naming rules from the Debian Policy Manual:
@@ -36,40 +46,7 @@ pub(crate) const APT_BATCH_PREF_FILE: &str = "/tmp/uptrakit-apt-batch.pref";
 /// - May only contain lowercase letters, digits, `+`, `-`, and `.`.
 /// - Must not contain `..` (path traversal protection).
 pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-    if value.is_empty() {
-        return Err("package_identifier must not be empty".to_string());
-    }
-    if value.len() < 2 {
-        return Err("package_identifier must be at least 2 characters long".to_string());
-    }
-    if value.len() > 64 {
-        return Err("package_identifier must not exceed 64 characters".to_string());
-    }
-
-    // Must start with [a-z0-9]. The empty check above guarantees chars().next()
-    // returns Some, so the unwrap_or path is unreachable in practice.
-    let first = value.chars().next().unwrap_or('\0');
-    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
-        return Err(format!(
-            "package_identifier must start with a lowercase letter or digit, found '{first}'"
-        ));
-    }
-
-    // All characters must be in [a-z0-9+\-.].
-    for ch in value.chars() {
-        if !ch.is_ascii_lowercase() && !ch.is_ascii_digit() && !matches!(ch, '+' | '-' | '.') {
-            return Err(format!(
-                "package_identifier contains invalid character: '{ch}'"
-            ));
-        }
-    }
-
-    // No path traversal via '..'.
-    if value.contains("..") {
-        return Err("package_identifier must not contain '..'".to_string());
-    }
-
-    Ok(())
+    IDENTIFIER_RULES.validate(value)
 }
 
 /// Validate a Debian APT version string before it is interpolated into install commands.

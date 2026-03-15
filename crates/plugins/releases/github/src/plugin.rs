@@ -8,14 +8,13 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::io::AsyncWriteExt;
-use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
-
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     AttestationStatus, OutputStreamType, PluginCapability, PluginError, ReleaseAsset, ReleaseInfo,
     SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
 };
+use uptrakit_plugin_infrastructure_core::{PluginHttpClientConfig, build_plugin_http_client};
 
 // Subtrait imports needed by tests (via `use super::*`) to resolve method calls.
 #[cfg(test)]
@@ -118,23 +117,15 @@ impl GitHubPlugin {
             headers.insert(reqwest::header::AUTHORIZATION, header_value);
         }
 
-        let client = reqwest::Client::builder()
-            .user_agent(concat!(
+        let client = build_plugin_http_client(PluginHttpClientConfig {
+            user_agent: concat!(
                 "uptrakit-plugin-releases-github/",
                 env!("CARGO_PKG_VERSION")
-            ))
-            .default_headers(headers)
-            .redirect(reqwest::redirect::Policy::none())
-            .use_preconfigured_tls(webpki_client_config())
-            .dns_resolver(Arc::new(SsrfSafeResolver::new()))
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .map_err(|e| {
-                report!(GitHubError::Request(format!(
-                    "failed to build HTTP client: {e}"
-                )))
-            })?;
+            ),
+            default_headers: Some(headers),
+            ..Default::default()
+        })
+        .map_err(|e| report!(GitHubError::Request(e)))?;
 
         let asset_filters: Vec<Regex> = config
             .asset_patterns
@@ -649,22 +640,17 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for GitHubPlugin 
                 }
             }
 
-            let download_client = reqwest::Client::builder()
-                .user_agent(concat!(
+            let download_client = build_plugin_http_client(PluginHttpClientConfig {
+                user_agent: concat!(
                     "uptrakit-plugin-releases-github/",
                     env!("CARGO_PKG_VERSION")
-                ))
-                .default_headers(download_headers)
-                .use_preconfigured_tls(webpki_client_config())
-                .connect_timeout(std::time::Duration::from_secs(10))
-                .timeout(std::time::Duration::from_secs(600))
-                .dns_resolver(Arc::new(SsrfSafeResolver::new()))
-                .build()
-                .map_err(|e| {
-                    report!(PluginError::InstallFailed(format!(
-                        "failed to build download HTTP client: {e}"
-                    )))
-                })?;
+                ),
+                default_headers: Some(download_headers),
+                request_timeout_secs: 600,
+                redirect_policy: reqwest::redirect::Policy::limited(10),
+                ..Default::default()
+            })
+            .map_err(|e| report!(PluginError::InstallFailed(e)))?;
 
             download_client
                 .get(&asset.download_url)

@@ -26,7 +26,8 @@ use uptrakit_web_api_types::update_batches::{
     HostBatchUpdateRequest, ItemBatchUpdateRequest, UpdateBatchDetailResponse,
     UpdateBatchListQuery, UpdateBatchSummaryResponse,
 };
-use uptrakit_web_api_types::validation::Validate;
+
+use crate::extract::Validated;
 
 #[cfg(feature = "nats")]
 use futures_util::StreamExt as _;
@@ -76,12 +77,8 @@ pub async fn trigger_host_batch_update(
     tenant_db: TenantDb,
     CanTriggerUpdates(user): CanTriggerUpdates,
     Path(host_id): Path<Uuid>,
-    Json(req): Json<HostBatchUpdateRequest>,
+    Validated(req): Validated<HostBatchUpdateRequest>,
 ) -> Response {
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     let candidates = match batch_queries::find_outdated_items_for_host(
         tenant_db.db(),
         tenant_db.tenant_id,
@@ -169,12 +166,8 @@ pub async fn trigger_item_batch_update(
     tenant_db: TenantDb,
     CanTriggerUpdates(user): CanTriggerUpdates,
     Path(item_id): Path<Uuid>,
-    Json(req): Json<ItemBatchUpdateRequest>,
+    Validated(req): Validated<ItemBatchUpdateRequest>,
 ) -> Response {
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     let candidates = match batch_queries::find_outdated_hosts_for_item(
         tenant_db.db(),
         tenant_db.tenant_id,

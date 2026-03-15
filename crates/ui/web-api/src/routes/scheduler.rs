@@ -4,9 +4,8 @@ use axum::response::{IntoResponse, Response};
 use http::StatusCode;
 use uuid::Uuid;
 
-use uptrakit_web_api_types::validation::Validate;
-
 use crate::error_response::error_response;
+use crate::extract::Validated;
 use crate::middleware::permission::CanManageScheduler;
 use crate::queries::scheduled_tasks::{self as sched_queries, ScheduledTaskError};
 use crate::tenant_db::TenantDb;
@@ -96,12 +95,8 @@ pub async fn update_scheduled_task(
     tenant_db: TenantDb,
     CanManageScheduler(_user): CanManageScheduler,
     Path(task_id): Path<Uuid>,
-    Json(req): Json<UpdateScheduledTaskRequest>,
+    Validated(req): Validated<UpdateScheduledTaskRequest>,
 ) -> Response {
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     match sched_queries::update_scheduled_task(&tenant_db, task_id, req).await {
         Ok(task) => Json(task).into_response(),
         Err(report) => match report.current_context() {

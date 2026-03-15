@@ -19,7 +19,19 @@ use uptrakit_plugin_infrastructure_core::{
     DiscoveryPlugin, ReleaseFetcherPlugin, UpdateExecutorPlugin, VersionDetectorPlugin,
 };
 
+use uptrakit_shared_types::PackageIdentifierRules;
+
 use crate::config::{ApkConfig, ApkDiscoveryFilter};
+
+const IDENTIFIER_RULES: PackageIdentifierRules = PackageIdentifierRules {
+    min_len: 2,
+    max_len: 100,
+    first_char_valid: |c| c.is_ascii_lowercase() || c.is_ascii_digit(),
+    char_valid: |c| {
+        c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '+' | '-')
+    },
+    reject_double_dot: true,
+};
 
 /// Validate an Alpine APK package identifier.
 ///
@@ -29,37 +41,7 @@ use crate::config::{ApkConfig, ApkDiscoveryFilter};
 /// - May only contain lowercase letters, digits, `.`, `_`, `+`, `-`.
 /// - Must not contain `..` (path traversal protection).
 pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-    if value.is_empty() {
-        return Err("package_identifier must not be empty".to_string());
-    }
-    if value.len() < 2 {
-        return Err("package_identifier must be at least 2 characters long".to_string());
-    }
-    if value.len() > 100 {
-        return Err("package_identifier must not exceed 100 characters".to_string());
-    }
-
-    let first = value.chars().next().unwrap_or('\0');
-    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
-        return Err(format!(
-            "package_identifier must start with a lowercase letter or digit, found '{first}'"
-        ));
-    }
-
-    for ch in value.chars() {
-        if !ch.is_ascii_lowercase() && !ch.is_ascii_digit() && !matches!(ch, '.' | '_' | '+' | '-')
-        {
-            return Err(format!(
-                "package_identifier contains invalid character: '{ch}'"
-            ));
-        }
-    }
-
-    if value.contains("..") {
-        return Err("package_identifier must not contain '..'".to_string());
-    }
-
-    Ok(())
+    IDENTIFIER_RULES.validate(value)
 }
 
 /// Validate an APK version string before it is interpolated into install commands.

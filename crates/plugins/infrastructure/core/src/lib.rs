@@ -1,5 +1,9 @@
 #[cfg(feature = "agent-infra")]
 pub mod agent_infra;
+#[cfg(feature = "http-client")]
+pub mod http_client;
+#[cfg(feature = "http-client")]
+pub use http_client::{PluginHttpClientConfig, SsrfMode, build_plugin_http_client};
 pub mod batch_detect;
 pub mod batch_fetch;
 pub mod batch_update;

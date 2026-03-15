@@ -18,7 +18,17 @@ use uptrakit_plugin_infrastructure_core::{
     DiscoveryPlugin, PluginBase, ReleaseFetcherPlugin, VersionDetectorPlugin,
 };
 
+use uptrakit_shared_types::PackageIdentifierRules;
+
 use crate::config::{DnfConfig, DnfDiscoveryFilter};
+
+const IDENTIFIER_RULES: PackageIdentifierRules = PackageIdentifierRules {
+    min_len: 1,
+    max_len: 128,
+    first_char_valid: |c| c.is_ascii_alphanumeric(),
+    char_valid: |c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'),
+    reject_double_dot: true,
+};
 
 /// Validate an RPM package identifier.
 ///
@@ -29,33 +39,7 @@ use crate::config::{DnfConfig, DnfDiscoveryFilter};
 /// - Must not contain `..` (path traversal protection).
 /// - Must not start with `-`.
 pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-    if value.is_empty() {
-        return Err("package_identifier must not be empty".to_string());
-    }
-    if value.len() > 128 {
-        return Err("package_identifier must not exceed 128 characters".to_string());
-    }
-
-    let first = value.chars().next().unwrap_or('\0');
-    if !first.is_ascii_alphanumeric() {
-        return Err(format!(
-            "package_identifier must start with a letter or digit, found '{first}'"
-        ));
-    }
-
-    for ch in value.chars() {
-        if !ch.is_ascii_alphanumeric() && !matches!(ch, '.' | '_' | '-') {
-            return Err(format!(
-                "package_identifier contains invalid character: '{ch}'"
-            ));
-        }
-    }
-
-    if value.contains("..") {
-        return Err("package_identifier must not contain '..'".to_string());
-    }
-
-    Ok(())
+    IDENTIFIER_RULES.validate(value)
 }
 
 /// Validate an RPM version string before it is interpolated into install commands.

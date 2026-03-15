@@ -13,7 +13,7 @@ daemon = ["dep:bollard", "dep:futures-util", "dep:tokio"]
 ssh = ["daemon", "bollard/ssh"]
 
 [dependencies]
-uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops", "http-client"] }
 uptrakit-shared-types = { workspace = true, features = ["http-ssrf"] }
 uptrakit-shared-db = { workspace = true }
 uptrakit-extension-framework = { workspace = true }

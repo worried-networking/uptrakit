@@ -6832,6 +6832,7 @@ name = "uptrakit-plugin-infrastructure-core"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "reqwest",
  "rootcause",
  "sea-orm",
  "sea-orm-migration",
@@ -6933,6 +6934,7 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
+ "uptrakit-shared-types",
 ]
 
 [[package]]
@@ -6949,6 +6951,7 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
+ "uptrakit-shared-types",
 ]
 
 [[package]]
@@ -6986,6 +6989,7 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
+ "uptrakit-shared-types",
 ]
 
 [[package]]
@@ -7037,7 +7041,6 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
- "uptrakit-shared-types",
 ]
 
 [[package]]
@@ -7054,6 +7057,7 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
+ "uptrakit-shared-types",
 ]
 
 [[package]]
@@ -7070,6 +7074,7 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
+ "uptrakit-shared-types",
 ]
 
 [[package]]
@@ -7087,6 +7092,7 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
+ "uptrakit-shared-types",
 ]
 
 [[package]]

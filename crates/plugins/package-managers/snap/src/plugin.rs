@@ -15,6 +15,8 @@ use uptrakit_plugin_infrastructure_core::{
     VersionDetectorPlugin,
 };
 
+use uptrakit_shared_types::PackageIdentifierRules;
+
 use crate::config::SnapConfig;
 
 /// System snaps that are excluded from discovery output.
@@ -32,6 +34,14 @@ struct SnapChannelInfo {
     published_at: Option<OffsetDateTime>,
 }
 
+const IDENTIFIER_RULES: PackageIdentifierRules = PackageIdentifierRules {
+    min_len: 2,
+    max_len: 40,
+    first_char_valid: |c| c.is_ascii_lowercase() || c.is_ascii_digit(),
+    char_valid: |c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-',
+    reject_double_dot: false,
+};
+
 /// Validate a Snap package identifier.
 ///
 /// Enforces Snap package naming rules:
@@ -40,42 +50,15 @@ struct SnapChannelInfo {
 /// - Must start and end with `[a-z0-9]` (not a hyphen).
 /// - No consecutive hyphens (`--`).
 pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-    if value.is_empty() {
-        return Err("package_identifier must not be empty".to_string());
-    }
-    if value.len() < 2 {
-        return Err("package_identifier must be at least 2 characters long".to_string());
-    }
-    if value.len() > 40 {
-        return Err("package_identifier must not exceed 40 characters".to_string());
-    }
+    IDENTIFIER_RULES.validate(value)?;
 
-    // Must start with [a-z0-9].
-    let first = value.chars().next().unwrap_or('\0');
-    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
-        return Err(format!(
-            "package_identifier must start with a lowercase letter or digit, found '{first}'"
-        ));
-    }
-
-    // Must end with [a-z0-9].
     let last = value.chars().next_back().unwrap_or('\0');
     if !last.is_ascii_lowercase() && !last.is_ascii_digit() {
         return Err("package_identifier must end with a lowercase letter or digit".to_string());
     }
 
-    // All characters must be in [a-z0-9-].
-    for ch in value.chars() {
-        if !ch.is_ascii_lowercase() && !ch.is_ascii_digit() && ch != '-' {
-            return Err(format!(
-                "package_identifier contains invalid character: '{ch}' (only lowercase letters, digits, and hyphens are allowed)"
-            ));
-        }
-    }
-
-    // No consecutive hyphens.
     if value.contains("--") {
-        return Err("package_identifier must not contain consecutive hyphens ('--')".to_string());
+        return Err("package_identifier must not contain consecutive hyphens".to_string());
     }
 
     Ok(())

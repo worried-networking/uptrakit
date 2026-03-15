@@ -1,4 +1,5 @@
 use crate::error_response::error_response;
+use crate::extract::Validated;
 use crate::middleware::permission::{CanManageCommands, CanViewSoftware};
 use crate::queries::plugin_type_settings as pts_queries;
 use crate::tenant_db::TenantDb;
@@ -12,7 +13,6 @@ use uptrakit_shared_types::PluginType;
 use uptrakit_web_api_types::plugin_type_settings::{
     PluginTypeSettingsResponse, UpsertPluginTypeSettingsRequest,
 };
-use uptrakit_web_api_types::validation::Validate;
 
 /// Convert a `plugin_type_setting::Model` into the API response type.
 fn model_to_response(
@@ -115,12 +115,8 @@ pub async fn upsert_plugin_type_settings(
     tenant_db: TenantDb,
     Path(plugin_type): Path<String>,
     CanManageCommands(user): CanManageCommands,
-    Json(req): Json<UpsertPluginTypeSettingsRequest>,
+    Validated(req): Validated<UpsertPluginTypeSettingsRequest>,
 ) -> Response {
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     match pts_queries::upsert_type_settings(
         tenant_db.db(),
         tenant_db.tenant_id,

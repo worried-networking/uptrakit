@@ -16,11 +16,11 @@ use axum::{
 pub use uptrakit_web_api_types::settings_zeroconf::{
     UpdateZeroconfSettingsRequest, ZeroconfSettingsResponse,
 };
-use uptrakit_web_api_types::validation::Validate;
 
 use crate::AppState;
 use crate::SettingKey;
 use crate::error_response::error_response;
+use crate::extract::Validated;
 use crate::middleware::permission::CanManageGlobalSettings;
 use crate::settings::ZeroconfSnapshot;
 use crate::settings_store::upsert_global_setting;
@@ -83,12 +83,8 @@ pub async fn get_zeroconf_settings(
 pub async fn update_zeroconf_settings(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
-    Json(req): Json<UpdateZeroconfSettingsRequest>,
+    Validated(req): Validated<UpdateZeroconfSettingsRequest>,
 ) -> Response {
-    if let Err(e) = req.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
     let mut snap = state.settings.zeroconf();
 
     // --- enabled ---
