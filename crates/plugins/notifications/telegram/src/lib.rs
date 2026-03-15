@@ -5,8 +5,11 @@
 
 pub mod extensions;
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use rootcause::prelude::*;
+use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
 use uptrakit_extension_framework::{
     ActionDef, ActionUi, ApiSubmitDef, ExtensionManifest, ExtensionPlacement, ExtensionUi,
@@ -35,6 +38,7 @@ impl TelegramPlugin {
         let http = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(60))
+            .dns_resolver(Arc::new(SsrfSafeResolver::new()))
             .build()
             .map_err(|e| report!(NotificationPluginError::HttpClientBuild(e.to_string())))?;
         Ok(Self { http })

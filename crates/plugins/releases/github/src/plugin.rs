@@ -698,6 +698,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for GitHubPlugin 
                 .default_headers(download_headers)
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .timeout(std::time::Duration::from_secs(600))
+                .dns_resolver(Arc::new(SsrfSafeResolver::new()))
                 .build()
                 .map_err(|e| {
                     report!(PluginError::InstallFailed(format!(

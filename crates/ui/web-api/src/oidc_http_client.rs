@@ -6,9 +6,11 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use openidconnect::{AsyncHttpClient, HttpClientError, HttpRequest, HttpResponse};
+use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
 /// Wrapper around [`reqwest::Client`] (workspace v0.13) that implements
 /// [`openidconnect::AsyncHttpClient`].
@@ -24,6 +26,7 @@ impl OidcHttpClient {
         let inner = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(60))
+            .dns_resolver(Arc::new(SsrfSafeResolver::new()))
             .build()
             .expect("failed to build OIDC HTTP client");
         Self { inner }
