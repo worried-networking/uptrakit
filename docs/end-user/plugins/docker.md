@@ -261,7 +261,7 @@ stopped) via `list_containers`. For each container that is not using a bare SHA 
 2. `inspect_image` is called to retrieve the local SHA digest from `RepoDigests` (deduplicated —
    the same image is only inspected once even when multiple containers share it).
 3. Images with no registry provenance (locally built images with no `RepoDigests`) are skipped.
-4. One **software item** is created per *image* (e.g. `nginx:latest`), but multiple containers
+4. One **software item** is created per *image* (e.g. `nginx`), but multiple containers
    using the same image each get their own **`host_software_item` row**, distinguished by the
    container name stored in the `qualifier` field.
 
@@ -279,8 +279,32 @@ per-container plugin operations (detect version, fetch releases, execute update)
 container-qualified identifier `image:tag#container_name` (e.g. `nginx:latest#web-server`),
 which is stored in `host_software_item_plugin.package_identifier`.
 
-**Software item name format:** the image reference (e.g. `nginx:latest`). All containers sharing
-the same image are grouped under this single software item.
+**Software item name format:** the image name **without the tag** (e.g. `nginx`, `ghcr.io/owner/app`).
+All containers sharing the same image are grouped under this single software item, regardless of
+which tag they are currently running. The full image reference including the tag is stored in the
+`package_identifier` field and used for version tracking.
+
+### Switching the tracked tag
+
+You can change the tracked Docker image tag for a specific host assignment without editing any
+plugin config. This is useful when you want to move a particular host to a newer tag (e.g. from
+`:25.8.3` to `:26.2.6`) without affecting other hosts.
+
+**How to switch the tag:**
+
+1. Open the software item detail page.
+2. Find the host row you want to change.
+3. Right-click the row (or click its context menu) and select **Docker → Switch Tag**.
+4. The form opens pre-populated with the current image reference.
+5. Edit the tag portion and submit.
+
+The action updates all plugin role assignments for that `(host, software item)` pair and
+preserves any `#container_name` suffixes that target specific containers. Version data is
+cleared so the next version check reflects the new tag rather than stale data from the old
+one.
+
+> **Note:** Only the selected host is updated. Other hosts tracking the same software item
+> continue to use their existing tags.
 
 ### Auto-created plugin config
 
