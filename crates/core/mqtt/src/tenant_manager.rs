@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use uptrakit_internal_wire::HostConnectivityUpdate;
@@ -26,6 +26,23 @@ macro_rules! publish_or_abort {
                 concat!("failed to ", $what, "; aborting remaining publishes for this client"),
             );
             return;
+        }
+    };
+}
+
+/// Best-effort variant of `publish_or_abort!` for cleanup operations.
+///
+/// Cleanup must continue even if individual operations fail (e.g. broker
+/// connection down for one topic). Logs a warning on failure and continues
+/// with the remaining cleanup operations.
+macro_rules! publish_best_effort {
+    ($expr:expr, $client_id:expr, $what:expr) => {
+        if let Err(e) = $expr {
+            tracing::warn!(
+                error = %e,
+                mqtt_client_id = %$client_id,
+                concat!("failed to ", $what, " (cleanup, continuing)"),
+            );
         }
     };
 }
@@ -147,17 +164,43 @@ impl TenantManager {
     /// State and version topics are published for every connected client.
     /// Home Assistant discovery config topics are published only for clients
     /// that have `ha_discovery` enabled.
+    ///
+    /// Before replacing the caches, computes diff sets of removed items/hosts
+    /// and publishes empty retained payloads to clean up stale MQTT topics.
     #[tracing::instrument(skip_all, fields(tenant_id = %payload.tenant_id))]
     pub(crate) async fn update_software_states(
         &mut self,
         payload: uptrakit_internal_wire::MqttSoftwareStatesPayload,
     ) {
         let tenant_id = payload.tenant_id;
+
+        // Compute removed sets before replacing the caches.
+        let removed_items =
+            compute_removed_items(self.software_states.get(&tenant_id), &payload.items);
+        let removed_summary_hosts = compute_removed_host_ids(
+            self.host_summary_states
+                .get(&tenant_id)
+                .map(|v| v.iter().map(|h| h.host_id)),
+            payload.host_summaries.iter().map(|h| h.host_id),
+        );
+        let removed_metadata_hosts = compute_removed_host_ids(
+            self.host_metadata
+                .get(&tenant_id)
+                .map(|v| v.iter().map(|h| h.host_id)),
+            payload.hosts.iter().map(|h| h.host_id),
+        );
+
+        // Replace caches with new data.
         self.software_states
             .insert(tenant_id, payload.items.clone());
         self.host_summary_states
             .insert(tenant_id, payload.host_summaries.clone());
         self.host_metadata.insert(tenant_id, payload.hosts.clone());
+
+        // Clean up connectivity cache entries for removed metadata hosts.
+        for host_id in &removed_metadata_hosts {
+            self.connectivity_cache.remove(&(tenant_id, *host_id));
+        }
 
         // Collect client IDs for this tenant (all of them, not just HA-enabled).
         let client_ids: Vec<uuid::Uuid> = self
@@ -167,12 +210,27 @@ impl TenantManager {
             .map(|(id, _)| *id)
             .collect();
 
-        for client_id in client_ids {
-            self.publish_software_states(client_id, &payload.items)
+        for client_id in &client_ids {
+            // Clean up stale topics for removed entities.
+            if !removed_items.is_empty() {
+                self.cleanup_removed_items(*client_id, tenant_id, &removed_items)
+                    .await;
+            }
+            if !removed_summary_hosts.is_empty() {
+                self.cleanup_removed_host_summaries(*client_id, tenant_id, &removed_summary_hosts)
+                    .await;
+            }
+            if !removed_metadata_hosts.is_empty() {
+                self.cleanup_removed_host_metadata(*client_id, tenant_id, &removed_metadata_hosts)
+                    .await;
+            }
+
+            // Publish new state.
+            self.publish_software_states(*client_id, &payload.items)
                 .await;
-            self.publish_host_summary_states(client_id, &payload.host_summaries)
+            self.publish_host_summary_states(*client_id, &payload.host_summaries)
                 .await;
-            self.publish_host_metadata(client_id, &payload.hosts).await;
+            self.publish_host_metadata(*client_id, &payload.hosts).await;
         }
     }
 
@@ -1175,6 +1233,261 @@ impl TenantManager {
         );
     }
 
+    /// Clean up MQTT topics for `(item_id, host_id)` pairs that are no longer
+    /// present in the new software states payload.
+    ///
+    /// Publishes empty retained payloads (which deletes the retained message
+    /// from the broker) for state, latest_version, attributes, and HA discovery
+    /// config topics. Best-effort unsubscribes from command topics.
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id, removed_count = removed.len()))]
+    async fn cleanup_removed_items(
+        &self,
+        mqtt_client_id: Uuid,
+        tenant_id: Uuid,
+        removed: &HashSet<(Uuid, Uuid)>,
+    ) {
+        let Some(state) = self.clients.get(&mqtt_client_id) else {
+            return;
+        };
+
+        let topic_prefix = &state.topic_prefix;
+        let ha_prefix = &state.ha_discovery_prefix;
+
+        for &(item_id, host_id) in removed {
+            tracing::debug!(%item_id, %host_id, "cleaning up removed item topics");
+
+            // Delete retained state/version/attributes topics.
+            let st = crate::ha_discovery::state_topic(topic_prefix, item_id, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&st, Vec::new()).await,
+                mqtt_client_id,
+                "clear state topic"
+            );
+
+            let lt = crate::ha_discovery::latest_version_topic(topic_prefix, item_id, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&lt, Vec::new()).await,
+                mqtt_client_id,
+                "clear latest_version topic"
+            );
+
+            let at = crate::ha_discovery::json_attributes_topic(topic_prefix, item_id, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&at, Vec::new()).await,
+                mqtt_client_id,
+                "clear attributes topic"
+            );
+
+            // Unsubscribe from command topic.
+            let ct = crate::ha_discovery::command_topic(topic_prefix, item_id, host_id);
+            publish_best_effort!(
+                state.handle.unsubscribe_topic(&ct).await,
+                mqtt_client_id,
+                "unsubscribe from command topic"
+            );
+
+            // HA-only: clear discovery config.
+            if state.ha_discovery {
+                let uid = crate::ha_discovery::unique_id(tenant_id, item_id, host_id);
+                let config_topic = crate::ha_discovery::discovery_config_topic(ha_prefix, &uid);
+                publish_best_effort!(
+                    state
+                        .handle
+                        .publish_retained(&config_topic, Vec::new())
+                        .await,
+                    mqtt_client_id,
+                    "clear HA discovery config topic"
+                );
+            }
+        }
+    }
+
+    /// Clean up MQTT topics for hosts that are no longer present in the new
+    /// host summary states payload (packages + security entities).
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id, removed_count = removed.len()))]
+    async fn cleanup_removed_host_summaries(
+        &self,
+        mqtt_client_id: Uuid,
+        tenant_id: Uuid,
+        removed: &HashSet<Uuid>,
+    ) {
+        let Some(state) = self.clients.get(&mqtt_client_id) else {
+            return;
+        };
+
+        let topic_prefix = &state.topic_prefix;
+        let ha_prefix = &state.ha_discovery_prefix;
+
+        for &host_id in removed {
+            tracing::debug!(%host_id, "cleaning up removed host summary topics");
+
+            // Packages entity.
+            let st = crate::ha_discovery::host_packages_state_topic(topic_prefix, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&st, Vec::new()).await,
+                mqtt_client_id,
+                "clear host packages state topic"
+            );
+            let lt = crate::ha_discovery::host_packages_latest_version_topic(topic_prefix, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&lt, Vec::new()).await,
+                mqtt_client_id,
+                "clear host packages latest_version topic"
+            );
+            let at =
+                crate::ha_discovery::host_packages_json_attributes_topic(topic_prefix, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&at, Vec::new()).await,
+                mqtt_client_id,
+                "clear host packages attributes topic"
+            );
+            let ct = crate::ha_discovery::host_packages_command_topic(topic_prefix, host_id);
+            publish_best_effort!(
+                state.handle.unsubscribe_topic(&ct).await,
+                mqtt_client_id,
+                "unsubscribe from host packages command topic"
+            );
+
+            // Security entity.
+            let sec_st = crate::ha_discovery::host_security_state_topic(topic_prefix, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&sec_st, Vec::new()).await,
+                mqtt_client_id,
+                "clear host security state topic"
+            );
+            let sec_lt =
+                crate::ha_discovery::host_security_latest_version_topic(topic_prefix, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&sec_lt, Vec::new()).await,
+                mqtt_client_id,
+                "clear host security latest_version topic"
+            );
+            let sec_at =
+                crate::ha_discovery::host_security_json_attributes_topic(topic_prefix, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&sec_at, Vec::new()).await,
+                mqtt_client_id,
+                "clear host security attributes topic"
+            );
+            let sec_ct = crate::ha_discovery::host_security_command_topic(topic_prefix, host_id);
+            publish_best_effort!(
+                state.handle.unsubscribe_topic(&sec_ct).await,
+                mqtt_client_id,
+                "unsubscribe from host security command topic"
+            );
+
+            // HA-only: clear discovery configs.
+            if state.ha_discovery {
+                let pkgs_config = crate::ha_discovery::host_packages_discovery_config_topic(
+                    ha_prefix, tenant_id, host_id,
+                );
+                publish_best_effort!(
+                    state
+                        .handle
+                        .publish_retained(&pkgs_config, Vec::new())
+                        .await,
+                    mqtt_client_id,
+                    "clear host packages HA discovery config"
+                );
+
+                let sec_config = crate::ha_discovery::host_security_discovery_config_topic(
+                    ha_prefix, tenant_id, host_id,
+                );
+                publish_best_effort!(
+                    state.handle.publish_retained(&sec_config, Vec::new()).await,
+                    mqtt_client_id,
+                    "clear host security HA discovery config"
+                );
+            }
+        }
+    }
+
+    /// Clean up MQTT topics for hosts that are no longer present in the new
+    /// host metadata payload (hostname, friendly_name, info, tags, agent,
+    /// connectivity).
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id, removed_count = removed.len()))]
+    async fn cleanup_removed_host_metadata(
+        &self,
+        mqtt_client_id: Uuid,
+        tenant_id: Uuid,
+        removed: &HashSet<Uuid>,
+    ) {
+        let Some(state) = self.clients.get(&mqtt_client_id) else {
+            return;
+        };
+
+        let topic_prefix = &state.topic_prefix;
+        let ha_prefix = &state.ha_discovery_prefix;
+
+        for &host_id in removed {
+            tracing::debug!(%host_id, "cleaning up removed host metadata topics");
+
+            // Identity topics.
+            let hn = crate::ha_discovery::hostname_topic(topic_prefix, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&hn, Vec::new()).await,
+                mqtt_client_id,
+                "clear hostname topic"
+            );
+            let fn_topic = crate::ha_discovery::friendly_name_topic(topic_prefix, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&fn_topic, Vec::new()).await,
+                mqtt_client_id,
+                "clear friendly_name topic"
+            );
+
+            // Metadata topics.
+            let info = crate::ha_discovery::host_info_topic(topic_prefix, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&info, Vec::new()).await,
+                mqtt_client_id,
+                "clear host info topic"
+            );
+            let tags = crate::ha_discovery::host_tags_topic(topic_prefix, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&tags, Vec::new()).await,
+                mqtt_client_id,
+                "clear host tags topic"
+            );
+            let agent = crate::ha_discovery::host_agent_topic(topic_prefix, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&agent, Vec::new()).await,
+                mqtt_client_id,
+                "clear host agent topic"
+            );
+
+            // Connectivity topics.
+            let conn_st = crate::ha_discovery::host_connectivity_state_topic(topic_prefix, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&conn_st, Vec::new()).await,
+                mqtt_client_id,
+                "clear connectivity state topic"
+            );
+            let conn_at =
+                crate::ha_discovery::host_connectivity_attributes_topic(topic_prefix, host_id);
+            publish_best_effort!(
+                state.handle.publish_retained(&conn_at, Vec::new()).await,
+                mqtt_client_id,
+                "clear connectivity attributes topic"
+            );
+
+            // HA-only: clear connectivity discovery config.
+            if state.ha_discovery {
+                let conn_config = crate::ha_discovery::host_connectivity_discovery_config_topic(
+                    ha_prefix, tenant_id, host_id,
+                );
+                publish_best_effort!(
+                    state
+                        .handle
+                        .publish_retained(&conn_config, Vec::new())
+                        .await,
+                    mqtt_client_id,
+                    "clear connectivity HA discovery config"
+                );
+            }
+        }
+    }
+
     fn report_status(&self, mqtt_client_id: Uuid, status: MqttClientConnectionStatus) {
         let Some(sender) = self.event_tx.as_ref() else {
             return;
@@ -1229,6 +1542,51 @@ fn display_name<'a>(friendly_name: &'a str, hostname: &'a str) -> &'a str {
     } else {
         friendly_name
     }
+}
+
+/// Compute the set of `(item_id, host_id)` pairs present in `old` but absent
+/// from `new`.
+///
+/// Returns an empty set when `old` is `None` (first update — nothing to remove).
+fn compute_removed_items(
+    old: Option<&Vec<uptrakit_internal_wire::MqttSoftwareStateItem>>,
+    new: &[uptrakit_internal_wire::MqttSoftwareStateItem],
+) -> HashSet<(Uuid, Uuid)> {
+    let Some(old_items) = old else {
+        return HashSet::new();
+    };
+    let old_set: HashSet<(Uuid, Uuid)> = old_items
+        .iter()
+        .flat_map(|item| {
+            item.hosts
+                .iter()
+                .map(move |h| (item.software_item_id, h.host_id))
+        })
+        .collect();
+    let new_set: HashSet<(Uuid, Uuid)> = new
+        .iter()
+        .flat_map(|item| {
+            item.hosts
+                .iter()
+                .map(move |h| (item.software_item_id, h.host_id))
+        })
+        .collect();
+    old_set.difference(&new_set).copied().collect()
+}
+
+/// Compute the set of host IDs present in `old` but absent from `new`.
+///
+/// Returns an empty set when `old` is `None` (first update — nothing to remove).
+fn compute_removed_host_ids(
+    old: Option<impl Iterator<Item = Uuid>>,
+    new: impl Iterator<Item = Uuid>,
+) -> HashSet<Uuid> {
+    let Some(old_iter) = old else {
+        return HashSet::new();
+    };
+    let old_set: HashSet<Uuid> = old_iter.collect();
+    let new_set: HashSet<Uuid> = new.collect();
+    old_set.difference(&new_set).copied().collect()
 }
 
 /// Compute a hash of the config for change detection.
@@ -1600,5 +1958,135 @@ mod tests {
 
         assert_eq!(manager.software_states[&tenant_id].len(), 2);
         assert_eq!(manager.software_states[&tenant_id][1].name, "redis");
+    }
+
+    // -------------------------------------------------------------------------
+    // compute_removed_items
+    // -------------------------------------------------------------------------
+
+    fn make_item(
+        item_id: Uuid,
+        host_ids: &[Uuid],
+    ) -> uptrakit_internal_wire::MqttSoftwareStateItem {
+        uptrakit_internal_wire::MqttSoftwareStateItem {
+            software_item_id: item_id,
+            name: "test".to_string(),
+            icon_url: None,
+            hosts: host_ids
+                .iter()
+                .map(|&hid| uptrakit_internal_wire::MqttSoftwareStateHostEntry {
+                    host_id: hid,
+                    hostname: "host".to_string(),
+                    friendly_name: String::new(),
+                    installed_version: None,
+                    latest_version: None,
+                    update_available: false,
+                    release_url: None,
+                    release_notes: None,
+                    update_in_progress: false,
+                    update_category: None,
+                    release_date: None,
+                    last_checked_at: None,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn compute_removed_items_no_old_returns_empty() {
+        let new = vec![make_item(Uuid::from_u128(1), &[Uuid::from_u128(10)])];
+        let removed = compute_removed_items(None, &new);
+        assert!(removed.is_empty());
+    }
+
+    #[test]
+    fn compute_removed_items_same_returns_empty() {
+        let items = vec![make_item(Uuid::from_u128(1), &[Uuid::from_u128(10)])];
+        let removed = compute_removed_items(Some(&items), &items);
+        assert!(removed.is_empty());
+    }
+
+    #[test]
+    fn compute_removed_items_detects_removed_pair() {
+        let item_a = Uuid::from_u128(1);
+        let host_a = Uuid::from_u128(10);
+        let host_b = Uuid::from_u128(20);
+
+        let old = vec![make_item(item_a, &[host_a, host_b])];
+        let new = vec![make_item(item_a, &[host_a])]; // host_b removed
+
+        let removed = compute_removed_items(Some(&old), &new);
+        assert_eq!(removed.len(), 1);
+        assert!(removed.contains(&(item_a, host_b)));
+    }
+
+    #[test]
+    fn compute_removed_items_detects_entire_item_removed() {
+        let item_a = Uuid::from_u128(1);
+        let item_b = Uuid::from_u128(2);
+        let host = Uuid::from_u128(10);
+
+        let old = vec![make_item(item_a, &[host]), make_item(item_b, &[host])];
+        let new = vec![make_item(item_a, &[host])]; // item_b removed entirely
+
+        let removed = compute_removed_items(Some(&old), &new);
+        assert_eq!(removed.len(), 1);
+        assert!(removed.contains(&(item_b, host)));
+    }
+
+    #[test]
+    fn compute_removed_items_new_items_not_in_removed() {
+        let item_a = Uuid::from_u128(1);
+        let item_b = Uuid::from_u128(2);
+        let host = Uuid::from_u128(10);
+
+        let old = vec![make_item(item_a, &[host])];
+        let new = vec![make_item(item_a, &[host]), make_item(item_b, &[host])];
+
+        let removed = compute_removed_items(Some(&old), &new);
+        assert!(removed.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // compute_removed_host_ids
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn compute_removed_host_ids_no_old_returns_empty() {
+        let new = vec![Uuid::from_u128(1)];
+        let removed = compute_removed_host_ids(None::<std::vec::IntoIter<Uuid>>, new.into_iter());
+        assert!(removed.is_empty());
+    }
+
+    #[test]
+    fn compute_removed_host_ids_same_returns_empty() {
+        let ids = vec![Uuid::from_u128(1), Uuid::from_u128(2)];
+        let removed = compute_removed_host_ids(Some(ids.clone().into_iter()), ids.into_iter());
+        assert!(removed.is_empty());
+    }
+
+    #[test]
+    fn compute_removed_host_ids_detects_removed() {
+        let host_a = Uuid::from_u128(1);
+        let host_b = Uuid::from_u128(2);
+
+        let old = vec![host_a, host_b];
+        let new = vec![host_a]; // host_b removed
+
+        let removed = compute_removed_host_ids(Some(old.into_iter()), new.into_iter());
+        assert_eq!(removed.len(), 1);
+        assert!(removed.contains(&host_b));
+    }
+
+    #[test]
+    fn compute_removed_host_ids_new_hosts_not_in_removed() {
+        let host_a = Uuid::from_u128(1);
+        let host_b = Uuid::from_u128(2);
+
+        let old = vec![host_a];
+        let new = vec![host_a, host_b]; // host_b is new
+
+        let removed = compute_removed_host_ids(Some(old.into_iter()), new.into_iter());
+        assert!(removed.is_empty());
     }
 }
