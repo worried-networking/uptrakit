@@ -42,6 +42,10 @@ pub enum PluginType {
     PackageManagerCargo,
     GenericShell,
     InfrastructureProxmox,
+    /// Update lifecycle hook: stop/start a systemd service around updates.
+    HookSystemd,
+    /// Update lifecycle hook: run arbitrary shell commands before/after updates.
+    HookShell,
     /// An unknown plugin type received from a newer peer.
     ///
     /// The inner string is the raw snake_case value as it appeared on the wire.
@@ -73,6 +77,8 @@ impl PluginType {
             Self::PackageManagerCargo => "package_manager_cargo",
             Self::GenericShell => "generic_shell",
             Self::InfrastructureProxmox => "infrastructure_proxmox",
+            Self::HookSystemd => "hook_systemd",
+            Self::HookShell => "hook_shell",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -120,6 +126,8 @@ impl PluginType {
             Self::PackageManagerCargo => "cargo install",
             Self::GenericShell => "Shell",
             Self::InfrastructureProxmox => "Proxmox VE",
+            Self::HookSystemd => "Systemd Hook",
+            Self::HookShell => "Shell Hook",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -162,6 +170,8 @@ impl FromStr for PluginType {
             "package_manager_cargo" => Ok(Self::PackageManagerCargo),
             "generic_shell" => Ok(Self::GenericShell),
             "infrastructure_proxmox" => Ok(Self::InfrastructureProxmox),
+            "hook_systemd" => Ok(Self::HookSystemd),
+            "hook_shell" => Ok(Self::HookShell),
             _ => Err(ParsePluginTypeError::Invalid),
         }
     }
@@ -204,6 +214,8 @@ impl From<String> for PluginType {
             "package_manager_cargo" => Self::PackageManagerCargo,
             "generic_shell" => Self::GenericShell,
             "infrastructure_proxmox" => Self::InfrastructureProxmox,
+            "hook_systemd" => Self::HookSystemd,
+            "hook_shell" => Self::HookShell,
             _ => Self::Other(s),
         }
     }
@@ -231,6 +243,8 @@ impl From<PluginType> for String {
             PluginType::PackageManagerCargo => "package_manager_cargo".to_string(),
             PluginType::GenericShell => "generic_shell".to_string(),
             PluginType::InfrastructureProxmox => "infrastructure_proxmox".to_string(),
+            PluginType::HookSystemd => "hook_systemd".to_string(),
+            PluginType::HookShell => "hook_shell".to_string(),
             PluginType::Other(s) => s,
         }
     }
@@ -569,6 +583,14 @@ mod tests {
             PluginType::InfrastructureProxmox
         );
         assert_eq!(
+            PluginType::from("hook_systemd".to_string()),
+            PluginType::HookSystemd
+        );
+        assert_eq!(
+            PluginType::from("hook_shell".to_string()),
+            PluginType::HookShell
+        );
+        assert_eq!(
             PluginType::from("winget".to_string()),
             PluginType::Other("winget".to_string())
         );
@@ -634,6 +656,8 @@ mod tests {
             PluginType::InfrastructureProxmox.to_string(),
             "infrastructure_proxmox"
         );
+        assert_eq!(PluginType::HookSystemd.to_string(), "hook_systemd");
+        assert_eq!(PluginType::HookShell.to_string(), "hook_shell");
         assert_eq!(
             PluginType::Other("custom_type".to_string()).to_string(),
             "custom_type"
@@ -707,6 +731,14 @@ mod tests {
         assert_eq!(
             "infrastructure_proxmox".parse::<PluginType>().ok(),
             Some(PluginType::InfrastructureProxmox)
+        );
+        assert_eq!(
+            "hook_systemd".parse::<PluginType>().ok(),
+            Some(PluginType::HookSystemd)
+        );
+        assert_eq!(
+            "hook_shell".parse::<PluginType>().ok(),
+            Some(PluginType::HookShell)
         );
         // Old wire strings must be rejected by FromStr
         assert!("docker_registry".parse::<PluginType>().is_err());
@@ -826,6 +858,8 @@ mod tests {
             PluginType::PackageManagerCargo,
             PluginType::GenericShell,
             PluginType::InfrastructureProxmox,
+            PluginType::HookSystemd,
+            PluginType::HookShell,
         ];
         for pt in &variants {
             let s = pt.to_string();
@@ -855,6 +889,8 @@ mod tests {
             PluginType::PackageManagerCargo,
             PluginType::GenericShell,
             PluginType::InfrastructureProxmox,
+            PluginType::HookSystemd,
+            PluginType::HookShell,
             PluginType::Other("my_plugin".to_string()),
         ];
         for pt in &variants {

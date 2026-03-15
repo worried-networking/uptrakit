@@ -51,6 +51,8 @@ pub enum PluginCapability {
     ServiceMigrations,
     /// Plugin contributes controller-side database migrations.
     ControllerMigrations,
+    /// Plugin implements update lifecycle hooks (pre/post update).
+    UpdateLifecycle,
 }
 
 #[cfg(test)]
@@ -102,6 +104,7 @@ mod tests {
                 PluginCapability::ControllerMigrations,
                 "controller_migrations",
             ),
+            (PluginCapability::UpdateLifecycle, "update_lifecycle"),
         ];
         for (cap, expected) in cases {
             let json = serde_json::to_string(&cap).expect("serialize");

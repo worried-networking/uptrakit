@@ -33,6 +33,10 @@ pub enum PluginRole {
     FetchReleases,
     /// Executes the actual software update on the agent host.
     ExecuteUpdate,
+    /// Runs a lifecycle plugin before the update (ordered by `ordinal`).
+    PreUpdateHook,
+    /// Runs a lifecycle plugin after the update (ordered by `ordinal`).
+    PostUpdateHook,
     /// An unknown plugin role received from a newer peer.
     ///
     /// The inner string is the raw snake_case value as it appeared on the wire.
@@ -48,6 +52,8 @@ impl PluginRole {
             Self::DetectVersion => "detect_version",
             Self::FetchReleases => "fetch_releases",
             Self::ExecuteUpdate => "execute_update",
+            Self::PreUpdateHook => "pre_update_hook",
+            Self::PostUpdateHook => "post_update_hook",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -76,6 +82,8 @@ impl FromStr for PluginRole {
             "detect_version" => Ok(Self::DetectVersion),
             "fetch_releases" => Ok(Self::FetchReleases),
             "execute_update" => Ok(Self::ExecuteUpdate),
+            "pre_update_hook" => Ok(Self::PreUpdateHook),
+            "post_update_hook" => Ok(Self::PostUpdateHook),
             _ => Err(ParsePluginRoleError::Invalid),
         }
     }
@@ -104,6 +112,8 @@ impl From<String> for PluginRole {
             "detect_version" => Self::DetectVersion,
             "fetch_releases" => Self::FetchReleases,
             "execute_update" => Self::ExecuteUpdate,
+            "pre_update_hook" => Self::PreUpdateHook,
+            "post_update_hook" => Self::PostUpdateHook,
             _ => Self::Other(s),
         }
     }
@@ -115,6 +125,8 @@ impl From<PluginRole> for String {
             PluginRole::DetectVersion => "detect_version".to_string(),
             PluginRole::FetchReleases => "fetch_releases".to_string(),
             PluginRole::ExecuteUpdate => "execute_update".to_string(),
+            PluginRole::PreUpdateHook => "pre_update_hook".to_string(),
+            PluginRole::PostUpdateHook => "post_update_hook".to_string(),
             PluginRole::Other(s) => s,
         }
     }
@@ -168,31 +180,36 @@ mod tests {
         assert_eq!(deserialized, eu);
     }
 
+    /// Hook role strings now deserialize to known variants.
+    #[test]
+    fn plugin_role_hook_variants_deserialize() {
+        let deserialized: PluginRole =
+            serde_json::from_str(r#""pre_update_hook""#).expect("deserialize");
+        assert_eq!(deserialized, PluginRole::PreUpdateHook);
+
+        let deserialized: PluginRole =
+            serde_json::from_str(r#""post_update_hook""#).expect("deserialize");
+        assert_eq!(deserialized, PluginRole::PostUpdateHook);
+    }
+
     /// Unknown strings from a newer peer must deserialize to `Other(String)`
     /// rather than failing.  This is the core forward-compatibility guarantee.
     #[test]
     fn plugin_role_unknown_deserializes_to_other() {
         let deserialized: PluginRole =
-            serde_json::from_str(r#""pre_update_hook""#).expect("deserialize unknown");
+            serde_json::from_str(r#""some_future_role""#).expect("deserialize unknown");
         assert_eq!(
             deserialized,
-            PluginRole::Other("pre_update_hook".to_string())
-        );
-
-        let deserialized: PluginRole =
-            serde_json::from_str(r#""post_update_hook""#).expect("deserialize unknown");
-        assert_eq!(
-            deserialized,
-            PluginRole::Other("post_update_hook".to_string())
+            PluginRole::Other("some_future_role".to_string())
         );
     }
 
     /// `Other(String)` must serialize back to its inner string.
     #[test]
     fn plugin_role_other_serializes_to_inner_string() {
-        let pr = PluginRole::Other("pre_update_hook".to_string());
+        let pr = PluginRole::Other("some_future_role".to_string());
         let json = serde_json::to_string(&pr).expect("serialize");
-        assert_eq!(json, r#""pre_update_hook""#);
+        assert_eq!(json, r#""some_future_role""#);
     }
 
     /// Full serde roundtrip for `Other`: deserialize then re-serialize produces
@@ -223,6 +240,14 @@ mod tests {
             PluginRole::ExecuteUpdate
         );
         assert_eq!(
+            PluginRole::from("pre_update_hook".to_string()),
+            PluginRole::PreUpdateHook
+        );
+        assert_eq!(
+            PluginRole::from("post_update_hook".to_string()),
+            PluginRole::PostUpdateHook
+        );
+        assert_eq!(
             PluginRole::from("custom_role".to_string()),
             PluginRole::Other("custom_role".to_string())
         );
@@ -233,6 +258,8 @@ mod tests {
         assert_eq!(PluginRole::DetectVersion.to_string(), "detect_version");
         assert_eq!(PluginRole::FetchReleases.to_string(), "fetch_releases");
         assert_eq!(PluginRole::ExecuteUpdate.to_string(), "execute_update");
+        assert_eq!(PluginRole::PreUpdateHook.to_string(), "pre_update_hook");
+        assert_eq!(PluginRole::PostUpdateHook.to_string(), "post_update_hook");
         assert_eq!(
             PluginRole::Other("custom_role".to_string()).to_string(),
             "custom_role"
@@ -252,6 +279,14 @@ mod tests {
         assert_eq!(
             "execute_update".parse::<PluginRole>().ok(),
             Some(PluginRole::ExecuteUpdate)
+        );
+        assert_eq!(
+            "pre_update_hook".parse::<PluginRole>().ok(),
+            Some(PluginRole::PreUpdateHook)
+        );
+        assert_eq!(
+            "post_update_hook".parse::<PluginRole>().ok(),
+            Some(PluginRole::PostUpdateHook)
         );
     }
 
@@ -278,6 +313,8 @@ mod tests {
             PluginRole::DetectVersion,
             PluginRole::FetchReleases,
             PluginRole::ExecuteUpdate,
+            PluginRole::PreUpdateHook,
+            PluginRole::PostUpdateHook,
         ];
         for pr in &variants {
             let s = pr.to_string();
@@ -294,6 +331,8 @@ mod tests {
             PluginRole::DetectVersion,
             PluginRole::FetchReleases,
             PluginRole::ExecuteUpdate,
+            PluginRole::PreUpdateHook,
+            PluginRole::PostUpdateHook,
             PluginRole::Other("my_role".to_string()),
         ];
         for pr in &variants {
