@@ -163,7 +163,7 @@ impl AptPlugin {
     fn parse_madison_output(output: &str) -> Option<MadisonEntry> {
         output.lines().find_map(|line| {
             let mut parts = line.splitn(3, '|');
-            let _package = parts.next()?;
+            let _ = parts.next()?;
             let version = parts.next()?.trim();
             if version.is_empty() {
                 return None;

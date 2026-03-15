@@ -166,7 +166,7 @@ fn parse_apk_version_line(line: &str) -> Option<(String, String)> {
     // Expected format: `<name-installed_ver> <cmp_op> <latest_ver>`
     let mut parts = line.splitn(3, ' ');
     let name_ver = parts.next()?.trim();
-    let _cmp_op = parts.next()?.trim();
+    let _ = parts.next()?;
     let latest_ver = parts.next()?.trim();
 
     if latest_ver.is_empty() {
