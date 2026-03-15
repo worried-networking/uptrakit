@@ -698,6 +698,31 @@ pub async fn list_software_items(
         }
     }
 
+    if let Some(plugin_type) = &params.plugin_type {
+        use sea_orm::sea_query::{BinOper, ExprTrait, Query};
+        // EXISTS subquery: item has at least one plugin assignment of this type.
+        // Supported by idx_hsip_software_item_id_plugin_type.
+        let plugin_type_sub = Query::select()
+            .expr(Expr::val(1_i32))
+            .from(host_software_item_plugin::Entity)
+            .and_where(
+                Expr::col((
+                    host_software_item_plugin::Entity,
+                    host_software_item_plugin::Column::SoftwareItemId,
+                ))
+                .equals((software_item::Entity, software_item::Column::Id)),
+            )
+            .and_where(
+                Expr::col((
+                    host_software_item_plugin::Entity,
+                    host_software_item_plugin::Column::PluginType,
+                ))
+                .binary(BinOper::Equal, Expr::val(plugin_type.as_str())),
+            )
+            .take();
+        base_query = base_query.filter(Expr::exists(plugin_type_sub));
+    }
+
     let total = base_query
         .clone()
         .count(tenant_db.db())

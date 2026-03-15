@@ -340,6 +340,11 @@ pub struct ListSoftwareItemsParams {
     /// - `false`: only items where no active host has an update available.
     /// - Omit: no filter.
     pub updatable: Option<bool>,
+    /// Filter by plugin type — only return items that have at least one host
+    /// assignment using this plugin type (e.g. `"releases_docker"`).
+    /// Omit to return items for any plugin type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_type: Option<String>,
 }
 
 impl ListSoftwareItemsParams {
@@ -882,5 +887,13 @@ mod tests {
         let params: ListSoftwareItemsParams =
             serde_json::from_value(json).expect("deserialization should succeed");
         assert_eq!(params.updatable, Some(true));
+    }
+
+    #[test]
+    fn list_software_items_params_plugin_type_filter() {
+        let json = serde_json::json!({ "plugin_type": "releases_docker" });
+        let params: ListSoftwareItemsParams =
+            serde_json::from_value(json).expect("deserialization should succeed");
+        assert_eq!(params.plugin_type.as_deref(), Some("releases_docker"));
     }
 }
