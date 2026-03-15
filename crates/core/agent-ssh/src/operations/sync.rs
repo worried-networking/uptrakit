@@ -115,6 +115,8 @@ pub(crate) struct SyncPlannedAction {
     pub security_impact: String,
     pub default_enabled: bool,
     pub skippable: bool,
+    /// Human-readable preview of the commands this action will run or configure.
+    pub commands: Vec<String>,
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -289,6 +291,21 @@ pub(crate) async fn sync_connect(
     let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
     let has_sudo_commands = plugin_sudo_cmds.iter().any(|(_, v)| !v.is_empty());
 
+    // Build a human-readable preview of every command that would appear in sudoers.
+    let sudo_command_previews: Vec<String> = plugin_sudo_cmds
+        .iter()
+        .flat_map(|(_, entries)| entries.iter())
+        .map(|entry| {
+            if entry.helper_script.is_some() {
+                format!("{} [helper script] — {}", entry.command, entry.explanation)
+            } else if let Some(ref suffix) = entry.args_suffix {
+                format!("{} {} — {}", entry.command, suffix, entry.explanation)
+            } else {
+                format!("{} — {}", entry.command, entry.explanation)
+            }
+        })
+        .collect();
+
     // Check if infra plugins have state for this host.
     let has_infra = any_infra_state(db, host.id).await;
 
@@ -299,20 +316,28 @@ pub(crate) async fn sync_connect(
     let mut actions = Vec::new();
 
     let sudoers_desc = if has_sudo_commands {
-        "Write a sudoers drop-in granting NOPASSWD access to plugin-required commands."
+        format!(
+            "Write /etc/sudoers.d/uptrakit-{} granting NOPASSWD access to {} plugin command(s).",
+            host.username,
+            sudo_command_previews.len()
+        )
     } else if allow_all {
-        "Write a sudoers drop-in granting NOPASSWD: ALL (no plugin commands detected)."
+        format!(
+            "Write /etc/sudoers.d/uptrakit-{} granting NOPASSWD: ALL (no plugin commands detected).",
+            host.username
+        )
     } else {
-        "No sudoers changes needed (no plugin commands detected)."
+        "No sudoers changes needed (no plugin commands detected).".to_string()
     };
 
     actions.push(SyncPlannedAction {
         id: ACTION_UPDATE_SUDOERS.to_string(),
         label: "Update sudoers".to_string(),
-        description: sudoers_desc.to_string(),
+        description: sudoers_desc,
         security_impact: "high".to_string(),
         default_enabled: has_sudo_commands || allow_all,
         skippable: true,
+        commands: sudo_command_previews,
     });
 
     actions.push(SyncPlannedAction {
@@ -323,6 +348,7 @@ pub(crate) async fn sync_connect(
         security_impact: "low".to_string(),
         default_enabled: true,
         skippable: true,
+        commands: vec![],
     });
 
     if has_infra {
@@ -334,6 +360,7 @@ pub(crate) async fn sync_connect(
             security_impact: "medium".to_string(),
             default_enabled: true,
             skippable: true,
+            commands: vec![],
         });
     }
 

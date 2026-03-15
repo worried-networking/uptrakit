@@ -344,6 +344,7 @@ pub(crate) async fn proxmox_bootstrap_connect(
         security_impact: "low".to_string(),
         default_enabled: !user_exists,
         skippable: true,
+        commands: vec![],
     });
 
     actions.push(PlannedAction {
@@ -353,6 +354,7 @@ pub(crate) async fn proxmox_bootstrap_connect(
         security_impact: "medium".to_string(),
         default_enabled: true,
         skippable: false,
+        commands: vec![],
     });
 
     actions.push(PlannedAction {
@@ -365,6 +367,7 @@ pub(crate) async fn proxmox_bootstrap_connect(
         security_impact: "high".to_string(),
         default_enabled: true,
         skippable: true,
+        commands: vec![],
     });
 
     actions.push(PlannedAction {
@@ -374,6 +377,7 @@ pub(crate) async fn proxmox_bootstrap_connect(
         security_impact: "low".to_string(),
         default_enabled: has_stale_keys && params.remove_stale_keys,
         skippable: true,
+        commands: vec![],
     });
 
     if docker_group_exists {
@@ -384,6 +388,7 @@ pub(crate) async fn proxmox_bootstrap_connect(
             security_impact: "medium".to_string(),
             default_enabled: true,
             skippable: true,
+            commands: vec![],
         });
     }
 

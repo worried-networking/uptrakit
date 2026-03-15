@@ -97,6 +97,8 @@ pub(crate) struct PlannedAction {
     pub default_enabled: bool,
     /// Whether the user can skip this action.
     pub skippable: bool,
+    /// Human-readable preview of the commands this action will run or configure.
+    pub commands: Vec<String>,
 }
 
 /// Information gathered about the target host during the connect phase.
@@ -162,6 +164,24 @@ pub(crate) async fn bootstrap_connect(
     let remote_info =
         gather_remote_host_info(&session, &executor, params, use_sudo, state_dir, &db).await?;
 
+    // Collect plugin sudo commands to build a preview for the review step.
+    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
+        as Arc<dyn uptrakit_command::CommandExecutor>;
+    let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
+    let sudo_command_previews: Vec<String> = plugin_sudo_cmds
+        .iter()
+        .flat_map(|(_, entries)| entries.iter())
+        .map(|entry| {
+            if entry.helper_script.is_some() {
+                format!("{} [helper script] — {}", entry.command, entry.explanation)
+            } else if let Some(ref suffix) = entry.args_suffix {
+                format!("{} {} — {}", entry.command, suffix, entry.explanation)
+            } else {
+                format!("{} — {}", entry.command, entry.explanation)
+            }
+        })
+        .collect();
+
     // 5. DISCONNECT
     drop(executor);
     SshSession::disconnect_shared(session).await;
@@ -176,7 +196,7 @@ pub(crate) async fn bootstrap_connect(
         host_key_fingerprint: observed_fp,
         target_user_exists: remote_info.target_user_exists,
     };
-    let actions = build_bootstrap_actions(params, &remote_info);
+    let actions = build_bootstrap_actions(params, &remote_info, sudo_command_previews);
 
     Ok(BootstrapPlan { host_info, actions })
 }
@@ -299,7 +319,11 @@ async fn detect_infra_plugins(
 }
 
 /// Build the list of planned bootstrap actions from gathered host info.
-fn build_bootstrap_actions(params: &BootstrapParams, info: &RemoteHostInfo) -> Vec<PlannedAction> {
+fn build_bootstrap_actions(
+    params: &BootstrapParams,
+    info: &RemoteHostInfo,
+    sudo_command_previews: Vec<String>,
+) -> Vec<PlannedAction> {
     let target_same_as_auth = params.target_username == params.auth_username;
     let mut actions = Vec::new();
 
@@ -314,6 +338,7 @@ fn build_bootstrap_actions(params: &BootstrapParams, info: &RemoteHostInfo) -> V
             security_impact: "medium".to_string(),
             default_enabled: true,
             skippable: true,
+            commands: vec![],
         });
     }
 
@@ -327,18 +352,21 @@ fn build_bootstrap_actions(params: &BootstrapParams, info: &RemoteHostInfo) -> V
         security_impact: "medium".to_string(),
         default_enabled: true,
         skippable: false,
+        commands: vec![],
     });
 
     actions.push(PlannedAction {
         id: "configure_sudoers".to_string(),
         label: "Configure sudoers".to_string(),
         description: format!(
-            "Write /etc/sudoers.d/uptrakit-{} with NOPASSWD entries for plugin commands.",
-            params.target_username
+            "Write /etc/sudoers.d/uptrakit-{} with NOPASSWD entries for {} plugin command(s).",
+            params.target_username,
+            sudo_command_previews.len()
         ),
         security_impact: "high".to_string(),
         default_enabled: true,
         skippable: true,
+        commands: sudo_command_previews,
     });
 
     if info.stale_keys_found {
@@ -350,6 +378,7 @@ fn build_bootstrap_actions(params: &BootstrapParams, info: &RemoteHostInfo) -> V
             security_impact: "low".to_string(),
             default_enabled: true,
             skippable: true,
+            commands: vec![],
         });
     }
 
@@ -364,6 +393,7 @@ fn build_bootstrap_actions(params: &BootstrapParams, info: &RemoteHostInfo) -> V
             security_impact: "low".to_string(),
             default_enabled: true,
             skippable: true,
+            commands: vec![],
         });
     }
 
@@ -377,6 +407,7 @@ fn build_bootstrap_actions(params: &BootstrapParams, info: &RemoteHostInfo) -> V
             security_impact: "medium".to_string(),
             default_enabled: true,
             skippable: true,
+            commands: vec![],
         });
     }
 
