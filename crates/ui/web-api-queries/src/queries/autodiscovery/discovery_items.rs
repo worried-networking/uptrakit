@@ -26,6 +26,9 @@ pub(super) struct DiscoveredItemInfo<'a> {
     /// Package identifier stored in `host_software_item_plugins` for per-container operations.
     /// `None` = use `package_identifier` (existing behavior for non-Docker items).
     pub plugin_package_identifier: Option<&'a str>,
+    /// Plugin-provided display version for the installed version (e.g. Docker image publish date).
+    /// `None` when the plugin cannot determine a display version during discovery.
+    pub installed_display_version: Option<&'a str>,
 }
 
 impl<'a> DiscoveredItemInfo<'a> {
@@ -69,6 +72,7 @@ pub(super) async fn process_plugin_result(
             featured: item.featured,
             qualifier: item.qualifier.as_deref(),
             plugin_package_identifier: item.plugin_package_identifier.as_deref(),
+            installed_display_version: item.installed_display_version.as_deref(),
         };
         if !item.targets.is_empty() {
             process_targets_discovery(db, tenant_id, host_id, &item_info, &item.targets, now)
@@ -165,6 +169,7 @@ async fn process_targets_discovery(
             featured: item.featured,
             qualifier: item.qualifier,
             plugin_package_identifier: item.plugin_package_identifier,
+            installed_display_version: item.installed_display_version,
         };
 
         // Find-or-create the software item and host link.
@@ -293,6 +298,8 @@ async fn find_or_create_software_item(
                     let mut active: host_software_item::ActiveModel = hsi.into();
                     active.installed_version = Set(Some(installed_version.to_string()));
                     active.installed_version_detected_at = Set(Some(now));
+                    active.installed_display_version =
+                        Set(item.installed_display_version.map(str::to_string));
                     active.update(db).await.context_to()?;
                 }
             } else {
@@ -429,7 +436,7 @@ async fn find_or_create_software_item(
         package_identifier: Set(Some(item.effective_plugin_pkg_id().to_string())),
         installed_version: Set(Some(installed_version.to_string())),
         installed_version_detected_at: Set(Some(now)),
-        installed_display_version: Set(None),
+        installed_display_version: Set(item.installed_display_version.map(str::to_string)),
         latest_version: Set(None),
         latest_version_fetched_at: Set(None),
         latest_release_metadata: Set(None),
@@ -558,6 +565,7 @@ mod tests {
             featured: false,
             qualifier: None,
             plugin_package_identifier: None,
+            installed_display_version: None,
         };
 
         process_one_discovery(
@@ -632,6 +640,7 @@ mod tests {
             featured: false,
             qualifier: None,
             plugin_package_identifier: None,
+            installed_display_version: None,
         };
 
         process_one_discovery(
@@ -712,6 +721,7 @@ mod tests {
             featured: false,
             qualifier: None,
             plugin_package_identifier: None,
+            installed_display_version: None,
         };
 
         process_one_discovery(
@@ -789,6 +799,7 @@ mod tests {
             featured: false,
             qualifier: None,
             plugin_package_identifier: None,
+            installed_display_version: None,
         };
 
         process_one_discovery(
@@ -908,6 +919,7 @@ mod tests {
                 featured: true,
                 qualifier: None,
                 plugin_package_identifier: None,
+                installed_display_version: None,
             }],
         };
 
@@ -1103,6 +1115,7 @@ mod tests {
                 featured: false,
                 qualifier: None,
                 plugin_package_identifier: None,
+                installed_display_version: None,
             }],
         };
 
@@ -1152,6 +1165,7 @@ mod tests {
                 featured: true,
                 qualifier: None,
                 plugin_package_identifier: None,
+                installed_display_version: None,
             }],
         };
 
@@ -1216,6 +1230,7 @@ mod tests {
                 featured: true,
                 qualifier: None,
                 plugin_package_identifier: None,
+                installed_display_version: None,
             }],
         };
 

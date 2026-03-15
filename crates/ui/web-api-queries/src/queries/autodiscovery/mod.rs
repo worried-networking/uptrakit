@@ -303,6 +303,7 @@ pub(crate) mod tests_common {
                 featured: false,
                 qualifier: None,
                 plugin_package_identifier: None,
+                installed_display_version: None,
             }],
         }
     }
@@ -333,6 +334,7 @@ pub(crate) mod tests_common {
                 featured: false,
                 qualifier: None,
                 plugin_package_identifier: None,
+                installed_display_version: None,
             }],
         }
     }
@@ -351,6 +353,7 @@ pub(crate) mod tests_common {
                 featured: false,
                 qualifier: None,
                 plugin_package_identifier: None,
+                installed_display_version: None,
             }],
         }
     }
@@ -406,6 +409,7 @@ pub(crate) mod tests_common {
                 featured: false,
                 qualifier: None,
                 plugin_package_identifier: None,
+                installed_display_version: None,
             }],
         }
     }
@@ -458,6 +462,7 @@ mod tests {
                     featured: false,
                     qualifier: None,
                     plugin_package_identifier: None,
+                    installed_display_version: None,
                 }],
             }],
         };
@@ -532,6 +537,7 @@ mod tests {
                         featured: false,
                         qualifier: None,
                         plugin_package_identifier: None,
+                        installed_display_version: None,
                     }],
                 }],
             }
