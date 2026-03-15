@@ -1320,3 +1320,131 @@ async fn batch_detect_returns_local_digest_not_platform_digest_when_no_platform_
     );
     assert!(results[0].error.is_none());
 }
+
+// ── discover_software — platform-digest namespace fix ─────────────────────
+//
+// When auto-discovery inspects a multi-arch image and detects a platform from
+// the os/arch fields, it must store the *platform-specific* manifest digest as
+// `installed_version` (not the image-index digest from RepoDigests).  This
+// keeps `installed_version` in the same digest namespace that `fetch_releases`
+// and `detect_version` use after they read `config_override = {"platform": "…"}`,
+// preventing the perpetual false "update available".
+
+/// When a platform is auto-detected during discovery and the registry call
+/// succeeds, `installed_version` must be the platform-specific manifest digest
+/// (not the image-index digest from `inspect_result`).
+///
+/// Regression: previously the image-index digest was always used, which
+/// never matched the platform digest returned by `fetch_releases`, causing a
+/// permanent spurious update signal.
+#[tokio::test]
+async fn discover_software_uses_platform_manifest_digest_as_installed_version() {
+    use crate::config::DockerConfig;
+    use crate::registry::{ManifestInfo, MockRegistryClient};
+
+    let index_digest =
+        "sha256:6dd50763aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string();
+    let platform_digest =
+        "sha256:f9086bfdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string();
+
+    let mock_docker = Arc::new(MockDockerClient {
+        inspect_result: Some(index_digest.clone()),
+        inspect_os: Some("linux".to_string()),
+        inspect_architecture: Some("amd64".to_string()),
+        containers: vec![LocalContainerInfo {
+            image: "containrrr/watchtower:latest".to_string(),
+            names: vec!["watchtower".to_string()],
+            labels: Default::default(),
+        }],
+        ..Default::default()
+    });
+    let mock_registry = Arc::new(MockRegistryClient {
+        platform_digest_result: Some(ManifestInfo {
+            digest: platform_digest.clone(),
+            created_at: None,
+        }),
+        ..Default::default()
+    });
+
+    let plugin = DockerPlugin::new_for_test_with_registry(
+        DockerConfig::default(),
+        mock_executor(),
+        mock_docker,
+        mock_registry,
+    )
+    .unwrap();
+
+    let discoveries = plugin.discover_software().await.unwrap();
+
+    assert_eq!(discoveries.len(), 1);
+    // Must use the platform-specific digest, not the image-index digest.
+    assert_eq!(
+        discoveries[0].installed_version, platform_digest,
+        "installed_version should be the platform digest, not the image-index digest"
+    );
+    assert_ne!(
+        discoveries[0].installed_version, index_digest,
+        "installed_version must not be the image-index digest when platform is detected"
+    );
+    // config_override must carry the detected platform so subsequent
+    // fetch_releases / detect_version calls stay in the same digest namespace.
+    let target = &discoveries[0].targets[0];
+    assert_eq!(
+        target.config_override,
+        Some(serde_json::json!({"platform": "linux/amd64"}))
+    );
+}
+
+/// When auto-discovery detects a platform but the registry call fails
+/// (transient error or platform not found), `discover_software` must not
+/// crash — it falls back to the image-index digest for `installed_version`.
+/// `detect_version` will correct the value on its next scheduled run.
+#[tokio::test]
+async fn discover_software_falls_back_to_index_digest_when_platform_registry_fails() {
+    use crate::config::DockerConfig;
+    use crate::registry::MockRegistryClient;
+
+    let index_digest =
+        "sha256:6dd50763cccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".to_string();
+
+    let mock_docker = Arc::new(MockDockerClient {
+        inspect_result: Some(index_digest.clone()),
+        inspect_os: Some("linux".to_string()),
+        inspect_architecture: Some("amd64".to_string()),
+        containers: vec![LocalContainerInfo {
+            image: "containrrr/watchtower:latest".to_string(),
+            names: vec!["watchtower".to_string()],
+            labels: Default::default(),
+        }],
+        ..Default::default()
+    });
+    let mock_registry = Arc::new(MockRegistryClient {
+        platform_digest_should_fail: true,
+        ..Default::default()
+    });
+
+    let plugin = DockerPlugin::new_for_test_with_registry(
+        DockerConfig::default(),
+        mock_executor(),
+        mock_docker,
+        mock_registry,
+    )
+    .unwrap();
+
+    let discoveries = plugin.discover_software().await.unwrap();
+
+    // Discovery must succeed (graceful degradation — no crash).
+    assert_eq!(discoveries.len(), 1);
+    // Falls back to the image-index digest.
+    assert_eq!(
+        discoveries[0].installed_version, index_digest,
+        "should fall back to image-index digest when platform registry call fails"
+    );
+    // Platform is still detected, so config_override is set — detect_version
+    // will use it to resolve the correct digest on the next run.
+    let target = &discoveries[0].targets[0];
+    assert_eq!(
+        target.config_override,
+        Some(serde_json::json!({"platform": "linux/amd64"}))
+    );
+}

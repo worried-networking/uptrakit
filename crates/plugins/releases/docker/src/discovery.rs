@@ -37,9 +37,19 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
         let mut digest_cache: HashMap<String, Option<crate::docker_client::LocalImageDigest>> =
             HashMap::new();
 
-        // Cache for display versions fetched from the registry during discovery.
-        // Key: `ir.full_ref`. Value: `Option<String>` (None = not available or no platform).
-        let mut display_cache: HashMap<String, Option<String>> = HashMap::new();
+        // Cache for (resolved_installed_version, display_version) per unique image ref.
+        //
+        // When a platform is auto-detected from the local image's os/arch fields,
+        // `resolved_installed_version` is the platform-specific manifest digest returned
+        // by `get_platform_manifest_digest`.  This keeps `installed_version` in the same
+        // digest namespace as what `fetch_releases` and `detect_version` produce when
+        // `config_override = {"platform": "…"}` is set, preventing the perpetual
+        // false "update available" caused by comparing an image-index digest against a
+        // platform-specific digest.
+        //
+        // Falls back to the image-index digest from `RepoDigests` if the registry call
+        // fails; `detect_version` will correct it on the next scheduled run.
+        let mut per_image_cache: HashMap<String, (String, Option<String>)> = HashMap::new();
 
         let mut discoveries = Vec::new();
 
@@ -137,20 +147,34 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
             );
             let config_override = platform.as_deref().map(|p| json!({"platform": p}));
 
-            // Fetch the display version from the registry (fault-tolerant: errors → None).
-            let display_version = match display_cache.entry(ir.full_ref.clone()) {
+            // Fetch from the registry (fault-tolerant: errors fall back to the
+            // image-index digest).  The cache key is `ir.full_ref`; all containers
+            // sharing the same image ref also share the same platform and therefore
+            // the same resolved installed_version and display_version.
+            let (resolved_installed_version, display_version) = match per_image_cache
+                .entry(ir.full_ref.clone())
+            {
                 std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
                 std::collections::hash_map::Entry::Vacant(e) => {
-                    let dv = if let Some(ref p) = platform {
+                    let (resolved_digest, dv) = if let Some(ref p) = platform {
                         match self
                             .registry_client
                             .get_platform_manifest_digest(&ir.registry, &ir.repository, &ir.tag, p)
                             .await
                         {
-                            Ok(Some(info)) => {
-                                info.created_at.map(crate::registry::format_display_version)
+                            Ok(Some(info)) => (
+                                info.digest.clone(),
+                                info.created_at.map(crate::registry::format_display_version),
+                            ),
+                            Ok(None) | Err(_) => {
+                                tracing::warn!(
+                                    image = %ir.full_ref,
+                                    platform = %p,
+                                    "platform manifest lookup failed during discovery; \
+                                     falling back to image-index digest (will self-correct)"
+                                );
+                                (digest_info.digest.clone(), None)
                             }
-                            Ok(None) | Err(_) => None,
                         }
                     } else {
                         match self
@@ -158,19 +182,21 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
                             .get_manifest_info(&ir.registry, &ir.repository, &ir.tag)
                             .await
                         {
-                            Ok(info) => {
-                                info.created_at.map(crate::registry::format_display_version)
-                            }
-                            Err(_) => None,
+                            Ok(info) => (
+                                digest_info.digest.clone(),
+                                info.created_at.map(crate::registry::format_display_version),
+                            ),
+                            Err(_) => (digest_info.digest.clone(), None),
                         }
                     };
                     tracing::debug!(
                         image = %ir.full_ref,
+                        installed_version = %resolved_digest,
                         display_version = ?dv,
-                        "fetched display version during discovery"
+                        "resolved versions during discovery"
                     );
-                    e.insert(dv.clone());
-                    dv
+                    e.insert((resolved_digest.clone(), dv.clone()));
+                    (resolved_digest, dv)
                 }
             };
 
@@ -191,7 +217,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
             discoveries.push(DiscoveredSoftware {
                 package_identifier: pkg_id,
                 name,
-                installed_version: digest_info.digest,
+                installed_version: resolved_installed_version,
                 targets,
                 extra: Some(json!({ "container": container_name })),
                 qualifier: Some(container_name.clone()),
