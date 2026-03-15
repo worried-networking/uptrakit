@@ -328,6 +328,7 @@ extension actions on the "SMTP Defaults" panel in Global Settings.
 | `global_smtp.from_address` | string? | `null` | Sender email address |
 | `global_smtp.from_name` | string? | `null` | Sender display name |
 | `global_smtp.tls_mode` | string | `"starttls"` | TLS mode: `starttls`, `tls`, or `none` |
+| `global_smtp.helo_host` | string? | `null` | Hostname sent in SMTP EHLO command (defaults to domain of `from_address`) |
 
 #### Per-tenant SMTP overrides
 

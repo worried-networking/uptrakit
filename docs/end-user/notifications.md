@@ -78,6 +78,16 @@ SMTP settings use a two-layer architecture:
   override the global defaults. Changes are saved with patch semantics: only fields you modify
   are updated, and empty fields inherit from global defaults.
 
+The Global SMTP Defaults form includes an optional **EHLO Hostname** field. The SMTP `EHLO`
+command requires a valid fully-qualified domain name. If left empty, the domain part of the
+**From Address** is used automatically (e.g. `from_address = noreply@example.com` → EHLO
+hostname `example.com`). Set this field when using a relay server whose required EHLO hostname
+differs from your sender domain — for example when Gmail or another provider rejects with
+`555 5.5.2 Syntax error`. This is a global setting and cannot be overridden per-tenant.
+
+**Send Test Email** sends a test message to the **calling user's own profile email address**. No
+recipient address input is needed.
+
 ### Notification Rules tab
 
 The **Notification Rules** tab lets you create rules that bind event types to channels.

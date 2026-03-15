@@ -509,6 +509,7 @@ Server-wide SMTP defaults are stored in the `global_settings` table and managed 
 | From address | `global_smtp.from_address` | Sender email address |
 | From name | `global_smtp.from_name` | Sender display name (optional) |
 | TLS mode | `global_smtp.tls_mode` | `"starttls"` (default), `"tls"`, or `"none"` |
+| EHLO hostname | `global_smtp.helo_host` | Hostname sent in the SMTP EHLO command (optional; defaults to the domain of `from_address`) |
 
 ### Per-tenant SMTP overrides
 
@@ -534,6 +535,30 @@ inherit from global defaults. Configured via the email channel extension's "Conf
 | `none` | No TLS (plaintext -- development only) | 25 |
 
 `"starttls"` is the default and is appropriate for most modern SMTP providers.
+
+### EHLO hostname derivation
+
+The SMTP `EHLO` command requires a valid fully-qualified domain name (FQDN) per RFC 5321. The
+email plugin never falls back to `gethostname()` — Docker container hostnames (e.g. `abc123`)
+and short hostnames without a `.` fail strict SMTP servers such as Gmail (error: `555 5.5.2
+Syntax error`).
+
+The EHLO hostname is resolved in priority order:
+
+1. Global `helo_host` setting (`global_smtp.helo_host`), if non-empty. Tenants cannot override
+   this setting.
+2. Domain part of the resolved `from_address` (the substring after `@`).
+3. Fallback: `localhost` (should not be reached in practice — `from_address` is required).
+
+`is_configured()` requires `from_address` to be set, so path 2 is always available when email
+delivery is enabled. Set `helo_host` via Global Settings when your SMTP relay requires a hostname
+different from the `from_address` domain.
+
+### Test email
+
+The "Send Test Email" action (`test_global_smtp_email`) sends a test message directly to the
+**calling user's profile email address** (looked up from the database). No recipient address
+input is required.
 
 ### Message format
 

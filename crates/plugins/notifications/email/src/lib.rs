@@ -462,12 +462,6 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for EmailPlugin {
                             .with_placeholder("noreply@example.com"),
                         FieldDef::new("from_name", "From Name")
                             .with_placeholder("Uptrakit Notifications"),
-                        FieldDef::new("helo_host", "EHLO Hostname")
-                            .with_placeholder("mail.example.com")
-                            .with_help_text(
-                                "Hostname sent in the SMTP EHLO command. Defaults to the domain \
-                                 of the From address. Set explicitly when using a relay server.",
-                            ),
                         FieldDef::new("username", "Username").with_placeholder("SMTP username"),
                         FieldDef::new("password", "Password")
                             .with_type(FieldType::Password)

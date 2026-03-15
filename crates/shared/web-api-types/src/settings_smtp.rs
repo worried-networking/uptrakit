@@ -33,11 +33,6 @@ pub struct SmtpSettingsResponse {
     pub from_name: Option<String>,
     /// TLS mode: `"starttls"` (default), `"tls"`, or `"none"`.
     pub tls_mode: String,
-    /// Optional EHLO hostname override for the SMTP EHLO command.
-    ///
-    /// When absent, the email plugin derives the hostname from the `from_address` domain.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub helo_host: Option<String>,
 }
 
 /// Request body for `PUT /api/v1/settings/smtp`.
@@ -69,12 +64,6 @@ pub struct UpdateSmtpSettingsRequest {
     /// TLS mode: `"starttls"` (default), `"tls"`, or `"none"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tls_mode: Option<String>,
-    /// SMTP EHLO hostname override. `null` = clear, omit = keep existing.
-    ///
-    /// When set, this value is sent in the SMTP EHLO command instead of the domain
-    /// derived from `from_address`. Useful when using a relay that requires a specific FQDN.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub helo_host: Option<serde_json::Value>,
 }
 
 impl Validate for UpdateSmtpSettingsRequest {
@@ -172,22 +161,6 @@ impl Validate for UpdateSmtpSettingsRequest {
             });
         }
 
-        if let Some(ref val) = self.helo_host {
-            if let Some(s) = val.as_str() {
-                if s.len() > 253 {
-                    return Err(ValidationError {
-                        field: "helo_host",
-                        message: "must not exceed 253 characters".to_string(),
-                    });
-                }
-            } else if !val.is_null() {
-                return Err(ValidationError {
-                    field: "helo_host",
-                    message: "must be a string or null".to_string(),
-                });
-            }
-        }
-
         Ok(())
     }
 }
@@ -205,7 +178,6 @@ mod tests {
             from_address: None,
             from_name: None,
             tls_mode: None,
-            helo_host: None,
         }
     }
 
@@ -315,7 +287,6 @@ mod tests {
             from_address: Some("noreply@example.com".to_string()),
             from_name: Some("Uptrakit".to_string()),
             tls_mode: "starttls".to_string(),
-            helo_host: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: SmtpSettingsResponse =

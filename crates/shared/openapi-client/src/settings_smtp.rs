@@ -31,7 +31,6 @@ mod tests {
             from_address: Some("noreply@example.com".to_string()),
             from_name: Some(serde_json::Value::String("Uptrakit".to_string())),
             tls_mode: Some("starttls".to_string()),
-            helo_host: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["host"], "smtp.example.com");
@@ -51,7 +50,6 @@ mod tests {
             from_address: None,
             from_name: Some(serde_json::Value::Null),
             tls_mode: None,
-            helo_host: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert!(json["username"].is_null());
@@ -69,7 +67,6 @@ mod tests {
             from_address: None,
             from_name: None,
             tls_mode: Some("tls".to_string()),
-            helo_host: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["host"], "relay.example.com");

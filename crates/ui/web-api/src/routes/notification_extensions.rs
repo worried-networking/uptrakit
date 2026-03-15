@@ -155,7 +155,6 @@ async fn get_smtp_settings(state: &Arc<AppState>, _tenant_ctx: &TenantContext) -
         "has_password": smtp.password.is_some(),
         "from_address": smtp.from_address.as_deref().unwrap_or(""),
         "from_name": smtp.from_name.as_deref().unwrap_or(""),
-        "helo_host": smtp.helo_host.as_deref().unwrap_or(""),
         "tls_mode": smtp.tls_mode,
         "effective_host": smtp.host.as_ref().or(global.host.as_ref()).cloned().unwrap_or_default(),
         "effective_from_address": smtp.from_address.as_ref().or(global.from_address.as_ref()).cloned().unwrap_or_default(),
@@ -305,21 +304,6 @@ async fn save_smtp_settings(
         smtp.tls_mode = tls_mode.to_string();
     }
 
-    if let Some(helo_host) = params.get("helo_host").and_then(|v| v.as_str()) {
-        if let Err(e) = upsert_setting(
-            state.db(),
-            tenant_id,
-            SettingKey::SmtpHeloHost,
-            serde_json::json!(helo_host),
-        )
-        .await
-        {
-            tracing::error!("Failed to save smtp.helo_host: {e:?}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-        smtp.helo_host = Some(helo_host.to_string()).filter(|h| !h.is_empty());
-    }
-
     state.settings.set_smtp(smtp.clone()).await;
 
     let response = serde_json::json!({
@@ -329,7 +313,6 @@ async fn save_smtp_settings(
         "has_password": smtp.password.is_some(),
         "from_address": smtp.from_address.as_deref().unwrap_or(""),
         "from_name": smtp.from_name.as_deref().unwrap_or(""),
-        "helo_host": smtp.helo_host.as_deref().unwrap_or(""),
         "tls_mode": smtp.tls_mode,
     });
 

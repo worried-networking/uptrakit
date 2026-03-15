@@ -957,12 +957,6 @@ impl Settings {
             .unwrap_or("starttls")
             .to_string();
 
-        let helo_host = raw
-            .get_setting(SettingKey::SmtpHeloHost)
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
         SmtpSettingsSnapshot {
             host,
             port,
@@ -971,7 +965,8 @@ impl Settings {
             from_address,
             from_name,
             tls_mode,
-            helo_host,
+            // helo_host is a global-only setting; tenants cannot override it.
+            helo_host: None,
         }
     }
 }
