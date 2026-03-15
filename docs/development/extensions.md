@@ -13,9 +13,10 @@ The extension framework uses a hybrid registration model:
 - **Runtime registration** for connected services (via the wire protocol)
 
 The `ExtensionRegistry` tracks three owner types: `Plugin`, `Service`, and `Notification`.
-Plugin and notification extensions are dispatched to the unified plugin system. Service
-extensions are proxied over WebSocket. Notification extensions are handled by
-`notification_extensions::handle()` for generic channel listing and SMTP settings management.
+Plugin and notification extensions are dispatched to the unified plugin system via
+`PluginOps::handle_extension_action()`. Each notification plugin owns its own
+`extensions.rs` module with a `handle_action()` function that handles settings CRUD,
+channel listing, and callback handling. Service extensions are proxied over WebSocket.
 
 The controller maintains an `ExtensionRegistry` that tracks all active extensions and their
 providers. When a user invokes an action, the controller proxies the request to the appropriate

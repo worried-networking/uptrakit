@@ -240,8 +240,7 @@ other controller instances. Each revocation site bumps `revocation_version` in t
 | `GET /api/v1/settings/mqtt/{id}` | ViewSettings | Get a specific MQTT client configuration |
 | `PUT /api/v1/settings/mqtt/{id}` | ManageSettings | Update MQTT client configuration |
 | `DELETE /api/v1/settings/mqtt/{id}` | ManageSettings | Delete MQTT client configuration |
-| `GET /api/v1/settings/smtp` | ViewSettings | Read global SMTP settings |
-| `PUT /api/v1/settings/smtp` | ManageSettings | Update global SMTP settings |
+| *(SMTP settings are managed via email plugin extension actions, not REST endpoints)* | | |
 | `POST /api/v1/settings/rotate-ca` | ManageGlobalSettings | Trigger immediate CA rotation |
 | `POST /api/v1/settings/renew-server-certificate` | ManageGlobalSettings | Renew server TLS certificate |
 | `GET /api/v1/system/alerts` | ManageGlobalSettings | Get system alerts (CA/cert status) |
@@ -347,11 +346,10 @@ extension actions on the email channel extension.
 
 #### Merge semantics
 
-At delivery time, `merge_smtp_into_config(global, tenant, config)` resolves the effective
-SMTP settings: for each field, the per-tenant value is used if non-empty, otherwise the
-global default. Email delivery is disabled (notifications skipped with a warning) until
-both `host` and `from_address` are configured in at least one layer
-(`SmtpSettingsSnapshot::is_configured()`).
+At delivery time, the dispatcher passes a generic settings bag `{"tenant": {...}, "global": {...}}`
+to `deliver()`. The email plugin internally merges SMTP settings: for each field, the per-tenant
+value is used if non-empty, otherwise the global default. Email delivery is disabled (notifications
+skipped with a warning) until both `host` and `from_address` are configured in at least one layer.
 
 #### Extension action responses
 
@@ -361,14 +359,9 @@ result and `has_global_defaults: bool`. The `get_global_smtp` action returns onl
 **Security:** Passwords are encrypted with `uptrakit_crypto::encrypt_str` (AES-256-GCM) before
 storage. See [Notifications Security — Email Channel Security](../security/notifications-security.md#email-channel-security).
 
-**CLI:**
-
-```bash
-uptrakit settings smtp show
-uptrakit settings smtp set --host smtp.example.com --port 587 --from-address noreply@example.com --tls-mode starttls
-uptrakit settings smtp set --password mysecret
-uptrakit settings smtp set --clear-password
-```
+**CLI:** SMTP settings are managed via the UI extension framework (Settings page). The
+`settings smtp` CLI subcommand has been removed. Use the web UI or extension actions to
+configure SMTP.
 
 ### NATS settings (feature: `nats`)
 

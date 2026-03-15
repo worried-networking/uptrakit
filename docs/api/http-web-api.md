@@ -72,7 +72,7 @@ Access tokens are short-lived, refresh tokens rotate on each use, and logout add
 - GET/PUT `/api/v1/settings/registration`
 - GET/PUT `/api/v1/settings/authentication`
 - GET/PUT `/api/v1/settings/service-certificates`
-- GET/PUT `/api/v1/settings/smtp` — global SMTP settings (requires `CanManageGlobalSettings`)
+- *(SMTP settings are managed via email plugin extension actions, not REST endpoints)*
 - GET/PUT `/api/v1/settings/nats` *(feature: `nats`)* — NATS server URL (requires `CanManageGlobalSettings`).
   The URL is stored encrypted at rest. The response returns the masked URL with password replaced by `***`.
   Changes take effect after a controller restart (hot-reload not supported). See
@@ -945,10 +945,12 @@ the complete endpoint reference with request/response examples.
 - `PUT /api/v1/notifications/rules/{id}`: update a rule (requires `ManageNotifications`).
 - `DELETE /api/v1/notifications/rules/{id}`: delete a rule (requires `ManageNotifications`).
 - `GET /api/v1/notifications/log`: list delivery log, paginated (requires `ViewNotifications`).
-- `POST /api/v1/notifications/callback/telegram/{channel_id}`: Telegram callback (public,
-  verified via `X-Telegram-Bot-Api-Secret-Token` header).
+- `POST /api/v1/notifications/callback/{channel_type}/{channel_id}`: generic notification
+  callback (public, plugin-specific verification).
 
-Channel types: `webhook` (always available), `telegram` (feature-gated).
+Channel types are plain strings validated against registered plugins via
+`notification_supported_types()`: `webhook` (always available), `telegram` and `email`
+(feature-gated).
 
 ## API Error Responses - Detailed
 

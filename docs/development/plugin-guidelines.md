@@ -1061,6 +1061,71 @@ The controller-side `run_controller_side_fetch_releases` groups rows by `plugin_
 of `(plugin_config_id, package_identifier)`). A single `batch_fetch_releases` call per config
 replaces the previous N-per-package loop.
 
+## Notification Plugin Extension Actions
+
+Notification plugins extend the UI via the extension framework. Each notification plugin
+owns its own `extensions.rs` module with:
+
+- `extension_manifests()` -- returns UI manifests for channel management
+- `extension_actions()` -- returns the action catalogue
+- `handle_action(ctx, extension_id, action_id, params)` -- dispatches actions
+
+### `handle_action` signature
+
+```rust
+pub async fn handle_action(
+    ctx: &ExtensionActionContext<'_>,
+    extension_id: &str,
+    action_id: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    match (extension_id, action_id) {
+        ("notifications.mytype", "list") => {
+            list_channels(ctx, "mytype", params).await
+        }
+        // ... other actions
+        _ => Err(format!("unknown action '{action_id}'")),
+    }
+}
+```
+
+`ExtensionActionContext` provides `db`, `tenant_id`, and `caller_user_id` (for actions
+that need the calling user, such as sending test emails to the user's profile address).
+
+### Shared `list_channels` helper
+
+All notification plugins share a `list_channels` helper from `uptrakit-notification-plugin-core`
+(behind the `extensions` feature). It handles:
+
+- Querying channels by type with tenant scoping
+- Decrypting and parsing channel config
+- Masking secrets via the plugin's `mask_config_secrets()`
+- Flattening top-level config keys into the row object for `DataTable` rendering
+- Pagination with `page`/`per_page` parameters
+
+Usage:
+
+```rust
+use uptrakit_notification_plugin_core::list_channels::list_channels;
+
+("notifications.mytype", "list") => {
+    list_channels(ctx, "mytype", params).await
+}
+```
+
+### Settings management via raw-key functions
+
+Plugins use raw-key settings store functions instead of `SettingKey` enum variants.
+This keeps notification-specific settings decoupled from the shared `SettingKey` type:
+
+- `upsert_setting_raw(db, tenant_id, key, value)` -- tenant setting
+- `upsert_global_setting_raw(db, key, value)` -- global setting
+- `load_settings_by_prefix(db, tenant_id, prefix)` -- load tenant settings by prefix
+- `load_global_settings_by_prefix(db, prefix)` -- load global settings by prefix
+
+See the email plugin's `extensions.rs` for a complete example of SMTP settings management
+using these functions.
+
 ## Testing
 
 ### Mock executor pattern

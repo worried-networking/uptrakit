@@ -38,10 +38,12 @@ Each runtime extension entry contains:
 | `app_name` | `String` | `service_app_name` of the registering service |
 | `providers` | `BTreeSet<Uuid>` | Service IDs currently providing this extension |
 
-### Compile-time registration (plugins)
+### Compile-time registration (plugins and notifications)
 
 Plugins implement `PluginOps::extension_manifests()` which returns a `Vec<ExtensionManifest>`.
-The `PluginRegistry` aggregates manifests from all registered plugins at controller startup.
+The `PluginRegistry` aggregates manifests from all registered plugins (including notification
+plugins) at controller startup. Notification plugins define their own extension manifests and
+action handlers in per-plugin `extensions.rs` modules.
 These are stored in `plugin_extensions` and are always available -- no provider tracking
 is needed because plugins run in-process.
 

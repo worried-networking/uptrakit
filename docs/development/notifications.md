@@ -28,10 +28,10 @@ This separation means adding a new notification plugin never requires changes to
 | `uptrakit-notification-plugin-telegram` | `crates/plugins/notifications/telegram/` | Telegram plugin (inline keyboard support); implements `PluginBase` + `NotificationTransportPlugin` |
 | `uptrakit-notification-plugin-email` | `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`); implements `PluginBase` + `NotificationTransportPlugin` |
 | `uptrakit-plugin-infrastructure-registry` | `crates/plugins/infrastructure/registry/` | Unified `PluginRegistry` stores notification plugins via `with_notifications(config)`; `NotificationRegistryConfig`; consumers use `PluginOps::notification_transport()` |
-| `uptrakit-web-api-types` | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, public enums (`NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus`) |
+| `uptrakit-web-api-types` | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, public enums (`NotificationEventType`, `NotificationDeliveryStatus`); `channel_type` is `String` (not an enum) |
 | `uptrakit-web-api` | `crates/ui/web-api/src/notifications/` | Dispatcher, internal event types, `message_builder` |
 | `uptrakit-web-api` | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers (CRUD for channels, rules, log) |
-| `uptrakit-web-api` | `crates/ui/web-api/src/routes/notifications.rs` | REST API route handlers + Telegram callback endpoint |
+| `uptrakit-web-api` | `crates/ui/web-api/src/routes/notifications.rs` | REST API route handlers + generic notification callback endpoint |
 
 ## Feature flags
 
@@ -78,15 +78,27 @@ pub trait PluginBase: Send + Sync {
 ```rust
 #[async_trait]
 pub trait NotificationTransportPlugin: PluginBase {
-    async fn deliver(&self, config: &serde_json::Value, message: &DeliveryMessage) -> Result<()>;
+    fn channel_type(&self) -> &'static str;
+    async fn deliver(
+        &self,
+        config: &serde_json::Value,
+        settings: &serde_json::Value,
+        message: &DeliveryMessage,
+    ) -> Result<()>;
     fn validate_config(&self, config: &serde_json::Value) -> Result<()>;
     #[must_use]
     fn mask_config_secrets(&self, config: &serde_json::Value) -> serde_json::Value;
 }
 ```
 
+The `settings` parameter is a generic JSON bag with the structure
+`{"tenant": {"key": value, ...}, "global": {"key": value, ...}}`. Each plugin extracts
+what it needs internally (e.g. the email plugin performs SMTP merge, the telegram plugin
+extracts `bot_token` from tenant settings, the webhook plugin ignores it).
+
 Each notification plugin implements both traits and overrides `as_notification_transport()` to return `Some(self)`.
-The `name()` method on `PluginBase` returns the channel type string identifier (e.g. `"webhook"`, `"telegram"`, `"email"`).
+The `channel_type()` method on `NotificationTransportPlugin` returns the channel type string identifier
+(e.g. `"webhook"`, `"telegram"`, `"email"`).
 
 Consumers look up notification plugins via `PluginOps::notification_transport(channel_type)`, which calls
 `as_notification_transport()` on the matching plugin.
@@ -195,12 +207,19 @@ impl PluginBase for SlackPlugin {
 
 #[async_trait]
 impl NotificationTransportPlugin for SlackPlugin {
+    fn channel_type(&self) -> &'static str {
+        "slack"
+    }
+
     async fn deliver(
         &self,
         config: &serde_json::Value,
+        settings: &serde_json::Value,
         message: &DeliveryMessage,
     ) -> Result<()> {
         // Build Slack Block Kit payload from message.title, message.body, etc.
+        // `settings` contains {"tenant": {...}, "global": {...}} -- extract any
+        // settings the plugin needs (e.g. API tokens from tenant settings).
         todo!()
     }
 
@@ -250,10 +269,32 @@ In `crates/plugins/infrastructure/registry/src/registry.rs`, add inside `with_no
 }
 ```
 
-### 4. Add the `NotificationChannelType` variant
+### 4. Add the extension action handler
 
-In `crates/shared/web-api-types/src/notifications.rs`, add `Slack` to the `NotificationChannelType` enum and update
-`as_str()`, `FromStr`, and `Display` implementations accordingly.
+Each notification plugin owns its own `extensions.rs` module with a `handle_action()` function
+that handles settings CRUD, channel listing, and callback handling. Create
+`crates/plugins/notifications/slack/src/extensions.rs`:
+
+```rust
+pub async fn handle_action(
+    ctx: &ExtensionActionContext<'_>,
+    extension_id: &str,
+    action_id: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    match (extension_id, action_id) {
+        ("notifications.slack", "list") => {
+            // Use the shared list_channels helper from notification-plugin-core
+            list_channels(ctx, "slack", params).await
+        }
+        _ => Err(format!("unknown action '{action_id}' for extension '{extension_id}'")),
+    }
+}
+```
+
+The shared `list_channels` helper (in `uptrakit-notification-plugin-core`, behind the `extensions`
+feature) provides pagination and config flattening that all notification plugins share. See
+[Shared list_channels helper](#shared-list_channels-helper) for details.
 
 ### 5. Propagate the feature flag
 
@@ -271,8 +312,10 @@ notifications-slack = ["uptrakit-web-api/notifications-slack"]
 
 ### 6. Global shared settings (if applicable)
 
-If the new plugin uses global shared settings (like email uses global SMTP settings), add a merge
-step in the dispatcher and `test_channel` handler following the email channel pattern.
+If the new plugin uses global shared settings (like email uses global SMTP settings), the plugin
+handles settings extraction internally from the `settings` bag passed to `deliver()`. The
+dispatcher builds the settings bag generically from the database (tenant and global settings by
+prefix) and passes it to all plugins -- no channel-type-specific logic in the dispatcher.
 
 ### 7. Add tests
 
@@ -322,7 +365,8 @@ require both `host_id` and `software_item_id` to be present.
 
 ### Dispatcher flow
 
-The dispatcher (`crates/ui/web-api/src/notifications/dispatcher.rs`) runs a fire-and-forget background loop:
+The dispatcher (`crates/ui/web-api/src/notifications/dispatcher.rs`) runs a fire-and-forget
+background loop. It is fully generic -- there are no channel-type-specific code blocks:
 
 1. Event received via `mpsc::UnboundedSender<NotificationEvent>`.
 2. Load matching rules by `(tenant_id, event_type, enabled=true)`.
@@ -331,11 +375,15 @@ The dispatcher (`crates/ui/web-api/src/notifications/dispatcher.rs`) runs a fire
    - Load the channel from DB and verify it is enabled.
    - Look up the plugin implementation via `PluginOps::notification_transport(channel_type)`.
    - Parse and decrypt the channel config (`EncryptedString`).
+   - Build a generic settings bag from the database: `{"tenant": {...}, "global": {...}}`
+     using `load_settings_by_prefix` and `load_global_settings_by_prefix`.
    - Generate `action_token` (UUIDv7) if the event is actionable.
    - Build `DeliveryMessage` via `message_builder::build_delivery_message()`.
    - Insert a `notification_log` row with `status = "pending"`.
    - Spawn a `tokio::spawn` delivery task.
-5. The delivery task calls `plugin.deliver()` and updates the log to `"delivered"` or `"failed"`.
+5. The delivery task calls `plugin.deliver(config, settings, message)` and updates the log
+   to `"delivered"` or `"failed"`. Each plugin extracts what it needs from the settings bag
+   internally (e.g. the email plugin performs SMTP merge from global/tenant settings).
 
 Delivery failures are logged at `warn` level but never propagate back to event producers.
 
@@ -436,10 +484,12 @@ return masked configs (secrets replaced with `"***"`) via `channel.mask_config_s
 | Method | Path | Permission | Description |
 | --- | --- | --- | --- |
 | `GET` | `/api/v1/notifications/log` | `view_notifications` | List delivery log (paginated) |
-| `POST` | `/api/v1/notifications/callback/telegram/{channel_id}` | Public (secret-verified) | Telegram bot callback |
+| `POST` | `/api/v1/notifications/callback/{channel_type}/{channel_id}` | Public (plugin-verified) | Generic notification callback |
 
-The Telegram callback endpoint is not authenticated via JWT. It verifies the `X-Telegram-Bot-Api-Secret-Token`
-header against the channel's `webhook_secret` config field.
+The callback endpoint is not authenticated via JWT. It dispatches to the plugin's
+`handle_callback` extension action, which performs channel-type-specific verification
+(e.g. the Telegram plugin verifies the `X-Telegram-Bot-Api-Secret-Token` header against
+the channel's `webhook_secret` config field).
 
 ## Webhook plugin details
 
@@ -570,21 +620,19 @@ The plugin sends **multipart/alternative** emails:
 
 The email subject is set to `message.title`.
 
-### Dispatcher merge step
+### Settings merge (plugin-internal)
 
-The dispatcher (`crates/ui/web-api/src/notifications/dispatcher.rs`) performs the merge before each delivery:
+The dispatcher passes a generic settings bag to all plugins -- it has no email-specific
+code. The email plugin performs the SMTP merge internally inside its `deliver()` method:
 
-1. Load the per-channel config (decrypted `to_addresses`).
-2. Read the live global SMTP snapshot from `settings.global_smtp()` and the per-tenant snapshot from
-   `settings.smtp()`.
-3. If neither layer has SMTP configured (`is_configured()` returns false for both), the notification is
-   skipped with a `tracing::warn!` log.
-4. Otherwise, call `merge_smtp_into_config(&global_smtp, &tenant_smtp, config)` which performs
-   field-by-field inheritance (tenant non-empty fields override global defaults), then call
-   `email_plugin.deliver(&merged_config, &message)`.
+1. Extract global SMTP settings from `settings["global"]` and tenant overrides from
+   `settings["tenant"]`.
+2. Merge field-by-field: tenant non-empty fields override global defaults.
+3. If no SMTP host is configured after merge, return an error.
+4. Merge the resulting SMTP config into the per-channel config and proceed with delivery.
 
-The same merge logic is applied in the `test_channel` route handler
-(`crates/ui/web-api/src/routes/notifications.rs`) and returns HTTP 400 when SMTP is not configured.
+The same merge logic is applied when the email plugin handles the `test_channel` extension
+action.
 
 ### `validate_config` and `mask_config_secrets`
 
@@ -611,7 +659,8 @@ The same merge logic is applied in the `test_channel` route handler
 - **Plugin tests** use standard `#[test]` for sync methods (`validate_config`, `mask_config_secrets`).
   Use `httpmock` for delivery assertions in async tests. Email delivery tests verify error conversion
   against non-routable SMTP hosts (the test waits up to 60 s for connection timeout).
-- **Serde round-trip tests** cover all enum variants and request/response types.
+- **Serde round-trip tests** cover all enum variants (`NotificationEventType`,
+  `NotificationDeliveryStatus`) and request/response types.
 - **Dispatcher testing**: the dispatcher uses fire-and-forget semantics. Test by verifying `notification_log`
   entries in the database after dispatching events.
 - **`start_paused = true`** is only needed for tests that call tokio time APIs. Most notification tests do not
@@ -621,19 +670,23 @@ The same merge logic is applied in the `test_channel` route handler
 
 | File | Purpose |
 | --- | --- |
-| `crates/plugins/infrastructure/core/src/plugin_base.rs` | `PluginBase` trait, `NotificationTransportPlugin` trait |
+| `crates/plugins/infrastructure/core/src/plugin_base.rs` | `PluginBase` trait, `NotificationTransportPlugin` trait (with `channel_type()`, `deliver(config, settings, message)`) |
 | `crates/plugins/notifications/core/src/lib.rs` | `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()` |
+| `crates/plugins/notifications/core/src/list_channels.rs` | Shared `list_channels` helper (behind `extensions` feature) |
 | `crates/plugins/infrastructure/registry/src/registry.rs` | Unified `PluginRegistry` with `with_notifications()` builder; `notification_transport()` lookup |
 | `crates/plugins/notifications/webhook/src/lib.rs` | Webhook plugin (HMAC-SHA256 signing) |
+| `crates/plugins/notifications/webhook/src/extensions.rs` | Webhook extension action handler |
 | `crates/plugins/notifications/telegram/src/lib.rs` | Telegram plugin (inline keyboard) |
+| `crates/plugins/notifications/telegram/src/extensions.rs` | Telegram extension action handler (including callback handling) |
 | `crates/plugins/notifications/email/src/lib.rs` | Email plugin (SMTP via mail-send, multipart/alternative) |
-| `crates/shared/web-api-types/src/notifications.rs` | Shared enums, request/response types, `Validate` impls |
-| `crates/ui/web-api/src/notifications/dispatcher.rs` | Fire-and-forget background dispatcher loop |
+| `crates/plugins/notifications/email/src/extensions.rs` | Email extension action handler (including SMTP settings CRUD) |
+| `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, `Validate` impls |
+| `crates/ui/web-api/src/notifications/dispatcher.rs` | Fire-and-forget generic background dispatcher loop |
 | `crates/ui/web-api/src/notifications/events.rs` | `NotificationEvent`, `NotificationEventDetails`, `ActionParams` |
 | `crates/ui/web-api/src/notifications/message_builder.rs` | Event-to-`DeliveryMessage` translation |
 | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers, `ChannelQueryError`, `RuleQueryError` |
-| `crates/ui/web-api/src/routes/notifications.rs` | REST route handlers, Telegram callback |
-| `crates/ui/web-api/src/routes/notification_extensions.rs` | Generic extension data action handler + SMTP settings (per-tenant and global) |
+| `crates/ui/web-api/src/routes/notifications.rs` | REST route handlers, generic notification callback |
+| `crates/ui/web-api-auth/src/settings_store.rs` | Raw-key settings store functions (`upsert_setting_raw`, `load_settings_by_prefix`, etc.) |
 | `crates/ui/web-api/src/extension_registry.rs` | Extension registry with `Notification` owner variant |
 
 ## Extension framework integration
@@ -643,13 +696,26 @@ tabs without any transport-specific knowledge in the frontend or web API route h
 
 ### Architecture
 
-Each notification plugin defines its own extension manifests and actions via methods on its
-`PluginBase` implementation. The unified `PluginRegistry` delegates to each registered
-notification plugin and aggregates the results through `PluginOps::extension_manifests()`
-and `PluginOps::extension_actions()`.
+Each notification plugin owns its extension definitions **and** action handlers in an
+`extensions.rs` module within the plugin crate. This keeps all transport-specific knowledge
+co-located with the plugin implementation. The unified `PluginRegistry` delegates to each
+registered notification plugin and aggregates the results through
+`PluginOps::extension_manifests()` and `PluginOps::handle_extension_action()`.
 
-This follows the same pattern as the Proxmox plugin: each plugin crate owns its extension
-definitions, keeping transport-specific knowledge co-located with the plugin implementation.
+Each plugin's `extensions.rs` module exports:
+
+- `extension_manifests() -> Vec<ExtensionManifest>` -- UI manifests for channel management
+- `extension_actions() -> Vec<(String, Vec<ActionDef>)>` -- action catalogue
+- `handle_action(ctx, extension_id, action_id, params) -> Result<Value, String>` -- action
+  dispatch including settings CRUD, channel listing, and callback handling
+
+### Shared `list_channels` helper
+
+The `uptrakit-notification-plugin-core` crate provides a shared `list_channels` module (behind
+the `extensions` feature) that all notification plugins use for paginated channel listing with
+config flattening. It queries channels by type, decrypts config, masks secrets via
+`mask_config_secrets()`, and flattens all top-level config keys into the row object. The
+extension manifest's `DataTable` column definitions reference these flattened keys.
 
 ### Extension IDs
 
@@ -666,53 +732,58 @@ Channel extensions share the `tab_group` value `"Notification Channels"`, so the
 sections within a single "Notification Channels" tab on the Settings page rather than as separate
 tabs. The global SMTP extension renders below the existing Global Settings content.
 
-### `ExtensionOwner::Notification`
+### Plugin extension action handlers
 
-The `ExtensionRegistry` supports a `Notification` owner variant alongside `Plugin` and `Service`.
-Notification-owned extensions are stored separately and dispatched to
-`notification_extensions::handle()` in `routes/notification_extensions.rs`.
+Each notification plugin handles its own extension actions. Common patterns:
 
-### Generic config flattening
+**Channel listing** (all plugins): delegates to the shared `list_channels` helper.
 
-The `list` data action in `notification_extensions.rs` queries channels by type, decrypts config,
-masks secrets via `mask_config_secrets()`, and flattens all top-level config keys into the row
-object. The extension manifest's `DataTable` column definitions reference these flattened keys.
-The handler has zero transport-specific knowledge.
+**Settings management** (email plugin): the email plugin handles SMTP settings CRUD
+via extension actions rather than dedicated REST endpoints:
 
-### SMTP settings via extensions
-
-The email extension defines actions for both per-tenant and global SMTP management:
-
-**Per-tenant SMTP** (via the email channel extension):
-
-- `get_smtp` — returns current per-tenant SMTP settings plus `effective_*` fields showing the
+- `get_smtp` -- returns current per-tenant SMTP settings plus `effective_*` fields showing the
   resolved value after global/tenant merge, and `has_global_defaults: bool`
-- `save_smtp` — receives flat params via extension invoke, performs patch-semantic updates on
-  per-tenant settings
+- `save_smtp` -- receives flat params via extension invoke, performs patch-semantic updates on
+  per-tenant settings using raw-key settings store functions (`upsert_setting_raw`)
 
 **Global SMTP defaults** (via the `notifications.email.global_smtp` extension):
 
-- `get_global_smtp` — returns the server-wide SMTP default settings
-- `save_global_smtp` — saves global SMTP defaults to the `global_settings` table
+- `get_global_smtp` -- returns the server-wide SMTP default settings
+- `save_global_smtp` -- saves global SMTP defaults to the `global_settings` table using
+  `upsert_global_setting_raw`
 
-The `configure_smtp` action uses `FormDef.pre_load_action = "get_smtp"` so the frontend
-pre-populates the form with current SMTP values on open.
+**Callback handling** (telegram plugin): the `handle_callback` action verifies the
+`X-Telegram-Bot-Api-Secret-Token` header, parses `callback_query.data` as a UUID action
+token, and updates the notification log entry.
+
+### Raw-key settings store functions
+
+Plugins use raw-key settings store functions instead of `SettingKey` enum variants:
+
+- `upsert_setting_raw(db, tenant_id, key, value)` -- write a tenant setting by string key
+- `upsert_global_setting_raw(db, key, value)` -- write a global setting by string key
+- `load_settings_by_prefix(db, tenant_id, prefix)` -- load all tenant settings with a prefix
+- `load_global_settings_by_prefix(db, prefix)` -- load all global settings with a prefix
+
+This decouples notification plugins from `SettingKey` and allows plugins to define their own
+settings key namespaces (e.g. `smtp.*`, `global_smtp.*`, `telegram.*`).
 
 ### `FormDef.pre_load_action`
 
-A new extension framework field. When set on a form, the frontend invokes this action when
-the form modal opens and uses the response to populate field values. This avoids separate
-REST endpoints for read-before-edit flows.
+When set on a form, the frontend invokes this action when the form modal opens and uses the
+response to populate field values. This avoids separate REST endpoints for read-before-edit
+flows. The `configure_smtp` action uses `FormDef.pre_load_action = "get_smtp"` so the frontend
+pre-populates the form with current SMTP values on open.
 
 ### `SchemaForm` pre-population
 
-The `SchemaForm` component now pre-populates all field types from row data (not just hidden
+The `SchemaForm` component pre-populates all field types from row data (not just hidden
 fields), enabling the edit-channel flow where masked secrets and current values appear in the
 form. The `preLoadAction` prop triggers an extension action invoke on form open.
 
 ### Built-in components
 
-Notification rules and delivery log are **not** extension-powered — they are built-in Svelte
+Notification rules and delivery log are **not** extension-powered -- they are built-in Svelte
 components (`NotificationRulesSettings.svelte`, `NotificationLogView.svelte`) with direct REST
 API calls, following the same pattern as MQTT and OIDC settings.
 

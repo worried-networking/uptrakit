@@ -566,10 +566,11 @@ Plugin architecture under `crates/plugins/notifications/` with `PluginBase` + `N
 - [ ] PagerDuty notification plugin
   - **Category**: Notifications | **Impact**: Low-Medium | **Effort**: Medium
   - PagerDuty Events API v2 integration for incident-based alerting on update failures.
-- [ ] Telegram callback rate limiting
+- [ ] Notification callback rate limiting
   - **Category**: Notifications / Security | **Impact**: Low-Medium | **Effort**: Low
-  - Rate-limit incoming Telegram inline keyboard callbacks to prevent abuse. The callback handler
-    exists but has no per-user or global throttle.
+  - Rate-limit incoming notification callbacks on the generic
+    `POST /api/v1/notifications/callback/{channel_type}/{channel_id}` endpoint to prevent abuse.
+    The callback handler exists but has no per-user or global throttle.
 
 ### Update Windows
 
@@ -658,7 +659,8 @@ ______________________________________________________________________
     update initiation).
 - [ ] Public callback endpoint logging
   - **Category**: Security / Audit | **Impact**: Low-Medium | **Effort**: Low
-  - Log Telegram webhook callback execution (action token verification) in
+  - Log notification callback execution (action token verification) on the generic
+    `POST /api/v1/notifications/callback/{channel_type}/{channel_id}` endpoint in
     `routes/notifications.rs`.
 - [ ] Tamper-evident log storage
   - **Category**: Security / Audit | **Impact**: Medium | **Effort**: High

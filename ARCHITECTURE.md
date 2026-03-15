@@ -233,9 +233,10 @@ via `with_notifications(config)` and accessed through `PluginOps::notification_t
 
 1. Create a new crate under `crates/plugins/notifications/<name>/`.
 2. Implement `PluginBase` + `NotificationTransportPlugin` traits from `uptrakit-plugin-infrastructure-core`.
-3. Register the plugin in `PluginRegistry::with_notifications()` behind `#[cfg(feature = "...")]`.
-4. Add the feature in `crates/plugins/infrastructure/registry/Cargo.toml`.
-5. Add the variant to the `NotificationChannelType` enum.
+3. Add an `extensions.rs` module with `handle_action()` for settings CRUD, channel listing,
+   and callback handling. Use the shared `list_channels` helper from `notification-plugin-core`.
+4. Register the plugin in `PluginRegistry::with_notifications()` behind `#[cfg(feature = "...")]`.
+5. Add the feature in `crates/plugins/infrastructure/registry/Cargo.toml`.
 6. Propagate the feature: `web-api/Cargo.toml` -> `controller/Cargo.toml`.
 
 Supported event types: `update_available`, `update_completed`, `update_failed`, `new_software_discovered`,
@@ -253,10 +254,11 @@ are masked in API responses. Delivery history is recorded in the `notification_l
 The unified plugin registry also provides `ExtensionManifest` and `ActionDef` entries for each enabled
 notification plugin. These are registered as `ExtensionOwner::Notification`
 in the `ExtensionRegistry` at startup, producing per-transport channel management tabs in the
-Settings page. The web API handles notification extension actions generically via
-`notification_extensions::handle()` — it flattens channel config into table rows without any
-transport-specific knowledge. SMTP settings are managed through extension actions (`get_smtp`,
-`save_smtp`) with patch semantics.
+Settings page. Each notification plugin owns its own `extensions.rs` module with a
+`handle_action()` function that handles settings CRUD, channel listing, and callback handling.
+A shared `list_channels` helper in `notification-plugin-core` provides pagination and config
+flattening that all plugins share. SMTP settings are managed through extension actions
+(`get_smtp`, `save_smtp`) within the email plugin using raw-key settings store functions.
 
 Notification rules and delivery log are built-in Svelte components (not extensions) with direct
 REST API calls.

@@ -86,21 +86,18 @@ SMTP responses use this masking pattern.
 
 ### Permission requirements
 
-| Endpoint | Required permission |
-| --- | --- |
-| `GET /api/v1/settings/smtp` | `view_settings` |
-| `PUT /api/v1/settings/smtp` | `manage_settings` |
-
-See [Auth and Authorization](auth-and-authorization.md) for the full permission model.
+SMTP settings are managed via extension actions within the email notification plugin.
+The extension manifests gate access through `ManageSettings` and `ViewSettings` permissions
+on the relevant action definitions.
 
 ### Key files
 
 | File | Purpose |
 | --- | --- |
-| `crates/plugins/notifications/email/src/lib.rs` | `EmailPlugin` — SMTP delivery, config validation |
-| `crates/ui/web-api/src/routes/notification_extensions.rs` | SMTP settings handlers (global and per-tenant) with password encryption |
+| `crates/plugins/notifications/email/src/lib.rs` | `EmailPlugin` -- SMTP delivery, config validation, internal SMTP merge |
+| `crates/plugins/notifications/email/src/extensions.rs` | SMTP settings handlers (global and per-tenant) with password encryption |
 | `crates/ui/web-api/src/settings.rs` | `SmtpSettingsSnapshot` with masked `Debug` impl |
-| `crates/ui/web-api/src/notifications/dispatcher.rs` | `merge_smtp_into_config` — in-memory merge before delivery |
+| `crates/ui/web-api-auth/src/settings_store.rs` | Raw-key settings store functions used by plugins |
 
 ## Webhook URL Validation and Header Blocklist
 
@@ -170,28 +167,33 @@ Recipients should verify this signature to authenticate webhook payloads:
 
 If no `secret` is configured on the channel, the `X-Uptrakit-Signature` header is omitted entirely.
 
-## Telegram Callback Verification
+## Notification Callback Verification
 
-The Telegram callback endpoint (`POST /api/v1/notifications/callback/telegram/{channel_id}`) is public -- it
-is not behind JWT authentication. It is registered outside the authenticated API router so that Telegram's Bot
-API servers can reach it directly.
+The generic callback endpoint (`POST /api/v1/notifications/callback/{channel_type}/{channel_id}`)
+is public -- it is not behind JWT authentication. It is registered outside the authenticated API
+router so that external services (e.g. Telegram's Bot API servers) can reach it directly.
 
-Security is provided by three layered checks:
+The callback endpoint dispatches to the plugin's `handle_callback` extension action, which
+performs channel-type-specific verification. The controller-side route handler provides
+common pre-checks:
 
-1. **`X-Telegram-Bot-Api-Secret-Token` header**: Telegram sends this header with every webhook request. The
-   value must match the `webhook_secret` field in the channel's encrypted config. If the secret is empty or
-   does not match, the request is rejected with HTTP 401.
-2. **Action token validation**: Each actionable notification generates a unique UUIDv7 action token. The
-   callback handler validates:
-   - The token exists in the `notification_log` table.
-   - The token has not already been actioned (`action_taken IS NULL`).
-3. **Channel ID binding**: The `channel_id` in the URL path must resolve to an existing notification channel.
-   If the channel does not exist, the request is rejected with HTTP 404.
+1. **Channel ID binding**: The `channel_id` in the URL path must resolve to an existing
+   notification channel. If the channel does not exist, the request is rejected with HTTP 404.
+2. **Channel type matching**: The `channel_type` in the URL path must match a registered
+   notification plugin. Unsupported types are rejected with HTTP 404.
+3. **Plugin-specific verification**: The plugin's `handle_callback` action performs its own
+   authentication (e.g. the Telegram plugin verifies the `X-Telegram-Bot-Api-Secret-Token`
+   header against the channel's `webhook_secret` config field).
+4. **Action token validation**: Each actionable notification generates a unique UUIDv7 action
+   token. The plugin's callback handler validates that the token exists in the
+   `notification_log` table and has not already been actioned (`action_taken IS NULL`).
 
-If any check fails, the request is rejected. Invalid action tokens or already-actioned tokens return
-HTTP 200 with an empty JSON body to prevent Telegram from retrying.
+If any check fails, the request is rejected. Invalid action tokens or already-actioned tokens
+return HTTP 200 with an empty JSON body to prevent the external service from retrying.
 
-Implementation: `telegram_callback` in `crates/ui/web-api/src/routes/notifications.rs`.
+Implementation: `notification_callback` in `crates/ui/web-api/src/routes/notifications.rs`
+dispatches to the plugin's `handle_callback` action via
+`plugin_ops.handle_extension_action()`.
 
 ## Action Token Lifecycle
 
@@ -236,16 +238,17 @@ All authenticated API queries use `TenantDb`, which automatically filters by the
 Foreign keys from `notification_rules` and `notification_log` reference `notification_channels`, which is
 itself tenant-scoped, so cross-tenant references are structurally impossible for authenticated endpoints.
 
-### Telegram callback and tenant scoping
+### Notification callback and tenant scoping
 
-The Telegram callback endpoint bypasses `TenantDb` -- it loads the channel by primary key directly from the
-database (`notification_channel::Entity::find_by_id`). This is necessary because the endpoint is not
-JWT-authenticated and therefore has no tenant context.
+The generic notification callback endpoint bypasses `TenantDb` -- it loads the channel by primary
+key directly from the database (`notification_channel::Entity::find_by_id`). This is necessary
+because the endpoint is not JWT-authenticated and therefore has no tenant context.
 
 The callback's scope is intentionally minimal:
 
-- It reads the channel's encrypted config to verify the webhook secret.
-- It reads and updates a single `notification_log` entry by action token.
+- It reads the channel's encrypted config to pass to the plugin's `handle_callback` action.
+- The plugin verifies the request and may read/update a single `notification_log` entry by
+  action token.
 - It does **not** return any tenant data, channel metadata, or log content in the response body.
 
 The channel itself is tenant-bound (its `tenant_id` foreign key references the `tenants` table), so a valid
@@ -253,13 +256,14 @@ callback can only affect log entries belonging to that channel's tenant.
 
 ## Rate Limiting Considerations
 
-The Telegram callback endpoint is currently **not** rate-limited. Because it is publicly reachable, it is
-susceptible to brute-force attempts against action tokens or denial-of-service via high request volume.
+The notification callback endpoint is currently **not** rate-limited. Because it is publicly
+reachable, it is susceptible to brute-force attempts against action tokens or denial-of-service
+via high request volume.
 
 Mitigating factors:
 
 - Action tokens are UUIDv7 (122 bits of entropy in the random portion), making brute-force infeasible.
-- The webhook secret check rejects unauthorized requests before any database write occurs.
+- Plugin-specific secret verification rejects unauthorized requests before any database write occurs.
 - Invalid or already-actioned tokens return immediately without side effects.
 
 **Future work**: Add per-IP rate limiting to the callback endpoint, similar to the WebSocket rate limiter, to
@@ -271,13 +275,15 @@ provide defense-in-depth against abuse.
 | --- | --- |
 | `crates/plugins/infrastructure/core/src/plugin_base.rs` | `NotificationTransportPlugin` trait with `#[must_use]` on `mask_config_secrets` |
 | `crates/plugins/notifications/webhook/src/lib.rs` | Webhook plugin: HMAC-SHA256 signing, secret masking |
+| `crates/plugins/notifications/webhook/src/extensions.rs` | Webhook extension action handler |
 | `crates/plugins/notifications/telegram/src/lib.rs` | Telegram plugin: bot token masking, webhook secret masking |
+| `crates/plugins/notifications/telegram/src/extensions.rs` | Telegram extension action handler (including callback verification) |
 | `crates/plugins/notifications/email/src/lib.rs` | Email plugin: SMTP delivery, no per-channel secrets |
-| `crates/ui/web-api/src/routes/settings_smtp.rs` | Global SMTP settings API: password encrypted at rest, `has_password` masking |
+| `crates/plugins/notifications/email/src/extensions.rs` | Email extension action handler (SMTP settings with password encryption) |
 | `crates/ui/web-api/src/settings.rs` | `SmtpSettingsSnapshot`: masked `Debug`, decrypted password in memory only |
 | `crates/plugins/infrastructure/registry/src/registry.rs` | Unified `PluginRegistry` with `notification_transport()` for channel type dispatch |
-| `crates/ui/web-api/src/routes/notifications.rs` | API route handlers including `telegram_callback` |
-| `crates/ui/web-api/src/notifications/dispatcher.rs` | Background dispatcher: rule matching, action token generation, delivery |
+| `crates/ui/web-api/src/routes/notifications.rs` | API route handlers including generic `notification_callback` |
+| `crates/ui/web-api/src/notifications/dispatcher.rs` | Background dispatcher: rule matching, action token generation, generic delivery |
 | `crates/shared/db/src/entity/notification_channel.rs` | `notification_channels` entity with `EncryptedString` config |
 | `crates/shared/db/src/entity/notification_log.rs` | `notification_log` entity with `action_token` and `action_taken` |
 | `crates/shared/db/src/entity/notification_rule.rs` | `notification_rules` entity with scope filters |

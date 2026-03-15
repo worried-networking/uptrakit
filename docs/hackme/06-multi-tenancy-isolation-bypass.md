@@ -20,16 +20,13 @@
 
 Specific vectors in the current architecture:
 
-- **Telegram callback endpoint.** The callback handler
-  (`POST /api/v1/notifications/callback/telegram/{channel_id}`) bypasses `TenantDb`
+- **Notification callback endpoint.** The generic callback handler
+  (`POST /api/v1/notifications/callback/{channel_type}/{channel_id}`) bypasses `TenantDb`
   and loads channels by primary key directly. It does not enforce tenant scoping
-  because the endpoint is unauthenticated (Telegram servers call it).
+  because the endpoint is unauthenticated (external services like Telegram call it).
 - **Action token lookup.** `find_log_by_action_token()` queries `notification_log`
   directly without a `tenant_id` filter, using only the action token UUID. A valid
   action token grants access to the log entry regardless of tenant.
-- **SMTP settings.** The SMTP settings handlers use `state.default_tenant_id`
-  directly, not the request's `TenantContext`. In a multi-tenant deployment, all
-  tenants would share the same SMTP configuration.
 - **Global settings.** Thirteen setting keys are stored in the global `global_settings`
   table (no `tenant_id` column). Changes to these settings affect all tenants.
 

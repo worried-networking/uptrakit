@@ -41,7 +41,7 @@ model.
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
-| POST | `/api/v1/notifications/callback/telegram/{channel_id}` | `X-Telegram-Bot-Api-Secret-Token` header | Telegram bot callback |
+| POST | `/api/v1/notifications/callback/{channel_type}/{channel_id}` | Plugin-specific (e.g. `X-Telegram-Bot-Api-Secret-Token` header for Telegram) | Generic notification callback |
 
 ## Channel Endpoints
 
@@ -70,7 +70,7 @@ implementation before storage. Config secrets are encrypted at rest.
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `name` | string | Yes | -- | Human-readable label. Must not be empty or whitespace-only. |
-| `channel_type` | string | Yes | -- | `"webhook"` or `"telegram"`. |
+| `channel_type` | string | Yes | -- | Channel type identifier (e.g. `"webhook"`, `"telegram"`, `"email"`). Must be one of the types returned by `notification_supported_types()`. |
 | `config` | object | Yes | -- | Channel-specific configuration (see [Channel Config](#channel-config)). Must be a JSON object. |
 | `enabled` | bool | No | `true` | Whether the channel is active. |
 
@@ -401,30 +401,27 @@ List notification delivery log entries for the tenant, ordered by creation date 
 }
 ```
 
-## Telegram Callback Endpoint
+## Notification Callback Endpoint
 
-### `POST /api/v1/notifications/callback/telegram/{channel_id}`
+### `POST /api/v1/notifications/callback/{channel_type}/{channel_id}`
 
-Public endpoint called by Telegram's Bot API when a user presses an inline keyboard button
-on a notification message. This endpoint is **not** authenticated via JWT. Instead, it
-verifies the `X-Telegram-Bot-Api-Secret-Token` header against the channel's `webhook_secret`
-config field.
+Generic public endpoint for notification callback handling. This endpoint is **not**
+authenticated via JWT. It dispatches to the plugin's `handle_callback` extension action,
+which performs channel-type-specific verification and processing.
 
-**Path parameters**: `channel_id` -- the notification channel UUID.
+**Path parameters**:
 
-**Headers**:
+- `channel_type` -- the notification channel type (e.g. `"telegram"`).
+- `channel_id` -- the notification channel UUID.
 
-| Header | Required | Description |
-| --- | --- | --- |
-| `X-Telegram-Bot-Api-Secret-Token` | Yes | Must match the channel's `webhook_secret` config value |
+**Request body and headers**: channel-type-specific. The raw request body and headers
+are passed to the plugin's `handle_callback` action for verification and processing.
 
-**Request body**: raw Telegram `Update` JSON (sent by the Telegram Bot API). The handler
-extracts `callback_query.data` which must contain a valid UUID action token.
-
-**Behavior**:
+**Telegram callback behavior** (handled by the Telegram plugin's `handle_callback` action):
 
 1. Loads the channel from the database and decrypts the config.
-2. Verifies the `X-Telegram-Bot-Api-Secret-Token` header against `webhook_secret`.
+2. Verifies the `X-Telegram-Bot-Api-Secret-Token` header against the channel's
+   `webhook_secret` config value.
 3. Parses the `callback_query.data` field as a UUID action token.
 4. Looks up the notification log entry by action token.
 5. If the action has not already been taken, sets `action_taken = "triggered"`.
@@ -432,9 +429,9 @@ extracts `callback_query.data` which must contain a valid UUID action token.
 
 **Error responses**:
 
-- `401` -- invalid or missing secret token.
+- `401` -- invalid or missing secret (plugin-specific verification failed).
 - `400` -- invalid request body.
-- `404` -- channel not found.
+- `404` -- channel not found or unsupported channel type.
 
 ## Enums
 
@@ -454,13 +451,18 @@ notifications:
 
 ### Channel Types
 
-The `NotificationChannelType` enum (`#[non_exhaustive]`) defines supported delivery
-mechanisms:
+Channel types are plain strings validated at runtime against the set of registered
+notification plugins via `notification_supported_types()`. There is no
+`NotificationChannelType` enum -- this allows new notification plugins to be added
+without modifying shared type definitions.
+
+Currently supported types:
 
 | Value | Description |
 | --- | --- |
 | `webhook` | HTTP POST with JSON payload and optional HMAC-SHA256 signature |
 | `telegram` | Telegram Bot API `sendMessage` with HTML formatting and inline keyboards |
+| `email` | SMTP email with multipart/alternative (plain text + HTML) |
 
 ### Delivery Statuses
 
@@ -567,9 +569,9 @@ Types are defined in `crates/shared/web-api-types/src/notifications.rs`:
 
 | Type | Fields |
 | --- | --- |
-| `CreateNotificationChannelRequest` | `name` (String), `channel_type` (NotificationChannelType), `config` (JSON object), `enabled` (bool, default `true`) |
+| `CreateNotificationChannelRequest` | `name` (String), `channel_type` (String), `config` (JSON object), `enabled` (bool, default `true`) |
 | `UpdateNotificationChannelRequest` | `name?` (String), `config?` (JSON object), `enabled?` (bool) |
-| `NotificationChannelResponse` | `id` (Uuid), `name` (String), `channel_type` (NotificationChannelType), `config` (JSON, masked), `enabled` (bool), `created_at` (OffsetDateTime), `updated_at` (OffsetDateTime) |
+| `NotificationChannelResponse` | `id` (Uuid), `name` (String), `channel_type` (String), `config` (JSON, masked), `enabled` (bool), `created_at` (OffsetDateTime), `updated_at` (OffsetDateTime) |
 | `CreateNotificationRuleRequest` | `channel_id` (Uuid), `event_type` (NotificationEventType), `host_id?` (Uuid), `software_item_id?` (Uuid), `plugin_type?` (String), `enabled` (bool, default `true`) |
 | `UpdateNotificationRuleRequest` | `event_type?` (NotificationEventType), `host_id?` (Uuid), `software_item_id?` (Uuid), `plugin_type?` (String), `enabled?` (bool) |
 | `NotificationRuleResponse` | `id` (Uuid), `channel_id` (Uuid), `event_type` (NotificationEventType), `host_id?` (Uuid), `software_item_id?` (Uuid), `plugin_type?` (String), `enabled` (bool), `created_at` (OffsetDateTime) |
@@ -580,13 +582,18 @@ Types are defined in `crates/shared/web-api-types/src/notifications.rs`:
 
 | File | Purpose |
 | --- | --- |
-| `crates/ui/web-api/src/routes/notifications.rs` | Route handlers (channels, rules, log, Telegram callback) |
+| `crates/ui/web-api/src/routes/notifications.rs` | Route handlers (channels, rules, log, generic notification callback) |
 | `crates/ui/web-api-queries/src/queries/notifications.rs` | Database query helpers and error types |
-| `crates/shared/web-api-types/src/notifications.rs` | Request/response types and enum definitions |
+| `crates/shared/web-api-types/src/notifications.rs` | Request/response types (channel_type is `String`, not an enum) |
 | `crates/plugins/infrastructure/core/src/plugin_base.rs` | `PluginBase` and `NotificationTransportPlugin` traits |
 | `crates/plugins/notifications/core/src/lib.rs` | `DeliveryMessage`, `NotificationPluginError`, `escape_html()` |
+| `crates/plugins/notifications/core/src/list_channels.rs` | Shared `list_channels` helper for extension actions |
 | `crates/plugins/notifications/webhook/src/lib.rs` | Webhook plugin implementation |
+| `crates/plugins/notifications/webhook/src/extensions.rs` | Webhook extension action handler |
 | `crates/plugins/notifications/telegram/src/lib.rs` | Telegram plugin implementation |
+| `crates/plugins/notifications/telegram/src/extensions.rs` | Telegram extension action handler (including callback) |
+| `crates/plugins/notifications/email/src/lib.rs` | Email plugin implementation |
+| `crates/plugins/notifications/email/src/extensions.rs` | Email extension action handler (including SMTP settings) |
 | `crates/shared/db/src/entity/notification_channel.rs` | SeaORM entity for `notification_channels` table |
 
 ## Related Documentation
