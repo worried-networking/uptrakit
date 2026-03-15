@@ -11,6 +11,7 @@ pub fn build_delivery_message(
     event: &NotificationEvent,
     action_token: Option<Uuid>,
     callback_base_url: &str,
+    channel_type: &str,
     channel_id: Uuid,
 ) -> DeliveryMessage {
     let (title, body, body_html) = build_content(event);
@@ -18,8 +19,9 @@ pub fn build_delivery_message(
 
     let actions = if let (Some(params), Some(token)) = (event.action_params(), action_token) {
         let callback_url = format!(
-            "{}/api/v1/notifications/callback/telegram/{}",
+            "{}/api/v1/notifications/callback/{}/{}",
             callback_base_url.trim_end_matches('/'),
+            channel_type,
             channel_id
         );
         vec![MessageAction::new(
@@ -199,7 +201,8 @@ mod tests {
             },
         };
 
-        let msg = build_delivery_message(&event, None, "https://example.com", Uuid::nil());
+        let msg =
+            build_delivery_message(&event, None, "https://example.com", "telegram", Uuid::nil());
 
         // body_html must not contain raw HTML tags from user input
         let html = msg.body_html.as_deref().unwrap();
@@ -244,6 +247,7 @@ mod tests {
             &event,
             Some(Uuid::nil()),
             "https://example.com",
+            "telegram",
             Uuid::nil(),
         );
 
@@ -267,7 +271,8 @@ mod tests {
             },
         };
 
-        let msg = build_delivery_message(&event, None, "https://example.com", Uuid::nil());
+        let msg =
+            build_delivery_message(&event, None, "https://example.com", "telegram", Uuid::nil());
         assert_eq!(msg.title, "CA Certificate Rotated");
         assert!(msg.actions.is_empty());
     }

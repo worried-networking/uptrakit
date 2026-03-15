@@ -576,24 +576,23 @@ pub async fn list_log(
 }
 
 // ---------------------------------------------------------------------------
-// Telegram callback (public endpoint)
+// Generic notification callback (public endpoint)
 // ---------------------------------------------------------------------------
 
-/// Telegram bot callback for interactive notification actions.
+/// Generic notification callback for interactive notification actions.
 ///
-/// This endpoint is called by Telegram's Bot API when a user presses an
-/// inline keyboard button. It is not authenticated via JWT but verified
-/// via the `X-Telegram-Bot-Api-Secret-Token` header against the channel's
-/// `webhook_secret` config field.
+/// This endpoint is called by external services (e.g., Telegram Bot API)
+/// when a user interacts with a notification. Not authenticated via JWT;
+/// verification is handled by each plugin's `handle_callback` action.
 #[tracing::instrument(skip_all)]
-pub async fn telegram_callback(
+pub async fn notification_callback(
     State(state): State<Arc<AppState>>,
-    Path(channel_id): Path<Uuid>,
+    Path((channel_type, channel_id)): Path<(String, Uuid)>,
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
-    use uptrakit_shared_db::entity::{notification_channel, notification_log};
+    use sea_orm::EntityTrait;
+    use uptrakit_shared_db::entity::notification_channel;
 
     // Load channel directly from DB (no TenantDb — this is a public endpoint)
     let channel_model = match notification_channel::Entity::find_by_id(channel_id)
@@ -603,17 +602,22 @@ pub async fn telegram_callback(
         Ok(Some(ch)) => ch,
         Ok(None) => return error_response(StatusCode::NOT_FOUND, "Channel not found"),
         Err(e) => {
-            tracing::error!(error = ?e, "failed to load channel for telegram callback");
+            tracing::error!(error = ?e, "failed to load channel for notification callback");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
+
+    // Verify channel type matches the URL path
+    if channel_model.channel_type != channel_type {
+        return error_response(StatusCode::NOT_FOUND, "Channel not found");
+    }
 
     // Parse channel config
     let config_json: serde_json::Value =
         match serde_json::from_str(channel_model.config.expose_secret()) {
             Ok(v) => v,
             Err(e) => {
-                tracing::error!(error = ?e, "failed to parse channel config for telegram callback");
+                tracing::error!(error = ?e, "failed to parse channel config for callback");
                 return error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to parse channel config",
@@ -621,86 +625,47 @@ pub async fn telegram_callback(
             }
         };
 
-    // Verify secret token using constant-time comparison to prevent timing attacks.
-    // Both secrets are hashed to SHA-256 so ct_eq always compares equal-length arrays,
-    // eliminating any length-based information leak.
-    use sha2::{Digest, Sha256};
-    use subtle::ConstantTimeEq;
-
-    let expected_secret = config_json
-        .get("webhook_secret")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-
-    let provided_secret = headers
-        .get("x-telegram-bot-api-secret-token")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-
-    let expected_hash: [u8; 32] = Sha256::digest(expected_secret.as_bytes()).into();
-    let provided_hash: [u8; 32] = Sha256::digest(provided_secret.as_bytes()).into();
-    let secrets_match: bool = expected_hash.ct_eq(&provided_hash).into();
-
-    if expected_secret.is_empty() || !secrets_match {
-        return error_response(StatusCode::UNAUTHORIZED, "Invalid secret token");
+    // Serialize headers into a JSON map
+    let mut headers_map = serde_json::Map::new();
+    for (name, value) in &headers {
+        if let Ok(v) = value.to_str() {
+            headers_map.insert(name.as_str().to_string(), serde_json::json!(v));
+        }
     }
 
-    // Parse Telegram Update body
-    let update: serde_json::Value = match serde_json::from_slice(&body) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(error = ?e, "failed to parse Telegram update body");
-            return error_response(StatusCode::BAD_REQUEST, "Invalid request body");
-        }
+    // Parse body as JSON if possible, otherwise pass as string
+    let body_value: serde_json::Value = serde_json::from_slice(&body)
+        .unwrap_or_else(|_| serde_json::json!(String::from_utf8_lossy(&body).to_string()));
+
+    let params = serde_json::json!({
+        "channel_config": config_json,
+        "headers": headers_map,
+        "body": body_value,
+    });
+
+    // Delegate to the plugin's extension action handler
+    let extension_id = format!("notifications.{channel_type}");
+    let ctx = uptrakit_plugin_infrastructure_registry::ExtensionActionContext {
+        db: state.db(),
+        tenant_id: Some(channel_model.tenant_id),
+        caller_user_id: None,
     };
 
-    // Extract callback_query.data (action token UUID)
-    let action_token_str = match update
-        .get("callback_query")
-        .and_then(|cq| cq.get("data"))
-        .and_then(serde_json::Value::as_str)
+    match state
+        .plugin_ops
+        .handle_extension_action(&ctx, &extension_id, "handle_callback", params)
+        .await
     {
-        Some(s) => s,
-        None => {
-            // Not a callback query we care about — acknowledge silently
-            return (StatusCode::OK, Json(serde_json::json!({}))).into_response();
-        }
-    };
-
-    let action_token: Uuid = match action_token_str.parse() {
-        Ok(id) => id,
-        Err(_) => {
-            tracing::warn!(action_token = %action_token_str, "invalid action token UUID in Telegram callback");
-            return (StatusCode::OK, Json(serde_json::json!({}))).into_response();
-        }
-    };
-
-    // Look up notification log by action token
-    let log_entry = match notif_queries::find_log_by_action_token(state.db(), action_token).await {
-        Ok(Some(entry)) => entry,
-        Ok(None) => {
-            tracing::warn!(%action_token, "no notification log found for action token");
-            return (StatusCode::OK, Json(serde_json::json!({}))).into_response();
-        }
+        Ok(result) => (StatusCode::OK, Json(result)).into_response(),
         Err(e) => {
-            tracing::error!(error = ?e, %action_token, "failed to look up action token");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            if e.contains("Unauthorized") || e.contains("Invalid secret") {
+                error_response(StatusCode::UNAUTHORIZED, e)
+            } else if e.contains("Bad request") || e.contains("Invalid request") {
+                error_response(StatusCode::BAD_REQUEST, e)
+            } else {
+                tracing::error!(error = %e, "notification callback failed");
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
         }
-    };
-
-    // If already actioned, return 200 with empty JSON
-    if log_entry.action_taken.is_some() {
-        return (StatusCode::OK, Json(serde_json::json!({}))).into_response();
     }
-
-    // Update action_taken
-    let mut active: notification_log::ActiveModel = log_entry.into();
-    active.action_taken = Set(Some("triggered".to_string()));
-
-    if let Err(e) = active.update(state.db()).await {
-        tracing::error!(error = ?e, "failed to update notification log action_taken");
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-    }
-
-    (StatusCode::OK, Json(serde_json::json!({}))).into_response()
 }

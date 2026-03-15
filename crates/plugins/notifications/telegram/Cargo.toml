@@ -16,6 +16,8 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 uptrakit-extension-framework = { workspace = true }
 sea-orm = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }
 uptrakit-notification-plugin-core = { workspace = true, features = ["extensions"] }
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
 uptrakit-shared-db = { workspace = true }

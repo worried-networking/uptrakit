@@ -829,8 +829,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     let mut router = api_router
         .route(
-            "/api/v1/notifications/callback/telegram/{channel_id}",
-            axum::routing::post(crate::routes::notifications::telegram_callback),
+            "/api/v1/notifications/callback/{channel_type}/{channel_id}",
+            axum::routing::post(crate::routes::notifications::notification_callback),
         )
         .route(
             "/api/v1/ws/service",

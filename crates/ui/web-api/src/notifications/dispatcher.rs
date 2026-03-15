@@ -249,6 +249,7 @@ async fn dispatch_loop(
                 &event,
                 action_token,
                 &callback_base_url,
+                &channel_model.channel_type,
                 channel_model.id,
             );
 
