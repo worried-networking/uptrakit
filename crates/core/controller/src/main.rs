@@ -367,17 +367,16 @@ async fn run(args: cli::Args) -> Result<()> {
     // Audit log backend and filter wiring.
     let (audit_filter, audit_dispatcher) = build_audit_logger(&args, &db_conn).await?;
 
-    // Seed the extension registry with plugin-provided manifests (including
-    // notification plugin extensions aggregated by the unified plugin_ops).
-    let extension_manifests = plugin_ops.extension_manifests();
-    let extension_actions = plugin_ops.extension_actions();
+    // Seed the extension registry with plugin-provided manifests paired with
+    // their per-plugin action catalogues (including notification plugin
+    // extensions aggregated by the unified plugin_ops). Using the paired form
+    // ensures each extension resolves only its own actions so that
+    // `resolveAction("create")` on notifications.telegram does not return
+    // webhook's "Add Webhook" action.
+    let extension_entries = plugin_ops.extension_manifests_and_actions();
 
-    let extension_registry = Arc::new(
-        uptrakit_web_api::extension_registry::ExtensionRegistry::new(
-            extension_manifests,
-            extension_actions,
-        ),
-    );
+    let extension_registry =
+        Arc::new(uptrakit_web_api::extension_registry::ExtensionRegistry::new(extension_entries));
 
     let builder = AppState::builder()
         .ca_snapshot(ca_rx)

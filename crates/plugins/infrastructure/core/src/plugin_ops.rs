@@ -136,6 +136,34 @@ pub trait PluginOps: Send + Sync + 'static {
         vec![]
     }
 
+    /// Returns extension manifests paired with their associated action catalogues.
+    ///
+    /// The default implementation pairs every manifest with the full
+    /// [`extension_actions`](Self::extension_actions) list. Override (as
+    /// `PluginRegistry` does) to provide per-manifest action scoping when
+    /// multiple independent plugins contribute to the same registry.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // A registry with two plugins: proxmox (infra) and webhook (notification).
+    /// // Each gets its own action list so `resolveAction("create")` on the
+    /// // webhook extension does not accidentally return a proxmox action.
+    /// let pairs = plugin_ops.extension_manifests_and_actions();
+    /// ```
+    fn extension_manifests_and_actions(
+        &self,
+    ) -> Vec<(
+        uptrakit_extension_framework::ExtensionManifest,
+        Vec<uptrakit_extension_framework::ActionDef>,
+    )> {
+        let actions = self.extension_actions();
+        self.extension_manifests()
+            .into_iter()
+            .map(|m| (m, actions.clone()))
+            .collect()
+    }
+
     /// Handle an extension action invocation for a plugin-backed extension.
     ///
     /// The controller calls this when an action is invoked on an extension

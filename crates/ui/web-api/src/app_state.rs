@@ -554,7 +554,7 @@ impl AppStateBuilder {
             }),
             extension_registry: self
                 .extension_registry
-                .unwrap_or_else(|| Arc::new(ExtensionRegistry::new(vec![], vec![]))),
+                .unwrap_or_else(|| Arc::new(ExtensionRegistry::new(vec![]))),
             extension_proxy: self
                 .extension_proxy
                 .unwrap_or_else(|| Arc::new(ExtensionProxy::new())),

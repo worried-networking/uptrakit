@@ -199,6 +199,41 @@ impl PluginOps for PluginRegistry {
         actions
     }
 
+    fn extension_manifests_and_actions(
+        &self,
+    ) -> Vec<(
+        uptrakit_extension_framework::ExtensionManifest,
+        Vec<uptrakit_extension_framework::ActionDef>,
+    )> {
+        let mut result = Vec::new();
+
+        // Proxmox plugin: pair each proxmox manifest with proxmox-specific actions.
+        let proxmox_manifests =
+            uptrakit_plugin_infrastructure_proxmox::extensions::extension_manifests();
+        let proxmox_actions =
+            uptrakit_plugin_infrastructure_proxmox::extensions::extension_actions();
+        for manifest in proxmox_manifests {
+            result.push((manifest, proxmox_actions.clone()));
+        }
+
+        // Notification plugins: pair each plugin's manifests with that plugin's
+        // own actions so that `resolveAction("create")` on one notification
+        // extension (e.g. telegram) does not return another plugin's action
+        // (e.g. webhook's "Add Webhook").
+        #[cfg(feature = "notifications")]
+        {
+            for plugin in self.notification_plugins.values() {
+                let plugin_manifests = plugin.extension_manifests();
+                let plugin_actions = plugin.extension_actions();
+                for manifest in plugin_manifests {
+                    result.push((manifest, plugin_actions.clone()));
+                }
+            }
+        }
+
+        result
+    }
+
     fn handle_extension_action<'a>(
         &'a self,
         ctx: &'a ExtensionActionContext<'a>,
