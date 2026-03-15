@@ -212,13 +212,15 @@ fn host_info_panel_manifest() -> ExtensionManifest {
 /// Dispatches based on `(extension_id, action_id)` to the appropriate handler.
 #[tracing::instrument(skip_all, fields(extension_id, action_id))]
 pub async fn handle_action(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    ctx: &uptrakit_plugin_infrastructure_core::ExtensionActionContext<'_>,
     extension_id: &str,
     action_id: &str,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
     tracing::debug!("dispatching Proxmox extension action");
+
+    let db = ctx.db;
+    let tenant_id = ctx.tenant_id;
 
     let result = match (extension_id, action_id) {
         ("proxmox.hosts", "list") => handle_list(db, tenant_id, params).await,

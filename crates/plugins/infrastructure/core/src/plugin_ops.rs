@@ -252,4 +252,6 @@ pub struct ExtensionActionContext<'a> {
     pub db: &'a sea_orm::DatabaseConnection,
     /// Tenant ID from the authenticated request (if available).
     pub tenant_id: Option<uuid::Uuid>,
+    /// User ID of the caller, for actions that need it (e.g. sending test emails).
+    pub caller_user_id: Option<uuid::Uuid>,
 }

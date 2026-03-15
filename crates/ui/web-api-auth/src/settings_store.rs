@@ -314,6 +314,107 @@ pub async fn insert_global_setting_if_absent(
     }
 }
 
+// ── Raw-key settings (bypass SettingKey validation) ──────────────────────────
+//
+// These functions accept raw `&str` keys, allowing plugin crates to manage
+// their own settings without adding variants to the `SettingKey` enum.
+// Version counters are bumped as usual so cross-instance invalidation works.
+
+/// Insert or update a per-tenant setting using a raw key string.
+pub async fn upsert_setting_raw(
+    db: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    key: &str,
+    value: serde_json::Value,
+) -> Result<()> {
+    let now = OffsetDateTime::now_utc();
+
+    let model = setting::ActiveModel {
+        tenant_id: Set(tenant_id),
+        key: Set(key.to_string()),
+        value: Set(value),
+        updated_at: Set(now),
+    };
+
+    Setting::insert(model)
+        .on_conflict(
+            OnConflict::columns([setting::Column::TenantId, setting::Column::Key])
+                .update_columns([setting::Column::Value, setting::Column::UpdatedAt])
+                .to_owned(),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+
+    if let Err(e) = bump_settings_version(db, tenant_id).await {
+        tracing::warn!(error = ?e, key, "failed to bump settings version counter");
+    }
+
+    Ok(())
+}
+
+/// Insert or update a global setting using a raw key string.
+pub async fn upsert_global_setting_raw(
+    db: &impl ConnectionTrait,
+    key: &str,
+    value: serde_json::Value,
+) -> Result<()> {
+    let now = OffsetDateTime::now_utc();
+
+    let model = global_setting::ActiveModel {
+        key: Set(key.to_string()),
+        value: Set(value),
+        updated_at: Set(now),
+    };
+
+    GlobalSetting::insert(model)
+        .on_conflict(
+            OnConflict::column(global_setting::Column::Key)
+                .update_columns([
+                    global_setting::Column::Value,
+                    global_setting::Column::UpdatedAt,
+                ])
+                .to_owned(),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+
+    if let Err(e) = bump_global_settings_version(db).await {
+        tracing::warn!(error = ?e, key, "failed to bump global settings version counter");
+    }
+
+    Ok(())
+}
+
+/// Load all per-tenant settings whose key starts with `prefix`.
+pub async fn load_settings_by_prefix(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    prefix: &str,
+) -> Result<HashMap<String, serde_json::Value>> {
+    let rows = Setting::find()
+        .filter(setting::Column::TenantId.eq(tenant_id))
+        .filter(setting::Column::Key.starts_with(prefix))
+        .all(db)
+        .await
+        .context_to()?;
+    Ok(rows.into_iter().map(|r| (r.key, r.value)).collect())
+}
+
+/// Load all global settings whose key starts with `prefix`.
+pub async fn load_global_settings_by_prefix(
+    db: &DatabaseConnection,
+    prefix: &str,
+) -> Result<HashMap<String, serde_json::Value>> {
+    let rows = GlobalSetting::find()
+        .filter(global_setting::Column::Key.starts_with(prefix))
+        .all(db)
+        .await
+        .context_to()?;
+    Ok(rows.into_iter().map(|r| (r.key, r.value)).collect())
+}
+
 // ── Version tracking ─────────────────────────────────────────────────────────
 
 /// Bump the per-tenant settings version counter after a per-tenant settings write.

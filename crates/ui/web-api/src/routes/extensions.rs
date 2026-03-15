@@ -194,6 +194,7 @@ pub async fn invoke_action(
             let ctx = ExtensionActionContext {
                 db: state.db(),
                 tenant_id: Some(tenant_ctx.tenant_id),
+                caller_user_id: Some(auth_user.user_id),
             };
             return match state
                 .plugin_ops

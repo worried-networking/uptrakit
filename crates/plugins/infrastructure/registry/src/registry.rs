@@ -508,8 +508,7 @@ macro_rules! register_plugins {
                     $($(
                         if extension_id.starts_with($ext_prefix) {
                             return $ext_handler(
-                                ctx.db,
-                                ctx.tenant_id,
+                                ctx,
                                 extension_id,
                                 action_id,
                                 params,

@@ -525,6 +525,7 @@ impl MessageProcessor {
                 let ctx = uptrakit_plugin_infrastructure_registry::ExtensionActionContext {
                     db: self.state.db(),
                     tenant_id: self.service_tenant_id,
+                    caller_user_id: None,
                 };
                 match self
                     .state
