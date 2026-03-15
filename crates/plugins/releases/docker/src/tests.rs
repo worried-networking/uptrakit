@@ -1148,3 +1148,83 @@ fn effective_dial_stdio_command_auto_defaults_to_docker() {
         "docker system dial-stdio"
     );
 }
+
+// ── detect_installed_version — digest consistency with fetch_releases ─────
+//
+// These tests guard against the regression where platform metadata available
+// in the local Docker inspect result caused detect_installed_version to call
+// get_platform_manifest_digest and return a platform-specific manifest digest,
+// while fetch_releases (without an explicit platform) returned the image-index
+// digest. The two digests can never be equal, producing a permanent spurious
+// "update available".
+//
+// The fix: do NOT auto-detect the platform from the local image's os/arch
+// fields. Only use config.platform when it is explicitly set.
+
+/// When no platform is configured and the local image has os/arch metadata,
+/// detect_installed_version must return the local inspect digest (image-index
+/// digest from RepoDigests) — not a platform-specific manifest digest fetched
+/// from the registry. This keeps installed_version in the same digest namespace
+/// as latest_version produced by fetch_releases (which also uses the image-index
+/// digest when no platform is configured).
+#[tokio::test]
+async fn detect_installed_version_returns_local_digest_not_platform_digest_when_no_platform_config()
+{
+    let local_digest =
+        "sha256:7c1b20687bd3016e61b4a67f6b232c10881bc979ac8ed12cbda8e0b99fe4b5ab".to_string();
+    // Simulate a multi-arch image whose inspect result carries os/arch metadata.
+    // Previously this triggered the auto-detection path which called
+    // get_platform_manifest_digest and returned a *different* digest.
+    let mock = Arc::new(MockDockerClient {
+        inspect_result: Some(local_digest.clone()),
+        inspect_os: Some("linux".to_string()),
+        inspect_architecture: Some("amd64".to_string()),
+        ..Default::default()
+    });
+    // No platform in config — mirrors the case where the user manually added
+    // a Docker item without going through autodiscovery (which stores the
+    // detected platform in the config).
+    let plugin =
+        DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+
+    let result = plugin
+        .detect_installed_version("traefik:v2.11")
+        .await
+        .unwrap();
+
+    // Must return the digest from docker inspect (image-index digest from
+    // RepoDigests), NOT a platform-specific manifest digest from the registry.
+    assert_eq!(
+        result.map(|v| v.to_string()).as_deref(),
+        Some(&*local_digest)
+    );
+}
+
+/// Same regression guard for the batch path.
+#[tokio::test]
+async fn batch_detect_returns_local_digest_not_platform_digest_when_no_platform_config() {
+    let local_digest =
+        "sha256:7c1b20687bd3016e61b4a67f6b232c10881bc979ac8ed12cbda8e0b99fe4b5ab".to_string();
+    let mock = Arc::new(MockDockerClient {
+        inspect_result: Some(local_digest.clone()),
+        inspect_os: Some("linux".to_string()),
+        inspect_architecture: Some("amd64".to_string()),
+        ..Default::default()
+    });
+    let plugin =
+        DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+
+    let items = vec![BatchDetectItem::new("traefik:v2.11".to_string())];
+    let results = plugin.batch_detect_installed_version(&items).await.unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results[0]
+            .installed_version
+            .as_ref()
+            .map(|v| v.to_string())
+            .as_deref(),
+        Some(&*local_digest)
+    );
+    assert!(results[0].error.is_none());
+}

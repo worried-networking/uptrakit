@@ -905,6 +905,14 @@ pub(crate) struct MockDockerClient {
     /// advance virtual time and verify that the caller's timeout fires.
     pub ping_should_hang: bool,
     pub inspect_result: Option<String>, // Some(digest) or None
+    /// Optional OS string returned in `LocalImageDigest.os` (e.g. `"linux"`).
+    /// Used by tests that need platform metadata without making real registry calls.
+    pub inspect_os: Option<String>,
+    /// Optional architecture string returned in `LocalImageDigest.architecture`
+    /// (e.g. `"amd64"`, `"arm"`).
+    pub inspect_architecture: Option<String>,
+    /// Optional variant string returned in `LocalImageDigest.variant` (e.g. `"v7"`).
+    pub inspect_variant: Option<String>,
     pub containers: Vec<LocalContainerInfo>,
     pub containers_for_image: Vec<ContainerForImage>,
     pub recreate_should_fail: bool,
@@ -944,9 +952,9 @@ impl DockerClient for MockDockerClient {
     async fn inspect_image(&self, _full_ref: &str) -> Result<Option<LocalImageDigest>> {
         Ok(self.inspect_result.clone().map(|d| LocalImageDigest {
             digest: d,
-            os: None,
-            architecture: None,
-            variant: None,
+            os: self.inspect_os.clone(),
+            architecture: self.inspect_architecture.clone(),
+            variant: self.inspect_variant.clone(),
         }))
     }
 

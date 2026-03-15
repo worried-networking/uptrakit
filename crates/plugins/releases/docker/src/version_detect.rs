@@ -33,18 +33,26 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin
                     "detected installed digest"
                 );
 
-                // When a platform is known (from config override or auto-detected from
-                // the local image), compare platform-specific digests to avoid false
-                // positives when only a different platform is updated.
-                let platform = self.config.platform.clone().or_else(|| {
-                    crate::config::form_platform_string(
-                        digest_info.os.as_deref(),
-                        digest_info.architecture.as_deref(),
-                        digest_info.variant.as_deref(),
-                    )
-                });
-
-                if let Some(ref p) = platform {
+                // When a platform is **explicitly** configured, fetch the
+                // platform-specific manifest digest so the comparison with
+                // `fetch_releases` (which also uses the configured platform) is
+                // apple-to-apple.
+                //
+                // When no platform is configured, `fetch_releases` returns the
+                // image-index digest (the manifest-list sha256). `digest_info.digest`
+                // comes from Docker's `RepoDigests`, which stores the same
+                // image-index digest that the registry returned during `docker pull`.
+                // Returning it directly keeps installed_version and latest_version
+                // in the same digest namespace and avoids a spurious "update
+                // available" that would otherwise appear because a per-platform
+                // manifest digest can never equal an image-index digest.
+                //
+                // Do NOT auto-detect the platform from the local image's os/arch
+                // metadata — doing so causes detect_installed_version to return a
+                // platform manifest digest while fetch_releases returns the index
+                // digest, which permanently appears as an outstanding update even
+                // when the image is already up to date.
+                if let Some(ref p) = self.config.platform {
                     match self
                         .registry_client
                         .get_platform_manifest_digest(&ir.registry, &ir.repository, tag, p)
@@ -156,15 +164,10 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin
 
             match inspect_cache.get(&resolved) {
                 Some(Ok(Some(digest_info))) => {
-                    let platform = self.config.platform.clone().or_else(|| {
-                        crate::config::form_platform_string(
-                            digest_info.os.as_deref(),
-                            digest_info.architecture.as_deref(),
-                            digest_info.variant.as_deref(),
-                        )
-                    });
-
-                    if let Some(ref p) = platform {
+                    // See the comment in `detect_installed_version` for the
+                    // rationale: only use the configured platform, never
+                    // auto-detect from the local image's os/arch fields.
+                    if let Some(ref p) = self.config.platform {
                         let cache_key = format!("{resolved}::{p}");
                         let platform_digest = match platform_cache.entry(cache_key) {
                             std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
