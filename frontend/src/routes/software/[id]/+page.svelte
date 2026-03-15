@@ -121,7 +121,9 @@
 	const ROLE_SHORT: Record<string, string> = {
 		detect_version: 'Detect',
 		fetch_releases: 'Fetch',
-		execute_update: 'Update'
+		execute_update: 'Update',
+		pre_update_hook: 'Pre-Hook',
+		post_update_hook: 'Post-Hook'
 	};
 
 	function groupHostPlugins(plugins: SoftwareItemHostSummary['plugins']): Array<{ name: string; roles: string[] }> {

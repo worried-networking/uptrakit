@@ -13,21 +13,31 @@
 		UpdateHostAssignmentRequest
 	} from '$lib/types';
 
-	type RoleKey = 'detect_version' | 'fetch_releases' | 'execute_update';
+	type RoleKey = 'detect_version' | 'fetch_releases' | 'execute_update' | 'pre_update_hook' | 'post_update_hook';
 
 	const ROLE_LABELS: Record<RoleKey, string> = {
 		detect_version: 'Detect Version',
 		fetch_releases: 'Fetch Releases',
-		execute_update: 'Execute Update'
+		execute_update: 'Execute Update',
+		pre_update_hook: 'Pre-Update Hook',
+		post_update_hook: 'Post-Update Hook'
 	};
 
 	const ROLE_DESCRIPTIONS: Record<RoleKey, string> = {
 		detect_version: 'Checks what version is currently installed on the host.',
 		fetch_releases: 'Queries upstream for the latest available version.',
-		execute_update: 'Performs the actual software update on the host.'
+		execute_update: 'Performs the actual software update on the host.',
+		pre_update_hook: 'Runs before the update (e.g. stop a service).',
+		post_update_hook: 'Runs after the update (e.g. restart a service).'
 	};
 
-	const ALL_ROLES: RoleKey[] = ['detect_version', 'fetch_releases', 'execute_update'];
+	const ALL_ROLES: RoleKey[] = [
+		'detect_version',
+		'fetch_releases',
+		'execute_update',
+		'pre_update_hook',
+		'post_update_hook'
+	];
 
 	interface RoleState {
 		plugin_config_id: string;
@@ -54,6 +64,20 @@
 		onclose: () => void;
 		onsuccess: (result: SoftwareItemDetailResponse) => void;
 	} = $props();
+
+	const HOOK_ROLES: RoleKey[] = ['pre_update_hook', 'post_update_hook'];
+
+	function isHookPluginType(pluginType: string): boolean {
+		const pt = pluginTypes.find((t) => t.plugin_type === pluginType);
+		if (!pt) return false;
+		return pt.capabilities.some((c) => c === 'pre_update_hook' || c === 'post_update_hook');
+	}
+
+	function isConfigCompatibleWithRole(config: PluginConfigResponse, role: RoleKey): boolean {
+		const isHook = isHookPluginType(config.plugin_type);
+		if (HOOK_ROLES.includes(role)) return isHook;
+		return !isHook;
+	}
 
 	function makeInitialState(): Record<RoleKey, RoleState> {
 		const result = {} as Record<RoleKey, RoleState>;
@@ -89,14 +113,18 @@
 	let overrideFormValues: Record<RoleKey, Record<string, string>> = $state({
 		detect_version: {},
 		fetch_releases: {},
-		execute_update: {}
+		execute_update: {},
+		pre_update_hook: {},
+		post_update_hook: {}
 	});
 
 	// Per-role toggle: true = JSON editor mode, false = form mode
 	let overrideShowJson: Record<RoleKey, boolean> = $state({
 		detect_version: false,
 		fetch_releases: false,
-		execute_update: false
+		execute_update: false,
+		pre_update_hook: false,
+		post_update_hook: false
 	});
 
 	onMount(async () => {
@@ -364,35 +392,37 @@
 							}}
 						>
 							<option value="">— not configured —</option>
-							{#each pluginConfigs as cfg (cfg.id)}
+							{#each pluginConfigs.filter((c) => isConfigCompatibleWithRole(c, role)) as cfg (cfg.id)}
 								<option value={cfg.id}>{cfg.name}</option>
 							{/each}
 						</select>
 					</div>
 
 					{#if s.plugin_config_id}
-						<!-- Package Identifier -->
-						<div class="grid grid-cols-[9rem_1fr] items-center gap-3">
-							<label class="text-sm font-medium" for="pkg-{role}">Package ID</label>
-							<input
-								id="pkg-{role}"
-								class="input text-sm"
-								type="text"
-								placeholder="e.g. owner/repo"
-								bind:value={roleStates[role].package_identifier}
-							/>
-						</div>
-
-						<!-- Execution Site (only for fetch_releases) -->
-						{#if role === 'fetch_releases'}
+						{#if !HOOK_ROLES.includes(role)}
+							<!-- Package Identifier -->
 							<div class="grid grid-cols-[9rem_1fr] items-center gap-3">
-								<label class="text-sm font-medium" for="site-{role}">Execution Site</label>
-								<select id="site-{role}" class="select text-sm" bind:value={roleStates[role].execution_site}>
-									<option value="auto">Auto (recommended)</option>
-									<option value="agent">Agent</option>
-									<option value="controller">Controller</option>
-								</select>
+								<label class="text-sm font-medium" for="pkg-{role}">Package ID</label>
+								<input
+									id="pkg-{role}"
+									class="input text-sm"
+									type="text"
+									placeholder="e.g. owner/repo"
+									bind:value={roleStates[role].package_identifier}
+								/>
 							</div>
+
+							<!-- Execution Site (only for fetch_releases) -->
+							{#if role === 'fetch_releases'}
+								<div class="grid grid-cols-[9rem_1fr] items-center gap-3">
+									<label class="text-sm font-medium" for="site-{role}">Execution Site</label>
+									<select id="site-{role}" class="select text-sm" bind:value={roleStates[role].execution_site}>
+										<option value="auto">Auto (recommended)</option>
+										<option value="agent">Agent</option>
+										<option value="controller">Controller</option>
+									</select>
+								</div>
+							{/if}
 						{/if}
 
 						<!-- Config Override (advanced, collapsible) -->

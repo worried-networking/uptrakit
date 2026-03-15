@@ -9,10 +9,11 @@
 		getHosts,
 		assignHostsToSoftwareItem,
 		unassignHostFromSoftwareItem,
-		getPluginConfigs
+		getPluginConfigs,
+		listPluginTypes
 	} from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
-	import type { HostResponse, PluginConfigResponse, HostPluginRoleAssignment } from '$lib/types';
+	import type { HostResponse, PluginConfigResponse, HostPluginRoleAssignment, PluginTypeInfo } from '$lib/types';
 
 	let {
 		softwareItemId,
@@ -26,15 +27,23 @@
 		onsuccess: () => void;
 	} = $props();
 
-	type RoleKey = 'detect_version' | 'fetch_releases' | 'execute_update';
+	type RoleKey = 'detect_version' | 'fetch_releases' | 'execute_update' | 'pre_update_hook' | 'post_update_hook';
 
 	const ROLE_LABELS: Record<RoleKey, string> = {
 		detect_version: 'Detect Version',
 		fetch_releases: 'Fetch Releases',
-		execute_update: 'Execute Update'
+		execute_update: 'Execute Update',
+		pre_update_hook: 'Pre-Update Hook',
+		post_update_hook: 'Post-Update Hook'
 	};
 
-	const ALL_ROLES: RoleKey[] = ['detect_version', 'fetch_releases', 'execute_update'];
+	const ALL_ROLES: RoleKey[] = [
+		'detect_version',
+		'fetch_releases',
+		'execute_update',
+		'pre_update_hook',
+		'post_update_hook'
+	];
 
 	let allHosts: HostResponse[] = $state([]);
 	const originalAssignedIds = new SvelteSet<string>();
@@ -44,6 +53,21 @@
 	let submitting: boolean = $state(false);
 
 	let pluginConfigs: PluginConfigResponse[] = $state([]);
+	let pluginTypes: PluginTypeInfo[] = $state([]);
+
+	const HOOK_ROLES: RoleKey[] = ['pre_update_hook', 'post_update_hook'];
+
+	function isHookPluginType(pluginType: string): boolean {
+		const pt = pluginTypes.find((t) => t.plugin_type === pluginType);
+		if (!pt) return false;
+		return pt.capabilities.some((c) => c === 'pre_update_hook' || c === 'post_update_hook');
+	}
+
+	function isConfigCompatibleWithRole(config: PluginConfigResponse, role: RoleKey): boolean {
+		const isHook = isHookPluginType(config.plugin_type);
+		if (HOOK_ROLES.includes(role)) return isHook;
+		return !isHook;
+	}
 
 	let roleAssignments: Record<
 		RoleKey,
@@ -51,17 +75,20 @@
 	> = $state({
 		detect_version: { enabled: true, plugin_config_id: '', package_identifier: '', execution_site: 'auto' },
 		fetch_releases: { enabled: false, plugin_config_id: '', package_identifier: '', execution_site: 'auto' },
-		execute_update: { enabled: false, plugin_config_id: '', package_identifier: '', execution_site: 'auto' }
+		execute_update: { enabled: false, plugin_config_id: '', package_identifier: '', execution_site: 'auto' },
+		pre_update_hook: { enabled: false, plugin_config_id: '', package_identifier: '', execution_site: 'auto' },
+		post_update_hook: { enabled: false, plugin_config_id: '', package_identifier: '', execution_site: 'auto' }
 	});
 
 	const toAdd = $derived([...selectedIds].filter((id) => !originalAssignedIds.has(id)));
 
 	onMount(async () => {
 		try {
-			const [detail, hostsResult, configsResult] = await Promise.all([
+			const [detail, hostsResult, configsResult, typesResult] = await Promise.all([
 				getSoftwareItem(softwareItemId),
 				getHosts(1, 200),
-				getPluginConfigs(1, 500)
+				getPluginConfigs(1, 500),
+				listPluginTypes()
 			]);
 			allHosts = hostsResult.items;
 			for (const h of detail.hosts) {
@@ -69,11 +96,14 @@
 				selectedIds.add(h.host_id);
 			}
 			pluginConfigs = configsResult.items;
+			pluginTypes = typesResult;
 			const firstId = configsResult.items[0]?.id ?? '';
 			roleAssignments = {
 				detect_version: { enabled: true, plugin_config_id: firstId, package_identifier: '', execution_site: 'auto' },
 				fetch_releases: { enabled: false, plugin_config_id: firstId, package_identifier: '', execution_site: 'auto' },
-				execute_update: { enabled: false, plugin_config_id: firstId, package_identifier: '', execution_site: 'auto' }
+				execute_update: { enabled: false, plugin_config_id: firstId, package_identifier: '', execution_site: 'auto' },
+				pre_update_hook: { enabled: false, plugin_config_id: firstId, package_identifier: '', execution_site: 'auto' },
+				post_update_hook: { enabled: false, plugin_config_id: firstId, package_identifier: '', execution_site: 'auto' }
 			};
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Failed to load data.';
@@ -178,32 +208,40 @@
 											disabled={!a.enabled}
 										>
 											<option value="">— none —</option>
-											{#each pluginConfigs as config (config.id)}
-												<option value={config.id}>{config.name}</option>
+											{#each pluginConfigs.filter((c) => isConfigCompatibleWithRole(c, role)) as cfg (cfg.id)}
+												<option value={cfg.id}>{cfg.name}</option>
 											{/each}
 										</select>
 									</td>
 									<td>
-										<input
-											class="input text-sm"
-											type="text"
-											placeholder="e.g. owner/repo"
-											bind:value={roleAssignments[role].package_identifier}
-											disabled={!a.enabled}
-										/>
+										{#if HOOK_ROLES.includes(role)}
+											<span class="text-surface-400 text-xs">—</span>
+										{:else}
+											<input
+												class="input text-sm"
+												type="text"
+												placeholder="e.g. owner/repo"
+												bind:value={roleAssignments[role].package_identifier}
+												disabled={!a.enabled}
+											/>
+										{/if}
 									</td>
 									<td>
-										<select
-											class="select text-sm"
-											bind:value={roleAssignments[role].execution_site}
-											disabled={!a.enabled}
-										>
-											<option value="auto">Auto</option>
-											<option value="agent">Agent</option>
-											{#if role === 'fetch_releases'}
-												<option value="controller">Controller</option>
-											{/if}
-										</select>
+										{#if HOOK_ROLES.includes(role)}
+											<span class="text-surface-400 text-xs">—</span>
+										{:else}
+											<select
+												class="select text-sm"
+												bind:value={roleAssignments[role].execution_site}
+												disabled={!a.enabled}
+											>
+												<option value="auto">Auto</option>
+												<option value="agent">Agent</option>
+												{#if role === 'fetch_releases'}
+													<option value="controller">Controller</option>
+												{/if}
+											</select>
+										{/if}
 									</td>
 								</tr>
 							{/each}
