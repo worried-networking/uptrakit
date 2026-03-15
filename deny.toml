@@ -253,30 +253,17 @@ skip = [
 
     # windows-sys 0.60.2 via socket-pktinfo (mdns-sd 0.18 dep); newer 0.61.x used by tokio/clap
     { crate = "windows-sys@0.60.2", reason = "pulled by socket-pktinfo (mdns-sd 0.18); newer 0.61.x used by tokio, clap" },
-    { crate = "windows-targets@0.53.5", reason = "pulled by windows-sys@0.60.2 (socket-pktinfo → mdns-sd 0.18); newer 0.52.6 used by ring" },
-
-    # windows-sys and related: 0.52.x via ring; newer deps use 0.61.x.
-    # These are platform-specific syscall bindings. Will resolve when ring updates.
-    { crate = "windows-sys@0.52.0", reason = "pulled by ring 0.17.14; waiting for ring update" },
-    { crate = "windows-targets@0.52.6", reason = "pulled by windows-sys@0.52.0 via ring" },
-    { crate = "windows_aarch64_gnullvm@0.52.6", reason = "pulled by windows-targets@0.52.6 via ring" },
-    { crate = "windows_aarch64_msvc@0.52.6", reason = "pulled by windows-targets@0.52.6 via ring" },
-    { crate = "windows_i686_gnu@0.52.6", reason = "pulled by windows-targets@0.52.6 via ring" },
-    { crate = "windows_i686_msvc@0.52.6", reason = "pulled by windows-targets@0.52.6 via ring" },
-    { crate = "windows_x86_64_gnu@0.52.6", reason = "pulled by windows-targets@0.52.6 via ring" },
-    { crate = "windows_x86_64_gnullvm@0.52.6", reason = "pulled by windows-targets@0.52.6 via ring" },
-    { crate = "windows_x86_64_msvc@0.52.6", reason = "pulled by windows-targets@0.52.6 via ring" },
+    { crate = "windows-targets@0.53.5", reason = "pulled by windows-sys@0.60.2 (socket-pktinfo → mdns-sd 0.18)" },
 
     # windows arch crates 0.53.1 via windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18);
-    # 0.52.6 pulled by ring (already skipped above). Will resolve when ring updates.
-    { crate = "windows_aarch64_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18); 0.52.6 pulled by ring" },
-    { crate = "windows_aarch64_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18); 0.52.6 pulled by ring" },
-    { crate = "windows_i686_gnu@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18); 0.52.6 pulled by ring" },
-    { crate = "windows_i686_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18); 0.52.6 pulled by ring" },
-    { crate = "windows_i686_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18); 0.52.6 pulled by ring" },
-    { crate = "windows_x86_64_gnu@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18); 0.52.6 pulled by ring" },
-    { crate = "windows_x86_64_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18); 0.52.6 pulled by ring" },
-    { crate = "windows_x86_64_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18); 0.52.6 pulled by ring" },
+    # 0.52.6 pulled by windows-targets@0.52.6 (older deps). Will resolve when deps converge.
+    { crate = "windows_aarch64_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18)" },
+    { crate = "windows_aarch64_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18)" },
+    { crate = "windows_i686_gnu@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18)" },
+    { crate = "windows_i686_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18)" },
+    { crate = "windows_x86_64_gnu@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18)" },
+    { crate = "windows_x86_64_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18)" },
+    { crate = "windows_x86_64_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18)" },
 
     # base64: 0.21.7 via openidconnect, 0.22.1 via axum/reqwest/sqlx
     { crate = "base64@0.21.7", reason = "pulled by openidconnect; newer 0.22.x used by axum, reqwest, sqlx" },
@@ -353,9 +340,6 @@ skip = [
 
     # r-efi: 5.3.0 via getrandom 0.3.4 (cc/jobserver build dep), 6.0.0 via getrandom 0.4.2 (rand 0.9)
     { crate = "r-efi@5.3.0", reason = "pulled by getrandom 0.3.4 (cc/jobserver build dep, already skipped); newer 6.0.0 used by getrandom 0.4.2 (rand 0.9)" },
-
-    # windows-sys: 0.59 via nix 0.29, 0.61 via clap; 0.60 already skipped above
-    { crate = "windows-sys@0.59.0", reason = "pulled by nix 0.29; newer 0.60/0.61 used by tokio/clap" },
 
     # RustCrypto stack duplicates: older stable versions pulled by openidconnect/ecdsa/elliptic-curve;
     # newer RC versions pulled by russh 0.57 crypto stack. Will resolve when upstream crates converge.
