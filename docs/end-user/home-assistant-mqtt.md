@@ -387,6 +387,26 @@ message (`online` on `{ha_discovery_prefix}/status`) and immediately republishes
 so HA picks them up fresh. State and version topics remain retained on the broker and do not need
 re-sending. This follows the standard [HA MQTT birth/will pattern](https://www.home-assistant.io/integrations/mqtt/#birth-and-last-will-messages).
 
+## Automatic Stale Entity Cleanup
+
+When software items are deactivated and recreated (for example, during Docker container re-discovery),
+they receive new UUIDs. Each UUID produces a distinct HA discovery config topic. Without cleanup, the
+old retained topic remains on the broker, causing Home Assistant to show ghost entities with stale
+version data.
+
+Uptrakit automatically detects when items or hosts are removed from a tenant's state and publishes
+empty retained payloads to the corresponding topics. This clears the stale retained messages from
+the broker and causes Home Assistant to remove the orphaned entities. The cleanup covers:
+
+- **Removed software item/host pairs:** state, latest_version, attributes, and HA discovery config
+  topics are cleared; command topic subscriptions are removed.
+- **Removed host summaries:** packages and security entity topics (state, latest_version, attributes,
+  command, and HA discovery config) are cleared.
+- **Removed host metadata:** hostname, friendly_name, info, tags, agent, and connectivity topics
+  (including HA discovery config for the connectivity sensor) are cleared.
+
+Cleanup runs automatically on every state update push. No manual intervention is required.
+
 ## Why Some Software Items May Not Appear
 
 | Symptom | Cause |
