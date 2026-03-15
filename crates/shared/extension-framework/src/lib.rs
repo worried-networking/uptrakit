@@ -687,6 +687,10 @@ pub struct WizardStep {
     /// Optional action to submit this step's data before proceeding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub submit_action: Option<String>,
+    /// When `true`, the frontend renders the previous step's response data
+    /// (e.g., a plan review) instead of a form.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub render_previous_response: bool,
 }
 
 impl WizardStep {
@@ -697,12 +701,19 @@ impl WizardStep {
             label: label.into(),
             form,
             submit_action: None,
+            render_previous_response: false,
         }
     }
 
     /// Set the action to submit this step's data before proceeding.
     pub fn with_submit_action(mut self, action_id: impl Into<String>) -> Self {
         self.submit_action = Some(action_id.into());
+        self
+    }
+
+    /// Mark this step as rendering the previous step's response data.
+    pub fn with_render_previous_response(mut self) -> Self {
+        self.render_previous_response = true;
         self
     }
 }
@@ -947,6 +958,13 @@ pub enum FieldType {
     Toggle,
     /// Hidden field (not displayed, included in submission).
     Hidden,
+    /// SSH private key file input.
+    ///
+    /// In the CLI, the value is a file path — the CLI reads the file and sends
+    /// the PEM content.  In the web UI, treated identically to [`Textarea`]
+    /// (user pastes PEM content).  Fields of this type should always be marked
+    /// [`sensitive`](FieldDef::sensitive).
+    SshPrivateKey,
     /// Forward-compatible catch-all for unknown field types.
     Other(String),
 }
@@ -963,6 +981,7 @@ impl FieldType {
             Self::Textarea => "textarea",
             Self::Toggle => "toggle",
             Self::Hidden => "hidden",
+            Self::SshPrivateKey => "ssh_private_key",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -979,6 +998,7 @@ impl From<String> for FieldType {
             "textarea" => Self::Textarea,
             "toggle" => Self::Toggle,
             "hidden" => Self::Hidden,
+            "ssh_private_key" => Self::SshPrivateKey,
             _ => {
                 tracing::debug!(value = s, "received unknown FieldType from peer");
                 Self::Other(s)
@@ -1509,6 +1529,7 @@ mod tests {
                 footer_actions: vec![],
             },
             submit_action: Some("validate-host".to_string()),
+            render_previous_response: false,
         };
 
         let json = serde_json::to_string(&step).expect("serialize should succeed");
@@ -1529,6 +1550,7 @@ mod tests {
                     footer_actions: vec![],
                 },
                 submit_action: None,
+                render_previous_response: false,
             }],
         };
 

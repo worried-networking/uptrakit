@@ -836,6 +836,7 @@ export type FieldType =
 	| 'textarea'
 	| 'toggle'
 	| 'hidden'
+	| 'ssh_private_key'
 	| string;
 
 export interface SelectOption {
@@ -900,6 +901,8 @@ export interface WizardStep {
 	label: string;
 	form: FormDef;
 	submit_action?: string;
+	/** When true, render the previous step's response data instead of a form. */
+	render_previous_response?: boolean;
 }
 
 export type ActionUi =
