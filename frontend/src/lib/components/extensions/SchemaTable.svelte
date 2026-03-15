@@ -70,6 +70,15 @@
 	let selectedIds = new SvelteSet<string>();
 	let batchConfirmAction: ActionDef | null = $state(null);
 	let batchSubmitting: boolean = $state(false);
+	let selectingAllPages = $state(false);
+
+	const allPageSelected = $derived(rows.length > 0 && rows.every((row) => selectedIds.has(String(row.id ?? ''))));
+
+	const selectAllPagesInfo = $derived(
+		allPageSelected && total > rows.length && selectedIds.size < total
+			? { total, loading: selectingAllPages, onSelect: selectAllPages }
+			: undefined
+	);
 
 	const batchBarActions = $derived(
 		batchCapableActions.map((a) => ({ id: a.action_id, label: a.label, destructive: a.destructive }))
@@ -190,10 +199,12 @@
 	}
 
 	function toggleSelectAll() {
-		if (selectedIds.size === rows.length) {
-			selectedIds.clear();
+		if (allPageSelected) {
+			for (const row of rows) {
+				const id = String(row.id ?? '');
+				if (id) selectedIds.delete(id);
+			}
 		} else {
-			selectedIds.clear();
 			for (const row of rows) {
 				const id = String(row.id ?? '');
 				if (id) selectedIds.add(id);
@@ -206,6 +217,31 @@
 			selectedIds.delete(id);
 		} else {
 			selectedIds.add(id);
+		}
+	}
+
+	async function selectAllPages() {
+		selectingAllPages = true;
+		try {
+			let p = 1;
+			while (true) {
+				const params: Record<string, unknown> = { page: p, per_page: 100 };
+				if (cs && selectedContext != null) params[cs.param_key] = selectedContext;
+				const result = await invokeExtensionAction(extensionId, ui.data_action, params, serviceId);
+				const resultObj = result as Record<string, unknown>;
+				const pageItems = (resultObj?.items as Record<string, unknown>[]) ?? [];
+				for (const row of pageItems) {
+					const id = String(row.id ?? '');
+					if (id) selectedIds.add(id);
+				}
+				const totalPagesFromResult = (resultObj?.total_pages as number) ?? 1;
+				if (p >= totalPagesFromResult) break;
+				p++;
+			}
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to select all items');
+		} finally {
+			selectingAllPages = false;
 		}
 	}
 
@@ -253,6 +289,7 @@
 			if (selectedContext !== prevContext) {
 				prevContext = selectedContext;
 				currentPage = 1;
+				selectedIds.clear();
 			}
 			void loadData();
 		}
@@ -328,8 +365,8 @@
 							<input
 								type="checkbox"
 								class="checkbox"
-								checked={rows.length > 0 && selectedIds.size === rows.length}
-								indeterminate={selectedIds.size > 0 && selectedIds.size < rows.length}
+								checked={allPageSelected}
+								indeterminate={!allPageSelected && selectedIds.size > 0}
 								onchange={toggleSelectAll}
 								aria-label="Select all"
 							/>
@@ -410,6 +447,7 @@
 			actions={batchBarActions}
 			onaction={requestBatchAction}
 			oncancel={() => selectedIds.clear()}
+			selectAllPages={selectAllPagesInfo}
 		/>
 	{/if}
 
