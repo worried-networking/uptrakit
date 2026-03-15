@@ -45,6 +45,11 @@ struct EmailConfig {
     to_addresses: Vec<String>,
     #[serde(default = "default_tls_mode")]
     tls_mode: String,
+    /// Optional explicit EHLO hostname override.
+    ///
+    /// When absent, the domain part of `from_address` is used.
+    #[serde(default)]
+    helo_host: Option<String>,
 }
 
 fn default_tls_mode() -> String {
@@ -54,9 +59,9 @@ fn default_tls_mode() -> String {
 /// Minimal email format validation: must contain exactly one `@` with
 /// non-empty local and domain parts and at least one `.` in the domain.
 fn is_valid_email(addr: &str) -> bool {
-    let mut parts = addr.splitn(2, '@');
-    let local = parts.next().unwrap_or("");
-    let domain = parts.next().unwrap_or("");
+    let Some((local, domain)) = addr.split_once('@') else {
+        return false;
+    };
     !local.is_empty() && !domain.is_empty() && domain.contains('.')
 }
 
@@ -123,6 +128,11 @@ pub fn merge_smtp_into_config(
         obj.insert("from_name".to_string(), serde_json::json!(from_name));
     }
 
+    let helo_host = tenant.helo_host.as_ref().or(global.helo_host.as_ref());
+    if let Some(h) = helo_host {
+        obj.insert("helo_host".to_string(), serde_json::json!(h));
+    }
+
     // TLS mode: use tenant if not the default, otherwise global
     let tls_mode = if tenant.tls_mode != "starttls" {
         &tenant.tls_mode
@@ -148,6 +158,10 @@ pub struct SmtpSettingsSnapshot {
     pub from_address: Option<String>,
     pub from_name: Option<String>,
     pub tls_mode: String,
+    /// Optional EHLO hostname override for the SMTP EHLO command.
+    ///
+    /// When `None`, the domain part of `from_address` is derived at send time.
+    pub helo_host: Option<String>,
 }
 
 impl SmtpSettingsSnapshot {
@@ -187,6 +201,18 @@ async fn send_email(cfg: &EmailConfig, message: MessageBuilder<'_>) -> Result<()
     {
         builder = builder.credentials((user.as_str(), pass.as_str()));
     }
+
+    // Derive EHLO hostname: explicit config override → domain from from_address.
+    // Never use gethostname() — short hostnames (e.g. Docker container names) are not
+    // valid FQDNs and cause Gmail to reject with "555 5.5.2 Syntax error" (RFC 5321).
+    let ehlo_host = cfg
+        .helo_host
+        .as_deref()
+        .filter(|h| !h.is_empty())
+        .or_else(|| cfg.from_address.split_once('@').map(|(_, domain)| domain))
+        .unwrap_or("localhost")
+        .to_string();
+    builder = builder.helo_host(ehlo_host);
 
     match cfg.tls_mode.as_str() {
         "tls" => {
@@ -325,6 +351,12 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for EmailPlugin {
                             .with_placeholder("noreply@example.com"),
                         FieldDef::new("from_name", "From Name")
                             .with_placeholder("Uptrakit Notifications"),
+                        FieldDef::new("helo_host", "EHLO Hostname")
+                            .with_placeholder("mail.example.com")
+                            .with_help_text(
+                                "Hostname sent in the SMTP EHLO command. Defaults to the domain \
+                                 of the From address. Set explicitly when using a relay server.",
+                            ),
                         FieldDef::new("username", "Username").with_placeholder("SMTP username"),
                         FieldDef::new("password", "Password")
                             .with_type(FieldType::Password)
@@ -430,6 +462,12 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for EmailPlugin {
                             .with_placeholder("noreply@example.com"),
                         FieldDef::new("from_name", "From Name")
                             .with_placeholder("Uptrakit Notifications"),
+                        FieldDef::new("helo_host", "EHLO Hostname")
+                            .with_placeholder("mail.example.com")
+                            .with_help_text(
+                                "Hostname sent in the SMTP EHLO command. Defaults to the domain \
+                                 of the From address. Set explicitly when using a relay server.",
+                            ),
                         FieldDef::new("username", "Username").with_placeholder("SMTP username"),
                         FieldDef::new("password", "Password")
                             .with_type(FieldType::Password)
@@ -441,15 +479,7 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for EmailPlugin {
             ActionDef::new("save_smtp", "Save SMTP Settings")
                 .with_permission("manage_notifications"),
             ActionDef::new("test_global_smtp_email", "Send Test Email")
-                .with_permission("manage_global_settings")
-                .with_ui(ActionUi::Form(FormDef::new(vec![
-                    FieldDef::new("to_address", "Recipient Email Address")
-                        .required()
-                        .with_placeholder("you@example.com")
-                        .with_help_text(
-                            "A test email will be sent using the global SMTP defaults above.",
-                        ),
-                ]))),
+                .with_permission("manage_global_settings"),
             ActionDef::new("get_global_smtp", "Get Global SMTP Defaults"),
             ActionDef::new("save_global_smtp", "Save Global SMTP Defaults")
                 .with_permission("manage_global_settings"),
@@ -697,6 +727,7 @@ mod tests {
             from_address: None,
             from_name: None,
             tls_mode: "starttls".to_string(),
+            helo_host: None,
         }
     }
 
@@ -713,6 +744,7 @@ mod tests {
             from_address: from.map(|s| s.to_string()),
             from_name: None,
             tls_mode: "starttls".to_string(),
+            helo_host: None,
         }
     }
 
@@ -770,6 +802,85 @@ mod tests {
         assert!(
             merged.get("smtp_host").is_none(),
             "smtp_host must not be set when host is None"
+        );
+    }
+
+    // ── EHLO hostname derivation ──────────────────────────────────────────────
+
+    /// Helper: build an EmailConfig JSON and derive the EHLO host the same way
+    /// `send_email` does (inline logic test — no SMTP connection required).
+    fn derive_ehlo_host(from_address: &str, helo_host: Option<&str>) -> String {
+        // Mirror the logic in `send_email()`.
+        let helo_host_owned: Option<String> = helo_host.map(String::from);
+        helo_host_owned
+            .as_deref()
+            .filter(|h| !h.is_empty())
+            .or_else(|| from_address.split_once('@').map(|(_, domain)| domain))
+            .unwrap_or("localhost")
+            .to_string()
+    }
+
+    #[test]
+    fn ehlo_host_derives_from_from_address_domain() {
+        let host = derive_ehlo_host("sender@smtp.example.com", None);
+        assert_eq!(host, "smtp.example.com");
+    }
+
+    #[test]
+    fn ehlo_host_explicit_override_takes_precedence() {
+        let host = derive_ehlo_host("sender@smtp.example.com", Some("relay.corp.internal"));
+        assert_eq!(host, "relay.corp.internal");
+    }
+
+    #[test]
+    fn ehlo_host_empty_override_falls_back_to_domain() {
+        // An empty string override must be treated as absent.
+        let host = derive_ehlo_host("sender@smtp.example.com", Some(""));
+        assert_eq!(host, "smtp.example.com");
+    }
+
+    #[test]
+    fn ehlo_host_subdomain_preserved() {
+        let host = derive_ehlo_host("noreply@mail.corp.example.org", None);
+        assert_eq!(host, "mail.corp.example.org");
+    }
+
+    #[test]
+    fn merge_smtp_propagates_helo_host_tenant_override() {
+        let mut global = empty_smtp();
+        global.helo_host = Some("global.example.com".to_string());
+
+        let mut tenant = empty_smtp();
+        tenant.helo_host = Some("tenant.example.com".to_string());
+
+        let config = serde_json::json!({});
+        let merged = merge_smtp_into_config(&global, &tenant, config);
+
+        assert_eq!(
+            merged["helo_host"], "tenant.example.com",
+            "tenant helo_host must override global"
+        );
+    }
+
+    #[test]
+    fn merge_smtp_uses_global_helo_host_when_tenant_absent() {
+        let mut global = empty_smtp();
+        global.helo_host = Some("global.example.com".to_string());
+
+        let config = serde_json::json!({});
+        let merged = merge_smtp_into_config(&global, &empty_smtp(), config);
+
+        assert_eq!(merged["helo_host"], "global.example.com");
+    }
+
+    #[test]
+    fn merge_smtp_omits_helo_host_when_both_absent() {
+        let config = serde_json::json!({});
+        let merged = merge_smtp_into_config(&empty_smtp(), &empty_smtp(), config);
+
+        assert!(
+            merged.get("helo_host").is_none(),
+            "helo_host must not appear in merged config when neither global nor tenant sets it"
         );
     }
 }

@@ -110,6 +110,7 @@ fn to_plugin_smtp_snapshot(
         from_address: smtp.from_address.clone(),
         from_name: smtp.from_name.clone(),
         tls_mode: smtp.tls_mode.clone(),
+        helo_host: smtp.helo_host.clone(),
     }
 }
 
@@ -387,6 +388,7 @@ mod tests {
             from_address: from.map(|s| s.to_string()),
             from_name: None,
             tls_mode: "starttls".to_string(),
+            helo_host: None,
         }
     }
 

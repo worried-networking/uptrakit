@@ -30,6 +30,7 @@ fn snapshot_to_response(smtp: &SmtpSettingsSnapshot) -> SmtpSettingsResponse {
         from_address: smtp.from_address.clone(),
         from_name: smtp.from_name.clone(),
         tls_mode: smtp.tls_mode.clone(),
+        helo_host: smtp.helo_host.clone(),
     }
 }
 
@@ -215,6 +216,26 @@ pub async fn update_smtp_settings(
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
         smtp.tls_mode = tls_mode;
+    }
+
+    if let Some(ref val) = req.helo_host {
+        let new_helo_host: Option<String> = if val.is_null() {
+            None
+        } else {
+            val.as_str().map(String::from)
+        };
+        if let Err(e) = upsert_setting(
+            state.db(),
+            state.default_tenant_id,
+            SettingKey::SmtpHeloHost,
+            serde_json::json!(new_helo_host.as_deref().unwrap_or("")),
+        )
+        .await
+        {
+            tracing::error!("Failed to save smtp.helo_host: {e:?}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        smtp.helo_host = new_helo_host;
     }
 
     state.settings.set_smtp(smtp.clone()).await;

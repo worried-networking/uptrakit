@@ -367,6 +367,8 @@ pub async fn dispatch(command: SettingsCommands, ctx: &CliContext) -> Result<()>
                 from_name,
                 clear_from_name,
                 tls_mode,
+                helo_host,
+                clear_helo_host,
             } => {
                 let resp = smtp_set(SmtpSetParams {
                     server: ctx.server.as_deref(),
@@ -383,6 +385,8 @@ pub async fn dispatch(command: SettingsCommands, ctx: &CliContext) -> Result<()>
                     from_name,
                     clear_from_name,
                     tls_mode,
+                    helo_host,
+                    clear_helo_host,
                 })
                 .await?;
                 crate::output::print_output(ctx.format, &resp)?;

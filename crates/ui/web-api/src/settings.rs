@@ -96,6 +96,10 @@ pub struct SmtpSettingsSnapshot {
     pub from_name: Option<String>,
     /// TLS mode: `"starttls"` (default), `"tls"`, or `"none"`.
     pub tls_mode: String,
+    /// Optional EHLO hostname override for the SMTP EHLO command.
+    ///
+    /// When `None`, the email plugin derives the hostname from the `from_address` domain.
+    pub helo_host: Option<String>,
 }
 
 impl SmtpSettingsSnapshot {
@@ -116,6 +120,7 @@ impl fmt::Debug for SmtpSettingsSnapshot {
             .field("from_address", &self.from_address)
             .field("from_name", &self.from_name)
             .field("tls_mode", &self.tls_mode)
+            .field("helo_host", &self.helo_host)
             .finish()
     }
 }
@@ -875,6 +880,12 @@ impl Settings {
             .unwrap_or("starttls")
             .to_string();
 
+        let helo_host = raw
+            .get_setting(SettingKey::GlobalSmtpHeloHost)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
         SmtpSettingsSnapshot {
             host,
             port,
@@ -883,6 +894,7 @@ impl Settings {
             from_address,
             from_name,
             tls_mode,
+            helo_host,
         }
     }
 
@@ -945,6 +957,12 @@ impl Settings {
             .unwrap_or("starttls")
             .to_string();
 
+        let helo_host = raw
+            .get_setting(SettingKey::SmtpHeloHost)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
         SmtpSettingsSnapshot {
             host,
             port,
@@ -953,6 +971,7 @@ impl Settings {
             from_address,
             from_name,
             tls_mode,
+            helo_host,
         }
     }
 }

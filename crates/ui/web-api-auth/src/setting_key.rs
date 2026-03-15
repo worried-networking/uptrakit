@@ -34,6 +34,13 @@ pub enum SettingKey {
     SmtpFromAddress,
     SmtpFromName,
     SmtpTlsMode,
+    /// Per-tenant SMTP EHLO hostname override.
+    ///
+    /// When set, this value is sent in the SMTP EHLO command instead of deriving
+    /// the hostname from the `from_address` domain.
+    ///
+    /// DB key: `smtp.helo_host`
+    SmtpHeloHost,
     NatsUrl,
     /// Per-tenant audit log filter mode (`all`, `mutations`, `none`).
     ///
@@ -77,6 +84,12 @@ pub enum SettingKey {
     ///
     /// DB key: `global_smtp.tls_mode`
     GlobalSmtpTlsMode,
+    /// Global SMTP EHLO hostname override (shared across all tenants as a fallback).
+    ///
+    /// Per-tenant `smtp.helo_host` overrides this when set.
+    ///
+    /// DB key: `global_smtp.helo_host`
+    GlobalSmtpHeloHost,
     /// Global Telegram bot token (shared across all tenants as a fallback).
     ///
     /// Per-channel `bot_token` overrides this when set.
@@ -127,6 +140,7 @@ impl SettingKey {
             Self::SmtpFromAddress => "smtp.from_address",
             Self::SmtpFromName => "smtp.from_name",
             Self::SmtpTlsMode => "smtp.tls_mode",
+            Self::SmtpHeloHost => "smtp.helo_host",
             Self::GlobalSmtpHost => "global_smtp.host",
             Self::GlobalSmtpPort => "global_smtp.port",
             Self::GlobalSmtpUsername => "global_smtp.username",
@@ -134,6 +148,7 @@ impl SettingKey {
             Self::GlobalSmtpFromAddress => "global_smtp.from_address",
             Self::GlobalSmtpFromName => "global_smtp.from_name",
             Self::GlobalSmtpTlsMode => "global_smtp.tls_mode",
+            Self::GlobalSmtpHeloHost => "global_smtp.helo_host",
             Self::GlobalTelegramBotToken => "global_telegram.bot_token",
             Self::NatsUrl => "nats.url",
             Self::AuditLogFilter => "audit_log.filter",
@@ -175,6 +190,7 @@ impl SettingKey {
             "smtp.from_address" => Some(Self::SmtpFromAddress),
             "smtp.from_name" => Some(Self::SmtpFromName),
             "smtp.tls_mode" => Some(Self::SmtpTlsMode),
+            "smtp.helo_host" => Some(Self::SmtpHeloHost),
             "global_smtp.host" => Some(Self::GlobalSmtpHost),
             "global_smtp.port" => Some(Self::GlobalSmtpPort),
             "global_smtp.username" => Some(Self::GlobalSmtpUsername),
@@ -182,6 +198,7 @@ impl SettingKey {
             "global_smtp.from_address" => Some(Self::GlobalSmtpFromAddress),
             "global_smtp.from_name" => Some(Self::GlobalSmtpFromName),
             "global_smtp.tls_mode" => Some(Self::GlobalSmtpTlsMode),
+            "global_smtp.helo_host" => Some(Self::GlobalSmtpHeloHost),
             "global_telegram.bot_token" => Some(Self::GlobalTelegramBotToken),
             "nats.url" => Some(Self::NatsUrl),
             "audit_log.filter" => Some(Self::AuditLogFilter),
@@ -217,6 +234,7 @@ impl SettingKey {
                 | Self::GlobalSmtpFromAddress
                 | Self::GlobalSmtpFromName
                 | Self::GlobalSmtpTlsMode
+                | Self::GlobalSmtpHeloHost
                 | Self::GlobalTelegramBotToken
                 | Self::NatsUrl
                 | Self::ZeroconfEnabled
