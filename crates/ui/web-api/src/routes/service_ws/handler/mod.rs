@@ -702,6 +702,232 @@ async fn send_mqtt_post_registration(
 }
 
 // ---------------------------------------------------------------------------
+// setup_authenticated_session — stage helpers
+// ---------------------------------------------------------------------------
+
+/// Stage 1: Load service from DB and return capabilities, app name, and tenant
+/// ID.
+///
+/// Falls back to empty capabilities on any DB error or missing row so that
+/// the setup can continue with a degraded (no-capability) service rather than
+/// crashing.
+async fn load_service_capabilities(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    is_system: bool,
+) -> (BTreeSet<Capability>, Option<String>, Option<uuid::Uuid>) {
+    if is_system {
+        match sys_svc_entity::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            Ok(Some(svc)) => (
+                parse_capabilities(&svc.capabilities),
+                svc.service_app_name,
+                None,
+            ),
+            _ => (BTreeSet::new(), None, None),
+        }
+    } else {
+        match service::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            Ok(Some(svc)) => (
+                parse_capabilities(&svc.capabilities),
+                svc.service_app_name,
+                Some(svc.tenant_id),
+            ),
+            _ => (BTreeSet::new(), None, None),
+        }
+    }
+}
+
+/// Stage 2: Run the MQTT register handshake for services with the `MqttBridge`
+/// capability.
+///
+/// Returns `Some(handshake)` when the handshake succeeds, or `None` when the
+/// connection closes before the `Register` message arrives (the caller should
+/// abort setup).
+///
+/// Only call this function when the service has the `MqttBridge` capability;
+/// the coordinator is responsible for the conditional check.
+async fn negotiate_mqtt_handshake(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    stream: &mut futures_util::stream::SplitStream<WebSocket>,
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
+    rate_limiter: &mut MessageRateLimiter,
+) -> Option<mqtt::MqttHandshake> {
+    handle_mqtt_register_handshake(
+        sink,
+        stream,
+        state,
+        service_id,
+        out_seq,
+        in_seq,
+        rate_limiter,
+    )
+    .await
+}
+
+/// Stage 3: Register the connection in `ServiceConnectionRegistry` and detect
+/// whether the service carries the external `Scheduler` capability.
+///
+/// Returns `(push_rx, cancel_token, is_external_scheduler)`.
+async fn register_connection(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    capabilities: &BTreeSet<Capability>,
+    mqtt_handshake: Option<&mqtt::MqttHandshake>,
+) -> (
+    tokio::sync::mpsc::Receiver<ControllerMessage>,
+    tokio_util::sync::CancellationToken,
+    bool,
+) {
+    let (push_rx, cancel_token) = if let Some(h) = mqtt_handshake {
+        state
+            .service_connections
+            .register(
+                service_id,
+                capabilities.clone(),
+                Some(h.instance_id.clone()),
+                Some(h.max_tenants),
+            )
+            .await
+    } else {
+        state
+            .service_connections
+            .register(service_id, capabilities.clone(), None, None)
+            .await
+    };
+
+    let is_external_scheduler = capabilities.contains(&Capability::Scheduler);
+    if is_external_scheduler {
+        state
+            .external_scheduler_connected
+            .store(true, Ordering::Relaxed);
+        tracing::info!(
+            %service_id,
+            "external scheduler connected; embedded scheduler deferring external tasks"
+        );
+    }
+
+    (push_rx, cancel_token, is_external_scheduler)
+}
+
+/// Stage 4: Complete MQTT setup — assign/reconcile leases, send `Registered`
+/// and `TenantAssignments`, push initial software states, and load linked host
+/// IDs.
+///
+/// Returns `Some((mqtt_context, linked_host_ids))` on success, or `None` if
+/// the WebSocket write failed and the connection must be closed.
+async fn complete_mqtt_setup(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    mqtt_handshake: Option<mqtt::MqttHandshake>,
+    has_software_discovery: bool,
+    out_seq: &mut OutgoingSeq,
+) -> Option<(
+    Option<mqtt::MqttContext>,
+    Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+)> {
+    // Assign/reconcile leases now that the service is in the registry.
+    let mqtt_context = if let Some(h) = mqtt_handshake {
+        Some(complete_mqtt_registration(state, service_id, h).await)
+    } else {
+        None
+    };
+
+    // Send Registered + TenantAssignments and push initial software states.
+    if let Some(ref mctx) = mqtt_context
+        && !send_mqtt_post_registration(sink, state, service_id, mctx, out_seq).await
+    {
+        return None;
+    }
+
+    // Load linked host IDs shared between the main loop and the processor.
+    let linked_host_ids: Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>> = if has_software_discovery {
+        Arc::new(parking_lot::Mutex::new(
+            load_linked_host_ids(state.db(), service_id)
+                .await
+                .unwrap_or_default(),
+        ))
+    } else {
+        Arc::new(parking_lot::Mutex::new(HashSet::new()))
+    };
+
+    Some((mqtt_context, linked_host_ids))
+}
+
+/// Stage 5: Deliver pending updates (non-MQTT only) and create the MQTT lease
+/// coordinator when applicable.
+///
+/// Errors from `deliver_pending_updates` are logged but do not abort setup —
+/// the connection is still usable.
+async fn deliver_updates_and_create_lease_coordinator(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    has_update_hooks: bool,
+    is_mqtt: bool,
+    out_seq: &mut OutgoingSeq,
+) -> Option<MqttLeaseCoordinator> {
+    if has_update_hooks
+        && !is_mqtt
+        && let Err(e) = deliver_pending_updates(state, service_id, sink, out_seq).await
+    {
+        tracing::error!(error = %e, %service_id, "failed to deliver pending updates on reconnect");
+    }
+
+    if is_mqtt {
+        Some(MqttLeaseCoordinator::new(
+            state.db().clone(),
+            state.service_connections.clone(),
+        ))
+    } else {
+        None
+    }
+}
+
+/// Output of [`spawn_message_processor`]: channels for communicating with the
+/// background task.
+struct ProcessorChannels {
+    msg_tx: tokio::sync::mpsc::Sender<ProcessorMessage>,
+    resp_rx: tokio::sync::mpsc::Receiver<ProcessorResponse>,
+    processor_cancel: tokio_util::sync::CancellationToken,
+    processor_handle: tokio::task::JoinHandle<()>,
+}
+
+/// Stage 6: Spawn the background [`MessageProcessor`] and return the channels
+/// the main loop needs to exchange messages with it.
+fn spawn_message_processor(processor: MessageProcessor) -> ProcessorChannels {
+    let (msg_tx, msg_rx) =
+        tokio::sync::mpsc::channel::<ProcessorMessage>(PROCESSOR_CHANNEL_CAPACITY);
+    let (resp_tx, resp_rx) =
+        tokio::sync::mpsc::channel::<ProcessorResponse>(RESPONSE_CHANNEL_CAPACITY);
+
+    let processor_cancel = tokio_util::sync::CancellationToken::new();
+    let proc_cancel_clone = processor_cancel.clone();
+    let processor_handle = tokio::spawn(async move {
+        tokio::select! {
+            () = processor.run(msg_rx, resp_tx) => {}
+            () = proc_cancel_clone.cancelled() => {}
+        }
+    });
+
+    ProcessorChannels {
+        msg_tx,
+        resp_rx,
+        processor_cancel,
+        processor_handle,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // setup_authenticated_session
 // ---------------------------------------------------------------------------
 
@@ -726,167 +952,64 @@ async fn setup_authenticated_session(
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
 ) -> Option<AuthenticatedSessionState> {
-    // Load service from DB, derive capabilities, app name, and tenant ID.
-    let (capabilities, service_app_name, service_tenant_id): (
-        BTreeSet<Capability>,
-        Option<String>,
-        Option<uuid::Uuid>,
-    ) = if is_system {
-        match sys_svc_entity::Entity::find_by_id(service_id)
-            .one(state.db())
-            .await
-        {
-            Ok(Some(svc)) => (
-                parse_capabilities(&svc.capabilities),
-                svc.service_app_name,
-                None,
-            ),
-            _ => (BTreeSet::new(), None, None),
-        }
-    } else {
-        match service::Entity::find_by_id(service_id)
-            .one(state.db())
-            .await
-        {
-            Ok(Some(svc)) => (
-                parse_capabilities(&svc.capabilities),
-                svc.service_app_name,
-                Some(svc.tenant_id),
-            ),
-            _ => (BTreeSet::new(), None, None),
-        }
-    };
+    // Stage 1: Load service record and derive capability set.
+    let (capabilities, service_app_name, service_tenant_id) =
+        load_service_capabilities(state, service_id, is_system).await;
 
     let is_mqtt = capabilities.contains(&Capability::MqttBridge);
     let has_software_discovery = capabilities.contains(&Capability::SoftwareDiscovery);
     let has_update_hooks = capabilities.contains(&Capability::UpdateHooks);
     let has_ui_extensions = capabilities.contains(&Capability::UiExtensions);
-
     let mut rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
 
-    // ------------------------------------------------------------------
-    // Credential delivery for services with credential capabilities
-    // ------------------------------------------------------------------
+    // Stage 2: Deliver credentials to services that have credential capabilities.
     deliver_service_credentials(sink, state, &capabilities, service_id, out_seq).await?;
 
-    // ------------------------------------------------------------------
-    // MQTT pre-loop phase: wait for Register message (handshake only)
-    // ------------------------------------------------------------------
+    // Stage 3: Run the MQTT register handshake when applicable.
     let mqtt_handshake = if is_mqtt {
-        match handle_mqtt_register_handshake(
-            sink,
-            stream,
-            state,
-            service_id,
-            out_seq,
-            in_seq,
-            &mut rate_limiter,
-        )
-        .await
-        {
-            Some(h) => Some(h),
-            None => return None, // connection closed before Register
-        }
-    } else {
-        None
-    };
-
-    // ------------------------------------------------------------------
-    // Register in service_connections (must happen before lease assignment)
-    // ------------------------------------------------------------------
-    let (push_rx, cancel_token) = if let Some(ref h) = mqtt_handshake {
-        state
-            .service_connections
-            .register(
+        Some(
+            negotiate_mqtt_handshake(
+                sink,
+                stream,
+                state,
                 service_id,
-                capabilities.clone(),
-                Some(h.instance_id.clone()),
-                Some(h.max_tenants),
+                out_seq,
+                in_seq,
+                &mut rate_limiter,
             )
-            .await
-    } else {
-        state
-            .service_connections
-            .register(service_id, capabilities.clone(), None, None)
-            .await
-    };
-
-    // ------------------------------------------------------------------
-    // External scheduler detection
-    // ------------------------------------------------------------------
-    let is_external_scheduler = capabilities.contains(&Capability::Scheduler);
-    if is_external_scheduler {
-        state
-            .external_scheduler_connected
-            .store(true, Ordering::Relaxed);
-        tracing::info!(
-            %service_id,
-            "external scheduler connected; embedded scheduler deferring external tasks"
-        );
-    }
-
-    // ------------------------------------------------------------------
-    // MQTT post-registration: assign/reconcile leases now that the service
-    // entry exists in the registry
-    // ------------------------------------------------------------------
-    let mqtt_context = if let Some(h) = mqtt_handshake {
-        Some(complete_mqtt_registration(state, service_id, h).await)
+            .await?,
+        )
     } else {
         None
     };
 
-    // ------------------------------------------------------------------
-    // MQTT post-registration: send Registered, TenantAssignments, push states
-    // ------------------------------------------------------------------
-    if let Some(ref mctx) = mqtt_context
-        && !send_mqtt_post_registration(sink, state, service_id, mctx, out_seq).await
-    {
-        return None;
-    }
+    // Stage 4: Register the connection and detect the external scheduler.
+    let (push_rx, cancel_token, is_external_scheduler) =
+        register_connection(state, service_id, &capabilities, mqtt_handshake.as_ref()).await;
 
-    // ------------------------------------------------------------------
-    // SoftwareDiscovery: load linked host IDs (shared with processor)
-    // ------------------------------------------------------------------
-    let linked_host_ids: Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>> = if has_software_discovery {
-        Arc::new(parking_lot::Mutex::new(
-            load_linked_host_ids(state.db(), service_id)
-                .await
-                .unwrap_or_default(),
-        ))
-    } else {
-        Arc::new(parking_lot::Mutex::new(HashSet::new()))
-    };
+    // Stage 5: Complete MQTT setup and load linked host IDs.
+    let (mqtt_context, linked_host_ids) = complete_mqtt_setup(
+        sink,
+        state,
+        service_id,
+        mqtt_handshake,
+        has_software_discovery,
+        out_seq,
+    )
+    .await?;
 
-    // ------------------------------------------------------------------
-    // UpdateHooks: deliver pending updates (non-MQTT only)
-    // ------------------------------------------------------------------
-    if has_update_hooks
-        && !is_mqtt
-        && let Err(e) = deliver_pending_updates(state, service_id, sink, out_seq).await
-    {
-        tracing::error!(error = %e, %service_id, "failed to deliver pending updates on reconnect");
-    }
+    // Stage 6: Deliver pending updates (non-MQTT) and create the lease coordinator.
+    let lease_coordinator = deliver_updates_and_create_lease_coordinator(
+        sink,
+        state,
+        service_id,
+        has_update_hooks,
+        is_mqtt,
+        out_seq,
+    )
+    .await;
 
-    // ------------------------------------------------------------------
-    // Create lease coordinator if MQTT
-    // ------------------------------------------------------------------
-    let lease_coordinator = if is_mqtt {
-        Some(MqttLeaseCoordinator::new(
-            state.db().clone(),
-            state.service_connections.clone(),
-        ))
-    } else {
-        None
-    };
-
-    // ------------------------------------------------------------------
-    // Spawn background message processor
-    // ------------------------------------------------------------------
-    let (msg_tx, msg_rx) =
-        tokio::sync::mpsc::channel::<ProcessorMessage>(PROCESSOR_CHANNEL_CAPACITY);
-    let (resp_tx, resp_rx) =
-        tokio::sync::mpsc::channel::<ProcessorResponse>(RESPONSE_CHANNEL_CAPACITY);
-
+    // Stage 7: Spawn the background message processor.
     let processor = MessageProcessor {
         state: Arc::clone(state),
         service_id,
@@ -903,15 +1026,7 @@ async fn setup_authenticated_session(
         lease_coordinator: lease_coordinator.clone(),
         report_tracker: ReportTracker::new(),
     };
-
-    let processor_cancel = tokio_util::sync::CancellationToken::new();
-    let proc_cancel_clone = processor_cancel.clone();
-    let processor_handle = tokio::spawn(async move {
-        tokio::select! {
-            () = processor.run(msg_rx, resp_tx) => {}
-            () = proc_cancel_clone.cancelled() => {}
-        }
-    });
+    let channels = spawn_message_processor(processor);
 
     Some(AuthenticatedSessionState {
         service_id,
@@ -925,10 +1040,10 @@ async fn setup_authenticated_session(
         lease_coordinator,
         push_rx,
         cancel_token,
-        msg_tx,
-        resp_rx,
-        processor_cancel,
-        processor_handle,
+        msg_tx: channels.msg_tx,
+        resp_rx: channels.resp_rx,
+        processor_cancel: channels.processor_cancel,
+        processor_handle: channels.processor_handle,
         rate_limiter,
     })
 }
