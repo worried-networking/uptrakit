@@ -84,6 +84,7 @@
 			Permission.TriggerUpdates
 		)
 	);
+	const canTriggerChecks = $derived(getUser()?.permissions.includes(Permission.TriggerChecks) ?? false);
 
 	const batchActions = $derived.by(() => {
 		const selected = [...batchSelectedItemsMap.values()];
@@ -96,6 +97,9 @@
 		}
 		if (selected.some((i) => i.update_available)) {
 			acts.push({ id: 'update-all', label: 'Update All' });
+		}
+		if (canTriggerChecks) {
+			acts.push({ id: 'check-version', label: 'Check Version' });
 		}
 		acts.push({ id: 'delete', label: 'Delete', destructive: true });
 		return acts;
@@ -350,7 +354,11 @@
 	}
 
 	function requestBatchAction(actionId: string) {
-		batchConfirmAction = actionId;
+		if (actionId === 'check-version') {
+			executeBatchCheckVersions();
+		} else {
+			batchConfirmAction = actionId;
+		}
 	}
 
 	async function selectAllSoftwarePages() {
@@ -377,6 +385,29 @@
 		} finally {
 			selectingAllPages = false;
 		}
+	}
+
+	async function executeBatchCheckVersions() {
+		if (submitting) return;
+		submitting = true;
+		const ids = [...batchSelectedIds];
+		let succeeded = 0;
+		let failed = 0;
+		await Promise.allSettled(
+			ids.map(async (id) => {
+				try {
+					await checkSoftwareItemVersions(id);
+					succeeded++;
+				} catch {
+					failed++;
+				}
+			})
+		);
+		if (succeeded > 0) showSuccess(`Version check triggered for ${succeeded} item(s).`);
+		if (failed > 0) showError(`Failed to trigger version check for ${failed} item(s).`);
+		batchSelectedIds.clear();
+		batchSelectedItemsMap.clear();
+		submitting = false;
 	}
 
 	async function executeBatchAction() {
