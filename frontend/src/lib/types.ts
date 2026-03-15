@@ -489,6 +489,7 @@ export interface SoftwareItemResponse {
 	last_checked_at: string | null;
 	host_count: number;
 	installed_version?: string | null;
+	installed_display_version?: string | null;
 	latest_version?: string | null;
 	latest_release_metadata?: Record<string, unknown> | null;
 	update_available: boolean;

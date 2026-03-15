@@ -486,7 +486,8 @@
 									<tr>
 										<td class="font-medium">{item.name}</td>
 										<td class="text-sm text-surface-500" title={item.installed_version ?? undefined}
-											>{formatVersion(resolveDisplayVersion(item.installed_version, undefined)) ?? '—'}</td
+											>{formatVersion(resolveDisplayVersion(item.installed_version, item.installed_display_version)) ??
+												'—'}</td
 										>
 										<td class="text-sm text-surface-500" title={item.latest_version ?? undefined}
 											>{formatVersion(

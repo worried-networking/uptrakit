@@ -665,7 +665,7 @@
 											class="badge {versionStatusClass(host)} cursor-pointer hover:opacity-80"
 											title={host.active_update_history_id
 												? 'View update progress'
-												: `Update to ${formatVersion(host.latest_version ?? item.latest_version)}`}
+												: `Update to ${formatVersion(resolveDisplayVersion(host.latest_version ?? item.latest_version, getReleaseMeta(host)?.display_version))}`}
 											onclick={() => {
 												if (host.active_update_history_id) {
 													openLiveModal(host.active_update_history_id, host.hostname);
@@ -719,7 +719,7 @@
 						tabindex="-1"
 						onclick={() => openUpdateModal()}
 					>
-						Update to {formatVersion(updateToVer)}
+						Update to {formatVersion(resolveDisplayVersion(updateToVer, getReleaseMeta(host)?.display_version))}
 					</button>
 				</li>
 			{/if}
@@ -767,7 +767,10 @@
 			<div>
 				<p class="text-surface-500">From</p>
 				<p class="font-medium" title={updateModal.host.installed_version ?? undefined}>
-					{formatVersion(updateModal.host.installed_version, 'unknown')}
+					{formatVersion(
+						resolveDisplayVersion(updateModal.host.installed_version, updateModal.host.installed_display_version),
+						'unknown'
+					)}
 				</p>
 			</div>
 			<div>
