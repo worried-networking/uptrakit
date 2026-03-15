@@ -101,13 +101,22 @@ impl DockerPlugin {
     ];
 
     /// Test constructor that injects a custom [`DockerClient`].
+    ///
+    /// Uses [`MockRegistryClient::default()`] for the registry client so that
+    /// tests never make real network calls to Docker Hub.
     #[cfg(all(test, feature = "daemon"))]
     pub(crate) fn new_for_test(
         config: DockerConfig,
         executor: Arc<dyn CommandExecutor>,
         docker_client: Arc<dyn DockerClient>,
     ) -> Result<Self> {
-        Self::init(config, executor, docker_client, None)
+        use crate::registry::MockRegistryClient;
+        Self::new_for_test_with_registry(
+            config,
+            executor,
+            docker_client,
+            Arc::new(MockRegistryClient::default()),
+        )
     }
 
     /// Test constructor that injects both a custom [`DockerClient`] and a

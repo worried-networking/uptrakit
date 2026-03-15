@@ -1,8 +1,8 @@
 use super::*;
-use uptrakit_command::LocalCommandExecutor;
+use uptrakit_command::NoopCommandExecutor;
 
 fn test_executor() -> Arc<dyn CommandExecutor> {
-    Arc::new(LocalCommandExecutor)
+    Arc::new(NoopCommandExecutor)
 }
 
 #[test]
