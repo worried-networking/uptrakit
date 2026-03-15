@@ -427,10 +427,12 @@ impl ServiceHandler for SshAgentHandler {
             // forever. Re-sending `UpdateStarted` on reconnect lets the controller
             // transition it to `in_progress` correctly before the result arrives.
             for (host_machine_id, update) in &self.in_flight_updates {
+                #[allow(unused_assignments, unused_mut)]
+                let mut interactive = false;
                 #[cfg(feature = "interactive")]
-                let interactive = update.stdin_tx.is_some();
-                #[cfg(not(feature = "interactive"))]
-                let interactive = false;
+                {
+                    interactive = update.stdin_tx.is_some();
+                }
 
                 tracing::debug!(
                     %host_machine_id,

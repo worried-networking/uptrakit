@@ -107,15 +107,14 @@ impl BatchProgressBroadcaster {
     }
 
     /// Returns `true` when a NATS client has been attached.
+    #[allow(unreachable_code)]
     pub fn has_nats(&self) -> bool {
         #[cfg(feature = "nats")]
         {
-            self.nats_client.is_some()
+            return self.nats_client.is_some();
         }
-        #[cfg(not(feature = "nats"))]
-        {
-            false
-        }
+        // Without the nats feature there is no NATS client field; always false.
+        false
     }
 
     /// Create a broadcast channel for the given batch.

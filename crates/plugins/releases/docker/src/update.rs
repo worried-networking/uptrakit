@@ -74,10 +74,13 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for DockerPlugin 
         output.push_str(&format!("Pulling Docker image {image}:{tag}\n"));
 
         tracing::debug!(image = %image, tag = %tag, "pulling Docker image");
+        // Use daemon-sourced credentials when the daemon feature is enabled
+        // (queries the Docker credential store at runtime); otherwise fall back
+        // to the static auth configured in the plugin config.
+        #[allow(unused_variables)]
+        let auth: Option<crate::config::DockerAuth> = self.config.auth.clone();
         #[cfg(feature = "daemon")]
         let auth = self.effective_auth(image).await;
-        #[cfg(not(feature = "daemon"))]
-        let auth: Option<crate::config::DockerAuth> = self.config.auth.clone();
         let client = Arc::clone(&*self.docker_client.lock());
         let pull_output = client
             .pull_image(image, tag, auth.as_ref(), output_tx)

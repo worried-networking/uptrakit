@@ -318,10 +318,12 @@ pub async fn start_update(
 
     // Confirmed PTY allocation: stdin_tx is Some only when execute_update_interactive
     // successfully allocated a PTY and delivered channels via the oneshot.
+    #[allow(unused_assignments, unused_mut)]
+    let mut confirmed_interactive = false;
     #[cfg(feature = "interactive")]
-    let confirmed_interactive = spawned.stdin_tx.is_some();
-    #[cfg(not(feature = "interactive"))]
-    let confirmed_interactive = false;
+    {
+        confirmed_interactive = spawned.stdin_tx.is_some();
+    }
 
     // Send UpdateStarted
     if let Err(e) = conn

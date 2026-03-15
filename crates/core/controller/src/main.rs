@@ -772,8 +772,7 @@ fn spawn_background_tasks(
     }
 
     // Suppress unused-variable warnings when nats feature is disabled.
-    #[cfg(not(feature = "nats"))]
-    let _ = service_connections;
+    let _ = &service_connections;
 }
 
 /// Wait for the HTTPS server to become ready, then signal the old controller

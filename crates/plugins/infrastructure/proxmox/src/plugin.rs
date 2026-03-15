@@ -18,13 +18,17 @@ pub struct ProxmoxPlugin {
 impl ProxmoxPlugin {
     /// Compile-time capabilities for the Proxmox VE plugin.
     ///
-    /// The controller-side plugin owns controller database migrations for
-    /// the `proxmox_host_mappings` table. It has no agent-side capabilities —
-    /// it operates entirely on the controller via extension actions.
+    /// When the `migrations` feature is enabled the plugin declares
+    /// `ControllerMigrations` so the controller runs its DB schema.
+    /// Without the feature the capability list is empty.
+    ///
+    /// NOTE: the `#[cfg(not)]` here is intentional — both branches define the
+    /// same constant name for different feature combinations, which is the only
+    /// supported way to provide divergent const values in Rust without a
+    /// runtime conditional.
     #[cfg(feature = "migrations")]
     pub const CAPABILITIES: &'static [PluginCapability] = &[PluginCapability::ControllerMigrations];
 
-    /// Compile-time capabilities for the Proxmox VE plugin (without migrations).
     #[cfg(not(feature = "migrations"))]
     pub const CAPABILITIES: &'static [PluginCapability] = &[];
 

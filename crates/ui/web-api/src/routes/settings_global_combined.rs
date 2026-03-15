@@ -65,17 +65,17 @@ pub async fn get_global_combined_settings(
         max_clients_per_tenant: state.settings.mqtt_max_clients_per_tenant(),
     };
 
+    #[allow(unused_assignments, unused_mut)]
+    let mut nats: Option<NatsSettingsResponse> = None;
     #[cfg(feature = "nats")]
-    let nats = {
+    {
         let nats_url = state.settings.nats_url();
         let has_url = nats_url.is_some();
-        Some(NatsSettingsResponse {
+        nats = Some(NatsSettingsResponse {
             url: nats_url,
             has_url,
-        })
-    };
-    #[cfg(not(feature = "nats"))]
-    let nats: Option<NatsSettingsResponse> = None;
+        });
+    }
 
     let response = GlobalSettingsCombinedResponse {
         network: network_response,

@@ -339,6 +339,7 @@ impl PluginOps for PluginRegistry {
         })
     }
 
+    #[allow(unreachable_code)]
     fn notification_transport(
         &self,
         // Only used by the `#[cfg(feature = "notifications")]` path below
@@ -347,25 +348,21 @@ impl PluginOps for PluginRegistry {
     ) -> Option<std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::PluginBase>> {
         #[cfg(feature = "notifications")]
         {
-            self.notification_plugin_ref(channel_type).cloned()
+            return self.notification_plugin_ref(channel_type).cloned();
         }
-        #[cfg(not(feature = "notifications"))]
-        {
-            None
-        }
+        None
     }
 
+    #[allow(unreachable_code)]
     fn notification_supported_types(&self) -> Vec<&'static str> {
         #[cfg(feature = "notifications")]
         {
-            self.notification_plugins.keys().copied().collect()
+            return self.notification_plugins.keys().copied().collect();
         }
-        #[cfg(not(feature = "notifications"))]
-        {
-            vec![]
-        }
+        vec![]
     }
 
+    #[allow(unreachable_code)]
     fn notification_validate_config(
         &self,
         // Only used by the `#[cfg(feature = "notifications")]` path below.
@@ -380,12 +377,9 @@ impl PluginOps for PluginRegistry {
             let Some(plugin) = self.notification_plugin_ref(channel_type) else {
                 return Err(format!("unknown channel type: {channel_type}"));
             };
-            plugin.validate_config(config)
+            return plugin.validate_config(config);
         }
-        #[cfg(not(feature = "notifications"))]
-        {
-            Ok(())
-        }
+        Ok(())
     }
 
     fn notification_mask_config_secrets(
