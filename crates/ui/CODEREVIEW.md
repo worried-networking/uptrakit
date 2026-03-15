@@ -1,6 +1,6 @@
 # Code Review: crates/ui (aggregate)
 
-- **Review date**: 2026-03-15
+- **Review date**: 2026-03-15, 2026-03-15 (14-dimension)
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -142,3 +142,142 @@
    fix stuck-batch on `load_target_for_dispatch` failure.
 10. **MEDIUM — Architecture**: Begin god-crate extraction (`uptrakit-web-api-pki` phase 1);
     introduce domain-scoped `AppState` accessors.
+
+## 14-Dimension Parallel Review — 2026-03-15
+
+Comprehensive review across all 14 analysis dimensions (D1 Architecture, D2 Security,
+D3 Error Handling, D4 Tests, D5 HA/Scaling, D6 Database/Tenant, D7 Standards Compliance,
+D8 Extensibility, D9 Consistency, D10 Idiomatic Rust, D11 References/Heap, D12 Maintainability,
+D13 Feature-flag, D14 Dependency).
+
+### web-api
+
+#### Architecture
+
+- **[HIGH D1]** God crate at 40,884 LoC with 33-field `AppState` — mixes HTTP routing, WS
+  protocol, PKI, broadcasting, MQTT, NATS, notifications, extension proxy.
+- **[HIGH D1]** 28/55 route files directly import `sea_orm` and construct
+  `ActiveModel`/`QueryFilter` — ORM leaks into HTTP layer.
+- **[HIGH D14]** PKI subsystem (~1,655 LoC) should be extracted — removes 6 heavy crypto deps
+  (`x509-parser`, `x509-ocsp`, `der`, `spki`, `x509-cert`, `rcgen`).
+- **[MEDIUM D1]** `router.rs` 424 lines of flat route registration — decompose into domain
+  sub-routers.
+
+#### Security
+
+- **[MEDIUM D2]** OIDC HTTP client at `oidc_http_client.rs:24` missing `SsrfSafeResolver` —
+  operator-configured URL limits attack surface.
+- **[MEDIUM D7]** `tokio::sync::Mutex` at `settings.rs:183` and `tokio::sync::RwLock` at
+  `service_connections.rs`, `event_broadcaster.rs` — justified where guard held across `.await`
+  but undocumented.
+- **[HIGH D7]** 4x `#[allow(clippy::too_many_arguments)]` in `oidc_auth.rs` + 1 in
+  `service_ws/handler/mod.rs` + 1 in `extension_proxy.rs` — without comments.
+- **[HIGH D7]** `#[cfg(not(feature))]` violations in `event_broadcaster.rs:147`,
+  `notifications/dispatcher.rs:255`, `routes/notifications.rs:330`,
+  `notification_extensions.rs:485,534,626`, `settings_global_combined.rs:77`,
+  `batch_progress_broadcaster.rs:114`.
+- **[HIGH D7]** 3 manual `has_permission()` calls at `services.rs:588`,
+  `interactive_ws.rs:102`, `system_services.rs:377` — violates typed extractor rule.
+
+#### Code Quality
+
+- **[MEDIUM D3]** 237 duplicated `error_response(500, "Internal server error")` calls across 35
+  route files — need trait-based error conversion.
+- **[MEDIUM D3]** Error logging lacks structured fields in 240+ locations — contrast with better
+  pattern in `service_ws/handler/messages.rs`.
+- **[MEDIUM D3]** 4x silent `let _ = sync_oidc_roles(...)` in `oidc_auth.rs` swallow DB mutation
+  errors.
+- **[MEDIUM D3]** OIDC auth functions have 9-11 parameters — need `OidcResolutionContext` struct.
+- **[MEDIUM D3]** `ReportPluginConfigResponsePayload` constructed via `.expect()` in 3 places —
+  need constructor methods.
+
+#### Database / Tenant Isolation
+
+- **[HIGH D6]** `ServiceHost::find()` without tenant join at `routes/hosts.rs:220`
+  (trigger-discovery), `software_items.rs:1191` (check-version), `interactive_ws.rs:143`
+  (interactive WS).
+- **[HIGH D6]** `get_update_history` at `update_history.rs:229` fetches by PK without tenant
+  scoping — timing oracle for record existence.
+- **[MEDIUM D6]** `software_items.rs:270` — `Host::find()` without tenant scoping in
+  `load_item_hosts` (takes raw `DatabaseConnection`).
+
+#### Tests
+
+- **[HIGH D4]** 42/53 route handler files have zero unit tests — critical untested paths include
+  `service_ws/handler/` (5,944 LoC), `users.rs`, `notifications.rs`.
+- **[MEDIUM D4]** `settings_store.rs` (580 lines) has zero tests and is not tested indirectly.
+
+#### Idiomatic Rust
+
+- **[MEDIUM D10]** `PluginType` conversion via `serde_json::from_value(Value::String(...))`
+  at `software_items.rs:972-975,1000,1066,1274` — use `PluginType::from(s)`.
+- **[MEDIUM D10]** `HashMap<(Uuid, String), ...>` with string role keys — each lookup allocates
+  a `String`; use `PluginRole` enum key.
+- **[MEDIUM D10]** `is_controller_fetch_site` takes `execution_site: &str` — need
+  `ExecutionSite` enum.
+
+#### References and Heap
+
+- **[MEDIUM D11]** `linked_host_ids.lock().clone()` clones `HashSet<Uuid>` on every WS update
+  message — 7 call sites; hold lock for brief lookup instead.
+- **[MEDIUM D11]** HashMap key string allocations (`"execute_update".to_string()`) for role
+  lookups in `updates.rs`.
+- **[MEDIUM D11]** `service_model.clone().into()` at `messages.rs:335` and
+  `record.clone().into()` at `updates.rs:664` — clone entire models for ActiveModel conversion.
+
+#### Consistency
+
+- **[LOW D9]** `notification_extensions.rs` missing `#[tracing::instrument]` on all functions,
+  builds pagination by hand instead of `PaginatedResponse<T>`.
+- **[LOW D9]** `list_api_tokens` uses custom `ApiTokenListResponse` wrapper — only list endpoint
+  with a one-off wrapper.
+
+#### Maintainability
+
+- **[MEDIUM D12]** `setup_authenticated_session` 273 lines, nesting 5 with 8 parameters.
+- **[MEDIUM D12]** `handle_version_check_results` 268 lines, nesting 6.
+- **[MEDIUM D12]** `dispatch_loop` (notifications) 254 lines, nesting 7.
+- **[LOW D12]** Deep nesting depth 9 in WS handler loop at `handler/mod.rs:1054`.
+- **[LOW D11]** Double `#[tracing::instrument]` at `update_triggers.rs:267-268,359-360,399-400,
+  468-469,580-581` — 5 functions with duplicate span creation.
+
+### web-api-auth
+
+- **[LOW D2]** Un-keyed SHA-256 for API token hashes — HMAC-SHA256 with server secret would add
+  defense-in-depth.
+- **[MEDIUM D4]** `settings_store.rs` (580 lines) has zero test coverage.
+- **[INFO D1]** Well-extracted — no dependency on `web-api` or `web-api-queries`.
+
+### web-api-queries
+
+- **[HIGH D6]** `ServiceHost::find()` without tenant join at `update_triggers.rs:298`,
+  `services.rs:380`, `mqtt_software_states.rs:342,464`.
+- **[MEDIUM D6]** Batch operations (`batch_deactivate_hosts`, `batch_approve_services`,
+  `batch_reject_services`) lack wrapping transactions.
+- **[MEDIUM D7]** 11 `#[allow(clippy::type_complexity)]` across batch operation functions —
+  need `BatchResult` type alias.
+- **[MEDIUM D9]** 3 query modules (`enrollment_tokens`, `host_tags`, `hosts`) return raw `DbErr`
+  instead of structured `rootcause::Report`.
+- **[MEDIUM D9]** Notifications module uses bespoke `ChannelResult<T>`/`RuleResult<T>` instead of
+  single `Result<T>` alias.
+- **[MEDIUM D10]** `update_triggers.rs:232` — same `serde_json::from_value(Value::String(...))`
+  pattern for `PluginType`.
+- **[MEDIUM D1]** Depends on `plugin-infrastructure-core` — couples persistence layer to plugin
+  abstraction.
+- **[LOW D10]** `host_tags.rs:45` — `.unwrap_or(0)` silently swallows DB errors on count query.
+
+### cli
+
+- **[LOW D12]** `main.rs` monolithic structure (16,121 LoC) — `lib` + `bin` split already done,
+  per-namespace dispatch would help.
+- **[INFO D1]** Depends only on `openapi-client`/`wire`/`shared-types` — correct layering as
+  pure API client.
+
+### Cross-Crate Strengths (14-Dimension Review)
+
+- `TestApp` harness used consistently across all 12 integration test files — zero duplicated
+  setup.
+- `web-api-auth` successfully extracted with clean boundaries.
+- Framework-agnostic `TenantDb` in `web-api-queries` — zero Axum dependency.
+- `ServiceNotifier` trait provides clean inversion-of-control boundary.
+- Rate limiting is DB-backed, HA-safe, with fail-closed semantics.
