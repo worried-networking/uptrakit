@@ -6,6 +6,8 @@
 - **Parallel reviewers**: 10 AI agents (architecture, security, code quality, tests, HA, database, coding standards, extensibility, consistency, maintainability)
 - **Comprehensive 12-dimension review date**: 2026-03-10
 - **12-dimension reviewers**: 12 AI agents (architecture, security, code quality, tests, high availability, database, coding standards, extensibility, consistency, idiomatic Rust, references & heap, maintainability)
+- **14-dimension parallel review date**: 2026-03-15
+- **14-dimension reviewers**: 14 AI agents (architecture, security, code quality, tests, high availability, database, coding standards, extensibility, consistency, idiomatic Rust, references & heap, sentrux metrics, maintainability, crate split/merge)
 - **Sentrux structural metrics date**: 2026-03-15
 - **Branch**: docs/codereview-backend
 
@@ -73,6 +75,20 @@ structs in `plugin-infrastructure-core` are missing `#[non_exhaustive]` (D8 Exte
 triple clone in MQTT `tenant_manager` on every state push (D11 Heap, MEDIUM); double `format!()`
 in HA discovery topics (D11 Heap, MEDIUM); CLI `main.rs` at 5,915 lines needs decomposition
 (D12 Maintainability, HIGH).
+
+Updated on 2026-03-15 with findings from a comprehensive 14-dimension parallel review using
+specialized agents for each dimension. The codebase has grown to ~286K LoC across 51 crates.
+Sentrux baseline: Structure D, Architecture B (1,139 files, 286K lines, 1,183 import edges).
+Key new findings across all dimensions: plugin registry forces full-workspace recompilation on
+any plugin change (D14 Crate Structure, CRITICAL); `agent-core` depends on full plugin graph
+via registry (D14 Crate Structure, CRITICAL); 16 `#[cfg(not(feature))]` violations remain
+(D7 Standards, HIGH); bare `ServiceHost::find()` bypasses tenant isolation in 7 locations
+(D6 Database, HIGH); 42/53 route handler files have zero unit tests (D4 Tests, HIGH);
+`web-api` god crate now at 40,884 LoC with 33-field AppState (D1 Architecture, HIGH);
+`PluginType` conversion via serde_json round-trip instead of `From<String>` (D10 Idiomatic,
+MEDIUM); `linked_host_ids.lock().clone()` on every WS update message (D11 Heap, MEDIUM);
+`NotificationEventType`/`NotificationChannelType` missing `Other(String)` catch-all
+(D8 Extensibility, MEDIUM); 237 duplicated `error_response(500)` calls (D3 Quality, MEDIUM).
 
 Key areas for improvement: the `web-api` crate at ~38K LoC is approaching "god crate" territory
 and would benefit from decomposition; and remaining HA concerns should be addressed before
@@ -203,7 +219,7 @@ now carry `publish = false`.
 
 - **Scan date**: 2026-03-15
 - **Overall grade**: D | **Architecture grade**: B
-- **Files**: 1,137 | **Lines**: 285,295 | **Import edges**: 1,183
+- **Files**: 1,139 | **Lines**: 286,436 | **Import edges**: 1,183
 
 | Dimension | Grade | Value |
 |-----------|-------|-------|
@@ -216,7 +232,7 @@ now carry `publish = false`.
 | Long functions | B | 605 (6.5%) |
 | Cognitive complexity | B | 209 (2.3%) |
 | Complex functions | A | 1.2% |
-| Comment ratio | A | 15.2% |
+| Comment ratio | A | 15.5% |
 | High params | A | 162 (1.8%) |
 | Hotspots | A | 0 |
 | God files | B | 3 (0.3%) |
@@ -240,6 +256,128 @@ test coverage is accepted policy.
 the dependency graph analysis which found a clean DAG. This likely reflects intra-crate module
 cycles (not inter-crate), which Sentrux detects at module granularity. These should be
 investigated.
+
+## 14-Dimension Parallel Review — 2026-03-15
+
+### Cross-Cutting Findings (All Dimensions)
+
+Findings organized by severity across all 14 review dimensions. Each finding is tagged with its
+source dimension [D1..D14].
+
+#### CRITICAL
+
+- **[D14 Crate Structure]** Plugin registry forces full-workspace recompilation on any plugin change — changing any single plugin forces recompilation of registry (2,120 LoC), web-api (40,884 LoC), controller (10,053 LoC), agent-core (3,213 LoC), scheduler-engine (4,356 LoC) — ~60,600 LoC total.
+- **[D14 Crate Structure]** `agent-core` depends on `plugin-infrastructure-registry` with `features = ["daemon"]`, transitively compiling every plugin including notification/discovery plugins irrelevant to agents.
+
+#### HIGH
+
+- **[D7 Standards]** 16 `#[cfg(not(feature = "..."))]` violations across 12 files — prohibited by AGENTS.md rule 21 (must use `if !cfg!(feature = "X")` instead).
+- **[D6 Database]** Bare `ServiceHost::find()` bypasses tenant isolation in `routes/hosts.rs:220` (trigger-discovery sends to cross-tenant agents), `software_items.rs:1191` (check-version uses cross-tenant agent), `interactive_ws.rs:143`, `update_triggers.rs:298`, `services.rs:380`, `mqtt_software_states.rs:342,464`.
+- **[D4 Tests]** 42 out of 53 route handler files have zero unit tests; only 1 tenant-isolation test exists across all query modules.
+- **[D1 Architecture]** `web-api` is a 40,884 LoC god crate with 33-field `AppState`, mixing HTTP routing, WebSocket protocol, PKI, broadcasting, MQTT coordination, NATS transport, notification dispatch, and extension proxy.
+- **[D1 Architecture]** SeaORM entity types leak into 28/55 route handlers — route files directly construct `ActiveModel`, call `insert`/`update`, build `QueryFilter` chains.
+- **[D7 Standards]** 3 manual `has_permission()` calls in batch-action handlers (`services.rs:588`, `interactive_ws.rs:102`, `system_services.rs:377`) — violates typed permission extractor rule.
+- **[D12 Maintainability]** 31 out of 45 `lib.rs` files and 18 `mod.rs` files have zero module-level documentation; zero README files in any crate directory.
+
+#### MEDIUM
+
+- **[D2 Security]** GitHub download client missing `SsrfSafeResolver` (`releases/github/src/plugin.rs:693`).
+- **[D2 Security]** OIDC HTTP client missing `SsrfSafeResolver` (`web-api/src/oidc_http_client.rs:24`).
+- **[D2 Security]** Telegram plugin HTTP client missing `SsrfSafeResolver` (`notifications/telegram/src/lib.rs:33`).
+- **[D2 Security]** Email plugin `SmtpSettingsSnapshot` has `#[derive(Debug)]` leaking SMTP password in logs.
+- **[D3 Quality]** 237 duplicated `error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")` calls across 35 route files.
+- **[D3 Quality]** Error logging lacks structured context in 240+ route handler locations.
+- **[D3 Quality]** 4 silent `let _ = sync_oidc_roles(...)` in `oidc_auth.rs` swallow DB errors.
+- **[D5 HA]** Audit log dispatcher uses `mpsc::unbounded_channel()` — unbounded memory growth risk.
+- **[D5 HA]** Orphaned in-progress update recovery missing after agent crash.
+- **[D6 Database]** Batch operations (`batch_deactivate_hosts`, `batch_approve_services`, `batch_reject_services`) lack transactions.
+- **[D6 Database]** `notification_rules.host_id` and `notification_rules.software_item_id` FK columns lack indexes (cascade delete perf on PostgreSQL).
+- **[D7 Standards]** 11 `#[allow(clippy::type_complexity)]` in `web-api-queries` without comments — need `BatchResult` type alias.
+- **[D7 Standards]** 7 `#[allow(clippy::too_many_arguments)]` without required comments.
+- **[D8 Extensibility]** `NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus` missing `Other(String)` catch-all.
+- **[D8 Extensibility]** Extension framework enums (`ExtensionTargeting`, `PanelPosition`, `FieldType`, etc.) lack catch-all for wire compatibility.
+- **[D9 Consistency]** 3 query modules (`enrollment_tokens`, `host_tags`, `hosts`) return raw `DbErr` instead of structured `rootcause::Report` errors.
+- **[D9 Consistency]** 12 list endpoints return flat `Vec<T>` instead of `PaginatedResponse<T>` (DB-sourced: users, api_tokens, oidc_providers, mqtt_settings, discovery_allowlist, plugin_type_settings).
+- **[D9 Consistency]** Mixed `get_*`/`find_*`/`load_*` naming for query functions — undocumented convention.
+- **[D10 Idiomatic]** `PluginType` conversion via `serde_json::from_value(Value::String(...))` instead of `PluginType::from(s)` at 5 call sites.
+- **[D10 Idiomatic]** String-typed role comparisons (`"fetch_releases"`, `"detect_version"`) where `PluginRole` enum exists.
+- **[D10 Idiomatic]** Missing `ExecutionSite` enum — `is_controller_fetch_site` takes `&str`.
+- **[D11 Heap]** `linked_host_ids.lock().clone()` clones `HashSet<Uuid>` on every WS update message (7 call sites).
+- **[D11 Heap]** HashMap key string allocations (`"execute_update".to_string()`) for role lookups in hot paths.
+- **[D11 Heap]** `service_model.clone().into()` and `record.clone().into()` for ActiveModel conversion — clones entire models including large String fields.
+- **[D11 Heap]** Double `#[tracing::instrument]` attributes on 5 functions in `update_triggers.rs` creating duplicate spans.
+- **[D12 Maintainability]** Multiple 250-400 line functions with nesting depth 5-7 (`reconcile_all_settings`, `run_proxmox_bootstrap`, `setup_authenticated_session`, `handle_version_check_results`).
+- **[D12 Maintainability]** `sea-orm` pinned at 2.0.0-rc.37 (release candidate) — upgrade friction.
+- **[D1 Architecture]** `scheduler-engine` misplaced in `crates/shared/` — only consumed by controller and scheduler binaries.
+- **[D1 Architecture]** `web-api-types` depends on `internal-wire`, creating cross-layer coupling.
+
+#### LOW
+
+- **[D2 Security]** `User::find_by_id()` in auth middleware without tenant filter (single-tenant only).
+- **[D3 Quality]** Duplicated `error_response` utility across `web-api` and `web-api-auth`.
+- **[D3 Quality]** `Result<T, String>` in 6+ trait signatures.
+- **[D5 HA]** SSH connection pool has no maximum size limit.
+- **[D5 HA]** NATS `publish_envelope` is fire-and-forget — events lost during outages.
+- **[D7 Standards]** 4 production `.expect()` calls (agent-core, nats, migration, email plugin).
+- **[D7 Standards]** 2 `#[allow(dead_code)]` without required comments (`openapi-client:367`, `test_harness/mod.rs:23`).
+- **[D8 Extensibility]** `AdminEvent` missing unknown variant for NATS cross-controller replication.
+- **[D8 Extensibility]** `UpdateStatus` lacks `Other(String)` — API clients may fail on unknown values.
+- **[D9 Consistency]** `notification_extensions.rs` missing `#[tracing::instrument]`, builds pagination by hand.
+- **[D10 Idiomatic]** `From<PluginType> for String` duplicates `as_str()` with per-variant `.to_string()`.
+- **[D12 Maintainability]** 1 TODO in production code (`tenant_context.rs:16` for multi-tenancy).
+- **[D14 Crate Structure]** Dead `oidc = []` feature in `scheduler-engine`.
+- **[D14 Crate Structure]** Notification feature flag asymmetry — webhook always-on, telegram/email opt-in.
+
+### Crate Split/Merge Recommendations
+
+**Split candidates:**
+
+1. **web-api PKI extraction** (HIGH) — ~1,655 LoC (`ocsp.rs`, `pki_utils.rs`, `cert_signer.rs`, `ca_snapshot.rs` + routes) into `web-api-pki`. Removes 6 heavy crypto deps from main compile path.
+2. **shared-db entity/migration split** (MEDIUM) — 55 entity files + 47 migrations in one compilation unit. Feature gating partially mitigates.
+3. **shared-types SSRF extraction** (MEDIUM) — `ssrf` module with `http-ssrf` feature pulls `reqwest`+`tokio` into a pure data-types crate.
+
+**Do NOT merge:**
+
+- Micro-crates (`backoff` 114 LoC, `build-info` 216 LoC, `macros` 142 LoC) — stable, clean boundaries, minimal overhead.
+- Per-plugin crates — correct pattern for parallel compilation.
+
+### Sentrux Structural Summary
+
+| Dimension | Grade | Notes |
+|-----------|-------|-------|
+| Coupling | A | 0.002 score, near-zero cross-module edges |
+| Entropy | A | 0.00 |
+| Complex functions | A | 1.2% |
+| High params | A | 1.8% |
+| Comment ratio | A | 15.5% |
+| Hotspots | A | 0 (0.0%) |
+| Depth | A | 3 |
+| God files | B | 3 (0.3%) |
+| Long functions | B | 605 (6.5%) |
+| Cognitive complexity | B | 209 (2.3%) |
+| File size | C | 148 files oversized (13.1%) |
+| Cycles | D | 4 cycles detected |
+| Cohesion | D | 0.22 |
+| Duplication | D | 234 groups (8.3%) |
+| Dead code | F | 4,402 items (47.6%) — mostly feature-gated false positives |
+| Test coverage | F | 3.6% — accepted; inline `#[cfg(test)]` metric only |
+
+### Cross-Cutting Strengths (All Dimensions)
+
+- Zero `.unwrap()` in production code — all occurrences confined to test modules
+- Zero `anyhow` usage — 100% consistent `rootcause` + `thiserror` error framework
+- Zero `&Vec<T>` or `&String` function parameters — excellent Rust idioms
+- No `&String` in production signatures — proper `&str` usage throughout
+- Clean DAG dependency graph with no circular inter-crate dependencies
+- Exemplary `#[non_exhaustive]` + `Other(String)` forward-compatibility on all wire protocol enums
+- `parking_lot::Mutex` used correctly everywhere — guards dropped before all `.await` points
+- Comprehensive security primitives: Argon2id, envelope encryption (v3), JWT denylist with DB persistence + NATS propagation, PKCE-enforced OIDC, typed permission extractors
+- 4,486 test functions, `TestApp` harness used consistently
+- Workspace-level `clippy::all = "deny"` and `warnings = "deny"` — no lint drift
+- Plugin subtrait pattern (`DiscoveryPlugin`, `ReleaseFetcherPlugin`, etc.) with macro-generated registry dispatch
+- All `#[tracing::instrument]` annotations use `skip_all` — full compliance
+- All dependencies use `workspace = true` — zero local version pinning
+- Serde `rename_all = "snake_case"` 100% consistent across 30+ files
 
 ## Architecture
 
