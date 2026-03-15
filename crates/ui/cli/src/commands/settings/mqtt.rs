@@ -235,7 +235,16 @@ impl HumanOutput for MqttLimitResponse {
 
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
-#[allow(clippy::too_many_lines)] // Large dispatch is inherent to MQTT subcommands
+fn resolve_ha_discovery_flag(ha_discovery: bool, no_ha_discovery: bool) -> Option<bool> {
+    if ha_discovery {
+        Some(true)
+    } else if no_ha_discovery {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 pub async fn dispatch_mqtt(command: MqttCommands, ctx: &CliContext) -> Result<()> {
     match command {
         MqttCommands::List => {
@@ -276,13 +285,7 @@ pub async fn dispatch_mqtt(command: MqttCommands, ctx: &CliContext) -> Result<()
             ha_discovery_prefix,
         } => {
             let ca_pem = crate::commands::resolve_ca_pem(ca_pem, ca_pem_file)?;
-            let ha_discovery_flag = if ha_discovery {
-                Some(true)
-            } else if no_ha_discovery {
-                Some(false)
-            } else {
-                None
-            };
+            let ha_discovery_flag = resolve_ha_discovery_flag(ha_discovery, no_ha_discovery);
             let resp = mqtt_create(MqttCreateParams {
                 server: ctx.server.as_deref(),
                 token: ctx.token.as_deref(),
@@ -322,13 +325,7 @@ pub async fn dispatch_mqtt(command: MqttCommands, ctx: &CliContext) -> Result<()
             ha_discovery_prefix,
         } => {
             let ca_pem = crate::commands::resolve_ca_pem(ca_pem, ca_pem_file)?;
-            let ha_discovery_flag = if ha_discovery {
-                Some(true)
-            } else if no_ha_discovery {
-                Some(false)
-            } else {
-                None
-            };
+            let ha_discovery_flag = resolve_ha_discovery_flag(ha_discovery, no_ha_discovery);
             let resp = mqtt_update(MqttUpdateParams {
                 server: ctx.server.as_deref(),
                 token: ctx.token.as_deref(),

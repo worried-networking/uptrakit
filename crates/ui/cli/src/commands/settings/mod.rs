@@ -182,7 +182,6 @@ impl HumanOutput for SystemAlertsResponse {
 
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
-#[allow(clippy::too_many_lines)] // Large dispatch is inherent to the settings tree
 pub async fn dispatch(command: SettingsCommands, ctx: &CliContext) -> Result<()> {
     match command {
         SettingsCommands::Show => {
