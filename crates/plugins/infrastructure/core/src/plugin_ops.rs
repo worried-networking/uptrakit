@@ -9,6 +9,7 @@ use crate::types::{PluginCapability, PluginType};
 
 /// Errors that can occur in [`PluginOps`] trait method implementations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum PluginOpsError {
     /// Unknown plugin type.
     #[error("unknown plugin type: {0}")]
