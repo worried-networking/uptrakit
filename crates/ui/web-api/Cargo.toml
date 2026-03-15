@@ -9,7 +9,7 @@ publish = false
 
 [features]
 default = ["oidc"]
-oidc = ["uptrakit-web-api-auth/oidc", "dep:openidconnect", "dep:reqwest"]
+oidc = ["uptrakit-web-api-auth/oidc", "uptrakit-web-api-queries/oidc", "dep:openidconnect", "dep:reqwest"]
 swagger-ui = ["dep:utoipa-swagger-ui"]
 nats = ["dep:async-nats", "dep:uptrakit-nats"]
 interactive = []

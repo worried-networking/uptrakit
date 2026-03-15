@@ -20,8 +20,7 @@ use openidconnect::{
     core::{CoreClient, CoreProviderMetadata, CoreResponseType},
 };
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, Set,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set, TransactionTrait,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -29,6 +28,9 @@ use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{oidc_provider, user_oidc_link, user_role};
 use uptrakit_shared_types::MaskedEmail;
+use uptrakit_web_api_queries::queries::users::oidc_sync::{
+    build_fake_claims_for_sync, find_active_provider,
+};
 
 use crate::auth::AuthMethod;
 use uptrakit_web_api_types::SecretString;
@@ -1278,43 +1280,6 @@ async fn exchange_code_for_claims(
     })
 }
 
-/// Build a synthetic `serde_json::Value` that re-maps stored `mapped_roles`
-/// back to the provider's original role-claim keys, suitable for passing to
-/// [`sync_oidc_roles`].
-///
-/// This is needed in flows where the original OIDC token is no longer
-/// available (e.g., deferred registration completion or account linking).
-fn build_fake_claims_for_sync(
-    provider: &oidc_provider::Model,
-    mapped_roles: &[String],
-) -> serde_json::Value {
-    let mut fake_claims = serde_json::Map::new();
-    if let Some(ref path) = provider.role_claim_path {
-        let reverse_mapped: Vec<String> = mapped_roles
-            .iter()
-            .filter_map(|local_name| {
-                provider
-                    .role_mapping
-                    .0
-                    .iter()
-                    .find(|(_, v)| v.as_str() == local_name)
-                    .map(|(k, _)| k.clone())
-            })
-            .collect();
-        let first_segment = path.split('.').next().unwrap_or(path);
-        fake_claims.insert(
-            first_segment.to_string(),
-            serde_json::Value::Array(
-                reverse_mapped
-                    .into_iter()
-                    .map(serde_json::Value::String)
-                    .collect(),
-            ),
-        );
-    }
-    serde_json::Value::Object(fake_claims)
-}
-
 /// Create an OIDC refresh token, access token, and return a complete
 /// [`AuthResponse`].
 ///
@@ -1380,21 +1345,6 @@ async fn mint_oidc_auth_response(state: &AppState, user_id: Uuid, provider_id: U
         Json(response),
     )
         .into_response()
-}
-
-async fn find_active_provider(
-    db: &impl ConnectionTrait,
-    tenant_id: uuid::Uuid,
-    id: uuid::Uuid,
-) -> Option<oidc_provider::Model> {
-    OidcProvider::find_by_id(id)
-        .filter(oidc_provider::Column::TenantId.eq(tenant_id))
-        .filter(oidc_provider::Column::IsActive.eq(true))
-        .filter(oidc_provider::Column::DeactivatedAt.is_null())
-        .one(db)
-        .await
-        .ok()
-        .flatten()
 }
 
 /// Store only (user_id, provider_id) in the database and redirect with exchange code.

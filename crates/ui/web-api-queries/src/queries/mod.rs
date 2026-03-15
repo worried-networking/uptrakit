@@ -24,3 +24,4 @@ pub mod update_dispatch;
 pub mod update_history;
 pub mod update_triggers;
 pub mod update_types;
+pub mod users;
