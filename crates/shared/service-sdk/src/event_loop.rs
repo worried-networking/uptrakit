@@ -28,19 +28,9 @@ use crate::cert_handler::{
 };
 use crate::connection::ControllerConnection;
 use crate::identity::ServiceIdentityState;
-use crate::lifecycle::{LoopError, LoopOutcome, LoopResult, ServiceHandler, ShutdownCause};
+use crate::shared_types::EventLoopContext;
+use crate::shared_types::{LoopError, LoopOutcome, LoopResult, ServiceHandler, ShutdownCause};
 use crate::signal::SignalWatcher;
-
-/// Context for the event loop, providing connection metadata that callbacks
-/// may need.
-pub struct EventLoopContext<'a> {
-    /// Base URL for the controller (e.g. `https://host:8443`).
-    pub base_url: &'a str,
-    /// Optional PKI address.
-    pub pki_addr: Option<&'a str>,
-    /// Raw CA PEM bytes, if a pinned CA is in use.
-    pub ca_pem: Option<&'a [u8]>,
-}
 
 /// Maximum number of consecutive service events to process before yielding
 /// to other `select!` arms (ping, renewal, controller messages, signals).

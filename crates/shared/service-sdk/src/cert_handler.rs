@@ -27,7 +27,7 @@ use uptrakit_internal_wire::{
 use crate::connection::ControllerConnection;
 use crate::error::{EnrollmentError, IdentityError, Result};
 use crate::identity::{ServiceIdentityState, generate_keypair_and_csr};
-use crate::lifecycle::LoopOutcome;
+use crate::shared_types::LoopOutcome;
 
 /// Far-future delay used when no renewal is scheduled (30 days).
 pub const FAR_FUTURE: Duration = Duration::from_secs(30 * 24 * 3600);

@@ -7,7 +7,7 @@
 //!   terminal errors into log messages or `process::exit`.
 
 use crate::cli::CommonServiceArgs;
-use crate::lifecycle::ServiceHandler;
+use crate::shared_types::ServiceHandler;
 
 /// Install the `aws-lc-rs` default cryptographic provider for `rustls`.
 ///
