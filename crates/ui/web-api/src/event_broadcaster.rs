@@ -15,7 +15,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::{RwLock, broadcast};
+use parking_lot::RwLock;
+use tokio::sync::broadcast;
 use uptrakit_web_api_types::events::AdminEvent;
 use uuid::Uuid;
 
@@ -85,7 +86,7 @@ impl EventBroadcaster {
     /// cross-controller events without causing a re-publish loop.
     #[tracing::instrument(skip_all, fields(%tenant_id))]
     pub async fn send_local(&self, tenant_id: Uuid, event: AdminEvent) {
-        let channels = self.channels.read().await;
+        let channels = self.channels.read();
         if let Some(entry) = channels.get(&tenant_id) {
             let _ = entry.tx.send(event);
         }
@@ -97,7 +98,7 @@ impl EventBroadcaster {
     /// cross-controller events without causing a re-publish loop.
     #[tracing::instrument(skip_all)]
     pub async fn send_global_local(&self, event: AdminEvent) {
-        let channels = self.channels.read().await;
+        let channels = self.channels.read();
         for entry in channels.values() {
             let _ = entry.tx.send(event.clone());
         }
@@ -127,6 +128,7 @@ impl EventBroadcaster {
     /// Publish an `AdminEvent` to NATS so other controller instances can
     /// relay it to their local SSE subscribers.  No-op when NATS is not
     /// configured or the `nats` feature is disabled.
+    #[allow(unused_variables)]
     async fn maybe_publish_nats(&self, tenant_id: Option<Uuid>, event: AdminEvent) {
         #[cfg(feature = "nats")]
         if let (Some(nats), Ok(event_json)) = (&self.nats, serde_json::to_string(&event)) {
@@ -143,9 +145,6 @@ impl EventBroadcaster {
             )
             .await;
         }
-        // Suppress unused variable warnings in non-NATS builds.
-        #[cfg(not(feature = "nats"))]
-        let _ = (tenant_id, event);
     }
 
     /// Subscribe to admin events for the given tenant.
@@ -154,7 +153,7 @@ impl EventBroadcaster {
     /// count on subsequent subscribes.
     #[tracing::instrument(skip_all, fields(%tenant_id))]
     pub async fn subscribe(&self, tenant_id: Uuid) -> broadcast::Receiver<AdminEvent> {
-        let mut channels = self.channels.write().await;
+        let mut channels = self.channels.write();
         let entry = channels.entry(tenant_id).or_insert_with(|| {
             let (tx, _) = broadcast::channel(CHANNEL_CAPACITY);
             ChannelEntry {
@@ -171,7 +170,7 @@ impl EventBroadcaster {
     /// When the count reaches zero, the channel is removed to free memory.
     #[tracing::instrument(skip_all, fields(%tenant_id))]
     pub async fn unsubscribe(&self, tenant_id: Uuid) {
-        let mut channels = self.channels.write().await;
+        let mut channels = self.channels.write();
         let remove = if let Some(entry) = channels.get_mut(&tenant_id) {
             entry.subscriber_count = entry.subscriber_count.saturating_sub(1);
             entry.subscriber_count == 0
@@ -202,7 +201,7 @@ mod tests {
         let _rx = broadcaster.subscribe(tenant).await;
 
         // Channel should exist
-        let channels = broadcaster.channels.read().await;
+        let channels = broadcaster.channels.read();
         assert!(channels.contains_key(&tenant));
         assert_eq!(channels[&tenant].subscriber_count, 1);
     }
@@ -215,7 +214,7 @@ mod tests {
         let _rx = broadcaster.subscribe(tenant).await;
         broadcaster.unsubscribe(tenant).await;
 
-        let channels = broadcaster.channels.read().await;
+        let channels = broadcaster.channels.read();
         assert!(!channels.contains_key(&tenant));
     }
 
@@ -306,7 +305,7 @@ mod tests {
         let mut rx2 = broadcaster.subscribe(tenant).await;
 
         {
-            let channels = broadcaster.channels.read().await;
+            let channels = broadcaster.channels.read();
             assert_eq!(channels[&tenant].subscriber_count, 2);
         }
 
@@ -320,7 +319,7 @@ mod tests {
         // Unsubscribe one — channel should remain
         broadcaster.unsubscribe(tenant).await;
         {
-            let channels = broadcaster.channels.read().await;
+            let channels = broadcaster.channels.read();
             assert!(channels.contains_key(&tenant));
             assert_eq!(channels[&tenant].subscriber_count, 1);
         }
@@ -328,7 +327,7 @@ mod tests {
         // Unsubscribe second — channel should be removed
         broadcaster.unsubscribe(tenant).await;
         {
-            let channels = broadcaster.channels.read().await;
+            let channels = broadcaster.channels.read();
             assert!(!channels.contains_key(&tenant));
         }
     }

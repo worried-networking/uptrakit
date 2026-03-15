@@ -2,10 +2,11 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use parking_lot::RwLock;
 use rand::Rng;
 use std::cmp::Ordering;
 use time::OffsetDateTime;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uptrakit_internal_wire::Capability;
 use uptrakit_internal_wire::ControllerMessage;
@@ -122,7 +123,7 @@ impl ServiceConnectionRegistry {
             connected_at: OffsetDateTime::now_utc(),
         };
 
-        let mut guard = self.inner.write().await;
+        let mut guard = self.inner.write();
         if let Some(old) = guard.connections.remove(&service_id) {
             old.cancel_token.cancel();
             // Clean up reverse index for superseded connection.
@@ -140,7 +141,7 @@ impl ServiceConnectionRegistry {
     /// Returns the set of MQTT client IDs that were assigned to this service
     /// (empty for non-MQTT services), so the lease coordinator can release them.
     pub async fn unregister(&self, service_id: &Uuid) -> Option<HashSet<Uuid>> {
-        let mut guard = self.inner.write().await;
+        let mut guard = self.inner.write();
         guard.connections.remove(service_id).map(|c| {
             // Clean up reverse index entries for all MQTT clients assigned to this service.
             for client_id in &c.assigned_mqtt_clients {
@@ -161,7 +162,7 @@ impl ServiceConnectionRegistry {
     /// rather than waiting for the next message round-trip to detect the
     /// disconnection.
     pub async fn force_disconnect(&self, service_id: &Uuid) -> Option<HashSet<Uuid>> {
-        let mut guard = self.inner.write().await;
+        let mut guard = self.inner.write();
         guard.connections.remove(service_id).map(|c| {
             c.cancel_token.cancel();
             for client_id in &c.assigned_mqtt_clients {
@@ -181,7 +182,7 @@ impl ServiceConnectionRegistry {
     /// `RwLock` across an await point.
     pub async fn send(&self, service_id: &Uuid, msg: ControllerMessage) -> bool {
         let sender = {
-            let guard = self.inner.read().await;
+            let guard = self.inner.read();
             guard.connections.get(service_id).map(|c| c.sender.clone())
         };
         if let Some(sender) = sender {
@@ -193,14 +194,13 @@ impl ServiceConnectionRegistry {
 
     /// Check whether a service is currently connected.
     pub async fn is_connected(&self, service_id: &Uuid) -> bool {
-        self.inner.read().await.connections.contains_key(service_id)
+        self.inner.read().connections.contains_key(service_id)
     }
 
     /// Get the connection time for a service, if connected.
     pub async fn connected_at(&self, service_id: &Uuid) -> Option<OffsetDateTime> {
         self.inner
             .read()
-            .await
             .connections
             .get(service_id)
             .map(|c| c.connected_at)
@@ -214,7 +214,7 @@ impl ServiceConnectionRegistry {
     /// a single slow consumer from blocking the entire broadcast.
     pub async fn broadcast(&self, msg: ControllerMessage) {
         let senders: Vec<mpsc::Sender<ControllerMessage>> = {
-            let guard = self.inner.read().await;
+            let guard = self.inner.read();
             guard
                 .connections
                 .values()
@@ -231,7 +231,7 @@ impl ServiceConnectionRegistry {
     /// Sends are dispatched in parallel with a per-send timeout.
     pub async fn broadcast_by_capability(&self, capability: &Capability, msg: ControllerMessage) {
         let senders: Vec<mpsc::Sender<ControllerMessage>> = {
-            let guard = self.inner.read().await;
+            let guard = self.inner.read();
             guard
                 .connections
                 .values()
@@ -244,7 +244,7 @@ impl ServiceConnectionRegistry {
 
     /// Get the current number of connected services.
     pub async fn connection_count(&self) -> usize {
-        self.inner.read().await.connections.len()
+        self.inner.read().connections.len()
     }
 
     /// Broadcast server restarting notification to all services, scattered over time.
@@ -262,7 +262,7 @@ impl ServiceConnectionRegistry {
         payload: uptrakit_internal_wire::ServerRestartingPayload,
         scatter_duration: Duration,
     ) {
-        let guard = self.inner.read().await;
+        let guard = self.inner.read();
         let service_ids: Vec<Uuid> = guard.connections.keys().copied().collect();
         let count = service_ids.len();
         drop(guard);
@@ -305,12 +305,17 @@ impl ServiceConnectionRegistry {
             // waiting until all services have actually disconnected.
             tokio::spawn(async move {
                 tokio::time::sleep(delay).await;
-                let guard = inner.read().await;
-                if let Some(conn) = guard.connections.get(&service_id) {
+                // Clone the sender under the lock then drop the guard before
+                // any await point — parking_lot guards are not Send.
+                let sender = {
+                    let guard = inner.read();
+                    guard.connections.get(&service_id).map(|c| c.sender.clone())
+                };
+                if let Some(sender) = sender {
                     tracing::trace!(%service_id, "sending ServerRestarting notification");
                     // Use the same send timeout as broadcast()/send_parallel() to
                     // prevent an unresponsive service from blocking indefinitely.
-                    if tokio::time::timeout(BROADCAST_SEND_TIMEOUT, conn.sender.send(msg_clone))
+                    if tokio::time::timeout(BROADCAST_SEND_TIMEOUT, sender.send(msg_clone))
                         .await
                         .is_err()
                     {
@@ -337,7 +342,7 @@ impl ServiceConnectionRegistry {
 
     /// Record a heartbeat from an MQTT service.
     pub async fn record_heartbeat(&self, service_id: &Uuid) {
-        let mut guard = self.inner.write().await;
+        let mut guard = self.inner.write();
         if let Some(conn) = guard.connections.get_mut(service_id) {
             conn.last_heartbeat = Some(Instant::now());
         }
@@ -347,7 +352,6 @@ impl ServiceConnectionRegistry {
     pub async fn get_instance_id(&self, service_id: &Uuid) -> Option<String> {
         self.inner
             .read()
-            .await
             .connections
             .get(service_id)
             .and_then(|c| c.instance_id.clone())
@@ -358,7 +362,7 @@ impl ServiceConnectionRegistry {
     /// Returns `true` if the assignment was recorded, `false` if the service
     /// is not connected.
     pub async fn assign_mqtt_client(&self, service_id: &Uuid, mqtt_client_id: Uuid) -> bool {
-        let mut guard = self.inner.write().await;
+        let mut guard = self.inner.write();
         if let Some(conn) = guard.connections.get_mut(service_id) {
             conn.assigned_mqtt_clients.insert(mqtt_client_id);
             guard.mqtt_client_index.insert(mqtt_client_id, *service_id);
@@ -372,7 +376,7 @@ impl ServiceConnectionRegistry {
     ///
     /// Returns `true` if the MQTT client was previously assigned, `false` otherwise.
     pub async fn release_mqtt_client(&self, service_id: &Uuid, mqtt_client_id: &Uuid) -> bool {
-        let mut guard = self.inner.write().await;
+        let mut guard = self.inner.write();
         if let Some(conn) = guard.connections.get_mut(service_id) {
             let removed = conn.assigned_mqtt_clients.remove(mqtt_client_id);
             if removed {
@@ -391,7 +395,6 @@ impl ServiceConnectionRegistry {
     pub async fn get_instance_for_mqtt_client(&self, mqtt_client_id: &Uuid) -> Option<Uuid> {
         self.inner
             .read()
-            .await
             .mqtt_client_index
             .get(mqtt_client_id)
             .copied()
@@ -401,7 +404,6 @@ impl ServiceConnectionRegistry {
     pub async fn assigned_mqtt_client_count(&self, service_id: &Uuid) -> usize {
         self.inner
             .read()
-            .await
             .connections
             .get(service_id)
             .map(|c| c.assigned_mqtt_clients.len())
@@ -415,7 +417,6 @@ impl ServiceConnectionRegistry {
     pub async fn get_max_tenants(&self, service_id: &Uuid) -> Option<u32> {
         self.inner
             .read()
-            .await
             .connections
             .get(service_id)
             .and_then(|c| c.max_tenants)
@@ -426,7 +427,7 @@ impl ServiceConnectionRegistry {
     /// Returns `None` if the service is not connected or has no capacity info.
     /// Returns `Some(u32::MAX)` if max_tenants is 0 (unlimited).
     pub async fn get_available_capacity(&self, service_id: &Uuid) -> Option<u32> {
-        let guard = self.inner.read().await;
+        let guard = self.inner.read();
         guard.connections.get(service_id).and_then(|c| {
             c.max_tenants.map(|max| {
                 if max == 0 {
@@ -442,7 +443,6 @@ impl ServiceConnectionRegistry {
     pub async fn list_connections(&self) -> Vec<(Uuid, String)> {
         self.inner
             .read()
-            .await
             .connections
             .iter()
             .filter_map(|(id, conn)| conn.instance_id.as_ref().map(|iid| (*id, iid.clone())))
@@ -453,7 +453,6 @@ impl ServiceConnectionRegistry {
     pub async fn has_capability_connected(&self, capability: &Capability) -> bool {
         self.inner
             .read()
-            .await
             .connections
             .values()
             .any(|c| c.capabilities.contains(capability))
@@ -466,7 +465,7 @@ impl ServiceConnectionRegistry {
         &self,
         ids: &[uuid::Uuid],
     ) -> std::collections::HashSet<uuid::Uuid> {
-        let guard = self.inner.read().await;
+        let guard = self.inner.read();
         ids.iter()
             .filter(|id| guard.connections.contains_key(*id))
             .copied()
@@ -477,7 +476,7 @@ impl ServiceConnectionRegistry {
     ///
     /// Returns a list of `(service_id, last_heartbeat_age)` for stale connections.
     pub async fn get_stale_services(&self, timeout: Duration) -> Vec<(Uuid, Duration)> {
-        let guard = self.inner.read().await;
+        let guard = self.inner.read();
         let now = Instant::now();
         guard
             .connections
@@ -497,7 +496,7 @@ impl ServiceConnectionRegistry {
 
     /// List MQTT service load information, sorted from least busy to most busy.
     pub async fn list_mqtt_service_loads(&self) -> Vec<MqttServiceLoad> {
-        let guard = self.inner.read().await;
+        let guard = self.inner.read();
         let mut loads = Vec::new();
 
         for (service_id, conn) in guard.connections.iter() {

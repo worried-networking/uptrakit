@@ -19,8 +19,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 /// Broadcast channel capacity per batch.
@@ -120,7 +121,7 @@ impl BatchProgressBroadcaster {
     /// Create a broadcast channel for the given batch.
     pub async fn create_channel(&self, batch_id: Uuid) {
         let (tx, _) = broadcast::channel(CHANNEL_CAPACITY);
-        self.channels.write().await.insert(batch_id, tx);
+        self.channels.write().insert(batch_id, tx);
     }
 
     /// Send a progress event to all local subscribers of the given batch.
@@ -131,7 +132,7 @@ impl BatchProgressBroadcaster {
     pub async fn send(&self, batch_id: Uuid, event: BatchProgressEvent) {
         // Local broadcast.
         {
-            let channels = self.channels.read().await;
+            let channels = self.channels.read();
             if let Some(tx) = channels.get(&batch_id) {
                 let _ = tx.send(event.clone());
             }
@@ -151,7 +152,7 @@ impl BatchProgressBroadcaster {
 
         // Local broadcast (removes channel atomically).
         {
-            let mut channels = self.channels.write().await;
+            let mut channels = self.channels.write();
             if let Some(tx) = channels.remove(&batch_id) {
                 let _ = tx.send(event.clone());
             }
@@ -206,7 +207,7 @@ impl BatchProgressBroadcaster {
         &self,
         batch_id: Uuid,
     ) -> Option<broadcast::Receiver<BatchProgressEvent>> {
-        let channels = self.channels.read().await;
+        let channels = self.channels.read();
         channels.get(&batch_id).map(|tx| tx.subscribe())
     }
 
