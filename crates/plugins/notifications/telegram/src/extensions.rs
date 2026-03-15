@@ -1,6 +1,22 @@
 //! Extension action handlers for the Telegram notification plugin.
 
 use uptrakit_plugin_infrastructure_core::ExtensionActionContext;
+
+// ── Raw settings key constants ────────────────────────────────────────────────
+
+/// Key prefix for global Telegram settings (used with `load_global_settings_by_prefix`).
+pub const GLOBAL_TELEGRAM_PREFIX: &str = "global_telegram.";
+
+/// Global Telegram bot token (stored in the `global_settings` table).
+pub const KEY_GLOBAL_TELEGRAM_BOT_TOKEN: &str = "global_telegram.bot_token";
+
+/// All raw settings keys written by the Telegram plugin to the `global_settings`
+/// table via [`uptrakit_shared_db::raw_settings`].
+///
+/// Aggregated by [`uptrakit_plugin_infrastructure_registry::all_plugin_raw_settings_keys`]
+/// so the controller can suppress false-positive "unrecognised setting key" startup warnings
+/// for these legitimately plugin-owned entries.
+pub const RAW_SETTINGS_KEYS: &[&str] = &[KEY_GLOBAL_TELEGRAM_BOT_TOKEN];
 use uuid::Uuid;
 
 /// Handle an extension action for the Telegram notification plugin.
@@ -60,16 +76,18 @@ pub async fn handle_action(
 async fn handle_get_global_telegram(
     db: &sea_orm::DatabaseConnection,
 ) -> std::result::Result<serde_json::Value, String> {
-    let settings =
-        uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(db, "global_telegram.")
-            .await
-            .map_err(|e| {
-                tracing::error!("failed to load global Telegram settings: {e:?}");
-                "Internal server error".to_string()
-            })?;
+    let settings = uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(
+        db,
+        GLOBAL_TELEGRAM_PREFIX,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("failed to load global Telegram settings: {e:?}");
+        "Internal server error".to_string()
+    })?;
 
     let has_bot_token = settings
-        .get("global_telegram.bot_token")
+        .get(KEY_GLOBAL_TELEGRAM_BOT_TOKEN)
         .and_then(|v| v.as_str())
         .is_some_and(|s| !s.is_empty());
 
@@ -88,7 +106,7 @@ async fn handle_save_global_telegram(
 
     uptrakit_shared_db::raw_settings::upsert_global_setting_raw(
         db,
-        "global_telegram.bot_token",
+        KEY_GLOBAL_TELEGRAM_BOT_TOKEN,
         serde_json::json!(bot_token),
     )
     .await

@@ -58,6 +58,40 @@ pub struct NotificationRegistryConfig {
     pub allow_private_urls: bool,
 }
 
+/// Returns the exact set of raw settings keys owned by compiled-in notification plugins.
+///
+/// Notification plugins store their configuration in the shared `settings` and
+/// `global_settings` DB tables via the raw-key settings store
+/// (`uptrakit_shared_db::raw_settings`). Because these keys are not part of the
+/// typed `SettingKey` enum, the controller would otherwise log a spurious
+/// "unrecognised setting key" warning for each one on startup.
+///
+/// This function returns the complete list of exact raw keys that are legitimately
+/// owned by compiled-in notification plugins. The set is determined at compile
+/// time by the active feature flags — enabling a new notification plugin
+/// automatically contributes its keys here via its `extensions::RAW_SETTINGS_KEYS`
+/// constant.
+///
+/// The slice is computed once and cached in a [`std::sync::OnceLock`].
+///
+/// # Adding a new notification plugin
+///
+/// Declare `pub const RAW_SETTINGS_KEYS: &[&str]` in the plugin's `extensions`
+/// module, then add a `#[cfg(feature = "notifications-<name>")]` extend call
+/// below.
+pub fn all_plugin_raw_settings_keys() -> Vec<&'static str> {
+    // `mut` is only exercised when at least one notification plugin feature is
+    // enabled (`notifications-email` / `notifications-telegram`). The suppression
+    // is required because additive feature flags prohibit `#[cfg(not(feature))]`.
+    #[allow(unused_mut)]
+    let mut keys: Vec<&'static str> = Vec::new();
+    #[cfg(feature = "notifications-email")]
+    keys.extend_from_slice(uptrakit_notification_plugin_email::extensions::RAW_SETTINGS_KEYS);
+    #[cfg(feature = "notifications-telegram")]
+    keys.extend_from_slice(uptrakit_notification_plugin_telegram::extensions::RAW_SETTINGS_KEYS);
+    keys
+}
+
 /// Return all controller-side database migrations contributed by plugins.
 ///
 /// The controller's migration runner appends these after the core migrations

@@ -41,13 +41,22 @@ pub const DEFAULT_HTTPS_ADDR: &str = "[::]:8443";
 pub const DEFAULT_REAL_IP_HEADER: &str = "X-Forwarded-For";
 
 fn warn_unrecognised_keys(raw: &RawSettings) {
+    // Notification plugins store their configuration in the same `settings` /
+    // `global_settings` tables using raw string keys (e.g. `smtp.host`,
+    // `global_telegram.bot_token`). These are legitimately owned by plugins and
+    // must not trigger the unrecognised-key warning. The registry aggregates
+    // the exact set of keys from each compiled-in notification plugin so that
+    // only truly unexpected keys produce a warning.
+    let plugin_keys = uptrakit_plugin_infrastructure_registry::all_plugin_raw_settings_keys();
+
     for key in raw.keys() {
-        if SettingKey::from_db_key(key).is_none() {
-            tracing::warn!(
-                key,
-                "unrecognised setting key in database — may be stale or misspelled"
-            );
+        if SettingKey::from_db_key(key).is_some() || plugin_keys.contains(&key.as_str()) {
+            continue;
         }
+        tracing::warn!(
+            key,
+            "unrecognised setting key in database — may be stale or misspelled"
+        );
     }
 }
 

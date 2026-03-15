@@ -251,7 +251,7 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransportPlugin for Telegr
         {
             if let Some(global_token) = settings
                 .get("global")
-                .and_then(|g| g.get("global_telegram.bot_token"))
+                .and_then(|g| g.get(crate::extensions::KEY_GLOBAL_TELEGRAM_BOT_TOKEN))
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
             {

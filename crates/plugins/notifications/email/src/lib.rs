@@ -589,8 +589,10 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransportPlugin for EmailP
             // Config is already merged (e.g. from a caller that pre-merged).
             config.clone()
         } else {
-            let global = smtp_from_settings_map(&settings["global"], "global_smtp.");
-            let tenant = smtp_from_settings_map(&settings["tenant"], "smtp.");
+            let global =
+                smtp_from_settings_map(&settings["global"], crate::extensions::GLOBAL_SMTP_PREFIX);
+            let tenant =
+                smtp_from_settings_map(&settings["tenant"], crate::extensions::SMTP_PREFIX);
             merge_smtp_into_config(&global, &tenant, config.clone())
         };
 
