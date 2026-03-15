@@ -33,7 +33,7 @@ use uptrakit_web_api_types::update_batches::{
 use uuid::Uuid;
 
 use crate::notifier::ServiceNotifier;
-use crate::queries::update_triggers::{
+use crate::queries::update_dispatch::{
     CreateUpdateRecordParams, DispatchUpdateParams, TriggerUpdateError, has_active_update_for_host,
 };
 use crate::queries::update_types::{ActorType, BatchType};
@@ -84,12 +84,12 @@ pub async fn create_batch(
     // Validate all candidates and partition into valid + skipped
     let mut validated: Vec<(
         BatchUpdateCandidate,
-        super::update_triggers::ValidatedUpdateTarget,
+        super::update_dispatch::ValidatedUpdateTarget,
     )> = Vec::new();
     let mut skipped: Vec<BatchSkippedItem> = Vec::new();
 
     for candidate in candidates {
-        match super::update_triggers::validate_update_preconditions(
+        match super::update_dispatch::validate_update_preconditions(
             db,
             params.tenant_id,
             candidate.host_id,
@@ -181,7 +181,7 @@ pub async fn create_batch(
                     (update_history::UpdateStatus::Queued, false)
                 }
             };
-        let update_history_id = super::update_triggers::create_update_history_record(
+        let update_history_id = super::update_dispatch::create_update_history_record(
             &txn,
             &CreateUpdateRecordParams {
                 tenant_id: params.tenant_id,
@@ -212,7 +212,7 @@ pub async fn create_batch(
         validated.iter().zip(history_ids)
     {
         let trigger_status = if should_dispatch {
-            let connected = super::update_triggers::dispatch_update_to_agent(
+            let connected = super::update_dispatch::dispatch_update_to_agent(
                 notifier,
                 target,
                 DispatchUpdateParams {

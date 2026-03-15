@@ -11,7 +11,7 @@ use uptrakit_shared_types::BatchStatus;
 use uuid::Uuid;
 
 use crate::notifier::ServiceNotifier;
-use crate::queries::update_triggers::{
+use crate::queries::update_dispatch::{
     DispatchUpdateParams, TriggerUpdateError, load_target_for_dispatch,
 };
 
@@ -88,7 +88,7 @@ pub async fn dispatch_next_queued_for_host(
     .await
     {
         Ok(target) => {
-            let _ = super::super::update_triggers::dispatch_update_to_agent(
+            let _ = super::super::update_dispatch::dispatch_update_to_agent(
                 notifier,
                 &target,
                 DispatchUpdateParams {

@@ -12,7 +12,7 @@ use uptrakit_shared_db::entity::{
 use uuid::Uuid;
 
 use super::Result;
-use crate::queries::update_triggers::TriggerUpdateError;
+use crate::queries::update_dispatch::TriggerUpdateError;
 
 /// A software item that is outdated on a particular host.
 pub struct BatchUpdateCandidate {

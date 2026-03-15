@@ -20,6 +20,7 @@ pub mod software_items;
 pub mod system_enrollment_tokens;
 pub mod system_services;
 pub mod update_batches;
+pub mod update_dispatch;
 pub mod update_history;
 pub mod update_triggers;
 pub mod update_types;
