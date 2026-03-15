@@ -22,13 +22,15 @@ pub use error::{PluginError, Result};
 pub use form_schema::ConfigFormSchema;
 pub use plugin_base::{
     DiscoveryPlugin, NotificationTransportPlugin, PackageIndexPlugin, PluginBase,
-    ReleaseFetcherPlugin, UpdateExecutorPlugin, UpdateHooksPlugin, VersionDetectorPlugin,
+    ReleaseFetcherPlugin, UpdateExecutorPlugin, UpdateHooksPlugin, UpdateLifecyclePlugin,
+    VersionDetectorPlugin,
 };
 #[cfg(feature = "agent-infra")]
 pub use plugin_base::{GuestExecPlugin, HostLifecyclePlugin, HostReportPlugin};
 pub use secrets::SecretMasking;
 pub use traits::{
     HostCompatibility, PreUpdateHookResult, SudoCommandEntry, SudoHelperScript, UpdateHookContext,
+    UpdateLifecycleContext,
 };
 pub use types::{
     AttestationStatus, DiscoveredSoftware, DiscoveryTarget, PluginCapability, PluginRole,

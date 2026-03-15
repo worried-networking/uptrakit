@@ -15,7 +15,8 @@
 //! | [`ReleaseFetcherPlugin`] | `ReleaseFetching` | Fetch upstream releases |
 //! | [`PackageIndexPlugin`] | `RefreshPackageIndex` | Sync local package database |
 //! | [`UpdateExecutorPlugin`] | `UpdateExecution` | Execute updates |
-//! | [`UpdateHooksPlugin`] | `PreUpdateHook`/`PostUpdateHook` | Pre/post update lifecycle hooks |
+//! | [`UpdateHooksPlugin`] | `PreUpdateHook`/`PostUpdateHook` | Pre/post update lifecycle hooks (on executor plugin) |
+//! | [`UpdateLifecyclePlugin`] | `UpdateLifecycle` | Standalone update lifecycle hook plugins |
 //! | [`NotificationTransportPlugin`] | `NotificationDelivery` | Deliver notification messages |
 //! | [`HostLifecyclePlugin`] | `HostLifecycle` | Infrastructure host bootstrap/sync |
 //! | [`HostReportPlugin`] | `HostReport` | Post-report-hosts callbacks |
@@ -31,7 +32,10 @@ use crate::batch_detect::{BatchDetectItem, BatchDetectResult};
 use crate::batch_fetch::{BatchFetchItem, BatchFetchResult};
 use crate::batch_update::{BatchUpdateItem, BatchUpdateResult};
 use crate::error::Result;
-use crate::traits::{HostCompatibility, PreUpdateHookResult, SudoCommandEntry, UpdateHookContext};
+use crate::traits::{
+    HostCompatibility, PreUpdateHookResult, SudoCommandEntry, UpdateHookContext,
+    UpdateLifecycleContext,
+};
 use crate::types::{DiscoveredSoftware, PluginCapability, ReleaseInfo, UpstreamRelease};
 use crate::version::Version;
 use uptrakit_command::UpdateOutputLine;
@@ -221,6 +225,11 @@ pub trait PluginBase: Send + Sync {
         None
     }
 
+    /// Downcast to [`UpdateLifecyclePlugin`], if implemented.
+    fn as_update_lifecycle(&self) -> Option<&dyn UpdateLifecyclePlugin> {
+        None
+    }
+
     /// Downcast to [`NotificationTransportPlugin`], if implemented.
     fn as_notification_transport(&self) -> Option<&dyn NotificationTransportPlugin> {
         None
@@ -400,6 +409,34 @@ pub trait UpdateHooksPlugin: PluginBase {
     async fn post_update_hook(
         &self,
         ctx: &UpdateHookContext,
+        output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<()>;
+}
+
+/// Standalone update lifecycle hooks.
+///
+/// Plugins implementing this trait are assigned via `PreUpdateHook` and
+/// `PostUpdateHook` roles on `host_software_item_plugins`. They run in
+/// `ordinal` order before/after the actual update execution.
+///
+/// Unlike [`UpdateHooksPlugin`] (which is coupled to the update executor
+/// plugin), lifecycle plugins are independent, first-class plugin
+/// assignments that can be reused across software items.
+#[async_trait]
+pub trait UpdateLifecyclePlugin: PluginBase {
+    /// Run before an update is applied. May abort the update.
+    async fn execute_pre_hook(
+        &self,
+        ctx: &UpdateLifecycleContext,
+        output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<PreUpdateHookResult>;
+
+    /// Run after an update has been applied. Errors are logged, not fatal.
+    ///
+    /// `ctx.update_succeeded` indicates whether the update itself succeeded.
+    async fn execute_post_hook(
+        &self,
+        ctx: &UpdateLifecycleContext,
         output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
     ) -> Result<()>;
 }
@@ -629,6 +666,7 @@ mod tests {
         assert!(plugin.as_package_index().is_none());
         assert!(plugin.as_update_executor().is_none());
         assert!(plugin.as_update_hooks().is_none());
+        assert!(plugin.as_update_lifecycle().is_none());
         assert!(plugin.as_notification_transport().is_none());
     }
 

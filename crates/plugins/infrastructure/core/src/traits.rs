@@ -67,6 +67,63 @@ impl PreUpdateHookResult {
     }
 }
 
+/// Contextual data passed to update lifecycle hook plugins.
+///
+/// Unlike [`UpdateHookContext`] (which is passed to the plugin that
+/// *performs* the update), this context is for standalone hook plugins
+/// assigned via `PreUpdateHook`/`PostUpdateHook` roles.
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub struct UpdateLifecycleContext {
+    /// The package identifier being updated.
+    pub package_identifier: String,
+    /// The target version being installed.
+    pub to_version: String,
+    /// The version installed before the update, if detected.
+    pub from_version: Option<String>,
+    /// Optional release metadata from the upstream source.
+    pub release_info: Option<ReleaseInfo>,
+    /// Whether the update succeeded.
+    ///
+    /// `None` during pre-hooks, `Some(true/false)` during post-hooks.
+    pub update_succeeded: Option<bool>,
+}
+
+impl UpdateLifecycleContext {
+    /// Create a new context for pre-update hooks.
+    pub fn for_pre_hook(
+        package_identifier: impl Into<String>,
+        to_version: impl Into<String>,
+        from_version: Option<String>,
+        release_info: Option<ReleaseInfo>,
+    ) -> Self {
+        Self {
+            package_identifier: package_identifier.into(),
+            to_version: to_version.into(),
+            from_version,
+            release_info,
+            update_succeeded: None,
+        }
+    }
+
+    /// Create a new context for post-update hooks.
+    pub fn for_post_hook(
+        package_identifier: impl Into<String>,
+        to_version: impl Into<String>,
+        from_version: Option<String>,
+        release_info: Option<ReleaseInfo>,
+        update_succeeded: bool,
+    ) -> Self {
+        Self {
+            package_identifier: package_identifier.into(),
+            to_version: to_version.into(),
+            from_version,
+            release_info,
+            update_succeeded: Some(update_succeeded),
+        }
+    }
+}
+
 /// A helper script installed by the bootstrap process on the managed host.
 ///
 /// Enables argument-validated sudo commands — something sudoers wildcards
