@@ -58,6 +58,9 @@ pub struct HostSoftwareAssignment {
 pub struct HostPluginRoleAssignment {
     /// The role this plugin serves (e.g. `detect_version`, `fetch_releases`, `execute_update`).
     pub role: PluginRole,
+    /// Ordinal for hook roles; must be `0` for non-hook roles. Defaults to `0`.
+    #[serde(default)]
+    pub ordinal: i32,
     /// UUID of an existing plugin config to use.
     pub plugin_config_id: Option<Uuid>,
     /// Inline plugin config to create (mutually exclusive with `plugin_config_id`).
@@ -88,6 +91,11 @@ pub struct AssignHostsRequest {
 pub struct UpdateHostAssignmentRequest {
     /// The role to update (e.g. `detect_version`, `fetch_releases`, `execute_update`).
     pub role: PluginRole,
+    /// Ordinal for this assignment. For hook roles (pre/post_update_hook), multiple
+    /// assignments with different ordinals are allowed. For non-hook roles, this
+    /// must be `0`. Defaults to `0`.
+    #[serde(default)]
+    pub ordinal: i32,
     /// UUID of an existing plugin config to use.
     pub plugin_config_id: Option<Uuid>,
     /// Inline plugin config to create (mutually exclusive with `plugin_config_id`).
@@ -229,6 +237,9 @@ pub struct SoftwareItemHostSummary {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostPluginRoleSummary {
     pub role: PluginRole,
+    /// Ordinal (0-based) for hook roles; always 0 for non-hook roles.
+    #[serde(default)]
+    pub ordinal: i32,
     /// `None` for autodiscovered package-manager assignments (no stored config).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_config_id: Option<Uuid>,
@@ -552,6 +563,7 @@ mod tests {
                     plugins: vec![
                         HostPluginRoleAssignment {
                             role: PluginRole::DetectVersion,
+                            ordinal: 0,
                             plugin_config_id: Some(sample_uuid()),
                             plugin_config: None,
                             package_identifier: "1password".to_string(),
@@ -560,6 +572,7 @@ mod tests {
                         },
                         HostPluginRoleAssignment {
                             role: PluginRole::FetchReleases,
+                            ordinal: 0,
                             plugin_config_id: Some(sample_uuid()),
                             plugin_config: None,
                             package_identifier: "1password".to_string(),
@@ -572,6 +585,7 @@ mod tests {
                     host_id: Uuid::nil(),
                     plugins: vec![HostPluginRoleAssignment {
                         role: PluginRole::ExecuteUpdate,
+                        ordinal: 0,
                         plugin_config_id: None,
                         plugin_config: Some(crate::plugin_configs::CreatePluginConfigRequest {
                             name: "Homebrew Casks".to_string(),
@@ -621,6 +635,7 @@ mod tests {
     fn update_host_assignment_request_round_trip() {
         let req = UpdateHostAssignmentRequest {
             role: PluginRole::FetchReleases,
+            ordinal: 0,
             plugin_config_id: Some(sample_uuid()),
             plugin_config: None,
             package_identifier: Some("nginx".to_string()),

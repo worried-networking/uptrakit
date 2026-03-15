@@ -587,6 +587,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             crate::routes::software_items::unassign_host,
             crate::routes::software_items::update_host_assignment
         ))
+        .routes(routes!(
+            crate::routes::software_items::delete_plugin_assignment
+        ))
         .routes(routes!(crate::routes::software_items::trigger_update))
         .routes(routes!(crate::routes::software_items::check_versions))
         .routes(routes!(crate::routes::software_items::check_versions_host))

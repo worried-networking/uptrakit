@@ -111,6 +111,20 @@ impl UptrakitClient {
             .await
     }
 
+    /// Remove a specific plugin assignment by role and ordinal.
+    pub async fn delete_plugin_assignment(
+        &self,
+        item_id: &Uuid,
+        host_id: &Uuid,
+        role: &str,
+        ordinal: i32,
+    ) -> Result<SoftwareItemDetailResponse> {
+        self.delete_json(&crate::paths::software_items::host_plugin_assignment(
+            item_id, host_id, role, ordinal,
+        ))
+        .await
+    }
+
     /// Trigger a version check for a software item across all assigned hosts.
     pub async fn check_versions(&self, item_id: &Uuid) -> Result<TriggerVersionCheckResponse> {
         self.post_empty(&crate::paths::software_items::check_versions(item_id))
@@ -207,6 +221,7 @@ mod tests {
                     host_id: host1,
                     plugins: vec![HostPluginRoleAssignment {
                         role: PluginRole::DetectVersion,
+                        ordinal: 0,
                         plugin_config_id: Some(pc_id),
                         plugin_config: None,
                         package_identifier: "nodejs/node".to_string(),
@@ -218,6 +233,7 @@ mod tests {
                     host_id: host2,
                     plugins: vec![HostPluginRoleAssignment {
                         role: PluginRole::DetectVersion,
+                        ordinal: 0,
                         plugin_config_id: Some(pc_id),
                         plugin_config: None,
                         package_identifier: "nodejs/node".to_string(),
@@ -249,6 +265,7 @@ mod tests {
         let pc_id = Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6").expect("valid uuid");
         let req = UpdateHostAssignmentRequest {
             role: PluginRole::ExecuteUpdate,
+            ordinal: 0,
             plugin_config_id: Some(pc_id),
             plugin_config: None,
             package_identifier: Some("homebrew/cask/firefox".to_string()),

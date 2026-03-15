@@ -637,6 +637,7 @@ pub async fn assign(params: AssignParams<'_>) -> Result<SoftwareItemDetailRespon
         .into_iter()
         .map(|role| HostPluginRoleAssignment {
             role,
+            ordinal: 0,
             plugin_config_id: params.plugin_config_id.copied(),
             plugin_config: None,
             package_identifier: params.package_identifier.clone().unwrap_or_default(),
@@ -858,6 +859,7 @@ mod tests {
                 qualifier: None,
                 plugins: vec![HostPluginRoleSummary {
                     role: PluginRole::DetectVersion,
+                    ordinal: 0,
                     plugin_config_id: Some(
                         "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
                             .parse::<Uuid>()
@@ -921,6 +923,7 @@ mod tests {
                 qualifier: None,
                 plugins: vec![HostPluginRoleSummary {
                     role: PluginRole::DetectVersion,
+                    ordinal: 0,
                     plugin_config_id: Some(
                         "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
                             .parse::<Uuid>()

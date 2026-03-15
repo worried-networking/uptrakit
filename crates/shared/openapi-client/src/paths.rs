@@ -351,6 +351,15 @@ pub(crate) mod software_items {
     pub(crate) fn host_update(item_id: &Uuid, host_id: &Uuid) -> String {
         format!("/api/v1/software-items/{item_id}/hosts/{host_id}/update")
     }
+    /// `DELETE /api/v1/software-items/{item_id}/hosts/{host_id}/plugins/{role}/{ordinal}`
+    pub(crate) fn host_plugin_assignment(
+        item_id: &Uuid,
+        host_id: &Uuid,
+        role: &str,
+        ordinal: i32,
+    ) -> String {
+        format!("/api/v1/software-items/{item_id}/hosts/{host_id}/plugins/{role}/{ordinal}")
+    }
     /// `POST /api/v1/software-items/{id}/approve`
     pub(crate) fn approve(id: &Uuid) -> String {
         format!("/api/v1/software-items/{id}/approve")

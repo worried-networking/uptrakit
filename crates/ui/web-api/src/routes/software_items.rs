@@ -33,6 +33,7 @@ use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
+use uptrakit_web_api_types::PluginRole;
 pub use uptrakit_web_api_types::batch_actions::{
     BatchActionFailure, BatchActionRequest, BatchActionResponse, BatchActionSuccess,
 };
@@ -75,6 +76,9 @@ fn query_error_to_response(report: rootcause::Report<SoftwareItemQueryError>) ->
         | SoftwareItemQueryError::InvalidInlinePluginConfig(msg)
         | SoftwareItemQueryError::InvalidExecutionSite(msg) => {
             error_response(StatusCode::BAD_REQUEST, msg.clone())
+        }
+        SoftwareItemQueryError::PluginAssignmentNotFound => {
+            error_response(StatusCode::NOT_FOUND, "Plugin assignment not found")
         }
         SoftwareItemQueryError::Db(_) => {
             tracing::error!("Database error in software items: {report}");
@@ -677,6 +681,41 @@ pub async fn update_host_assignment(
         req,
     )
     .await
+    {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err(e) => query_error_to_response(e),
+    }
+}
+
+/// Remove a specific plugin assignment identified by role and ordinal.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/software-items/{id}/hosts/{host_id}/plugins/{role}/{ordinal}",
+    params(
+        ("id" = Uuid, Path, description = "Software item UUID"),
+        ("host_id" = Uuid, Path, description = "Host UUID"),
+        ("role" = String, Path, description = "Plugin role (e.g. pre_update_hook)"),
+        ("ordinal" = i32, Path, description = "Ordinal of the plugin assignment to remove")
+    ),
+    extensions(("x-required-permission" = json!("update_software"))),
+    responses(
+        (status = 200, description = "Plugin assignment removed", body = SoftwareItemDetailResponse),
+        (status = 404, description = "Software item, host, or plugin assignment not found"),
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn delete_plugin_assignment(
+    tenant_db: TenantDb,
+    CanUpdateSoftware(_user): CanUpdateSoftware,
+    Path((item_id, host_id, role, ordinal)): Path<(Uuid, Uuid, String, i32)>,
+) -> Response {
+    let role = match role.parse::<PluginRole>() {
+        Ok(r) => r,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid role"),
+    };
+    match item_queries::delete_plugin_assignment(&tenant_db, item_id, host_id, role, ordinal).await
     {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => query_error_to_response(e),

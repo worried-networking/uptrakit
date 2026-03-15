@@ -57,6 +57,9 @@ pub enum SoftwareItemQueryError {
     /// Invalid `execution_site` value.
     #[error("invalid execution site: {0}")]
     InvalidExecutionSite(String),
+    /// A plugin assignment (role, ordinal) does not exist.
+    #[error("plugin assignment not found")]
+    PluginAssignmentNotFound,
     /// A database error occurred.
     #[error("database error: {0}")]
     Db(sea_orm::DbErr),
@@ -389,6 +392,7 @@ async fn load_item_hosts(
                                 .and_then(|pc_id| data.plugin_configs.get(&pc_id));
                             HostPluginRoleSummary {
                                 role: PluginRole::from(pr.role.clone()),
+                                ordinal: pr.ordinal,
                                 plugin_config_id: pc.map(|c| c.id),
                                 plugin_config_name: pc.map(|c| c.name.clone()),
                                 plugin_type: pc
@@ -1154,7 +1158,7 @@ async fn upsert_role_assignment(
         .filter(host_software_item_plugin::Column::HostId.eq(host_id))
         .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
         .filter(host_software_item_plugin::Column::Role.eq(role.as_str()))
-        .filter(host_software_item_plugin::Column::Ordinal.eq(0))
+        .filter(host_software_item_plugin::Column::Ordinal.eq(role_assignment.ordinal))
         .one(txn)
         .await
         .context_to()?;
@@ -1180,7 +1184,7 @@ async fn upsert_role_assignment(
                 plugin_config_id: Set(Some(plugin_config_id)),
                 plugin_type: Set(config.plugin_type.clone()),
                 role: Set(role.as_str().to_string()),
-                ordinal: Set(0),
+                ordinal: Set(role_assignment.ordinal),
                 package_identifier: Set(role_assignment.package_identifier.clone()),
                 config: Set(role_assignment.config_override.clone()),
                 execution_site: Set(execution_site.clone()),
@@ -1302,7 +1306,7 @@ pub async fn update_host_assignment(
         .filter(host_software_item_plugin::Column::HostId.eq(host_id))
         .filter(host_software_item_plugin::Column::SoftwareItemId.eq(id))
         .filter(host_software_item_plugin::Column::Role.eq(req.role.as_str()))
-        .filter(host_software_item_plugin::Column::Ordinal.eq(0))
+        .filter(host_software_item_plugin::Column::Ordinal.eq(req.ordinal))
         .one(tenant_db.db())
         .await
         .context_to()?;
@@ -1322,6 +1326,7 @@ pub async fn update_host_assignment(
 
     let synthetic = HostPluginRoleAssignment {
         role: req.role.clone(),
+        ordinal: req.ordinal,
         plugin_config_id: req.plugin_config_id.or(existing_pcid),
         plugin_config: req.plugin_config,
         package_identifier: req
@@ -1385,7 +1390,7 @@ pub async fn update_host_assignment(
                 plugin_config_id: Set(Some(plugin_config_id)),
                 plugin_type: Set(config.plugin_type.clone()),
                 role: Set(req.role.as_str().to_string()),
-                ordinal: Set(0),
+                ordinal: Set(req.ordinal),
                 package_identifier: Set(synthetic.package_identifier),
                 config: Set(synthetic.config_override),
                 execution_site: Set(synthetic.execution_site),
@@ -1443,6 +1448,56 @@ pub async fn unassign_host(tenant_db: &TenantDb, id: Uuid, host_id: Uuid) -> Res
         }
         None => Ok(false),
     }
+}
+
+/// Remove a specific plugin assignment identified by `(item_id, host_id, role, ordinal)`.
+///
+/// Returns the updated [`SoftwareItemDetailResponse`] on success. Returns
+/// `SoftwareItemQueryError::NotFound` when the software item does not exist or
+/// is deactivated, and `SoftwareItemQueryError::PluginAssignmentNotFound` when
+/// no matching plugin row exists.
+#[tracing::instrument(skip_all, fields(%item_id, %host_id, %role, %ordinal))]
+pub async fn delete_plugin_assignment(
+    tenant_db: &TenantDb,
+    item_id: Uuid,
+    host_id: Uuid,
+    role: PluginRole,
+    ordinal: i32,
+) -> Result<SoftwareItemDetailResponse> {
+    find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id)
+        .await
+        .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
+
+    let deleted = HostSoftwareItemPlugin::delete_many()
+        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
+        .filter(host_software_item_plugin::Column::Role.eq(role.as_str()))
+        .filter(host_software_item_plugin::Column::Ordinal.eq(ordinal))
+        .exec(tenant_db.db())
+        .await
+        .context_to()?;
+
+    if deleted.rows_affected == 0 {
+        bail!(SoftwareItemQueryError::PluginAssignmentNotFound);
+    }
+
+    let item = find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id)
+        .await
+        .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
+
+    let hosts = load_item_hosts(tenant_db.db(), item_id).await;
+    let host_count = hosts.len() as u64;
+    let plugins = load_plugins(tenant_db.db(), item_id).await;
+    let latest_version = load_latest_version_for_item(tenant_db.db(), item_id).await;
+    let update_available = hosts.iter().any(|h| h.update_available);
+    Ok(build_detail_response(
+        item,
+        plugins,
+        host_count,
+        latest_version,
+        update_available,
+        hosts,
+    ))
 }
 
 /// Load the host_software_item link for a specific host assignment.
@@ -1675,6 +1730,7 @@ mod tests {
             qualifier: None,
             plugins: vec![HostPluginRoleSummary {
                 role: PluginRole::FetchReleases,
+                ordinal: 0,
                 plugin_config_id: Some(uuid::Uuid::now_v7()),
                 plugin_config_name: Some("GitHub Releases".to_string()),
                 plugin_type: "releases_github".to_string(),
