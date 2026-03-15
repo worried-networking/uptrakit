@@ -447,10 +447,17 @@ async fn handle_test_global_smtp_email(
         vec![],
     );
 
-    transport.deliver(&config, &test_msg).await.map_err(|e| {
-        tracing::warn!(error = ?e, to_address, "test global smtp email failed");
-        e.to_string()
-    })?;
+    // The config is already merged with SMTP settings above, so pass an
+    // empty settings bag — deliver() will see smtp_host in the config and
+    // skip re-merging.
+    let empty_settings = serde_json::json!({});
+    transport
+        .deliver(&config, &empty_settings, &test_msg)
+        .await
+        .map_err(|e| {
+            tracing::warn!(error = ?e, to_address, "test global smtp email failed");
+            e.to_string()
+        })?;
 
     Ok(serde_json::json!({
         "success": true,

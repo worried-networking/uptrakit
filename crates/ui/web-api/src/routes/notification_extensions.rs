@@ -629,7 +629,11 @@ async fn test_global_smtp_email(state: &Arc<AppState>, caller_user_id: uuid::Uui
         vec![],
     );
 
-    match transport.deliver(&config, &test_msg).await {
+    // TODO: build a proper settings bag from tenant/global settings
+    match transport
+        .deliver(&config, &serde_json::json!({}), &test_msg)
+        .await
+    {
         Ok(()) => (
             StatusCode::OK,
             Json(serde_json::json!({

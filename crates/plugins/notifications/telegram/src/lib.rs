@@ -231,9 +231,42 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransportPlugin for Telegr
         "telegram"
     }
 
-    async fn deliver(&self, config: &serde_json::Value, message: &DeliveryMessage) -> Result<()> {
-        // bot_token may be absent in per-channel config if a global token is configured
-        // (the dispatcher merges it before calling deliver).
+    async fn deliver(
+        &self,
+        config: &serde_json::Value,
+        settings: &serde_json::Value,
+        message: &DeliveryMessage,
+    ) -> Result<()> {
+        // If per-channel config has no bot_token, try the global settings bag.
+        let effective_config;
+        let config = if config
+            .get("bot_token")
+            .and_then(|v| v.as_str())
+            .is_none_or(str::is_empty)
+        {
+            if let Some(global_token) = settings
+                .get("global")
+                .and_then(|g| g.get("global_telegram.bot_token"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+            {
+                effective_config = {
+                    let mut c = config.clone();
+                    c.as_object_mut()
+                        .expect("config is always an object")
+                        .insert("bot_token".to_string(), serde_json::json!(global_token));
+                    c
+                };
+                &effective_config
+            } else {
+                config
+            }
+        } else {
+            config
+        };
+
+        // bot_token must be present after merging (extracted from settings bag
+        // when absent in per-channel config).
         let bot_token = config["bot_token"].as_str().ok_or_else(|| {
             report!(NotificationPluginError::InvalidConfig(
                 "missing 'bot_token' (no per-channel token and no global token configured)"

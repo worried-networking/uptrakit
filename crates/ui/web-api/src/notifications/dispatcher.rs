@@ -321,7 +321,11 @@ async fn dispatch_loop(
                     );
                     return;
                 };
-                match transport.deliver(&config_json, &message).await {
+                // TODO: build a proper settings bag from tenant/global settings
+                match transport
+                    .deliver(&config_json, &serde_json::json!({}), &message)
+                    .await
+                {
                     Ok(()) => {
                         let now = OffsetDateTime::now_utc();
                         let update = notification_log::ActiveModel {

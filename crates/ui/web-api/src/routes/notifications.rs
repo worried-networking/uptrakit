@@ -347,7 +347,11 @@ pub async fn test_channel(
     );
 
     // Deliver
-    match channel_transport.deliver(&config_json, &test_msg).await {
+    // TODO: build a proper settings bag from tenant/global settings
+    match channel_transport
+        .deliver(&config_json, &serde_json::json!({}), &test_msg)
+        .await
+    {
         Ok(()) => {
             let resp = TestNotificationResponse {
                 success: true,

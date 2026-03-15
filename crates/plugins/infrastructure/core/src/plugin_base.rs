@@ -411,9 +411,14 @@ pub trait NotificationTransportPlugin: PluginBase {
     fn channel_type(&self) -> &'static str;
 
     /// Deliver a pre-built message using the given channel-specific config.
+    ///
+    /// The `settings` bag provides tenant and global settings that the plugin
+    /// may need for delivery (e.g. SMTP credentials, bot tokens). Structure:
+    /// `{"tenant": {"key": value, ...}, "global": {"key": value, ...}}`.
     async fn deliver(
         &self,
         config: &serde_json::Value,
+        settings: &serde_json::Value,
         message: &uptrakit_notification_plugin_core::DeliveryMessage,
     ) -> uptrakit_notification_plugin_core::Result<()>;
 }

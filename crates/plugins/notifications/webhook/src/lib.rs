@@ -275,7 +275,12 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransportPlugin for Webhoo
         "webhook"
     }
 
-    async fn deliver(&self, config: &serde_json::Value, message: &DeliveryMessage) -> Result<()> {
+    async fn deliver(
+        &self,
+        config: &serde_json::Value,
+        _settings: &serde_json::Value,
+        message: &DeliveryMessage,
+    ) -> Result<()> {
         let url = config["url"].as_str().ok_or_else(|| {
             report!(NotificationPluginError::InvalidConfig(
                 "missing 'url'".to_string()

@@ -174,6 +174,57 @@ impl SmtpSettingsSnapshot {
     }
 }
 
+/// Build an [`SmtpSettingsSnapshot`] from a flat JSON settings map using the
+/// given key prefix.
+///
+/// For example, with prefix `"smtp."`, looks up `"smtp.host"`, `"smtp.port"`,
+/// etc. With prefix `"global_smtp."`, looks up `"global_smtp.host"`, etc.
+pub fn smtp_from_settings_map(
+    settings_map: &serde_json::Value,
+    prefix: &str,
+) -> SmtpSettingsSnapshot {
+    let get_str = |suffix: &str| -> Option<String> {
+        let key = format!("{prefix}{suffix}");
+        settings_map
+            .get(&key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+    };
+
+    let port = {
+        let key = format!("{prefix}port");
+        settings_map
+            .get(&key)
+            .and_then(|v| {
+                v.as_u64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            })
+            .and_then(|n| u16::try_from(n).ok())
+    };
+
+    let tls_mode = {
+        let key = format!("{prefix}tls_mode");
+        settings_map
+            .get(&key)
+            .and_then(|v| v.as_str())
+            .filter(|s| matches!(*s, "starttls" | "tls" | "none"))
+            .unwrap_or("starttls")
+            .to_string()
+    };
+
+    SmtpSettingsSnapshot {
+        host: get_str("host"),
+        port,
+        username: get_str("username"),
+        password: get_str("password"),
+        from_address: get_str("from_address"),
+        from_name: get_str("from_name"),
+        tls_mode,
+        helo_host: get_str("helo_host"),
+    }
+}
+
 /// Email notification plugin via SMTP.
 ///
 /// Per-channel config stores only recipient addresses (`to_addresses`). SMTP
@@ -497,10 +548,26 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransportPlugin for EmailP
 
     /// Deliver a notification to all configured recipients.
     ///
-    /// The `config` argument must be the *merged* config containing both the
-    /// global SMTP settings and the per-channel `to_addresses`.
-    async fn deliver(&self, config: &serde_json::Value, message: &DeliveryMessage) -> Result<()> {
-        let cfg: EmailConfig = serde_json::from_value(config.clone()).map_err(|e| {
+    /// The `config` argument contains the per-channel config (primarily
+    /// `to_addresses`). SMTP credentials are extracted from the `settings`
+    /// bag and merged into the config before sending.
+    async fn deliver(
+        &self,
+        config: &serde_json::Value,
+        settings: &serde_json::Value,
+        message: &DeliveryMessage,
+    ) -> Result<()> {
+        // Merge SMTP settings from the settings bag into the per-channel config.
+        let merged_config = if config.get("smtp_host").is_some() {
+            // Config is already merged (e.g. from a caller that pre-merged).
+            config.clone()
+        } else {
+            let global = smtp_from_settings_map(&settings["global"], "global_smtp.");
+            let tenant = smtp_from_settings_map(&settings["tenant"], "smtp.");
+            merge_smtp_into_config(&global, &tenant, config.clone())
+        };
+
+        let cfg: EmailConfig = serde_json::from_value(merged_config).map_err(|e| {
             report!(NotificationPluginError::InvalidConfig(format!(
                 "failed to deserialize email config: {e}"
             )))
@@ -632,7 +699,9 @@ mod tests {
         // Config missing smtp_host and from_address should fail deserialization or validation.
         let config = serde_json::json!({"to_addresses": ["user@example.com"]});
         let msg = DeliveryMessage::new("Test", "Body", None, serde_json::json!({}), vec![]);
-        let result = NotificationTransportPlugin::deliver(&plugin(), &config, &msg).await;
+        let empty_settings = serde_json::json!({});
+        let result =
+            NotificationTransportPlugin::deliver(&plugin(), &config, &empty_settings, &msg).await;
         assert!(result.is_err(), "missing smtp_host should produce an error");
     }
 
@@ -650,7 +719,9 @@ mod tests {
             "tls_mode": "none"
         });
         let msg = DeliveryMessage::new("Test", "Body", None, serde_json::json!({}), vec![]);
-        let result = NotificationTransportPlugin::deliver(&plugin(), &config, &msg).await;
+        let empty_settings = serde_json::json!({});
+        let result =
+            NotificationTransportPlugin::deliver(&plugin(), &config, &empty_settings, &msg).await;
         assert!(
             result.is_err(),
             "delivery to a refused connection should fail"
