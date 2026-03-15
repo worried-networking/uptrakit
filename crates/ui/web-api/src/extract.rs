@@ -142,6 +142,49 @@ pub fn normalize_serial(hex: &str) -> String {
     result
 }
 
+/// Axum extractor that deserialises the request body as JSON and immediately
+/// validates it with [`Validate::validate()`].
+///
+/// Replaces the repetitive 3-line pattern:
+/// ```rust,ignore
+/// if let Err(e) = req.validate() {
+///     return error_response(StatusCode::BAD_REQUEST, e.to_string());
+/// }
+/// ```
+///
+/// Usage — change the handler signature from:
+/// ```rust,ignore
+/// Json(req): Json<CreateFooRequest>
+/// ```
+/// to:
+/// ```rust,ignore
+/// Validated(req): Validated<CreateFooRequest>
+/// ```
+/// and remove the manual `validate()` call.
+///
+/// Returns `400 Bad Request` on JSON deserialisation failure or validation failure.
+pub struct Validated<T>(pub T);
+
+impl<T, S> FromRequest<S> for Validated<T>
+where
+    T: DeserializeOwned + Validate + Send,
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request(
+        req: axum::http::Request<axum::body::Body>,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::Json(body) = axum::Json::<T>::from_request(req, state)
+            .await
+            .map_err(|e| error_response(StatusCode::BAD_REQUEST, e.to_string()))?;
+        body.validate()
+            .map_err(|e| error_response(StatusCode::BAD_REQUEST, e.to_string()))?;
+        Ok(Validated(body))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,48 +308,5 @@ mod tests {
         let cert = params.self_signed(&key_pair).expect("self-sign");
 
         assert!(service_identity_from_der(cert.der()).is_none());
-    }
-}
-
-/// Axum extractor that deserialises the request body as JSON and immediately
-/// validates it with [`Validate::validate()`].
-///
-/// Replaces the repetitive 3-line pattern:
-/// ```rust,ignore
-/// if let Err(e) = req.validate() {
-///     return error_response(StatusCode::BAD_REQUEST, e.to_string());
-/// }
-/// ```
-///
-/// Usage — change the handler signature from:
-/// ```rust,ignore
-/// Json(req): Json<CreateFooRequest>
-/// ```
-/// to:
-/// ```rust,ignore
-/// Validated(req): Validated<CreateFooRequest>
-/// ```
-/// and remove the manual `validate()` call.
-///
-/// Returns `400 Bad Request` on JSON deserialisation failure or validation failure.
-pub struct Validated<T>(pub T);
-
-impl<T, S> FromRequest<S> for Validated<T>
-where
-    T: DeserializeOwned + Validate + Send,
-    S: Send + Sync,
-{
-    type Rejection = Response;
-
-    async fn from_request(
-        req: axum::http::Request<axum::body::Body>,
-        state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        let axum::Json(body) = axum::Json::<T>::from_request(req, state)
-            .await
-            .map_err(|e| error_response(StatusCode::BAD_REQUEST, e.to_string()))?;
-        body.validate()
-            .map_err(|e| error_response(StatusCode::BAD_REQUEST, e.to_string()))?;
-        Ok(Validated(body))
     }
 }
