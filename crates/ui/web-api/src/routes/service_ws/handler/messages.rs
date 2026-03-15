@@ -26,7 +26,7 @@ use uptrakit_shared_db::entity::system_service as sys_svc_entity;
 use super::LoopAction;
 use super::discovery::trigger_discovery_for_agent_host;
 use super::renewal::{sign_renewal_csr, sign_renewal_csr_system};
-use super::updates::load_linked_host_ids;
+use super::shared_types::{ProcessorResponse, load_linked_host_ids};
 use uptrakit_web_api_types::events::AdminEvent;
 
 use crate::AppState;
@@ -38,62 +38,6 @@ use crate::routes::agent_operations::{
 use crate::routes::service_ws::protocol::{
     CertIdentity, record_service_activity, record_system_service_activity, send_pong,
 };
-
-// ---------------------------------------------------------------------------
-// ProcessorAction
-// ---------------------------------------------------------------------------
-
-/// Action for the main loop after the processor handles a message.
-pub(super) enum ProcessorAction {
-    /// Continue processing messages.
-    Continue,
-    /// Break out of the main loop.
-    Break,
-    /// Send a WebSocket close frame with a reason, then break.
-    CloseWithReason(CloseReason),
-}
-
-/// Response from the message processor to the main loop.
-pub(super) struct ProcessorResponse {
-    /// Optional message to send to the service before executing the action.
-    pub replies: Vec<ControllerMessage>,
-    /// Action for the main loop after sending replies.
-    pub action: ProcessorAction,
-}
-
-impl ProcessorResponse {
-    /// Continue with no reply.
-    pub(crate) fn cont() -> Self {
-        Self {
-            replies: Vec::new(),
-            action: ProcessorAction::Continue,
-        }
-    }
-
-    /// Continue with a single reply.
-    pub(crate) fn reply(msg: ControllerMessage) -> Self {
-        Self {
-            replies: vec![msg],
-            action: ProcessorAction::Continue,
-        }
-    }
-
-    /// Break with a single reply.
-    pub(crate) fn reply_and_break(msg: ControllerMessage) -> Self {
-        Self {
-            replies: vec![msg],
-            action: ProcessorAction::Break,
-        }
-    }
-
-    /// Send a reply and close with a reason.
-    pub(crate) fn reply_and_close(msg: ControllerMessage, reason: CloseReason) -> Self {
-        Self {
-            replies: vec![msg],
-            action: ProcessorAction::CloseWithReason(reason),
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // handle_ping (stays in main loop — not part of processor)

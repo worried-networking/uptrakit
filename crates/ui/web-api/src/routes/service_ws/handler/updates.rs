@@ -1,7 +1,7 @@
 //! Update delivery, ownership validation, and update-lifecycle message handlers.
 //!
-//! Contains `validate_update_ownership`, `load_linked_host_ids`,
-//! `deliver_pending_updates`, and the per-message handlers
+//! Contains `validate_update_ownership`, `deliver_pending_updates`,
+//! and the per-message handlers
 //! `handle_update_started`, `handle_update_output`, and `handle_update_result`.
 
 use std::collections::{HashMap, HashSet};
@@ -23,31 +23,12 @@ use uptrakit_shared_db::entity::{
     software_item, update_history, update_output_line,
 };
 
-use super::messages::ProcessorResponse;
+use super::shared_types::ProcessorResponse;
 use super::{HandlerError, HandlerResult, MAX_UPDATE_OUTPUT_BYTES};
 use crate::AppState;
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
 use crate::routes::service_ws::protocol::serialize_controller_msg;
 use uptrakit_web_api_types::events::AdminEvent;
-
-// ---------------------------------------------------------------------------
-// load_linked_host_ids
-// ---------------------------------------------------------------------------
-
-/// Load the set of host IDs linked to the given service.
-#[tracing::instrument(skip_all, fields(%service_id))]
-pub(super) async fn load_linked_host_ids(
-    db: &sea_orm::DatabaseConnection,
-    service_id: uuid::Uuid,
-) -> HandlerResult<HashSet<uuid::Uuid>> {
-    let links = service_host::Entity::find()
-        .filter(service_host::Column::ServiceId.eq(service_id))
-        .all(db)
-        .await
-        .context_to::<HandlerError>()?;
-
-    Ok(links.into_iter().map(|l| l.host_id).collect())
-}
 
 // ---------------------------------------------------------------------------
 // validate_update_ownership

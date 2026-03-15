@@ -18,7 +18,7 @@ use uptrakit_internal_wire::{
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::settings_mqtt::MqttClientConnectionStatus as ApiMqttClientConnectionStatus;
 
-use super::messages::ProcessorResponse;
+use super::shared_types::ProcessorResponse;
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
 use crate::queries::update_types::ActorType;

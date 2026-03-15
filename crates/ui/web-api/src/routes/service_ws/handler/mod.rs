@@ -13,7 +13,7 @@
 //! else to the processor via a bounded MPSC channel.
 //!
 //! The processor handles messages sequentially (preserving ordering) and
-//! sends [`ProcessorResponse`](messages::ProcessorResponse) values back
+//! sends [`ProcessorResponse`](shared_types::ProcessorResponse) values back
 //! to the main loop, which serializes and writes replies to the WebSocket
 //! sink with `out_seq` staying in the main loop.
 //!
@@ -28,12 +28,13 @@ mod discovery;
 pub(super) mod messages;
 mod mqtt;
 mod renewal;
+mod shared_types;
 mod updates;
 
 pub(crate) use discovery::trigger_discovery_for_agent_host;
-use messages::{ProcessorAction, ProcessorResponse};
 use mqtt::{complete_mqtt_registration, handle_mqtt_register_handshake};
-use updates::{deliver_pending_updates, load_linked_host_ids};
+use shared_types::{ProcessorAction, ProcessorResponse, load_linked_host_ids};
+use updates::deliver_pending_updates;
 
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
