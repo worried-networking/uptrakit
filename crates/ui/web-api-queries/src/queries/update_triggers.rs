@@ -578,7 +578,6 @@ fn is_unique_constraint_violation(e: &rootcause::Report<TriggerUpdateError>) -> 
 /// Returns a [`TriggerUpdateError`] describing the first validation failure or
 /// database error encountered.
 #[tracing::instrument(skip_all)]
-#[tracing::instrument(skip_all)]
 pub async fn trigger_update_for_host(
     db: &DatabaseConnection,
     notifier: &dyn ServiceNotifier,
@@ -600,29 +599,31 @@ pub async fn trigger_update_for_host(
             &execute_update_plugin.config,
         );
 
+    // Build a reusable record params template — only `initial_status` differs
+    // between the Queued, Pending, and race-condition-Queued insert sites.
+    let build_record = |initial_status| CreateUpdateRecordParams {
+        tenant_id: params.tenant_id,
+        host_id: params.host_id,
+        item_id: params.item_id,
+        host_software_item_id: Some(target.hsi_link.id),
+        to_version: &params.to_version,
+        from_version: target.hsi_link.installed_version.clone(),
+        actor_type: params.actor_type,
+        actor_id: params.actor_id,
+        update_category: &target.hsi_link.update_category,
+        batch_id: None,
+        initial_status,
+        interactive: resolved_interactive,
+    };
+
     // Check if the host already has an active (Pending/InProgress) update.
     let host_busy = has_active_update_for_host(db, params.host_id).await?;
 
     if host_busy {
         // Insert as Queued — do not dispatch until the active update completes.
-        let update_history_id = create_update_history_record(
-            db,
-            &CreateUpdateRecordParams {
-                tenant_id: params.tenant_id,
-                host_id: params.host_id,
-                item_id: params.item_id,
-                host_software_item_id: Some(target.hsi_link.id),
-                to_version: &params.to_version,
-                from_version: target.hsi_link.installed_version.clone(),
-                actor_type: params.actor_type,
-                actor_id: params.actor_id,
-                update_category: &target.hsi_link.update_category,
-                batch_id: None,
-                initial_status: update_history::UpdateStatus::Queued,
-                interactive: resolved_interactive,
-            },
-        )
-        .await?;
+        let update_history_id =
+            create_update_history_record(db, &build_record(update_history::UpdateStatus::Queued))
+                .await?;
         tracing::info!(
             update_id = %update_history_id,
             host_id = %params.host_id,
@@ -635,24 +636,9 @@ pub async fn trigger_update_for_host(
     }
 
     // Attempt to insert as Pending.
-    let pending_insert = create_update_history_record(
-        db,
-        &CreateUpdateRecordParams {
-            tenant_id: params.tenant_id,
-            host_id: params.host_id,
-            item_id: params.item_id,
-            host_software_item_id: Some(target.hsi_link.id),
-            to_version: &params.to_version,
-            from_version: target.hsi_link.installed_version.clone(),
-            actor_type: params.actor_type,
-            actor_id: params.actor_id,
-            update_category: &target.hsi_link.update_category,
-            batch_id: None,
-            initial_status: update_history::UpdateStatus::Pending,
-            interactive: resolved_interactive,
-        },
-    )
-    .await;
+    let pending_insert =
+        create_update_history_record(db, &build_record(update_history::UpdateStatus::Pending))
+            .await;
 
     let (update_history_id, initial_status) = match pending_insert {
         Ok(id) => (id, update_history::UpdateStatus::Pending),
@@ -665,20 +651,7 @@ pub async fn trigger_update_for_host(
             );
             let id = create_update_history_record(
                 db,
-                &CreateUpdateRecordParams {
-                    tenant_id: params.tenant_id,
-                    host_id: params.host_id,
-                    item_id: params.item_id,
-                    host_software_item_id: Some(target.hsi_link.id),
-                    to_version: &params.to_version,
-                    from_version: target.hsi_link.installed_version.clone(),
-                    actor_type: params.actor_type,
-                    actor_id: params.actor_id,
-                    update_category: &target.hsi_link.update_category,
-                    batch_id: None,
-                    initial_status: update_history::UpdateStatus::Queued,
-                    interactive: resolved_interactive,
-                },
+                &build_record(update_history::UpdateStatus::Queued),
             )
             .await?;
             (id, update_history::UpdateStatus::Queued)
