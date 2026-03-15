@@ -282,9 +282,9 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
             &self,
         ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
             vec![
-                SudoCommandEntry::new("apk", "Package index refresh requires root privileges")
+                SudoCommandEntry::new("apk", "Refresh the APK package index")
                     .with_args_suffix(Cow::Borrowed("update")),
-                SudoCommandEntry::new("apk", "Package installation requires root privileges")
+                SudoCommandEntry::new("apk", "Install or upgrade an APK package")
                     .with_args_suffix(Cow::Borrowed("add *")),
             ]
         }

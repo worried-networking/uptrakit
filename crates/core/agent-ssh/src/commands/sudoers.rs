@@ -128,7 +128,7 @@ pub(crate) async fn resolve_command_path(
 /// ```text
 /// # Managed by Uptrakit - DO NOT EDIT MANUALLY
 /// # Regenerate: uptrakit-agent-ssh host sync <host>
-/// # /usr/bin/apt-get: Package installation and index refresh require root privileges
+/// # /usr/bin/apt-get: Install or upgrade APT packages
 /// alice ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get
 /// ```
 ///
@@ -333,13 +333,13 @@ mod tests {
     fn generate_sudoers_specific_commands_with_setenv() {
         let content = SudoersContent::SpecificCommands(vec![ResolvedSudoCommand {
             command_path: "/usr/bin/apt-get".to_string(),
-            explanation: "Package installation requires root".to_string(),
+            explanation: "Install or upgrade an APT package".to_string(),
             needs_setenv: true,
         }]);
         let text = generate_sudoers_content("bob", &content);
 
         assert!(text.contains("# Managed by Uptrakit"));
-        assert!(text.contains("# /usr/bin/apt-get: Package installation requires root"));
+        assert!(text.contains("# /usr/bin/apt-get: Install or upgrade an APT package"));
         // SETENV: is emitted when needs_setenv is true.
         assert!(text.contains("bob ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get"));
         assert!(!text.contains("NOPASSWD: ALL\n"));
@@ -349,7 +349,7 @@ mod tests {
     fn generate_sudoers_specific_commands_without_setenv() {
         let content = SudoersContent::SpecificCommands(vec![ResolvedSudoCommand {
             command_path: "/usr/bin/npm".to_string(),
-            explanation: "Global npm installation requires root".to_string(),
+            explanation: "Install or upgrade a global npm package".to_string(),
             needs_setenv: false,
         }]);
         let text = generate_sudoers_content("bob", &content);
@@ -414,7 +414,7 @@ mod tests {
         // by bootstrap/sync). This test verifies the suffix is rendered verbatim.
         let content = SudoersContent::SpecificCommands(vec![ResolvedSudoCommand {
             command_path: "/usr/bin/apt-get update *".to_string(),
-            explanation: "Package index refresh requires root privileges".to_string(),
+            explanation: "Refresh the APT package index".to_string(),
             needs_setenv: true,
         }]);
         let text = generate_sudoers_content("alice", &content);
@@ -434,18 +434,18 @@ mod tests {
         let content = SudoersContent::SpecificCommands(vec![
             ResolvedSudoCommand {
                 command_path: "/usr/bin/apt-get update *".to_string(),
-                explanation: "Package index refresh requires root".to_string(),
+                explanation: "Refresh the APT package index".to_string(),
                 needs_setenv: true,
             },
             ResolvedSudoCommand {
                 command_path: "/usr/bin/apt-get install *".to_string(),
-                explanation: "Package installation requires root".to_string(),
+                explanation: "Install or upgrade an APT package".to_string(),
                 needs_setenv: true,
             },
             ResolvedSudoCommand {
                 command_path: "/usr/bin/apt-get -o Dir::Etc::Preferences=/tmp/uptrakit-apt-batch.pref upgrade *"
                     .to_string(),
-                explanation: "Batch upgrade requires root".to_string(),
+                explanation: "Upgrade packages using a pinned preferences file (batch update)".to_string(),
                 needs_setenv: true,
             },
         ]);
@@ -514,7 +514,7 @@ mod tests {
             command_path:
                 "/usr/bin/apt-get -o Dir::Etc::Preferences=/tmp/uptrakit-apt-batch.pref upgrade *"
                     .to_string(),
-            explanation: "Batch upgrade requires root".to_string(),
+            explanation: "Upgrade packages using a pinned preferences file (batch update)".to_string(),
             needs_setenv: true,
         }]);
         let text = generate_sudoers_content("uptrakit", &content);

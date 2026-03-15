@@ -241,7 +241,7 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
             vec![
                 // `refresh *` covers `snap refresh PKG`, `snap refresh PKG --channel=stable`,
                 // and batch `snap refresh PKG1 PKG2 ...`.
-                SudoCommandEntry::new("snap", "Snap package refresh requires root privileges")
+                SudoCommandEntry::new("snap", "Refresh one or more Snap packages")
                     .with_args_suffix(Cow::Borrowed("refresh *")),
             ]
         }

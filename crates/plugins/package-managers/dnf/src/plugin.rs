@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -245,10 +246,20 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
         fn required_sudo_commands(
             &self,
         ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-            vec![uptrakit_plugin_infrastructure_core::SudoCommandEntry::new(
-                "dnf",
-                "Package installation and index refresh require root privileges",
-            )]
+            vec![
+                // Restrict to `dnf makecache` only (with optional flags such as `-q`).
+                uptrakit_plugin_infrastructure_core::SudoCommandEntry::new(
+                    "dnf",
+                    "Refresh the DNF package cache",
+                )
+                .with_args_suffix(Cow::Borrowed("makecache *")),
+                // Restrict to `dnf install -y` only; covers single and batch installs.
+                uptrakit_plugin_infrastructure_core::SudoCommandEntry::new(
+                    "dnf",
+                    "Install or upgrade a DNF package",
+                )
+                .with_args_suffix(Cow::Borrowed("install -y *")),
+            ]
         }
 
         fn as_discovery(

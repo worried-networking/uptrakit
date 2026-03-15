@@ -249,17 +249,17 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
             &self,
         ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
             vec![
-                SudoCommandEntry::new("apt-get", "Package index refresh requires root privileges")
+                SudoCommandEntry::new("apt-get", "Refresh the APT package index")
                     // Restrict to `apt-get update` only (with optional flags).
                     .with_args_suffix(Cow::Borrowed("update *"))
                     .with_setenv(),
-                SudoCommandEntry::new("apt-get", "Package installation requires root privileges")
+                SudoCommandEntry::new("apt-get", "Install or upgrade an APT package")
                     // Restrict to `apt-get install` only; covers single and batch installs.
                     .with_args_suffix(Cow::Borrowed("install *"))
                     .with_setenv(),
                 SudoCommandEntry::new(
                     "apt-get",
-                    "Batch package upgrade (pinned versions) requires root privileges",
+                    "Upgrade packages using a pinned preferences file (batch update)",
                 )
                 // Lock in the exact -o Dir::Etc::Preferences= invocation that
                 // execute_batch_update uses. The path is intentionally hardcoded on

@@ -221,10 +221,10 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
         ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
             vec![
                 // `-Sy` matches the exact refresh call (no extra args).
-                SudoCommandEntry::new("pacman", "Package database sync requires root privileges")
+                SudoCommandEntry::new("pacman", "Synchronise the Pacman package database")
                     .with_args_suffix(Cow::Borrowed("-Sy")),
                 // `-S --noconfirm *` covers single and batch installs.
-                SudoCommandEntry::new("pacman", "Package installation requires root privileges")
+                SudoCommandEntry::new("pacman", "Install or upgrade a Pacman package")
                     .with_args_suffix(Cow::Borrowed("-S --noconfirm *")),
             ]
         }

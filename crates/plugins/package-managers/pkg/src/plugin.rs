@@ -158,9 +158,9 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
             &self,
         ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
             vec![
-                SudoCommandEntry::new("pkg", "Package index refresh requires root privileges")
+                SudoCommandEntry::new("pkg", "Refresh the pkg package index")
                     .with_args_suffix(Cow::Borrowed("update *")),
-                SudoCommandEntry::new("pkg", "Package installation requires root privileges")
+                SudoCommandEntry::new("pkg", "Install or upgrade a pkg package")
                     .with_args_suffix(Cow::Borrowed("install -y *")),
             ]
         }

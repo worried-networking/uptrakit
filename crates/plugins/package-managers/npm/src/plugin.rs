@@ -376,7 +376,7 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
             // `install -g *` covers both `npm install -g PKG@VER` and
             // batch `npm install -g PKG1@VER1 PKG2@VER2 ...`.
             vec![
-                SudoCommandEntry::new("npm", "Global npm package installation requires root")
+                SudoCommandEntry::new("npm", "Install or upgrade a global npm package")
                     .with_args_suffix(Cow::Borrowed("install -g *")),
             ]
         }
