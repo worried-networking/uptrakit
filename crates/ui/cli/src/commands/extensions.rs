@@ -316,7 +316,8 @@ pub async fn dynamic_invoke(
 
     // Extract params from the action matches.
     let action_def = ext.actions.iter().find(|a| a.action_id == action_id);
-    let mut params = extract_params_from_matches(action_matches, action_def);
+    let mut params = extract_params_from_matches(action_matches, action_def)
+        .map_err(|e| report!(CliError::Other(e)))?;
 
     // Inject the context selector param into the action params.
     if let Some((key, val)) = context_param
@@ -332,6 +333,23 @@ pub async fn dynamic_invoke(
         && let Some(ref api_submit) = action.api_submit
     {
         return execute_api_submit(&client, api_submit, &params).await;
+    }
+
+    // Wizard actions: multi-step flow (connect → optional preview → execute).
+    if let Some(action) = action_def
+        && let Some((connect_action, execute_action)) = wizard_submit_actions(action)
+    {
+        let preview = action_matches.get_flag("preview");
+        return execute_wizard(
+            &client,
+            &extension_id,
+            &connect_action,
+            &execute_action,
+            params,
+            service_id.as_ref(),
+            preview,
+        )
+        .await;
     }
 
     // Invoke the action via the extension proxy.
@@ -386,11 +404,21 @@ fn build_extension_command(manifest: &ExtensionManifest, actions: &[ActionDef]) 
 
         let mut subcmd = clap::Command::new(action.action_id.clone()).about(action.label.clone());
 
-        // Add form field args if the action has a form UI.
+        // Add form field args if the action has a form UI (wizard fields are flattened).
         if let Some(fields) = action_form_fields(action) {
-            for field in fields {
+            for field in &fields {
                 subcmd = subcmd.arg(build_arg_from_field(field));
             }
+        }
+
+        // Wizard actions get a --preview flag for plan-only invocation.
+        if is_wizard_action(action) {
+            subcmd = subcmd.arg(
+                clap::Arg::new("preview")
+                    .long("preview")
+                    .help("Show the plan without executing (connect phase only)")
+                    .action(clap::ArgAction::SetTrue),
+            );
         }
 
         // Row actions get a positional `id` argument.
@@ -477,6 +505,13 @@ fn build_arg_from_field(field: &FieldDef) -> clap::Arg {
         FieldType::Hidden => {
             arg = arg.hide(true);
         }
+        FieldType::SshPrivateKey => {
+            // Accepts a file path; the file content is read at invocation time.
+            arg = arg.value_parser(clap::value_parser!(std::path::PathBuf));
+            if arg.get_help().is_none() {
+                arg = arg.help("Path to SSH private key file (PEM)");
+            }
+        }
         // Text, Password, Textarea — default string arg.
         _ => {}
     }
@@ -488,7 +523,7 @@ fn build_arg_from_field(field: &FieldDef) -> clap::Arg {
 fn extract_params_from_matches(
     matches: &clap::ArgMatches,
     action_def: Option<&ActionDef>,
-) -> serde_json::Value {
+) -> std::result::Result<serde_json::Value, String> {
     let mut params = serde_json::Map::new();
 
     // Extract positional `id` if present.
@@ -500,7 +535,7 @@ fn extract_params_from_matches(
     if let Some(action) = action_def
         && let Some(fields) = action_form_fields(action)
     {
-        for field in fields {
+        for field in &fields {
             match &field.field_type {
                 FieldType::Toggle => {
                     if matches.get_flag(field.key.as_str()) {
@@ -512,6 +547,17 @@ fn extract_params_from_matches(
                         params.insert(field.key.clone(), serde_json::json!(*val));
                     }
                 }
+                FieldType::SshPrivateKey => {
+                    if let Some(path) = matches.get_one::<std::path::PathBuf>(field.key.as_str()) {
+                        let content = std::fs::read_to_string(path).map_err(|e| {
+                            format!(
+                                "failed to read SSH private key file '{}': {e}",
+                                path.display()
+                            )
+                        })?;
+                        params.insert(field.key.clone(), serde_json::Value::String(content));
+                    }
+                }
                 _ => {
                     if let Some(val) = matches.get_one::<String>(field.key.as_str()) {
                         params.insert(field.key.clone(), serde_json::Value::String(val.clone()));
@@ -521,7 +567,7 @@ fn extract_params_from_matches(
         }
     }
 
-    serde_json::Value::Object(params)
+    Ok(serde_json::Value::Object(params))
 }
 
 // ── api_submit support ─────────────────────────────────────────────────────
@@ -668,6 +714,63 @@ fn apply_template_string(s: &str, params: &serde_json::Value) -> serde_json::Val
     }
 }
 
+// ── Wizard flow ───────────────────────────────────────────────────────────
+
+/// Execute a wizard action as a two-phase connect → execute flow.
+///
+/// Phase 1 (connect): invokes `connect_action` with the user-supplied params
+/// to gather a plan. If `preview` is set, prints the plan and returns.
+///
+/// Phase 2 (execute): invokes `execute_action` with the same params plus an
+/// empty `skip_actions` set (CLI always executes all planned actions).
+async fn execute_wizard(
+    client: &uptrakit_openapi_client::UptrakitClient,
+    extension_id: &str,
+    connect_action: &str,
+    execute_action: &str,
+    params: serde_json::Value,
+    service_id: Option<&Uuid>,
+    preview: bool,
+) -> Result<InvokeOutput> {
+    // Phase 1: connect.
+    let plan = client
+        .invoke_extension_action(
+            extension_id,
+            connect_action,
+            params.clone(),
+            None,
+            service_id,
+        )
+        .await
+        .context_to()?;
+
+    if preview {
+        return Ok(InvokeOutput(plan));
+    }
+
+    // Phase 2: execute with empty skip_actions.
+    let mut execute_params = match params {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    execute_params.insert(
+        "skip_actions".to_string(),
+        serde_json::Value::Array(Vec::new()),
+    );
+
+    let result = client
+        .invoke_extension_action(
+            extension_id,
+            execute_action,
+            serde_json::Value::Object(execute_params),
+            None,
+            service_id,
+        )
+        .await
+        .context_to()?;
+    Ok(InvokeOutput(result))
+}
+
 // ── Helpers for manifest introspection ─────────────────────────────────────
 
 /// Collect all action ID strings referenced from an extension UI definition.
@@ -731,9 +834,46 @@ fn extract_context_selector_param(
 }
 
 /// Extract form fields from an action definition.
-fn action_form_fields(action: &ActionDef) -> Option<&[FieldDef]> {
+///
+/// For wizard actions, fields from all steps are flattened into a single list,
+/// allowing the CLI to present all parameters as top-level flags.
+fn action_form_fields(action: &ActionDef) -> Option<Vec<&FieldDef>> {
     match &action.ui {
-        Some(ActionUi::Form(FormDef { fields, .. })) => Some(fields),
+        Some(ActionUi::Form(FormDef { fields, .. })) => {
+            if fields.is_empty() {
+                None
+            } else {
+                Some(fields.iter().collect())
+            }
+        }
+        Some(ActionUi::Wizard { steps }) => {
+            let fields: Vec<&FieldDef> = steps.iter().flat_map(|s| &s.form.fields).collect();
+            if fields.is_empty() {
+                None
+            } else {
+                Some(fields)
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Check if an action uses a wizard UI.
+fn is_wizard_action(action: &ActionDef) -> bool {
+    matches!(&action.ui, Some(ActionUi::Wizard { .. }))
+}
+
+/// Extract submit_action IDs from a wizard action's steps.
+///
+/// Returns `(connect_action, execute_action)` — the first step's submit_action
+/// and the last step's submit_action (skipping the review step).
+fn wizard_submit_actions(action: &ActionDef) -> Option<(String, String)> {
+    match &action.ui {
+        Some(ActionUi::Wizard { steps }) => {
+            let connect = steps.first()?.submit_action.clone()?;
+            let execute = steps.iter().rev().find_map(|s| s.submit_action.clone())?;
+            Some((connect, execute))
+        }
         _ => None,
     }
 }
