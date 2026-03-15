@@ -250,10 +250,21 @@ async fn load_plugins(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> Vec<St
         .collect()
 }
 
-async fn load_item_hosts(
+/// All data needed to assemble host summaries, loaded in bulk from the database.
+struct HostAssignmentData {
+    links: Vec<host_software_item::Model>,
+    hosts: HashMap<Uuid, host::Model>,
+    active_updates: HashMap<Uuid, Uuid>,
+    plugin_rows: Vec<host_software_item_plugin::Model>,
+    plugin_configs: HashMap<Uuid, plugin_config::Model>,
+}
+
+/// Load the 5 bulk queries required to assemble host summaries for a software item.
+/// Returns `None` if there are no links or a critical query fails.
+async fn load_host_assignment_data(
     db: &sea_orm::DatabaseConnection,
     item_id: Uuid,
-) -> Vec<SoftwareItemHostSummary> {
+) -> Option<HostAssignmentData> {
     let links = match HostSoftwareItem::find()
         .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
         .all(db)
@@ -262,12 +273,12 @@ async fn load_item_hosts(
         Ok(links) => links,
         Err(e) => {
             tracing::warn!("Failed to load software item hosts: {e}");
-            return Vec::new();
+            return None;
         }
     };
 
     if links.is_empty() {
-        return Vec::new();
+        return None;
     }
 
     let host_ids: Vec<Uuid> = links.iter().map(|l| l.host_id).collect();
@@ -281,7 +292,7 @@ async fn load_item_hosts(
         Ok(h) => h.into_iter().map(|h| (h.id, h)).collect(),
         Err(e) => {
             tracing::warn!("Failed to load hosts for software item: {e}");
-            return Vec::new();
+            return None;
         }
     };
 
@@ -314,7 +325,7 @@ async fn load_item_hosts(
         Ok(rows) => rows,
         Err(e) => {
             tracing::warn!("Failed to load host plugin assignments: {e}");
-            return Vec::new();
+            return None;
         }
     };
 
@@ -331,25 +342,42 @@ async fn load_item_hosts(
         Ok(pcs) => pcs.into_iter().map(|pc| (pc.id, pc)).collect(),
         Err(e) => {
             tracing::warn!("Failed to load plugin configs for software item: {e}");
-            return Vec::new();
+            return None;
         }
+    };
+
+    Some(HostAssignmentData {
+        links,
+        hosts,
+        active_updates,
+        plugin_rows,
+        plugin_configs,
+    })
+}
+
+async fn load_item_hosts(
+    db: &sea_orm::DatabaseConnection,
+    item_id: Uuid,
+) -> Vec<SoftwareItemHostSummary> {
+    let Some(data) = load_host_assignment_data(db, item_id).await else {
+        return Vec::new();
     };
 
     // Group plugin rows by host_software_item_id so each link only sees its own plugins.
     // Grouping by host_id would merge plugins from sibling links (e.g. two Docker container
     // entries for the same image on the same host), causing duplicate `role` keys.
     let mut plugins_by_link: HashMap<Uuid, Vec<&host_software_item_plugin::Model>> = HashMap::new();
-    for row in &plugin_rows {
+    for row in &data.plugin_rows {
         plugins_by_link
             .entry(row.host_software_item_id)
             .or_default()
             .push(row);
     }
 
-    links
+    data.links
         .into_iter()
         .filter_map(|link| {
-            let host = hosts.get(&link.host_id)?;
+            let host = data.hosts.get(&link.host_id)?;
 
             let host_plugins: Vec<HostPluginRoleSummary> = plugins_by_link
                 .get(&link.id)
@@ -358,7 +386,7 @@ async fn load_item_hosts(
                         .map(|pr| {
                             let pc = pr
                                 .plugin_config_id
-                                .and_then(|pc_id| plugin_configs.get(&pc_id));
+                                .and_then(|pc_id| data.plugin_configs.get(&pc_id));
                             HostPluginRoleSummary {
                                 role: PluginRole::from(pr.role.clone()),
                                 plugin_config_id: pc.map(|c| c.id),
@@ -393,7 +421,7 @@ async fn load_item_hosts(
                 latest_version: link.latest_version,
                 latest_release_metadata: link.latest_release_metadata,
                 update_available: update_avail,
-                active_update_history_id: active_updates.get(&host.id).copied(),
+                active_update_history_id: data.active_updates.get(&host.id).copied(),
                 update_category: link.update_category,
                 last_updated_at: link.last_updated_at,
                 linked_at: link.linked_at,
@@ -608,6 +636,193 @@ pub async fn create_software_item(
     ))
 }
 
+/// Build the EXISTS subquery that checks whether a software item has at least one
+/// active host assignment where `installed_version != latest_version` (both non-null).
+fn build_updatable_exists_subquery() -> sea_orm::sea_query::SelectStatement {
+    use sea_orm::sea_query::{BinOper, Expr, ExprTrait, Query};
+
+    Query::select()
+        .expr(Expr::val(1_i32))
+        .from(host_software_item::Entity)
+        .inner_join(
+            host::Entity,
+            Expr::col((
+                host_software_item::Entity,
+                host_software_item::Column::HostId,
+            ))
+            .equals((host::Entity, host::Column::Id)),
+        )
+        .and_where(
+            Expr::col((
+                host_software_item::Entity,
+                host_software_item::Column::SoftwareItemId,
+            ))
+            .equals((software_item::Entity, software_item::Column::Id)),
+        )
+        .and_where(Expr::col((host::Entity, host::Column::DeactivatedAt)).is_null())
+        .and_where(
+            Expr::col((
+                host_software_item::Entity,
+                host_software_item::Column::InstalledVersion,
+            ))
+            .is_not_null(),
+        )
+        .and_where(
+            Expr::col((
+                host_software_item::Entity,
+                host_software_item::Column::LatestVersion,
+            ))
+            .is_not_null(),
+        )
+        .and_where(
+            Expr::col((
+                host_software_item::Entity,
+                host_software_item::Column::InstalledVersion,
+            ))
+            .binary(
+                BinOper::NotEqual,
+                Expr::col((
+                    host_software_item::Entity,
+                    host_software_item::Column::LatestVersion,
+                )),
+            ),
+        )
+        .take()
+}
+
+// (installed_version, latest_version, installed_display_version, latest_release_metadata)
+type VersionPair = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<serde_json::Value>,
+);
+
+#[derive(Debug, FromQueryResult)]
+struct InstalledVersionRow {
+    software_item_id: Uuid,
+    installed_version: Option<String>,
+    latest_version: Option<String>,
+    installed_display_version: Option<String>,
+    latest_release_metadata: Option<serde_json::Value>,
+}
+
+/// Pre-loaded enrichment data for the list endpoint: host counts, plugin types,
+/// latest versions, and installed version pairs.
+struct ListEnrichment {
+    host_counts: HashMap<Uuid, u64>,
+    plugins_map: HashMap<Uuid, Vec<String>>,
+    latest_versions: HashMap<Uuid, String>,
+    installed_map: HashMap<Uuid, Vec<VersionPair>>,
+}
+
+/// Bulk-load the four enrichment queries needed by `list_software_items`.
+async fn bulk_load_list_enrichment(
+    db: &sea_orm::DatabaseConnection,
+    item_ids: &[Uuid],
+    host_id_filter: Option<Uuid>,
+) -> Result<ListEnrichment> {
+    use sea_orm::sea_query::Expr;
+
+    // Bulk-load host counts for all items in one GROUP BY query.
+    // Only active (non-deactivated) hosts are counted.
+    let host_counts: HashMap<Uuid, u64> = HostSoftwareItem::find()
+        .select_only()
+        .column(host_software_item::Column::SoftwareItemId)
+        .column_as(
+            {
+                use sea_orm::sea_query::ExprTrait;
+                Expr::col(host_software_item::Column::HostId).count()
+            },
+            "count",
+        )
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            host_software_item::Relation::Host.def(),
+        )
+        .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.to_vec()))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .group_by(host_software_item::Column::SoftwareItemId)
+        .into_model::<ItemHostCount>()
+        .all(db)
+        .await
+        .context_to()?
+        .into_iter()
+        .map(|row| (row.software_item_id, row.count as u64))
+        .collect();
+
+    // Bulk-load plugin types for all items directly from host_software_item_plugins.
+    // plugin_type is stored on the row itself; no join to plugin_configs is needed, and
+    // an INNER JOIN would silently drop rows where plugin_config_id IS NULL.
+    let plugin_type_rows: Vec<ItemPluginType> = HostSoftwareItemPlugin::find()
+        .select_only()
+        .column(host_software_item_plugin::Column::SoftwareItemId)
+        .column(host_software_item_plugin::Column::PluginType)
+        .filter(host_software_item_plugin::Column::SoftwareItemId.is_in(item_ids.to_vec()))
+        .into_model::<ItemPluginType>()
+        .all(db)
+        .await
+        .context_to()?;
+
+    // Group plugin types by software item id, deduplicated.
+    let mut plugins_map: HashMap<Uuid, Vec<String>> = HashMap::new();
+    for row in plugin_type_rows {
+        let entry = plugins_map.entry(row.software_item_id).or_default();
+        if !entry.contains(&row.plugin_type) {
+            entry.push(row.plugin_type);
+        }
+    }
+
+    // Bulk-load latest known versions from host_software_items for all items.
+    let latest_versions = bulk_load_latest_versions(db, item_ids).await;
+
+    // Bulk-load all host installed_versions for update_available computation.
+    // Map: software_item_id -> list of (installed_version, latest_version) pairs.
+    let mut installed_query = HostSoftwareItem::find()
+        .select_only()
+        .column(host_software_item::Column::SoftwareItemId)
+        .column(host_software_item::Column::InstalledVersion)
+        .column(host_software_item::Column::LatestVersion)
+        .column(host_software_item::Column::InstalledDisplayVersion)
+        .column(host_software_item::Column::LatestReleaseMetadata)
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            host_software_item::Relation::Host.def(),
+        )
+        .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.to_vec()))
+        .filter(host::Column::DeactivatedAt.is_null());
+
+    if let Some(host_id) = host_id_filter {
+        installed_query = installed_query.filter(host_software_item::Column::HostId.eq(host_id));
+    }
+
+    let installed_rows: Vec<InstalledVersionRow> = installed_query
+        .into_model::<InstalledVersionRow>()
+        .all(db)
+        .await
+        .context_to()?;
+
+    let mut installed_map: HashMap<Uuid, Vec<VersionPair>> = HashMap::new();
+    for row in installed_rows {
+        installed_map
+            .entry(row.software_item_id)
+            .or_default()
+            .push((
+                row.installed_version,
+                row.latest_version,
+                row.installed_display_version,
+                row.latest_release_metadata,
+            ));
+    }
+
+    Ok(ListEnrichment {
+        host_counts,
+        plugins_map,
+        latest_versions,
+        installed_map,
+    })
+}
+
 #[tracing::instrument(skip_all)]
 pub async fn list_software_items(
     tenant_db: &TenantDb,
@@ -642,55 +857,7 @@ pub async fn list_software_items(
     }
 
     if let Some(updatable) = params.updatable {
-        use sea_orm::sea_query::{BinOper, ExprTrait, Query};
-        // Build an EXISTS subquery: active host assignment where installed != latest (both non-null).
-        let exists_sub = Query::select()
-            .expr(Expr::val(1_i32))
-            .from(host_software_item::Entity)
-            .inner_join(
-                host::Entity,
-                Expr::col((
-                    host_software_item::Entity,
-                    host_software_item::Column::HostId,
-                ))
-                .equals((host::Entity, host::Column::Id)),
-            )
-            .and_where(
-                Expr::col((
-                    host_software_item::Entity,
-                    host_software_item::Column::SoftwareItemId,
-                ))
-                .equals((software_item::Entity, software_item::Column::Id)),
-            )
-            .and_where(Expr::col((host::Entity, host::Column::DeactivatedAt)).is_null())
-            .and_where(
-                Expr::col((
-                    host_software_item::Entity,
-                    host_software_item::Column::InstalledVersion,
-                ))
-                .is_not_null(),
-            )
-            .and_where(
-                Expr::col((
-                    host_software_item::Entity,
-                    host_software_item::Column::LatestVersion,
-                ))
-                .is_not_null(),
-            )
-            .and_where(
-                Expr::col((
-                    host_software_item::Entity,
-                    host_software_item::Column::InstalledVersion,
-                ))
-                .binary(
-                    BinOper::NotEqual,
-                    Expr::col((
-                        host_software_item::Entity,
-                        host_software_item::Column::LatestVersion,
-                    )),
-                ),
-            )
-            .take();
+        let exists_sub = build_updatable_exists_subquery();
         if updatable {
             base_query = base_query.filter(Expr::exists(exists_sub));
         } else {
@@ -741,123 +908,19 @@ pub async fn list_software_items(
     }
 
     let item_ids: Vec<Uuid> = items.iter().map(|i| i.id).collect();
-
-    // Bulk-load host counts for all items in one GROUP BY query.
-    // Only active (non-deactivated) hosts are counted.
-    let host_counts: HashMap<Uuid, u64> = HostSoftwareItem::find()
-        .select_only()
-        .column(host_software_item::Column::SoftwareItemId)
-        .column_as(
-            {
-                use sea_orm::sea_query::ExprTrait;
-                Expr::col(host_software_item::Column::HostId).count()
-            },
-            "count",
-        )
-        .join(
-            sea_orm::JoinType::InnerJoin,
-            host_software_item::Relation::Host.def(),
-        )
-        .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
-        .filter(host::Column::DeactivatedAt.is_null())
-        .group_by(host_software_item::Column::SoftwareItemId)
-        .into_model::<ItemHostCount>()
-        .all(tenant_db.db())
-        .await
-        .context_to()?
-        .into_iter()
-        .map(|row| (row.software_item_id, row.count as u64))
-        .collect();
-
-    // Bulk-load plugin types for all items directly from host_software_item_plugins.
-    // plugin_type is stored on the row itself; no join to plugin_configs is needed, and
-    // an INNER JOIN would silently drop rows where plugin_config_id IS NULL.
-    let plugin_type_rows: Vec<ItemPluginType> = HostSoftwareItemPlugin::find()
-        .select_only()
-        .column(host_software_item_plugin::Column::SoftwareItemId)
-        .column(host_software_item_plugin::Column::PluginType)
-        .filter(host_software_item_plugin::Column::SoftwareItemId.is_in(item_ids.clone()))
-        .into_model::<ItemPluginType>()
-        .all(tenant_db.db())
-        .await
-        .context_to()?;
-
-    // Group plugin types by software item id, deduplicated.
-    let mut plugins_map: HashMap<Uuid, Vec<String>> = HashMap::new();
-    for row in plugin_type_rows {
-        let entry = plugins_map.entry(row.software_item_id).or_default();
-        if !entry.contains(&row.plugin_type) {
-            entry.push(row.plugin_type);
-        }
-    }
-
-    // Bulk-load latest known versions from host_software_items for all items.
-    let latest_versions = bulk_load_latest_versions(tenant_db.db(), &item_ids).await;
-
-    // Bulk-load all host installed_versions for update_available computation.
-    // Map: software_item_id -> list of (installed_version, latest_version) pairs.
-    #[derive(Debug, FromQueryResult)]
-    struct InstalledVersionRow {
-        software_item_id: Uuid,
-        installed_version: Option<String>,
-        latest_version: Option<String>,
-        installed_display_version: Option<String>,
-        latest_release_metadata: Option<serde_json::Value>,
-    }
-
-    let mut installed_query = HostSoftwareItem::find()
-        .select_only()
-        .column(host_software_item::Column::SoftwareItemId)
-        .column(host_software_item::Column::InstalledVersion)
-        .column(host_software_item::Column::LatestVersion)
-        .column(host_software_item::Column::InstalledDisplayVersion)
-        .column(host_software_item::Column::LatestReleaseMetadata)
-        .join(
-            sea_orm::JoinType::InnerJoin,
-            host_software_item::Relation::Host.def(),
-        )
-        .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
-        .filter(host::Column::DeactivatedAt.is_null());
-
-    if let Some(host_id) = params.host_id {
-        installed_query = installed_query.filter(host_software_item::Column::HostId.eq(host_id));
-    }
-
-    let installed_rows: Vec<InstalledVersionRow> = installed_query
-        .into_model::<InstalledVersionRow>()
-        .all(tenant_db.db())
-        .await
-        .context_to()?;
-
-    // (installed_version, latest_version, installed_display_version, latest_release_metadata)
-    type VersionPair = (
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<serde_json::Value>,
-    );
-    let mut installed_map: HashMap<Uuid, Vec<VersionPair>> = HashMap::new();
-    for row in installed_rows {
-        installed_map
-            .entry(row.software_item_id)
-            .or_default()
-            .push((
-                row.installed_version,
-                row.latest_version,
-                row.installed_display_version,
-                row.latest_release_metadata,
-            ));
-    }
-
     let host_id_filter = params.host_id;
+
+    let mut enrichment =
+        bulk_load_list_enrichment(tenant_db.db(), &item_ids, host_id_filter).await?;
 
     let response: Vec<SoftwareItemResponse> = items
         .iter()
         .map(|item| {
-            let plugins = plugins_map.remove(&item.id).unwrap_or_default();
-            let host_count = host_counts.get(&item.id).copied().unwrap_or(0);
-            let latest_version = latest_versions.get(&item.id).cloned();
-            let update_available = installed_map
+            let plugins = enrichment.plugins_map.remove(&item.id).unwrap_or_default();
+            let host_count = enrichment.host_counts.get(&item.id).copied().unwrap_or(0);
+            let latest_version = enrichment.latest_versions.get(&item.id).cloned();
+            let update_available = enrichment
+                .installed_map
                 .get(&item.id)
                 .map(|pairs| {
                     pairs
@@ -868,7 +931,8 @@ pub async fn list_software_items(
             // When filtered by host_id, expose the per-host installed version and extra fields.
             let (installed_version, installed_display_version, latest_release_metadata) =
                 if host_id_filter.is_some() {
-                    installed_map
+                    enrichment
+                        .installed_map
                         .get(&item.id)
                         .and_then(|pairs| pairs.first())
                         .map(|(iv, _lv, idv, lrm)| (iv.clone(), idv.clone(), lrm.clone()))
@@ -1024,6 +1088,132 @@ pub async fn delete_software_item(tenant_db: &TenantDb, id: Uuid) -> Result<bool
     Ok(true)
 }
 
+/// Ensure a `host_software_item` link row exists for the given host and item.
+/// Returns the link's ID (existing or newly created).
+async fn ensure_host_link(
+    txn: &impl sea_orm::ConnectionTrait,
+    host_id: Uuid,
+    item_id: Uuid,
+    now: OffsetDateTime,
+) -> Result<Uuid> {
+    let existing_link = HostSoftwareItem::find()
+        .filter(host_software_item::Column::HostId.eq(host_id))
+        .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+        .one(txn)
+        .await
+        .context_to()?;
+
+    if let Some(ref link) = existing_link {
+        return Ok(link.id);
+    }
+
+    let new_hsi_id = Uuid::now_v7();
+    let link = host_software_item::ActiveModel {
+        id: Set(new_hsi_id),
+        host_id: Set(host_id),
+        software_item_id: Set(item_id),
+        qualifier: Set(None),
+        plugin_config_id: Set(None),
+        package_identifier: Set(None),
+        installed_version: Set(None),
+        installed_version_detected_at: Set(None),
+        installed_display_version: Set(None),
+        latest_version: Set(None),
+        latest_version_fetched_at: Set(None),
+        latest_release_metadata: Set(None),
+        last_updated_at: Set(None),
+        linked_at: Set(now),
+        update_category: Set("unknown".to_string()),
+        deactivated_at: Set(None),
+    };
+    link.insert(txn).await.context_to()?;
+    Ok(new_hsi_id)
+}
+
+/// Validate, resolve, and upsert a single role assignment for a host-software-item pair.
+#[allow(clippy::too_many_arguments)]
+async fn upsert_role_assignment(
+    ops: &dyn PluginOps,
+    txn: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    host_id: Uuid,
+    item_id: Uuid,
+    hsi_id: Uuid,
+    role_assignment: &HostPluginRoleAssignment,
+    now: OffsetDateTime,
+) -> Result<()> {
+    let role = &role_assignment.role;
+    let execution_site = &role_assignment.execution_site;
+
+    // Validate execution_site.
+    validate_execution_site(execution_site, role)?;
+
+    let (plugin_config_id, config) =
+        resolve_plugin_config_txn(ops, txn, tenant_id, role_assignment).await?;
+
+    validate_assignment(
+        ops,
+        &config,
+        &role_assignment.package_identifier,
+        role_assignment.config_override.as_ref(),
+    )?;
+
+    // Check for existing assignment at the same (host_id, software_item_id, role, ordinal).
+    let existing_plugin = HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
+        .filter(host_software_item_plugin::Column::Role.eq(role.as_str()))
+        .filter(host_software_item_plugin::Column::Ordinal.eq(0))
+        .one(txn)
+        .await
+        .context_to()?;
+
+    match existing_plugin {
+        Some(existing) => {
+            // Update existing plugin assignment for this role.
+            let mut active: host_software_item_plugin::ActiveModel = existing.into();
+            active.plugin_config_id = Set(Some(plugin_config_id));
+            active.plugin_type = Set(config.plugin_type.clone());
+            active.package_identifier = Set(role_assignment.package_identifier.clone());
+            active.config = Set(role_assignment.config_override.clone());
+            active.execution_site = Set(execution_site.clone());
+            active.updated_at = Set(now);
+            active.update(txn).await.context_to()?;
+        }
+        None => {
+            let plugin_row = host_software_item_plugin::ActiveModel {
+                id: Set(generate_uuid()),
+                host_id: Set(host_id),
+                software_item_id: Set(item_id),
+                host_software_item_id: Set(hsi_id),
+                plugin_config_id: Set(Some(plugin_config_id)),
+                plugin_type: Set(config.plugin_type.clone()),
+                role: Set(role.as_str().to_string()),
+                ordinal: Set(0),
+                package_identifier: Set(role_assignment.package_identifier.clone()),
+                config: Set(role_assignment.config_override.clone()),
+                execution_site: Set(execution_site.clone()),
+                created_at: Set(now),
+                updated_at: Set(now),
+            };
+            plugin_row.insert(txn).await.map_err(|e| {
+                // Check if this is a unique constraint violation
+                // (host_id, software_item_id, role, ordinal).
+                if matches!(e, sea_orm::DbErr::Query(..))
+                    || e.to_string().contains("UNIQUE")
+                    || e.to_string().contains("duplicate")
+                {
+                    report!(SoftwareItemQueryError::DuplicateHostAssignment)
+                } else {
+                    report!(SoftwareItemQueryError::Db(e))
+                }
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Assign hosts to a software item. Each host carries its own list of role-specific
 /// plugin assignments. Returns the updated detail response, or an error if the item
 /// or a host is not found.
@@ -1055,110 +1245,20 @@ pub async fn assign_hosts(
             bail!(SoftwareItemQueryError::HostNotFound(host_id));
         }
 
-        // Upsert the host_software_item link row (no plugin fields, just the link).
-        let existing_link = HostSoftwareItem::find()
-            .filter(host_software_item::Column::HostId.eq(host_id))
-            .filter(host_software_item::Column::SoftwareItemId.eq(id))
-            .one(&txn)
-            .await
-            .context_to()?;
+        let hsi_id = ensure_host_link(&txn, host_id, id, now).await?;
 
-        let hsi_id = if let Some(ref link) = existing_link {
-            link.id
-        } else {
-            let new_hsi_id = Uuid::now_v7();
-            let link = host_software_item::ActiveModel {
-                id: Set(new_hsi_id),
-                host_id: Set(host_id),
-                software_item_id: Set(id),
-                qualifier: Set(None),
-                plugin_config_id: Set(None),
-                package_identifier: Set(None),
-                installed_version: Set(None),
-                installed_version_detected_at: Set(None),
-                installed_display_version: Set(None),
-                latest_version: Set(None),
-                latest_version_fetched_at: Set(None),
-                latest_release_metadata: Set(None),
-                last_updated_at: Set(None),
-                linked_at: Set(now),
-                update_category: Set("unknown".to_string()),
-                deactivated_at: Set(None),
-            };
-            link.insert(&txn).await.context_to()?;
-            new_hsi_id
-        };
-
-        // Process each role assignment for this host.
         for role_assignment in &assignment.plugins {
-            let role = &role_assignment.role;
-            let execution_site = &role_assignment.execution_site;
-
-            // Validate execution_site.
-            validate_execution_site(execution_site, role)?;
-
-            let (plugin_config_id, config) =
-                resolve_plugin_config_txn(ops, &txn, tenant_db.tenant_id, role_assignment).await?;
-
-            validate_assignment(
+            upsert_role_assignment(
                 ops,
-                &config,
-                &role_assignment.package_identifier,
-                role_assignment.config_override.as_ref(),
-            )?;
-
-            // Check for existing assignment at the same (host_id, software_item_id, role, ordinal).
-            let existing_plugin = HostSoftwareItemPlugin::find()
-                .filter(host_software_item_plugin::Column::HostId.eq(host_id))
-                .filter(host_software_item_plugin::Column::SoftwareItemId.eq(id))
-                .filter(host_software_item_plugin::Column::Role.eq(role.as_str()))
-                .filter(host_software_item_plugin::Column::Ordinal.eq(0))
-                .one(&txn)
-                .await
-                .context_to()?;
-
-            match existing_plugin {
-                Some(existing) => {
-                    // Update existing plugin assignment for this role.
-                    let mut active: host_software_item_plugin::ActiveModel = existing.into();
-                    active.plugin_config_id = Set(Some(plugin_config_id));
-                    active.plugin_type = Set(config.plugin_type.clone());
-                    active.package_identifier = Set(role_assignment.package_identifier.clone());
-                    active.config = Set(role_assignment.config_override.clone());
-                    active.execution_site = Set(execution_site.clone());
-                    active.updated_at = Set(now);
-                    active.update(&txn).await.context_to()?;
-                }
-                None => {
-                    let plugin_row = host_software_item_plugin::ActiveModel {
-                        id: Set(generate_uuid()),
-                        host_id: Set(host_id),
-                        software_item_id: Set(id),
-                        host_software_item_id: Set(hsi_id),
-                        plugin_config_id: Set(Some(plugin_config_id)),
-                        plugin_type: Set(config.plugin_type.clone()),
-                        role: Set(role.as_str().to_string()),
-                        ordinal: Set(0),
-                        package_identifier: Set(role_assignment.package_identifier.clone()),
-                        config: Set(role_assignment.config_override.clone()),
-                        execution_site: Set(execution_site.clone()),
-                        created_at: Set(now),
-                        updated_at: Set(now),
-                    };
-                    plugin_row.insert(&txn).await.map_err(|e| {
-                        // Check if this is a unique constraint violation
-                        // (host_id, software_item_id, role, ordinal).
-                        if matches!(e, sea_orm::DbErr::Query(..))
-                            || e.to_string().contains("UNIQUE")
-                            || e.to_string().contains("duplicate")
-                        {
-                            report!(SoftwareItemQueryError::DuplicateHostAssignment)
-                        } else {
-                            report!(SoftwareItemQueryError::Db(e))
-                        }
-                    })?;
-                }
-            }
+                &txn,
+                tenant_db.tenant_id,
+                host_id,
+                id,
+                hsi_id,
+                role_assignment,
+                now,
+            )
+            .await?;
         }
     }
 
