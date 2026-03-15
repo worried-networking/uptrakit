@@ -41,9 +41,16 @@
 	let batchResult: BatchActionResponse | null = $state(null);
 	let selectingAllPages = $state(false);
 
-	const batchActions: { id: string; label: string; destructive?: boolean }[] = [
-		{ id: 'deactivate', label: 'Deactivate', destructive: true }
-	];
+	const batchActions = $derived.by(() => {
+		const actions: { id: string; label: string; destructive?: boolean }[] = [];
+		if (canManageSoftware) {
+			actions.push({ id: 'discover', label: 'Trigger Discovery' });
+		}
+		if (canManage) {
+			actions.push({ id: 'deactivate', label: 'Deactivate', destructive: true });
+		}
+		return actions;
+	});
 
 	const allPageSelected = $derived(hosts.length > 0 && hosts.every((h) => selectedIds.has(h.id)));
 
@@ -192,8 +199,27 @@
 		}
 	}
 
+	async function executeBatchDiscover() {
+		const ids = [...selectedIds];
+		selectedIds.clear();
+		const results = await Promise.allSettled(ids.map((id) => triggerHostDiscovery(id)));
+		const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+		const failed = results.length - succeeded;
+		if (succeeded > 0 && failed === 0) {
+			showSuccess(`Discovery triggered for ${succeeded} host(s).`);
+		} else if (succeeded > 0) {
+			showSuccess(`Discovery triggered for ${succeeded} host(s). ${failed} failed.`);
+		} else {
+			showError(`Failed to trigger discovery for all ${ids.length} host(s).`);
+		}
+	}
+
 	function requestBatchAction(actionId: string) {
-		batchConfirmAction = actionId;
+		if (actionId === 'deactivate') {
+			batchConfirmAction = actionId;
+		} else if (actionId === 'discover') {
+			void executeBatchDiscover();
+		}
 	}
 
 	async function executeBatchAction() {
@@ -269,7 +295,7 @@
 		<table class="table">
 			<thead>
 				<tr>
-					{#if canManage}
+					{#if canManage || canManageSoftware}
 						<th class="w-10">
 							<input
 								type="checkbox"
@@ -297,7 +323,7 @@
 			<tbody>
 				{#each hosts as host (host.id)}
 					<tr>
-						{#if canManage}
+						{#if canManage || canManageSoftware}
 							<td>
 								<input
 									type="checkbox"
@@ -347,7 +373,7 @@
 					</tr>
 				{:else}
 					<tr>
-						<td colspan={canManage ? 11 : 8} class="text-center py-8">
+						<td colspan={canManage || canManageSoftware ? 10 : 8} class="text-center py-8">
 							<p class="text-lg font-medium">No hosts discovered yet</p>
 							<p class="mt-1 text-sm text-surface-500">
 								Hosts appear here automatically when an approved agent reports from a new machine.
@@ -361,7 +387,7 @@
 
 	<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadHosts} />
 
-	{#if canManage && selectedIds.size > 0}
+	{#if (canManage || canManageSoftware) && selectedIds.size > 0}
 		<BatchActionBar
 			selectedCount={selectedIds.size}
 			actions={batchActions}
