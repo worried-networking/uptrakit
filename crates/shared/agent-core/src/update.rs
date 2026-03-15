@@ -83,6 +83,84 @@ pub struct UpdateOutputMessage {
     pub stream: OutputStreamType,
 }
 
+/// Run the three-phase update pipeline: user pre-hooks → plugin execution →
+/// user post-hooks.
+///
+/// The caller wraps this in [`tokio::time::timeout`] so cancellation
+/// (`drop`) releases the `&mut accumulated_output` borrow cleanly.
+async fn execute_update_pipeline(
+    payload: &ExecuteUpdatePayload,
+    output_tx: &mpsc::Sender<UpdateOutputMessage>,
+    executor: Arc<dyn CommandExecutor>,
+    accumulated_output: &mut String,
+) -> std::result::Result<(), AgentCoreError> {
+    // Run pre-update hooks
+    run_hook_phase(
+        &payload.pre_update_hooks,
+        "pre-hook",
+        OutputStreamType::PreHook,
+        output_tx,
+        accumulated_output,
+        AgentCoreError::PreUpdateHookFailed,
+    )
+    .await?;
+
+    // Attestation gate — abort if policy requires a verified attestation
+    // and none was found.
+    tracing::debug!("checking attestation gate");
+    check_attestation_gate(payload.release_info.as_ref(), output_tx).await?;
+    tracing::debug!("attestation gate passed");
+
+    // Execute actual update based on plugin type
+    send_output(
+        output_tx,
+        &format!(
+            "[update] Executing update to version {}...",
+            payload.to_version
+        ),
+        OutputStreamType::System,
+    )
+    .await;
+
+    tracing::debug!("executing plugin update");
+    match execute_plugin_update(payload, output_tx, executor).await {
+        Ok(output) => {
+            tracing::debug!("plugin update returned successfully");
+            append_bounded(accumulated_output, &output, MAX_OUTPUT_BYTES);
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            tracing::warn!(
+                software_item = %payload.software_item_name,
+                error = %error_msg,
+                "plugin update command failed"
+            );
+            let formatted = format!("[error] {error_msg}\n");
+            send_output(
+                output_tx,
+                &format!("[error] {error_msg}"),
+                OutputStreamType::Stderr,
+            )
+            .await;
+            append_bounded(accumulated_output, &formatted, MAX_OUTPUT_BYTES);
+            return Err(AgentCoreError::UpdateExecution(error_msg));
+        }
+    }
+
+    // Run post-update hooks
+    run_hook_phase(
+        &payload.post_update_hooks,
+        "post-hook",
+        OutputStreamType::PostHook,
+        output_tx,
+        accumulated_output,
+        AgentCoreError::PostUpdateHookFailed,
+    )
+    .await?;
+
+    Ok(())
+}
+
 /// Execute an update based on the payload.
 ///
 /// This function runs the complete update flow and sends output lines through
@@ -99,6 +177,8 @@ pub async fn execute_update(
 ) -> UpdateExecutionResult {
     tracing::info!(software_item = %payload.software_item_name, "starting update");
     let update_history_id = payload.update_history_id;
+    // Copy before the payload reference is used inside the timeout future.
+    let timeout_duration = payload.timeout;
 
     // Detect current version (from_version)
     let from_version = detect_current_version(&payload, Arc::clone(&executor)).await;
@@ -108,75 +188,17 @@ pub async fn execute_update(
     let mut final_error: Option<String> = None;
     let mut final_status = UpdateFinalStatus::Completed;
 
-    // Run with timeout
-    let timeout_duration = payload.timeout;
-    let execution_result = tokio::time::timeout(timeout_duration, async {
-        // Run pre-update hooks
-        run_hook_phase(
-            &payload.pre_update_hooks,
-            "pre-hook",
-            OutputStreamType::PreHook,
+    // Run with timeout — the pipeline borrows `accumulated_output` mutably;
+    // on cancellation (timeout) the borrow is released before the match below.
+    let execution_result = tokio::time::timeout(
+        timeout_duration,
+        execute_update_pipeline(
+            &payload,
             &output_tx,
+            Arc::clone(&executor),
             &mut accumulated_output,
-            AgentCoreError::PreUpdateHookFailed,
-        )
-        .await?;
-
-        // Attestation gate — abort if policy requires a verified attestation
-        // and none was found.
-        tracing::debug!("checking attestation gate");
-        check_attestation_gate(payload.release_info.as_ref(), &output_tx).await?;
-        tracing::debug!("attestation gate passed");
-
-        // Execute actual update based on plugin type
-        send_output(
-            &output_tx,
-            &format!(
-                "[update] Executing update to version {}...",
-                payload.to_version
-            ),
-            OutputStreamType::System,
-        )
-        .await;
-
-        tracing::debug!("executing plugin update");
-        match execute_plugin_update(&payload, &output_tx, Arc::clone(&executor)).await {
-            Ok(output) => {
-                tracing::debug!("plugin update returned successfully");
-                append_bounded(&mut accumulated_output, &output, MAX_OUTPUT_BYTES);
-            }
-            Err(e) => {
-                let error_msg = e.to_string();
-                tracing::warn!(
-                    software_item = %payload.software_item_name,
-                    error = %error_msg,
-                    "plugin update command failed"
-                );
-                let formatted = format!("[error] {error_msg}\n");
-                send_output(
-                    &output_tx,
-                    &format!("[error] {error_msg}"),
-                    OutputStreamType::Stderr,
-                )
-                .await;
-                append_bounded(&mut accumulated_output, &formatted, MAX_OUTPUT_BYTES);
-                return Err(AgentCoreError::UpdateExecution(error_msg));
-            }
-        }
-
-        // Run post-update hooks
-        run_hook_phase(
-            &payload.post_update_hooks,
-            "post-hook",
-            OutputStreamType::PostHook,
-            &output_tx,
-            &mut accumulated_output,
-            AgentCoreError::PostUpdateHookFailed,
-        )
-        .await?;
-
-        Ok(())
-    })
+        ),
+    )
     .await;
 
     // Handle timeout or execution result
@@ -190,22 +212,22 @@ pub async fn execute_update(
             )
             .await;
             // Detect new version after update
-            let to_version = detect_current_version(&payload, Arc::clone(&executor)).await;
+            let to_version = detect_current_version(&payload, executor).await;
             tracing::debug!(to_version = ?to_version, "post-update version detected");
             to_version
         }
         Ok(Err(e)) => {
             // The error was already logged and appended to accumulated_output in the
-            // execute_plugin_update error arm above; here we only set the final state.
+            // execute_update_pipeline error arm above; here we only set the final state.
             final_status = UpdateFinalStatus::Failed;
             final_error = Some(e.to_string());
             None
         }
         Err(_) => {
-            let timeout_msg = format!("Update timed out after {}s", payload.timeout.as_secs());
+            let timeout_msg = format!("Update timed out after {}s", timeout_duration.as_secs());
             tracing::warn!(
                 software_item = %payload.software_item_name,
-                timeout = ?payload.timeout,
+                timeout = ?timeout_duration,
                 "update timed out"
             );
             let formatted = format!("[error] {timeout_msg}\n");

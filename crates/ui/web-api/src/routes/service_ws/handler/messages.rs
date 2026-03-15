@@ -252,40 +252,14 @@ pub(super) async fn handle_renew_certificate(
 // handle_report_hosts
 // ---------------------------------------------------------------------------
 
-/// Handle a `ReportHosts` message: update `client_version`, find/create hosts,
-/// trigger discovery, refresh `linked_host_ids`.
-#[tracing::instrument(skip_all, fields(%service_id, host_count = payload.hosts.len()))]
-pub(super) async fn handle_report_hosts(
+/// Iterate reported hosts and find-or-create their DB entries, triggering
+/// autodiscovery for any newly-seen hosts.
+async fn link_reported_hosts(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
+    service_model: &service::Model,
     payload: &ReportHostsPayload,
-    linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
-) -> ProcessorResponse {
-    tracing::debug!(
-        %service_id,
-        capabilities = ?payload.capabilities,
-        "received ReportHosts"
-    );
-
-    let service_model = match service::Entity::find_by_id(service_id)
-        .one(state.db())
-        .await
-    {
-        Ok(Some(s)) => s,
-        _ => return ProcessorResponse::cont(),
-    };
-
-    // Update client_version.
-    let mut active: service::ActiveModel = service_model.clone().into();
-    active.client_version = Set(Some(payload.agent_version.clone()));
-    active.updated_at = Set(time::OffsetDateTime::now_utc());
-    if let Err(e) = active.update(state.db()).await {
-        tracing::error!(
-            error = %e,
-            "failed to update client_version"
-        );
-    }
-
+) {
     for host_info in &payload.hosts {
         let host_hostname = host_info
             .hostname
@@ -326,34 +300,86 @@ pub(super) async fn handle_report_hosts(
             }
         }
     }
+}
+
+/// Notify MQTT services that a service's linked hosts are online.
+async fn notify_reported_hosts_online(
+    state: &Arc<AppState>,
+    service_model: &service::Model,
+    linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+    agent_version: &str,
+) {
+    let current_ids = linked_host_ids.lock().clone();
+    if current_ids.is_empty() {
+        return;
+    }
+    let now = time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default();
+    let updates: Vec<HostConnectivityUpdate> = current_ids
+        .iter()
+        .map(|&host_id| {
+            HostConnectivityUpdate::online(
+                host_id,
+                Some(now.clone()),
+                Some(agent_version.to_string()),
+            )
+        })
+        .collect();
+    state
+        .notification_service
+        .send_connectivity_update(service_model.tenant_id, updates)
+        .await;
+}
+
+/// Handle a `ReportHosts` message: update `client_version`, find/create hosts,
+/// trigger discovery, refresh `linked_host_ids`.
+#[tracing::instrument(skip_all, fields(%service_id, host_count = payload.hosts.len()))]
+pub(super) async fn handle_report_hosts(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    payload: &ReportHostsPayload,
+    linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+) -> ProcessorResponse {
+    tracing::debug!(
+        %service_id,
+        capabilities = ?payload.capabilities,
+        "received ReportHosts"
+    );
+
+    let service_model = match service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(s)) => s,
+        _ => return ProcessorResponse::cont(),
+    };
+
+    // Update client_version.
+    let mut active: service::ActiveModel = service_model.clone().into();
+    active.client_version = Set(Some(payload.agent_version.clone()));
+    active.updated_at = Set(time::OffsetDateTime::now_utc());
+    if let Err(e) = active.update(state.db()).await {
+        tracing::error!(
+            error = %e,
+            "failed to update client_version"
+        );
+    }
+
+    link_reported_hosts(state, service_id, &service_model, payload).await;
 
     // Refresh cached host IDs.
     if let Ok(ids) = load_linked_host_ids(state.db(), service_id).await {
         *linked_host_ids.lock() = ids;
     }
 
-    // Notify MQTT services that this agent's hosts are online.
-    let current_ids = linked_host_ids.lock().clone();
-    if !current_ids.is_empty() {
-        let now = time::OffsetDateTime::now_utc()
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_default();
-        let agent_version = payload.agent_version.clone();
-        let updates: Vec<HostConnectivityUpdate> = current_ids
-            .iter()
-            .map(|&host_id| {
-                HostConnectivityUpdate::online(
-                    host_id,
-                    Some(now.clone()),
-                    Some(agent_version.clone()),
-                )
-            })
-            .collect();
-        state
-            .notification_service
-            .send_connectivity_update(service_model.tenant_id, updates)
-            .await;
-    }
+    notify_reported_hosts_online(
+        state,
+        &service_model,
+        linked_host_ids,
+        &payload.agent_version,
+    )
+    .await;
 
     ProcessorResponse::cont()
 }
@@ -642,6 +668,107 @@ pub(super) async fn handle_version_check_results(
 // handle_discovery_results
 // ---------------------------------------------------------------------------
 
+/// Find the host linked to a service that matches the given `machine_id`.
+///
+/// Iterates the provided service-host links and queries the DB for each
+/// until a matching, non-deactivated host is found.
+async fn find_linked_host_by_machine_id(
+    db: &sea_orm::DatabaseConnection,
+    links: &[service_host::Model],
+    machine_id: &str,
+) -> Option<uuid::Uuid> {
+    for link in links {
+        if let Ok(Some(h)) = host::Entity::find_by_id(link.host_id)
+            .filter(host::Column::MachineId.eq(machine_id))
+            .filter(host::Column::DeactivatedAt.is_null())
+            .one(db)
+            .await
+        {
+            return Some(h.id);
+        }
+    }
+    None
+}
+
+/// Process a single discovery page for a known host.
+///
+/// Calls [`process_discovery_results`] and, on the final page, dispatches
+/// a [`NotificationEventDetails::NewSoftwareDiscovered`] notification when
+/// at least one item was found.
+async fn process_discovery_page_for_host(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    host_id: uuid::Uuid,
+    payload: DiscoveryResultsPayload,
+    page_outcome: PageOutcome,
+    pagination: Option<&ReportPagination>,
+    report_tracker: &mut ReportTracker,
+) {
+    let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    else {
+        return;
+    };
+
+    let this_page_count: u32 = payload
+        .results
+        .iter()
+        .filter(|r| r.error.is_none())
+        .map(|r| r.discoveries.len() as u32)
+        .sum();
+
+    if let Err(e) = crate::queries::autodiscovery::process_discovery_results(
+        state.db(),
+        service_id,
+        svc.tenant_id,
+        host_id,
+        payload,
+    )
+    .await
+    {
+        tracing::warn!(
+            error = %e,
+            %service_id,
+            "failed to process discovery results"
+        );
+        return;
+    }
+
+    match page_outcome {
+        PageOutcome::Final {
+            accumulated_discovered_count,
+        } => {
+            let total_discovered = accumulated_discovered_count.saturating_add(this_page_count);
+            if total_discovered > 0 {
+                let host_name = host::Entity::find_by_id(host_id)
+                    .one(state.db())
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|h| h.hostname.clone());
+
+                state.notification_dispatcher.dispatch(NotificationEvent {
+                    tenant_id: svc.tenant_id,
+                    host_id: Some(host_id),
+                    host_name,
+                    software_item_id: None,
+                    software_item_name: None,
+                    plugin_type: None,
+                    details: NotificationEventDetails::NewSoftwareDiscovered {
+                        discovered_count: total_discovered,
+                    },
+                });
+            }
+        }
+        PageOutcome::Pending => {
+            if let Some(p) = pagination {
+                report_tracker.add_discovered_count(p.report_id, this_page_count);
+            }
+        }
+    }
+}
+
 /// Handle a `DiscoveryResults` message: find host, process results.
 #[tracing::instrument(skip_all, fields(%service_id, host_machine_id = %payload.host_machine_id))]
 pub(super) async fn handle_discovery_results(
@@ -686,87 +813,27 @@ pub(super) async fn handle_discovery_results(
         .await
         .unwrap_or_default();
 
-    let mut host_id_opt: Option<uuid::Uuid> = None;
-    for link in &links {
-        if let Ok(Some(h)) = host::Entity::find_by_id(link.host_id)
-            .filter(host::Column::MachineId.eq(&payload.host_machine_id))
-            .filter(host::Column::DeactivatedAt.is_null())
-            .one(state.db())
-            .await
-        {
-            host_id_opt = Some(h.id);
-            break;
-        }
-    }
-
-    if let Some(host_id) = host_id_opt {
-        if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
-            .one(state.db())
-            .await
-        {
-            let this_page_count: u32 = payload
-                .results
-                .iter()
-                .filter(|r| r.error.is_none())
-                .map(|r| r.discoveries.len() as u32)
-                .sum();
-
-            if let Err(e) = crate::queries::autodiscovery::process_discovery_results(
-                state.db(),
+    let host_machine_id = payload.host_machine_id.clone();
+    match find_linked_host_by_machine_id(state.db(), &links, &host_machine_id).await {
+        Some(host_id) => {
+            process_discovery_page_for_host(
+                state,
                 service_id,
-                svc.tenant_id,
                 host_id,
                 payload,
+                page_outcome,
+                pagination,
+                report_tracker,
             )
-            .await
-            {
-                tracing::warn!(
-                    error = %e,
-                    %service_id,
-                    "failed to process discovery results"
-                );
-            } else {
-                match page_outcome {
-                    PageOutcome::Final {
-                        accumulated_discovered_count,
-                    } => {
-                        let total_discovered =
-                            accumulated_discovered_count.saturating_add(this_page_count);
-                        if total_discovered > 0 {
-                            let host_name = host::Entity::find_by_id(host_id)
-                                .one(state.db())
-                                .await
-                                .ok()
-                                .flatten()
-                                .map(|h| h.hostname.clone());
-
-                            state.notification_dispatcher.dispatch(NotificationEvent {
-                                tenant_id: svc.tenant_id,
-                                host_id: Some(host_id),
-                                host_name,
-                                software_item_id: None,
-                                software_item_name: None,
-                                plugin_type: None,
-                                details: NotificationEventDetails::NewSoftwareDiscovered {
-                                    discovered_count: total_discovered,
-                                },
-                            });
-                        }
-                    }
-                    PageOutcome::Pending => {
-                        if let Some(p) = pagination {
-                            report_tracker.add_discovered_count(p.report_id, this_page_count);
-                        }
-                    }
-                }
-            }
+            .await;
         }
-    } else {
-        tracing::warn!(
-            %service_id,
-            host_machine_id = %payload.host_machine_id,
-            "received DiscoveryResults for unknown host machine_id"
-        );
+        None => {
+            tracing::warn!(
+                %service_id,
+                host_machine_id = %host_machine_id,
+                "received DiscoveryResults for unknown host machine_id"
+            );
+        }
     }
 
     ProcessorResponse::cont()

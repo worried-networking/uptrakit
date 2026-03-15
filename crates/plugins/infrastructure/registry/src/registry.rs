@@ -70,6 +70,56 @@ fn restore_secrets_for<T: SecretMasking>(
     }
 }
 
+/// Probe whether a plugin instance is compatible with the target host.
+///
+/// Returns `true` when the plugin is compatible or when the compatibility
+/// check is unavailable. Returns `false` only when the plugin explicitly
+/// reports [`HostCompatibility::Incompatible`].
+///
+/// If a compatibility check returns an error, it is logged as a debug
+/// message and the plugin is treated as compatible (fail-open).
+async fn probe_plugin_host_compatibility(
+    plugin: &dyn uptrakit_plugin_infrastructure_core::PluginBase,
+    pt: uptrakit_plugin_infrastructure_core::PluginType,
+) -> bool {
+    if !plugin.has_capability(
+        uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility,
+    ) {
+        return true;
+    }
+    let Some(discovery) = plugin.as_discovery() else {
+        // Plugin declares DetectHostCompatibility but doesn't implement
+        // DiscoveryPlugin — assume compatible.
+        return true;
+    };
+    match discovery.detect_host_compatibility().await {
+        Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Compatible) => true,
+        Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Incompatible(reason)) => {
+            tracing::debug!(
+                plugin = %pt,
+                reason = %reason,
+                "plugin not compatible with host; skipping sudo commands"
+            );
+            false
+        }
+        Ok(_) => {
+            tracing::warn!(
+                plugin = %pt,
+                "unknown HostCompatibility variant; assuming compatible"
+            );
+            true
+        }
+        Err(e) => {
+            tracing::debug!(
+                plugin = %pt,
+                error = %e,
+                "host compatibility check failed; assuming compatible"
+            );
+            true
+        }
+    }
+}
+
 /// Generates the `PluginRegistry` dispatch methods from a single
 /// declaration list, eliminating manually-maintained match arms.
 ///
@@ -430,53 +480,11 @@ macro_rules! register_plugins {
                 let check_futs: Vec<_> = instances
                     .into_iter()
                     .map(|(pt, p)| async move {
-                        let is_compatible = if p.has_capability(
-                            uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility)
-                        {
-                            if let Some(discovery) = p.as_discovery() {
-                                match discovery.detect_host_compatibility().await {
-                                    Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Compatible) => true,
-                                    Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Incompatible(reason)) => {
-                                        tracing::debug!(
-                                            plugin = %pt,
-                                            reason = %reason,
-                                            "plugin not compatible with host; skipping sudo commands"
-                                        );
-                                        false
-                                    }
-                                    Ok(_) => {
-                                        tracing::warn!(
-                                            plugin = %pt,
-                                            "unknown HostCompatibility variant; assuming compatible"
-                                        );
-                                        true
-                                    }
-                                    Err(e) => {
-                                        tracing::debug!(
-                                            plugin = %pt,
-                                            error = %e,
-                                            "host compatibility check failed; assuming compatible"
-                                        );
-                                        true
-                                    }
-                                }
-                            } else {
-                                // Plugin declares DetectHostCompatibility but
-                                // doesn't implement DiscoveryPlugin — assume
-                                // compatible.
-                                true
-                            }
-                        } else {
-                            true
-                        };
-
-                        if is_compatible {
-                            let entries = p.required_sudo_commands();
-                            if !entries.is_empty() {
-                                return Some((pt, entries));
-                            }
+                        if !probe_plugin_host_compatibility(p.as_ref(), pt.clone()).await {
+                            return None;
                         }
-                        None
+                        let entries = p.required_sudo_commands();
+                        if entries.is_empty() { None } else { Some((pt, entries)) }
                     })
                     .collect();
 
