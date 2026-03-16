@@ -30,18 +30,21 @@ use uuid::Uuid;
 use crate::tasks::BackgroundTasks;
 use types::{CoexistencePolicy, EmbeddedTransport, ExternalServiceInfo};
 
+/// Custom yield predicate for embedded service coexistence decisions.
+type YieldCheckFn = Box<dyn Fn(&ExternalServiceInfo) -> bool + Send + Sync>;
+
 // ---------------------------------------------------------------------------
 // EmbeddedServiceHandle
 // ---------------------------------------------------------------------------
 
 /// Internal handle for a single embedded service tracked by the host.
 struct EmbeddedServiceHandle {
-    service_id: Uuid,
+    _service_id: Uuid,
     label: &'static str,
     yielded: Arc<AtomicBool>,
     coexistence_policy: CoexistencePolicy,
     capabilities: BTreeSet<Capability>,
-    yield_check: Option<Box<dyn Fn(&ExternalServiceInfo) -> bool + Send + Sync>>,
+    yield_check: Option<YieldCheckFn>,
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +79,7 @@ impl EmbeddedServiceHost {
         capabilities: BTreeSet<Capability>,
         is_system_service: bool,
         coexistence_policy: CoexistencePolicy,
-        yield_check: Option<Box<dyn Fn(&ExternalServiceInfo) -> bool + Send + Sync>>,
+        yield_check: Option<YieldCheckFn>,
         run_fn: impl FnOnce(
             EmbeddedTransport,
             CancellationToken,
@@ -152,7 +155,7 @@ impl EmbeddedServiceHost {
         {
             let mut services = self.services.lock();
             services.push(EmbeddedServiceHandle {
-                service_id,
+                _service_id: service_id,
                 label,
                 yielded,
                 coexistence_policy,
@@ -259,7 +262,7 @@ mod tests {
     #[test]
     fn yield_always_matches_overlapping_capabilities() {
         let handle = EmbeddedServiceHandle {
-            service_id: Uuid::nil(),
+            _service_id: Uuid::nil(),
             label: "test",
             yielded: Arc::new(AtomicBool::new(false)),
             coexistence_policy: CoexistencePolicy::YieldAlways,
@@ -281,7 +284,7 @@ mod tests {
     #[test]
     fn yield_always_does_not_match_disjoint_capabilities() {
         let handle = EmbeddedServiceHandle {
-            service_id: Uuid::nil(),
+            _service_id: Uuid::nil(),
             label: "test",
             yielded: Arc::new(AtomicBool::new(false)),
             coexistence_policy: CoexistencePolicy::YieldAlways,
@@ -303,7 +306,7 @@ mod tests {
     #[test]
     fn never_yield_ignores_overlapping_capabilities() {
         let handle = EmbeddedServiceHandle {
-            service_id: Uuid::nil(),
+            _service_id: Uuid::nil(),
             label: "test",
             yielded: Arc::new(AtomicBool::new(false)),
             coexistence_policy: CoexistencePolicy::NeverYield,
@@ -325,7 +328,7 @@ mod tests {
     #[test]
     fn custom_yield_check_overrides_policy() {
         let handle = EmbeddedServiceHandle {
-            service_id: Uuid::nil(),
+            _service_id: Uuid::nil(),
             label: "test",
             yielded: Arc::new(AtomicBool::new(false)),
             coexistence_policy: CoexistencePolicy::NeverYield,
@@ -350,7 +353,7 @@ mod tests {
         {
             let mut services = host.services.lock();
             services.push(EmbeddedServiceHandle {
-                service_id: Uuid::nil(),
+                _service_id: Uuid::nil(),
                 label: "scheduler",
                 yielded: Arc::new(AtomicBool::new(false)),
                 coexistence_policy: CoexistencePolicy::YieldAlways,
@@ -371,7 +374,7 @@ mod tests {
         {
             let mut services = host.services.lock();
             services.push(EmbeddedServiceHandle {
-                service_id: Uuid::nil(),
+                _service_id: Uuid::nil(),
                 label: "scheduler",
                 yielded: Arc::new(AtomicBool::new(true)),
                 coexistence_policy: CoexistencePolicy::YieldAlways,

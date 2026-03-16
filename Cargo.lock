@@ -6489,6 +6489,7 @@ dependencies = [
  "ipnet",
  "mdns-sd",
  "nix 0.31.2",
+ "parking_lot",
  "rcgen",
  "rootcause",
  "rust-embed",

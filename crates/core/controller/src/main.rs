@@ -4,7 +4,10 @@ mod crl_manager;
 mod db;
 mod db_migrate;
 mod durations;
-#[allow(dead_code)] // Infrastructure module; `add()` is called in the next step.
+#[cfg_attr(
+    not(feature = "embedded-scheduler"),
+    allow(dead_code) // Infrastructure types used by follow-up service embeddings.
+)]
 mod embedded;
 #[cfg(feature = "embed-frontend")]
 mod embedded_frontend;
@@ -21,6 +24,8 @@ mod tasks;
 #[cfg(feature = "zeroconf")]
 mod zeroconf;
 
+#[cfg(feature = "embedded-scheduler")]
+use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -379,6 +384,10 @@ async fn run(args: cli::Args) -> Result<()> {
     let extension_registry =
         Arc::new(uptrakit_web_api::extension_registry::ExtensionRegistry::new(extension_entries));
 
+    // Create the embedded service host before AppState so it can be stored
+    // in the state. The host's `add()` is called later in spawn_background_tasks.
+    let embedded_host = Arc::new(embedded::EmbeddedServiceHost::new());
+
     let builder = AppState::builder()
         .ca_snapshot(ca_rx)
         .ca_key_store(ca_key_store)
@@ -387,6 +396,9 @@ async fn run(args: cli::Args) -> Result<()> {
         .cert_signer(cert_signer)
         .service_connections(service_connections.clone())
         .revocation_notify(revocation_notify)
+        .embedded_service_notifier(
+            Arc::clone(&embedded_host) as Arc<dyn uptrakit_web_api::EmbeddedServiceNotifier>
+        )
         .jwt(Arc::new(jwt_manager))
         .device_flow_store(device_flow_store)
         .rate_limit_store(rate_limit_store)
@@ -447,9 +459,11 @@ async fn run(args: cli::Args) -> Result<()> {
         controller_id,
         args.tls_cert.is_some(),
         &service_connections,
+        &embedded_host,
         #[cfg(feature = "nats")]
         &nats_transport,
-    );
+    )
+    .await;
 
     // Set up signal handlers
     let mut sigterm = signal(SignalKind::terminate()).context_transform(|e| {
@@ -613,7 +627,7 @@ async fn build_audit_logger(
 /// Spawn all background tasks: CRL manager, denylist cleanup, settings reload,
 /// CA reload/rotation, scheduler, server cert renewal, and NATS consumer.
 #[allow(clippy::too_many_arguments)]
-fn spawn_background_tasks(
+async fn spawn_background_tasks(
     bg: &mut tasks::BackgroundTasks,
     app_state: &Arc<AppState>,
     crl_manager: &Arc<crl_manager::CrlManager>,
@@ -623,6 +637,7 @@ fn spawn_background_tasks(
     controller_id: uuid::Uuid,
     has_external_tls_cert: bool,
     service_connections: &uptrakit_web_api::service_connections::ServiceConnectionRegistry,
+    embedded_host: &Arc<embedded::EmbeddedServiceHost>,
     #[cfg(feature = "nats")] nats_transport: &Option<
         uptrakit_web_api::nats_transport::NatsTransport,
     >,
@@ -656,100 +671,143 @@ fn spawn_background_tasks(
     // Only compiled when the `embedded-scheduler` feature is enabled.
     // When an external scheduler service is deployed, the controller does NOT
     // need this feature — the external scheduler handles all scheduled tasks.
+    //
+    // Uses `EmbeddedServiceHost::add()` to register the scheduler as a unified
+    // embedded service with `CoexistencePolicy::YieldAlways` — it defers
+    // non-internal tasks when an external scheduler connects.
     #[cfg(feature = "embedded-scheduler")]
     {
+        use embedded::types::CoexistencePolicy;
         use scheduler::ControllerSchedulerNotifier;
         use uptrakit_scheduler_engine::executors::*;
         use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
 
-        let notifier: std::sync::Arc<dyn uptrakit_scheduler_engine::SchedulerNotifier> =
-            std::sync::Arc::new(ControllerSchedulerNotifier::new(
-                app_state.notification_service.clone(),
-                app_state.db().clone(),
-                Arc::clone(&app_state.cert.ca_rotation_trigger),
-                Arc::clone(&app_state.cert.revocation_notify),
-            ));
+        let scheduler_caps: BTreeSet<uptrakit_internal_wire::Capability> = [
+            uptrakit_internal_wire::Capability::Scheduler,
+            uptrakit_internal_wire::Capability::SystemService,
+            uptrakit_internal_wire::Capability::GracefulShutdown,
+        ]
+        .into();
 
-        // The embedded scheduler yields non-internal tasks when the notifier
-        // reports that an external service with the Scheduler capability is
-        // connected.
-        let notifier_ref = app_state.embedded_service_notifier.clone();
-        let mut sched = uptrakit_scheduler_engine::Scheduler::new(
-            app_state.db().clone(),
-            uptrakit_scheduler_engine::SchedulerConfig::new(controller_id),
-            Box::new(move || {
-                notifier_ref.as_ref().is_some_and(|n| {
-                    n.is_capability_yielded(&uptrakit_internal_wire::Capability::Scheduler)
-                })
-            }),
-        );
+        // Capture values needed by the scheduler closure.
+        let db = app_state.db().clone();
+        let notification_service = app_state.notification_service.clone();
+        let ca_rotation_trigger = Arc::clone(&app_state.cert.ca_rotation_trigger);
+        let revocation_notify = Arc::clone(&app_state.cert.revocation_notify);
+        let embedded_notifier_ref = app_state.embedded_service_notifier.clone();
+        let ca_tx_sub = ca_tx.subscribe();
 
-        sched.register(
-            ScheduledTaskType::AuthCleanup,
-            Box::new(auth_cleanup::AuthCleanupExecutor::new(
-                app_state.db().clone(),
-            )),
-        );
-        sched.register(
-            ScheduledTaskType::StaleLeaseCleanup,
-            Box::new(stale_lease_cleanup::StaleLeaseCleanupExecutor::new(
-                app_state.db().clone(),
-            )),
-        );
-        if ca_managed {
-            sched.register(
-                ScheduledTaskType::CaRotationCheck,
-                Box::new(scheduler::CaRotationCheckExecutor::new(
-                    ca_tx.subscribe(),
-                    Arc::clone(&app_state.cert.ca_rotation_trigger),
-                )),
-            );
+        if let Err(e) = embedded_host
+            .add(
+                "Embedded Scheduler",
+                "uptrakit-scheduler",
+                scheduler_caps,
+                true, // is_system_service
+                CoexistencePolicy::YieldAlways,
+                None, // no custom yield check
+                move |transport, cancel| {
+                    Box::pin(async move {
+                        let notifier: std::sync::Arc<
+                            dyn uptrakit_scheduler_engine::SchedulerNotifier,
+                        > = std::sync::Arc::new(ControllerSchedulerNotifier::new(
+                            notification_service,
+                            db.clone(),
+                            Arc::clone(&ca_rotation_trigger),
+                            Arc::clone(&revocation_notify),
+                        ));
+
+                        // The embedded scheduler yields non-internal tasks when
+                        // the transport signals that an external scheduler with
+                        // overlapping capabilities is connected.
+                        let yield_check: Box<dyn Fn() -> bool + Send + Sync> =
+                            if let Some(notifier_arc) = embedded_notifier_ref {
+                                Box::new(move || {
+                                    notifier_arc.is_capability_yielded(
+                                        &uptrakit_internal_wire::Capability::Scheduler,
+                                    )
+                                })
+                            } else {
+                                // Fallback: use transport's yield flag directly.
+                                Box::new(move || transport.is_yielded())
+                            };
+
+                        let mut sched = uptrakit_scheduler_engine::Scheduler::new(
+                            db.clone(),
+                            uptrakit_scheduler_engine::SchedulerConfig::new(controller_id),
+                            yield_check,
+                        );
+
+                        sched.register(
+                            ScheduledTaskType::AuthCleanup,
+                            Box::new(auth_cleanup::AuthCleanupExecutor::new(db.clone())),
+                        );
+                        sched.register(
+                            ScheduledTaskType::StaleLeaseCleanup,
+                            Box::new(stale_lease_cleanup::StaleLeaseCleanupExecutor::new(
+                                db.clone(),
+                            )),
+                        );
+                        if ca_managed {
+                            sched.register(
+                                ScheduledTaskType::CaRotationCheck,
+                                Box::new(scheduler::CaRotationCheckExecutor::new(
+                                    ca_tx_sub,
+                                    Arc::clone(&ca_rotation_trigger),
+                                )),
+                            );
+                        }
+                        sched.register(
+                            ScheduledTaskType::FetchReleases,
+                            Box::new(fetch_releases::FetchReleasesExecutor::new(
+                                db.clone(),
+                                Arc::clone(&notifier),
+                            )),
+                        );
+                        sched.register(
+                            ScheduledTaskType::DetectVersion,
+                            Box::new(detect_version::DetectVersionExecutor::new(
+                                db.clone(),
+                                Arc::clone(&notifier),
+                            )),
+                        );
+                        sched.register(
+                            ScheduledTaskType::ServiceCertCheck,
+                            Box::new(service_cert_check::ServiceCertCheckExecutor::new(
+                                db.clone(),
+                                Arc::clone(&notifier),
+                            )),
+                        );
+                        sched.register(
+                            ScheduledTaskType::CrlRenewal,
+                            Box::new(crl_renewal::CrlRenewalExecutor::new(Arc::clone(&notifier))),
+                        );
+                        sched.register(
+                            ScheduledTaskType::AuditLogCleanup,
+                            Box::new(audit_log_cleanup::AuditLogCleanupExecutor::new(db.clone())),
+                        );
+                        sched.register(
+                            ScheduledTaskType::DiscoverSoftware,
+                            Box::new(discover_software::DiscoverSoftwareExecutor::new(
+                                db,
+                                Arc::clone(&notifier),
+                            )),
+                        );
+
+                        sched.run(cancel).await;
+                    })
+                },
+                app_state,
+                bg,
+            )
+            .await
+        {
+            tracing::error!(error = %e, "failed to start embedded scheduler");
         }
-        sched.register(
-            ScheduledTaskType::FetchReleases,
-            Box::new(fetch_releases::FetchReleasesExecutor::new(
-                app_state.db().clone(),
-                Arc::clone(&notifier),
-            )),
-        );
-        sched.register(
-            ScheduledTaskType::DetectVersion,
-            Box::new(detect_version::DetectVersionExecutor::new(
-                app_state.db().clone(),
-                Arc::clone(&notifier),
-            )),
-        );
-        sched.register(
-            ScheduledTaskType::ServiceCertCheck,
-            Box::new(service_cert_check::ServiceCertCheckExecutor::new(
-                app_state.db().clone(),
-                Arc::clone(&notifier),
-            )),
-        );
-        sched.register(
-            ScheduledTaskType::CrlRenewal,
-            Box::new(crl_renewal::CrlRenewalExecutor::new(Arc::clone(&notifier))),
-        );
-        sched.register(
-            ScheduledTaskType::AuditLogCleanup,
-            Box::new(audit_log_cleanup::AuditLogCleanupExecutor::new(
-                app_state.db().clone(),
-            )),
-        );
-        sched.register(
-            ScheduledTaskType::DiscoverSoftware,
-            Box::new(discover_software::DiscoverSoftwareExecutor::new(
-                app_state.db().clone(),
-                Arc::clone(&notifier),
-            )),
-        );
-
-        let h = tokio::spawn(sched.run(bg.child_token()));
-        bg.track_with_timeout("scheduler", h, durations::SCHEDULER_SHUTDOWN_TIMEOUT);
     }
 
     // Suppress unused-variable warnings when embedded-scheduler is disabled.
     let _ = controller_id;
+    let _ = &embedded_host;
 
     if ca_managed {
         let h = tasks::spawn_ca_rotation(

@@ -91,16 +91,13 @@ mod tests {
     use super::*;
 
     async fn test_db() -> DatabaseConnection {
-        use sea_orm::{ConnectOptions, ConnectionTrait, Database, Schema};
+        use sea_orm::{ConnectOptions, Database};
 
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
         let db = Database::connect(opt).await.expect("test db");
-        let schema = Schema::new(db.get_database_backend());
-
-        let stmt = schema.create_table_from_entity(system_service::Entity);
-        db.execute(&stmt)
+        uptrakit_shared_db::migration::run_migrations(&db)
             .await
-            .expect("create system_services table");
+            .expect("run migrations");
         db
     }
 
