@@ -121,6 +121,7 @@ impl ExtensionProxy {
         params: serde_json::Value,
         sensitive_params: Option<SecretString>,
         service_id_override: Option<Uuid>,
+        tenant_id: Option<Uuid>,
         timeout: Duration,
     ) -> Result<ExtensionResponsePayload, ExtensionProxyError> {
         // 1. Resolve target service_id.
@@ -157,6 +158,7 @@ impl ExtensionProxy {
             action_id: action_id.to_string(),
             params,
             sensitive_params,
+            tenant_id,
         });
 
         let sent = service_connections.send(&service_id, msg).await;
@@ -276,6 +278,7 @@ mod tests {
                 serde_json::json!({"key": "value"}),
                 None,
                 None,
+                None,
                 Duration::from_secs(5),
             )
             .await;
@@ -314,6 +317,7 @@ mod tests {
                 "ext.test",
                 "do-thing",
                 serde_json::Value::Null,
+                None,
                 None,
                 None,
                 Duration::from_millis(100),
@@ -362,6 +366,7 @@ mod tests {
                 serde_json::Value::Null,
                 None,
                 None,
+                None,
                 Duration::from_secs(5),
             )
             .await;
@@ -394,6 +399,7 @@ mod tests {
                 serde_json::Value::Null,
                 None,
                 Some(wrong_svc),
+                None,
                 Duration::from_secs(5),
             )
             .await;
@@ -423,6 +429,7 @@ mod tests {
                 "ext.test",
                 "action",
                 serde_json::Value::Null,
+                None,
                 None,
                 None,
                 Duration::from_secs(5),
@@ -473,6 +480,7 @@ mod tests {
                 "ext.test",
                 "action",
                 serde_json::Value::Null,
+                None,
                 None,
                 None,
                 Duration::from_secs(5),

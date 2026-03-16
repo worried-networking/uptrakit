@@ -22,6 +22,8 @@ use crate::extension_proxy::ExtensionProxyError;
 use crate::extension_registry::ExtensionOwner;
 use crate::middleware::tenant_context::TenantContext;
 
+use uptrakit_shared_db::entity::system_service;
+
 // ── Response types ──────────────────────────────────────────────────────────
 
 /// A single extension in the list response.
@@ -114,6 +116,21 @@ pub async fn list_extension_providers(
                         });
                     }
                     Ok(None) => {
+                        // Fallback: system services are not in the `services` table.
+                        if let Ok(Some(sys_svc)) = system_service::Entity::find_by_id(service_id)
+                            .one(&state.db)
+                            .await
+                        {
+                            let encryption_public_key =
+                                state.extension_registry.encryption_public_key(&service_id);
+                            infos.push(ExtensionProviderInfo {
+                                service_id,
+                                service_label: sys_svc.friendly_name.clone(),
+                                hostname: Some(sys_svc.hostname.clone()),
+                                encryption_public_key,
+                            });
+                            continue;
+                        }
                         // Service no longer in DB; include with minimal info.
                         let encryption_public_key =
                             state.extension_registry.encryption_public_key(&service_id);
@@ -256,6 +273,7 @@ pub async fn invoke_action(
             body.params,
             body.sensitive_params,
             query.service_id,
+            Some(tenant_ctx.tenant_id),
             timeout,
         )
         .await

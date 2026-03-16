@@ -1200,6 +1200,16 @@ pub struct ExtensionRequestPayload {
     /// zero-filled on drop.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensitive_params: Option<SecretString>,
+    /// Tenant context for the requesting user.
+    ///
+    /// Populated by the controller when routing REST-originated extension action
+    /// invocations to services. Allows a service to scope its response to the
+    /// correct tenant without extracting tenant state from the action params.
+    ///
+    /// `None` for service-initiated requests (set in the SDK) — the mTLS channel
+    /// is already trusted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<uuid::Uuid>,
 }
 
 /// Payload for `ServiceMessage::ExtensionResponse`: a service responds to a
@@ -1623,6 +1633,7 @@ mod tests {
             action_id: "do-thing".to_string(),
             params: serde_json::json!({"key": "value"}),
             sensitive_params: None,
+            tenant_id: None,
         };
 
         let json = serde_json::to_string(&payload).expect("serialize should succeed");
