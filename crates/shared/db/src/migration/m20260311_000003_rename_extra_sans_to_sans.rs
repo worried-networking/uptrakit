@@ -11,20 +11,29 @@ impl MigrationName for Migration {
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let db = manager.get_connection();
-        db.execute_unprepared(
-            "UPDATE global_settings SET key = 'network.sans' WHERE key = 'network.extra_sans'",
-        )
-        .await?;
+        // Uses sea_query to correctly quote `key` (reserved word in MySQL/MariaDB).
+        manager
+            .exec_stmt(
+                Query::update()
+                    .table(Alias::new("global_settings"))
+                    .value(Alias::new("key"), "network.sans")
+                    .and_where(Expr::col(Alias::new("key")).eq("network.extra_sans"))
+                    .to_owned(),
+            )
+            .await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let db = manager.get_connection();
-        db.execute_unprepared(
-            "UPDATE global_settings SET key = 'network.extra_sans' WHERE key = 'network.sans'",
-        )
-        .await?;
+        manager
+            .exec_stmt(
+                Query::update()
+                    .table(Alias::new("global_settings"))
+                    .value(Alias::new("key"), "network.extra_sans")
+                    .and_where(Expr::col(Alias::new("key")).eq("network.sans"))
+                    .to_owned(),
+            )
+            .await?;
         Ok(())
     }
 }

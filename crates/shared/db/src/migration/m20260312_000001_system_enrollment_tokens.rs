@@ -1,6 +1,8 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 
+use super::helpers::{timestamp, timestamp_null};
+
 /// Create `system_enrollment_tokens` table and add `system_enrollment_token_id`
 /// to `system_services`.
 ///
@@ -77,11 +79,15 @@ impl MigrationTrait for Migration {
         // The old system_services.enrollment_token setting is superseded by the
         // new system_enrollment_tokens table. Delete it from the DB so the
         // application no longer reads it.
-        let db = manager.get_connection();
-        db.execute_unprepared(
-            "DELETE FROM global_settings WHERE key = 'system_services.enrollment_token'",
-        )
-        .await?;
+        // Uses sea_query to correctly quote `key` (reserved word in MySQL/MariaDB).
+        manager
+            .exec_stmt(
+                Query::delete()
+                    .from_table(Alias::new("global_settings"))
+                    .and_where(Expr::col(Alias::new("key")).eq("system_services.enrollment_token"))
+                    .to_owned(),
+            )
+            .await?;
 
         Ok(())
     }
