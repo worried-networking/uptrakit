@@ -673,11 +673,12 @@ async fn spawn_background_tasks(
     // need this feature — the external scheduler handles all scheduled tasks.
     //
     // Uses `EmbeddedServiceHost::add()` to register the scheduler as a unified
-    // embedded service with `CoexistencePolicy::YieldAlways` — it defers
-    // non-internal tasks when an external scheduler connects.
+    // embedded service. It defers non-internal tasks only when an external
+    // service that declares `Scheduler` capability connects, preventing
+    // accidental yield triggers from agents and other services that share only
+    // the `GracefulShutdown` capability.
     #[cfg(feature = "embedded-scheduler")]
     {
-        use embedded::types::CoexistencePolicy;
         use scheduler::ControllerSchedulerNotifier;
         use uptrakit_scheduler_engine::executors::*;
         use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
@@ -703,8 +704,14 @@ async fn spawn_background_tasks(
                 "uptrakit-scheduler",
                 scheduler_caps,
                 true, // is_system_service
-                CoexistencePolicy::YieldAlways,
-                None, // no custom yield check
+                // Only yield to services that explicitly carry the Scheduler
+                // capability. Agents, SSH agents, and MQTT services share
+                // GracefulShutdown with the embedded scheduler but must NOT
+                // cause a yield.
+                Some(Box::new(|info: &embedded::types::ExternalServiceInfo| {
+                    info.capabilities
+                        .contains(&uptrakit_internal_wire::Capability::Scheduler)
+                })),
                 move |transport, cancel| {
                     Box::pin(async move {
                         let notifier: std::sync::Arc<

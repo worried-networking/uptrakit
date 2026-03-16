@@ -16,7 +16,7 @@ pub(crate) mod provision;
 #[allow(dead_code)] // Infrastructure types used by follow-up service embeddings.
 pub(crate) mod types;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -28,7 +28,7 @@ use uptrakit_web_api::embedded_support::EmbeddedServiceNotifier;
 use uuid::Uuid;
 
 use crate::tasks::BackgroundTasks;
-use types::{CoexistencePolicy, EmbeddedTransport, ExternalServiceInfo};
+use types::{EmbeddedTransport, ExternalServiceInfo};
 
 /// Custom yield predicate for embedded service coexistence decisions.
 type YieldCheckFn = Box<dyn Fn(&ExternalServiceInfo) -> bool + Send + Sync>;
@@ -42,7 +42,11 @@ struct EmbeddedServiceHandle {
     _service_id: Uuid,
     label: &'static str,
     yielded: Arc<AtomicBool>,
-    coexistence_policy: CoexistencePolicy,
+    /// Set of external service IDs that are currently causing this embedded
+    /// service to yield. The `yielded` AtomicBool is set when the first ID is
+    /// inserted and cleared when the last ID is removed, preventing false
+    /// resumes when multiple yielder services are connected simultaneously.
+    yielding_service_ids: Arc<parking_lot::Mutex<HashSet<Uuid>>>,
     capabilities: BTreeSet<Capability>,
     yield_check: Option<YieldCheckFn>,
 }
@@ -78,7 +82,6 @@ impl EmbeddedServiceHost {
         app_name: &str,
         capabilities: BTreeSet<Capability>,
         is_system_service: bool,
-        coexistence_policy: CoexistencePolicy,
         yield_check: Option<YieldCheckFn>,
         run_fn: impl FnOnce(
             EmbeddedTransport,
@@ -158,7 +161,7 @@ impl EmbeddedServiceHost {
                 _service_id: service_id,
                 label,
                 yielded,
-                coexistence_policy,
+                yielding_service_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
                 capabilities,
                 yield_check,
             });
@@ -175,24 +178,9 @@ impl EmbeddedServiceHost {
     }
 
     /// Evaluate whether a specific embedded service should yield based on
-    /// its policy and the external service info.
+    /// its yield closure and the external service info.
     fn should_yield(handle: &EmbeddedServiceHandle, info: &ExternalServiceInfo) -> bool {
-        // Check custom yield closure first.
-        if let Some(ref check) = handle.yield_check {
-            return check(info);
-        }
-
-        match handle.coexistence_policy {
-            CoexistencePolicy::YieldAlways => {
-                // Yield if any capability overlaps.
-                handle
-                    .capabilities
-                    .intersection(&info.capabilities)
-                    .next()
-                    .is_some()
-            }
-            CoexistencePolicy::NeverYield => false,
-        }
+        handle.yield_check.as_ref().is_some_and(|check| check(info))
     }
 }
 
@@ -214,13 +202,16 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
 
         let services = self.services.lock();
         for handle in services.iter() {
-            if Self::should_yield(handle, &info) && !handle.yielded.load(Ordering::Relaxed) {
-                handle.yielded.store(true, Ordering::Relaxed);
-                tracing::info!(
-                    embedded_label = handle.label,
-                    external_service_id = %service_id,
-                    "embedded service yielding to external"
-                );
+            if Self::should_yield(handle, &info) {
+                let mut ids = handle.yielding_service_ids.lock();
+                if ids.insert(service_id) && ids.len() == 1 {
+                    handle.yielded.store(true, Ordering::Release);
+                    tracing::info!(
+                        embedded_label = handle.label,
+                        %service_id,
+                        "embedded service yielding to external"
+                    );
+                }
             }
         }
     }
@@ -228,15 +219,13 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
     fn on_external_disconnected(&self, service_id: &Uuid) {
         let services = self.services.lock();
         for handle in services.iter() {
-            if handle.yielded.load(Ordering::Relaxed) {
-                // For simplicity, reset yield on any disconnect.
-                // A more sophisticated implementation would track which
-                // external service caused the yield.
-                handle.yielded.store(false, Ordering::Relaxed);
+            let mut ids = handle.yielding_service_ids.lock();
+            if ids.remove(service_id) && ids.is_empty() {
+                handle.yielded.store(false, Ordering::Release);
                 tracing::info!(
                     embedded_label = handle.label,
-                    external_service_id = %service_id,
-                    "embedded service resuming (external disconnected)"
+                    %service_id,
+                    "embedded service resuming (no more active yielders)"
                 );
             }
         }
@@ -259,108 +248,79 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
 mod tests {
     use super::*;
 
-    #[test]
-    fn yield_always_matches_overlapping_capabilities() {
-        let handle = EmbeddedServiceHandle {
+    fn make_scheduler_handle() -> EmbeddedServiceHandle {
+        EmbeddedServiceHandle {
             _service_id: Uuid::nil(),
-            label: "test",
+            label: "scheduler",
             yielded: Arc::new(AtomicBool::new(false)),
-            coexistence_policy: CoexistencePolicy::YieldAlways,
+            yielding_service_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
             capabilities: [Capability::Scheduler].into(),
-            yield_check: None,
-        };
+            yield_check: Some(Box::new(|info: &ExternalServiceInfo| {
+                info.capabilities.contains(&Capability::Scheduler)
+            })),
+        }
+    }
 
-        let info = ExternalServiceInfo {
-            service_id: Uuid::nil(),
-            capabilities: [Capability::Scheduler, Capability::DatabaseAccess].into(),
+    fn ext_info(service_id: Uuid, caps: BTreeSet<Capability>) -> ExternalServiceInfo {
+        ExternalServiceInfo {
+            service_id,
+            capabilities: caps,
             hostname: None,
             machine_id: None,
             is_system: true,
-        };
+        }
+    }
 
+    #[test]
+    fn yield_check_matches_scheduler_capability() {
+        let handle = make_scheduler_handle();
+        let info = ext_info(
+            Uuid::nil(),
+            [Capability::Scheduler, Capability::DatabaseAccess].into(),
+        );
         assert!(EmbeddedServiceHost::should_yield(&handle, &info));
     }
 
     #[test]
-    fn yield_always_does_not_match_disjoint_capabilities() {
-        let handle = EmbeddedServiceHandle {
-            _service_id: Uuid::nil(),
-            label: "test",
-            yielded: Arc::new(AtomicBool::new(false)),
-            coexistence_policy: CoexistencePolicy::YieldAlways,
-            capabilities: [Capability::Scheduler].into(),
-            yield_check: None,
-        };
-
-        let info = ExternalServiceInfo {
-            service_id: Uuid::nil(),
-            capabilities: [Capability::DatabaseAccess].into(),
-            hostname: None,
-            machine_id: None,
-            is_system: false,
-        };
-
+    fn yield_check_does_not_match_non_scheduler_service() {
+        let handle = make_scheduler_handle();
+        // A service with GracefulShutdown only must NOT trigger a yield.
+        let info = ext_info(Uuid::nil(), [Capability::GracefulShutdown].into());
         assert!(!EmbeddedServiceHost::should_yield(&handle, &info));
     }
 
     #[test]
-    fn never_yield_ignores_overlapping_capabilities() {
+    fn no_yield_check_never_yields() {
         let handle = EmbeddedServiceHandle {
             _service_id: Uuid::nil(),
             label: "test",
             yielded: Arc::new(AtomicBool::new(false)),
-            coexistence_policy: CoexistencePolicy::NeverYield,
+            yielding_service_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
             capabilities: [Capability::Scheduler].into(),
             yield_check: None,
         };
-
-        let info = ExternalServiceInfo {
-            service_id: Uuid::nil(),
-            capabilities: [Capability::Scheduler].into(),
-            hostname: None,
-            machine_id: None,
-            is_system: true,
-        };
-
+        let info = ext_info(Uuid::nil(), [Capability::Scheduler].into());
         assert!(!EmbeddedServiceHost::should_yield(&handle, &info));
     }
 
     #[test]
-    fn custom_yield_check_overrides_policy() {
+    fn yield_check_closure_always_true() {
         let handle = EmbeddedServiceHandle {
             _service_id: Uuid::nil(),
             label: "test",
             yielded: Arc::new(AtomicBool::new(false)),
-            coexistence_policy: CoexistencePolicy::NeverYield,
+            yielding_service_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
             capabilities: [Capability::Scheduler].into(),
             yield_check: Some(Box::new(|_| true)),
         };
-
-        let info = ExternalServiceInfo {
-            service_id: Uuid::nil(),
-            capabilities: BTreeSet::new(),
-            hostname: None,
-            machine_id: None,
-            is_system: false,
-        };
-
+        let info = ext_info(Uuid::nil(), BTreeSet::new());
         assert!(EmbeddedServiceHost::should_yield(&handle, &info));
     }
 
     #[test]
     fn on_external_connected_sets_yielded_flag() {
         let host = EmbeddedServiceHost::new();
-        {
-            let mut services = host.services.lock();
-            services.push(EmbeddedServiceHandle {
-                _service_id: Uuid::nil(),
-                label: "scheduler",
-                yielded: Arc::new(AtomicBool::new(false)),
-                coexistence_policy: CoexistencePolicy::YieldAlways,
-                capabilities: [Capability::Scheduler].into(),
-                yield_check: None,
-            });
-        }
+        host.services.lock().push(make_scheduler_handle());
 
         let ext_caps: BTreeSet<Capability> = [Capability::Scheduler].into();
         host.on_external_connected(Uuid::now_v7(), &ext_caps, None, true);
@@ -369,22 +329,86 @@ mod tests {
     }
 
     #[test]
-    fn on_external_disconnected_clears_yielded_flag() {
+    fn non_scheduler_service_does_not_yield_embedded_scheduler() {
         let host = EmbeddedServiceHost::new();
-        {
-            let mut services = host.services.lock();
-            services.push(EmbeddedServiceHandle {
-                _service_id: Uuid::nil(),
-                label: "scheduler",
-                yielded: Arc::new(AtomicBool::new(true)),
-                coexistence_policy: CoexistencePolicy::YieldAlways,
-                capabilities: [Capability::Scheduler].into(),
-                yield_check: None,
-            });
-        }
+        host.services.lock().push(make_scheduler_handle());
 
-        host.on_external_disconnected(&Uuid::now_v7());
+        // Agent connects with GracefulShutdown only — must NOT trigger yield.
+        let ext_caps: BTreeSet<Capability> = [Capability::GracefulShutdown].into();
+        host.on_external_connected(Uuid::now_v7(), &ext_caps, None, false);
 
         assert!(!host.is_capability_yielded(&Capability::Scheduler));
+    }
+
+    #[test]
+    fn on_external_disconnected_clears_yielded_flag() {
+        let host = EmbeddedServiceHost::new();
+        let id = Uuid::now_v7();
+        {
+            let handle = make_scheduler_handle();
+            handle.yielding_service_ids.lock().insert(id);
+            handle.yielded.store(true, Ordering::Release);
+            host.services.lock().push(handle);
+        }
+
+        host.on_external_disconnected(&id);
+
+        assert!(!host.is_capability_yielded(&Capability::Scheduler));
+    }
+
+    #[test]
+    fn multiple_yielders_one_disconnect_yield_remains() {
+        let host = EmbeddedServiceHost::new();
+        host.services.lock().push(make_scheduler_handle());
+
+        let id_a = Uuid::now_v7();
+        let id_b = Uuid::now_v7();
+        let caps: BTreeSet<Capability> = [Capability::Scheduler].into();
+
+        host.on_external_connected(id_a, &caps, None, true);
+        host.on_external_connected(id_b, &caps, None, true);
+        assert!(host.is_capability_yielded(&Capability::Scheduler));
+
+        // Only A disconnects — B is still connected, yield must remain.
+        host.on_external_disconnected(&id_a);
+        assert!(host.is_capability_yielded(&Capability::Scheduler));
+
+        // Now B disconnects — yield must clear.
+        host.on_external_disconnected(&id_b);
+        assert!(!host.is_capability_yielded(&Capability::Scheduler));
+    }
+
+    #[test]
+    fn same_service_id_reconnect_does_not_double_count() {
+        let host = EmbeddedServiceHost::new();
+        host.services.lock().push(make_scheduler_handle());
+
+        let id = Uuid::now_v7();
+        let caps: BTreeSet<Capability> = [Capability::Scheduler].into();
+
+        // Register twice with the same ID (e.g. reconnect without disconnect).
+        host.on_external_connected(id, &caps, None, true);
+        host.on_external_connected(id, &caps, None, true);
+        assert!(host.is_capability_yielded(&Capability::Scheduler));
+
+        // Single disconnect must clear the flag since the set has exactly one entry.
+        host.on_external_disconnected(&id);
+        assert!(!host.is_capability_yielded(&Capability::Scheduler));
+    }
+
+    #[test]
+    fn unknown_service_disconnect_does_not_clear_yield() {
+        let host = EmbeddedServiceHost::new();
+        let known_id = Uuid::now_v7();
+        {
+            let handle = make_scheduler_handle();
+            handle.yielding_service_ids.lock().insert(known_id);
+            handle.yielded.store(true, Ordering::Release);
+            host.services.lock().push(handle);
+        }
+
+        // Disconnect of a service that never set the yield must not clear it.
+        host.on_external_disconnected(&Uuid::now_v7());
+        assert!(host.is_capability_yielded(&Capability::Scheduler));
     }
 }

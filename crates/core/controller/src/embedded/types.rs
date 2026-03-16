@@ -15,22 +15,6 @@ use uptrakit_internal_wire::{Capability, ControllerMessage, ServiceMessage};
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
-// CoexistencePolicy
-// ---------------------------------------------------------------------------
-
-/// Coexistence policy for embedded services.
-///
-/// Determines when an embedded service should yield to an external service
-/// that provides overlapping capabilities.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CoexistencePolicy {
-    /// Yield when an external service with overlapping capabilities connects.
-    YieldAlways,
-    /// Never yield — coexist with external services.
-    NeverYield,
-}
-
-// ---------------------------------------------------------------------------
 // EmbeddedTransport
 // ---------------------------------------------------------------------------
 
