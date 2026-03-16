@@ -52,6 +52,7 @@ mod m20260323_000001_notification_permissions;
 mod m20260324_000001_hsi_installed_display_version;
 mod m20260325_000001_hsip_plugin_type_index;
 mod m20260326_000001_hsip_role_ordinal_index;
+mod m20260328_000001_mqtt_states_pagination_indexes;
 
 pub struct Migrator;
 
@@ -108,6 +109,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260324_000001_hsi_installed_display_version::Migration),
             Box::new(m20260325_000001_hsip_plugin_type_index::Migration),
             Box::new(m20260326_000001_hsip_role_ordinal_index::Migration),
+            Box::new(m20260328_000001_mqtt_states_pagination_indexes::Migration),
         ]
     }
 }
