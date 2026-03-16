@@ -93,8 +93,18 @@ impl Scheduler {
             .insert(task_type, std::sync::Arc::from(executor));
     }
 
-    /// Run the scheduler loop until the cancellation token is triggered.
-    pub async fn run(self, token: CancellationToken) {
+    /// Run the scheduler loop until a cancellation token is triggered.
+    ///
+    /// Two tokens control shutdown behaviour:
+    ///
+    /// - `drain` — soft stop: the loop exits after the current poll cycle
+    ///   completes; in-flight tasks are allowed to finish naturally.
+    /// - `abort` — hard stop: in-flight tasks receive the abort signal and
+    ///   release their claims before terminating.
+    ///
+    /// `abort` is checked first (biased) so that a simultaneous hard-stop
+    /// always wins over a pending soft-stop.
+    pub async fn run(self, drain: CancellationToken, abort: CancellationToken) {
         let mut interval = tokio::time::interval(self.config.poll_interval);
         // Skip the first immediate tick
         interval.tick().await;
@@ -110,18 +120,28 @@ impl Scheduler {
         loop {
             tokio::select! {
                 biased;
-                _ = token.cancelled() => {
-                    tracing::debug!("scheduler shutting down, releasing claims");
+                _ = abort.cancelled() => {
+                    tracing::debug!("scheduler hard-abort, releasing claims");
                     if let Err(e) = claim::release_all_claims(
                         &self.db,
                         self.config.controller_id,
                     ).await {
-                        tracing::warn!(error = %e, "failed to release claims during shutdown");
+                        tracing::warn!(error = %e, "failed to release claims during hard-abort");
+                    }
+                    return;
+                }
+                _ = drain.cancelled() => {
+                    tracing::debug!("scheduler draining, stopping new tasks");
+                    if let Err(e) = claim::release_all_claims(
+                        &self.db,
+                        self.config.controller_id,
+                    ).await {
+                        tracing::warn!(error = %e, "failed to release claims during drain");
                     }
                     return;
                 }
                 _ = interval.tick() => {
-                    self.poll_cycle(&token).await;
+                    self.poll_cycle(&drain, &abort).await;
                 }
             }
         }
@@ -134,11 +154,11 @@ impl Scheduler {
     /// JoinSet is drained before returning so that all in-flight tasks complete
     /// (or release their claims) before the next poll tick.
     ///
-    /// `token` is checked before each claim attempt. If cancelled, the claiming
-    /// loop stops immediately; already-running tasks observe the same token inside
-    /// their own `biased` select and release their claims before terminating.
+    /// `drain` is checked before each claim attempt — if cancelled, no new tasks
+    /// are claimed but already-running tasks continue to completion. `abort` is
+    /// passed into each spawned task and triggers immediate claim release when fired.
     #[tracing::instrument(skip_all, fields(controller_id = %self.config.controller_id))]
-    async fn poll_cycle(&self, token: &CancellationToken) {
+    async fn poll_cycle(&self, drain: &CancellationToken, abort: &CancellationToken) {
         // Recover stale claims from crashed controllers
         match claim::recover_stale_claims(&self.db).await {
             Ok(recovered) if recovered > 0 => {
@@ -162,8 +182,8 @@ impl Scheduler {
         let mut join_set: JoinSet<()> = JoinSet::new();
 
         for task in due_tasks {
-            // Stop claiming new tasks if shutdown was requested
-            if token.is_cancelled() {
+            // Stop claiming new tasks if a drain or abort was requested.
+            if drain.is_cancelled() || abort.is_cancelled() {
                 break;
             }
 
@@ -212,20 +232,22 @@ impl Scheduler {
 
             let db = self.db.clone();
             let executor = executor.clone();
-            let token = token.clone();
+            let abort = abort.clone();
             let timeout = self.config.task_execution_timeout;
 
             join_set.spawn(async move {
-                // Execute with per-task timeout and cancellation awareness.
-                // `biased` gives the cancellation branch higher priority so that
-                // a pending shutdown is honoured before the timeout branch fires.
+                // Execute with per-task timeout and hard-abort awareness.
+                // `biased` gives the abort branch higher priority so that a
+                // hard-stop is honoured before the timeout branch fires.
+                // Drain (soft stop) does not interrupt running tasks — they
+                // complete naturally and release their claims normally.
                 let result: crate::error::Result<()> = tokio::select! {
                     biased;
-                    _ = token.cancelled() => {
+                    _ = abort.cancelled() => {
                         tracing::debug!(
                             task_id = %task.id,
                             task_type = ?task.task_type,
-                            "scheduler shutdown requested during task execution; releasing claim"
+                            "scheduler hard-abort during task execution; releasing claim"
                         );
                         // Release the claim so other scheduler instances can pick
                         // up the task immediately rather than waiting for the
@@ -351,7 +373,7 @@ mod tests {
         let scheduler = Scheduler::new(db.clone(), config, Box::new(|| false));
         let token = CancellationToken::new();
 
-        scheduler.poll_cycle(&token).await;
+        scheduler.poll_cycle(&token, &token).await;
 
         // No tasks should exist at all in the empty DB
         let all_tasks = scheduled_task::Entity::find()
@@ -379,8 +401,11 @@ mod tests {
         // cancelled branch fires immediately on the first poll. No real sleep needed.
         token.cancel();
 
-        // Must complete within a reasonable timeout after cancellation
-        let result = tokio::time::timeout(Duration::from_secs(5), scheduler.run(token)).await;
+        // Must complete within a reasonable timeout after cancellation.
+        // Pass the same token as both drain and abort — the abort branch fires
+        // first (biased), which is correct for this test.
+        let result =
+            tokio::time::timeout(Duration::from_secs(5), scheduler.run(token.clone(), token)).await;
         assert!(
             result.is_ok(),
             "scheduler.run should exit promptly after cancellation"
@@ -433,7 +458,7 @@ mod tests {
         let scheduler = Scheduler::new(db.clone(), config, Box::new(|| false));
 
         let token = CancellationToken::new();
-        scheduler.poll_cycle(&token).await;
+        scheduler.poll_cycle(&token, &token).await;
 
         // Task should remain untouched: not locked, run_count still 0
         let task = scheduled_task::Entity::find_by_id(task_id)
@@ -484,7 +509,7 @@ mod tests {
         let scheduler = Scheduler::new(db.clone(), config, Box::new(|| false));
         let token = CancellationToken::new();
 
-        scheduler.poll_cycle(&token).await;
+        scheduler.poll_cycle(&token, &token).await;
 
         // Task should NOT be claimed or executed when no executor is registered
         let task = scheduled_task::Entity::find_by_id(task_id)
@@ -572,12 +597,13 @@ mod tests {
             }),
         );
 
-        let token = CancellationToken::new();
-        let token_clone = token.clone();
+        let drain = CancellationToken::new();
+        let abort = CancellationToken::new();
+        let abort_clone = abort.clone();
 
         // Run the scheduler in a background task.
         let scheduler_handle = tokio::spawn(async move {
-            scheduler.run(token_clone).await;
+            scheduler.run(drain, abort_clone).await;
         });
 
         // Wait until the executor has started (i.e. the task has been claimed).
@@ -598,9 +624,9 @@ mod tests {
             "task should be claimed"
         );
 
-        // Cancel the scheduler while the executor is still running.
-        token.cancel();
-        // Unblock the executor so its task can observe the cancellation.
+        // Hard-abort the scheduler while the executor is still running.
+        abort.cancel();
+        // Unblock the executor so its task can observe the abort signal.
         let _ = unblock_tx.send(());
 
         // Wait for the scheduler to finish.
@@ -703,7 +729,7 @@ mod tests {
         );
         let token = CancellationToken::new();
 
-        scheduler.poll_cycle(&token).await;
+        scheduler.poll_cycle(&token, &token).await;
 
         assert!(executed.load(std::sync::atomic::Ordering::SeqCst));
 
@@ -766,7 +792,7 @@ mod tests {
         );
         let token = CancellationToken::new();
 
-        scheduler.poll_cycle(&token).await;
+        scheduler.poll_cycle(&token, &token).await;
 
         assert!(
             !executed.load(std::sync::atomic::Ordering::SeqCst),
@@ -832,7 +858,7 @@ mod tests {
         );
         let token = CancellationToken::new();
 
-        scheduler.poll_cycle(&token).await;
+        scheduler.poll_cycle(&token, &token).await;
 
         assert!(
             executed.load(std::sync::atomic::Ordering::SeqCst),
