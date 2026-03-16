@@ -13,6 +13,9 @@ a week.
 ## Security stance
 
 - Agents run as unprivileged users, execute updates via sudo allowlists, and connect outbound only.
+- The optional embedded agent (`embedded-agent` feature) runs inside the controller process and
+  inherits its privileges. Use sudo allowlists to constrain update commands, and prefer a separate
+  agent binary in multi-tenant or hardened deployments.
 - The scheduler never runs automatic updates; all actions require user confirmation.
 - Secrets are encrypted at rest, never logged, and sensitive endpoints are rate limited.
 - Master key consistency is verified at startup to prevent silent decryption failures in HA deployments.

@@ -118,9 +118,15 @@ Main functionality that delivers the core value proposition.
   scheduler feature, credential delivery, shared NATS crate.
 - **Embedded Services Infrastructure** — Unified `EmbeddedServiceHost` in the controller for
   embedding any service (agent, mqtt, scheduler) in-process via mpsc channels. Coexistence
-  policies (`YieldAlways`, `NeverYield`), auto-provisioning of `system_services` DB records,
-  `EmbeddedServiceNotifier` trait for WS handler hooks. The existing embedded scheduler has been
-  refactored to use this infrastructure.
+  policies (`YieldAlways`, `NeverYield`), auto-provisioning of `system_services` and tenant
+  `services` DB records, `EmbeddedServiceNotifier` trait for WS handler hooks,
+  `ServiceTransport` trait for transport-agnostic message sending, message processor bridge
+  for dispatching embedded service messages through the standard handler pipeline. The embedded
+  scheduler and embedded agent have been refactored to use this infrastructure.
+- **Embedded Agent** — Optional in-process agent (`embedded-agent` feature) for single-tenant
+  deployments. Reuses `uptrakit-agent-core` for version checks, software discovery, and update
+  execution. Yields to an external agent on the same host (machine-ID-based coexistence).
+  Supports interactive updates when the `interactive` feature is also enabled.
 - **Software Autodiscovery** — Event-driven trigger, `discovery_state` field, ignore table,
   `DiscoverSoftware` / `DiscoveryResults` wire messages, agent-core shared implementation,
   plugin-driven `DiscoveryTarget`, REST API (approve, discover, ignore), version check excludes
