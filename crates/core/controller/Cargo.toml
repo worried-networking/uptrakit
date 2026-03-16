@@ -43,6 +43,7 @@ axum-server = { workspace = true }
 clap = { workspace = true }
 ipnet = { workspace = true }
 hostname = { workspace = true }
+parking_lot = { workspace = true }
 rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 thiserror = { workspace = true }

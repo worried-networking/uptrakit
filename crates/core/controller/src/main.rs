@@ -4,6 +4,8 @@ mod crl_manager;
 mod db;
 mod db_migrate;
 mod durations;
+#[allow(dead_code)] // Infrastructure module; `add()` is called in the next step.
+mod embedded;
 #[cfg(feature = "embed-frontend")]
 mod embedded_frontend;
 mod migration;
