@@ -7467,6 +7467,7 @@ dependencies = [
  "time",
  "tracing",
  "uptrakit-internal-wire",
+ "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "utoipa",
  "uuid",
