@@ -187,7 +187,7 @@ struct ProcessorMessage {
 struct MessageProcessor {
     state: Arc<AppState>,
     service_id: uuid::Uuid,
-    cert: CertIdentity,
+    cert: Option<CertIdentity>,
     is_system: bool,
     is_mqtt: bool,
     has_software_discovery: bool,
@@ -282,14 +282,23 @@ impl MessageProcessor {
 
             // -- Universal messages (all capabilities) --
             ServiceMessage::RenewCertificate(payload) => {
-                messages::handle_renew_certificate(
-                    &self.state,
-                    self.service_id,
-                    &self.cert,
-                    &payload,
-                    self.is_system,
-                )
-                .await
+                if let Some(ref cert) = self.cert {
+                    messages::handle_renew_certificate(
+                        &self.state,
+                        self.service_id,
+                        cert,
+                        &payload,
+                        self.is_system,
+                    )
+                    .await
+                } else {
+                    // Embedded services do not use certificates.
+                    ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
+                        code: ErrorCode::BadRequest,
+                        message: "certificate renewal not supported for embedded services"
+                            .to_string(),
+                    }))
+                }
             }
             ServiceMessage::ReportPluginConfig(payload) => {
                 messages::handle_report_plugin_config(&self.state, self.service_id, &payload).await
@@ -704,6 +713,80 @@ fn spawn_message_processor(processor: MessageProcessor) -> ProcessorChannels {
 }
 
 // ---------------------------------------------------------------------------
+// Embedded service message handler
+// ---------------------------------------------------------------------------
+
+/// Run a message handler loop for an embedded service.
+///
+/// This creates a [`MessageProcessor`] configured for an embedded (in-process)
+/// service and reads messages from the provided channel. Replies are pushed
+/// back through the [`ServiceConnectionRegistry`].
+///
+/// Used by `embedded_support::run_embedded_message_handler`.
+pub(crate) async fn run_embedded_message_handler(
+    state: Arc<AppState>,
+    service_id: uuid::Uuid,
+    tenant_id: uuid::Uuid,
+    capabilities: &BTreeSet<Capability>,
+    app_name: &str,
+    mut service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
+    cancel: tokio_util::sync::CancellationToken,
+) {
+    let has_software_discovery = capabilities.contains(&Capability::SoftwareDiscovery);
+    let has_update_hooks = capabilities.contains(&Capability::UpdateHooks);
+
+    let linked_host_ids = load_session_host_ids(&state, service_id, has_software_discovery).await;
+
+    let mut processor = MessageProcessor {
+        state: Arc::clone(&state),
+        service_id,
+        cert: None,
+        is_system: false,
+        is_mqtt: false,
+        has_software_discovery,
+        has_update_hooks,
+        has_ui_extensions: false,
+        service_app_name: Some(app_name.to_string()),
+        service_tenant_id: Some(tenant_id),
+        linked_host_ids,
+        report_tracker: ReportTracker::new(),
+    };
+
+    loop {
+        let msg = tokio::select! {
+            biased;
+            () = cancel.cancelled() => break,
+            msg = service_rx.recv() => match msg {
+                Some(m) => m,
+                None => break,
+            },
+        };
+
+        let response = processor.dispatch(msg, None).await;
+
+        // Push replies back through the registry so they reach the
+        // EmbeddedTransport via the response forwarder.
+        for reply in response.replies {
+            state.service_connections.send(&service_id, reply).await;
+        }
+
+        match response.action {
+            ProcessorAction::Continue => {}
+            ProcessorAction::Break | ProcessorAction::CloseWithReason(_) => {
+                tracing::info!(
+                    %service_id,
+                    app_name,
+                    "embedded message handler stopping (processor requested break)"
+                );
+                break;
+            }
+        }
+    }
+
+    tracing::debug!(%service_id, app_name, "embedded message handler exited");
+}
+
+// ---------------------------------------------------------------------------
 // receive_register_message
 // ---------------------------------------------------------------------------
 
@@ -898,7 +981,7 @@ async fn setup_authenticated_session(
     let processor = MessageProcessor {
         state: Arc::clone(state),
         service_id,
-        cert: cert.clone(),
+        cert: Some(cert.clone()),
         is_system,
         is_mqtt,
         has_software_discovery,
