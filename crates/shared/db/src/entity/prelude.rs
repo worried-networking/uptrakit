@@ -7,6 +7,9 @@ pub use super::data_encryption_key::{
     Entity as DataEncryptionKey, Model as DataEncryptionKeyModel,
 };
 pub use super::enrollment_token::{Entity as EnrollmentToken, Model as EnrollmentTokenModel};
+pub use super::global_service_config::{
+    Entity as GlobalServiceConfig, Model as GlobalServiceConfigModel,
+};
 pub use super::global_setting::{Entity as GlobalSetting, Model as GlobalSettingModel};
 pub use super::host::{Entity as Host, Model as HostModel};
 pub use super::host_discovery_allowlist::{
@@ -80,6 +83,9 @@ pub use super::system_service_certificate::{
 pub use super::tenant::{Entity as Tenant, Model as TenantModel};
 pub use super::tenant_discovery_allowlist::{
     Entity as TenantDiscoveryAllowlist, Model as TenantDiscoveryAllowlistModel,
+};
+pub use super::tenant_service_config::{
+    Entity as TenantServiceConfig, Model as TenantServiceConfigModel,
 };
 pub use super::update_batch::{Entity as UpdateBatch, Model as UpdateBatchModel};
 pub use super::update_history::{

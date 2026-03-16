@@ -53,6 +53,7 @@ mod m20260324_000001_hsi_installed_display_version;
 mod m20260325_000001_hsip_plugin_type_index;
 mod m20260326_000001_hsip_role_ordinal_index;
 mod m20260328_000001_mqtt_states_pagination_indexes;
+mod m20260329_000001_drop_mqtt_and_add_service_config;
 
 pub struct Migrator;
 
@@ -110,6 +111,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260325_000001_hsip_plugin_type_index::Migration),
             Box::new(m20260326_000001_hsip_role_ordinal_index::Migration),
             Box::new(m20260328_000001_mqtt_states_pagination_indexes::Migration),
+            Box::new(m20260329_000001_drop_mqtt_and_add_service_config::Migration),
         ]
     }
 }
@@ -229,12 +231,13 @@ mod tests {
     };
 
     use crate::entity::{
-        audit_log, crl_cache, data_encryption_key, global_setting, host_discovery_allowlist,
-        host_software_item, host_tag, host_tag_assignment, notification_channel, notification_log,
-        notification_rule, plugin_config, plugin_type_setting, revoked_token_jti,
-        revoked_token_user, role_permission, service, software_ignore, software_item,
-        system_audit_log, system_enrollment_token, system_service, system_service_certificate,
-        tenant_discovery_allowlist, update_batch, update_history,
+        audit_log, crl_cache, data_encryption_key, global_service_config, global_setting,
+        host_discovery_allowlist, host_software_item, host_tag, host_tag_assignment,
+        notification_channel, notification_log, notification_rule, plugin_config,
+        plugin_type_setting, revoked_token_jti, revoked_token_user, role_permission, service,
+        software_ignore, software_item, system_audit_log, system_enrollment_token, system_service,
+        system_service_certificate, tenant_discovery_allowlist, tenant_service_config,
+        update_batch, update_history,
     };
 
     /// Simulate the "existing database" upgrade scenario:
@@ -316,6 +319,16 @@ mod tests {
 
         // Verify plugin_type_settings table exists.
         plugin_type_setting::Entity::find()
+            .count(&db)
+            .await
+            .unwrap();
+
+        // Verify tenant_service_config and global_service_config tables exist.
+        tenant_service_config::Entity::find()
+            .count(&db)
+            .await
+            .unwrap();
+        global_service_config::Entity::find()
             .count(&db)
             .await
             .unwrap();
