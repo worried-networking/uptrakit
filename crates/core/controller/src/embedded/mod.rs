@@ -30,6 +30,14 @@ use uuid::Uuid;
 use crate::tasks::BackgroundTasks;
 use types::{EmbeddedTransport, ExternalServiceInfo};
 
+/// Tokens passed to each embedded service's run closure to control its lifecycle.
+pub(crate) struct EmbeddedShutdownTokens {
+    /// Cancel to stop claiming new work. In-flight work completes naturally.
+    pub drain: CancellationToken,
+    /// Cancel to abort in-flight work immediately.
+    pub abort: CancellationToken,
+}
+
 /// Custom yield predicate for embedded service coexistence decisions.
 pub(crate) type YieldCheckFn = Box<dyn Fn(&ExternalServiceInfo) -> bool + Send + Sync>;
 
@@ -100,7 +108,7 @@ impl EmbeddedServiceHost {
         yield_check: Option<YieldCheckFn>,
         run_fn: impl FnOnce(
             EmbeddedTransport,
-            CancellationToken,
+            EmbeddedShutdownTokens,
         ) -> Pin<Box<dyn Future<Output = ()> + Send>>
         + Send
         + 'static,
@@ -171,9 +179,17 @@ impl EmbeddedServiceHost {
         bg.track(forwarder_label, forwarder_handle);
 
         // 5. Create transport and spawn the service closure.
+        //    - drain_token: independent, cancelled in Phase 2.5 before service drain.
+        //    - abort_token: child of shutdown_token, cancelled in Phase 3 (hard stop).
         let transport = EmbeddedTransport::new(service_tx, ctrl_rx, Arc::clone(&yielded));
-        let service_cancel = bg.child_token();
-        let service_handle = tokio::spawn(run_fn(transport, service_cancel));
+        let drain_token = CancellationToken::new();
+        let abort_token = bg.child_token();
+        let tokens = EmbeddedShutdownTokens {
+            drain: drain_token.clone(),
+            abort: abort_token,
+        };
+        let service_handle = tokio::spawn(run_fn(transport, tokens));
+        bg.mark_embedded(service_id, drain_token);
         bg.track(label, service_handle);
 
         // 6. Track the handle.
