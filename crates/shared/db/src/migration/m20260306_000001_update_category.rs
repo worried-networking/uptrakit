@@ -21,7 +21,7 @@ impl MigrationTrait for Migration {
                     .table(HostSoftwareItems::Table)
                     .add_column(
                         ColumnDef::new(HostSoftwareItems::UpdateCategory)
-                            .text()
+                            .string()
                             .not_null()
                             .default("unknown"),
                     )
@@ -36,7 +36,7 @@ impl MigrationTrait for Migration {
                     .table(UpdateHistory::Table)
                     .add_column(
                         ColumnDef::new(UpdateHistory::UpdateCategory)
-                            .text()
+                            .string()
                             .not_null()
                             .default("unknown"),
                     )

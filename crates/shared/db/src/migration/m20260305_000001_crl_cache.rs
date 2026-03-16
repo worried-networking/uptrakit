@@ -20,7 +20,7 @@ impl MigrationTrait for Migration {
                     .table(Alias::new("crl_cache"))
                     .col(
                         ColumnDef::new(Alias::new("ca_fingerprint"))
-                            .text()
+                            .string()
                             .not_null()
                             .primary_key(),
                     )

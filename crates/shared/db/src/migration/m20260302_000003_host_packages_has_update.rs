@@ -1,19 +1,19 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 
-use super::helpers::{self, CrashRecoveryState};
+use super::helpers::{self, CrashRecoveryState, timestamp, timestamp_null};
 
 /// Add `has_update` stored generated column and covering indexes to `host_packages`.
 ///
 /// SQLite does not support `ALTER TABLE … ADD COLUMN … GENERATED ALWAYS AS`.
-/// This migration uses the standard SQLite 12-step table-recreation approach:
+/// On SQLite this migration uses the standard 12-step table-recreation approach:
 /// disable FK enforcement, create the replacement table with the generated
 /// column already present, copy all data, drop the original, rename, rebuild
 /// indexes, and re-enable FK enforcement.
 ///
-/// On PostgreSQL (≥ 12) and MySQL (≥ 5.7) the same table-recreation strategy
-/// is used for uniformity. The `PRAGMA foreign_keys` guard is gated behind a
-/// database-backend check and is never sent to those engines.
+/// On PostgreSQL (≥ 12) and MySQL (≥ 5.7) the migration uses
+/// `ALTER TABLE ADD COLUMN` directly, which avoids the FK-cascade problems
+/// that table recreation causes when other tables reference `host_packages`.
 ///
 /// The column is computed by the database engine as:
 ///
@@ -162,6 +162,25 @@ fn build_host_packages_table(
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        if helpers::is_sqlite(manager) {
+            self.up_sqlite(manager).await
+        } else {
+            self.up_alter(manager).await
+        }
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        if helpers::is_sqlite(manager) {
+            self.down_sqlite(manager).await
+        } else {
+            self.down_alter(manager).await
+        }
+    }
+}
+
+impl Migration {
+    /// SQLite path: table recreation (create new -> copy -> drop old -> rename).
+    async fn up_sqlite(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         helpers::set_foreign_keys(manager, false).await?;
 
         let state =
@@ -182,7 +201,123 @@ impl MigrationTrait for Migration {
 
         helpers::rename_temp(manager, "host_packages_new", "host_packages").await?;
 
-        // Step 5: recreate the three original indexes.
+        // Recreate the three original indexes (dropped implicitly with the old table).
+        self.create_original_indexes(manager).await?;
+
+        // Create the three new covering indexes on has_update.
+        self.create_has_update_indexes(manager).await?;
+
+        helpers::set_foreign_keys(manager, true).await?;
+
+        Ok(())
+    }
+
+    /// PostgreSQL/MySQL path: ALTER TABLE ADD COLUMN + indexes.
+    async fn up_alter(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(HostPackages::Table)
+                    .add_column(
+                        ColumnDef::new(Col::HasUpdate).boolean().generated(
+                            Expr::col(Col::InstalledVersion)
+                                .is_not_null()
+                                .and(Expr::col(Col::LatestVersion).is_not_null())
+                                .and(
+                                    Expr::col(Col::InstalledVersion)
+                                        .ne(Expr::col(Col::LatestVersion)),
+                                ),
+                            true, // STORED
+                        ),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        // Create the three new covering indexes on has_update.
+        self.create_has_update_indexes(manager).await?;
+
+        Ok(())
+    }
+
+    /// SQLite down path: table recreation (create without has_update -> copy -> drop -> rename).
+    async fn down_sqlite(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+        helpers::set_foreign_keys(manager, false).await?;
+
+        let state =
+            helpers::check_crash_recovery(manager, "host_packages", "host_packages_bak").await?;
+
+        if state == CrashRecoveryState::Normal {
+            // Create the pre-migration schema (no has_update column).
+            manager
+                .create_table(build_host_packages_table(HostPackagesBak::Table, false))
+                .await?;
+
+            // Copy all data rows (DATA_COLS, which already excludes has_update).
+            copy_table(manager, HostPackages::Table, HostPackagesBak::Table).await?;
+
+            // Drop the current table (drops the new indexes implicitly).
+            helpers::drop_original(manager, "host_packages").await?;
+        }
+
+        helpers::rename_temp(manager, "host_packages_bak", "host_packages").await?;
+
+        // Restore the original indexes.
+        self.create_original_indexes(manager).await?;
+
+        helpers::set_foreign_keys(manager, true).await?;
+
+        Ok(())
+    }
+
+    /// PostgreSQL/MySQL down path: DROP COLUMN + indexes.
+    async fn down_alter(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+        // Drop the has_update indexes first.
+        manager
+            .drop_index(
+                Index::drop()
+                    .name("idx_hp_has_update")
+                    .table(HostPackages::Table)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .drop_index(
+                Index::drop()
+                    .name("idx_hp_has_update_category")
+                    .table(HostPackages::Table)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .drop_index(
+                Index::drop()
+                    .name("idx_hp_host_category")
+                    .table(HostPackages::Table)
+                    .to_owned(),
+            )
+            .await?;
+
+        // Drop the generated column.
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(HostPackages::Table)
+                    .drop_column(Col::HasUpdate)
+                    .to_owned(),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// The three original indexes that existed before this migration.
+    ///
+    /// On the SQLite path these are dropped implicitly when the old table is
+    /// dropped and must be recreated after the rename.
+    async fn create_original_indexes(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         manager
             .create_index(
                 Index::create()
@@ -218,8 +353,11 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Step 6: create the three new covering indexes on has_update.
-        //
+        Ok(())
+    }
+
+    /// The three new covering indexes introduced by this migration.
+    async fn create_has_update_indexes(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         // (host_id, has_update) — has_update-only filter; used by the
         // update-summary aggregation query (WHERE host_id = ? AND enabled = true
         // AND has_update = true).
@@ -258,70 +396,6 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-
-        helpers::set_foreign_keys(manager, true).await?;
-
-        Ok(())
-    }
-
-    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        helpers::set_foreign_keys(manager, false).await?;
-
-        let state =
-            helpers::check_crash_recovery(manager, "host_packages", "host_packages_bak").await?;
-
-        if state == CrashRecoveryState::Normal {
-            // Create the pre-migration schema (no has_update column).
-            manager
-                .create_table(build_host_packages_table(HostPackagesBak::Table, false))
-                .await?;
-
-            // Copy all data rows (DATA_COLS, which already excludes has_update).
-            copy_table(manager, HostPackages::Table, HostPackagesBak::Table).await?;
-
-            // Drop the current table (drops the new indexes implicitly).
-            helpers::drop_original(manager, "host_packages").await?;
-        }
-
-        helpers::rename_temp(manager, "host_packages_bak", "host_packages").await?;
-
-        // Restore the original indexes.
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_hp_host_plugin_pkg")
-                    .table(HostPackages::Table)
-                    .col(Col::HostId)
-                    .col(Col::PluginConfigId)
-                    .col(Col::PackageIdentifier)
-                    .unique()
-                    .to_owned(),
-            )
-            .await?;
-
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_hp_tenant_host")
-                    .table(HostPackages::Table)
-                    .col(Col::TenantId)
-                    .col(Col::HostId)
-                    .to_owned(),
-            )
-            .await?;
-
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_hp_host_enabled")
-                    .table(HostPackages::Table)
-                    .col(Col::HostId)
-                    .col(Col::Enabled)
-                    .to_owned(),
-            )
-            .await?;
-
-        helpers::set_foreign_keys(manager, true).await?;
 
         Ok(())
     }

@@ -1,6 +1,8 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 
+use super::helpers::{timestamp, timestamp_null};
+
 /// Create `host_packages`, `host_package_ignores`, and
 /// `host_package_update_history` tables for per-host package tracking.
 #[derive(DeriveMigrationName)]
@@ -40,7 +42,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(HostPackages::UpdateCategory)
-                            .text()
+                            .string()
                             .not_null()
                             .default("unknown"),
                     )
@@ -206,7 +208,7 @@ impl MigrationTrait for Migration {
                     .col(string_null(HpUpdateHistory::ToVersion))
                     .col(
                         ColumnDef::new(HpUpdateHistory::Status)
-                            .text()
+                            .string()
                             .not_null()
                             .default("pending"),
                     )
@@ -221,7 +223,7 @@ impl MigrationTrait for Migration {
                     .col(string(HpUpdateHistory::ActorId))
                     .col(
                         ColumnDef::new(HpUpdateHistory::UpdateCategory)
-                            .text()
+                            .string()
                             .not_null()
                             .default("unknown"),
                     )

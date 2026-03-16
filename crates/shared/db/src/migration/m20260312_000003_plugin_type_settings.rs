@@ -70,12 +70,12 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(PluginTypeSettings::CreatedAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .col(
                         ColumnDef::new(PluginTypeSettings::UpdatedAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .foreign_key(
@@ -197,8 +197,16 @@ impl Migration {
                                 .not_null()
                                 .default("auto"),
                         )
-                        .col(ColumnDef::new(HsipNew::CreatedAt).timestamp().not_null())
-                        .col(ColumnDef::new(HsipNew::UpdatedAt).timestamp().not_null())
+                        .col(
+                            ColumnDef::new(HsipNew::CreatedAt)
+                                .timestamp_with_time_zone()
+                                .not_null(),
+                        )
+                        .col(
+                            ColumnDef::new(HsipNew::UpdatedAt)
+                                .timestamp_with_time_zone()
+                                .not_null(),
+                        )
                         .foreign_key(
                             ForeignKey::create()
                                 .name("fk_hsip_plugin_config")
@@ -368,6 +376,9 @@ impl Migration {
         for pm_type in PACKAGE_MANAGER_TYPES {
             // Insert into plugin_type_settings if not already present.
             // Uses the first active plugin_config per (tenant_id, plugin_type).
+            // Pick the oldest active config per (tenant_id, plugin_type) using a
+            // correlated subquery instead of GROUP BY — PG requires all selected
+            // columns in GROUP BY, which defeats the "pick one per tenant" intent.
             let insert_sql = format!(
                 "INSERT INTO plugin_type_settings (id, tenant_id, plugin_type, config, created_at, updated_at) \
                  SELECT \
@@ -380,7 +391,14 @@ impl Migration {
                      WHERE pts.tenant_id = pc.tenant_id \
                        AND pts.plugin_type = pc.plugin_type \
                    ) \
-                 GROUP BY pc.tenant_id"
+                   AND pc.id = ( \
+                     SELECT pc2.id FROM plugin_configs pc2 \
+                     WHERE pc2.tenant_id = pc.tenant_id \
+                       AND pc2.plugin_type = '{pm_type}' \
+                       AND pc2.deactivated_at IS NULL \
+                     ORDER BY pc2.created_at \
+                     LIMIT 1 \
+                   )"
             );
             manager
                 .get_connection()
@@ -460,8 +478,16 @@ impl Migration {
                                 .not_null()
                                 .default("auto"),
                         )
-                        .col(ColumnDef::new(HsipOld::CreatedAt).timestamp().not_null())
-                        .col(ColumnDef::new(HsipOld::UpdatedAt).timestamp().not_null())
+                        .col(
+                            ColumnDef::new(HsipOld::CreatedAt)
+                                .timestamp_with_time_zone()
+                                .not_null(),
+                        )
+                        .col(
+                            ColumnDef::new(HsipOld::UpdatedAt)
+                                .timestamp_with_time_zone()
+                                .not_null(),
+                        )
                         .to_owned(),
                 )
                 .await?;

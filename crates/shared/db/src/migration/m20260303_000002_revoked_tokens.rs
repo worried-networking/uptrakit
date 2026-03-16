@@ -27,7 +27,7 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                     .col(
                         ColumnDef::new(RevokedTokenJtis::Jti)
-                            .text()
+                            .string()
                             .not_null()
                             .primary_key(),
                     )

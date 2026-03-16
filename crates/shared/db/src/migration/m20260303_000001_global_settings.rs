@@ -78,12 +78,12 @@ impl MigrationTrait for Migration {
 
         // 2. Copy global keys from the default tenant's settings rows.
         //    SELECT key, value, updated_at FROM settings
-        //    WHERE tenant_id = (SELECT id FROM tenants WHERE is_default = 1)
+        //    WHERE tenant_id = (SELECT id FROM tenants WHERE is_default = TRUE)
         //    AND key IN (...)
         let tenant_subquery = Query::select()
             .from(Tenants::Table)
             .column(Tenants::Id)
-            .and_where(Expr::col(Tenants::IsDefault).eq(1))
+            .and_where(Expr::col(Tenants::IsDefault).eq(true))
             .to_owned();
 
         let select = Query::select()
@@ -119,12 +119,12 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // Move global settings back to the default tenant's settings rows.
-        //    SELECT (SELECT id FROM tenants WHERE is_default = 1), key, value, updated_at
+        //    SELECT (SELECT id FROM tenants WHERE is_default = TRUE), key, value, updated_at
         //    FROM global_settings WHERE key IN (...)
         let tenant_subquery = Query::select()
             .from(Tenants::Table)
             .column(Tenants::Id)
-            .and_where(Expr::col(Tenants::IsDefault).eq(1))
+            .and_where(Expr::col(Tenants::IsDefault).eq(true))
             .to_owned();
 
         let select = Query::select()

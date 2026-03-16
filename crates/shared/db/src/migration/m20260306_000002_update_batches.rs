@@ -1,6 +1,8 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 
+use super::helpers::{timestamp, timestamp_null};
+
 /// Create `update_batches` table and add `batch_id` to `update_history`.
 ///
 /// Since there are no active deployments, the `update_history` and
@@ -24,10 +26,10 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(UpdateBatches::TenantId).uuid().not_null())
-                    .col(ColumnDef::new(UpdateBatches::BatchType).text().not_null())
+                    .col(ColumnDef::new(UpdateBatches::BatchType).string().not_null())
                     .col(
                         ColumnDef::new(UpdateBatches::Status)
-                            .text()
+                            .string()
                             .not_null()
                             .default("in_progress"),
                     )
@@ -36,8 +38,8 @@ impl MigrationTrait for Migration {
                             .integer()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(UpdateBatches::ActorType).text().not_null())
-                    .col(ColumnDef::new(UpdateBatches::ActorId).text().not_null())
+                    .col(ColumnDef::new(UpdateBatches::ActorType).string().not_null())
+                    .col(ColumnDef::new(UpdateBatches::ActorId).string().not_null())
                     .col(timestamp(UpdateBatches::CreatedAt))
                     .col(timestamp_null(UpdateBatches::CompletedAt))
                     .foreign_key(
@@ -116,7 +118,7 @@ impl MigrationTrait for Migration {
                     .col(timestamp(UpdateHistory::CreatedAt))
                     .col(
                         ColumnDef::new(UpdateHistory::UpdateCategory)
-                            .text()
+                            .string()
                             .not_null()
                             .default("unknown"),
                     )

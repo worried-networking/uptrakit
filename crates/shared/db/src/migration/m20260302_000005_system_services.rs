@@ -1,6 +1,8 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 
+use super::helpers::{timestamp, timestamp_null};
+
 /// Create `system_services` and `system_service_certificates` tables.
 ///
 /// System services (MQTT bridge, external scheduler) are global infrastructure

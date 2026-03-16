@@ -194,11 +194,11 @@ impl MigrationTrait for Migration {
                         tenant_id.into(),
                         "audit_log_cleanup".into(),
                         "0 3 * * *".into(),
-                        false.into(),                  // disabled by default
-                        Option::<String>::None.into(), // last_run_at
+                        false.into(), // disabled by default
+                        Option::<time::OffsetDateTime>::None.into(), // last_run_at
                         next_run.into(),
                         Option::<uuid::Uuid>::None.into(), // locked_by
-                        Option::<String>::None.into(),     // locked_at
+                        Option::<time::OffsetDateTime>::None.into(), // locked_at
                         Option::<String>::None.into(),     // last_error
                         0i64.into(),                       // run_count
                         now.into(),

@@ -38,7 +38,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Alias::new("message_json")).json().not_null())
                     .col(
                         ColumnDef::new(Alias::new("created_at"))
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .to_owned(),

@@ -24,7 +24,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(DataEncryptionKeys::KeyId)
-                            .text()
+                            .string()
                             .not_null()
                             .unique_key(),
                     )
