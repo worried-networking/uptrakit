@@ -2,10 +2,11 @@ use std::collections::HashMap;
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use uptrakit_internal_wire::HostConnectivityUpdate;
-use uptrakit_internal_wire::MqttTenantConfig;
 use uuid::Uuid;
 
-use crate::client_manager::{ClientState, build_config_from_wire, compute_config_hash};
+use crate::client_manager::{
+    ClientState, ParsedMqttClientConfig, build_config_from_parsed, compute_config_hash,
+};
 use crate::mqtt_client::MqttServiceEvent;
 use crate::state_publisher::{compute_removed_host_ids, compute_removed_items};
 use tokio::sync::mpsc;
@@ -102,11 +103,11 @@ impl TenantManager {
         }
     }
 
-    /// Apply MQTT client assignments from the controller.
+    /// Apply MQTT client configs from the service config store.
     ///
-    /// This is called when receiving `TenantAssignments` message.
+    /// This is called when receiving `ServiceConfigDelivery` or `ServiceConfigUpdated` messages.
     #[tracing::instrument(skip_all)]
-    pub(crate) async fn apply_assignments(&mut self, configs: Vec<MqttTenantConfig>) {
+    pub(crate) async fn apply_configs(&mut self, configs: Vec<ParsedMqttClientConfig>) {
         for config in configs {
             if config.enabled {
                 self.start_or_update_client(config).await;
@@ -116,21 +117,9 @@ impl TenantManager {
         }
     }
 
-    /// Reload a single MQTT client's configuration.
-    ///
-    /// This is called when receiving `TenantConfigUpdated` message.
-    #[tracing::instrument(skip_all, fields(mqtt_client_id = %config.mqtt_client_id))]
-    pub(crate) async fn reload_client(&mut self, config: MqttTenantConfig) {
-        if config.enabled {
-            self.start_or_update_client(config).await;
-        } else {
-            self.stop_client(&config.mqtt_client_id).await;
-        }
-    }
-
     /// Stop an MQTT client.
     ///
-    /// This is called when receiving `TenantRevoked` message or when config is disabled.
+    /// Called when a config entry is deleted or disabled.
     #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
     pub(crate) async fn stop_client(&mut self, mqtt_client_id: &Uuid) {
         if let Some(state) = self.clients.remove(mqtt_client_id) {
@@ -138,11 +127,6 @@ impl TenantManager {
             self.report_status(*mqtt_client_id, MqttClientConnectionStatus::Offline);
             state.handle.shutdown().await;
         }
-    }
-
-    /// Return list of active MQTT client IDs (used in `Disconnecting` payload).
-    pub(crate) fn active_mqtt_client_ids(&self) -> Vec<Uuid> {
-        self.clients.keys().copied().collect()
     }
 
     /// Graceful shutdown: stop all MQTT clients.
@@ -474,7 +458,7 @@ impl TenantManager {
 
     /// Start or update an MQTT client.
     #[tracing::instrument(skip_all, fields(mqtt_client_id = %config.mqtt_client_id))]
-    async fn start_or_update_client(&mut self, config: MqttTenantConfig) {
+    pub(crate) async fn start_or_update_client(&mut self, config: ParsedMqttClientConfig) {
         let mqtt_client_id = config.mqtt_client_id;
         let new_hash = compute_config_hash(&config);
 
@@ -494,7 +478,7 @@ impl TenantManager {
         }
 
         // Build and start new client
-        let mqtt_config = build_config_from_wire(&config);
+        let mqtt_config = build_config_from_parsed(&config);
         tracing::info!(%mqtt_client_id, config = ?mqtt_config, "starting MQTT client");
 
         let ha_status_topic = if config.ha_discovery {
@@ -548,16 +532,15 @@ impl Default for TenantManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client_manager::build_config_from_wire;
+    use crate::client_manager::build_config_from_parsed;
     use crate::client_manager::compute_config_hash;
     use crate::state_publisher::{compute_removed_host_ids, compute_removed_items};
-    use time::UtcDateTime;
     use uptrakit_internal_wire::MqttTransport;
     use uptrakit_internal_wire::SecretString;
 
     #[test]
-    fn build_config_from_wire_correct() {
-        let config = MqttTenantConfig {
+    fn build_config_from_parsed_correct() {
+        let config = ParsedMqttClientConfig {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000001").unwrap(),
             tenant_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
             enabled: true,
@@ -571,10 +554,9 @@ mod tests {
             topic_prefix: "home/uptrakit".to_string(),
             ha_discovery: false,
             ha_discovery_prefix: "homeassistant".to_string(),
-            updated_at: UtcDateTime::UNIX_EPOCH,
         };
 
-        let mqtt_config = build_config_from_wire(&config);
+        let mqtt_config = build_config_from_parsed(&config);
 
         assert_eq!(mqtt_config.transport, MqttTransport::Tls);
         assert_eq!(mqtt_config.host, "broker.example.com");
@@ -593,7 +575,7 @@ mod tests {
 
     #[test]
     fn build_config_uses_default_port_when_zero() {
-        let config = MqttTenantConfig {
+        let config = ParsedMqttClientConfig {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000002").unwrap(),
             tenant_id: Uuid::nil(),
             enabled: true,
@@ -607,16 +589,15 @@ mod tests {
             topic_prefix: "uptrakit".to_string(),
             ha_discovery: false,
             ha_discovery_prefix: "homeassistant".to_string(),
-            updated_at: UtcDateTime::UNIX_EPOCH,
         };
 
-        let mqtt_config = build_config_from_wire(&config);
+        let mqtt_config = build_config_from_parsed(&config);
         assert_eq!(mqtt_config.port, 8883); // TLS default port
     }
 
     #[test]
     fn config_hash_changes_on_different_values() {
-        let config1 = MqttTenantConfig {
+        let config1 = ParsedMqttClientConfig {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000003").unwrap(),
             tenant_id: Uuid::nil(),
             enabled: true,
@@ -630,10 +611,9 @@ mod tests {
             topic_prefix: "uptrakit".to_string(),
             ha_discovery: false,
             ha_discovery_prefix: "homeassistant".to_string(),
-            updated_at: UtcDateTime::UNIX_EPOCH,
         };
 
-        let config2 = MqttTenantConfig {
+        let config2 = ParsedMqttClientConfig {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000003").unwrap(),
             tenant_id: Uuid::nil(),
             enabled: true,
@@ -647,7 +627,6 @@ mod tests {
             topic_prefix: "uptrakit".to_string(),
             ha_discovery: false,
             ha_discovery_prefix: "homeassistant".to_string(),
-            updated_at: UtcDateTime::UNIX_EPOCH,
         };
 
         assert_ne!(compute_config_hash(&config1), compute_config_hash(&config2));
@@ -655,7 +634,7 @@ mod tests {
 
     #[test]
     fn build_config_uses_default_port_for_tcp_when_zero() {
-        let config = MqttTenantConfig {
+        let config = ParsedMqttClientConfig {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000005").unwrap(),
             tenant_id: Uuid::nil(),
             enabled: true,
@@ -669,16 +648,15 @@ mod tests {
             topic_prefix: "uptrakit".to_string(),
             ha_discovery: false,
             ha_discovery_prefix: "homeassistant".to_string(),
-            updated_at: UtcDateTime::UNIX_EPOCH,
         };
 
-        let mqtt_config = build_config_from_wire(&config);
+        let mqtt_config = build_config_from_parsed(&config);
         assert_eq!(mqtt_config.port, 1883); // TCP default port
     }
 
     #[test]
     fn build_config_no_credentials() {
-        let config = MqttTenantConfig {
+        let config = ParsedMqttClientConfig {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000006").unwrap(),
             tenant_id: Uuid::nil(),
             enabled: true,
@@ -692,10 +670,9 @@ mod tests {
             topic_prefix: "prefix".to_string(),
             ha_discovery: false,
             ha_discovery_prefix: "homeassistant".to_string(),
-            updated_at: UtcDateTime::UNIX_EPOCH,
         };
 
-        let mqtt_config = build_config_from_wire(&config);
+        let mqtt_config = build_config_from_parsed(&config);
         assert!(mqtt_config.username.is_none());
         assert!(mqtt_config.password.is_none());
     }
@@ -703,13 +680,13 @@ mod tests {
     #[test]
     fn tenant_manager_new_has_no_clients() {
         let manager = TenantManager::new(None);
-        assert!(manager.active_mqtt_client_ids().is_empty());
+        assert!(manager.clients.is_empty());
     }
 
     #[test]
     fn tenant_manager_default_has_no_clients() {
         let manager = TenantManager::default();
-        assert!(manager.active_mqtt_client_ids().is_empty());
+        assert!(manager.clients.is_empty());
     }
 
     #[tokio::test]
@@ -718,7 +695,7 @@ mod tests {
         let fake_id = Uuid::parse_str("019471a0-0000-7000-8000-000000000099").unwrap();
         // Should not panic or error.
         manager.stop_client(&fake_id).await;
-        assert!(manager.active_mqtt_client_ids().is_empty());
+        assert!(manager.clients.is_empty());
     }
 
     #[tokio::test]
@@ -726,13 +703,13 @@ mod tests {
         let mut manager = TenantManager::new(None);
         // Should not panic on empty manager.
         manager.shutdown_all().await;
-        assert!(manager.active_mqtt_client_ids().is_empty());
+        assert!(manager.clients.is_empty());
     }
 
     #[tokio::test]
-    async fn apply_assignments_disabled_configs_ignored() {
+    async fn apply_configs_disabled_configs_ignored() {
         let mut manager = TenantManager::new(None);
-        let configs = vec![MqttTenantConfig {
+        let configs = vec![ParsedMqttClientConfig {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000010").unwrap(),
             tenant_id: Uuid::nil(),
             enabled: false, // disabled
@@ -746,23 +723,22 @@ mod tests {
             topic_prefix: "uptrakit".to_string(),
             ha_discovery: false,
             ha_discovery_prefix: "homeassistant".to_string(),
-            updated_at: UtcDateTime::UNIX_EPOCH,
         }];
         // Disabled configs should be a no-op (stop_client on non-existent is noop).
-        manager.apply_assignments(configs).await;
-        assert!(manager.active_mqtt_client_ids().is_empty());
+        manager.apply_configs(configs).await;
+        assert!(manager.clients.is_empty());
     }
 
     #[tokio::test]
-    async fn apply_assignments_empty_vec() {
+    async fn apply_configs_empty_vec() {
         let mut manager = TenantManager::new(None);
-        manager.apply_assignments(vec![]).await;
-        assert!(manager.active_mqtt_client_ids().is_empty());
+        manager.apply_configs(vec![]).await;
+        assert!(manager.clients.is_empty());
     }
 
     #[test]
     fn config_hash_same_for_same_values() {
-        let config1 = MqttTenantConfig {
+        let config1 = ParsedMqttClientConfig {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000004").unwrap(),
             tenant_id: Uuid::nil(),
             enabled: true,
@@ -776,10 +752,9 @@ mod tests {
             topic_prefix: "uptrakit".to_string(),
             ha_discovery: false,
             ha_discovery_prefix: "homeassistant".to_string(),
-            updated_at: UtcDateTime::UNIX_EPOCH,
         };
 
-        let config2 = MqttTenantConfig {
+        let config2 = ParsedMqttClientConfig {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000004").unwrap(),
             tenant_id: Uuid::nil(),
             enabled: true,
@@ -793,7 +768,6 @@ mod tests {
             topic_prefix: "uptrakit".to_string(),
             ha_discovery: false,
             ha_discovery_prefix: "homeassistant".to_string(),
-            updated_at: UtcDateTime::from_unix_timestamp(12345).unwrap(), // Different updated_at doesn't matter
         };
 
         assert_eq!(compute_config_hash(&config1), compute_config_hash(&config2));

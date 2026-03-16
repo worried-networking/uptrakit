@@ -404,10 +404,7 @@ fn update_result_failed_serialization_roundtrip() {
 
 #[test]
 fn disconnecting_shutdown_serialization_roundtrip() {
-    let msg = ServiceMessage::Disconnecting(DisconnectingPayload {
-        reason: DisconnectReason::Shutdown,
-        active_mqtt_clients: vec![],
-    });
+    let msg = ServiceMessage::Disconnecting(DisconnectingPayload::new(DisconnectReason::Shutdown));
     let json = serde_json::to_string(&msg).unwrap();
     assert_eq!(json, r#"{"type":"disconnecting","reason":"shutdown"}"#);
     let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
@@ -416,105 +413,9 @@ fn disconnecting_shutdown_serialization_roundtrip() {
 
 #[test]
 fn disconnecting_restart_serialization_roundtrip() {
-    let msg = ServiceMessage::Disconnecting(DisconnectingPayload {
-        reason: DisconnectReason::Restart,
-        active_mqtt_clients: vec![],
-    });
+    let msg = ServiceMessage::Disconnecting(DisconnectingPayload::new(DisconnectReason::Restart));
     let json = serde_json::to_string(&msg).unwrap();
     assert_eq!(json, r#"{"type":"disconnecting","reason":"restart"}"#);
-    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized, msg);
-}
-
-#[test]
-fn disconnecting_with_active_mqtt_clients() {
-    let msg = ServiceMessage::Disconnecting(DisconnectingPayload {
-        reason: DisconnectReason::Shutdown,
-        active_mqtt_clients: vec![TEST_UUID_1],
-    });
-    let json = serde_json::to_string(&msg).unwrap();
-    assert!(json.contains(r#""reason":"shutdown"#));
-    assert!(json.contains(r#""active_mqtt_clients":["550e8400-e29b-41d4-a716-446655440000"]"#));
-    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized, msg);
-}
-
-#[test]
-fn disconnecting_empty_mqtt_clients_omitted() {
-    let msg = ServiceMessage::Disconnecting(DisconnectingPayload {
-        reason: DisconnectReason::Restart,
-        active_mqtt_clients: vec![],
-    });
-    let json = serde_json::to_string(&msg).unwrap();
-    assert!(!json.contains("active_mqtt_clients"));
-    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized, msg);
-}
-
-#[test]
-fn register_serialization_roundtrip() {
-    let msg = ServiceMessage::Register(RegisterPayload {
-        instance_id: Some("mqtt-node1-01936a1e".to_string()),
-        max_tenants: 10,
-        active_mqtt_clients: vec![TEST_UUID_1, TEST_UUID_2],
-        capabilities: BTreeSet::new(),
-    });
-    let json = serde_json::to_string(&msg).unwrap();
-    assert!(json.contains(r#""type":"register"#));
-    assert!(json.contains(r#""instance_id":"mqtt-node1-01936a1e"#));
-    assert!(json.contains(r#""max_tenants":10"#));
-    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized, msg);
-}
-
-#[test]
-fn register_empty_active_mqtt_clients() {
-    let msg = ServiceMessage::Register(RegisterPayload {
-        instance_id: Some("mqtt-node2-01936a1e".to_string()),
-        max_tenants: 0,
-        active_mqtt_clients: vec![],
-        capabilities: BTreeSet::new(),
-    });
-    let json = serde_json::to_string(&msg).unwrap();
-    assert!(!json.contains("active_mqtt_clients"));
-    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized, msg);
-}
-
-#[test]
-fn register_without_instance_id() {
-    // Services without UpdateTracking capability send Register without instance_id.
-    let msg = ServiceMessage::Register(RegisterPayload {
-        capabilities: agent_capabilities(),
-        ..RegisterPayload::default()
-    });
-    let json = serde_json::to_string(&msg).unwrap();
-    assert!(json.contains(r#""type":"register"#));
-    assert!(!json.contains("instance_id"));
-    assert!(!json.contains("active_mqtt_clients"));
-    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized, msg);
-}
-
-#[test]
-fn release_tenants_serialization_roundtrip() {
-    let msg = ServiceMessage::ReleaseTenants(MqttReleaseTenantsPayload {
-        mqtt_client_ids: vec![TEST_UUID_1],
-    });
-    let json = serde_json::to_string(&msg).unwrap();
-    assert!(json.contains(r#""type":"release_tenants"#));
-    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized, msg);
-}
-
-#[test]
-fn mqtt_client_status_serialization_roundtrip() {
-    let msg = ServiceMessage::MqttClientStatus(MqttClientStatusPayload {
-        mqtt_client_id: TEST_UUID_1,
-        status: MqttClientConnectionStatus::Connecting,
-    });
-    let json = serde_json::to_string(&msg).unwrap();
-    assert!(json.contains(r#""type":"mqtt_client_status"#));
     let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, msg);
 }
@@ -939,97 +840,6 @@ fn execute_update_backward_compat_extra_fields() {
     assert!(matches!(msg, ControllerMessage::ExecuteUpdate(_)));
 }
 
-#[test]
-fn registered_serialization_roundtrip() {
-    let msg = ControllerMessage::Registered(MqttRegisteredPayload {
-        instance_id: "mqtt-node1-01936a1e".to_string(),
-    });
-    let json = serde_json::to_string(&msg).unwrap();
-    assert_eq!(
-        json,
-        r#"{"type":"registered","instance_id":"mqtt-node1-01936a1e"}"#
-    );
-    let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized, msg);
-}
-
-#[test]
-fn tenant_assignments_serialization_roundtrip() {
-    let msg = ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload {
-        tenants: vec![MqttTenantConfig {
-            mqtt_client_id: TEST_UUID_3,
-            tenant_id: TEST_UUID_1,
-            enabled: true,
-            transport: MqttTransport::Tls,
-            host: "broker.example.com".to_string(),
-            port: 8883,
-            client_id: "uptrakit".to_string(),
-            username: Some(SecretString::new("user")),
-            password: Some(SecretString::new("pass")),
-            ca_pem: None,
-            topic_prefix: "home/uptrakit".to_string(),
-            ha_discovery: false,
-            ha_discovery_prefix: "homeassistant".to_string(),
-            updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
-        }],
-    });
-    let json = serde_json::to_string(&msg).unwrap();
-    assert!(json.contains(r#""type":"tenant_assignments"#));
-    assert!(json.contains(r#""transport":"tls"#));
-    let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized, msg);
-}
-
-#[test]
-fn tenant_config_updated_serialization_roundtrip() {
-    let msg = ControllerMessage::TenantConfigUpdated(MqttTenantConfigUpdatedPayload {
-        tenant: MqttTenantConfig {
-            mqtt_client_id: TEST_UUID_1,
-            tenant_id: TEST_UUID_2,
-            enabled: true,
-            transport: MqttTransport::Tcp,
-            host: "broker.local".to_string(),
-            port: 1883,
-            client_id: "uptrakit".to_string(),
-            username: None,
-            password: None,
-            ca_pem: None,
-            topic_prefix: "uptrakit".to_string(),
-            ha_discovery: false,
-            ha_discovery_prefix: "homeassistant".to_string(),
-            updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
-        },
-    });
-    let json = serde_json::to_string(&msg).unwrap();
-    assert!(json.contains(r#""type":"tenant_config_updated"#));
-    let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized, msg);
-}
-
-#[test]
-fn tenant_revoked_serialization_roundtrip() {
-    let msg = ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
-        mqtt_client_id: TEST_UUID_1,
-        reason: "mqtt client disabled".to_string(),
-    });
-    let json = serde_json::to_string(&msg).unwrap();
-    assert!(json.contains(r#""type":"tenant_revoked"#));
-    assert!(json.contains(r#""reason":"mqtt client disabled"#));
-    let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized, msg);
-}
-
-#[test]
-fn mqtt_client_created_serialization_roundtrip() {
-    let msg = ControllerMessage::MqttClientCreated(MqttClientCreatedPayload {
-        mqtt_client_id: TEST_UUID_2,
-    });
-    let json = serde_json::to_string(&msg).unwrap();
-    assert!(json.contains(r#""type":"mqtt_client_created"#));
-    let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized, msg);
-}
-
 // =========================================================================
 // Shared payload and helper tests
 // =========================================================================
@@ -1371,32 +1181,6 @@ fn release_info_empty_assets_omitted() {
     assert!(!json.contains("attestation_status"));
     let deserialized: ReleaseInfo = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, info);
-}
-
-#[test]
-fn mqtt_tenant_config_omits_none_fields() {
-    let config = MqttTenantConfig {
-        mqtt_client_id: TEST_UUID_1,
-        tenant_id: TEST_UUID_2,
-        enabled: true,
-        transport: MqttTransport::Tcp,
-        host: "localhost".to_string(),
-        port: 1883,
-        client_id: "uptrakit".to_string(),
-        username: None,
-        password: None,
-        ca_pem: None,
-        topic_prefix: "uptrakit".to_string(),
-        ha_discovery: false,
-        ha_discovery_prefix: "homeassistant".to_string(),
-        updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
-    };
-    let json = serde_json::to_string(&config).unwrap();
-    assert!(!json.contains("username"));
-    assert!(!json.contains("password"));
-    assert!(!json.contains("ca_pem"));
-    let deserialized: MqttTenantConfig = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized, config);
 }
 
 #[test]
@@ -1953,44 +1737,10 @@ fn spec_conformance_update_result() {
 #[test]
 fn spec_conformance_disconnecting() {
     let spec = AsyncApiSpec::load();
-    let json = service_envelope_json(ServiceMessage::Disconnecting(DisconnectingPayload {
-        reason: DisconnectReason::Shutdown,
-        active_mqtt_clients: vec![TEST_UUID_1],
-    }));
+    let json = service_envelope_json(ServiceMessage::Disconnecting(DisconnectingPayload::new(
+        DisconnectReason::Shutdown,
+    )));
     spec.validate("disconnectingPayload", &json);
-}
-
-#[test]
-fn spec_conformance_register() {
-    let spec = AsyncApiSpec::load();
-    let json = service_envelope_json(ServiceMessage::Register(RegisterPayload {
-        instance_id: Some("mqtt-node1-01936a1e".to_string()),
-        max_tenants: 10,
-        active_mqtt_clients: vec![TEST_UUID_1],
-        capabilities: [Capability::UpdateTracking, Capability::GracefulShutdown]
-            .into_iter()
-            .collect(),
-    }));
-    spec.validate("registerPayload", &json);
-}
-
-#[test]
-fn spec_conformance_release_tenants() {
-    let spec = AsyncApiSpec::load();
-    let json = service_envelope_json(ServiceMessage::ReleaseTenants(MqttReleaseTenantsPayload {
-        mqtt_client_ids: vec![TEST_UUID_1],
-    }));
-    spec.validate("mqttReleaseTenantsPayload", &json);
-}
-
-#[test]
-fn spec_conformance_mqtt_client_status() {
-    let spec = AsyncApiSpec::load();
-    let json = service_envelope_json(ServiceMessage::MqttClientStatus(MqttClientStatusPayload {
-        mqtt_client_id: TEST_UUID_1,
-        status: MqttClientConnectionStatus::Online,
-    }));
-    spec.validate("mqttClientStatusPayload", &json);
 }
 
 // ── ControllerMessage spec conformance ──────────────────────────
@@ -2155,90 +1905,6 @@ fn spec_conformance_execute_update() {
         },
     )));
     spec.validate("executeUpdatePayload", &json);
-}
-
-#[test]
-fn spec_conformance_registered() {
-    let spec = AsyncApiSpec::load();
-    let json = controller_envelope_json(ControllerMessage::Registered(MqttRegisteredPayload {
-        instance_id: "mqtt-node1-01936a1e".to_string(),
-    }));
-    spec.validate("mqttRegisteredPayload", &json);
-}
-
-#[test]
-fn spec_conformance_tenant_assignments() {
-    let spec = AsyncApiSpec::load();
-    let json = controller_envelope_json(ControllerMessage::TenantAssignments(
-        MqttTenantAssignmentsPayload {
-            tenants: vec![MqttTenantConfig {
-                mqtt_client_id: TEST_UUID_3,
-                tenant_id: TEST_UUID_1,
-                enabled: true,
-                transport: MqttTransport::Tls,
-                host: "broker.example.com".to_string(),
-                port: 8883,
-                client_id: "uptrakit".to_string(),
-                username: Some(SecretString::new("user")),
-                password: Some(SecretString::new("pass")),
-                ca_pem: None,
-                topic_prefix: "home/uptrakit".to_string(),
-                ha_discovery: false,
-                ha_discovery_prefix: "homeassistant".to_string(),
-                updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
-            }],
-        },
-    ));
-    spec.validate("mqttTenantAssignmentsPayload", &json);
-}
-
-#[test]
-fn spec_conformance_tenant_config_updated() {
-    let spec = AsyncApiSpec::load();
-    let json = controller_envelope_json(ControllerMessage::TenantConfigUpdated(
-        MqttTenantConfigUpdatedPayload {
-            tenant: MqttTenantConfig {
-                mqtt_client_id: TEST_UUID_1,
-                tenant_id: TEST_UUID_2,
-                enabled: true,
-                transport: MqttTransport::Tcp,
-                host: "broker.local".to_string(),
-                port: 1883,
-                client_id: "uptrakit".to_string(),
-                username: None,
-                password: None,
-                ca_pem: None,
-                topic_prefix: "uptrakit".to_string(),
-                ha_discovery: false,
-                ha_discovery_prefix: "homeassistant".to_string(),
-                updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
-            },
-        },
-    ));
-    spec.validate("mqttTenantConfigUpdatedPayload", &json);
-}
-
-#[test]
-fn spec_conformance_tenant_revoked() {
-    let spec = AsyncApiSpec::load();
-    let json =
-        controller_envelope_json(ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
-            mqtt_client_id: TEST_UUID_1,
-            reason: "mqtt client disabled".to_string(),
-        }));
-    spec.validate("mqttTenantRevokedPayload", &json);
-}
-
-#[test]
-fn spec_conformance_mqtt_client_created() {
-    let spec = AsyncApiSpec::load();
-    // mqtt_client_created uses a different schema (no seq in required).
-    // Serialize just the inner message to match the schema.
-    let msg = ControllerMessage::MqttClientCreated(MqttClientCreatedPayload {
-        mqtt_client_id: TEST_UUID_2,
-    });
-    let json = serde_json::to_value(&msg).unwrap();
-    spec.validate("mqttClientCreatedPayload", &json);
 }
 
 // =========================================================================
@@ -2887,42 +2553,6 @@ fn is_nats_publishable_blocks_credential_bearing_variants() {
             db_url: Some(SecretString::new("postgres://localhost/db")),
             master_key_hex: None,
             nats_url: None,
-        })
-        .is_nats_publishable()
-    );
-
-    // MQTT tenant credential variants must also be blocked.
-    assert!(
-        !ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload { tenants: vec![] })
-            .is_nats_publishable()
-    );
-
-    assert!(
-        !ControllerMessage::TenantConfigUpdated(MqttTenantConfigUpdatedPayload {
-            tenant: MqttTenantConfig {
-                mqtt_client_id: TEST_UUID_1,
-                tenant_id: TEST_UUID_2,
-                enabled: true,
-                transport: MqttTransport::Tcp,
-                host: "localhost".into(),
-                port: 1883,
-                client_id: "c".into(),
-                username: None,
-                password: None,
-                ca_pem: None,
-                topic_prefix: "t/".into(),
-                ha_discovery: false,
-                ha_discovery_prefix: "homeassistant".into(),
-                updated_at: time::UtcDateTime::UNIX_EPOCH,
-            },
-        })
-        .is_nats_publishable()
-    );
-
-    assert!(
-        !ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
-            mqtt_client_id: TEST_UUID_1,
-            reason: "test".into(),
         })
         .is_nats_publishable()
     );

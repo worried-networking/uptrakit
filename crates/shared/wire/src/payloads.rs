@@ -8,8 +8,7 @@ use super::capabilities::{Capability, EnrollmentStatus};
 use super::shared_types::{DisconnectReason, UpdateFinalStatus};
 use crate::serde_helpers::{duration_seconds, option_duration_seconds, utc_datetime_millis};
 use uptrakit_shared_types::{
-    DiscoveredSoftware, MqttClientConnectionStatus, MqttTransport, OutputStreamType, PluginType,
-    ReleaseInfo, SecretString, UpdateCategory,
+    DiscoveredSoftware, OutputStreamType, PluginType, ReleaseInfo, SecretString, UpdateCategory,
 };
 
 /// Payload for ping messages.
@@ -557,24 +556,15 @@ pub struct SetUpdateFreezePayload {
 // --- Graceful shutdown messages ---
 
 /// Service -> Controller: Notification before disconnecting.
-///
-/// Agents send this with just a reason; MQTT services also include the list
-/// of MQTT client IDs that were active at disconnection time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DisconnectingPayload {
     pub reason: DisconnectReason,
-    /// MQTT client IDs that were active at disconnection time (MQTT services only).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub active_mqtt_clients: Vec<Uuid>,
 }
 
 impl DisconnectingPayload {
-    /// Create a `DisconnectingPayload` for non-MQTT services (agents).
+    /// Create a `DisconnectingPayload` with the given reason.
     pub fn new(reason: DisconnectReason) -> Self {
-        Self {
-            reason,
-            active_mqtt_clients: Vec::new(),
-        }
+        Self { reason }
     }
 }
 
@@ -591,132 +581,6 @@ impl DisconnectingPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateCapabilitiesPayload {
     pub capabilities: BTreeSet<Capability>,
-}
-
-// =============================================================================
-// MQTT Service Specific Payloads
-// =============================================================================
-
-/// Payload sent by every service immediately on connect to declare its capabilities.
-///
-/// All service types send this message from `on_connected`, before `ServiceSettings`
-/// is processed. The controller uses `capabilities` as the authoritative source for
-/// service-type detection and capability persistence.
-///
-/// MQTT-specific fields (`instance_id`, `max_tenants`, `active_mqtt_clients`) are
-/// only meaningful for services that declare the `UpdateTracking` capability.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RegisterPayload {
-    /// Capabilities declared by this service instance.
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub capabilities: BTreeSet<Capability>,
-    /// Unique instance identifier (e.g., hostname-uuid prefix).
-    ///
-    /// Only set by services with the `UpdateTracking` capability.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub instance_id: Option<String>,
-    /// Maximum tenants this instance handles (0 = unlimited).
-    ///
-    /// Only meaningful for services with the `UpdateTracking` capability.
-    #[serde(default)]
-    pub max_tenants: u32,
-    /// Currently active MQTT client IDs (for reconnect reconciliation).
-    ///
-    /// Only set by services with the `UpdateTracking` capability.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub active_mqtt_clients: Vec<Uuid>,
-}
-
-/// Payload for registration acknowledgment.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttRegisteredPayload {
-    /// Echo back the instance ID for confirmation.
-    pub instance_id: String,
-}
-
-/// Payload for explicitly releasing MQTT clients.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttReleaseTenantsPayload {
-    /// MQTT client IDs to release.
-    pub mqtt_client_ids: Vec<Uuid>,
-}
-
-/// Payload for MQTT client connection status updates.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttClientStatusPayload {
-    /// MQTT client UUID (primary identifier from mqtt_clients table).
-    pub mqtt_client_id: Uuid,
-    /// Current connection status.
-    pub status: MqttClientConnectionStatus,
-}
-
-/// Payload for tenant assignments (initial or incremental).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttTenantAssignmentsPayload {
-    /// List of tenant configurations to start serving.
-    pub tenants: Vec<MqttTenantConfig>,
-}
-
-/// Configuration for a single MQTT client.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttTenantConfig {
-    /// MQTT client UUID (primary identifier from mqtt_clients table).
-    pub mqtt_client_id: Uuid,
-    /// Tenant UUID (kept for context).
-    pub tenant_id: Uuid,
-    /// Whether MQTT is enabled for this tenant.
-    pub enabled: bool,
-    /// Transport protocol (tcp, tls).
-    pub transport: MqttTransport,
-    /// Broker hostname.
-    pub host: String,
-    /// Broker port.
-    pub port: u16,
-    /// MQTT client ID.
-    pub client_id: String,
-    /// Username (optional).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub username: Option<SecretString>,
-    /// Password (optional).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub password: Option<SecretString>,
-    /// Custom CA certificate in PEM format (optional, for private brokers).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ca_pem: Option<SecretString>,
-    /// Topic prefix.
-    pub topic_prefix: String,
-    /// Whether to publish Home Assistant MQTT discovery topics.
-    #[serde(default)]
-    pub ha_discovery: bool,
-    /// Prefix for Home Assistant MQTT discovery topics.
-    #[serde(default = "default_ha_discovery_prefix")]
-    pub ha_discovery_prefix: String,
-    /// Last update timestamp (for change detection).
-    #[serde(with = "utc_datetime_millis")]
-    pub updated_at: UtcDateTime,
-}
-
-/// Payload for single tenant config update.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttTenantConfigUpdatedPayload {
-    /// Updated tenant configuration.
-    pub tenant: MqttTenantConfig,
-}
-
-/// Payload for MQTT client revocation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttTenantRevokedPayload {
-    /// MQTT client UUID being revoked.
-    pub mqtt_client_id: Uuid,
-    /// Reason for revocation.
-    pub reason: String,
-}
-
-/// Payload for controller outbox events when a new MQTT client is created.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttClientCreatedPayload {
-    /// MQTT client UUID to lease.
-    pub mqtt_client_id: Uuid,
 }
 
 // =============================================================================
@@ -1008,10 +872,6 @@ pub struct TokenRevokedPayload {
     /// Remove the user entry after this unix timestamp.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub purge_after: Option<i64>,
-}
-
-fn default_ha_discovery_prefix() -> String {
-    "homeassistant".to_string()
 }
 
 /// Per-host metadata published to MQTT for MQTT-browser visibility and Home Assistant.

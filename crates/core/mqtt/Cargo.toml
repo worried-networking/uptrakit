@@ -21,6 +21,7 @@ clap = { workspace = true }
 futures-util = { workspace = true }
 hostname = { workspace = true }
 rootcause = { workspace = true }
+serde = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 rumqttc = { workspace = true }
 serde_json = { workspace = true }

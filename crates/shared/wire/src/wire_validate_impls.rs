@@ -37,9 +37,6 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::BatchUpdateResult(p) => p.wire_validate(),
             ServiceMessage::DiscoveryResults(p) => p.wire_validate(),
             ServiceMessage::StdinAttention(p) => p.wire_validate(),
-            ServiceMessage::Register(p) => p.wire_validate(),
-            ServiceMessage::ReleaseTenants(p) => p.wire_validate(),
-            ServiceMessage::MqttClientStatus(_) => Ok(()),
             ServiceMessage::ServiceTriggerUpdate(p) => p.wire_validate(),
             ServiceMessage::ServiceTriggerHostBatchUpdate(_) => Ok(()),
             ServiceMessage::Disconnecting(p) => p.wire_validate(),
@@ -83,11 +80,6 @@ impl WireValidate for ControllerMessage {
             ControllerMessage::DiscoverSoftware(p) => p.wire_validate(),
             ControllerMessage::SetUpdateFreeze(p) => p.wire_validate(),
             ControllerMessage::UpdateStdinData(p) => p.wire_validate(),
-            ControllerMessage::Registered(_) => Ok(()),
-            ControllerMessage::TenantAssignments(p) => p.wire_validate(),
-            ControllerMessage::TenantConfigUpdated(p) => p.wire_validate(),
-            ControllerMessage::TenantRevoked(p) => p.wire_validate(),
-            ControllerMessage::MqttClientCreated(_) => Ok(()),
             ControllerMessage::SoftwareStates(p) => p.wire_validate(),
             ControllerMessage::HostConnectivityUpdated(p) => p.wire_validate(),
             ControllerMessage::ReportPluginConfigResponse(p) => p.wire_validate(),
@@ -305,31 +297,6 @@ impl WireValidate for uptrakit_shared_types::DiscoveredSoftware {
     }
 }
 
-impl WireValidate for RegisterPayload {
-    fn wire_validate(&self) -> Result<(), WireValidationError> {
-        if let Some(ref id) = self.instance_id {
-            check_string_len(id, MAX_SHORT_STRING_LEN, "instance_id")?;
-        }
-        check_vec_len(
-            &self.active_mqtt_clients,
-            MAX_ACTIVE_MQTT_CLIENTS,
-            "active_mqtt_clients",
-        )?;
-        Ok(())
-    }
-}
-
-impl WireValidate for MqttReleaseTenantsPayload {
-    fn wire_validate(&self) -> Result<(), WireValidationError> {
-        check_vec_len(
-            &self.mqtt_client_ids,
-            MAX_ACTIVE_MQTT_CLIENTS,
-            "mqtt_client_ids",
-        )?;
-        Ok(())
-    }
-}
-
 impl WireValidate for ServiceUpdateTriggerPayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.to_version, MAX_SHORT_STRING_LEN, "to_version")?;
@@ -339,11 +306,6 @@ impl WireValidate for ServiceUpdateTriggerPayload {
 
 impl WireValidate for DisconnectingPayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
-        check_vec_len(
-            &self.active_mqtt_clients,
-            MAX_ACTIVE_MQTT_CLIENTS,
-            "active_mqtt_clients",
-        )?;
         Ok(())
     }
 }
@@ -1008,44 +970,6 @@ impl WireValidate for UpdateStdinDataPayload {
 impl WireValidate for StdinAttentionPayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_opt_string_len(&self.hint, MAX_MEDIUM_STRING_LEN, "hint")?;
-        Ok(())
-    }
-}
-
-impl WireValidate for MqttTenantAssignmentsPayload {
-    fn wire_validate(&self) -> Result<(), WireValidationError> {
-        check_vec_len(&self.tenants, MAX_MQTT_TENANTS, "tenants")?;
-        for tenant in &self.tenants {
-            tenant.wire_validate()?;
-        }
-        Ok(())
-    }
-}
-
-impl WireValidate for MqttTenantConfig {
-    fn wire_validate(&self) -> Result<(), WireValidationError> {
-        check_string_len(&self.client_id, MAX_SHORT_STRING_LEN, "client_id")?;
-        check_string_len(&self.host, MAX_SHORT_STRING_LEN, "host")?;
-        check_string_len(&self.topic_prefix, MAX_SHORT_STRING_LEN, "topic_prefix")?;
-        check_string_len(
-            &self.ha_discovery_prefix,
-            MAX_SHORT_STRING_LEN,
-            "ha_discovery_prefix",
-        )?;
-        Ok(())
-    }
-}
-
-impl WireValidate for MqttTenantConfigUpdatedPayload {
-    fn wire_validate(&self) -> Result<(), WireValidationError> {
-        self.tenant.wire_validate()?;
-        Ok(())
-    }
-}
-
-impl WireValidate for MqttTenantRevokedPayload {
-    fn wire_validate(&self) -> Result<(), WireValidationError> {
-        check_string_len(&self.reason, MAX_MEDIUM_STRING_LEN, "reason")?;
         Ok(())
     }
 }

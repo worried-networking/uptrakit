@@ -38,6 +38,7 @@ macro_rules! publish_best_effort {
 
 mod cli;
 mod client_manager;
+mod extension;
 mod ha_discovery;
 mod mqtt_client;
 mod state_publisher;
@@ -46,16 +47,18 @@ mod tenant_manager;
 use clap::Parser;
 use rootcause::prelude::*;
 use std::collections::BTreeSet;
+use uuid::Uuid;
 
 use uptrakit_internal_wire::{
-    Capability, ControllerMessage, DisconnectingPayload, MqttClientStatusPayload, RegisterPayload,
-    ServiceMessage,
+    Capability, ControllerMessage, DisconnectingPayload, ServiceMessage,
+    payloads::{ServiceConfigEntry, ServiceConfigUpdatedPayload},
 };
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
-    ShutdownCause, default_resolve_shutdown,
+    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceConfigProxy, ServiceHandler,
+    ServiceIdentityState, ShutdownCause, default_resolve_shutdown,
 };
 
+use crate::client_manager::ParsedMqttClientConfig;
 use crate::tenant_manager::TenantManager;
 
 /// Capacity of the bounded MQTT service-event channel.
@@ -66,11 +69,20 @@ use crate::tenant_manager::TenantManager;
 /// (tens of MQTT clients) while bounding memory growth under backpressure.
 const MQTT_EVENT_CHANNEL_CAPACITY: usize = 512;
 
+/// Prefix for client config store keys.
+///
+/// Each MQTT client is stored under `"clients.{uuid}"` in the service config store.
+const CONFIG_KEY_PREFIX: &str = "clients.";
+
 struct MqttHandler {
-    max_tenants: u32,
-    instance_id: String,
     tenant_mgr: TenantManager,
     event_rx: tokio::sync::mpsc::Receiver<crate::mqtt_client::MqttServiceEvent>,
+    /// In-memory snapshot of all parsed MQTT client configs.
+    ///
+    /// Updated on `ServiceConfigDelivery` and `ServiceConfigUpdated`.
+    configs: Vec<ParsedMqttClientConfig>,
+    /// Correlates `StoreServiceConfig` / `DeleteServiceConfig` requests with ACKs.
+    config_proxy: ServiceConfigProxy,
 }
 
 #[async_trait::async_trait]
@@ -83,18 +95,45 @@ impl ServiceHandler for MqttHandler {
 
     async fn on_connected(
         &mut self,
-        conn: &mut ControllerConnection,
+        _conn: &mut ControllerConnection,
         _identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
-        conn.send(ServiceMessage::Register(RegisterPayload {
-            capabilities: mqtt_capabilities(),
-            instance_id: Some(self.instance_id.clone()),
-            max_tenants: self.max_tenants,
-            active_mqtt_clients: self.tenant_mgr.active_mqtt_client_ids(),
-        }))
-        .await
-        .context_to::<LoopError>()?;
+        // Nothing to send on connect — the controller will deliver
+        // ServiceConfigDelivery after authentication completes.
         Ok(())
+    }
+
+    async fn on_settings(
+        &mut self,
+        _settings: &uptrakit_internal_wire::ServiceSettingsPayload,
+        conn: &mut ControllerConnection,
+    ) {
+        // Register UI extensions only when the agreed capability set includes
+        // UiExtensions. The SDK sends UpdateCapabilities before calling
+        // on_settings, so the controller has already refreshed its gating flags
+        // by the time ExtensionRegister is received.
+        if conn
+            .agreed_capabilities()
+            .contains(&Capability::UiExtensions)
+        {
+            let register_payload = extension::build_register_payload();
+            if let Err(e) = conn
+                .send(ServiceMessage::ExtensionRegister(register_payload))
+                .await
+            {
+                tracing::warn!(error = %e, "failed to register UI extensions");
+            }
+
+            let actions_payload = uptrakit_internal_wire::extension::ExtensionActionsPayload::new(
+                extension::build_actions(),
+            );
+            if let Err(e) = conn
+                .send(ServiceMessage::ExtensionActionsRegister(actions_payload))
+                .await
+            {
+                tracing::warn!(error = %e, "failed to register extension actions");
+            }
+        }
     }
 
     async fn on_message(
@@ -103,23 +142,19 @@ impl ServiceHandler for MqttHandler {
         _conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>> {
         match msg {
-            ControllerMessage::Registered(payload) => {
-                tracing::info!(instance_id = %payload.instance_id, "registered with controller");
+            ControllerMessage::ServiceConfigDelivery(payload) => {
+                tracing::info!(
+                    count = payload.entries.len(),
+                    "received ServiceConfigDelivery"
+                );
+                let parsed = parse_client_configs(payload.entries);
+                self.configs = parsed.clone();
+                self.tenant_mgr.apply_configs(parsed).await;
                 Ok(None)
             }
-            ControllerMessage::TenantAssignments(payload) => {
-                tracing::info!(count = payload.tenants.len(), "received tenant assignments");
-                self.tenant_mgr.apply_assignments(payload.tenants).await;
-                Ok(None)
-            }
-            ControllerMessage::TenantConfigUpdated(payload) => {
-                tracing::info!(mqtt_client_id = %payload.tenant.mqtt_client_id, "mqtt client config updated");
-                self.tenant_mgr.reload_client(payload.tenant).await;
-                Ok(None)
-            }
-            ControllerMessage::TenantRevoked(payload) => {
-                tracing::info!(mqtt_client_id = %payload.mqtt_client_id, reason = %payload.reason, "mqtt client revoked");
-                self.tenant_mgr.stop_client(&payload.mqtt_client_id).await;
+            ControllerMessage::ServiceConfigUpdated(payload) => {
+                tracing::debug!("received ServiceConfigUpdated");
+                self.apply_config_update(payload).await;
                 Ok(None)
             }
             ControllerMessage::SoftwareStates(payload) => {
@@ -149,6 +184,55 @@ impl ServiceHandler for MqttHandler {
         }
     }
 
+    fn on_service_config_ack(
+        &self,
+        ack: uptrakit_internal_wire::payloads::ServiceConfigAckPayload,
+    ) {
+        self.config_proxy.complete(&ack.request_id.clone(), ack);
+    }
+
+    async fn on_extension_request(
+        &mut self,
+        request: uptrakit_internal_wire::extension::ExtensionRequestPayload,
+        conn: &mut ControllerConnection,
+    ) -> LoopResult<()> {
+        let request_id = request.request_id.clone();
+
+        // List action — read-only, no config proxy needed.
+        if let Some(response) = extension::handle_list_action(&request, &self.configs) {
+            return conn
+                .send(ServiceMessage::ExtensionResponse(response))
+                .await
+                .map_err(|e| {
+                    report!(LoopError::Other(format!(
+                        "failed to send extension response: {e}"
+                    )))
+                });
+        }
+
+        // Write actions — create, edit, delete.
+        match request.action_id.as_str() {
+            extension::ACTION_CREATE => {
+                self.handle_create_client(request, conn).await?;
+            }
+            extension::ACTION_EDIT => {
+                self.handle_edit_client(request, conn).await?;
+            }
+            extension::ACTION_DELETE => {
+                self.handle_delete_client(request, conn).await?;
+            }
+            _ => {
+                extension::send_error_response(
+                    conn,
+                    request_id,
+                    format!("unknown action: {}", request.action_id),
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
     async fn poll_service_event(&mut self) -> Self::ServiceEvent {
         self.event_rx.recv().await
     }
@@ -161,11 +245,11 @@ impl ServiceHandler for MqttHandler {
         use crate::mqtt_client::MqttServiceEvent;
         match event {
             Some(MqttServiceEvent::Status(status)) => {
-                conn.send_best_effort(ServiceMessage::MqttClientStatus(MqttClientStatusPayload {
-                    mqtt_client_id: status.mqtt_client_id,
-                    status: status.status,
-                }))
-                .await;
+                tracing::debug!(
+                    mqtt_client_id = %status.mqtt_client_id,
+                    status = %status.status,
+                    "MQTT client connection status changed"
+                );
                 Ok(None)
             }
             Some(MqttServiceEvent::Reconnected(id)) => {
@@ -226,12 +310,9 @@ impl ServiceHandler for MqttHandler {
     ) -> LoopOutcome {
         let (reason, outcome) = default_resolve_shutdown(cause);
 
-        // Notify controller with active MQTT client list.
-        let active = self.tenant_mgr.active_mqtt_client_ids();
-        conn.send_best_effort(ServiceMessage::Disconnecting(DisconnectingPayload {
+        conn.send_best_effort(ServiceMessage::Disconnecting(DisconnectingPayload::new(
             reason,
-            active_mqtt_clients: active,
-        }))
+        )))
         .await;
 
         tracing::info!("shutting down MQTT clients");
@@ -242,15 +323,245 @@ impl ServiceHandler for MqttHandler {
     }
 }
 
+impl MqttHandler {
+    /// Apply an incremental config update from the controller.
+    async fn apply_config_update(&mut self, payload: ServiceConfigUpdatedPayload) {
+        // Parse newly changed entries.
+        let changed = parse_client_configs(payload.changed);
+
+        // Collect deleted UUIDs and update the in-memory snapshot.
+        let mut deleted_ids: Vec<Uuid> = Vec::new();
+        for deleted_key in &payload.deleted {
+            if let Some(mqtt_client_id) = parse_client_key(&deleted_key.key) {
+                self.configs.retain(|c| c.mqtt_client_id != mqtt_client_id);
+                deleted_ids.push(mqtt_client_id);
+            }
+        }
+        for config in &changed {
+            let id = config.mqtt_client_id;
+            if let Some(existing) = self.configs.iter_mut().find(|c| c.mqtt_client_id == id) {
+                *existing = config.clone();
+            } else {
+                self.configs.push(config.clone());
+            }
+        }
+
+        // Stop deleted clients.
+        for mqtt_client_id in deleted_ids {
+            self.tenant_mgr.stop_client(&mqtt_client_id).await;
+        }
+
+        // Apply changed configs to the tenant manager.
+        self.tenant_mgr.apply_configs(changed).await;
+    }
+
+    /// Handle `ACTION_CREATE`: store a new MQTT client config.
+    async fn handle_create_client(
+        &mut self,
+        request: uptrakit_internal_wire::extension::ExtensionRequestPayload,
+        conn: &mut ControllerConnection,
+    ) -> LoopResult<()> {
+        let request_id = request.request_id.clone();
+        let tenant_id = request.tenant_id;
+        let new_id = Uuid::now_v7();
+        let key = format!("{CONFIG_KEY_PREFIX}{new_id}");
+
+        let pending = self
+            .config_proxy
+            .store(tenant_id, key, request.params, false);
+        let msg = pending.message.clone();
+        if let Err(e) = conn.send(msg).await {
+            return extension::send_error_response(
+                conn,
+                request_id,
+                format!("failed to send store request: {e}"),
+            )
+            .await;
+        }
+
+        match pending
+            .wait(&self.config_proxy, std::time::Duration::from_secs(10))
+            .await
+        {
+            Ok(()) => {
+                let response = uptrakit_internal_wire::extension::ExtensionResponsePayload {
+                    request_id,
+                    success: true,
+                    data: serde_json::json!({ "id": new_id.to_string() }),
+                    error: None,
+                };
+                conn.send(ServiceMessage::ExtensionResponse(response))
+                    .await
+                    .map_err(|e| {
+                        report!(LoopError::Other(format!(
+                            "failed to send extension response: {e}"
+                        )))
+                    })
+            }
+            Err(e) => extension::send_error_response(conn, request_id, e.to_string()).await,
+        }
+    }
+
+    /// Handle `ACTION_EDIT`: update an existing MQTT client config.
+    async fn handle_edit_client(
+        &mut self,
+        request: uptrakit_internal_wire::extension::ExtensionRequestPayload,
+        conn: &mut ControllerConnection,
+    ) -> LoopResult<()> {
+        let request_id = request.request_id.clone();
+        let tenant_id = request.tenant_id;
+
+        let Some(id_str) = request.params.get("id").and_then(|v| v.as_str()) else {
+            return extension::send_error_response(conn, request_id, "missing 'id' parameter")
+                .await;
+        };
+        let Ok(mqtt_client_id) = Uuid::parse_str(id_str) else {
+            return extension::send_error_response(conn, request_id, "invalid 'id' parameter")
+                .await;
+        };
+        let key = format!("{CONFIG_KEY_PREFIX}{mqtt_client_id}");
+
+        let pending = self
+            .config_proxy
+            .store(tenant_id, key, request.params, false);
+        let msg = pending.message.clone();
+        if let Err(e) = conn.send(msg).await {
+            return extension::send_error_response(
+                conn,
+                request_id,
+                format!("failed to send store request: {e}"),
+            )
+            .await;
+        }
+
+        match pending
+            .wait(&self.config_proxy, std::time::Duration::from_secs(10))
+            .await
+        {
+            Ok(()) => {
+                let response = uptrakit_internal_wire::extension::ExtensionResponsePayload {
+                    request_id,
+                    success: true,
+                    data: serde_json::Value::Null,
+                    error: None,
+                };
+                conn.send(ServiceMessage::ExtensionResponse(response))
+                    .await
+                    .map_err(|e| {
+                        report!(LoopError::Other(format!(
+                            "failed to send extension response: {e}"
+                        )))
+                    })
+            }
+            Err(e) => extension::send_error_response(conn, request_id, e.to_string()).await,
+        }
+    }
+
+    /// Handle `ACTION_DELETE`: delete an MQTT client config.
+    async fn handle_delete_client(
+        &mut self,
+        request: uptrakit_internal_wire::extension::ExtensionRequestPayload,
+        conn: &mut ControllerConnection,
+    ) -> LoopResult<()> {
+        let request_id = request.request_id.clone();
+        let tenant_id = request.tenant_id;
+
+        let Some(id_str) = request.params.get("id").and_then(|v| v.as_str()) else {
+            return extension::send_error_response(conn, request_id, "missing 'id' parameter")
+                .await;
+        };
+        let Ok(mqtt_client_id) = Uuid::parse_str(id_str) else {
+            return extension::send_error_response(conn, request_id, "invalid 'id' parameter")
+                .await;
+        };
+        let key = format!("{CONFIG_KEY_PREFIX}{mqtt_client_id}");
+
+        let pending = self.config_proxy.delete(tenant_id, key);
+        let msg = pending.message.clone();
+        if let Err(e) = conn.send(msg).await {
+            return extension::send_error_response(
+                conn,
+                request_id,
+                format!("failed to send delete request: {e}"),
+            )
+            .await;
+        }
+
+        match pending
+            .wait(&self.config_proxy, std::time::Duration::from_secs(10))
+            .await
+        {
+            Ok(()) => {
+                let response = uptrakit_internal_wire::extension::ExtensionResponsePayload {
+                    request_id,
+                    success: true,
+                    data: serde_json::Value::Null,
+                    error: None,
+                };
+                conn.send(ServiceMessage::ExtensionResponse(response))
+                    .await
+                    .map_err(|e| {
+                        report!(LoopError::Other(format!(
+                            "failed to send extension response: {e}"
+                        )))
+                    })
+            }
+            Err(e) => extension::send_error_response(conn, request_id, e.to_string()).await,
+        }
+    }
+}
+
+/// Parse a slice of `ServiceConfigEntry` values into `ParsedMqttClientConfig`.
+///
+/// Entries whose key does not start with `"clients."` or whose value cannot be
+/// deserialized are logged and skipped.
+fn parse_client_configs(entries: Vec<ServiceConfigEntry>) -> Vec<ParsedMqttClientConfig> {
+    entries
+        .into_iter()
+        .filter_map(|entry| {
+            let Some(mqtt_client_id) = parse_client_key(&entry.key) else {
+                tracing::debug!(key = %entry.key, "skipping non-client config entry");
+                return None;
+            };
+            match serde_json::from_value::<ParsedMqttClientConfig>(entry.value) {
+                Ok(mut config) => {
+                    config.mqtt_client_id = mqtt_client_id;
+                    config.tenant_id = entry.tenant_id.unwrap_or_default();
+                    Some(config)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        key = %entry.key,
+                        error = %e,
+                        "failed to deserialize MQTT client config, skipping"
+                    );
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+/// Parse the UUID suffix from a `"clients.{uuid}"` config key.
+///
+/// Returns `None` if the key does not start with `CONFIG_KEY_PREFIX` or if
+/// the UUID suffix is malformed.
+fn parse_client_key(key: &str) -> Option<Uuid> {
+    let suffix = key.strip_prefix(CONFIG_KEY_PREFIX)?;
+    Uuid::parse_str(suffix).ok()
+}
+
 /// Capabilities advertised by the MQTT service.
 ///
 /// `SystemService` marks this service as global infrastructure (routed to the
 /// `system_services` table instead of the per-tenant `services` table).
+/// `UiExtensions` enables the MQTT clients settings page.
 fn mqtt_capabilities() -> BTreeSet<Capability> {
     [
         Capability::SystemService,
         Capability::UpdateTracking,
         Capability::GracefulShutdown,
+        Capability::UiExtensions,
     ]
     .into_iter()
     .collect()
@@ -271,18 +582,16 @@ async fn main() {
     init_tracing("uptrakit_mqtt", args.common.verbose);
     uptrakit_service_sdk::init_crypto();
 
-    let instance_id = generate_instance_id();
-    tracing::info!(%instance_id, "starting uptrakit-mqtt service");
+    tracing::info!("starting uptrakit-mqtt service");
 
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(MQTT_EVENT_CHANNEL_CAPACITY);
     let tenant_mgr = TenantManager::new(Some(event_tx));
 
     let mut handler = MqttHandler {
-        // Convert Option<NonZeroU32> → u32 using 0 as the wire sentinel for "unlimited".
-        max_tenants: args.max_tenants.map_or(0, |n| n.get()),
-        instance_id,
         tenant_mgr,
         event_rx,
+        configs: Vec::new(),
+        config_proxy: ServiceConfigProxy::new(),
     };
 
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
@@ -291,18 +600,6 @@ async fn main() {
         &mut handler,
     )
     .await;
-}
-
-/// Generate a unique instance ID: `{hostname}-{uuid_v7_first_8_chars}`
-fn generate_instance_id() -> String {
-    let host = hostname::get()
-        .map(|h| h.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "unknown".to_string());
-    let uuid_str = uuid::Uuid::now_v7().to_string();
-    // UUID v7 format is `xxxxxxxx-xxxx-...`, so the first 8 chars are always
-    // ASCII hex digits. Using `.get()` for defence-in-depth.
-    let uuid_prefix = uuid_str.get(..8).unwrap_or(&uuid_str);
-    format!("{host}-{uuid_prefix}")
 }
 
 /// Initialize `tracing_subscriber` with a verbosity-aware filter.

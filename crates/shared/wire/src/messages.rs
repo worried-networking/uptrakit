@@ -6,18 +6,16 @@ use super::payloads::{
     ApprovedPayload, BatchUpdateResultPayload, BroadcastAdminEventPayload, CaBundleUpdatedPayload,
     CertificatePayload, CheckVersionsPayload, DeleteServiceConfigPayload, DisconnectingPayload,
     DiscoverSoftwarePayload, DiscoveryResultsPayload, EnrollPayload, EnrolledPayload,
-    ExecuteBatchUpdatePayload, ExecuteUpdatePayload, HostConnectivityUpdatedPayload,
-    MqttClientCreatedPayload, MqttClientStatusPayload, MqttRegisteredPayload,
-    MqttReleaseTenantsPayload, MqttTenantAssignmentsPayload, MqttTenantConfigUpdatedPayload,
-    MqttTenantRevokedPayload, PingPayload, PongPayload, RegisterPayload, RejectedPayload,
-    ReportHostsPayload, ReportPluginConfigPayload, ReportPluginConfigResponsePayload,
-    RequestCaRotationPayload, RequestCertRenewalPayload, RequestCrlRenewalPayload,
-    ServerRestartingPayload, ServiceConfigAckPayload, ServiceConfigDeliveryPayload,
-    ServiceConfigUpdatedPayload, ServiceCredentialsPayload, ServiceHostBatchUpdateTriggerPayload,
-    ServiceSettingsPayload, ServiceUpdateTriggerPayload, SetUpdateFreezePayload,
-    SoftwareStatesChangedPayload, SoftwareStatesPayload, StdinAttentionPayload,
-    StoreServiceConfigPayload, TokenRevokedPayload, UpdateCapabilitiesPayload, UpdateOutputPayload,
-    UpdateResultPayload, UpdateStartedPayload, UpdateStdinDataPayload, VersionCheckResultsPayload,
+    ExecuteBatchUpdatePayload, ExecuteUpdatePayload, HostConnectivityUpdatedPayload, PingPayload,
+    PongPayload, RejectedPayload, ReportHostsPayload, ReportPluginConfigPayload,
+    ReportPluginConfigResponsePayload, RequestCaRotationPayload, RequestCertRenewalPayload,
+    RequestCrlRenewalPayload, ServerRestartingPayload, ServiceConfigAckPayload,
+    ServiceConfigDeliveryPayload, ServiceConfigUpdatedPayload, ServiceCredentialsPayload,
+    ServiceHostBatchUpdateTriggerPayload, ServiceSettingsPayload, ServiceUpdateTriggerPayload,
+    SetUpdateFreezePayload, SoftwareStatesChangedPayload, SoftwareStatesPayload,
+    StdinAttentionPayload, StoreServiceConfigPayload, TokenRevokedPayload,
+    UpdateCapabilitiesPayload, UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload,
+    UpdateStdinDataPayload, VersionCheckResultsPayload,
 };
 
 /// Messages sent from a service (agent or MQTT) to the controller.
@@ -55,10 +53,6 @@ pub enum ServiceMessage {
     /// The controller broadcasts this to interactive session subscribers and may
     /// trigger notifications.
     StdinAttention(StdinAttentionPayload),
-    // -- MQTT-specific --
-    Register(RegisterPayload),
-    ReleaseTenants(MqttReleaseTenantsPayload),
-    MqttClientStatus(MqttClientStatusPayload),
     #[serde(alias = "mqtt_trigger_update")]
     ServiceTriggerUpdate(ServiceUpdateTriggerPayload),
     /// Service → Controller: trigger a batch update of all outdated software items on a host.
@@ -184,12 +178,6 @@ pub enum ControllerMessage {
     /// controller has cleared the database. Services should truncate their
     /// local data stores (e.g. SSH host list, Proxmox state).
     ResetData,
-    // -- MQTT-specific --
-    Registered(MqttRegisteredPayload),
-    TenantAssignments(MqttTenantAssignmentsPayload),
-    TenantConfigUpdated(MqttTenantConfigUpdatedPayload),
-    TenantRevoked(MqttTenantRevokedPayload),
-    MqttClientCreated(MqttClientCreatedPayload),
     SoftwareStates(SoftwareStatesPayload),
     /// Agent connectivity changed for one or more hosts.
     ///
@@ -298,20 +286,16 @@ pub enum ControllerMessage {
 impl ControllerMessage {
     /// Returns `true` if this message may be published to NATS JetStream.
     ///
-    /// Credential-bearing variants (`ServiceCredentials`, `TenantAssignments`,
-    /// `TenantConfigUpdated`, `TenantRevoked`) and session-targeted variants
-    /// (`ExtensionRequest`, `ExtensionResponse`) must **never** be published
-    /// to NATS — they are delivered exclusively over authenticated WebSocket
-    /// connections.  All other variants are safe to broadcast via NATS.
+    /// Credential-bearing variants (`ServiceCredentials`) and session-targeted
+    /// variants (`ExtensionRequest`, `ExtensionResponse`) must **never** be
+    /// published to NATS — they are delivered exclusively over authenticated
+    /// WebSocket connections.  All other variants are safe to broadcast via NATS.
     ///
     /// This is the authoritative gate used by [`NatsConnection::publish`].
     pub fn is_nats_publishable(&self) -> bool {
         !matches!(
             self,
             ControllerMessage::ServiceCredentials(_)
-                | ControllerMessage::TenantAssignments(_)
-                | ControllerMessage::TenantConfigUpdated(_)
-                | ControllerMessage::TenantRevoked(_)
                 | ControllerMessage::ExtensionRequest(_)
                 | ControllerMessage::ExtensionResponse(_)
                 | ControllerMessage::UpdateStdinData(_)
