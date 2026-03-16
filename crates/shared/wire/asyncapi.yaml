@@ -537,18 +537,20 @@ operations:
       This allows the controller to distinguish between intentional disconnects
       and unexpected connection losses.
 
-  sendMqttRegister:
+  sendRegister:
     action: send
     channel:
       $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/serviceConnection/messages/mqttRegister"
-    summary: MQTT service registers with the controller (MQTT-only)
+      - $ref: "#/channels/serviceConnection/messages/register"
+    summary: Service declares its capabilities to the controller
     description: |
-      Sent by an authenticated MQTT service immediately after mTLS WebSocket connect.
-      Includes the instance ID, max tenants capacity, and currently active MQTT client
-      IDs (for reconnect reconciliation). The controller responds with `registered`
-      followed by `tenant_assignments`.
+      Sent by every authenticated service immediately on connect (from `on_connected`,
+      before `ServiceSettings` is processed). Declares the service's capability set.
+      Services with the `UpdateTracking` capability also include `instance_id`,
+      `max_tenants`, and `active_mqtt_clients` for MQTT lease coordination.
+      The controller responds with `registered` and `tenant_assignments` for
+      update-tracking services.
 
   receiveMqttRegistered:
     action: receive
@@ -1191,13 +1193,13 @@ components:
       payload:
         $ref: "#/components/schemas/disconnectingPayload"
 
-    mqttRegister:
+    register:
       name: register
-      title: MQTT Register Message
-      summary: MQTT service registration request (MQTT-only)
+      title: Register Message
+      summary: Service capability declaration (sent by all services on connect)
       contentType: application/json
       payload:
-        $ref: "#/components/schemas/mqttRegisterPayload"
+        $ref: "#/components/schemas/registerPayload"
 
     mqttRegistered:
       name: registered
@@ -2909,13 +2911,12 @@ components:
             format: uuid
           description: List of active MQTT client IDs (MQTT services only, for graceful handoff)
 
-    mqttRegisterPayload:
+    registerPayload:
       type: object
       required:
         - protocol_version
         - seq
         - type
-        - instance_id
       properties:
         protocol_version:
           type: integer
@@ -2934,15 +2935,29 @@ components:
           type: string
           const: register
           description: Message type discriminator
+        capabilities:
+          type: array
+          items:
+            type: string
+          default: []
+          description: |
+            Capabilities declared by this service instance. Unknown strings are
+            ignored (forward compatibility). Omitted when empty.
+          examples:
+            - ["graceful_shutdown", "software_discovery", "update_hooks"]
         instance_id:
           type: string
-          description: Unique instance identifier (e.g., hostname-uuid_prefix)
+          description: |
+            Unique instance identifier (e.g., hostname-uuid_prefix).
+            Only set by services with the `update_tracking` capability.
           examples:
             - mqtt-node-1-a1b2c3d4
         max_tenants:
           type: integer
           format: int32
-          description: Maximum tenants this instance will handle (0 = unlimited)
+          description: |
+            Maximum tenants this instance will handle (0 = unlimited).
+            Only meaningful for services with the `update_tracking` capability.
           default: 0
           examples:
             - 0
@@ -2954,23 +2969,10 @@ components:
             format: uuid
           description: |
             Currently active MQTT client IDs (for reconnect reconciliation).
+            Only set by services with the `update_tracking` capability.
             Omitted when empty (empty array is the default).
           examples:
             - ["660e8400-e29b-41d4-a716-446655440001"]
-        capabilities:
-          type: array
-          items:
-            type: string
-            enum:
-              - graceful_shutdown
-              - update_tracking
-              - software_discovery
-              - ssh_remote
-              - update_hooks
-          default: []
-          description: |
-            Capabilities advertised by this MQTT service. Unknown strings are
-            ignored (forward compatibility). Omitted when empty.
 
     mqttRegisteredPayload:
       type: object

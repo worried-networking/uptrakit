@@ -300,9 +300,11 @@ impl WireValidate for uptrakit_shared_types::DiscoveredSoftware {
     }
 }
 
-impl WireValidate for MqttRegisterPayload {
+impl WireValidate for RegisterPayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
-        check_string_len(&self.instance_id, MAX_SHORT_STRING_LEN, "instance_id")?;
+        if let Some(ref id) = self.instance_id {
+            check_string_len(id, MAX_SHORT_STRING_LEN, "instance_id")?;
+        }
         check_vec_len(
             &self.active_mqtt_clients,
             MAX_ACTIVE_MQTT_CLIENTS,

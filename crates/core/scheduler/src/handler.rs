@@ -13,7 +13,9 @@ use std::time::Duration;
 use rootcause::prelude::*;
 use sea_orm::{ConnectOptions, Database};
 use tokio_util::sync::CancellationToken;
-use uptrakit_internal_wire::{Capability, ControllerMessage, DisconnectingPayload, ServiceMessage};
+use uptrakit_internal_wire::{
+    Capability, ControllerMessage, DisconnectingPayload, RegisterPayload, ServiceMessage,
+};
 use uptrakit_scheduler_engine::executors::{
     auth_cleanup::AuthCleanupExecutor, detect_version::DetectVersionExecutor,
     discover_software::DiscoverSoftwareExecutor, fetch_releases::FetchReleasesExecutor,
@@ -45,6 +47,20 @@ pub(crate) struct SchedulerHandler {
     /// Stable service ID captured on connect; used as the claim identity so that
     /// a scheduler that reconnects to a different controller reuses the same UUID.
     service_id: Option<Uuid>,
+}
+
+/// Capabilities advertised by the external scheduler service.
+fn scheduler_capabilities() -> BTreeSet<Capability> {
+    [
+        Capability::SystemService,
+        Capability::Scheduler,
+        Capability::DatabaseAccess,
+        Capability::NatsAccess,
+        Capability::MasterKeyAccess,
+        Capability::GracefulShutdown,
+    ]
+    .into_iter()
+    .collect()
 }
 
 impl SchedulerHandler {
@@ -93,9 +109,16 @@ impl ServiceHandler for SchedulerHandler {
 
     async fn on_connected(
         &mut self,
-        _conn: &mut ControllerConnection,
+        conn: &mut ControllerConnection,
         identity: &uptrakit_service_sdk::ServiceIdentityState,
     ) -> LoopResult<()> {
+        conn.send(ServiceMessage::Register(RegisterPayload {
+            capabilities: scheduler_capabilities(),
+            ..RegisterPayload::default()
+        }))
+        .await
+        .context_to::<LoopError>()?;
+
         self.service_id = identity.service_id();
         tracing::info!("connected to controller, waiting for ServiceCredentials");
         Ok(())
@@ -250,16 +273,7 @@ impl ServiceHandler for SchedulerHandler {
     }
 
     fn capabilities(&self) -> BTreeSet<Capability> {
-        [
-            Capability::SystemService,
-            Capability::Scheduler,
-            Capability::DatabaseAccess,
-            Capability::NatsAccess,
-            Capability::MasterKeyAccess,
-            Capability::GracefulShutdown,
-        ]
-        .into_iter()
-        .collect()
+        scheduler_capabilities()
     }
 
     async fn poll_service_event(&mut self) -> Self::ServiceEvent {

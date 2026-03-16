@@ -453,8 +453,8 @@ fn disconnecting_empty_mqtt_clients_omitted() {
 
 #[test]
 fn register_serialization_roundtrip() {
-    let msg = ServiceMessage::Register(MqttRegisterPayload {
-        instance_id: "mqtt-node1-01936a1e".to_string(),
+    let msg = ServiceMessage::Register(RegisterPayload {
+        instance_id: Some("mqtt-node1-01936a1e".to_string()),
         max_tenants: 10,
         active_mqtt_clients: vec![TEST_UUID_1, TEST_UUID_2],
         capabilities: BTreeSet::new(),
@@ -469,13 +469,28 @@ fn register_serialization_roundtrip() {
 
 #[test]
 fn register_empty_active_mqtt_clients() {
-    let msg = ServiceMessage::Register(MqttRegisterPayload {
-        instance_id: "mqtt-node2-01936a1e".to_string(),
+    let msg = ServiceMessage::Register(RegisterPayload {
+        instance_id: Some("mqtt-node2-01936a1e".to_string()),
         max_tenants: 0,
         active_mqtt_clients: vec![],
         capabilities: BTreeSet::new(),
     });
     let json = serde_json::to_string(&msg).unwrap();
+    assert!(!json.contains("active_mqtt_clients"));
+    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized, msg);
+}
+
+#[test]
+fn register_without_instance_id() {
+    // Services without UpdateTracking capability send Register without instance_id.
+    let msg = ServiceMessage::Register(RegisterPayload {
+        capabilities: agent_capabilities(),
+        ..RegisterPayload::default()
+    });
+    let json = serde_json::to_string(&msg).unwrap();
+    assert!(json.contains(r#""type":"register"#));
+    assert!(!json.contains("instance_id"));
     assert!(!json.contains("active_mqtt_clients"));
     let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, msg);
@@ -1948,15 +1963,15 @@ fn spec_conformance_disconnecting() {
 #[test]
 fn spec_conformance_register() {
     let spec = AsyncApiSpec::load();
-    let json = service_envelope_json(ServiceMessage::Register(MqttRegisterPayload {
-        instance_id: "mqtt-node1-01936a1e".to_string(),
+    let json = service_envelope_json(ServiceMessage::Register(RegisterPayload {
+        instance_id: Some("mqtt-node1-01936a1e".to_string()),
         max_tenants: 10,
         active_mqtt_clients: vec![TEST_UUID_1],
         capabilities: [Capability::UpdateTracking, Capability::GracefulShutdown]
             .into_iter()
             .collect(),
     }));
-    spec.validate("mqttRegisterPayload", &json);
+    spec.validate("registerPayload", &json);
 }
 
 #[test]

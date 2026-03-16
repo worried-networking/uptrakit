@@ -38,7 +38,7 @@ use cert::{
 };
 use credentials::deliver_service_credentials;
 pub(crate) use discovery::trigger_discovery_for_agent_host;
-use mqtt::{FirstServiceMessage, complete_mqtt_registration, receive_first_service_message};
+use mqtt::{complete_mqtt_registration, receive_first_service_message};
 use shared_types::{ProcessorAction, ProcessorResponse, load_linked_host_ids};
 use updates::deliver_pending_updates;
 
@@ -883,13 +883,12 @@ async fn setup_authenticated_session(
     // Stage 2: Deliver credentials to services that have credential capabilities.
     deliver_service_credentials(sink, state, &db_capabilities, service_id, out_seq).await?;
 
-    // Stage 3: Detect service type by reading the first wire message.
-    // The MQTT service sends Register before processing ServiceSettings (from
-    // on_connected). Non-MQTT services send UpdateCapabilities after processing
-    // ServiceSettings. Reading from the wire — rather than from DB capabilities —
-    // ensures correct detection even when the DB stores a stale capability string
-    // from before a rename.
-    let first_msg = receive_first_service_message(
+    // Stage 3: Receive the Register message sent by every service on connect.
+    // All service types send Register from on_connected, before ServiceSettings
+    // is processed. Reading capabilities from the live wire — rather than from
+    // DB-stored strings — ensures correct detection even when the DB holds stale
+    // values from before a capability rename.
+    let register = receive_first_service_message(
         sink,
         stream,
         state,
@@ -900,15 +899,17 @@ async fn setup_authenticated_session(
     )
     .await?;
 
-    let (mqtt_handshake, session_capabilities) = match first_msg {
-        FirstServiceMessage::Mqtt {
-            handshake,
-            capabilities,
-        } => (Some(handshake), capabilities),
-        FirstServiceMessage::NonMqtt(capabilities) => (None, capabilities),
+    let session_capabilities = register.capabilities.clone();
+    let is_mqtt = session_capabilities.contains(&Capability::UpdateTracking);
+    let mqtt_handshake = if is_mqtt {
+        Some(mqtt::MqttHandshake {
+            instance_id: register.instance_id.unwrap_or_default(),
+            max_tenants: register.max_tenants,
+            active_mqtt_clients: register.active_mqtt_clients,
+        })
+    } else {
+        None
     };
-
-    let is_mqtt = mqtt_handshake.is_some();
     let has_software_discovery = session_capabilities.contains(&Capability::SoftwareDiscovery);
     let has_update_hooks = session_capabilities.contains(&Capability::UpdateHooks);
     let mut has_ui_extensions = session_capabilities.contains(&Capability::UiExtensions);

@@ -597,23 +597,34 @@ pub struct UpdateCapabilitiesPayload {
 // MQTT Service Specific Payloads
 // =============================================================================
 
-/// Payload for MQTT service instance registration (sent after mTLS connect).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttRegisterPayload {
+/// Payload sent by every service immediately on connect to declare its capabilities.
+///
+/// All service types send this message from `on_connected`, before `ServiceSettings`
+/// is processed. The controller uses `capabilities` as the authoritative source for
+/// service-type detection and capability persistence.
+///
+/// MQTT-specific fields (`instance_id`, `max_tenants`, `active_mqtt_clients`) are
+/// only meaningful for services that declare the `UpdateTracking` capability.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegisterPayload {
+    /// Capabilities declared by this service instance.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub capabilities: BTreeSet<Capability>,
     /// Unique instance identifier (e.g., hostname-uuid prefix).
-    pub instance_id: String,
-    /// Maximum tenants this instance will handle (0 = unlimited).
+    ///
+    /// Only set by services with the `UpdateTracking` capability.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
+    /// Maximum tenants this instance handles (0 = unlimited).
+    ///
+    /// Only meaningful for services with the `UpdateTracking` capability.
     #[serde(default)]
     pub max_tenants: u32,
     /// Currently active MQTT client IDs (for reconnect reconciliation).
+    ///
+    /// Only set by services with the `UpdateTracking` capability.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_mqtt_clients: Vec<Uuid>,
-    /// Capabilities advertised by this MQTT service.
-    ///
-    /// The controller computes the agreed set as the intersection of this set
-    /// with its own capabilities, considering only typed (known) variants.
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub capabilities: BTreeSet<Capability>,
 }
 
 /// Payload for registration acknowledgment.

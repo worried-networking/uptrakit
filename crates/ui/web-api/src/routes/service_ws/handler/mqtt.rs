@@ -10,11 +10,10 @@ use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 
 use uptrakit_internal_wire::{
-    Capability, CloseReason, ControllerMessage, ErrorCode, ErrorPayload, IncomingSeq,
+    CloseReason, ControllerMessage, ErrorCode, ErrorPayload, IncomingSeq,
     MqttClientConnectionStatus as WireMqttClientConnectionStatus, MqttClientStatusPayload,
-    MqttReleaseTenantsPayload, MqttTenantConfig, OutgoingSeq, PingPayload,
+    MqttReleaseTenantsPayload, MqttTenantConfig, OutgoingSeq, PingPayload, RegisterPayload,
     ServiceHostBatchUpdateTriggerPayload, ServiceMessage, ServiceUpdateTriggerPayload,
-    UpdateCapabilitiesPayload,
 };
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::settings_mqtt::MqttClientConnectionStatus as ApiMqttClientConnectionStatus;
@@ -50,37 +49,17 @@ pub(super) struct MqttContext {
 }
 
 // ---------------------------------------------------------------------------
-// FirstServiceMessage / receive_first_service_message
+// receive_first_service_message
 // ---------------------------------------------------------------------------
 
-/// Result of reading the first message from a connecting service.
+/// Read the `Register` message sent by a connecting service.
 ///
-/// The MQTT service always sends `Register` immediately on connection (from
-/// `on_connected`, before processing `ServiceSettings`). All other services
-/// send `UpdateCapabilities` as their first message after receiving and
-/// processing `ServiceSettings`. This distinction lets the controller identify
-/// the service type from the live wire rather than from DB-stored capability
-/// strings, which can be stale after a capability rename.
-pub(super) enum FirstServiceMessage {
-    /// MQTT service: `Register` was the first message.
-    Mqtt {
-        handshake: MqttHandshake,
-        /// Capabilities declared in the `Register` payload.
-        capabilities: std::collections::BTreeSet<Capability>,
-    },
-    /// Non-MQTT service: `UpdateCapabilities` was the first message.
-    NonMqtt(std::collections::BTreeSet<Capability>),
-}
-
-/// Read the first significant message from a connecting service to determine
-/// its type.
+/// All service types send `Register` immediately from `on_connected`, before
+/// `ServiceSettings` is processed. The controller waits for this message on
+/// every new authenticated connection.
 ///
-/// Must be called after `ServiceSettings` has been sent by the controller.
-/// The MQTT service will have already queued `Register` (sent from
-/// `on_connected` before receiving `ServiceSettings`). Non-MQTT services send
-/// `UpdateCapabilities` in response to `ServiceSettings`.
-///
-/// Returns `None` when the connection is closed or an error occurs.
+/// Returns the [`RegisterPayload`] on success, or `None` when the connection
+/// is closed or an unexpected message is received.
 #[tracing::instrument(skip_all, fields(%service_id))]
 pub(super) async fn receive_first_service_message(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
@@ -90,7 +69,7 @@ pub(super) async fn receive_first_service_message(
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
     rate_limiter: &mut MessageRateLimiter,
-) -> Option<FirstServiceMessage> {
+) -> Option<RegisterPayload> {
     loop {
         let msg = match stream.next().await {
             Some(Ok(m)) => m,
@@ -122,26 +101,9 @@ pub(super) async fn receive_first_service_message(
                         tracing::debug!(
                             %service_id,
                             capabilities = ?payload.capabilities,
-                            "received Register — identified as MQTT service"
+                            "received Register from service"
                         );
-                        return Some(FirstServiceMessage::Mqtt {
-                            handshake: MqttHandshake {
-                                instance_id: payload.instance_id,
-                                max_tenants: payload.max_tenants,
-                                active_mqtt_clients: payload.active_mqtt_clients,
-                            },
-                            capabilities: payload.capabilities,
-                        });
-                    }
-                    ServiceMessage::UpdateCapabilities(UpdateCapabilitiesPayload {
-                        capabilities,
-                    }) => {
-                        tracing::debug!(
-                            %service_id,
-                            ?capabilities,
-                            "received UpdateCapabilities — identified as non-MQTT service"
-                        );
-                        return Some(FirstServiceMessage::NonMqtt(capabilities));
+                        return Some(payload);
                     }
                     ServiceMessage::Ping(PingPayload { service_ts, .. }) => {
                         if send_pong(sink, out_seq, service_ts).await.is_err() {
@@ -159,7 +121,7 @@ pub(super) async fn receive_first_service_message(
                     _ => {
                         let err = ControllerMessage::Error(ErrorPayload {
                             code: ErrorCode::BadRequest,
-                            message: "unexpected message during service identification".to_string(),
+                            message: "expected Register message during session setup".to_string(),
                         });
                         if let Some(json) = serialize_controller_msg(out_seq, err) {
                             let _ = sink.send(Message::Text(json.into())).await;

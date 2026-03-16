@@ -48,8 +48,8 @@ use rootcause::prelude::*;
 use std::collections::BTreeSet;
 
 use uptrakit_internal_wire::{
-    Capability, ControllerMessage, DisconnectingPayload, MqttClientStatusPayload,
-    MqttRegisterPayload, ServiceMessage,
+    Capability, ControllerMessage, DisconnectingPayload, MqttClientStatusPayload, RegisterPayload,
+    ServiceMessage,
 };
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
@@ -86,11 +86,11 @@ impl ServiceHandler for MqttHandler {
         conn: &mut ControllerConnection,
         _identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
-        conn.send(ServiceMessage::Register(MqttRegisterPayload {
-            instance_id: self.instance_id.clone(),
+        conn.send(ServiceMessage::Register(RegisterPayload {
+            capabilities: mqtt_capabilities(),
+            instance_id: Some(self.instance_id.clone()),
             max_tenants: self.max_tenants,
             active_mqtt_clients: self.tenant_mgr.active_mqtt_client_ids(),
-            capabilities: mqtt_capabilities(),
         }))
         .await
         .context_to::<LoopError>()?;

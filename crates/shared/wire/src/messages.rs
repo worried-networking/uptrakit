@@ -7,15 +7,16 @@ use super::payloads::{
     CertificatePayload, CheckVersionsPayload, DisconnectingPayload, DiscoverSoftwarePayload,
     DiscoveryResultsPayload, EnrollPayload, EnrolledPayload, ExecuteBatchUpdatePayload,
     ExecuteUpdatePayload, HostConnectivityUpdatedPayload, MqttClientCreatedPayload,
-    MqttClientStatusPayload, MqttRegisterPayload, MqttRegisteredPayload, MqttReleaseTenantsPayload,
+    MqttClientStatusPayload, MqttRegisteredPayload, MqttReleaseTenantsPayload,
     MqttTenantAssignmentsPayload, MqttTenantConfigUpdatedPayload, MqttTenantRevokedPayload,
-    PingPayload, PongPayload, RejectedPayload, ReportHostsPayload, ReportPluginConfigPayload,
-    ReportPluginConfigResponsePayload, RequestCaRotationPayload, RequestCertRenewalPayload,
-    RequestCrlRenewalPayload, ServerRestartingPayload, ServiceCredentialsPayload,
-    ServiceHostBatchUpdateTriggerPayload, ServiceSettingsPayload, ServiceUpdateTriggerPayload,
-    SetUpdateFreezePayload, SoftwareStatesChangedPayload, SoftwareStatesPayload,
-    StdinAttentionPayload, TokenRevokedPayload, UpdateCapabilitiesPayload, UpdateOutputPayload,
-    UpdateResultPayload, UpdateStartedPayload, UpdateStdinDataPayload, VersionCheckResultsPayload,
+    PingPayload, PongPayload, RegisterPayload, RejectedPayload, ReportHostsPayload,
+    ReportPluginConfigPayload, ReportPluginConfigResponsePayload, RequestCaRotationPayload,
+    RequestCertRenewalPayload, RequestCrlRenewalPayload, ServerRestartingPayload,
+    ServiceCredentialsPayload, ServiceHostBatchUpdateTriggerPayload, ServiceSettingsPayload,
+    ServiceUpdateTriggerPayload, SetUpdateFreezePayload, SoftwareStatesChangedPayload,
+    SoftwareStatesPayload, StdinAttentionPayload, TokenRevokedPayload, UpdateCapabilitiesPayload,
+    UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload, UpdateStdinDataPayload,
+    VersionCheckResultsPayload,
 };
 
 /// Messages sent from a service (agent or MQTT) to the controller.
@@ -54,7 +55,7 @@ pub enum ServiceMessage {
     /// trigger notifications.
     StdinAttention(StdinAttentionPayload),
     // -- MQTT-specific --
-    Register(MqttRegisterPayload),
+    Register(RegisterPayload),
     ReleaseTenants(MqttReleaseTenantsPayload),
     MqttClientStatus(MqttClientStatusPayload),
     #[serde(alias = "mqtt_trigger_update")]

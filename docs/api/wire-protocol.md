@@ -39,7 +39,8 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 ### Shared (service -> controller)
 
-`ping`, `enroll`, `request_certificate`, `renew_certificate`, `disconnecting`, `error`
+`ping`, `enroll`, `request_certificate`, `renew_certificate`, `disconnecting`, `error`,
+`register` (sent by **all** services immediately on connect to declare capabilities)
 
 ### Agent-specific (service -> controller)
 
@@ -59,7 +60,7 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 ### Update-tracking service (service -> controller)
 
-`register`, `release_tenants`, `mqtt_client_status`, `service_trigger_update`,
+`release_tenants`, `mqtt_client_status`, `service_trigger_update`,
 `service_trigger_host_batch_update`
 
 ### Shared (controller -> service)
@@ -845,7 +846,9 @@ support at the start of each authenticated connection; neither requires a hard c
 ### How It Works
 
 1. After mTLS authentication succeeds, the controller sends `service_settings` containing `capabilities: [...]`.
-2. The service sends `report_hosts` (agent/SSH agent) or `register` (MQTT) containing its own `capabilities: [...]`.
+2. Every service sends `register` containing its own `capabilities: [...]` immediately on connect (before
+   processing `service_settings`). Services with the `update_tracking` capability also include MQTT-specific
+   fields (`instance_id`, `max_tenants`, `active_mqtt_clients`) in the same message.
 3. Each side independently computes the **agreed set**: the intersection of the two capability sets, excluding `Other`
    values (unrecognized capabilities from a newer peer).
 4. The agreed set is stored on the connection and can be used to gate feature-specific flows.
@@ -859,7 +862,7 @@ The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incomp
 | `SoftwareDiscovery` | `software_discovery` | Service supports `discover_software` → `discovery_results` flow. Controller gates autodiscovery requests on this capability. |
 | `UpdateHooks` | `update_hooks` | Service supports pre-/post-update hook plugin assignments in `execute_update`. Controller omits hook plugins when absent. |
 | `GracefulShutdown` | `graceful_shutdown` | Service sends `disconnecting` before clean exit and honours `shutdown_timeout_seconds`. |
-| `UpdateTracking` | `update_tracking` | Service is an update-tracking service: handles `register`, `tenant_assignments`, `release_tenants`, `mqtt_client_status`, etc. Maps to `ServiceProfile::UpdateTracker`. |
+| `UpdateTracking` | `update_tracking` | Service is an update-tracking service: handles `tenant_assignments`, `release_tenants`, `mqtt_client_status`, etc. Also includes MQTT-specific fields in `register`. Maps to `ServiceProfile::UpdateTracker`. |
 | `SshRemote` | `ssh_remote` | Service manages remote hosts over SSH. Combined with `SoftwareDiscovery`, maps to `ServiceProfile::Agent` with SSH label. |
 | `SystemService` | `system_service` | Routes enrollment to the `system_services` table instead of `services`. Required for any service that requests system credentials. The MQTT bridge declares this alongside `update_tracking`. See [System Services Architecture](../architecture/system-services.md). |
 | `Scheduler` | `scheduler` | Marker: service is an external task scheduler. Maps to `ServiceProfile::Scheduler`. |

@@ -29,7 +29,6 @@ pub enum Capability {
     /// for MQTT bridge services.
     ///
     /// Wire string: `update_tracking`.
-    /// Legacy alias: `mqtt_bridge` (accepted on receive, never emitted).
     UpdateTracking,
     /// Service supports `DiscoverSoftware` → `DiscoveryResults` flow.
     ///
@@ -165,11 +164,7 @@ impl FromStr for Capability {
             "software_discovery" => Self::SoftwareDiscovery,
             "update_hooks" => Self::UpdateHooks,
             "graceful_shutdown" => Self::GracefulShutdown,
-            // "mqtt_bridge" is the legacy wire string for UpdateTracking (renamed in v0.x).
-            // Accepted as a backward-compat alias so that services enrolled with the old
-            // name still get the correct profile and profile-derived ping interval until
-            // their capabilities are rewritten on the next reconnect.
-            "update_tracking" | "mqtt_bridge" => Self::UpdateTracking,
+            "update_tracking" => Self::UpdateTracking,
             "ssh_remote" => Self::SshRemote,
             "scheduler" => Self::Scheduler,
             "database_access" => Self::DatabaseAccess,

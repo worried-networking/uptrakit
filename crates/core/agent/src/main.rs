@@ -3,14 +3,17 @@ mod client;
 mod host_info;
 
 use clap::Parser;
+use rootcause::prelude::*;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use uptrakit_command::CommandExecutor;
-use uptrakit_internal_wire::{Capability, ControllerMessage, ReportHostsPayload, ServiceMessage};
+use uptrakit_internal_wire::{
+    Capability, ControllerMessage, RegisterPayload, ReportHostsPayload, ServiceMessage,
+};
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
+    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
     ShutdownCause, default_resolve_shutdown,
 };
 
@@ -65,9 +68,16 @@ impl ServiceHandler for AgentHandler {
 
     async fn on_connected(
         &mut self,
-        _conn: &mut ControllerConnection,
+        conn: &mut ControllerConnection,
         _identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
+        conn.send(ServiceMessage::Register(RegisterPayload {
+            capabilities: agent_capabilities(),
+            ..RegisterPayload::default()
+        }))
+        .await
+        .context_to::<LoopError>()?;
+
         let host_info = crate::host_info::collect_host_info();
         // Capture and store the machine_id for use in on_message() validation.
         self.machine_id = host_info.machine_id.clone();
