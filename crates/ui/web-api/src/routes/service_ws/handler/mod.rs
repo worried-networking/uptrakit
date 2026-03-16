@@ -689,36 +689,6 @@ async fn load_service_capabilities(
     }
 }
 
-/// Stage 2: Run the MQTT register handshake for services with the `MqttBridge`
-/// capability.
-///
-/// Returns `Some(handshake)` when the handshake succeeds, or `None` when the
-/// connection closes before the `Register` message arrives (the caller should
-/// abort setup).
-///
-/// Only call this function when the service has the `MqttBridge` capability;
-/// the coordinator is responsible for the conditional check.
-async fn negotiate_mqtt_handshake(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    stream: &mut futures_util::stream::SplitStream<WebSocket>,
-    state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    out_seq: &mut OutgoingSeq,
-    in_seq: &mut IncomingSeq,
-    rate_limiter: &mut MessageRateLimiter,
-) -> Option<mqtt::MqttHandshake> {
-    handle_mqtt_register_handshake(
-        sink,
-        stream,
-        state,
-        service_id,
-        out_seq,
-        in_seq,
-        rate_limiter,
-    )
-    .await
-}
-
 /// Stage 3: Register the connection in `ServiceConnectionRegistry` and notify
 /// the embedded service infrastructure about the new external connection.
 ///
