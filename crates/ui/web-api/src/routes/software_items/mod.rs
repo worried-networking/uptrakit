@@ -744,38 +744,38 @@ pub async fn check_versions(
     (StatusCode::OK, Json(resp)).into_response()
 }
 
-/// Trigger a version check for a specific software item on a specific host.
-#[utoipa::path(
-    post,
-    path = "/api/v1/software-items/{id}/hosts/{host_id}/check-versions",
-    params(
-        ("id" = Uuid, Path, description = "Software item UUID"),
-        ("host_id" = Uuid, Path, description = "Host UUID")
+// ---------------------------------------------------------------------------
+// check_versions_host helpers
+// ---------------------------------------------------------------------------
+
+/// Verify that a software item exists, a host exists and belongs to the tenant,
+/// and the host is assigned to the software item.
+///
+/// Returns `(item, host_record, link)` on success, or an HTTP error response on
+/// any failure.
+async fn verify_software_item_and_host(
+    tenant_db: &TenantDb,
+    item_id: Uuid,
+    host_id: Uuid,
+) -> Result<
+    (
+        uptrakit_shared_db::entity::software_item::Model,
+        uptrakit_shared_db::entity::host::Model,
+        uptrakit_shared_db::entity::host_software_item::Model,
     ),
-    extensions(("x-required-permission" = json!("trigger_checks"))),
-    responses(
-        (status = 200, description = "Version check triggered", body = TriggerVersionCheckResponse),
-        (status = 400, description = "Invalid input"),
-        (status = 404, description = "Software item, host, or agent not found")
-    ),
-    tag = "Software Items",
-    security(("bearer_token" = []))
-)]
-#[tracing::instrument(skip_all)]
-pub async fn check_versions_host(
-    State(state): State<Arc<AppState>>,
-    tenant_db: TenantDb,
-    CanTriggerChecks(_user): CanTriggerChecks,
-    Path((item_id, host_id)): Path<(Uuid, Uuid)>,
-) -> Response {
-    // Verify software item exists and is active
+    Response,
+> {
     let item =
         match item_queries::find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id).await {
             Some(i) => i,
-            None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
+            None => {
+                return Err(error_response(
+                    StatusCode::NOT_FOUND,
+                    "Software item not found",
+                ));
+            }
         };
 
-    // Verify host exists and belongs to tenant; keep the record for machine_id.
     let host_record = match Host::find_by_id(host_id)
         .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
@@ -783,25 +783,40 @@ pub async fn check_versions_host(
         .await
     {
         Ok(Some(h)) => h,
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Host not found"),
+        Ok(None) => return Err(error_response(StatusCode::NOT_FOUND, "Host not found")),
         Err(e) => {
             tracing::error!("Failed to lookup host: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
         }
     };
 
-    // Verify host is assigned
     let link = match item_queries::load_host_assignment(tenant_db.db(), host_id, item_id).await {
         Some(l) => l,
         None => {
-            return error_response(
+            return Err(error_response(
                 StatusCode::BAD_REQUEST,
                 "Host is not assigned to this software item",
-            );
+            ));
         }
     };
 
-    // Find agent linked to host (tenant-scoped via join on service)
+    Ok((item, host_record, link))
+}
+
+/// Load the approved agent service record for a given host.
+///
+/// Queries `service_host` (tenant-scoped via join on `service`) and then verifies
+/// the linked service is active and approved.
+///
+/// Returns the `service::Model` on success, or an HTTP error response on any
+/// failure.
+async fn load_agent_service(
+    tenant_db: &TenantDb,
+    host_id: Uuid,
+) -> Result<uptrakit_shared_db::entity::service::Model, Response> {
     let agent_link = match tenant_db
         .find_via_tenant_join::<service_host::Entity, service::Entity>(
             service_host::Relation::Service.def(),
@@ -812,58 +827,69 @@ pub async fn check_versions_host(
     {
         Ok(Some(l)) => l,
         Ok(None) => {
-            return error_response(StatusCode::NOT_FOUND, "No agent linked to this host");
+            return Err(error_response(
+                StatusCode::NOT_FOUND,
+                "No agent linked to this host",
+            ));
         }
         Err(e) => {
             tracing::error!("Failed to find agent for host: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
         }
     };
 
-    // Verify agent exists and is approved
-    let agent = match Service::find_by_id(agent_link.service_id)
+    match Service::find_by_id(agent_link.service_id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
     {
         Ok(Some(a)) => {
             if a.status != service::ServiceStatus::Approved {
-                return error_response(StatusCode::BAD_REQUEST, "Agent is not approved");
+                return Err(error_response(
+                    StatusCode::BAD_REQUEST,
+                    "Agent is not approved",
+                ));
             }
-            a
+            Ok(a)
         }
-        Ok(None) => {
-            return error_response(StatusCode::NOT_FOUND, "Agent not found or deactivated");
-        }
+        Ok(None) => Err(error_response(
+            StatusCode::NOT_FOUND,
+            "Agent not found or deactivated",
+        )),
         Err(e) => {
             tracing::error!("Failed to lookup agent: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ))
         }
-    };
+    }
+}
 
-    // Load role-specific plugin assignments for this host
-    let role_plugins = match HostSoftwareItemPlugin::find()
-        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
-        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
-        .filter(host_software_item_plugin::Column::Role.is_in(["detect_version", "fetch_releases"]))
-        .all(tenant_db.db())
-        .await
-    {
-        Ok(ps) => ps,
-        Err(e) => {
-            tracing::error!("Failed to load role plugins: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    // Build role assignments, separating controller-side from agent-side.
+/// Classify plugin rows into controller-side fetch jobs and agent-side
+/// `detect_version` / `fetch_releases` assignments.
+///
+/// Returns `(controller_fetch_jobs, detect_version, fetch_releases)`.
+async fn classify_role_assignments(
+    tenant_db: &TenantDb,
+    plugin_rows: &[uptrakit_shared_db::entity::host_software_item_plugin::Model],
+    host_id: Uuid,
+    item_id: Uuid,
+) -> (
+    Vec<ControllerFetchJob>,
+    Option<uptrakit_internal_wire::PluginAssignment>,
+    Option<uptrakit_internal_wire::PluginAssignment>,
+) {
     let mut detect_version: Option<uptrakit_internal_wire::PluginAssignment> = None;
     let mut fetch_releases: Option<uptrakit_internal_wire::PluginAssignment> = None;
     let mut controller_fetch_jobs: Vec<ControllerFetchJob> = Vec::new();
 
-    for plugin in &role_plugins {
+    for plugin in plugin_rows {
         let config = match plugin.plugin_config_id {
-            Some(pc_id) => match find_raw_active_config(&tenant_db, pc_id).await {
+            Some(pc_id) => match find_raw_active_config(tenant_db, pc_id).await {
                 Ok(Some(c)) => Some(c),
                 Ok(None) => {
                     tracing::warn!(
@@ -921,7 +947,66 @@ pub async fn check_versions_host(
         }
     }
 
-    // Run controller-side fetch_releases (e.g. GitHub, Docker).
+    (controller_fetch_jobs, detect_version, fetch_releases)
+}
+
+/// Trigger a version check for a specific software item on a specific host.
+#[utoipa::path(
+    post,
+    path = "/api/v1/software-items/{id}/hosts/{host_id}/check-versions",
+    params(
+        ("id" = Uuid, Path, description = "Software item UUID"),
+        ("host_id" = Uuid, Path, description = "Host UUID")
+    ),
+    extensions(("x-required-permission" = json!("trigger_checks"))),
+    responses(
+        (status = 200, description = "Version check triggered", body = TriggerVersionCheckResponse),
+        (status = 400, description = "Invalid input"),
+        (status = 404, description = "Software item, host, or agent not found")
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn check_versions_host(
+    State(state): State<Arc<AppState>>,
+    tenant_db: TenantDb,
+    CanTriggerChecks(_user): CanTriggerChecks,
+    Path((item_id, host_id)): Path<(Uuid, Uuid)>,
+) -> Response {
+    // Phase 1–3: verify software item, host, and assignment.
+    let (item, host_record, link) =
+        match verify_software_item_and_host(&tenant_db, item_id, host_id).await {
+            Ok(t) => t,
+            Err(resp) => return resp,
+        };
+
+    // Phase 4–5: load approved agent service for this host.
+    let agent = match load_agent_service(&tenant_db, host_id).await {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+
+    // Phase 6: load role-specific plugin assignments for this host.
+    let role_plugins = match HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
+        .filter(host_software_item_plugin::Column::Role.is_in(["detect_version", "fetch_releases"]))
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(ps) => ps,
+        Err(e) => {
+            tracing::error!("Failed to load role plugins: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    // Phase 7: classify plugins into controller jobs vs agent assignments.
+    let (controller_fetch_jobs, detect_version, fetch_releases) =
+        classify_role_assignments(&tenant_db, &role_plugins, host_id, item_id).await;
+
+    // Phase 8a: run controller-side fetch_releases (e.g. GitHub, Docker).
     let controller_checks_run = run_controller_fetch_jobs(
         tenant_db.db(),
         &state.notification_service,
@@ -931,7 +1016,7 @@ pub async fn check_versions_host(
     )
     .await;
 
-    // If no agent-side work is needed, return immediately.
+    // Phase 8b: if no agent-side work is needed, return immediately.
     if detect_version.is_none() && fetch_releases.is_none() {
         if controller_checks_run > 0 {
             let resp = TriggerVersionCheckResponse {
@@ -950,6 +1035,7 @@ pub async fn check_versions_host(
         );
     }
 
+    // Phase 8c: dispatch CheckVersions to the agent.
     let assignment = uptrakit_internal_wire::VersionCheckAssignment {
         software_item_id: item_id,
         name: item.name.clone(),
