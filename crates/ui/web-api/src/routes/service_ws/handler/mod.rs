@@ -24,6 +24,8 @@
 //! - [`trigger_discovery_for_agent_host`] -- send `DiscoverSoftware` to an
 //!   agent for a specific host (also used by `hosts.rs`).
 
+mod cert;
+mod credentials;
 mod discovery;
 pub(super) mod messages;
 mod mqtt;
@@ -31,6 +33,10 @@ mod renewal;
 mod shared_types;
 mod updates;
 
+use cert::{
+    ApprovalPollResult, CertificateResult, handle_request_certificate, poll_approval_status,
+};
+use credentials::deliver_service_credentials;
 pub(crate) use discovery::trigger_discovery_for_agent_host;
 use mqtt::{complete_mqtt_registration, handle_mqtt_register_handshake};
 use shared_types::{ProcessorAction, ProcessorResponse, load_linked_host_ids};
@@ -48,13 +54,11 @@ use rootcause::prelude::*;
 use sea_orm::EntityTrait;
 
 use uptrakit_internal_wire::limits::WireValidate;
-use uptrakit_internal_wire::payloads::RequestCertificatePayload;
 use uptrakit_internal_wire::report_tracker::ReportTracker;
 use uptrakit_internal_wire::{
-    ApprovedPayload, Capability, CertificatePayload, CloseReason, ControllerMessage, ErrorCode,
-    ErrorPayload, HostConnectivityUpdate, IncomingSeq, MqttRegisteredPayload,
-    MqttTenantAssignmentsPayload, OutgoingSeq, PingPayload, RejectedPayload, ReportPagination,
-    ServiceCredentialsPayload, ServiceMessage, UpdateCapabilitiesPayload,
+    Capability, CloseReason, ControllerMessage, ErrorCode, ErrorPayload, HostConnectivityUpdate,
+    IncomingSeq, MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq, PingPayload,
+    ReportPagination, ServiceMessage, UpdateCapabilitiesPayload,
 };
 use uptrakit_shared_db::entity::{service, system_service as sys_svc_entity};
 use uptrakit_shared_macros::impl_report_conversion;
@@ -66,7 +70,6 @@ use super::protocol::{
 };
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
-use crate::routes::agent_operations::{do_sign_csr, do_sign_csr_for_system_service};
 use uptrakit_internal_wire::service_profile::parse_capabilities;
 
 // ---------------------------------------------------------------------------
@@ -126,64 +129,6 @@ async fn send_ws_with_timeout(
 
 /// Bounded channel capacity for messages forwarded to the processor.
 const PROCESSOR_CHANNEL_CAPACITY: usize = 32;
-
-/// Deliver service credentials (DB URL, NATS URL, master key) to services
-/// that have the corresponding capabilities.
-///
-/// Returns `Some(())` on success (including when no credentials are needed)
-/// or `None` if the WebSocket write failed and the connection should close.
-async fn deliver_service_credentials(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    state: &Arc<AppState>,
-    capabilities: &BTreeSet<Capability>,
-    service_id: uuid::Uuid,
-    out_seq: &mut OutgoingSeq,
-) -> Option<()> {
-    let has_db_access = capabilities.contains(&Capability::DatabaseAccess);
-    let has_nats_access = capabilities.contains(&Capability::NatsAccess);
-    let has_master_key_access = capabilities.contains(&Capability::MasterKeyAccess);
-
-    if !has_db_access && !has_nats_access && !has_master_key_access {
-        return Some(());
-    }
-
-    let sources = &state.credential_sources;
-    let payload = ServiceCredentialsPayload {
-        db_url: if has_db_access {
-            sources
-                .db_url
-                .as_ref()
-                .map(|u| uptrakit_internal_wire::SecretString::new(u.clone()))
-        } else {
-            None
-        },
-        nats_url: if has_nats_access {
-            sources.nats_url.clone()
-        } else {
-            None
-        },
-        master_key_hex: if has_master_key_access {
-            sources.master_key_hex.clone()
-        } else {
-            None
-        },
-    };
-    let cred_msg = ControllerMessage::ServiceCredentials(payload);
-    if let Some(json) = serialize_controller_msg(out_seq, cred_msg)
-        && sink.send(Message::Text(json.into())).await.is_err()
-    {
-        return None;
-    }
-    tracing::info!(
-        %service_id,
-        db = has_db_access,
-        nats = has_nats_access,
-        master_key = has_master_key_access,
-        "delivered service credentials"
-    );
-
-    Some(())
-}
 
 /// Bounded channel capacity for responses from the processor.
 const RESPONSE_CHANNEL_CAPACITY: usize = 32;
@@ -1536,217 +1481,6 @@ async fn setup_enrolled_session(
         rate_limiter,
         approval_poll,
     }
-}
-
-// ---------------------------------------------------------------------------
-// CertificateResult
-// ---------------------------------------------------------------------------
-
-/// Result of processing a `RequestCertificate` message.
-enum CertificateResult {
-    /// Certificate issued (or error sent); break out of the main loop.
-    Break,
-    /// Service not yet approved; already sent error reply, continue looping.
-    NotApproved,
-}
-
-// ---------------------------------------------------------------------------
-// handle_request_certificate
-// ---------------------------------------------------------------------------
-
-/// Handle a `RequestCertificate` message during the enrolled loop.
-///
-/// Signs the CSR for either a system service or a regular service, sends the
-/// certificate (or error) back over the WebSocket, and returns whether the
-/// loop should break or continue.
-async fn handle_request_certificate(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    is_system: bool,
-    approved: bool,
-    out_seq: &mut OutgoingSeq,
-    payload: &RequestCertificatePayload,
-) -> CertificateResult {
-    if !approved {
-        let err = ControllerMessage::Error(ErrorPayload {
-            code: ErrorCode::NotApproved,
-            message: "service is not yet approved".to_string(),
-        });
-        if let Some(json) = serialize_controller_msg(out_seq, err) {
-            let _ = sink.send(Message::Text(json.into())).await;
-        }
-        return CertificateResult::NotApproved;
-    }
-
-    if is_system {
-        let sys_svc = match sys_svc_entity::Entity::find_by_id(service_id)
-            .one(state.db())
-            .await
-        {
-            Ok(Some(s)) => s,
-            _ => {
-                let err = ControllerMessage::Error(ErrorPayload {
-                    code: ErrorCode::InternalError,
-                    message: "system service not found".to_string(),
-                });
-                if let Some(json) = serialize_controller_msg(out_seq, err) {
-                    let _ = sink.send(Message::Text(json.into())).await;
-                }
-                return CertificateResult::Break;
-            }
-        };
-
-        match do_sign_csr_for_system_service(
-            state.cert_signer.as_ref(),
-            &state.settings,
-            state.db(),
-            sys_svc,
-            &payload.csr_pem,
-        )
-        .await
-        {
-            Ok(bundle) => {
-                let cert_msg = ControllerMessage::Certificate(CertificatePayload {
-                    cert_pem: bundle.cert_pem,
-                    not_after: bundle.not_after,
-                });
-                if let Some(json) = serialize_controller_msg(out_seq, cert_msg) {
-                    let _ = sink.send(Message::Text(json.into())).await;
-                }
-                tracing::info!(%service_id, "system service certificate issued via WS");
-            }
-            Err(e) => {
-                let err = ControllerMessage::Error(ErrorPayload {
-                    code: ErrorCode::CertificateError,
-                    message: e.current_context().to_string(),
-                });
-                if let Some(json) = serialize_controller_msg(out_seq, err) {
-                    let _ = sink.send(Message::Text(json.into())).await;
-                }
-            }
-        }
-    } else {
-        let svc = match service::Entity::find_by_id(service_id)
-            .one(state.db())
-            .await
-        {
-            Ok(Some(s)) => s,
-            _ => {
-                let err = ControllerMessage::Error(ErrorPayload {
-                    code: ErrorCode::InternalError,
-                    message: "service not found".to_string(),
-                });
-                if let Some(json) = serialize_controller_msg(out_seq, err) {
-                    let _ = sink.send(Message::Text(json.into())).await;
-                }
-                return CertificateResult::Break;
-            }
-        };
-
-        match do_sign_csr(
-            state.cert_signer.as_ref(),
-            &state.settings,
-            state.db(),
-            svc,
-            &payload.csr_pem,
-        )
-        .await
-        {
-            Ok(bundle) => {
-                let cert_msg = ControllerMessage::Certificate(CertificatePayload {
-                    cert_pem: bundle.cert_pem,
-                    not_after: bundle.not_after,
-                });
-                if let Some(json) = serialize_controller_msg(out_seq, cert_msg) {
-                    let _ = sink.send(Message::Text(json.into())).await;
-                }
-                tracing::info!(%service_id, "certificate issued via WS");
-            }
-            Err(e) => {
-                let err = ControllerMessage::Error(ErrorPayload {
-                    code: ErrorCode::CertificateError,
-                    message: e.current_context().to_string(),
-                });
-                if let Some(json) = serialize_controller_msg(out_seq, err) {
-                    let _ = sink.send(Message::Text(json.into())).await;
-                }
-            }
-        }
-    }
-
-    CertificateResult::Break
-}
-
-// ---------------------------------------------------------------------------
-// handle_enrolled_loop
-// ---------------------------------------------------------------------------
-
-/// Result of polling the DB for service approval status changes.
-enum ApprovalPollResult {
-    /// Service has been approved; notification sent.
-    Approved,
-    /// Service has been rejected; notification sent, caller should break.
-    Rejected,
-    /// No status change.
-    Unchanged,
-}
-
-/// Poll the database for approval status changes and send the appropriate
-/// WebSocket notification.
-async fn poll_approval_status(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    state: &AppState,
-    service_id: uuid::Uuid,
-    is_system: bool,
-    out_seq: &mut OutgoingSeq,
-) -> ApprovalPollResult {
-    if is_system {
-        if let Ok(Some(s)) = sys_svc_entity::Entity::find_by_id(service_id)
-            .one(state.db())
-            .await
-        {
-            return match s.status {
-                sys_svc_entity::SystemServiceStatus::Approved => {
-                    let msg = ControllerMessage::Approved(ApprovedPayload { service_id });
-                    if let Some(json) = serialize_controller_msg(out_seq, msg) {
-                        let _ = sink.send(Message::Text(json.into())).await;
-                    }
-                    ApprovalPollResult::Approved
-                }
-                sys_svc_entity::SystemServiceStatus::Rejected => {
-                    let msg = ControllerMessage::Rejected(RejectedPayload { service_id });
-                    if let Some(json) = serialize_controller_msg(out_seq, msg) {
-                        let _ = sink.send(Message::Text(json.into())).await;
-                    }
-                    ApprovalPollResult::Rejected
-                }
-                _ => ApprovalPollResult::Unchanged,
-            };
-        }
-    } else if let Ok(Some(s)) = service::Entity::find_by_id(service_id)
-        .one(state.db())
-        .await
-    {
-        return match s.status {
-            service::ServiceStatus::Approved => {
-                let msg = ControllerMessage::Approved(ApprovedPayload { service_id });
-                if let Some(json) = serialize_controller_msg(out_seq, msg) {
-                    let _ = sink.send(Message::Text(json.into())).await;
-                }
-                ApprovalPollResult::Approved
-            }
-            service::ServiceStatus::Rejected => {
-                let msg = ControllerMessage::Rejected(RejectedPayload { service_id });
-                if let Some(json) = serialize_controller_msg(out_seq, msg) {
-                    let _ = sink.send(Message::Text(json.into())).await;
-                }
-                ApprovalPollResult::Rejected
-            }
-            _ => ApprovalPollResult::Unchanged,
-        };
-    }
-    ApprovalPollResult::Unchanged
 }
 
 /// Clean up after an enrolled loop exits normally (not superseded).

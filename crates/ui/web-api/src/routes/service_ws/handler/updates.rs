@@ -72,23 +72,35 @@ pub(super) async fn validate_update_ownership(
 }
 
 // ---------------------------------------------------------------------------
-// deliver_pending_updates
+// deliver_pending_updates helpers
 // ---------------------------------------------------------------------------
 
-/// Deliver pending updates for hosts linked to this service.
+/// All data loaded from the DB that is needed to dispatch pending updates for
+/// a set of hosts.
+struct PendingUpdateRecords {
+    pending_updates: Vec<update_history::Model>,
+    sw_items_map: HashMap<uuid::Uuid, software_item::Model>,
+    hosts_map: HashMap<uuid::Uuid, host::Model>,
+    assignments_map: HashMap<(uuid::Uuid, uuid::Uuid, String), host_software_item_plugin::Model>,
+    hook_assignments_map:
+        HashMap<(uuid::Uuid, uuid::Uuid, String), Vec<host_software_item_plugin::Model>>,
+    configs_map: HashMap<uuid::Uuid, plugin_config::Model>,
+    hsi_metadata_map: HashMap<(uuid::Uuid, uuid::Uuid), Option<serde_json::Value>>,
+}
+
+/// Load all pending update records and their auxiliary data for hosts linked to
+/// `service_id`.
 ///
-/// On service reconnect, we check for any `update_history` records with
-/// `status = Pending` for hosts linked to this service and send them.
+/// Also calls [`fail_in_progress_on_reconnect`] so that any orphaned
+/// in-progress records from a prior session are resolved before the pending
+/// query runs.
 ///
-/// All auxiliary data (software items, hosts, plugin assignments, plugin configs)
-/// is loaded in four batched queries and joined in memory to avoid N+1 round-trips.
-#[tracing::instrument(skip_all, fields(%service_id))]
-pub(super) async fn deliver_pending_updates(
+/// Returns `None` when there are no host links or no pending records (nothing
+/// to dispatch).
+async fn load_pending_update_records(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    out_seq: &mut OutgoingSeq,
-) -> HandlerResult<()> {
+) -> HandlerResult<Option<(Vec<uuid::Uuid>, PendingUpdateRecords)>> {
     // 1. Find host_ids linked to this service.
     let host_links = service_host::Entity::find()
         .filter(service_host::Column::ServiceId.eq(service_id))
@@ -97,7 +109,7 @@ pub(super) async fn deliver_pending_updates(
         .context_to::<HandlerError>()?;
 
     if host_links.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
 
     let host_ids: Vec<uuid::Uuid> = host_links.iter().map(|l| l.host_id).collect();
@@ -119,14 +131,8 @@ pub(super) async fn deliver_pending_updates(
         .context_to::<HandlerError>()?;
 
     if pending_updates.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
-
-    tracing::info!(
-        %service_id,
-        count = pending_updates.len(),
-        "delivering pending updates on reconnect"
-    );
 
     // Collect unique IDs needed for batch queries.
     let sw_ids: Vec<uuid::Uuid> = pending_updates
@@ -228,7 +234,7 @@ pub(super) async fn deliver_pending_updates(
     // `release_info` for plugins like GitHub that require asset download URLs.
     let hsi_metadata_map: HashMap<(uuid::Uuid, uuid::Uuid), Option<serde_json::Value>> =
         host_software_item::Entity::find()
-            .filter(host_software_item::Column::HostId.is_in(host_ids))
+            .filter(host_software_item::Column::HostId.is_in(host_ids.clone()))
             .filter(host_software_item::Column::SoftwareItemId.is_in(sw_ids))
             .all(state.db())
             .await
@@ -237,14 +243,209 @@ pub(super) async fn deliver_pending_updates(
             .map(|m| ((m.host_id, m.software_item_id), m.latest_release_metadata))
             .collect();
 
-    // 3. Build ExecuteUpdatePayload for each pending update using HashMap lookups.
+    Ok(Some((
+        host_ids,
+        PendingUpdateRecords {
+            pending_updates,
+            sw_items_map,
+            hosts_map,
+            assignments_map,
+            hook_assignments_map,
+            configs_map,
+            hsi_metadata_map,
+        },
+    )))
+}
+
+/// Build an [`ExecuteUpdatePayload`] for a single pending update record using
+/// the preloaded lookup maps.
+///
+/// Returns `None` and logs a warning for any unresolvable dependency (missing
+/// software item, missing host, unknown plugin type, etc.) so the caller can
+/// skip the record.
+fn build_execute_payload(
+    update_record: &update_history::Model,
+    records: &PendingUpdateRecords,
+) -> Option<ExecuteUpdatePayload> {
+    let item = match records.sw_items_map.get(&update_record.software_item_id) {
+        Some(i) => i,
+        None => {
+            tracing::warn!(
+                update_id = %update_record.id,
+                software_item_id = %update_record.software_item_id,
+                "software item not found or deactivated, skipping pending update"
+            );
+            return None;
+        }
+    };
+
+    // Resolve execute_update assignment.
+    let exec_key = (update_record.host_id, item.id, "execute_update".to_string());
+    let exec_assignment = match records.assignments_map.get(&exec_key) {
+        Some(a) => a,
+        None => {
+            tracing::warn!(
+                update_id = %update_record.id,
+                host_id = %update_record.host_id,
+                software_item_id = %item.id,
+                "no execute_update plugin assigned, skipping pending update"
+            );
+            return None;
+        }
+    };
+    let exec_config = exec_assignment
+        .plugin_config_id
+        .and_then(|pc_id| records.configs_map.get(&pc_id));
+
+    let execute_update_plugin = match build_plugin_assignment_nullable(exec_assignment, exec_config)
+    {
+        Some(a) => a,
+        None => {
+            tracing::warn!(
+                update_id = %update_record.id,
+                "unknown plugin type for execute_update, skipping pending update"
+            );
+            return None;
+        }
+    };
+
+    // Resolve optional detect_version assignment.
+    let detect_key = (update_record.host_id, item.id, "detect_version".to_string());
+    let detect_version_plugin = records.assignments_map.get(&detect_key).and_then(|a| {
+        let c = a
+            .plugin_config_id
+            .and_then(|pc_id| records.configs_map.get(&pc_id));
+        build_plugin_assignment_nullable(a, c)
+    });
+
+    // Resolve hook plugin assignments.
+    let pre_hook_key = (
+        update_record.host_id,
+        update_record.software_item_id,
+        "pre_update_hook".to_string(),
+    );
+    let pre_update_hook_plugins: Vec<PluginAssignment> = records
+        .hook_assignments_map
+        .get(&pre_hook_key)
+        .map(|assignments| {
+            assignments
+                .iter()
+                .filter_map(|a| {
+                    let c = a
+                        .plugin_config_id
+                        .and_then(|pc_id| records.configs_map.get(&pc_id));
+                    build_plugin_assignment_nullable(a, c)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let post_hook_key = (
+        update_record.host_id,
+        update_record.software_item_id,
+        "post_update_hook".to_string(),
+    );
+    let post_update_hook_plugins: Vec<PluginAssignment> = records
+        .hook_assignments_map
+        .get(&post_hook_key)
+        .map(|assignments| {
+            assignments
+                .iter()
+                .filter_map(|a| {
+                    let c = a
+                        .plugin_config_id
+                        .and_then(|pc_id| records.configs_map.get(&pc_id));
+                    build_plugin_assignment_nullable(a, c)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let host = match records.hosts_map.get(&update_record.host_id) {
+        Some(h) => h,
+        None => {
+            tracing::warn!(
+                update_id = %update_record.id,
+                host_id = %update_record.host_id,
+                "host not found for pending update, skipping"
+            );
+            return None;
+        }
+    };
+
+    // Reconstruct release_info from latest_release_metadata so that
+    // asset-download plugins (e.g. GitHub) receive the download URLs on
+    // reconnect replay — same enrichment used in dispatch_update_to_agent.
+    let hsi_metadata = records
+        .hsi_metadata_map
+        .get(&(update_record.host_id, item.id))
+        .and_then(|m| m.as_ref());
+    let fetch_key = (update_record.host_id, item.id, "fetch_releases".to_string());
+    let fetch_config = records
+        .assignments_map
+        .get(&fetch_key)
+        .and_then(|a| a.plugin_config_id)
+        .and_then(|pc_id| records.configs_map.get(&pc_id))
+        .map(|c| &c.config);
+    let release_info = crate::queries::update_dispatch::enrich_release_info_with_attestation(
+        None,
+        hsi_metadata,
+        fetch_config,
+    );
+
+    Some(ExecuteUpdatePayload {
+        host_machine_id: host.machine_id.clone(),
+        update_history_id: update_record.id,
+        software_item_id: item.id,
+        software_item_name: item.name.clone(),
+        to_version: update_record.to_version.clone().unwrap_or_default(),
+        detect_version_plugin,
+        execute_update_plugin,
+        pre_update_hook_plugins,
+        post_update_hook_plugins,
+        release_info,
+        timeout: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT,
+        // Preserve the interactive flag that was set at original dispatch time
+        // so that a reconnecting agent receives a PTY when expected.
+        interactive: update_record.interactive,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// deliver_pending_updates
+// ---------------------------------------------------------------------------
+
+/// Deliver pending updates for hosts linked to this service.
+///
+/// On service reconnect, we check for any `update_history` records with
+/// `status = Pending` for hosts linked to this service and send them.
+///
+/// All auxiliary data (software items, hosts, plugin assignments, plugin configs)
+/// is loaded in four batched queries and joined in memory to avoid N+1 round-trips.
+#[tracing::instrument(skip_all, fields(%service_id))]
+pub(super) async fn deliver_pending_updates(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    out_seq: &mut OutgoingSeq,
+) -> HandlerResult<()> {
+    let Some((_host_ids, records)) = load_pending_update_records(state, service_id).await? else {
+        return Ok(());
+    };
+
+    tracing::info!(
+        %service_id,
+        count = records.pending_updates.len(),
+        "delivering pending updates on reconnect"
+    );
+
+    // Build ExecuteUpdatePayload for each pending update using HashMap lookups.
     //
     // Batch-aware filtering: for updates within a batch, only dispatch the
     // first pending update per (batch_id, host_id) — the rest are dispatched
     // sequentially as each completes via dispatch_next_in_batch.
     let mut dispatched_batch_hosts: HashSet<(uuid::Uuid, uuid::Uuid)> = HashSet::new();
 
-    for update_record in pending_updates {
+    for update_record in &records.pending_updates {
         if let Some(batch_id) = update_record.batch_id {
             let key = (batch_id, update_record.host_id);
             if !dispatched_batch_hosts.insert(key) {
@@ -253,127 +454,9 @@ pub(super) async fn deliver_pending_updates(
                 continue;
             }
         }
-        let Some(item) = sw_items_map.get(&update_record.software_item_id) else {
-            tracing::warn!(
-                update_id = %update_record.id,
-                software_item_id = %update_record.software_item_id,
-                "software item not found or deactivated, skipping pending update"
-            );
+
+        let Some(execute_payload) = build_execute_payload(update_record, &records) else {
             continue;
-        };
-
-        // Resolve execute_update assignment.
-        let exec_key = (update_record.host_id, item.id, "execute_update".to_string());
-        let Some(exec_assignment) = assignments_map.get(&exec_key) else {
-            tracing::warn!(
-                update_id = %update_record.id,
-                host_id = %update_record.host_id,
-                software_item_id = %item.id,
-                "no execute_update plugin assigned, skipping pending update"
-            );
-            continue;
-        };
-        let exec_config = exec_assignment
-            .plugin_config_id
-            .and_then(|pc_id| configs_map.get(&pc_id));
-
-        let execute_update_plugin =
-            match build_plugin_assignment_nullable(exec_assignment, exec_config) {
-                Some(a) => a,
-                None => {
-                    tracing::warn!(
-                        update_id = %update_record.id,
-                        "unknown plugin type for execute_update, skipping pending update"
-                    );
-                    continue;
-                }
-            };
-
-        // Resolve optional detect_version assignment.
-        let detect_key = (update_record.host_id, item.id, "detect_version".to_string());
-        let detect_version_plugin = assignments_map.get(&detect_key).and_then(|a| {
-            let c = a.plugin_config_id.and_then(|pc_id| configs_map.get(&pc_id));
-            build_plugin_assignment_nullable(a, c)
-        });
-
-        // Resolve hook plugin assignments.
-        let pre_hook_key = (
-            update_record.host_id,
-            update_record.software_item_id,
-            "pre_update_hook".to_string(),
-        );
-        let pre_update_hook_plugins: Vec<PluginAssignment> = hook_assignments_map
-            .get(&pre_hook_key)
-            .map(|assignments| {
-                assignments
-                    .iter()
-                    .filter_map(|a| {
-                        let c = a.plugin_config_id.and_then(|pc_id| configs_map.get(&pc_id));
-                        build_plugin_assignment_nullable(a, c)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let post_hook_key = (
-            update_record.host_id,
-            update_record.software_item_id,
-            "post_update_hook".to_string(),
-        );
-        let post_update_hook_plugins: Vec<PluginAssignment> = hook_assignments_map
-            .get(&post_hook_key)
-            .map(|assignments| {
-                assignments
-                    .iter()
-                    .filter_map(|a| {
-                        let c = a.plugin_config_id.and_then(|pc_id| configs_map.get(&pc_id));
-                        build_plugin_assignment_nullable(a, c)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let Some(host) = hosts_map.get(&update_record.host_id) else {
-            tracing::warn!(
-                update_id = %update_record.id,
-                host_id = %update_record.host_id,
-                "host not found for pending update, skipping"
-            );
-            continue;
-        };
-
-        // Reconstruct release_info from latest_release_metadata so that
-        // asset-download plugins (e.g. GitHub) receive the download URLs on
-        // reconnect replay — same enrichment used in dispatch_update_to_agent.
-        let hsi_metadata = hsi_metadata_map
-            .get(&(update_record.host_id, item.id))
-            .and_then(|m| m.as_ref());
-        let fetch_key = (update_record.host_id, item.id, "fetch_releases".to_string());
-        let fetch_config = assignments_map
-            .get(&fetch_key)
-            .and_then(|a| a.plugin_config_id)
-            .and_then(|pc_id| configs_map.get(&pc_id))
-            .map(|c| &c.config);
-        let release_info = crate::queries::update_dispatch::enrich_release_info_with_attestation(
-            None,
-            hsi_metadata,
-            fetch_config,
-        );
-
-        let execute_payload = ExecuteUpdatePayload {
-            host_machine_id: host.machine_id.clone(),
-            update_history_id: update_record.id,
-            software_item_id: item.id,
-            software_item_name: item.name.clone(),
-            to_version: update_record.to_version.clone().unwrap_or_default(),
-            detect_version_plugin,
-            execute_update_plugin,
-            pre_update_hook_plugins,
-            post_update_hook_plugins,
-            release_info,
-            timeout: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT,
-            // Preserve the interactive flag that was set at original dispatch time
-            // so that a reconnecting agent receives a PTY when expected.
-            interactive: update_record.interactive,
         };
 
         let msg = ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
@@ -388,7 +471,11 @@ pub(super) async fn deliver_pending_updates(
         tracing::info!(
             update_id = %update_record.id,
             %service_id,
-            software = %item.name,
+            software = %records
+                .sw_items_map
+                .get(&update_record.software_item_id)
+                .map(|i| i.name.as_str())
+                .unwrap_or("?"),
             "delivered pending update on reconnect"
         );
     }
