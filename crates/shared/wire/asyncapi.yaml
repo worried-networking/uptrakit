@@ -187,28 +187,24 @@ channels:
         $ref: "#/components/messages/serverRestarting"
       disconnecting:
         $ref: "#/components/messages/disconnecting"
-      mqttRegister:
-        $ref: "#/components/messages/mqttRegister"
-      mqttRegistered:
-        $ref: "#/components/messages/mqttRegistered"
-      mqttReleaseTenants:
-        $ref: "#/components/messages/mqttReleaseTenants"
-      mqttClientStatus:
-        $ref: "#/components/messages/mqttClientStatus"
-      mqttTenantAssignments:
-        $ref: "#/components/messages/mqttTenantAssignments"
-      mqttTenantConfigUpdated:
-        $ref: "#/components/messages/mqttTenantConfigUpdated"
-      mqttTenantRevoked:
-        $ref: "#/components/messages/mqttTenantRevoked"
+      storeServiceConfig:
+        $ref: "#/components/messages/storeServiceConfig"
+      deleteServiceConfig:
+        $ref: "#/components/messages/deleteServiceConfig"
+      serviceConfigAck:
+        $ref: "#/components/messages/serviceConfigAck"
+      serviceConfigDelivery:
+        $ref: "#/components/messages/serviceConfigDelivery"
+      serviceConfigUpdated:
+        $ref: "#/components/messages/serviceConfigUpdated"
       softwareStates:
         $ref: "#/components/messages/softwareStates"
       hostConnectivityUpdated:
         $ref: "#/components/messages/hostConnectivityUpdated"
-      mqttTriggerUpdate:
-        $ref: "#/components/messages/mqttTriggerUpdate"
-      mqttTriggerHostPackageUpdate:
-        $ref: "#/components/messages/mqttTriggerHostPackageUpdate"
+      serviceTriggerUpdate:
+        $ref: "#/components/messages/serviceTriggerUpdate"
+      serviceTriggerHostBatchUpdate:
+        $ref: "#/components/messages/serviceTriggerHostBatchUpdate"
       serviceCredentials:
         $ref: "#/components/messages/serviceCredentials"
       discoverSoftware:
@@ -243,8 +239,6 @@ channels:
       are published to the `uptrakit.events.controller` subject for
       controller-to-controller fanout. Without NATS, these events are local-only.
     messages:
-      mqttClientCreated:
-        $ref: "#/components/messages/mqttClientCreated"
       requestCaRotation:
         $ref: "#/components/messages/requestCaRotation"
       requestCrlRenewal:
@@ -537,114 +531,68 @@ operations:
       This allows the controller to distinguish between intentional disconnects
       and unexpected connection losses.
 
-  sendRegister:
+  sendStoreServiceConfig:
     action: send
     channel:
       $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/serviceConnection/messages/register"
-    summary: Service declares its capabilities to the controller
+      - $ref: "#/channels/serviceConnection/messages/storeServiceConfig"
+    summary: Service stores a named config entry on the controller
     description: |
-      Sent by every authenticated service immediately on connect (from `on_connected`,
-      before `ServiceSettings` is processed). Declares the service's capability set.
-      Services with the `UpdateTracking` capability also include `instance_id`,
-      `max_tenants`, and `active_mqtt_clients` for MQTT lease coordination.
-      The controller responds with `registered` and `tenant_assignments` for
-      update-tracking services.
+      Sent by a service to persist a named key/value config entry. The controller
+      writes to `tenant_service_config` (when `tenant_id` is present) or
+      `global_service_config` (when absent), responds with `service_config_ack`,
+      and broadcasts `service_config_updated` to all other connected instances
+      of the same `service_app_name`.
 
-  receiveMqttRegistered:
-    action: receive
-    channel:
-      $ref: "#/channels/serviceConnection"
-    messages:
-      - $ref: "#/channels/serviceConnection/messages/mqttRegistered"
-    summary: MQTT service receives registration acknowledgment
-    description: |
-      The controller confirms the MQTT service registration by echoing back
-      the instance ID. Followed by a `tenant_assignments` message with
-      initial MQTT client configurations to serve.
-
-  sendMqttReleaseTenants:
+  sendDeleteServiceConfig:
     action: send
     channel:
       $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/serviceConnection/messages/mqttReleaseTenants"
-    summary: MQTT service releases MQTT client leases (MQTT-only)
+      - $ref: "#/channels/serviceConnection/messages/deleteServiceConfig"
+    summary: Service deletes a named config entry from the controller
     description: |
-      Sent by an MQTT service to explicitly release leases for specific MQTT
-      client configurations. The controller will delete the corresponding leases
-      and may reassign the released clients to other instances.
+      Sent by a service to delete a config entry by key. The controller removes
+      the row from the DB, responds with `service_config_ack`, and broadcasts
+      `service_config_updated` (with `deleted: true`) to all other connected
+      instances of the same `service_app_name`.
 
-  sendMqttClientStatus:
-    action: send
-    channel:
-      $ref: "#/channels/serviceConnection"
-    messages:
-      - $ref: "#/channels/serviceConnection/messages/mqttClientStatus"
-    summary: MQTT service reports MQTT client connection status (MQTT-only)
-    description: |
-      Sent by an MQTT service when a client transitions between connecting,
-      online, or offline. The controller records the latest status for display.
-
-  receiveMqttTenantAssignments:
+  receiveServiceConfigAck:
     action: receive
     channel:
       $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/serviceConnection/messages/mqttTenantAssignments"
-    summary: MQTT service receives tenant assignments (MQTT-only)
+      - $ref: "#/channels/serviceConnection/messages/serviceConfigAck"
+    summary: Service receives acknowledgment for a store or delete operation
     description: |
-      The controller pushes MQTT client configurations that the service should
-      start serving. Sent after registration and whenever new clients are
-      assigned to this instance. Each configuration is keyed by `mqtt_client_id`.
+      Sent by the controller in response to `StoreServiceConfig` or
+      `DeleteServiceConfig`. Carries the original `request_id` for correlation,
+      a `success` flag, and an optional `error` message on failure.
 
-  receiveMqttTenantConfigUpdated:
+  receiveServiceConfigDelivery:
     action: receive
     channel:
       $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/serviceConnection/messages/mqttTenantConfigUpdated"
-    summary: MQTT service receives a configuration update (MQTT-only)
+      - $ref: "#/channels/serviceConnection/messages/serviceConfigDelivery"
+    summary: Service receives its stored config entries on connect
     description: |
-      The controller pushes this message when an MQTT client configuration is
-      modified via the REST API. The service should hot-reload the configuration
-      for the affected MQTT client (identified by `mqtt_client_id`).
+      Sent once by the controller after mTLS authentication for each connected
+      service `app_name`. Contains all stored config entries (both tenant-scoped
+      and global) for this service, with values decrypted before delivery.
 
-  receiveMqttTenantRevoked:
+  receiveServiceConfigUpdated:
     action: receive
     channel:
       $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/serviceConnection/messages/mqttTenantRevoked"
-    summary: MQTT service receives a client revocation (MQTT-only)
+      - $ref: "#/channels/serviceConnection/messages/serviceConfigUpdated"
+    summary: Service receives a push notification when any config entry changes
     description: |
-      The controller pushes this message when an MQTT client configuration is
-      deleted or its lease is revoked. The service should stop the MQTT client
-      identified by `mqtt_client_id` and release its resources.
-
-  sendControllerOutboxMqttClientCreated:
-    action: send
-    channel:
-      $ref: "#/channels/controllerEvents"
-    messages:
-      - $ref: "#/channels/controllerEvents/messages/mqttClientCreated"
-    summary: Controller publishes event for new MQTT client leases
-    description: |
-      When a new MQTT client is created and no local MQTT service is connected,
-      the controller publishes an event to NATS (when configured) so another
-      controller instance can lease the client.
-
-  receiveControllerOutboxMqttClientCreated:
-    action: receive
-    channel:
-      $ref: "#/channels/controllerEvents"
-    messages:
-      - $ref: "#/channels/controllerEvents/messages/mqttClientCreated"
-    summary: Controller receives event for new MQTT client leases
-    description: |
-      A controller consumes this event from NATS to attempt leasing the newly
-      created MQTT client to its least busy local instance.
+      Pushed by the controller to all connected instances of the same
+      `service_app_name` whenever any instance stores or deletes a config entry.
+      Allows multi-instance deployments to stay in sync without polling.
 
   receiveSoftwareStates:
     action: receive
@@ -654,11 +602,11 @@ operations:
       - $ref: "#/channels/serviceConnection/messages/softwareStates"
     summary: MQTT service receives current software version state from controller
     description: |
-      Sent after tenant assignment and after any version check or update result.
-      Contains per-host installed/latest version data for all active software
-      items of the tenant, plus per-host metadata (OS info, tags, agent info).
-      The MQTT service uses this to publish Home Assistant discovery topics and
-      state topics for the broker.
+      Sent after the MQTT service connects and after any version check or update
+      result. Contains per-host installed/latest version data for all active
+      software items of the tenant, plus per-host metadata (OS info, tags, agent
+      info). The MQTT service uses this to publish Home Assistant discovery topics
+      and state topics for the broker.
 
       Safe for cross-controller delivery via NATS (contains no credentials).
 
@@ -1193,69 +1141,45 @@ components:
       payload:
         $ref: "#/components/schemas/disconnectingPayload"
 
-    register:
-      name: register
-      title: Register Message
-      summary: Service capability declaration (sent by all services on connect)
+    storeServiceConfig:
+      name: store_service_config
+      title: Store Service Config Message
+      summary: Service requests to store a named config entry on the controller
       contentType: application/json
       payload:
-        $ref: "#/components/schemas/registerPayload"
+        $ref: "#/components/schemas/storeServiceConfigPayload"
 
-    mqttRegistered:
-      name: registered
-      title: MQTT Registered Message
-      summary: MQTT service registration acknowledgment (MQTT-only)
+    deleteServiceConfig:
+      name: delete_service_config
+      title: Delete Service Config Message
+      summary: Service requests to delete a named config entry from the controller
       contentType: application/json
       payload:
-        $ref: "#/components/schemas/mqttRegisteredPayload"
+        $ref: "#/components/schemas/deleteServiceConfigPayload"
 
-    mqttReleaseTenants:
-      name: release_tenants
-      title: MQTT Release Tenants Message
-      summary: MQTT service releases MQTT client leases (MQTT-only)
+    serviceConfigAck:
+      name: service_config_ack
+      title: Service Config Ack Message
+      summary: Controller acknowledges a store or delete config operation
       contentType: application/json
       payload:
-        $ref: "#/components/schemas/mqttReleaseTenantsPayload"
+        $ref: "#/components/schemas/serviceConfigAckPayload"
 
-    mqttClientStatus:
-      name: mqtt_client_status
-      title: MQTT Client Status Message
-      summary: MQTT service reports client connection status (MQTT-only)
+    serviceConfigDelivery:
+      name: service_config_delivery
+      title: Service Config Delivery Message
+      summary: Controller delivers all stored config entries to a service on connect
       contentType: application/json
       payload:
-        $ref: "#/components/schemas/mqttClientStatusPayload"
+        $ref: "#/components/schemas/serviceConfigDeliveryPayload"
 
-    mqttTenantAssignments:
-      name: tenant_assignments
-      title: MQTT Tenant Assignments Message
-      summary: Controller assigns MQTT client configurations (MQTT-only)
+    serviceConfigUpdated:
+      name: service_config_updated
+      title: Service Config Updated Message
+      summary: Controller pushes a config change to all connected instances of the same service
       contentType: application/json
       payload:
-        $ref: "#/components/schemas/mqttTenantAssignmentsPayload"
-
-    mqttTenantConfigUpdated:
-      name: tenant_config_updated
-      title: MQTT Tenant Config Updated Message
-      summary: Controller pushes MQTT client configuration update (MQTT-only)
-      contentType: application/json
-      payload:
-        $ref: "#/components/schemas/mqttTenantConfigUpdatedPayload"
-
-    mqttTenantRevoked:
-      name: tenant_revoked
-      title: MQTT Tenant Revoked Message
-      summary: Controller revokes an MQTT client assignment (MQTT-only)
-      contentType: application/json
-      payload:
-        $ref: "#/components/schemas/mqttTenantRevokedPayload"
-
-    mqttClientCreated:
-      name: mqtt_client_created
-      title: MQTT Client Created Message
-      summary: Controller event for new MQTT client leases
-      contentType: application/json
-      payload:
-        $ref: "#/components/schemas/mqttClientCreatedPayload"
+        $ref: "#/components/schemas/serviceConfigUpdatedPayload"
 
     softwareStates:
       name: software_states
@@ -1269,7 +1193,7 @@ components:
         - An update is triggered (REST, MQTT command, or scheduler)
         - An agent sends `update_started` (status transitions to `in_progress`)
         - An update result (completed or failed) is received from an agent
-        - An MQTT service first connects and receives its tenant assignments
+        - An MQTT service first connects
         - A batch host package update is triggered or completed
 
         The `update_in_progress` field in each host entry reflects whether an
@@ -2909,14 +2833,17 @@ components:
           items:
             type: string
             format: uuid
-          description: List of active MQTT client IDs (MQTT services only, for graceful handoff)
+          description: List of active MQTT client IDs (for graceful handoff on reconnect)
 
-    registerPayload:
+    storeServiceConfigPayload:
       type: object
       required:
         - protocol_version
         - seq
         - type
+        - request_id
+        - key
+        - value
       properties:
         protocol_version:
           type: integer
@@ -2933,358 +2860,223 @@ components:
           description: Monotonically increasing sequence number for replay protection
         type:
           type: string
-          const: register
+          const: store_service_config
           description: Message type discriminator
-        capabilities:
-          type: array
-          items:
-            type: string
-          default: []
-          description: |
-            Capabilities declared by this service instance. Unknown strings are
-            ignored (forward compatibility). Omitted when empty.
-          examples:
-            - ["graceful_shutdown", "software_discovery", "update_hooks"]
-        instance_id:
-          type: string
-          description: |
-            Unique instance identifier (e.g., hostname-uuid_prefix).
-            Only set by services with the `update_tracking` capability.
-          examples:
-            - mqtt-node-1-a1b2c3d4
-        max_tenants:
-          type: integer
-          format: int32
-          description: |
-            Maximum tenants this instance will handle (0 = unlimited).
-            Only meaningful for services with the `update_tracking` capability.
-          default: 0
-          examples:
-            - 0
-            - 10
-        active_mqtt_clients:
-          type: array
-          items:
-            type: string
-            format: uuid
-          description: |
-            Currently active MQTT client IDs (for reconnect reconciliation).
-            Only set by services with the `update_tracking` capability.
-            Omitted when empty (empty array is the default).
-          examples:
-            - ["660e8400-e29b-41d4-a716-446655440001"]
-
-    mqttRegisteredPayload:
-      type: object
-      required:
-        - protocol_version
-        - seq
-        - type
-        - instance_id
-      properties:
-        protocol_version:
-          type: integer
-          format: int32
-          minimum: 1
-          description: |
-            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
-            Receivers that encounter an unknown version must close the connection
-            with a protocol error.
-        seq:
-          type: integer
-          format: int64
-          minimum: 1
-          description: Monotonically increasing sequence number for replay protection
-        type:
-          type: string
-          const: registered
-          description: Message type discriminator
-        instance_id:
-          type: string
-          description: Echo of the instance ID for confirmation
-          examples:
-            - mqtt-node-1-a1b2c3d4
-
-    mqttReleaseTenantsPayload:
-      type: object
-      required:
-        - protocol_version
-        - seq
-        - type
-        - mqtt_client_ids
-      properties:
-        protocol_version:
-          type: integer
-          format: int32
-          minimum: 1
-          description: |
-            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
-            Receivers that encounter an unknown version must close the connection
-            with a protocol error.
-        seq:
-          type: integer
-          format: int64
-          minimum: 1
-          description: Monotonically increasing sequence number for replay protection
-        type:
-          type: string
-          const: release_tenants
-          description: Message type discriminator
-        mqtt_client_ids:
-          type: array
-          items:
-            type: string
-            format: uuid
-          description: MQTT client IDs to release
-          examples:
-            - ["660e8400-e29b-41d4-a716-446655440001"]
-
-    mqttClientStatusPayload:
-      type: object
-      required:
-        - protocol_version
-        - seq
-        - type
-        - mqtt_client_id
-        - status
-      properties:
-        protocol_version:
-          type: integer
-          format: int32
-          minimum: 1
-          description: |
-            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
-            Receivers that encounter an unknown version must close the connection
-            with a protocol error.
-        seq:
-          type: integer
-          format: int64
-          minimum: 1
-          description: Monotonically increasing sequence number for replay protection
-        type:
-          type: string
-          const: mqtt_client_status
-          description: Message type discriminator
-        mqtt_client_id:
-          type: string
-          description: MQTT client ID reporting status
-          examples:
-            - "660e8400-e29b-41d4-a716-446655440001"
-        status:
-          $ref: "#/components/schemas/mqttClientConnectionStatus"
-          description: Connection status for the MQTT client
-
-    mqttClientConnectionStatus:
-      type: string
-      enum:
-        - online
-        - offline
-        - connecting
-      description: MQTT client connection status
-
-    mqttTenantAssignmentsPayload:
-      type: object
-      required:
-        - protocol_version
-        - seq
-        - type
-        - tenants
-      properties:
-        protocol_version:
-          type: integer
-          format: int32
-          minimum: 1
-          description: |
-            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
-            Receivers that encounter an unknown version must close the connection
-            with a protocol error.
-        seq:
-          type: integer
-          format: int64
-          minimum: 1
-          description: Monotonically increasing sequence number for replay protection
-        type:
-          type: string
-          const: tenant_assignments
-          description: Message type discriminator
-        tenants:
-          type: array
-          items:
-            $ref: "#/components/schemas/mqttTenantConfig"
-          description: List of MQTT client configurations to start serving
-
-    mqttTenantConfig:
-      type: object
-      required:
-        - mqtt_client_id
-        - tenant_id
-        - enabled
-        - transport
-        - host
-        - port
-        - client_id
-        - topic_prefix
-        - updated_at
-      properties:
-        mqtt_client_id:
+        request_id:
           type: string
           format: uuid
-          description: MQTT client UUID (primary identifier from mqtt_clients table)
+          description: Correlation ID for the matching `service_config_ack`
           examples:
-            - 660e8400-e29b-41d4-a716-446655440001
+            - 550e8400-e29b-41d4-a716-446655440000
+        key:
+          type: string
+          description: Config entry key (max 512 chars, namespaced by convention)
+          examples:
+            - "clients/broker-1"
+        value:
+          type: string
+          description: JSON-serialized config value (max 65,536 chars)
+          examples:
+            - '{"host":"mqtt.example.com","port":1883}'
         tenant_id:
           type: string
           format: uuid
-          description: Tenant UUID (kept for context)
-          examples:
-            - 550e8400-e29b-41d4-a716-446655440000
-        enabled:
-          type: boolean
-          description: Whether this MQTT client is enabled
-        transport:
-          type: string
-          enum:
-            - tcp
-            - tls
-          description: Transport protocol
-        host:
-          type: string
-          description: MQTT broker hostname
-          examples:
-            - mqtt.example.com
-        port:
-          type: integer
-          format: int32
-          description: MQTT broker port
-          examples:
-            - 1883
-            - 8883
-        client_id:
-          type: string
-          description: MQTT client ID for broker connection
-          examples:
-            - uptrakit-controller
-        username:
-          type: string
-          description: Username for broker authentication (optional)
-        password:
-          type: string
-          description: Password for broker authentication (optional)
-        ca_pem:
-          type: string
           description: |
-            Custom CA certificate in PEM format for private MQTT brokers
-            using internal certificate authorities. When present, the MQTT
-            service uses these bytes as the trusted CA for TLS connections
-            instead of relying on the system trust store. Optional — omitted
-            when not configured.
-          examples:
-            - "-----BEGIN CERTIFICATE-----\nMIIC...\n-----END CERTIFICATE-----\n"
-        topic_prefix:
-          type: string
-          description: MQTT topic prefix
-          examples:
-            - uptrakit
-        ha_discovery:
-          type: boolean
-          default: false
-          description: Whether to publish Home Assistant MQTT discovery topics
-        ha_discovery_prefix:
-          type: string
-          default: homeassistant
-          description: Prefix for Home Assistant MQTT discovery topics
-          examples:
-            - homeassistant
-        updated_at:
-          type: integer
-          format: int64
-          description: Last update timestamp in milliseconds (for change detection)
-          examples:
-            - 1706400000000
-
-    mqttTenantConfigUpdatedPayload:
-      type: object
-      required:
-        - protocol_version
-        - seq
-        - type
-        - tenant
-      properties:
-        protocol_version:
-          type: integer
-          format: int32
-          minimum: 1
-          description: |
-            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
-            Receivers that encounter an unknown version must close the connection
-            with a protocol error.
-        seq:
-          type: integer
-          format: int64
-          minimum: 1
-          description: Monotonically increasing sequence number for replay protection
-        type:
-          type: string
-          const: tenant_config_updated
-          description: Message type discriminator
-        tenant:
-          $ref: "#/components/schemas/mqttTenantConfig"
-          description: Updated MQTT client configuration
-
-    mqttTenantRevokedPayload:
-      type: object
-      required:
-        - protocol_version
-        - seq
-        - type
-        - mqtt_client_id
-        - reason
-      properties:
-        protocol_version:
-          type: integer
-          format: int32
-          minimum: 1
-          description: |
-            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
-            Receivers that encounter an unknown version must close the connection
-            with a protocol error.
-        seq:
-          type: integer
-          format: int64
-          minimum: 1
-          description: Monotonically increasing sequence number for replay protection
-        type:
-          type: string
-          const: tenant_revoked
-          description: Message type discriminator
-        mqtt_client_id:
-          type: string
-          format: uuid
-          description: MQTT client UUID being revoked
+            When present, the entry is stored in `tenant_service_config`.
+            When absent, stored in `global_service_config`.
           examples:
             - 660e8400-e29b-41d4-a716-446655440001
-        reason:
-          type: string
-          description: Human-readable reason for the revocation
-          examples:
-            - MQTT client configuration deleted
 
-    mqttClientCreatedPayload:
+    deleteServiceConfigPayload:
       type: object
       required:
+        - protocol_version
+        - seq
         - type
-        - mqtt_client_id
+        - request_id
+        - key
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
-          const: mqtt_client_created
+          const: delete_service_config
           description: Message type discriminator
-        mqtt_client_id:
+        request_id:
           type: string
           format: uuid
-          description: MQTT client UUID to lease
+          description: Correlation ID for the matching `service_config_ack`
           examples:
-            - 660e8400-e29b-41d4-a716-446655440002
+            - 550e8400-e29b-41d4-a716-446655440001
+        key:
+          type: string
+          description: Config entry key to delete
+          examples:
+            - "clients/broker-1"
+        tenant_id:
+          type: string
+          format: uuid
+          description: |
+            When present, deletes from `tenant_service_config`.
+            When absent, deletes from `global_service_config`.
+          examples:
+            - 660e8400-e29b-41d4-a716-446655440001
+
+    serviceConfigAckPayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+        - request_id
+        - success
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: service_config_ack
+          description: Message type discriminator
+        request_id:
+          type: string
+          format: uuid
+          description: Matches the `request_id` from the originating request
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+        success:
+          type: boolean
+          description: "`true` when the store or delete operation completed successfully"
+        error:
+          type: string
+          description: Human-readable error message when `success` is `false`
+          examples:
+            - "key not found"
+
+    serviceConfigDeliveryPayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+        - entries
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: service_config_delivery
+          description: Message type discriminator
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/serviceConfigEntry"
+          description: All stored config entries for this service (both tenant-scoped and global)
+
+    serviceConfigEntry:
+      type: object
+      required:
+        - key
+        - value
+      properties:
+        key:
+          type: string
+          description: Config entry key
+          examples:
+            - "clients/broker-1"
+        value:
+          type: string
+          description: |
+            JSON-serialized config value. Values are decrypted by the controller
+            before inclusion in this message.
+          examples:
+            - '{"host":"mqtt.example.com","port":1883}'
+        tenant_id:
+          type: string
+          format: uuid
+          description: Present for tenant-scoped entries; absent for global entries
+          examples:
+            - 660e8400-e29b-41d4-a716-446655440001
+
+    serviceConfigUpdatedPayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+        - key
+        - deleted
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: service_config_updated
+          description: Message type discriminator
+        key:
+          type: string
+          description: Config entry key that changed
+          examples:
+            - "clients/broker-1"
+        value:
+          type: string
+          description: |
+            New config value (decrypted). Absent when `deleted` is `true`.
+          examples:
+            - '{"host":"mqtt.example.com","port":1883}'
+        tenant_id:
+          type: string
+          format: uuid
+          description: Present for tenant-scoped entries; absent for global entries
+          examples:
+            - 660e8400-e29b-41d4-a716-446655440001
+        deleted:
+          type: boolean
+          description: |
+            `true` when the entry was deleted; `false` when it was stored or updated.
 
     softwareStateHostEntry:
       type: object

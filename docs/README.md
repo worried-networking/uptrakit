@@ -116,6 +116,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Docker](development/docker.md) | Docker image build, CI workflow, and local development with docker-compose. See also: [Docker Deployment](end-user/deployment/docker.md). |
 | [Interactive Updates](development/interactive-updates.md) | Interactive updates feature: PTY allocation, feature gate strategy, architecture, testing. See also: [Interactive Updates API](api/interactive-updates.md), [Interactive Updates Security](security/interactive-updates.md). |
 | [Zero-Configuration Discovery](development/zeroconf-discovery.md) | mDNS/DNS-SD zero-configuration discovery architecture, TXT records, feature flags, and testing. See also: [Zeroconf Guide](end-user/zeroconf-discovery.md), [Zeroconf Security](security/zeroconf-discovery.md). |
+| [Service Config Store](development/service-config-store.md) | Generic mechanism for services to persist named config entries on the controller, with multi-instance fanout. DB schema, SDK usage, and security model. See also: [Wire Protocol](api/wire-protocol.md). |
 
 ## Deployment Guides
 

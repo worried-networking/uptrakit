@@ -60,8 +60,8 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 ### Update-tracking service (service -> controller)
 
-`release_tenants`, `mqtt_client_status`, `service_trigger_update`,
-`service_trigger_host_batch_update`
+`service_trigger_update`, `service_trigger_host_batch_update`, `store_service_config`,
+`delete_service_config`
 
 ### Shared (controller -> service)
 
@@ -452,10 +452,16 @@ no output for 10 seconds while the process is still running).
 The controller broadcasts this as a `stdin_attention` SSE event and dispatches a
 notification (if rules are configured for the `StdinAttention` event type).
 
-### MQTT-specific (controller -> service)
+### Update-tracking service (controller -> service)
 
-`registered`, `tenant_assignments`, `tenant_config_updated`, `tenant_revoked`, `software_states`,
-`host_connectivity_updated`
+`software_states`, `host_connectivity_updated`, `service_config_delivery`, `service_config_ack`,
+`service_config_updated`
+
+MQTT clients are now configured through the extension framework. The MQTT service registers the
+`uptrakit-mqtt.clients` extension with actions `list-clients`, `create-client`, `update-client`,
+`delete-client`, and `test-connection`. Client configuration is stored and delivered via the
+generic service config store messages above. See
+[Service Config Store](../development/service-config-store.md) for the full mechanism.
 
 #### `host_connectivity_updated` payload
 
@@ -502,6 +508,141 @@ credentials, no PEM data, and no plugin configuration.
 agent's WebSocket connection — not inferred from a database scan. Update-tracking services on all controllers
 receive the event via NATS and update their in-memory connectivity cache accordingly. This ensures
 that `connectivity/state` is correct even in deployments with multiple controllers.
+
+## Generic Service Config Messages
+
+These messages implement a generic mechanism for services to persist named key/value config
+entries on the controller. The controller stores entries in `tenant_service_config` or
+`global_service_config`, propagates changes to all connected instances of the same service
+`app_name`, and delivers all stored entries once on connect. Sensitive values are encrypted at
+rest. See [Service Config Store](../development/service-config-store.md) for the full architecture.
+
+### `store_service_config` (service -> controller)
+
+Requests that the controller persist a named config entry for this service. Sensitive values
+should be pre-encrypted by the service using `EncryptedString`. The controller responds with
+`service_config_ack` and pushes `service_config_updated` to all other connected instances of
+the same `service_app_name`.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 10,
+  "type": "store_service_config",
+  "request_id": "550e8400-e29b-41d4-a716-446655440000",
+  "key": "clients/broker-1",
+  "value": "{\"host\":\"mqtt.example.com\",\"port\":1883}",
+  "tenant_id": "660e8400-e29b-41d4-a716-446655440001"
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `request_id` | UUID | Yes | Correlation ID for the matching `service_config_ack` |
+| `key` | string | Yes | Config entry key (max 512 chars, namespaced by convention e.g. `"clients/{id}"`) |
+| `value` | string | Yes | JSON-serialized config value (max 65,536 chars) |
+| `tenant_id` | UUID? | No | When present, stored in `tenant_service_config`; when absent, stored in `global_service_config` |
+
+### `delete_service_config` (service -> controller)
+
+Requests that the controller delete a named config entry. The controller responds with
+`service_config_ack` and pushes `service_config_updated` (with `deleted: true`) to all
+other connected instances.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 11,
+  "type": "delete_service_config",
+  "request_id": "550e8400-e29b-41d4-a716-446655440001",
+  "key": "clients/broker-1",
+  "tenant_id": "660e8400-e29b-41d4-a716-446655440001"
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `request_id` | UUID | Yes | Correlation ID for the matching `service_config_ack` |
+| `key` | string | Yes | Config entry key to delete |
+| `tenant_id` | UUID? | No | Scopes the lookup to `tenant_service_config` or `global_service_config` |
+
+### `service_config_ack` (controller -> service)
+
+Acknowledges a `store_service_config` or `delete_service_config` request. Sent only to
+the instance that initiated the request (not broadcast).
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 12,
+  "type": "service_config_ack",
+  "request_id": "550e8400-e29b-41d4-a716-446655440000",
+  "success": true,
+  "error": null
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `request_id` | UUID | Yes | Matches the `request_id` from the originating request |
+| `success` | boolean | Yes | `true` when the operation completed successfully |
+| `error` | string? | No | Human-readable error message when `success` is `false` |
+
+### `service_config_delivery` (controller -> service)
+
+Sent once per service app name after mTLS authentication. Contains all stored config entries
+for the service (both tenant-scoped and global).
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 5,
+  "type": "service_config_delivery",
+  "entries": [
+    {
+      "key": "clients/broker-1",
+      "value": "{\"host\":\"mqtt.example.com\",\"port\":1883}",
+      "tenant_id": "660e8400-e29b-41d4-a716-446655440001"
+    }
+  ]
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `entries` | `ServiceConfigEntry[]` | Yes | All stored config entries for this service |
+
+**`ServiceConfigEntry` fields:**
+
+| Field | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `key` | string | Yes | Config entry key |
+| `value` | string | Yes | JSON-serialized config value (decrypted by controller before delivery) |
+| `tenant_id` | UUID? | No | Present for tenant-scoped entries; absent for global entries |
+
+### `service_config_updated` (controller -> service)
+
+Pushed to all connected instances of the same `service_app_name` when any instance stores
+or deletes a config entry. Allows multi-instance deployments to stay in sync without polling.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 6,
+  "type": "service_config_updated",
+  "key": "clients/broker-1",
+  "value": "{\"host\":\"mqtt.example.com\",\"port\":1883}",
+  "tenant_id": "660e8400-e29b-41d4-a716-446655440001",
+  "deleted": false
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `key` | string | Yes | Config entry key that changed |
+| `value` | string? | No | New value (absent when `deleted` is `true`) |
+| `tenant_id` | UUID? | No | Present for tenant-scoped entries; absent for global entries |
+| `deleted` | boolean | Yes | `true` when the entry was deleted; `false` when it was stored or updated |
 
 ## `host_machine_id` Field
 
@@ -862,7 +1003,7 @@ The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incomp
 | `SoftwareDiscovery` | `software_discovery` | Service supports `discover_software` → `discovery_results` flow. Controller gates autodiscovery requests on this capability. |
 | `UpdateHooks` | `update_hooks` | Service supports pre-/post-update hook plugin assignments in `execute_update`. Controller omits hook plugins when absent. |
 | `GracefulShutdown` | `graceful_shutdown` | Service sends `disconnecting` before clean exit and honours `shutdown_timeout_seconds`. |
-| `UpdateTracking` | `update_tracking` | Service is an update-tracking service: handles `tenant_assignments`, `release_tenants`, `mqtt_client_status`, etc. Also includes MQTT-specific fields in `register`. Maps to `ServiceProfile::UpdateTracker`. |
+| `UpdateTracking` | `update_tracking` | Service is an update-tracking service: handles `software_states`, `host_connectivity_updated`, `service_config_delivery`, `service_trigger_update`, etc. Maps to `ServiceProfile::UpdateTracker`. |
 | `SshRemote` | `ssh_remote` | Service manages remote hosts over SSH. Combined with `SoftwareDiscovery`, maps to `ServiceProfile::Agent` with SSH label. |
 | `SystemService` | `system_service` | Routes enrollment to the `system_services` table instead of `services`. Required for any service that requests system credentials. The MQTT bridge declares this alongside `update_tracking`. See [System Services Architecture](../architecture/system-services.md). |
 | `Scheduler` | `scheduler` | Marker: service is an external task scheduler. Maps to `ServiceProfile::Scheduler`. |

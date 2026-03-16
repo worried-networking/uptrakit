@@ -14,8 +14,8 @@ Key components:
 - **Controller** (server): API, Web UI, optional embedded scheduler, upstream version checking.
 - **External Scheduler** (standalone binary): enrolls as a system service, receives DB/NATS/master-key credentials via
   WebSocket, runs scheduled tasks across all tenants independently.
-- **MQTT Service** (standalone binary): MQTT/Home Assistant integration with lease-based multi-instance tenant
-  distribution.
+- **MQTT Service** (standalone binary): MQTT/Home Assistant integration with extension-based client
+  management via the service config store.
 - **Agents**: lightweight daemons on each managed host; outbound-only secure WebSocket to the controller; local version
   detection and update execution via sudo allowlists.
 - **Plugins**: first-party extension modules that detect, report, and update software; each crate implements the
@@ -44,8 +44,9 @@ details, see [SECURITY.md](SECURITY.md). For the documentation catalogue, see [d
   software items, and update history.
 - **Development docs** (`docs/development/`): setup, testing, coding standards, PR process, dependency policy, plugin
   guidelines ([plugin-guidelines.md](docs/development/plugin-guidelines.md)), plugin system architecture
-  ([plugin-system.md](docs/development/plugin-system.md)), AI usage expectations, and database migration authoring
-  ([database-migrations.md](docs/development/database-migrations.md)).
+  ([plugin-system.md](docs/development/plugin-system.md)), AI usage expectations, database migration authoring
+  ([database-migrations.md](docs/development/database-migrations.md)), and the generic service config store
+  ([service-config-store.md](docs/development/service-config-store.md)).
 - **Deployment guides**: reverse proxy deployment and per-proxy guides live under
   [`docs/end-user/deployment/`](docs/end-user/deployment/). Reverse proxy security model is at
   [`docs/security/reverse-proxy-security.md`](docs/security/reverse-proxy-security.md). Docker deployment guide at
@@ -785,10 +786,11 @@ It also publishes **per-host summary entities** summarising all non-featured sof
 
 Key invariants:
 
-1. **HA Discovery is opt-in per MQTT client.** Two columns on `mqtt_clients` control it:
-   `ha_discovery BOOL` and `ha_discovery_prefix TEXT DEFAULT 'homeassistant'`. This flag controls
-   **only** the publication of `{ha_prefix}/update/.../config` discovery topics. State and version
-   topics under `{topic_prefix}` are always published for all connected, enabled clients.
+1. **HA Discovery is opt-in per MQTT client.** The `ha_discovery` and `ha_discovery_prefix` fields
+   on each client config (stored in `tenant_service_config` / `global_service_config`, delivered
+   via `ServiceConfigDelivery`) control this. The flag controls **only** the publication of
+   `{ha_prefix}/update/.../config` discovery topics. State and version topics under
+   `{topic_prefix}` are always published for all connected, enabled clients.
 2. **State push is controller-initiated.** The controller sends `SoftwareStates` (wire type
    `software_states`) to MQTT services whenever version data changes. Push triggers: version check
    completed, update triggered (REST/MQTT/scheduler), `update_started` received from agent, update
@@ -889,10 +891,11 @@ Published immediately on agent connect/disconnect via `ControllerMessage::HostCo
 | --- | --- |
 | `crates/core/mqtt/src/ha_discovery.rs` | Pure HA topic/config helpers for software items, host summaries, security entities, metadata topics, and connectivity `binary_sensor`; `parse_command_topic`, `parse_host_packages_command_topic`, `parse_host_security_command_topic` |
 | `crates/core/mqtt/src/tenant_manager.rs` | `TenantManager` struct, event handlers, in-memory state caches (software state + host summary + host metadata + connectivity); split from original 2,012-line file |
-| `crates/core/mqtt/src/client_manager.rs` | `MqttClientHandle`, `build_config_from_wire`, `compute_config_hash` (split from `tenant_manager.rs`) |
+| `crates/core/mqtt/src/client_manager.rs` | `MqttClientHandle`, `ParsedMqttClientConfig`, `build_config_from_parsed`, `compute_config_hash` (split from `tenant_manager.rs`) |
+| `crates/core/mqtt/src/extension.rs` | MQTT extension manifest, action library (`list-clients`, `create-client`, `update-client`, `delete-client`, `test-connection`), extension request handler |
 | `crates/core/mqtt/src/state_publisher.rs` | All `publish_*` and `cleanup_*` methods (`publish_host_metadata`, `publish_connectivity_for_host`, `handle_host_connectivity_updated`; `publish_or_abort!` macro); second `impl TenantManager` block (split from `tenant_manager.rs`) |
 | `crates/core/mqtt/src/mqtt_client.rs` | `MqttServiceEvent` enum, `publish_retained` (5 s `OPERATION_TIMEOUT`), `subscribe_topic` (5 s timeout), `shutdown` (5 s timeout on offline publish + disconnect), HA status topic handling; timeouts prevent indefinite blocking when broker connection is down |
-| `crates/core/mqtt/src/main.rs` | `on_service_event` dispatch; `ControllerMessage::SoftwareStates` handler; `ControllerMessage::HostConnectivityUpdated` handler; `ServiceTriggerHostBatchUpdate` dispatch |
+| `crates/core/mqtt/src/main.rs` | `on_service_event` dispatch; `ControllerMessage::SoftwareStates` handler; `ControllerMessage::HostConnectivityUpdated` handler; `ControllerMessage::ServiceConfigDelivery` handler (populate config store on connect); `ControllerMessage::ServiceConfigUpdated` handler (apply config changes from other instances); `ExtensionRequest` handler; `ServiceTriggerHostBatchUpdate` dispatch |
 | `crates/ui/web-api-queries/src/queries/software_states.rs` | **Canonical** `load_software_states_for_tenant(&TenantDb)` (single page, all hosts) and `load_software_states_page_for_tenant(&TenantDb, host_page, page_size)` (paginated, ≤ `STATES_HOST_PAGE_SIZE` hosts per page, ordered by `host.id`). Both functions now accept `&TenantDb` (from `shared-db`) instead of `(db, tenant_id)`. |
 | `crates/ui/web-api-queries/src/queries/software_states.rs` | Canonical `load_software_states_for_tenant` and `load_software_states_page_for_tenant`; adds `AgentConnectivityInfo` + `load_agent_connectivity_for_tenant` |
 | `crates/ui/web-api/src/notification_service.rs` | `push_software_states_paginated_for_tenant` (loops over `load_software_states_page_for_tenant`, delivers each page immediately); `send_connectivity_update` (wraps `HostConnectivityUpdated`, local broadcast + NATS) |
@@ -908,7 +911,8 @@ Published immediately on agent connect/disconnect via `ControllerMessage::HostCo
 | `crates/shared/openapi-client/src/batch_progress_stream.rs` | SSE streaming client for batch progress events |
 | `crates/ui/cli/src/commands/batch_update.rs` | CLI batch update commands |
 | `docs/end-user/home-assistant-mqtt.md` | Full end-user setup guide including host summary entities, metadata topics, and connectivity sensor |
-| `docs/api/wire-protocol.md` | `software_states`, `host_connectivity_updated`, `service_trigger_update`, and `service_trigger_host_batch_update` payload docs |
+| `docs/api/wire-protocol.md` | `software_states`, `host_connectivity_updated`, `service_trigger_update`, `service_trigger_host_batch_update`, and generic service config message docs |
+| `docs/development/service-config-store.md` | Generic service config store architecture, DB schema, SDK usage, and security model |
 | `crates/shared/wire/asyncapi.yaml` | AsyncAPI schemas for all messages and schemas |
 
 ### Service ping interval

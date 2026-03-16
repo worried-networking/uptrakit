@@ -12,11 +12,11 @@ etc.) on that host. See [Host Summary Update Entities](#host-summary-update-enti
 
 ## Startup state delivery
 
-When an MQTT service first connects and receives its tenant assignment, the controller delivers the
-complete current state as a series of **host-batched pages** (up to 100 active hosts per page). The
-MQTT service accumulates all pages before publishing retained topics to the broker. For small tenants
-this is typically a single message; for large deployments it is transparent — retained topics appear
-on the broker once the last page is received.
+When an MQTT service first connects, the controller delivers the complete current state as a series
+of **host-batched pages** (up to 100 active hosts per page). The MQTT service accumulates all pages
+before publishing retained topics to the broker. For small tenants this is typically a single
+message; for large deployments it is transparent — retained topics appear on the broker once the
+last page is received.
 
 ## MQTT State Topics (always active)
 
@@ -124,8 +124,9 @@ finishes, or host tags are changed. No extra configuration is required.
 Before enabling Home Assistant Discovery:
 
 1. **An MQTT broker** is reachable by both Uptrakit and Home Assistant (e.g. Mosquitto).
-2. **An MQTT client** is configured in Uptrakit under **Settings > MQTT Clients** and the MQTT service is
-   running and connected to the broker.
+2. **An MQTT client** is configured via the **MQTT Clients** extension in the Uptrakit UI (found
+   under the Configuration section in Settings) and the MQTT service is running and connected to the
+   broker.
 3. **Home Assistant** has the [MQTT integration](https://www.home-assistant.io/integrations/mqtt/)
    enabled and pointed at the same broker.
 4. At least one **agent** is connected and has performed a version check for the software items you want
@@ -136,27 +137,16 @@ Before enabling Home Assistant Discovery:
 
 Discovery is configured per MQTT client:
 
-1. Go to **Settings > MQTT Clients**.
-2. Create a new client or click **Edit** on an existing one.
+1. Navigate to **Settings** and open the **MQTT Clients** tab (under the Configuration section).
+2. Click **Create Client** to add a new client, or click the row action on an existing one and
+   select **Edit**.
 3. Enable the **Home Assistant Discovery** toggle.
 4. Optionally change the **Discovery Prefix** (default: `homeassistant`). This must match the MQTT
    Discovery prefix configured in Home Assistant (default is also `homeassistant`).
 5. Save the configuration.
 
-You can also enable discovery via the CLI:
-
-```sh
-# Create a new MQTT client with HA discovery enabled
-uptrakit settings mqtt create \
-  --host broker.local --port 1883 \
-  --client-id uptrakit-ha \
-  --topic-prefix uptrakit \
-  --ha-discovery \
-  --ha-discovery-prefix homeassistant
-
-# Enable HA discovery on an existing client
-uptrakit settings mqtt update <id> --ha-discovery
-```
+> **Note:** The CLI no longer has direct MQTT client commands. All MQTT client management is
+> performed through the MQTT Clients extension in the web interface.
 
 ## What Entities Are Created
 
@@ -433,7 +423,8 @@ Cleanup runs automatically on every state update push. No manual intervention is
 When connecting to MQTT brokers that use a private or internal certificate authority (e.g. self-signed
 certificates or enterprise CAs), you can provide a custom CA certificate in PEM format.
 
-This is configured per MQTT client in **Settings > MQTT Clients**:
+This is configured per MQTT client in the **MQTT Clients** extension (found under the Configuration
+section in Settings):
 
 1. Create or edit an MQTT client.
 2. Set the transport to **TLS**.
@@ -446,9 +437,6 @@ system trust store. See [Secrets and Encryption](../security/secrets-and-encrypt
 
 If no custom CA is provided, the MQTT service falls back to the system trust store (default behavior for
 public brokers).
-
-The CLI supports this via `--ca-pem <PEM_STRING>` (inline) or `--ca-pem-file <PATH>` (from file) on
-the `settings mqtt create` and `settings mqtt update` subcommands.
 
 ## Security Notes
 
