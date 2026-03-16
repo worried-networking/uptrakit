@@ -57,8 +57,8 @@ pub async fn run_embedded_message_handler(
     state: Arc<AppState>,
     service_id: Uuid,
     tenant_id: Uuid,
-    capabilities: &BTreeSet<Capability>,
-    app_name: &str,
+    capabilities: BTreeSet<Capability>,
+    app_name: String,
     service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
     cancel: CancellationToken,
 ) {
@@ -66,8 +66,8 @@ pub async fn run_embedded_message_handler(
         state,
         service_id,
         tenant_id,
-        capabilities,
-        app_name,
+        &capabilities,
+        &app_name,
         service_rx,
         cancel,
     )

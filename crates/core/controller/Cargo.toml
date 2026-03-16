@@ -10,6 +10,7 @@ version.workspace = true
 [features]
 default = ["db-sqlite", "oidc", "zeroconf", "interactive", "notifications-all", "embedded-scheduler", "embed-frontend", "reset-data"]
 embedded-scheduler = ["dep:uptrakit-scheduler-engine"]
+embedded-agent = ["dep:uptrakit-agent-core", "dep:base64"]
 zeroconf = ["dep:mdns-sd"]
 oidc = ["uptrakit-web-api/oidc", "uptrakit-scheduler-engine?/oidc"]
 swagger-ui = ["uptrakit-web-api/swagger-ui"]
@@ -17,7 +18,7 @@ db-all = ["db-sqlite", "db-postgres", "db-mysql", "uptrakit-web-api/db-all"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite", "uptrakit-web-api/db-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres", "uptrakit-web-api/db-postgres"]
 db-mysql = ["sea-orm/sqlx-mysql", "uptrakit-shared-db/db-mysql", "uptrakit-web-api/db-mysql"]
-interactive = ["uptrakit-web-api/interactive"]
+interactive = ["uptrakit-web-api/interactive", "uptrakit-agent-core?/interactive"]
 nats = ["uptrakit-web-api/nats"]
 notifications-telegram = ["uptrakit-web-api/notifications-telegram", "uptrakit-plugin-infrastructure-registry/notifications-telegram"]
 notifications-email = ["uptrakit-web-api/notifications-email", "uptrakit-plugin-infrastructure-registry/notifications-email"]
@@ -67,6 +68,8 @@ zeroize = { workspace = true }
 uptrakit-build-info = { workspace = true }
 uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-scheduler-engine = { workspace = true, optional = true }
+uptrakit-agent-core = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
 tracing-journald = { workspace = true, optional = true }
 rust-embed = { workspace = true, optional = true, features = ["mime-guess"] }
 mdns-sd = { workspace = true, optional = true }

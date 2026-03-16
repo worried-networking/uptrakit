@@ -31,7 +31,7 @@ use crate::tasks::BackgroundTasks;
 use types::{EmbeddedTransport, ExternalServiceInfo};
 
 /// Custom yield predicate for embedded service coexistence decisions.
-type YieldCheckFn = Box<dyn Fn(&ExternalServiceInfo) -> bool + Send + Sync>;
+pub(crate) type YieldCheckFn = Box<dyn Fn(&ExternalServiceInfo) -> bool + Send + Sync>;
 
 /// Result of registering an embedded service via [`EmbeddedServiceHost::add()`].
 #[allow(dead_code)] // Fields used by follow-up service embeddings (agent).

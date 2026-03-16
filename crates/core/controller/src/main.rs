@@ -1,3 +1,5 @@
+#[cfg(feature = "embedded-agent")]
+mod agent;
 mod cert_signer;
 mod cli;
 mod crl_manager;
@@ -5,7 +7,7 @@ mod db;
 mod db_migrate;
 mod durations;
 #[cfg_attr(
-    not(feature = "embedded-scheduler"),
+    not(any(feature = "embedded-scheduler", feature = "embedded-agent")),
     allow(dead_code) // Infrastructure types used by follow-up service embeddings.
 )]
 mod embedded;
@@ -460,6 +462,7 @@ async fn run(args: cli::Args) -> Result<()> {
         args.tls_cert.is_some(),
         &service_connections,
         &embedded_host,
+        app_dirs.state_dir().to_path_buf(),
         #[cfg(feature = "nats")]
         &nats_transport,
     )
@@ -638,6 +641,7 @@ async fn spawn_background_tasks(
     has_external_tls_cert: bool,
     service_connections: &uptrakit_web_api::service_connections::ServiceConnectionRegistry,
     embedded_host: &Arc<embedded::EmbeddedServiceHost>,
+    state_dir: std::path::PathBuf,
     #[cfg(feature = "nats")] nats_transport: &Option<
         uptrakit_web_api::nats_transport::NatsTransport,
     >,
@@ -814,9 +818,78 @@ async fn spawn_background_tasks(
         }
     }
 
-    // Suppress unused-variable warnings when embedded-scheduler is disabled.
+    // Embedded agent: run a local agent inside the controller process.
+    // Only available in single-tenant deployments (uses default_tenant_id).
+    #[cfg(feature = "embedded-agent")]
+    {
+        use embedded::types::CoexistencePolicy;
+
+        let agent_caps = agent::agent_capabilities();
+        let default_tenant_id = app_state.default_tenant_id;
+
+        // Collect the local machine_id for same-host yield comparison.
+        let local_machine_id = uptrakit_agent_core::host_info::read_machine_id();
+
+        // Custom yield check: yield only when an external agent on the same
+        // host (same machine_id) with SoftwareDiscovery capability connects.
+        let yield_check: embedded::YieldCheckFn = Box::new(move |info| {
+            info.machine_id.as_deref() == Some(local_machine_id.as_str())
+                && info
+                    .capabilities
+                    .contains(&uptrakit_internal_wire::Capability::SoftwareDiscovery)
+        });
+
+        let state_dir_for_agent = state_dir.clone();
+        let add_result = embedded_host
+            .add(
+                "Embedded Agent",
+                "uptrakit-agent",
+                agent_caps.clone(),
+                false, // tenant service (not system)
+                Some(default_tenant_id),
+                CoexistencePolicy::YieldAlways, // custom yield_check overrides
+                Some(yield_check),
+                move |transport, cancel| {
+                    Box::pin(agent::run_embedded_agent(
+                        transport,
+                        cancel,
+                        state_dir_for_agent,
+                    ))
+                },
+                app_state,
+                bg,
+            )
+            .await;
+
+        match add_result {
+            Ok(add_result) => {
+                // Spawn the message handler bridge so that messages from the
+                // embedded agent (ReportHosts, VersionCheckResults, etc.) are
+                // processed by the same pipeline as WebSocket-connected agents.
+                let bridge_cancel = bg.child_token();
+                let bridge_handle = tokio::spawn(
+                    uptrakit_web_api::embedded_support::run_embedded_message_handler(
+                        Arc::clone(app_state),
+                        add_result.service_id,
+                        default_tenant_id,
+                        agent_caps.clone(),
+                        "uptrakit-agent".to_string(),
+                        add_result.service_rx,
+                        bridge_cancel,
+                    ),
+                );
+                bg.track("Embedded Agent (bridge)", bridge_handle);
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "failed to start embedded agent");
+            }
+        }
+    }
+
+    // Suppress unused-variable warnings when embedded features are disabled.
     let _ = controller_id;
     let _ = &embedded_host;
+    let _ = &state_dir;
 
     if ca_managed {
         let h = tasks::spawn_ca_rotation(
