@@ -35,7 +35,6 @@ pub mod settings_auth;
 pub mod settings_ca;
 pub mod settings_combined;
 pub mod settings_global_combined;
-pub mod settings_mqtt;
 #[cfg(feature = "nats")]
 pub mod settings_nats;
 pub mod settings_network;

@@ -993,7 +993,7 @@ mod tests {
         };
         let (_rx, _token) = state
             .service_connections
-            .register(target.id, caps, None, None)
+            .register(target.id, caps, None, None, None)
             .await;
 
         let auth_user = AuthenticatedUser {

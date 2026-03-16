@@ -12,8 +12,6 @@ pub mod extension_proxy;
 pub mod extension_registry;
 pub mod extract;
 pub mod middleware;
-pub mod mqtt_client_store;
-pub mod mqtt_lease_coordinator;
 #[cfg(feature = "nats")]
 pub mod nats_transport;
 pub mod notification_service;

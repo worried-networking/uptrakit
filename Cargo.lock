@@ -6574,6 +6574,7 @@ dependencies = [
  "serde_json",
  "tracing",
  "uptrakit-shared-types",
+ "uuid",
 ]
 
 [[package]]

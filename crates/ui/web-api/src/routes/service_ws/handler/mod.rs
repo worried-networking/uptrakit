@@ -28,10 +28,10 @@ mod cert;
 mod credentials;
 mod discovery;
 pub(super) mod messages;
-mod mqtt;
 mod renewal;
 mod service_config;
 mod shared_types;
+mod update_tracking;
 mod updates;
 
 use cert::{
@@ -39,7 +39,6 @@ use cert::{
 };
 use credentials::deliver_service_credentials;
 pub(crate) use discovery::trigger_discovery_for_agent_host;
-use mqtt::{complete_mqtt_registration, receive_first_service_message};
 use shared_types::{ProcessorAction, ProcessorResponse, load_linked_host_ids};
 use updates::deliver_pending_updates;
 
@@ -56,8 +55,8 @@ use uptrakit_internal_wire::limits::WireValidate;
 use uptrakit_internal_wire::report_tracker::ReportTracker;
 use uptrakit_internal_wire::{
     Capability, CloseReason, ControllerMessage, ErrorCode, ErrorPayload, HostConnectivityUpdate,
-    IncomingSeq, MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq, PingPayload,
-    ReportPagination, ServiceMessage, UpdateCapabilitiesPayload,
+    IncomingSeq, OutgoingSeq, PingPayload, ReportPagination, ServiceMessage,
+    UpdateCapabilitiesPayload,
 };
 use uptrakit_shared_db::entity::{service, system_service as sys_svc_entity};
 use uptrakit_shared_macros::impl_report_conversion;
@@ -68,7 +67,6 @@ use super::protocol::{
     record_system_service_activity, send_pong, serialize_controller_msg,
 };
 use crate::AppState;
-use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
 use uptrakit_internal_wire::service_profile::parse_capabilities;
 
 // ---------------------------------------------------------------------------
@@ -199,8 +197,6 @@ struct MessageProcessor {
     service_app_name: Option<String>,
     service_tenant_id: Option<uuid::Uuid>,
     linked_host_ids: Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
-    mqtt_context: Option<mqtt::MqttContext>,
-    lease_coordinator: Option<MqttLeaseCoordinator>,
     report_tracker: ReportTracker,
 }
 
@@ -268,9 +264,7 @@ impl MessageProcessor {
             }
 
             // -- UpdateTracking capability --
-            msg @ (ServiceMessage::ReleaseTenants(_)
-            | ServiceMessage::MqttClientStatus(_)
-            | ServiceMessage::ServiceTriggerUpdate(_)
+            msg @ (ServiceMessage::ServiceTriggerUpdate(_)
             | ServiceMessage::ServiceTriggerHostBatchUpdate(_))
                 if self.is_mqtt =>
             {
@@ -389,38 +383,17 @@ impl MessageProcessor {
         }
     }
 
-    /// Dispatch update-tracking messages (ReleaseTenants, MqttClientStatus, etc.).
+    /// Dispatch update-tracking messages (ServiceTriggerUpdate, etc.).
     async fn dispatch_mqtt(&self, msg: ServiceMessage) -> ProcessorResponse {
         match msg {
-            ServiceMessage::ReleaseTenants(payload) => {
-                mqtt::handle_release_tenants(
-                    &self.state,
-                    self.service_id,
-                    &payload,
-                    self.lease_coordinator.as_ref(),
-                )
-                .await
-            }
-            ServiceMessage::MqttClientStatus(payload) => {
-                mqtt::handle_mqtt_client_status(&self.state, &payload).await
-            }
             ServiceMessage::ServiceTriggerUpdate(payload) => {
-                mqtt::handle_service_trigger_update(
-                    &self.state,
-                    &payload,
-                    self.mqtt_context.as_ref(),
-                )
-                .await
+                update_tracking::handle_service_trigger_update(&self.state, &payload).await
             }
             ServiceMessage::ServiceTriggerHostBatchUpdate(payload) => {
-                mqtt::handle_service_trigger_host_batch_update(
-                    &self.state,
-                    &payload,
-                    self.mqtt_context.as_ref(),
-                )
-                .await
+                update_tracking::handle_service_trigger_host_batch_update(&self.state, &payload)
+                    .await
             }
-            _ => unreachable!("dispatch_mqtt called with non-MQTT message"),
+            _ => unreachable!("dispatch_mqtt called with non-update-tracking message"),
         }
     }
 
@@ -591,7 +564,6 @@ struct AuthenticatedSessionState {
     has_ui_extensions: bool,
     service_tenant_id: Option<uuid::Uuid>,
     linked_host_ids: Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
-    lease_coordinator: Option<MqttLeaseCoordinator>,
     push_rx: tokio::sync::mpsc::Receiver<ControllerMessage>,
     cancel_token: tokio_util::sync::CancellationToken,
     msg_tx: tokio::sync::mpsc::Sender<ProcessorMessage>,
@@ -599,71 +571,6 @@ struct AuthenticatedSessionState {
     processor_cancel: tokio_util::sync::CancellationToken,
     processor_handle: tokio::task::JoinHandle<()>,
     rate_limiter: MessageRateLimiter,
-}
-
-// ---------------------------------------------------------------------------
-// MQTT post-registration helper
-// ---------------------------------------------------------------------------
-
-/// Send `Registered` + `TenantAssignments` messages and push initial software
-/// states for each assigned tenant. Returns `false` if the connection must be
-/// closed (write failure).
-async fn send_mqtt_post_registration(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    mctx: &mqtt::MqttContext,
-    out_seq: &mut OutgoingSeq,
-) -> bool {
-    // Send Registered acknowledgment.
-    let registered_msg = ControllerMessage::Registered(MqttRegisteredPayload {
-        instance_id: mctx.instance_id.clone(),
-    });
-    let Some(json) = serialize_controller_msg(out_seq, registered_msg) else {
-        state.service_connections.unregister(&service_id).await;
-        return false;
-    };
-    if sink.send(Message::Text(json.into())).await.is_err() {
-        state.service_connections.unregister(&service_id).await;
-        return false;
-    }
-
-    // Send initial tenant assignments.
-    if !mctx.tenant_configs.is_empty() {
-        let assignments_msg = ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload {
-            tenants: mctx.tenant_configs.clone(),
-        });
-        let Some(json) = serialize_controller_msg(out_seq, assignments_msg) else {
-            state.service_connections.unregister(&service_id).await;
-            return false;
-        };
-        if sink.send(Message::Text(json.into())).await.is_err() {
-            state.service_connections.unregister(&service_id).await;
-            return false;
-        }
-    }
-
-    // Push current software states and connectivity for each assigned tenant.
-    let mut seen = HashSet::new();
-    for cfg in &mctx.tenant_configs {
-        if seen.insert(cfg.tenant_id) {
-            state
-                .notification_service
-                .push_software_states_paginated_for_tenant(state.db(), cfg.tenant_id)
-                .await;
-            state
-                .notification_service
-                .push_connected_agent_states_for_tenant(state.db(), cfg.tenant_id)
-                .await;
-        }
-    }
-
-    tracing::info!(
-        %service_id,
-        instance_id = %mctx.instance_id,
-        "MQTT service registered"
-    );
-    true
 }
 
 // ---------------------------------------------------------------------------
@@ -716,35 +623,21 @@ async fn register_connection(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     capabilities: &BTreeSet<Capability>,
-    mqtt_handshake: Option<&mqtt::MqttHandshake>,
     service_app_name: Option<String>,
 ) -> (
     tokio::sync::mpsc::Receiver<ControllerMessage>,
     tokio_util::sync::CancellationToken,
 ) {
-    let (push_rx, cancel_token) = if let Some(h) = mqtt_handshake {
-        state
-            .service_connections
-            .register(
-                service_id,
-                capabilities.clone(),
-                Some(h.instance_id.clone()),
-                Some(h.max_tenants),
-                service_app_name,
-            )
-            .await
-    } else {
-        state
-            .service_connections
-            .register(
-                service_id,
-                capabilities.clone(),
-                None,
-                None,
-                service_app_name,
-            )
-            .await
-    };
+    let (push_rx, cancel_token) = state
+        .service_connections
+        .register(
+            service_id,
+            capabilities.clone(),
+            None,
+            None,
+            service_app_name,
+        )
+        .await;
 
     // Notify embedded services about the new external connection.
     if let Some(ref notifier) = state.embedded_service_notifier {
@@ -754,39 +647,13 @@ async fn register_connection(
     (push_rx, cancel_token)
 }
 
-/// Stage 4: Complete MQTT setup — assign/reconcile leases, send `Registered`
-/// and `TenantAssignments`, push initial software states, and load linked host
-/// IDs.
-///
-/// Returns `Some((mqtt_context, linked_host_ids))` on success, or `None` if
-/// the WebSocket write failed and the connection must be closed.
-async fn complete_mqtt_setup(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+/// Stage 4: Load linked host IDs shared between the main loop and the processor.
+async fn load_session_host_ids(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
-    mqtt_handshake: Option<mqtt::MqttHandshake>,
     has_software_discovery: bool,
-    out_seq: &mut OutgoingSeq,
-) -> Option<(
-    Option<mqtt::MqttContext>,
-    Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
-)> {
-    // Assign/reconcile leases now that the service is in the registry.
-    let mqtt_context = if let Some(h) = mqtt_handshake {
-        Some(complete_mqtt_registration(state, service_id, h).await)
-    } else {
-        None
-    };
-
-    // Send Registered + TenantAssignments and push initial software states.
-    if let Some(ref mctx) = mqtt_context
-        && !send_mqtt_post_registration(sink, state, service_id, mctx, out_seq).await
-    {
-        return None;
-    }
-
-    // Load linked host IDs shared between the main loop and the processor.
-    let linked_host_ids: Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>> = if has_software_discovery {
+) -> Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>> {
+    if has_software_discovery {
         Arc::new(parking_lot::Mutex::new(
             load_linked_host_ids(state.db(), service_id)
                 .await
@@ -794,38 +661,23 @@ async fn complete_mqtt_setup(
         ))
     } else {
         Arc::new(parking_lot::Mutex::new(HashSet::new()))
-    };
-
-    Some((mqtt_context, linked_host_ids))
+    }
 }
 
-/// Stage 5: Deliver pending updates (non-MQTT only) and create the MQTT lease
-/// coordinator when applicable.
+/// Stage 5: Deliver pending updates to services with the `UpdateHooks` capability.
 ///
-/// Errors from `deliver_pending_updates` are logged but do not abort setup —
-/// the connection is still usable.
-async fn deliver_updates_and_create_lease_coordinator(
+/// Errors are logged but do not abort setup — the connection is still usable.
+async fn deliver_pending_updates_on_connect(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     has_update_hooks: bool,
-    is_mqtt: bool,
     out_seq: &mut OutgoingSeq,
-) -> Option<MqttLeaseCoordinator> {
+) {
     if has_update_hooks
-        && !is_mqtt
         && let Err(e) = deliver_pending_updates(state, service_id, sink, out_seq).await
     {
         tracing::error!(error = %e, %service_id, "failed to deliver pending updates on reconnect");
-    }
-
-    if is_mqtt {
-        Some(MqttLeaseCoordinator::new(
-            state.db().clone(),
-            state.service_connections.clone(),
-        ))
-    } else {
-        None
     }
 }
 
@@ -880,13 +732,13 @@ fn spawn_message_processor(processor: MessageProcessor) -> ProcessorChannels {
 #[allow(clippy::too_many_arguments)]
 async fn setup_authenticated_session(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    stream: &mut futures_util::stream::SplitStream<WebSocket>,
+    _stream: &mut futures_util::stream::SplitStream<WebSocket>,
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     cert: &CertIdentity,
     is_system: bool,
     out_seq: &mut OutgoingSeq,
-    in_seq: &mut IncomingSeq,
+    _in_seq: &mut IncomingSeq,
 ) -> Option<AuthenticatedSessionState> {
     // Stage 1: Load service record from DB. The DB capabilities are used only
     // for credential delivery (which checks DatabaseAccess, NatsAccess, etc.),
@@ -895,7 +747,11 @@ async fn setup_authenticated_session(
     let (db_capabilities, service_app_name, service_tenant_id) =
         load_service_capabilities(state, service_id, is_system).await;
 
-    let mut rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
+    let is_mqtt = db_capabilities.contains(&Capability::UpdateTracking);
+    let has_software_discovery = db_capabilities.contains(&Capability::SoftwareDiscovery);
+    let has_update_hooks = db_capabilities.contains(&Capability::UpdateHooks);
+    let has_ui_extensions = db_capabilities.contains(&Capability::UiExtensions);
+    let rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
 
     // Stage 2: Deliver credentials to services that have credential capabilities.
     deliver_service_credentials(sink, state, &db_capabilities, service_id, out_seq).await?;
@@ -905,87 +761,17 @@ async fn setup_authenticated_session(
         service_config::deliver_service_config(sink, state, app_name, out_seq).await?;
     }
 
-    // Stage 3: Receive the Register message sent by every service on connect.
-    // All service types send Register from on_connected, before ServiceSettings
-    // is processed. Reading capabilities from the live wire — rather than from
-    // DB-stored strings — ensures correct detection even when the DB holds stale
-    // values from before a capability rename.
-    let register = receive_first_service_message(
-        sink,
-        stream,
-        state,
-        service_id,
-        out_seq,
-        in_seq,
-        &mut rate_limiter,
-    )
-    .await?;
+    // Stage 3: Register the connection and notify embedded services.
+    let (push_rx, cancel_token) =
+        register_connection(state, service_id, &db_capabilities, service_app_name.clone()).await;
 
-    let session_capabilities = register.capabilities.clone();
-    let is_mqtt = session_capabilities.contains(&Capability::UpdateTracking);
-    let mqtt_handshake = if is_mqtt {
-        Some(mqtt::MqttHandshake {
-            instance_id: register.instance_id.unwrap_or_default(),
-            max_tenants: register.max_tenants,
-            active_mqtt_clients: register.active_mqtt_clients,
-        })
-    } else {
-        None
-    };
-    let has_software_discovery = session_capabilities.contains(&Capability::SoftwareDiscovery);
-    let has_update_hooks = session_capabilities.contains(&Capability::UpdateHooks);
-    let mut has_ui_extensions = session_capabilities.contains(&Capability::UiExtensions);
+    // Stage 4: Load linked host IDs shared between the main loop and the processor.
+    let linked_host_ids = load_session_host_ids(state, service_id, has_software_discovery).await;
 
-    // Persist the service's current capabilities to the DB immediately on every
-    // reconnect. This rewrites any stale capability strings (e.g. a renamed
-    // capability from a previous enrollment) so that subsequent reconnects —
-    // and the ServiceProfile derivation in send_service_settings — use the
-    // canonical current names.
-    if !session_capabilities.is_empty() {
-        upgrade_service_capabilities(
-            state.db(),
-            service_id,
-            is_system,
-            UpdateCapabilitiesPayload {
-                capabilities: session_capabilities.clone(),
-            },
-            &mut has_ui_extensions,
-        )
-        .await;
-    }
+    // Stage 5: Deliver pending updates to services with the `UpdateHooks` capability.
+    deliver_pending_updates_on_connect(sink, state, service_id, has_update_hooks, out_seq).await;
 
-    // Stage 4: Register the connection and notify embedded services.
-    let (push_rx, cancel_token) = register_connection(
-        state,
-        service_id,
-        &session_capabilities,
-        mqtt_handshake.as_ref(),
-    )
-    .await;
-
-    // Stage 5: Complete MQTT setup and load linked host IDs.
-    let (mqtt_context, linked_host_ids) = complete_mqtt_setup(
-        sink,
-        state,
-        service_id,
-        mqtt_handshake,
-        has_software_discovery,
-        out_seq,
-    )
-    .await?;
-
-    // Stage 6: Deliver pending updates (non-MQTT) and create the lease coordinator.
-    let lease_coordinator = deliver_updates_and_create_lease_coordinator(
-        sink,
-        state,
-        service_id,
-        has_update_hooks,
-        is_mqtt,
-        out_seq,
-    )
-    .await;
-
-    // Stage 7: Spawn the background message processor.
+    // Stage 6: Spawn the background message processor.
     let processor = MessageProcessor {
         state: Arc::clone(state),
         service_id,
@@ -998,8 +784,6 @@ async fn setup_authenticated_session(
         service_app_name,
         service_tenant_id,
         linked_host_ids: Arc::clone(&linked_host_ids),
-        mqtt_context,
-        lease_coordinator: lease_coordinator.clone(),
         report_tracker: ReportTracker::new(),
     };
     let channels = spawn_message_processor(processor);
@@ -1012,7 +796,6 @@ async fn setup_authenticated_session(
         has_ui_extensions,
         service_tenant_id,
         linked_host_ids,
-        lease_coordinator,
         push_rx,
         cancel_token,
         msg_tx: channels.msg_tx,
@@ -1038,7 +821,6 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
         has_ui_extensions,
         service_tenant_id,
         linked_host_ids,
-        lease_coordinator,
         processor_cancel,
         processor_handle,
         ..
@@ -1053,13 +835,7 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
         state.extension_registry.unregister_service(&service_id);
     }
 
-    if let Some(ref lc) = lease_coordinator
-        && let Err(e) = lc.release_all_for_service(&service_id).await
-    {
-        tracing::error!(error = %e, "failed to release leases on disconnect");
-    }
-
-    // Notify MQTT services that this agent's hosts are now offline.
+    // Notify services that this agent's hosts are now offline.
     if !is_system
         && !is_mqtt
         && has_software_discovery
@@ -1137,17 +913,9 @@ async fn handle_incoming_text(
     // Fast-path messages handled inline.
     match &service_msg {
         ServiceMessage::Ping(PingPayload { service_ts, .. }) => {
-            if messages::handle_ping(
-                sink,
-                out_seq,
-                state,
-                service_id,
-                *service_ts,
-                session.lease_coordinator.as_ref(),
-                is_system,
-            )
-            .await
-            .is_break()
+            if messages::handle_ping(sink, out_seq, state, service_id, *service_ts, is_system)
+                .await
+                .is_break()
             {
                 return TextAction::Break;
             }
@@ -1320,12 +1088,6 @@ pub(crate) async fn handle_authenticated_loop(
                 tracing::info!(%service_id, "connection superseded by new registration");
                 let _ = close_with_reason(sink, CloseReason::Superseded).await;
                 // Do NOT unregister -- the new connection owns the registry entry.
-                // Release MQTT leases if applicable (new connection will re-reconcile).
-                if let Some(ref lc) = session.lease_coordinator
-                    && let Err(e) = lc.release_all_for_service(&service_id).await
-                {
-                    tracing::error!(error = %e, "failed to release leases on superseded disconnect");
-                }
                 session.processor_cancel.cancel();
                 let _ = session.processor_handle.await;
                 return;

@@ -147,7 +147,7 @@ async fn service_connection_registry_send() {
     let service_id = uuid::Uuid::now_v7();
 
     let (mut rx, _cancel) = registry
-        .register(service_id, Default::default(), None, None)
+        .register(service_id, Default::default(), None, None, None)
         .await;
 
     // Send a message through the registry.
@@ -177,8 +177,12 @@ async fn service_connection_registry_broadcast() {
 
     let id1 = uuid::Uuid::now_v7();
     let id2 = uuid::Uuid::now_v7();
-    let (mut rx1, _c1) = registry.register(id1, Default::default(), None, None).await;
-    let (mut rx2, _c2) = registry.register(id2, Default::default(), None, None).await;
+    let (mut rx1, _c1) = registry
+        .register(id1, Default::default(), None, None, None)
+        .await;
+    let (mut rx2, _c2) = registry
+        .register(id2, Default::default(), None, None, None)
+        .await;
 
     registry
         .broadcast(ControllerMessage::Pong(

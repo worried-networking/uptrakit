@@ -9,13 +9,12 @@ use std::sync::Arc;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Notify;
 use uptrakit_internal_wire::{
-    BroadcastAdminEventPayload, Capability, ControllerMessage, MqttClientCreatedPayload,
-    MqttTenantRevokedPayload, SoftwareStatesChangedPayload, TokenRevokedPayload,
+    BroadcastAdminEventPayload, Capability, ControllerMessage, SoftwareStatesChangedPayload,
+    TokenRevokedPayload,
 };
 use uptrakit_web_api_types::events::AdminEvent;
 use uuid::Uuid;
 
-use crate::mqtt_lease_coordinator::{LeaseCoordinatorError, MqttLeaseCoordinator};
 use crate::service_connections::ServiceConnectionRegistry;
 
 /// Optional controller-local resources needed when processing controller-targeted events.
@@ -71,7 +70,7 @@ pub async fn deliver_event(
 ) -> bool {
     // Controller-targeted events are handled locally (not forwarded to services)
     if target_service_id.is_none() && target_capability == Some("controller") {
-        return deliver_controller_event(db, registry, resources, msg).await;
+        return deliver_controller_event(db, resources, msg).await;
     }
 
     match (target_service_id, target_capability) {
@@ -85,18 +84,15 @@ pub async fn deliver_event(
             }
         }
         // Targeted to services with a specific capability
-        (None, Some(cap_str)) => match cap_str {
-            "update_tracking" => deliver_mqtt_event(registry, msg).await,
-            _ => {
-                // For any known capability, broadcast to services with that capability
-                if let Some(capability) = parse_capability_str(cap_str) {
-                    registry.broadcast_by_capability(&capability, msg).await;
-                } else {
-                    registry.broadcast(msg).await;
-                }
-                true
+        (None, Some(cap_str)) => {
+            // For any known capability, broadcast to services with that capability
+            if let Some(capability) = parse_capability_str(cap_str) {
+                registry.broadcast_by_capability(&capability, msg).await;
+            } else {
+                registry.broadcast(msg).await;
             }
-        },
+            true
+        }
         // No filter — broadcast to all
         (None, None) => {
             registry.broadcast(msg).await;
@@ -105,81 +101,16 @@ pub async fn deliver_event(
     }
 }
 
-/// Deliver an MQTT-targeted event with special routing for tenant messages.
-///
-/// Returns `true` if delivery succeeded or the target is not on this
-/// controller.
-#[tracing::instrument(skip_all)]
-pub async fn deliver_mqtt_event(
-    registry: &ServiceConnectionRegistry,
-    msg: ControllerMessage,
-) -> bool {
-    match &msg {
-        ControllerMessage::TenantConfigUpdated(payload) => {
-            // Route to the specific instance holding this MQTT client
-            let mqtt_client_id = payload.tenant.mqtt_client_id;
-            if let Some(service_id) = registry.get_instance_for_mqtt_client(&mqtt_client_id).await {
-                registry.send(&service_id, msg).await
-            } else {
-                // Not on this controller.
-                true
-            }
-        }
-        ControllerMessage::TenantRevoked(MqttTenantRevokedPayload { mqtt_client_id, .. }) => {
-            // Route to the specific instance holding this MQTT client
-            let mqtt_client_id = *mqtt_client_id;
-            if let Some(service_id) = registry.get_instance_for_mqtt_client(&mqtt_client_id).await {
-                registry
-                    .release_mqtt_client(&service_id, &mqtt_client_id)
-                    .await;
-                registry.send(&service_id, msg).await
-            } else {
-                // Not on this controller.
-                true
-            }
-        }
-        _ => {
-            // Other MQTT messages: broadcast to all local MQTT services
-            registry
-                .broadcast_by_capability(&Capability::UpdateTracking, msg)
-                .await;
-            true
-        }
-    }
-}
-
-/// Handle a controller-targeted event (e.g. `MqttClientCreated`, `RequestCaRotation`,
-/// `TokenRevoked`).
+/// Handle a controller-targeted event (e.g. `RequestCaRotation`, `TokenRevoked`).
 ///
 /// Returns `true` on success, `false` on transient failure.
 #[tracing::instrument(skip_all)]
 pub async fn deliver_controller_event(
     db: &DatabaseConnection,
-    registry: &ServiceConnectionRegistry,
     resources: &ControllerResources<'_>,
     msg: ControllerMessage,
 ) -> bool {
     match msg {
-        ControllerMessage::MqttClientCreated(MqttClientCreatedPayload { mqtt_client_id }) => {
-            let coordinator = MqttLeaseCoordinator::new(db.clone(), registry.clone());
-            match coordinator.lease_client_by_id(mqtt_client_id).await {
-                Ok(_) => true,
-                Err(e) => {
-                    if matches!(
-                        e.current_context(),
-                        LeaseCoordinatorError::MqttClientNotFound(_)
-                    ) {
-                        return true;
-                    }
-                    tracing::warn!(
-                        error = %e,
-                        %mqtt_client_id,
-                        "failed to lease MQTT client from cross-controller event"
-                    );
-                    false
-                }
-            }
-        }
         ControllerMessage::RequestCaRotation(payload) => {
             if let Some(trigger) = resources.ca_rotation_trigger {
                 tracing::info!(reason = %payload.reason, "CA rotation requested via cross-controller event");

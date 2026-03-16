@@ -557,7 +557,7 @@ mod tests {
         let registry = ServiceConnectionRegistry::new();
         let service_id = Uuid::nil();
         registry
-            .register(service_id, BTreeSet::new(), None, None)
+            .register(service_id, BTreeSet::new(), None, None, None)
             .await;
 
         // Unregister the service after 5 s (simulated).
@@ -587,7 +587,7 @@ mod tests {
         let registry = ServiceConnectionRegistry::new();
         let service_id = Uuid::nil();
         registry
-            .register(service_id, BTreeSet::new(), None, None)
+            .register(service_id, BTreeSet::new(), None, None, None)
             .await;
 
         let start = tokio::time::Instant::now();

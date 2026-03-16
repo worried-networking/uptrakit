@@ -30,7 +30,6 @@ use super::shared_types::{ProcessorResponse, load_linked_host_ids};
 use uptrakit_web_api_types::events::AdminEvent;
 
 use crate::AppState;
-use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
 use crate::routes::agent_operations::{
     find_or_create_host_and_link, revoke_certificate, revoke_system_certificate,
@@ -43,7 +42,7 @@ use crate::routes::service_ws::protocol::{
 // handle_ping (stays in main loop — not part of processor)
 // ---------------------------------------------------------------------------
 
-/// Handle a `Ping` message: send pong, record activity, optional MQTT heartbeat.
+/// Handle a `Ping` message: send pong and record activity.
 #[tracing::instrument(skip_all, fields(%service_id))]
 pub(super) async fn handle_ping(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
@@ -51,7 +50,6 @@ pub(super) async fn handle_ping(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     service_ts: i64,
-    lease_coordinator: Option<&MqttLeaseCoordinator>,
     is_system: bool,
 ) -> LoopAction {
     let Ok(controller_ts) = send_pong(sink, out_seq, service_ts).await else {
@@ -68,15 +66,6 @@ pub(super) async fn handle_ping(
             error = %e,
             %service_id,
             "failed to record service activity"
-        );
-    }
-    // MQTT heartbeat
-    if let Some(lc) = lease_coordinator
-        && let Err(e) = lc.record_heartbeat(&service_id).await
-    {
-        tracing::warn!(
-            error = %e,
-            "failed to record heartbeat"
         );
     }
     LoopAction::Continue

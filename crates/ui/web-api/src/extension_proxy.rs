@@ -238,7 +238,7 @@ mod tests {
         let service_id = Uuid::now_v7();
 
         let (mut rx, _cancel) = service_connections
-            .register(service_id, BTreeSet::new(), None, None)
+            .register(service_id, BTreeSet::new(), None, None, None)
             .await;
         registry
             .register_service(
@@ -299,7 +299,7 @@ mod tests {
 
         // Register the service but never consume messages (no complete call).
         let (_rx, _cancel) = service_connections
-            .register(service_id, BTreeSet::new(), None, None)
+            .register(service_id, BTreeSet::new(), None, None, None)
             .await;
         registry
             .register_service(
@@ -453,7 +453,7 @@ mod tests {
         let service_id = Uuid::now_v7();
 
         let (mut rx, _cancel) = service_connections
-            .register(service_id, BTreeSet::new(), None, None)
+            .register(service_id, BTreeSet::new(), None, None, None)
             .await;
         registry
             .register_service(service_id, "app", vec![test_manifest("ext.test")], None)

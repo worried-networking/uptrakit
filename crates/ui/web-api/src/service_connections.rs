@@ -1,10 +1,9 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use parking_lot::RwLock;
 use rand::Rng;
-use std::cmp::Ordering;
 use time::OffsetDateTime;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -24,14 +23,6 @@ struct ServiceConnection {
     cancel_token: CancellationToken,
     /// Set of capabilities advertised by this service.
     capabilities: BTreeSet<Capability>,
-    /// Instance ID provided during registration (MQTT only).
-    instance_id: Option<String>,
-    /// Maximum tenants this instance is willing to handle, 0 = unlimited (MQTT only).
-    max_tenants: Option<u32>,
-    /// Set of MQTT client IDs currently assigned to this instance (MQTT only).
-    assigned_mqtt_clients: HashSet<Uuid>,
-    /// Timestamp of last heartbeat received (MQTT only).
-    last_heartbeat: Option<Instant>,
     /// The `service_app_name` from the service record, used to fan out
     /// `ServiceConfigUpdated` to all instances of the same app.
     service_app_name: Option<String>,
@@ -43,15 +34,12 @@ struct ServiceConnection {
 struct RegistryInner {
     /// Primary map: service_id -> connection state.
     connections: HashMap<Uuid, ServiceConnection>,
-    /// Reverse index: mqtt_client_id -> service_id for O(1) lookup.
-    mqtt_client_index: HashMap<Uuid, Uuid>,
 }
 
 impl RegistryInner {
     fn new() -> Self {
         Self {
             connections: HashMap::new(),
-            mqtt_client_index: HashMap::new(),
         }
     }
 }
@@ -64,18 +52,6 @@ impl RegistryInner {
 #[derive(Clone)]
 pub struct ServiceConnectionRegistry {
     inner: Arc<RwLock<RegistryInner>>,
-}
-
-/// Snapshot of MQTT service load used for lease selection.
-#[derive(Clone, Debug)]
-pub struct MqttServiceLoad {
-    pub service_id: Uuid,
-    pub instance_id: String,
-    pub assigned_count: usize,
-    pub max_tenants: u32,
-    pub available_capacity: u32,
-    pub utilization_numerator: u32,
-    pub utilization_denominator: u32,
 }
 
 impl Default for ServiceConnectionRegistry {
@@ -99,10 +75,7 @@ impl ServiceConnectionRegistry {
     /// plus a cancellation token that is triggered if the same `service_id`
     /// registers again (connection deduplication).
     ///
-    /// The `capabilities` set describes what the service can do.  For MQTT
-    /// bridge services (those with `Capability::UpdateTracking`), `instance_id`
-    /// and `max_tenants` should be provided; for all other services they
-    /// can be `None`.
+    /// The `capabilities` set describes what the service can do.
     ///
     /// `service_app_name` is stored per-connection so that
     /// [`broadcast_to_app_except`](Self::broadcast_to_app_except) can fan out
@@ -115,19 +88,17 @@ impl ServiceConnectionRegistry {
         max_tenants: Option<u32>,
         service_app_name: Option<String>,
     ) -> (mpsc::Receiver<ControllerMessage>, CancellationToken) {
+        // instance_id and max_tenants are kept for API compatibility but no
+        // longer stored — MQTT lease management has been removed.
+        let _ = (instance_id, max_tenants);
+
         let (tx, rx) = mpsc::channel(PUSH_CHANNEL_CAPACITY);
         let cancel_token = CancellationToken::new();
-
-        let is_mqtt = capabilities.contains(&Capability::UpdateTracking);
 
         let conn = ServiceConnection {
             sender: tx,
             cancel_token: cancel_token.clone(),
             capabilities,
-            instance_id,
-            max_tenants,
-            assigned_mqtt_clients: HashSet::new(),
-            last_heartbeat: if is_mqtt { Some(Instant::now()) } else { None },
             service_app_name,
             connected_at: OffsetDateTime::now_utc(),
         };
@@ -135,10 +106,6 @@ impl ServiceConnectionRegistry {
         let mut guard = self.inner.write();
         if let Some(old) = guard.connections.remove(&service_id) {
             old.cancel_token.cancel();
-            // Clean up reverse index for superseded connection.
-            for client_id in &old.assigned_mqtt_clients {
-                guard.mqtt_client_index.remove(client_id);
-            }
             tracing::info!(%service_id, "cancelled superseded connection");
         }
         guard.connections.insert(service_id, conn);
@@ -146,39 +113,25 @@ impl ServiceConnectionRegistry {
     }
 
     /// Remove a service from the registry on disconnect.
-    ///
-    /// Returns the set of MQTT client IDs that were assigned to this service
-    /// (empty for non-MQTT services), so the lease coordinator can release them.
-    pub async fn unregister(&self, service_id: &Uuid) -> Option<HashSet<Uuid>> {
-        let mut guard = self.inner.write();
-        guard.connections.remove(service_id).map(|c| {
-            // Clean up reverse index entries for all MQTT clients assigned to this service.
-            for client_id in &c.assigned_mqtt_clients {
-                guard.mqtt_client_index.remove(client_id);
-            }
-            c.assigned_mqtt_clients
-        })
+    pub async fn unregister(&self, service_id: &Uuid) {
+        self.inner.write().connections.remove(service_id);
     }
 
     /// Force-disconnect a service by cancelling its connection token and
     /// removing it from the registry.
     ///
     /// The handler loop's `cancel_token.cancelled()` branch fires, closing
-    /// the WebSocket. Returns the set of assigned MQTT client IDs (if any).
+    /// the WebSocket.
     ///
     /// This is used when a certificate is revoked or a service is deactivated
     /// to ensure the existing WebSocket session is terminated immediately,
     /// rather than waiting for the next message round-trip to detect the
     /// disconnection.
-    pub async fn force_disconnect(&self, service_id: &Uuid) -> Option<HashSet<Uuid>> {
+    pub async fn force_disconnect(&self, service_id: &Uuid) {
         let mut guard = self.inner.write();
-        guard.connections.remove(service_id).map(|c| {
-            c.cancel_token.cancel();
-            for client_id in &c.assigned_mqtt_clients {
-                guard.mqtt_client_index.remove(client_id);
-            }
-            c.assigned_mqtt_clients
-        })
+        if let Some(conn) = guard.connections.remove(service_id) {
+            conn.cancel_token.cancel();
+        }
     }
 
     // ---------------------------------------------------------------
@@ -345,119 +298,6 @@ impl ServiceConnectionRegistry {
         tracing::debug!(count, "ServerRestarting notifications scheduled");
     }
 
-    // ---------------------------------------------------------------
-    // MQTT-specific methods
-    // ---------------------------------------------------------------
-
-    /// Record a heartbeat from an MQTT service.
-    pub async fn record_heartbeat(&self, service_id: &Uuid) {
-        let mut guard = self.inner.write();
-        if let Some(conn) = guard.connections.get_mut(service_id) {
-            conn.last_heartbeat = Some(Instant::now());
-        }
-    }
-
-    /// Get the instance ID for a connected MQTT service.
-    pub async fn get_instance_id(&self, service_id: &Uuid) -> Option<String> {
-        self.inner
-            .read()
-            .connections
-            .get(service_id)
-            .and_then(|c| c.instance_id.clone())
-    }
-
-    /// Assign an MQTT client to an MQTT service instance.
-    ///
-    /// Returns `true` if the assignment was recorded, `false` if the service
-    /// is not connected.
-    pub async fn assign_mqtt_client(&self, service_id: &Uuid, mqtt_client_id: Uuid) -> bool {
-        let mut guard = self.inner.write();
-        if let Some(conn) = guard.connections.get_mut(service_id) {
-            conn.assigned_mqtt_clients.insert(mqtt_client_id);
-            guard.mqtt_client_index.insert(mqtt_client_id, *service_id);
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Release an MQTT client from an MQTT service instance.
-    ///
-    /// Returns `true` if the MQTT client was previously assigned, `false` otherwise.
-    pub async fn release_mqtt_client(&self, service_id: &Uuid, mqtt_client_id: &Uuid) -> bool {
-        let mut guard = self.inner.write();
-        if let Some(conn) = guard.connections.get_mut(service_id) {
-            let removed = conn.assigned_mqtt_clients.remove(mqtt_client_id);
-            if removed {
-                guard.mqtt_client_index.remove(mqtt_client_id);
-            }
-            removed
-        } else {
-            false
-        }
-    }
-
-    /// Find which MQTT service instance holds a specific MQTT client.
-    ///
-    /// Returns the `service_id` of the instance holding this MQTT client, if any.
-    /// Uses a reverse index for O(1) lookup.
-    pub async fn get_instance_for_mqtt_client(&self, mqtt_client_id: &Uuid) -> Option<Uuid> {
-        self.inner
-            .read()
-            .mqtt_client_index
-            .get(mqtt_client_id)
-            .copied()
-    }
-
-    /// Get the current number of MQTT clients assigned to a service.
-    pub async fn assigned_mqtt_client_count(&self, service_id: &Uuid) -> usize {
-        self.inner
-            .read()
-            .connections
-            .get(service_id)
-            .map(|c| c.assigned_mqtt_clients.len())
-            .unwrap_or(0)
-    }
-
-    /// Get the maximum tenants limit for a service.
-    ///
-    /// Returns `None` if the service is not connected or has no max_tenants set.
-    /// `Some(0)` means unlimited.
-    pub async fn get_max_tenants(&self, service_id: &Uuid) -> Option<u32> {
-        self.inner
-            .read()
-            .connections
-            .get(service_id)
-            .and_then(|c| c.max_tenants)
-    }
-
-    /// Get available capacity for a service (max_tenants - current assignments).
-    ///
-    /// Returns `None` if the service is not connected or has no capacity info.
-    /// Returns `Some(u32::MAX)` if max_tenants is 0 (unlimited).
-    pub async fn get_available_capacity(&self, service_id: &Uuid) -> Option<u32> {
-        let guard = self.inner.read();
-        guard.connections.get(service_id).and_then(|c| {
-            c.max_tenants.map(|max| {
-                if max == 0 {
-                    u32::MAX
-                } else {
-                    max.saturating_sub(c.assigned_mqtt_clients.len() as u32)
-                }
-            })
-        })
-    }
-
-    /// Get all MQTT service IDs with their instance IDs.
-    pub async fn list_connections(&self) -> Vec<(Uuid, String)> {
-        self.inner
-            .read()
-            .connections
-            .iter()
-            .filter_map(|(id, conn)| conn.instance_id.as_ref().map(|iid| (*id, iid.clone())))
-            .collect()
-    }
-
     /// Check whether any connected service advertises the given capability.
     pub async fn has_capability_connected(&self, capability: &Capability) -> bool {
         self.inner
@@ -508,74 +348,6 @@ impl ServiceConnectionRegistry {
             .copied()
             .collect()
     }
-
-    /// Get MQTT services that haven't sent a heartbeat within the given timeout.
-    ///
-    /// Returns a list of `(service_id, last_heartbeat_age)` for stale connections.
-    pub async fn get_stale_services(&self, timeout: Duration) -> Vec<(Uuid, Duration)> {
-        let guard = self.inner.read();
-        let now = Instant::now();
-        guard
-            .connections
-            .iter()
-            .filter_map(|(service_id, conn)| {
-                conn.last_heartbeat.and_then(|hb| {
-                    let age = now.duration_since(hb);
-                    if age > timeout {
-                        Some((*service_id, age))
-                    } else {
-                        None
-                    }
-                })
-            })
-            .collect()
-    }
-
-    /// List MQTT service load information, sorted from least busy to most busy.
-    pub async fn list_mqtt_service_loads(&self) -> Vec<MqttServiceLoad> {
-        let guard = self.inner.read();
-        let mut loads = Vec::new();
-
-        for (service_id, conn) in guard.connections.iter() {
-            if !conn.capabilities.contains(&Capability::UpdateTracking) {
-                continue;
-            }
-
-            let Some(instance_id) = conn.instance_id.clone() else {
-                continue;
-            };
-            let max_tenants = conn.max_tenants.unwrap_or(0);
-            let assigned_count = conn.assigned_mqtt_clients.len();
-
-            if max_tenants > 0 && assigned_count >= max_tenants as usize {
-                continue;
-            }
-
-            let (utilization_numerator, utilization_denominator, available_capacity) =
-                if max_tenants == 0 {
-                    (0, 1, u32::MAX)
-                } else {
-                    (
-                        assigned_count as u32,
-                        max_tenants,
-                        max_tenants.saturating_sub(assigned_count as u32),
-                    )
-                };
-
-            loads.push(MqttServiceLoad {
-                service_id: *service_id,
-                instance_id,
-                assigned_count,
-                max_tenants,
-                available_capacity,
-                utilization_numerator,
-                utilization_denominator,
-            });
-        }
-
-        loads.sort_by(compare_mqtt_service_load);
-        loads
-    }
 }
 
 /// Timeout for individual send operations during parallel broadcast.
@@ -605,32 +377,10 @@ async fn send_parallel(senders: &[mpsc::Sender<ControllerMessage>], msg: Control
     futures_util::future::join_all(futures).await;
 }
 
-fn compare_mqtt_service_load(a: &MqttServiceLoad, b: &MqttServiceLoad) -> Ordering {
-    let left = u128::from(a.utilization_numerator) * u128::from(b.utilization_denominator);
-    let right = u128::from(b.utilization_numerator) * u128::from(a.utilization_denominator);
-
-    match left.cmp(&right) {
-        Ordering::Equal => match a.assigned_count.cmp(&b.assigned_count) {
-            Ordering::Equal => a.service_id.as_bytes().cmp(b.service_id.as_bytes()),
-            other => other,
-        },
-        other => other,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Helper: build a capability set for an MQTT bridge service.
-    fn mqtt_caps() -> BTreeSet<Capability> {
-        BTreeSet::from([Capability::UpdateTracking, Capability::GracefulShutdown])
-    }
-
-    /// `broadcast_server_restarting_scattered` must return immediately rather than
-    /// blocking until the scatter window elapses.  With virtual time paused, the
-    /// sleeping scatter tasks can only fire after an explicit `advance()` — so if
-    /// the function were still using `join_all`, this test would hang.
     #[tokio::test(start_paused = true)]
     async fn scattered_broadcast_is_non_blocking() {
         let registry = ServiceConnectionRegistry::new();
@@ -700,8 +450,9 @@ mod tests {
         let svc_mqtt = Uuid::now_v7();
         let svc_other = Uuid::now_v7();
 
+        let mqtt_caps = BTreeSet::from([Capability::UpdateTracking, Capability::GracefulShutdown]);
         let (mut rx_mqtt, _) = registry
-            .register(svc_mqtt, mqtt_caps(), Some("m".to_string()), Some(10), None)
+            .register(svc_mqtt, mqtt_caps, None, None, None)
             .await;
         let (mut rx_other, _) = registry
             .register(
@@ -784,74 +535,16 @@ mod tests {
         assert!(registry.is_connected(&svc).await);
         assert!(!cancel_token.is_cancelled());
 
-        let result = registry.force_disconnect(&svc).await;
-        assert!(result.is_some());
+        registry.force_disconnect(&svc).await;
         assert!(cancel_token.is_cancelled());
         assert!(!registry.is_connected(&svc).await);
     }
 
     #[tokio::test]
-    async fn force_disconnect_returns_none_for_unknown_service() {
+    async fn force_disconnect_noop_for_unknown_service() {
         let registry = ServiceConnectionRegistry::new();
-        let result = registry.force_disconnect(&Uuid::now_v7()).await;
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn least_busy_prefers_lower_utilization_ratio() {
-        let registry = ServiceConnectionRegistry::new();
-        let svc_a = Uuid::now_v7();
-        let svc_b = Uuid::now_v7();
-
-        let _ = registry
-            .register(svc_a, mqtt_caps(), Some("a".to_string()), Some(4), None)
-            .await;
-        let _ = registry
-            .register(svc_b, mqtt_caps(), Some("b".to_string()), Some(2), None)
-            .await;
-
-        let _ = registry.assign_mqtt_client(&svc_a, Uuid::now_v7()).await;
-        let _ = registry.assign_mqtt_client(&svc_b, Uuid::now_v7()).await;
-
-        let loads = registry.list_mqtt_service_loads().await;
-        let selected = loads.first().map(|l| l.service_id);
-        assert_eq!(selected, Some(svc_a));
-    }
-
-    #[tokio::test]
-    async fn least_busy_tiebreaks_by_assigned_count() {
-        let registry = ServiceConnectionRegistry::new();
-        let svc_unlimited = Uuid::now_v7();
-        let svc_idle = Uuid::now_v7();
-
-        let _ = registry
-            .register(
-                svc_unlimited,
-                mqtt_caps(),
-                Some("unlimited".to_string()),
-                Some(0),
-                None,
-            )
-            .await;
-        let _ = registry
-            .register(
-                svc_idle,
-                mqtt_caps(),
-                Some("idle".to_string()),
-                Some(10),
-                None,
-            )
-            .await;
-
-        for _ in 0..3 {
-            let _ = registry
-                .assign_mqtt_client(&svc_unlimited, Uuid::now_v7())
-                .await;
-        }
-
-        let loads = registry.list_mqtt_service_loads().await;
-        let selected = loads.first().map(|l| l.service_id);
-        assert_eq!(selected, Some(svc_idle));
+        // Should not panic
+        registry.force_disconnect(&Uuid::now_v7()).await;
     }
 
     #[tokio::test]

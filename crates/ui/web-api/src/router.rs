@@ -79,13 +79,6 @@ use crate::AppState;
         crate::routes::settings_global_combined::get_global_combined_settings,
         crate::routes::settings_network::get_network_settings,
         crate::routes::settings_network::update_network_settings,
-        crate::routes::settings_mqtt::list_mqtt_settings,
-        crate::routes::settings_mqtt::create_mqtt_settings,
-        crate::routes::settings_mqtt::get_mqtt_limit,
-        crate::routes::settings_mqtt::update_mqtt_limit,
-        crate::routes::settings_mqtt::get_mqtt_settings,
-        crate::routes::settings_mqtt::update_mqtt_settings,
-        crate::routes::settings_mqtt::delete_mqtt_settings,
         crate::routes::hosts::list_hosts,
         crate::routes::hosts::get_host,
         crate::routes::hosts::update_host,
@@ -226,12 +219,6 @@ use crate::AppState;
             crate::routes::device_auth::DeviceAuthApproveResponse,
             crate::routes::settings_network::NetworkSettingsResponse,
             crate::routes::settings_network::UpdateNetworkSettingsRequest,
-            crate::routes::settings_mqtt::MqttClientResponse,
-            crate::routes::settings_mqtt::MqttLimitResponse,
-            crate::routes::settings_mqtt::CreateMqttClientRequest,
-            crate::routes::settings_mqtt::UpdateMqttClientRequest,
-            crate::routes::settings_mqtt::UpdateMqttLimitRequest,
-            uptrakit_web_api_types::mqtt_transport::MqttTransport,
             crate::routes::hosts::HostResponse,
             crate::routes::hosts::HostAgentSummary,
             crate::routes::hosts::UpdateHostRequest,
@@ -532,19 +519,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(
             crate::routes::settings_network::get_network_settings,
             crate::routes::settings_network::update_network_settings
-        ))
-        .routes(routes!(
-            crate::routes::settings_mqtt::list_mqtt_settings,
-            crate::routes::settings_mqtt::create_mqtt_settings
-        ))
-        .routes(routes!(
-            crate::routes::settings_mqtt::get_mqtt_limit,
-            crate::routes::settings_mqtt::update_mqtt_limit
-        ))
-        .routes(routes!(
-            crate::routes::settings_mqtt::get_mqtt_settings,
-            crate::routes::settings_mqtt::update_mqtt_settings,
-            crate::routes::settings_mqtt::delete_mqtt_settings
         ))
         .routes(routes!(crate::routes::device_auth::device_auth_approve))
         .routes(routes!(crate::routes::settings_ca::rotate_ca))
