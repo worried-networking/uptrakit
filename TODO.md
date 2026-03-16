@@ -720,9 +720,10 @@ ______________________________________________________________________
   - **Category**: Testing | **Impact**: Medium-High | **Effort**: Medium
   - Test full message exchange beyond enrollment (version checks, update commands, discovery
     results).
-- [ ] Integration tests: database operations
+- [x] Integration tests: database operations
   - **Category**: Testing | **Impact**: Medium | **Effort**: Medium
-  - Dedicated tests for complex query patterns (tenant isolation, join tables, batch operations).
+  - Multi-DB integration tests (SQLite, PostgreSQL, MariaDB) using testcontainers. 61 tests
+    per backend covering auth flows, CRUD operations, batch actions, and error cases.
 - [ ] Integration tests: plugin implementations
   - **Category**: Testing | **Impact**: Medium | **Effort**: Medium
   - Test each plugin against real or mocked package managers / registries.

@@ -1053,6 +1053,22 @@ See the end-user guide for operator-facing instructions:
 
 ---
 
+## Multi-backend integration testing
+
+All migrations are tested against SQLite, PostgreSQL, and MariaDB via the database integration
+tests in `crates/core/integration-tests/tests/database/`. The `migrations.rs` module verifies
+that migrations run successfully and all core tables exist on each backend.
+
+```bash
+# Run migration tests on all backends (requires Docker)
+cargo test -p uptrakit-integration-tests --test database migrations -- --ignored
+```
+
+See [Testing — Database Integration Tests](testing.md#database-integration-tests) for the full
+guide.
+
+---
+
 ## Cross-references
 
 - [Data migration guide](../end-user/db-migration.md) — operator-facing instructions for `db-migrate`

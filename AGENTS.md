@@ -249,6 +249,9 @@ build environments.
   - auth behavior behind proxies
   - IP detection / `ClientIp`, forwarded headers, trusted-proxy logic
   - reverse proxy middleware/settings and related TLS behavior
+- If anything related to database queries, migrations, or REST API behavior changes, run the
+  database integration tests (requires Docker for PG/MariaDB):
+  - `cargo test -p uptrakit-integration-tests --test database -- --ignored`
 - If anything related to enrollment, wire protocol, service lifecycle, or inter-component
   communication changes, run the system integration tests (requires Docker and pre-built image):
   - `docker build -f docker/Dockerfile.test -t uptrakit-test:latest .`

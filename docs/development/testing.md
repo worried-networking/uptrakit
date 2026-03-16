@@ -249,6 +249,15 @@ cargo test --all-features
 
 - Error paths with clear messaging
 
+- Database integration tests (Docker-based for PG/MariaDB, ignored by default):
+
+  ```bash
+  cargo test -p uptrakit-integration-tests --test database -- --ignored
+  ```
+
+  Tests all REST API flows against SQLite, PostgreSQL, and MariaDB using testcontainers.
+  See [Database Integration Tests](#database-integration-tests) below.
+
 - Reverse proxy integration tests (Docker-based, ignored by default):
 
   ```bash
@@ -336,6 +345,86 @@ cargo test -p uptrakit-web-api --features db-sqlite integration_tests::auth_flow
 # Full workspace (includes these automatically)
 cargo test --all-features
 ```
+
+## Database Integration Tests
+
+The `database` test binary in `crates/core/integration-tests/tests/database.rs` exercises the
+full REST API against all three supported database backends: SQLite, PostgreSQL, and MariaDB.
+
+### Architecture
+
+A `TestHarness` builds a fully wired `AppState` + Axum router per backend, mirroring the
+in-crate `TestApp` but running from an external crate. PostgreSQL and MariaDB containers are
+managed by `testcontainers-modules` — one shared container per process, with a fresh
+`test_{uuid}` database per test for isolation.
+
+```text
+crates/core/integration-tests/tests/
+  database.rs                      -- test binary entry point
+  database_helpers/
+    mod.rs                         -- module root
+    db_providers.rs                -- SQLite/PostgreSQL/MariaDB setup + migrations
+    harness.rs                     -- TestHarness (builds AppState + Router)
+    http_client.rs                 -- TestClient (tower::oneshot wrapper)
+    fixtures.rs                    -- DB insertion + HTTP registration helpers
+    macros.rs                      -- db_test! macro
+  database/
+    migrations.rs                  -- migration smoke tests
+    auth_flow.rs                   -- registration, login, refresh, logout
+    services.rs                    -- service CRUD + status transitions
+    hosts.rs                       -- host list, detail, deactivate
+    software_items.rs              -- CRUD lifecycle
+    host_tags.rs                   -- tag CRUD + host assignment
+    enrollment_tokens.rs           -- create, list, revoke
+    system_services.rs             -- system service listing
+    system_enrollment_tokens.rs    -- system token CRUD
+    notifications.rs               -- channel + rule CRUD
+    plugin_configs.rs              -- plugin type list, config create/delete
+    settings.rs                    -- registration settings get/update
+    users.rs                       -- user list, role update
+    api_tokens.rs                  -- token CRUD + authentication
+    audit_logs.rs                  -- audit log listing
+    update_history.rs              -- update history listing
+    health.rs                      -- healthz endpoint
+    batch_actions.rs               -- batch deactivation
+    error_cases.rs                 -- 401/404/expired JWT
+```
+
+### The `db_test!` macro
+
+Each test function is written once as `async fn test_xxx(harness: &TestHarness)` and then
+expanded into three `#[ignore]` test functions via the `db_test!` macro:
+
+```rust
+async fn test_create_host_tag(harness: &TestHarness) {
+    // ... test logic ...
+}
+
+db_test!(create_host_tag, test_create_host_tag);
+// Generates: create_host_tag_sqlite, create_host_tag_postgres, create_host_tag_mariadb
+```
+
+### Running
+
+```bash
+# Run all database integration tests (requires Docker for PG/MariaDB)
+cargo test -p uptrakit-integration-tests --test database -- --ignored
+
+# Run only SQLite tests (no Docker required)
+cargo test -p uptrakit-integration-tests --test database sqlite -- --ignored
+
+# Run only PostgreSQL tests
+cargo test -p uptrakit-integration-tests --test database postgres -- --ignored
+
+# Run only MariaDB tests
+cargo test -p uptrakit-integration-tests --test database mariadb -- --ignored
+
+# Run a specific test across all backends
+cargo test -p uptrakit-integration-tests --test database auth_flow -- --ignored
+```
+
+A dedicated `database-integration-tests` CI job runs all tests on `ubuntu-latest` (Docker
+pre-installed).
 
 ## Plugin Unit Test Utilities
 

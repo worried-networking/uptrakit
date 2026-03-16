@@ -3,6 +3,7 @@
 # Usage:
 #   docker compose up                       — controller only (SQLite)
 #   docker compose --profile postgres up    — controller + PostgreSQL
+#   docker compose --profile mariadb up     — controller + MariaDB
 #   docker compose --profile mqtt up        — controller + MQTT service
 #   docker compose --profile ssh up         — controller + SSH agent
 #   docker compose --profile scheduler up   — controller + scheduler + NATS
@@ -167,10 +168,29 @@ services:
       controller:
         condition: service_healthy
 
+  # ---------- MariaDB (profile: mariadb, full) ----------
+  mariadb:
+    <<: *common-service
+    image: mariadb:11
+    profiles: ["mariadb", "full"]
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    environment:
+      MARIADB_DATABASE: uptrakit
+      MARIADB_USER: uptrakit
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-changeme}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-changeme}
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   controller-config:
   controller-state:
   postgres-data:
+  mariadb-data:
   nats-data:
   scheduler-state:
   scheduler-config:
