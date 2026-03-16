@@ -500,7 +500,7 @@ impl ServiceHandler for SshAgentHandler {
 
             // Register the action library (separate from manifests).
             let actions_payload = uptrakit_internal_wire::extension::ExtensionActionsPayload::new(
-                extension::build_actions(&self.infra_plugins),
+                extension::build_actions(),
             );
             if let Err(e) = conn
                 .send(

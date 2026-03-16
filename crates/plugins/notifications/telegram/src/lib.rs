@@ -84,7 +84,10 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for TelegramPlugin {
         masked
     }
 
-    fn extension_manifests(&self) -> Vec<ExtensionManifest> {
+    fn extension_manifests() -> Vec<ExtensionManifest>
+    where
+        Self: Sized,
+    {
         vec![
             ExtensionManifest::new(
                 "notifications.telegram",
@@ -138,7 +141,10 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for TelegramPlugin {
         ]
     }
 
-    fn extension_actions(&self) -> Vec<ActionDef> {
+    fn extension_actions() -> Vec<ActionDef>
+    where
+        Self: Sized,
+    {
         vec![
             ActionDef::new("list", "List"),
             ActionDef::new("create", "Add Telegram Channel")

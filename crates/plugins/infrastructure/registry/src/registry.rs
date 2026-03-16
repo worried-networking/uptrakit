@@ -497,6 +497,43 @@ macro_rules! register_plugins {
                     .collect()
             }
 
+            /// Collect extension manifest/action pairs from all macro-registered plugins.
+            ///
+            /// Calls [`PluginBase::extension_manifests`] (static `where Self: Sized` variant) on
+            /// each registered plugin type. Plugins without extensions return empty vecs and
+            /// contribute nothing. This is the authoritative source for controller-startup
+            /// extension seeding for all non-notification plugins.
+            pub fn static_plugin_extension_manifests_and_actions() -> Vec<(
+                uptrakit_extension_framework::ExtensionManifest,
+                Vec<uptrakit_extension_framework::ActionDef>,
+            )> {
+                let mut result = Vec::new();
+                $(
+                    let manifests = <$plugin>::extension_manifests();
+                    let actions   = <$plugin>::extension_actions();
+                    for manifest in manifests {
+                        result.push((manifest, actions.clone()));
+                    }
+                )+
+                result
+            }
+
+            /// Flat list of all extension manifests from macro-registered plugins.
+            pub fn static_plugin_extension_manifests()
+            -> Vec<uptrakit_extension_framework::ExtensionManifest> {
+                let mut result = Vec::new();
+                $(result.extend(<$plugin>::extension_manifests());)+
+                result
+            }
+
+            /// Flat list of all extension actions from macro-registered plugins.
+            pub fn static_plugin_extension_actions()
+            -> Vec<uptrakit_extension_framework::ActionDef> {
+                let mut result = Vec::new();
+                $(result.extend(<$plugin>::extension_actions());)+
+                result
+            }
+
             /// Dispatch an extension action to the appropriate plugin handler.
             ///
             /// Routes based on the extension ID prefix declared via `extension_prefix`

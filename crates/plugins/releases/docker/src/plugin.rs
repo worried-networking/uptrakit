@@ -183,11 +183,17 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
             Self::CAPABILITIES.to_vec()
         }
 
-        fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
+        fn extension_manifests() -> Vec<uptrakit_extension_framework::ExtensionManifest>
+        where
+            Self: Sized,
+        {
             crate::extensions::extension_manifests()
         }
 
-        fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
+        fn extension_actions() -> Vec<uptrakit_extension_framework::ActionDef>
+        where
+            Self: Sized,
+        {
             crate::extensions::extension_actions()
         }
 

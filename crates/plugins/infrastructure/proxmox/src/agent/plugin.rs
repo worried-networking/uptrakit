@@ -63,14 +63,20 @@ impl PluginBase for ProxmoxAgentPlugin {
         ]
     }
 
-    fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
+    fn extension_manifests() -> Vec<uptrakit_extension_framework::ExtensionManifest>
+    where
+        Self: Sized,
+    {
         // The Proxmox plugin does not register its own top-level extension
         // manifest — it contributes actions to the SSH agent's existing
         // `ssh-agent.hosts` manifest via `primary_action_ids`.
         vec![]
     }
 
-    fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
+    fn extension_actions() -> Vec<uptrakit_extension_framework::ActionDef>
+    where
+        Self: Sized,
+    {
         vec![
             uptrakit_extension_framework::ActionDef::new(
                 "list-discovered-guests",

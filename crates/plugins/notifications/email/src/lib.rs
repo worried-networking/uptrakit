@@ -376,7 +376,10 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for EmailPlugin {
         config.clone()
     }
 
-    fn extension_manifests(&self) -> Vec<ExtensionManifest> {
+    fn extension_manifests() -> Vec<ExtensionManifest>
+    where
+        Self: Sized,
+    {
         vec![
             // Channel management tab (grouped with other notification channels)
             ExtensionManifest::new(
@@ -450,7 +453,10 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for EmailPlugin {
         ]
     }
 
-    fn extension_actions(&self) -> Vec<ActionDef> {
+    fn extension_actions() -> Vec<ActionDef>
+    where
+        Self: Sized,
+    {
         vec![
             ActionDef::new("list", "List"),
             ActionDef::new("create", "Add Email Channel")

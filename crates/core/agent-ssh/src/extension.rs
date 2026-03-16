@@ -81,10 +81,8 @@ pub(crate) fn build_register_payload(
         .iter()
         .flat_map(|p| p.primary_action_ids())
         .collect();
-    let infra_manifests: Vec<ExtensionManifest> = infra_plugins
-        .iter()
-        .flat_map(|p| p.extension_manifests())
-        .collect();
+    let infra_manifests =
+        uptrakit_plugin_infrastructure_registry::agent_infra_extension_manifests();
 
     let mut manifests = vec![build_manifest(&infra_primary_actions)];
     manifests.extend(infra_manifests);
@@ -97,7 +95,7 @@ pub(crate) fn build_register_payload(
 }
 
 /// Build the action library for registration via `ExtensionActionsRegister`.
-pub(crate) fn build_actions(infra_plugins: &[Arc<dyn PluginBase>]) -> Vec<ActionDef> {
+pub(crate) fn build_actions() -> Vec<ActionDef> {
     let mut actions = vec![
         ActionDef::new("remove-host", "Remove Host")
             .with_permission(Permission::UpdateHosts)
@@ -121,7 +119,7 @@ pub(crate) fn build_actions(infra_plugins: &[Arc<dyn PluginBase>]) -> Vec<Action
             .with_permission(Permission::UpdateHosts)
             .with_timeout(120),
     ];
-    actions.extend(infra_plugins.iter().flat_map(|p| p.extension_actions()));
+    actions.extend(uptrakit_plugin_infrastructure_registry::agent_infra_extension_actions());
     actions
 }
 

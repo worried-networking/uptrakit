@@ -119,6 +119,24 @@ pub fn create_agent_infra_plugins()
     )]
 }
 
+/// Returns extension manifests contributed by all compiled-in agent-infra plugins.
+///
+/// Called by `crates/core/agent-ssh/src/extension.rs` during extension registration,
+/// replacing the previous `Arc<dyn PluginBase>` instance-method iteration.
+/// Naming follows the convention of [`create_agent_infra_plugins`].
+#[cfg(feature = "agent-infra")]
+pub fn agent_infra_extension_manifests() -> Vec<uptrakit_extension_framework::ExtensionManifest> {
+    uptrakit_plugin_infrastructure_proxmox::agent::ProxmoxAgentPlugin::extension_manifests()
+}
+
+/// Returns extension actions contributed by all compiled-in agent-infra plugins.
+///
+/// Naming follows the convention of [`create_agent_infra_plugins`].
+#[cfg(feature = "agent-infra")]
+pub fn agent_infra_extension_actions() -> Vec<uptrakit_extension_framework::ActionDef> {
+    uptrakit_plugin_infrastructure_proxmox::agent::ProxmoxAgentPlugin::extension_actions()
+}
+
 // Re-export `PluginOps` trait and associated types from `infrastructure-core`.
 // The trait definition lives in `core` so that lightweight consumers (e.g.
 // `web-api-queries`) can depend on `core` alone without pulling in all plugin
@@ -210,26 +228,27 @@ impl PluginOps for PluginRegistry {
 
     fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
         #[allow(unused_mut)]
-        let mut manifests =
-            uptrakit_plugin_infrastructure_proxmox::extensions::extension_manifests();
-        #[cfg(feature = "notifications")]
-        {
-            for plugin in self.notification_plugins.values() {
-                manifests.extend(plugin.extension_manifests());
-            }
-        }
+        let mut manifests = PluginRegistry::static_plugin_extension_manifests();
+        #[cfg(feature = "notifications-webhook")]
+        manifests
+            .extend(uptrakit_notification_plugin_webhook::WebhookPlugin::extension_manifests());
+        #[cfg(feature = "notifications-telegram")]
+        manifests
+            .extend(uptrakit_notification_plugin_telegram::TelegramPlugin::extension_manifests());
+        #[cfg(feature = "notifications-email")]
+        manifests.extend(uptrakit_notification_plugin_email::EmailPlugin::extension_manifests());
         manifests
     }
 
     fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
         #[allow(unused_mut)]
-        let mut actions = uptrakit_plugin_infrastructure_proxmox::extensions::extension_actions();
-        #[cfg(feature = "notifications")]
-        {
-            for plugin in self.notification_plugins.values() {
-                actions.extend(plugin.extension_actions());
-            }
-        }
+        let mut actions = PluginRegistry::static_plugin_extension_actions();
+        #[cfg(feature = "notifications-webhook")]
+        actions.extend(uptrakit_notification_plugin_webhook::WebhookPlugin::extension_actions());
+        #[cfg(feature = "notifications-telegram")]
+        actions.extend(uptrakit_notification_plugin_telegram::TelegramPlugin::extension_actions());
+        #[cfg(feature = "notifications-email")]
+        actions.extend(uptrakit_notification_plugin_email::EmailPlugin::extension_actions());
         actions
     }
 
@@ -239,29 +258,34 @@ impl PluginOps for PluginRegistry {
         uptrakit_extension_framework::ExtensionManifest,
         Vec<uptrakit_extension_framework::ActionDef>,
     )> {
-        let mut result = Vec::new();
-
-        // Proxmox plugin: pair each proxmox manifest with proxmox-specific actions.
-        let proxmox_manifests =
-            uptrakit_plugin_infrastructure_proxmox::extensions::extension_manifests();
-        let proxmox_actions =
-            uptrakit_plugin_infrastructure_proxmox::extensions::extension_actions();
-        for manifest in proxmox_manifests {
-            result.push((manifest, proxmox_actions.clone()));
-        }
+        let mut result = PluginRegistry::static_plugin_extension_manifests_and_actions();
 
         // Notification plugins: pair each plugin's manifests with that plugin's
         // own actions so that `resolveAction("create")` on one notification
         // extension (e.g. telegram) does not return another plugin's action
         // (e.g. webhook's "Add Webhook").
-        #[cfg(feature = "notifications")]
+        #[cfg(feature = "notifications-webhook")]
         {
-            for plugin in self.notification_plugins.values() {
-                let plugin_manifests = plugin.extension_manifests();
-                let plugin_actions = plugin.extension_actions();
-                for manifest in plugin_manifests {
-                    result.push((manifest, plugin_actions.clone()));
-                }
+            let m = uptrakit_notification_plugin_webhook::WebhookPlugin::extension_manifests();
+            let a = uptrakit_notification_plugin_webhook::WebhookPlugin::extension_actions();
+            for manifest in m {
+                result.push((manifest, a.clone()));
+            }
+        }
+        #[cfg(feature = "notifications-telegram")]
+        {
+            let m = uptrakit_notification_plugin_telegram::TelegramPlugin::extension_manifests();
+            let a = uptrakit_notification_plugin_telegram::TelegramPlugin::extension_actions();
+            for manifest in m {
+                result.push((manifest, a.clone()));
+            }
+        }
+        #[cfg(feature = "notifications-email")]
+        {
+            let m = uptrakit_notification_plugin_email::EmailPlugin::extension_manifests();
+            let a = uptrakit_notification_plugin_email::EmailPlugin::extension_actions();
+            for manifest in m {
+                result.push((manifest, a.clone()));
             }
         }
 

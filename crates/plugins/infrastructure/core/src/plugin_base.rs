@@ -141,13 +141,29 @@ pub trait PluginBase: Send + Sync {
 
     // ── Extensions ───────────────────────────────────────────────────────
 
-    /// Return UI extension manifests for this plugin.
-    fn extension_manifests(&self) -> Vec<ExtensionManifest> {
+    /// Returns extension manifests for this plugin type without requiring an instance.
+    ///
+    /// Called by the [`register_plugins!`] macro on each registered plugin type to
+    /// populate the controller's extension registry at startup. Also called by the
+    /// agent-infra collection helpers in the plugin registry. Plugins that expose UI
+    /// extensions override this; all others use the default empty vec.
+    ///
+    /// `where Self: Sized` excludes this from the `dyn PluginBase` vtable.
+    fn extension_manifests() -> Vec<ExtensionManifest>
+    where
+        Self: Sized,
+    {
         vec![]
     }
 
-    /// Return action definitions for this plugin's extensions.
-    fn extension_actions(&self) -> Vec<ActionDef> {
+    /// Returns extension action definitions for this plugin type without requiring an
+    /// instance. Paired with [`extension_manifests`](Self::extension_manifests).
+    ///
+    /// `where Self: Sized` excludes this from the `dyn PluginBase` vtable.
+    fn extension_actions() -> Vec<ActionDef>
+    where
+        Self: Sized,
+    {
         vec![]
     }
 
@@ -648,8 +664,8 @@ mod tests {
             serde_json::json!({"key": "val"})
         );
         assert!(plugin.form_schema().is_empty());
-        assert!(plugin.extension_manifests().is_empty());
-        assert!(plugin.extension_actions().is_empty());
+        assert!(StubPlugin::extension_manifests().is_empty());
+        assert!(StubPlugin::extension_actions().is_empty());
         assert!(plugin.primary_action_ids().is_empty());
         assert!(plugin.required_sudo_commands().is_empty());
     }
