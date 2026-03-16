@@ -19,6 +19,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 time = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 utoipa = { workspace = true, optional = true }
