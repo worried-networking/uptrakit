@@ -33,6 +33,17 @@ use types::{EmbeddedTransport, ExternalServiceInfo};
 /// Custom yield predicate for embedded service coexistence decisions.
 type YieldCheckFn = Box<dyn Fn(&ExternalServiceInfo) -> bool + Send + Sync>;
 
+/// Result of registering an embedded service via [`EmbeddedServiceHost::add()`].
+#[allow(dead_code)] // Fields used by follow-up service embeddings (agent).
+pub(crate) struct AddResult {
+    /// The provisioned service ID.
+    pub service_id: Uuid,
+    /// Receiver for `ServiceMessage` sent by the embedded service.
+    /// System services (scheduler) can ignore this; tenant services (agent)
+    /// must feed it into a message processor bridge.
+    pub service_rx: tokio::sync::mpsc::Receiver<uptrakit_internal_wire::ServiceMessage>,
+}
+
 // ---------------------------------------------------------------------------
 // EmbeddedServiceHandle
 // ---------------------------------------------------------------------------
@@ -75,6 +86,9 @@ impl EmbeddedServiceHost {
     /// 4. Spawn response forwarder
     /// 5. Spawn the service's run closure with `EmbeddedTransport`
     /// 6. Track handles in `BackgroundTasks`
+    ///
+    /// `tenant_id` is required when `!is_system_service` — it determines which
+    /// tenant the embedded service record belongs to.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn add(
         &self,
@@ -82,6 +96,8 @@ impl EmbeddedServiceHost {
         app_name: &str,
         capabilities: BTreeSet<Capability>,
         is_system_service: bool,
+        tenant_id: Option<Uuid>,
+        coexistence_policy: CoexistencePolicy,
         yield_check: Option<YieldCheckFn>,
         run_fn: impl FnOnce(
             EmbeddedTransport,
@@ -91,7 +107,7 @@ impl EmbeddedServiceHost {
         + 'static,
         state: &Arc<uptrakit_web_api::AppState>,
         bg: &mut BackgroundTasks,
-    ) -> rootcause::Result<Uuid> {
+    ) -> rootcause::Result<AddResult> {
         // 1. Auto-provision.
         let hostname = hostname::get()
             .ok()
@@ -108,9 +124,16 @@ impl EmbeddedServiceHost {
             )
             .await?
         } else {
-            // Non-system embedded services are not yet supported — this path
-            // is reserved for future use.
-            unimplemented!("non-system embedded services are not yet implemented");
+            let tid = tenant_id.expect("tenant_id is required for non-system embedded services");
+            provision::provision_embedded_tenant_service(
+                state.db(),
+                tid,
+                app_name,
+                label,
+                &capabilities,
+                &hostname,
+            )
+            .await?
         };
 
         // 2. Register in ServiceConnectionRegistry.
@@ -123,12 +146,12 @@ impl EmbeddedServiceHost {
         //
         // Service → Controller (ServiceMessage):
         //   service_tx is given to the EmbeddedTransport
-        //   service_rx is consumed by the run closure (future: processor)
+        //   service_rx is returned to the caller when a message bridge is needed
         //
         // Controller → Service (ControllerMessage):
         //   ctrl_tx is used by the response forwarder
         //   ctrl_rx is given to the EmbeddedTransport
-        let (service_tx, _service_rx) =
+        let (service_tx, service_rx) =
             tokio::sync::mpsc::channel::<uptrakit_internal_wire::ServiceMessage>(32);
         let (ctrl_tx, ctrl_rx) =
             tokio::sync::mpsc::channel::<uptrakit_internal_wire::ControllerMessage>(32);
@@ -174,7 +197,10 @@ impl EmbeddedServiceHost {
             "embedded service registered"
         );
 
-        Ok(service_id)
+        Ok(AddResult {
+            service_id,
+            service_rx,
+        })
     }
 
     /// Evaluate whether a specific embedded service should yield based on

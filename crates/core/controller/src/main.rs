@@ -704,6 +704,8 @@ async fn spawn_background_tasks(
                 "uptrakit-scheduler",
                 scheduler_caps,
                 true, // is_system_service
+                None, // tenant_id (not needed for system services)
+                CoexistencePolicy::YieldAlways,
                 // Only yield to services that explicitly carry the Scheduler
                 // capability. Agents, SSH agents, and MQTT services share
                 // GracefulShutdown with the embedded scheduler but must NOT

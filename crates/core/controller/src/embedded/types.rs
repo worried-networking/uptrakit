@@ -63,6 +63,35 @@ impl EmbeddedTransport {
 // ExternalServiceInfo
 // ---------------------------------------------------------------------------
 
+#[async_trait::async_trait]
+impl uptrakit_internal_wire::ServiceTransport for EmbeddedTransport {
+    async fn transport_send(
+        &mut self,
+        msg: ServiceMessage,
+    ) -> Result<(), uptrakit_internal_wire::TransportError> {
+        self.tx
+            .send(msg)
+            .await
+            .map_err(|_| uptrakit_internal_wire::TransportError)
+    }
+
+    async fn transport_send_best_effort(&mut self, msg: ServiceMessage) {
+        let _ = self.tx.try_send(msg);
+    }
+
+    async fn transport_send_auto_paginate(
+        &mut self,
+        msg: ServiceMessage,
+    ) -> Result<(), uptrakit_internal_wire::TransportError> {
+        // In-process channels have no frame size limits — delegate to send.
+        self.transport_send(msg).await
+    }
+
+    async fn transport_recv(&mut self) -> Option<ControllerMessage> {
+        self.rx.recv().await
+    }
+}
+
 /// Info about an external service, used for yield decisions.
 pub(crate) struct ExternalServiceInfo {
     pub service_id: Uuid,
