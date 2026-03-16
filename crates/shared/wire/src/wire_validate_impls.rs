@@ -49,6 +49,8 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::ExtensionActionsRegister(p) => p.wire_validate(),
             ServiceMessage::ExtensionResponse(p) => p.wire_validate(),
             ServiceMessage::ExtensionRequest(p) => p.wire_validate(),
+            ServiceMessage::StoreServiceConfig(p) => p.wire_validate(),
+            ServiceMessage::DeleteServiceConfig(p) => p.wire_validate(),
             // Forward-compatible: unknown variants from newer peers pass validation.
             _ => {
                 tracing::debug!(
@@ -92,6 +94,9 @@ impl WireValidate for ControllerMessage {
             ControllerMessage::ExtensionRequest(p) => p.wire_validate(),
             ControllerMessage::ExtensionResponse(p) => p.wire_validate(),
             ControllerMessage::ServiceCredentials(_) => Ok(()),
+            ControllerMessage::ServiceConfigDelivery(p) => p.wire_validate(),
+            ControllerMessage::ServiceConfigAck(p) => p.wire_validate(),
+            ControllerMessage::ServiceConfigUpdated(p) => p.wire_validate(),
             ControllerMessage::RequestCaRotation(p) => p.wire_validate(),
             ControllerMessage::RequestCrlRenewal(_) => Ok(()),
             ControllerMessage::TokenRevoked(_) => Ok(()),
@@ -1168,6 +1173,78 @@ impl WireValidate for RequestCaRotationPayload {
     }
 }
 
+// ── Service config store ──────────────────────────────────────────────────────
+
+impl WireValidate for StoreServiceConfigPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.request_id, MAX_SHORT_STRING_LEN, "request_id")?;
+        check_string_len(&self.key, MAX_SHORT_STRING_LEN, "key")?;
+        let value_str = self.value.to_string();
+        check_string_len(&value_str, MAX_SERVICE_CONFIG_VALUE_LEN, "value")?;
+        Ok(())
+    }
+}
+
+impl WireValidate for DeleteServiceConfigPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.request_id, MAX_SHORT_STRING_LEN, "request_id")?;
+        check_string_len(&self.key, MAX_SHORT_STRING_LEN, "key")?;
+        Ok(())
+    }
+}
+
+impl WireValidate for ServiceConfigAckPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.request_id, MAX_SHORT_STRING_LEN, "request_id")?;
+        check_opt_string_len(&self.error, MAX_MEDIUM_STRING_LEN, "error")?;
+        Ok(())
+    }
+}
+
+impl WireValidate for ServiceConfigEntry {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.key, MAX_SHORT_STRING_LEN, "key")?;
+        let value_str = self.value.to_string();
+        check_string_len(&value_str, MAX_SERVICE_CONFIG_VALUE_LEN, "value")?;
+        Ok(())
+    }
+}
+
+impl WireValidate for ServiceConfigKey {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.key, MAX_SHORT_STRING_LEN, "key")?;
+        Ok(())
+    }
+}
+
+impl WireValidate for ServiceConfigDeliveryPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_vec_len(&self.entries, MAX_SERVICE_CONFIG_ENTRIES, "entries")?;
+        for (i, entry) in self.entries.iter().enumerate() {
+            entry.wire_validate().map_err(|mut e| {
+                e.field = "entries[i]";
+                e
+            })?;
+            let _ = i; // avoid warning
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for ServiceConfigUpdatedPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_vec_len(&self.changed, MAX_SERVICE_CONFIG_ENTRIES, "changed")?;
+        check_vec_len(&self.deleted, MAX_SERVICE_CONFIG_ENTRIES, "deleted")?;
+        for entry in &self.changed {
+            entry.wire_validate()?;
+        }
+        for key in &self.deleted {
+            key.wire_validate()?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1559,6 +1636,7 @@ mod tests {
             action_id: "do-thing".to_string(),
             params: serde_json::json!({}),
             sensitive_params: None,
+            tenant_id: None,
         };
         assert!(payload.wire_validate().is_ok());
     }
@@ -1572,6 +1650,7 @@ mod tests {
             action_id: "do-thing".to_string(),
             params: serde_json::Value::String(big_value),
             sensitive_params: None,
+            tenant_id: None,
         };
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "params");
@@ -1629,6 +1708,7 @@ mod tests {
             action_id: "action".to_string(),
             params: serde_json::json!({}),
             sensitive_params: None,
+            tenant_id: None,
         });
         assert!(msg.wire_validate().is_ok());
     }

@@ -1,6 +1,7 @@
 pub mod ca;
 pub mod cert_handler;
 pub mod cli;
+pub mod config_proxy;
 pub mod connection;
 #[cfg(feature = "zeroconf")]
 pub mod discovery;
@@ -20,6 +21,7 @@ pub use cert_handler::{
     CertificateRenewalHandler, FAR_FUTURE, compute_renewal_delay, create_renewal_sleep,
     update_renewal_schedule,
 };
+pub use config_proxy::{PendingServiceConfigRequest, ServiceConfigProxy, ServiceConfigProxyError};
 pub use connection::ControllerConnection;
 pub use error::{
     CaError, EnrollmentError, IdentityError, ProtocolError, Result, TlsError,

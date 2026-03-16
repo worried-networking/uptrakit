@@ -201,6 +201,19 @@ pub trait ServiceHandler: Send {
     /// this to call `proxy.complete()`.
     fn on_extension_response(&mut self, _response: ExtensionResponsePayload) {}
 
+    /// Handle a service config ACK from the controller.
+    ///
+    /// Called when the controller sends `ControllerMessage::ServiceConfigAck`
+    /// in reply to a service-initiated `StoreServiceConfig` or
+    /// `DeleteServiceConfig`. The default implementation does nothing. Services
+    /// using [`ServiceConfigProxy`](crate::ServiceConfigProxy) should override
+    /// this to call `proxy.complete()`.
+    fn on_service_config_ack(
+        &self,
+        _ack: uptrakit_internal_wire::payloads::ServiceConfigAckPayload,
+    ) {
+    }
+
     /// Handle an extension action request from the controller.
     ///
     /// The default implementation responds with a "not supported" error.

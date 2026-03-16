@@ -367,6 +367,10 @@ async fn handle_controller_message<H: ServiceHandler>(
             handler.on_extension_response(payload);
             Ok(None)
         }
+        Some(ControllerMessage::ServiceConfigAck(ack)) => {
+            handler.on_service_config_ack(ack);
+            Ok(None)
+        }
         Some(ControllerMessage::Unknown) => {
             tracing::warn!(
                 "received unknown controller message type; \

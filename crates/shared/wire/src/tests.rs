@@ -2935,6 +2935,7 @@ fn is_nats_publishable_blocks_credential_bearing_variants() {
             action_id: "act".into(),
             params: serde_json::Value::Null,
             sensitive_params: None,
+            tenant_id: None,
         })
         .is_nats_publishable()
     );
@@ -3084,6 +3085,7 @@ fn service_extension_request_roundtrip() {
         action_id: "list-all-unmatched".into(),
         params: serde_json::json!({"tenant_id": "abc"}),
         sensitive_params: None,
+        tenant_id: None,
     });
     let json = serde_json::to_value(&msg).unwrap();
     assert_eq!(json["type"], "extension_request");

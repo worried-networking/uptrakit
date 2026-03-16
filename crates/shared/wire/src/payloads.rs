@@ -720,6 +720,167 @@ pub struct MqttClientCreatedPayload {
 }
 
 // =============================================================================
+// Service Config Store Payloads
+// =============================================================================
+
+/// A single stored service config entry, delivered to the service.
+///
+/// Sensitive values are already decrypted by the controller before delivery.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceConfigEntry {
+    /// Tenant this entry belongs to, or `None` for global entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<Uuid>,
+    /// Entry key (e.g. `"clients.{uuid}"`).
+    pub key: String,
+    /// Entry value (plaintext JSON; controller decrypts before delivery).
+    pub value: serde_json::Value,
+}
+
+/// Identifies a service config entry by scope and key (used in delete notifications).
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceConfigKey {
+    /// Tenant this entry belongs to, or `None` for global entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<Uuid>,
+    /// Entry key.
+    pub key: String,
+}
+
+/// Service → Controller: write or update a config entry.
+///
+/// The controller upserts the entry in `tenant_service_config` (when
+/// `tenant_id` is set) or `global_service_config` (when `None`), encrypts
+/// the value if `sensitive` is `true`, ACKs the operation, and broadcasts
+/// `ServiceConfigUpdated` to all other connected instances of the same
+/// `service_app_name`.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoreServiceConfigPayload {
+    /// Correlation ID for the `ServiceConfigAck` response.
+    pub request_id: String,
+    /// Tenant scope. `None` = global scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<Uuid>,
+    /// Config key (e.g. `"clients.{uuid}"`).
+    pub key: String,
+    /// Config value (plaintext JSON; controller encrypts at rest if `sensitive`).
+    pub value: serde_json::Value,
+    /// When `true`, the controller stores the value using `EncryptedString`.
+    #[serde(default)]
+    pub sensitive: bool,
+}
+
+impl StoreServiceConfigPayload {
+    /// Create a new `StoreServiceConfigPayload`.
+    pub fn new(
+        request_id: String,
+        tenant_id: Option<Uuid>,
+        key: String,
+        value: serde_json::Value,
+        sensitive: bool,
+    ) -> Self {
+        Self {
+            request_id,
+            tenant_id,
+            key,
+            value,
+            sensitive,
+        }
+    }
+}
+
+/// Service → Controller: delete a config entry.
+///
+/// The controller deletes the entry, ACKs, and broadcasts `ServiceConfigUpdated`
+/// to all other connected instances of the same `service_app_name`.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeleteServiceConfigPayload {
+    /// Correlation ID for the `ServiceConfigAck` response.
+    pub request_id: String,
+    /// Tenant scope. `None` = global scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<Uuid>,
+    /// Config key to delete.
+    pub key: String,
+}
+
+impl DeleteServiceConfigPayload {
+    /// Create a new `DeleteServiceConfigPayload`.
+    pub fn new(request_id: String, tenant_id: Option<Uuid>, key: String) -> Self {
+        Self {
+            request_id,
+            tenant_id,
+            key,
+        }
+    }
+}
+
+/// Controller → Service: acknowledgment of a `StoreServiceConfig` or
+/// `DeleteServiceConfig` operation.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceConfigAckPayload {
+    /// Correlation ID matching the request.
+    pub request_id: String,
+    /// `true` if the operation succeeded.
+    pub success: bool,
+    /// Error message when `success` is `false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl ServiceConfigAckPayload {
+    /// Create a new success ACK.
+    pub fn success(request_id: String) -> Self {
+        Self {
+            request_id,
+            success: true,
+            error: None,
+        }
+    }
+
+    /// Create a new error ACK.
+    pub fn error(request_id: String, error: String) -> Self {
+        Self {
+            request_id,
+            success: false,
+            error: Some(error),
+        }
+    }
+}
+
+/// Controller → Service: initial delivery of all stored config entries.
+///
+/// Sent once after the service authenticates (after credential delivery).
+/// The service should use this as its authoritative in-memory state.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceConfigDeliveryPayload {
+    /// All config entries stored for this `service_app_name`.
+    pub entries: Vec<ServiceConfigEntry>,
+}
+
+/// Controller → Service: incremental config update notification.
+///
+/// Pushed to all connected instances of the same `service_app_name` when
+/// any instance stores or deletes a config entry. Services should apply
+/// these changes to their in-memory state atomically.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceConfigUpdatedPayload {
+    /// Entries that were inserted or updated (with decrypted values).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed: Vec<ServiceConfigEntry>,
+    /// Keys that were deleted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deleted: Vec<ServiceConfigKey>,
+}
+
+// =============================================================================
 // Infrastructure Credential Payloads
 // =============================================================================
 

@@ -4,19 +4,20 @@ use super::capabilities::ErrorPayload;
 use super::extension;
 use super::payloads::{
     ApprovedPayload, BatchUpdateResultPayload, BroadcastAdminEventPayload, CaBundleUpdatedPayload,
-    CertificatePayload, CheckVersionsPayload, DisconnectingPayload, DiscoverSoftwarePayload,
-    DiscoveryResultsPayload, EnrollPayload, EnrolledPayload, ExecuteBatchUpdatePayload,
-    ExecuteUpdatePayload, HostConnectivityUpdatedPayload, MqttClientCreatedPayload,
-    MqttClientStatusPayload, MqttRegisteredPayload, MqttReleaseTenantsPayload,
-    MqttTenantAssignmentsPayload, MqttTenantConfigUpdatedPayload, MqttTenantRevokedPayload,
-    PingPayload, PongPayload, RegisterPayload, RejectedPayload, ReportHostsPayload,
-    ReportPluginConfigPayload, ReportPluginConfigResponsePayload, RequestCaRotationPayload,
-    RequestCertRenewalPayload, RequestCrlRenewalPayload, ServerRestartingPayload,
-    ServiceCredentialsPayload, ServiceHostBatchUpdateTriggerPayload, ServiceSettingsPayload,
-    ServiceUpdateTriggerPayload, SetUpdateFreezePayload, SoftwareStatesChangedPayload,
-    SoftwareStatesPayload, StdinAttentionPayload, TokenRevokedPayload, UpdateCapabilitiesPayload,
-    UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload, UpdateStdinDataPayload,
-    VersionCheckResultsPayload,
+    CertificatePayload, CheckVersionsPayload, DeleteServiceConfigPayload, DisconnectingPayload,
+    DiscoverSoftwarePayload, DiscoveryResultsPayload, EnrollPayload, EnrolledPayload,
+    ExecuteBatchUpdatePayload, ExecuteUpdatePayload, HostConnectivityUpdatedPayload,
+    MqttClientCreatedPayload, MqttClientStatusPayload, MqttRegisteredPayload,
+    MqttReleaseTenantsPayload, MqttTenantAssignmentsPayload, MqttTenantConfigUpdatedPayload,
+    MqttTenantRevokedPayload, PingPayload, PongPayload, RegisterPayload, RejectedPayload,
+    ReportHostsPayload, ReportPluginConfigPayload, ReportPluginConfigResponsePayload,
+    RequestCaRotationPayload, RequestCertRenewalPayload, RequestCrlRenewalPayload,
+    ServerRestartingPayload, ServiceConfigAckPayload, ServiceConfigDeliveryPayload,
+    ServiceConfigUpdatedPayload, ServiceCredentialsPayload, ServiceHostBatchUpdateTriggerPayload,
+    ServiceSettingsPayload, ServiceUpdateTriggerPayload, SetUpdateFreezePayload,
+    SoftwareStatesChangedPayload, SoftwareStatesPayload, StdinAttentionPayload,
+    StoreServiceConfigPayload, TokenRevokedPayload, UpdateCapabilitiesPayload, UpdateOutputPayload,
+    UpdateResultPayload, UpdateStartedPayload, UpdateStdinDataPayload, VersionCheckResultsPayload,
 };
 
 /// Messages sent from a service (agent or MQTT) to the controller.
@@ -120,6 +121,16 @@ pub enum ServiceMessage {
     /// is always `None` for service-initiated requests (the mTLS channel is
     /// already trusted).
     ExtensionRequest(extension::ExtensionRequestPayload),
+    // -- Service config store --
+    /// Service → Controller: upsert a config entry in the controller DB.
+    ///
+    /// The controller encrypts sensitive values at rest, ACKs, and broadcasts
+    /// `ServiceConfigUpdated` to all connected instances of the same service app.
+    StoreServiceConfig(StoreServiceConfigPayload),
+    /// Service → Controller: delete a config entry from the controller DB.
+    ///
+    /// The controller deletes, ACKs, and broadcasts `ServiceConfigUpdated`.
+    DeleteServiceConfig(DeleteServiceConfigPayload),
     /// Unknown message type from a newer service build.
     ///
     /// Deserialized when the `type` tag does not match any known variant.
@@ -219,6 +230,21 @@ pub enum ControllerMessage {
     /// **Security**: NEVER published to NATS. Delivered locally via WebSocket only,
     /// following the same pattern as MQTT credential messages.
     ServiceCredentials(ServiceCredentialsPayload),
+    // -- Service config store --
+    /// Controller → Service: initial delivery of all stored config entries.
+    ///
+    /// Sent once after authentication (after credential delivery if applicable).
+    /// **Security**: contains decrypted sensitive values — NEVER published to NATS.
+    ServiceConfigDelivery(ServiceConfigDeliveryPayload),
+    /// Controller → Service: acknowledgment of a store or delete operation.
+    ///
+    /// **Security**: NEVER published to NATS — session-targeted.
+    ServiceConfigAck(ServiceConfigAckPayload),
+    /// Controller → Service: incremental update pushed to all instances of the
+    /// same `service_app_name` when any instance modifies a config entry.
+    ///
+    /// **Security**: may contain decrypted sensitive values — NEVER published to NATS.
+    ServiceConfigUpdated(ServiceConfigUpdatedPayload),
     /// Request from an external component (e.g. scheduler) for the controller to
     /// perform CA certificate rotation. Published via NATS to the controller subject;
     /// handled by triggering `ca_rotation_trigger.notify_one()`.
@@ -290,6 +316,9 @@ impl ControllerMessage {
                 | ControllerMessage::ExtensionResponse(_)
                 | ControllerMessage::UpdateStdinData(_)
                 | ControllerMessage::ResetData
+                | ControllerMessage::ServiceConfigDelivery(_)
+                | ControllerMessage::ServiceConfigAck(_)
+                | ControllerMessage::ServiceConfigUpdated(_)
                 | ControllerMessage::Unknown
         )
     }

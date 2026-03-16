@@ -139,6 +139,9 @@ impl ServiceExtensionProxy {
             action_id: action_id.to_string(),
             params,
             sensitive_params: None,
+            // Service-initiated requests carry no tenant context — the mTLS
+            // channel is already trusted.
+            tenant_id: None,
         });
 
         PendingExtensionRequest {

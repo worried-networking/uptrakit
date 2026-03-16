@@ -203,6 +203,12 @@ pub const MAX_OUTPUT_STRING_LEN: usize = 1_048_576;
 /// Maximum number of assets in a `ReleaseInfo` message.
 pub const MAX_RELEASE_ASSETS: usize = 500;
 
+/// Maximum number of entries in a `ServiceConfigDelivery` or `ServiceConfigUpdated` message.
+pub const MAX_SERVICE_CONFIG_ENTRIES: usize = 10_000;
+
+/// Maximum byte length of a service config value (serialized JSON).
+pub const MAX_SERVICE_CONFIG_VALUE_LEN: usize = 65_536;
+
 /// Expected byte length of a SHA-256 hex digest string (64 hex characters).
 pub const SHA256_DIGEST_LEN: usize = 64;
 
