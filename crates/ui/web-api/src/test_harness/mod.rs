@@ -234,6 +234,7 @@ pub(crate) async fn build_test_state(
         )),
         extension_registry: Arc::new(crate::extension_registry::ExtensionRegistry::new(vec![])),
         extension_proxy: Arc::new(crate::extension_proxy::ExtensionProxy::new()),
+        workload_claim_registry: Arc::new(crate::workload_claims::WorkloadClaimRegistry::new()),
         pki_path: std::path::PathBuf::from("/tmp/test-pki"),
         rustls_config: rustls_cfg,
         reject_dangerous_commands: false,

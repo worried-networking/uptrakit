@@ -58,6 +58,8 @@ pub struct NatsConsumerConfig {
     pub revocation_notify: Option<Arc<Notify>>,
     /// Token denylist for cross-controller token revocation (optional).
     pub token_denylist: Option<Arc<crate::auth::token_denylist::TokenDenylist>>,
+    /// Workload claim registry for tenant-scoped routing of remote events.
+    pub claim_registry: Option<Arc<crate::workload_claims::WorkloadClaimRegistry>>,
 }
 
 /// Maximum delivery attempts before a message is dropped.
@@ -159,6 +161,7 @@ impl NatsTransport {
             ca_rotation_trigger,
             revocation_notify,
             token_denylist,
+            claim_registry,
         } = config;
         let consumer = match self.create_consumer().await {
             Ok(c) => c,
@@ -254,6 +257,7 @@ impl NatsTransport {
                     revocation_notify: revocation_notify.as_ref(),
                     token_denylist: token_denylist.as_ref(),
                     event_broadcaster: Some(&event_broadcaster),
+                    claim_registry: claim_registry.as_ref(),
                 };
                 let delivered = crate::event_delivery::deliver_event(
                     &registry,

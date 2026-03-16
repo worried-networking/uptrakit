@@ -94,6 +94,17 @@ pub struct ClaimResult {
     pub tenants_before: BTreeSet<Uuid>,
 }
 
+impl ClaimResult {
+    /// Returns the set of tenants that the service is newly serving (present in
+    /// `tenants_after` but not in `tenants_before`).
+    pub fn new_tenants(&self) -> BTreeSet<Uuid> {
+        self.tenants_after
+            .difference(&self.tenants_before)
+            .copied()
+            .collect()
+    }
+}
+
 /// A revocation caused by applying a remote announcement.
 pub struct Revocation {
     /// The local service whose claim was revoked.
@@ -243,13 +254,13 @@ impl WorkloadClaimRegistry {
         let mut released = BTreeMap::new();
 
         for key in keys {
-            if let Some(owner) = inner.claims.get(key) {
-                if owner.service_id == service_id {
-                    let owner = inner.claims.remove(key).unwrap();
-                    released.insert(key.clone(), owner.tenant_id);
-                    if let Some(svc_keys) = inner.by_service.get_mut(&service_id) {
-                        svc_keys.remove(key);
-                    }
+            if let Some(owner) = inner.claims.get(key)
+                && owner.service_id == service_id
+            {
+                let owner = inner.claims.remove(key).unwrap();
+                released.insert(key.clone(), owner.tenant_id);
+                if let Some(svc_keys) = inner.by_service.get_mut(&service_id) {
+                    svc_keys.remove(key);
                 }
             }
         }
@@ -278,12 +289,12 @@ impl WorkloadClaimRegistry {
 
         // Process released keys
         for key in released {
-            if let Some(owner) = inner.claims.get(key) {
-                if owner.service_id == announcement_service_id {
-                    inner.claims.remove(key);
-                    if let Some(svc_keys) = inner.by_service.get_mut(&announcement_service_id) {
-                        svc_keys.remove(key);
-                    }
+            if let Some(owner) = inner.claims.get(key)
+                && owner.service_id == announcement_service_id
+            {
+                inner.claims.remove(key);
+                if let Some(svc_keys) = inner.by_service.get_mut(&announcement_service_id) {
+                    svc_keys.remove(key);
                 }
             }
         }
@@ -463,6 +474,12 @@ impl WorkloadClaimRegistry {
                 )
             })
             .collect()
+    }
+
+    /// Returns the tenant_id for a specific config key, if claimed.
+    pub fn tenant_for_key(&self, key: &str) -> Option<Uuid> {
+        let inner = self.inner.read();
+        inner.claims.get(key).map(|o| o.tenant_id)
     }
 
     /// Returns `true` if any claims exist in the registry.

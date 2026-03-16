@@ -10,12 +10,13 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::Notify;
 use uptrakit_internal_wire::{
     BroadcastAdminEventPayload, Capability, ControllerMessage, SoftwareStatesChangedPayload,
-    TokenRevokedPayload,
+    TokenRevokedPayload, WorkloadClaimResultPayload,
 };
 use uptrakit_web_api_types::events::AdminEvent;
 use uuid::Uuid;
 
 use crate::service_connections::ServiceConnectionRegistry;
+use crate::workload_claims::WorkloadClaimRegistry;
 
 /// Optional controller-local resources needed when processing controller-targeted events.
 ///
@@ -33,6 +34,8 @@ pub struct ControllerResources<'a> {
     /// to local SSE subscribers using `send_local` / `send_global_local`
     /// (without re-publishing to NATS to avoid loops).
     pub event_broadcaster: Option<&'a crate::event_broadcaster::EventBroadcaster>,
+    /// Workload claim registry for tenant-scoped routing of remote events.
+    pub claim_registry: Option<&'a Arc<WorkloadClaimRegistry>>,
 }
 
 /// Parse a capability string back to a typed [`Capability`] variant.
@@ -51,6 +54,22 @@ pub fn parse_capability_str(s: &str) -> Option<Capability> {
         "nats_access" => Some(Capability::NatsAccess),
         "master_key_access" => Some(Capability::MasterKeyAccess),
         "ca_management" => Some(Capability::CaManagement),
+        "workload_claims" => Some(Capability::WorkloadClaims),
+        "system_service" => Some(Capability::SystemService),
+        "ui_extensions" => Some(Capability::UiExtensions),
+        _ => None,
+    }
+}
+
+/// Extract `tenant_id` from a [`ControllerMessage`] when it carries tenant-scoped data.
+///
+/// Returns `Some(tenant_id)` for `SoftwareStates` and `HostConnectivityUpdated`
+/// messages, which should be routed via the workload claim registry rather than
+/// broadcast to all services with a matching capability.
+pub fn extract_tenant_id(msg: &ControllerMessage) -> Option<Uuid> {
+    match msg {
+        ControllerMessage::SoftwareStates(p) => Some(p.tenant_id),
+        ControllerMessage::HostConnectivityUpdated(p) => Some(p.tenant_id),
         _ => None,
     }
 }
@@ -85,8 +104,22 @@ pub async fn deliver_event(
         }
         // Targeted to services with a specific capability
         (None, Some(cap_str)) => {
-            // For any known capability, broadcast to services with that capability
             if let Some(capability) = parse_capability_str(cap_str) {
+                // Attempt tenant-scoped delivery via claim registry
+                if let Some(tenant_id) = extract_tenant_id(&msg)
+                    && let Some(cr) = resources.claim_registry
+                {
+                    let service_ids = cr.services_for_tenant(tenant_id);
+                    if !service_ids.is_empty() {
+                        for svc_id in &service_ids {
+                            registry.send(svc_id, msg.clone()).await;
+                        }
+                        return true;
+                    }
+                    // No local claimants — skip (served by other controllers)
+                    return true;
+                }
+                // No tenant scope or no claim registry — broadcast by capability
                 registry.broadcast_by_capability(&capability, msg).await;
             } else {
                 registry.broadcast(msg).await;
@@ -188,6 +221,124 @@ pub async fn deliver_controller_event(
             }
             true
         }
+        ControllerMessage::WorkloadClaimAnnouncement(ref payload) => {
+            if let Some(cr) = resources.claim_registry {
+                let claimed_at = time::OffsetDateTime::parse(
+                    &payload.claimed_at,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+
+                let revocations = cr.apply_remote_announcement(
+                    payload.service_id,
+                    payload.controller_id,
+                    &payload.claimed,
+                    &payload.released,
+                    claimed_at,
+                );
+                let registry = resources.notification_service.map(|ns| ns.registry());
+                // Send revocation results to affected local services.
+                for rev in &revocations {
+                    if let Some(reg) = registry {
+                        let result = WorkloadClaimResultPayload::new(
+                            std::collections::BTreeSet::new(),
+                            rev.revoked_keys.clone(),
+                        );
+                        reg.send(
+                            &rev.service_id,
+                            ControllerMessage::WorkloadClaimResult(result),
+                        )
+                        .await;
+                    }
+                }
+                // Proactive re-grant for released keys that local services wanted.
+                if !payload.released.is_empty() {
+                    let re_grantable = cr.find_pending_desires_for_keys(&payload.released);
+                    if let (Some(ns), false) =
+                        (resources.notification_service, re_grantable.is_empty())
+                    {
+                        let controller_id = ns.controller_id();
+                        for (svc_id, desired) in re_grantable {
+                            let result = cr.try_claim(svc_id, controller_id, desired);
+                            if !result.granted.is_empty() {
+                                let new_tenants = result.new_tenants();
+                                let claim_result = WorkloadClaimResultPayload::new(
+                                    result.granted.clone(),
+                                    result.rejected,
+                                );
+                                ns.registry()
+                                    .send(
+                                        &svc_id,
+                                        ControllerMessage::WorkloadClaimResult(claim_result),
+                                    )
+                                    .await;
+                                // Announce newly granted claims via NATS.
+                                let claimed_at_str = time::OffsetDateTime::now_utc()
+                                    .format(&time::format_description::well_known::Rfc3339)
+                                    .unwrap_or_default();
+                                let announcement =
+                                    uptrakit_internal_wire::WorkloadClaimAnnouncementPayload::new(
+                                        svc_id,
+                                        controller_id,
+                                        result
+                                            .granted
+                                            .iter()
+                                            .filter_map(|k| {
+                                                cr.tenant_for_key(k).map(|tid| (k.clone(), tid))
+                                            })
+                                            .collect(),
+                                        std::collections::BTreeSet::new(),
+                                        claimed_at_str,
+                                    );
+                                ns.publish_controller_event(
+                                    ControllerMessage::WorkloadClaimAnnouncement(announcement),
+                                )
+                                .await;
+                                // Push initial state for newly served tenants.
+                                for tid in &new_tenants {
+                                    ns.push_software_states_paginated_for_tenant(db, *tid).await;
+                                    ns.push_connected_agent_states_for_tenant(db, *tid).await;
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                tracing::debug!(
+                    "received WorkloadClaimAnnouncement but no claim_registry configured"
+                );
+            }
+            true
+        }
+        ControllerMessage::WorkloadClaimSyncRequest(ref payload) => {
+            // Another controller is requesting our local claim state.
+            if let (Some(cr), Some(ns)) = (resources.claim_registry, resources.notification_service)
+            {
+                let local = cr.local_claims(ns.controller_id());
+                let response = build_sync_response(ns.controller_id(), &local);
+                ns.publish_controller_event(ControllerMessage::WorkloadClaimSyncResponse(response))
+                    .await;
+                tracing::info!(
+                    requester = %payload.controller_id,
+                    local_claims = local.len(),
+                    "responded to WorkloadClaimSyncRequest"
+                );
+            }
+            true
+        }
+        ControllerMessage::WorkloadClaimSyncResponse(ref payload) => {
+            // Merge remote claims into our global registry.
+            if let Some(cr) = resources.claim_registry {
+                let claims = parse_sync_claims(&payload.claims);
+                cr.apply_sync_response(payload.controller_id, &claims);
+                tracing::info!(
+                    responder = %payload.controller_id,
+                    claims = payload.claims.len(),
+                    "merged WorkloadClaimSyncResponse into global registry"
+                );
+            }
+            true
+        }
         _ => {
             tracing::warn!(
                 msg_type = ?std::mem::discriminant(&msg),
@@ -196,6 +347,49 @@ pub async fn deliver_controller_event(
             true
         }
     }
+}
+
+/// Build a [`WorkloadClaimSyncResponsePayload`] from the local claims map.
+fn build_sync_response(
+    controller_id: Uuid,
+    local: &std::collections::BTreeMap<String, (Uuid, Uuid, time::OffsetDateTime)>,
+) -> uptrakit_internal_wire::WorkloadClaimSyncResponsePayload {
+    use std::collections::BTreeMap;
+    use uptrakit_internal_wire::{WorkloadClaimSyncEntry, WorkloadClaimSyncResponsePayload};
+
+    let claims: BTreeMap<String, WorkloadClaimSyncEntry> = local
+        .iter()
+        .map(|(key, (service_id, tenant_id, claimed_at))| {
+            let ts = claimed_at
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_default();
+            (
+                key.clone(),
+                WorkloadClaimSyncEntry::new(*service_id, *tenant_id, ts),
+            )
+        })
+        .collect();
+    WorkloadClaimSyncResponsePayload::new(controller_id, claims)
+}
+
+/// Parse sync response claims from wire format into the internal tuple format.
+fn parse_sync_claims(
+    wire_claims: &std::collections::BTreeMap<
+        String,
+        uptrakit_internal_wire::WorkloadClaimSyncEntry,
+    >,
+) -> std::collections::BTreeMap<String, (Uuid, Uuid, time::OffsetDateTime)> {
+    wire_claims
+        .iter()
+        .map(|(key, entry)| {
+            let claimed_at = time::OffsetDateTime::parse(
+                &entry.claimed_at,
+                &time::format_description::well_known::Rfc3339,
+            )
+            .unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+            (key.clone(), (entry.service_id, entry.tenant_id, claimed_at))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -244,6 +438,18 @@ mod tests {
             parse_capability_str("ca_management"),
             Some(Capability::CaManagement)
         );
+        assert_eq!(
+            parse_capability_str("workload_claims"),
+            Some(Capability::WorkloadClaims)
+        );
+        assert_eq!(
+            parse_capability_str("system_service"),
+            Some(Capability::SystemService)
+        );
+        assert_eq!(
+            parse_capability_str("ui_extensions"),
+            Some(Capability::UiExtensions)
+        );
     }
 
     #[test]
@@ -268,6 +474,7 @@ mod tests {
             revocation_notify: None,
             token_denylist: None,
             event_broadcaster: None,
+            claim_registry: None,
         };
         let result = deliver_event(&registry, &db, &resources, None, None, msg).await;
         assert!(result);
@@ -290,6 +497,7 @@ mod tests {
             revocation_notify: None,
             token_denylist: None,
             event_broadcaster: None,
+            claim_registry: None,
         };
         let result = deliver_event(&registry, &db, &resources, Some(service_id), None, msg).await;
         assert!(result);
@@ -310,6 +518,7 @@ mod tests {
             revocation_notify: None,
             token_denylist: None,
             event_broadcaster: None,
+            claim_registry: None,
         };
         let result = deliver_event(
             &registry,

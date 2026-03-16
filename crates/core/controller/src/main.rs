@@ -276,11 +276,15 @@ async fn run(args: cli::Args) -> Result<()> {
     let service_connections =
         uptrakit_web_api::service_connections::ServiceConnectionRegistry::new();
     let controller_id = uuid::Uuid::now_v7();
+    let workload_claim_registry =
+        Arc::new(uptrakit_web_api::workload_claims::WorkloadClaimRegistry::new());
     #[cfg_attr(not(feature = "nats"), allow(unused_mut))]
-    let mut notification_service = uptrakit_web_api::notification_service::NotificationService::new(
-        service_connections.clone(),
-        controller_id,
-    );
+    let mut notification_service =
+        uptrakit_web_api::notification_service::NotificationService::new(
+            service_connections.clone(),
+            controller_id,
+        )
+        .with_claim_registry(Arc::clone(&workload_claim_registry));
 
     // NATS transport (optional, feature-gated)
     // Uses the reconciled NATS URL (DB value wins over CLI; CLI seeds DB on first run).
@@ -421,6 +425,7 @@ async fn run(args: cli::Args) -> Result<()> {
         .audit_log_dispatcher(audit_dispatcher)
         .plugin_ops(plugin_ops)
         .extension_registry(extension_registry)
+        .workload_claim_registry(workload_claim_registry)
         .reject_dangerous_commands(!args.allow_dangerous_commands);
 
     #[cfg(feature = "oidc")]
@@ -920,6 +925,7 @@ async fn spawn_background_tasks(
                 ca_rotation_trigger: Some(Arc::clone(&app_state.cert.ca_rotation_trigger)),
                 revocation_notify: Some(Arc::clone(&app_state.cert.revocation_notify)),
                 token_denylist: Some(Arc::clone(&app_state.auth.token_denylist)),
+                claim_registry: Some(Arc::clone(&app_state.workload_claim_registry)),
             },
         );
         bg.track("nats-consumer", h);

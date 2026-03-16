@@ -153,6 +153,13 @@ pub struct AppState {
     pub default_tenant_id: uuid::Uuid,
     /// Unique identifier for this controller instance (used for cross-controller notification delivery).
     pub controller_id: uuid::Uuid,
+    /// Global workload claim registry for exclusive config-key ownership.
+    ///
+    /// Services with the `WorkloadClaims` capability send `WorkloadClaim` to
+    /// request exclusive ownership of config keys. The registry tracks grants
+    /// and derives tenant routing indexes for SoftwareStates/HostConnectivity
+    /// delivery.
+    pub workload_claim_registry: Arc<crate::workload_claims::WorkloadClaimRegistry>,
     /// When `true` (default), plugin config create/update requests that contain
     /// dangerous command patterns (e.g. `curl|bash`, `rm -rf /`) are rejected
     /// with HTTP 400. Set to `false` via `--allow-dangerous-commands` CLI flag
@@ -219,6 +226,7 @@ pub struct AppStateBuilder {
     audit_log_dispatcher: Option<uptrakit_audit_log::AuditLogDispatcher>,
     extension_registry: Option<Arc<ExtensionRegistry>>,
     extension_proxy: Option<Arc<ExtensionProxy>>,
+    workload_claim_registry: Option<Arc<crate::workload_claims::WorkloadClaimRegistry>>,
     reject_dangerous_commands: bool,
 }
 
@@ -264,6 +272,7 @@ impl AppStateBuilder {
             audit_log_dispatcher: None,
             extension_registry: None,
             extension_proxy: None,
+            workload_claim_registry: None,
             reject_dangerous_commands: false,
         }
     }
@@ -486,6 +495,15 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the workload claim registry for exclusive config-key ownership.
+    pub fn workload_claim_registry(
+        mut self,
+        v: Arc<crate::workload_claims::WorkloadClaimRegistry>,
+    ) -> Self {
+        self.workload_claim_registry = Some(v);
+        self
+    }
+
     /// Enable dangerous command pattern rejection.
     ///
     /// When `true`, plugin config create/update requests containing dangerous
@@ -593,6 +611,9 @@ impl AppStateBuilder {
             controller_id: self
                 .controller_id
                 .ok_or(AppStateBuildError("controller_id"))?,
+            workload_claim_registry: self
+                .workload_claim_registry
+                .unwrap_or_else(|| Arc::new(crate::workload_claims::WorkloadClaimRegistry::new())),
             reject_dangerous_commands: self.reject_dangerous_commands,
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),

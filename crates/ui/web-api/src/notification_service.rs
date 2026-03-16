@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use uptrakit_internal_wire::{
     Capability, ControllerMessage, HostConnectivityUpdate, HostConnectivityUpdatedPayload,
     SoftwareStatesPayload,
@@ -5,6 +7,7 @@ use uptrakit_internal_wire::{
 use uuid::Uuid;
 
 use crate::service_connections::ServiceConnectionRegistry;
+use crate::workload_claims::WorkloadClaimRegistry;
 
 /// Cross-controller notification service.
 ///
@@ -12,6 +15,11 @@ use crate::service_connections::ServiceConnectionRegistry;
 /// messages are delivered locally only (single-controller mode). When the
 /// `nats` feature is enabled and a `NatsTransport` is attached, messages are
 /// also published to NATS JetStream for cross-controller delivery.
+///
+/// When a `WorkloadClaimRegistry` is set, tenant-scoped messages
+/// (`SoftwareStates`, `HostConnectivityUpdated`) are routed only to services
+/// that hold at least one claimed config key for the target tenant, rather
+/// than broadcast to all update-tracking services.
 #[derive(Clone)]
 pub struct NotificationService {
     registry: ServiceConnectionRegistry,
@@ -19,6 +27,8 @@ pub struct NotificationService {
     /// Tracks whether a NATS transport has been attached. Always present so
     /// that `has_nats()` can be implemented without any `#[cfg]`.
     nats_configured: bool,
+    /// Workload claim registry for tenant-scoped routing.
+    claim_registry: Option<Arc<WorkloadClaimRegistry>>,
     #[cfg(feature = "nats")]
     nats: Option<crate::nats_transport::NatsTransport>,
 }
@@ -29,9 +39,21 @@ impl NotificationService {
             registry,
             controller_id,
             nats_configured: false,
+            claim_registry: None,
             #[cfg(feature = "nats")]
             nats: None,
         }
+    }
+
+    /// Attach a workload claim registry for tenant-scoped delivery routing.
+    pub fn with_claim_registry(mut self, registry: Arc<WorkloadClaimRegistry>) -> Self {
+        self.claim_registry = Some(registry);
+        self
+    }
+
+    /// Access the workload claim registry, if configured.
+    pub fn claim_registry(&self) -> Option<&Arc<WorkloadClaimRegistry>> {
+        self.claim_registry.as_ref()
     }
 
     /// Attach a NATS transport for cross-controller delivery.
@@ -181,15 +203,19 @@ impl NotificationService {
     /// Deliver a pre-loaded `SoftwareStatesPayload` to all locally connected
     /// update-tracking services and publish to NATS for cross-controller delivery.
     ///
+    /// When a `WorkloadClaimRegistry` is set, delivery is scoped to services that
+    /// hold at least one claimed config key for the payload's tenant. Falls back
+    /// to capability-based broadcast when no claim registry is configured or no
+    /// services have claims for the tenant.
+    ///
     /// Used by `ControllerSchedulerNotifier` to avoid re-loading an already-loaded
     /// payload through the ORM layer.
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(skip_all, fields(tenant_id = %payload.tenant_id))]
     pub async fn deliver_software_states(&self, payload: SoftwareStatesPayload) {
+        let tenant_id = payload.tenant_id;
         let msg = ControllerMessage::SoftwareStates(payload);
-        // Deliver to locally connected update-tracking services immediately.
-        self.registry
-            .broadcast_by_capability(&Capability::UpdateTracking, msg.clone())
-            .await;
+        // Deliver to locally connected services — scoped by claim when available.
+        self.deliver_tenant_scoped(tenant_id, msg.clone()).await;
         // Publish to NATS for cross-controller delivery.
         self.maybe_publish_nats(None, Some("update_tracking"), msg)
             .await;
@@ -217,10 +243,8 @@ impl NotificationService {
     ) {
         let payload = HostConnectivityUpdatedPayload::new(tenant_id, updates);
         let msg = ControllerMessage::HostConnectivityUpdated(payload);
-        // Deliver to locally connected update-tracking services immediately.
-        self.registry
-            .broadcast_by_capability(&Capability::UpdateTracking, msg.clone())
-            .await;
+        // Deliver to locally connected services — scoped by claim when available.
+        self.deliver_tenant_scoped(tenant_id, msg.clone()).await;
         // Publish to NATS for cross-controller delivery.
         self.maybe_publish_nats(None, Some("update_tracking"), msg)
             .await;
@@ -304,6 +328,28 @@ impl NotificationService {
     /// Return the controller ID.
     pub fn controller_id(&self) -> Uuid {
         self.controller_id
+    }
+
+    /// Route a tenant-scoped message to local services.
+    ///
+    /// When a claim registry is configured, delivers only to services that hold
+    /// at least one claimed config key for `tenant_id`. Falls back to
+    /// capability-based broadcast when no claims exist or no registry is set.
+    async fn deliver_tenant_scoped(&self, tenant_id: Uuid, msg: ControllerMessage) {
+        if let Some(ref cr) = self.claim_registry {
+            let service_ids = cr.services_for_tenant(tenant_id);
+            if !service_ids.is_empty() {
+                for svc_id in &service_ids {
+                    self.registry.send(svc_id, msg.clone()).await;
+                }
+                return;
+            }
+            // No claims for this tenant — fall through to broadcast for graceful
+            // degradation (e.g. during rolling deployment or before claims arrive).
+        }
+        self.registry
+            .broadcast_by_capability(&Capability::UpdateTracking, msg)
+            .await;
     }
 
     /// Conditionally publish a message to NATS when a transport is configured.
