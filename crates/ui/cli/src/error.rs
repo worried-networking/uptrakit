@@ -41,7 +41,6 @@ impl_report_conversion! {
 }
 
 impl_report_conversion!(serde_yaml_ng::Error => CliError, |e| CliError::Yaml(e.to_string()));
-impl_report_conversion!(uptrakit_openapi_client::types::mqtt_transport::ParseMqttTransportError => CliError, |e| CliError::Other(e.to_string()));
 
 impl_report_conversion!(uptrakit_openapi_client::ClientError => CliError, |e| {
     match e {

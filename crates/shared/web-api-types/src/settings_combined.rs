@@ -4,7 +4,6 @@ use crate::enrollment_tokens::EnrollmentTokensSummary;
 use crate::settings::RegistrationSettingsResponse;
 use crate::settings_agent_certs::AgentCertificateSettingsResponse;
 use crate::settings_auth::AuthenticationSettingsResponse;
-use crate::settings_mqtt::MqttLimitResponse;
 use crate::settings_nats::NatsSettingsResponse;
 use crate::settings_network::NetworkSettingsResponse;
 
@@ -30,7 +29,6 @@ pub struct CombinedSettingsResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct GlobalSettingsCombinedResponse {
     pub network: NetworkSettingsResponse,
-    pub mqtt_limit: MqttLimitResponse,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nats: Option<NatsSettingsResponse>,
 }

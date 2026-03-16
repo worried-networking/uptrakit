@@ -158,13 +158,6 @@ impl MockApiServer {
         }
     }
 
-    /// MQTT settings endpoints (`/api/v1/settings/mqtt`).
-    pub fn settings_mqtt(&self) -> MockSettingsMqtt<'_> {
-        MockSettingsMqtt {
-            server: &self.server,
-        }
-    }
-
     /// Software item endpoints (`/api/v1/software-items`).
     pub fn software_items(&self) -> MockSoftwareItems<'_> {
         MockSoftwareItems {
@@ -705,50 +698,6 @@ impl<'a> MockSettings<'a> {
     /// Mock `POST /api/v1/settings/renew-server-certificate`.
     pub fn on_renew_server_certificate(&self) -> MockEndpoint<'_> {
         MockEndpoint::new(self.server, "POST", paths::settings::RENEW_SERVER_CERT)
-    }
-}
-
-// ── Section: Settings MQTT ─────────────────────────────────────────────────
-
-/// Mock helpers for MQTT client settings endpoints.
-pub struct MockSettingsMqtt<'a> {
-    server: &'a MockServer,
-}
-
-impl<'a> MockSettingsMqtt<'a> {
-    /// Mock `GET /api/v1/settings/mqtt`.
-    pub fn on_list(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "GET", paths::settings_mqtt::BASE)
-    }
-
-    /// Mock `POST /api/v1/settings/mqtt`.
-    pub fn on_create(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "POST", paths::settings_mqtt::BASE)
-    }
-
-    /// Mock `GET /api/v1/settings/mqtt/limit`.
-    pub fn on_get_limit(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "GET", paths::settings_mqtt::LIMIT)
-    }
-
-    /// Mock `PUT /api/v1/settings/mqtt/limit`.
-    pub fn on_update_limit(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "PUT", paths::settings_mqtt::LIMIT)
-    }
-
-    /// Mock `GET /api/v1/settings/mqtt/{id}`.
-    pub fn on_get(&self, id: &Uuid) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "GET", &paths::settings_mqtt::by_id(id))
-    }
-
-    /// Mock `PUT /api/v1/settings/mqtt/{id}`.
-    pub fn on_update(&self, id: &Uuid) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "PUT", &paths::settings_mqtt::by_id(id))
-    }
-
-    /// Mock `DELETE /api/v1/settings/mqtt/{id}`.
-    pub fn on_delete(&self, id: &Uuid) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "DELETE", &paths::settings_mqtt::by_id(id))
     }
 }
 

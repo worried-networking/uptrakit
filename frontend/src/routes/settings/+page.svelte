@@ -2,14 +2,12 @@
 	import { getUser } from '$lib/auth.svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { onDestroy } from 'svelte';
-	import { getCombinedSettings, getOidcProviders, getMqttClients } from '$lib/api';
+	import { getCombinedSettings, getOidcProviders } from '$lib/api';
 	import type {
 		RegistrationSettings as RegistrationSettingsData,
 		AuthenticationSettings as AuthenticationSettingsData,
 		AgentCertificateSettings as AgentCertSettingsData,
 		EnrollmentTokensSummary,
-		MqttClientResponse,
 		OidcProviderResponse
 	} from '$lib/types';
 	import { Permission, hasAnyPermission } from '$lib/types';
@@ -18,7 +16,6 @@
 
 	import RegistrationSettings from './RegistrationSettings.svelte';
 	import AuthenticationSettings from './AuthenticationSettings.svelte';
-	import MqttClientsSettings from './MqttClientsSettings.svelte';
 	import OidcProvidersSettings from './OidcProvidersSettings.svelte';
 	import AgentCertificateSettings from './AgentCertificateSettings.svelte';
 	import EnrollmentTokenSettings from './EnrollmentTokenSettings.svelte';
@@ -110,73 +107,31 @@
 
 	let registrationSettings: RegistrationSettingsData | undefined = $state(undefined);
 	let authSettings: AuthenticationSettingsData | undefined = $state(undefined);
-	let mqttClients: MqttClientResponse[] | undefined = $state(undefined);
 	let oidcProviders: OidcProviderResponse[] | undefined = $state(undefined);
 	let agentCertSettings: AgentCertSettingsData | undefined = $state(undefined);
 	let enrollmentTokensSummary: EnrollmentTokensSummary | undefined = $state(undefined);
 
-	let mqttPollHandle: ReturnType<typeof setTimeout> | null = null;
-
 	let registrationError: string | null = $state(null);
 	let authenticationError: string | null = $state(null);
-	let mqttClientsError: string | null = $state(null);
 	let oidcProvidersError: string | null = $state(null);
 	let agentCertificateError: string | null = $state(null);
 	let enrollmentTokenError: string | null = $state(null);
-	let mqttPollAttempt: number = $state(0);
-	const initialMqttPollDelay = 10_000;
-	const maxMqttPollDelay = 5 * 60 * 1000;
 
 	$effect(() => {
 		if (canManageSettings) {
 			loadAllSettings();
-			startMqttPolling();
 		}
 	});
-
-	onDestroy(() => {
-		stopMqttPolling();
-	});
-
-	function startMqttPolling() {
-		if (mqttPollHandle) return;
-		const poll = async () => {
-			try {
-				const clients = await getMqttClients();
-				mqttClients = clients;
-				mqttPollAttempt = 0;
-				scheduleNextPoll(initialMqttPollDelay);
-			} catch {
-				mqttPollAttempt++;
-				const baseDelay = Math.min(initialMqttPollDelay * Math.pow(2, mqttPollAttempt - 1), maxMqttPollDelay);
-				const delay = baseDelay * (0.5 + Math.random() * 0.5);
-				scheduleNextPoll(delay);
-			}
-		};
-		const scheduleNextPoll = (delay: number) => {
-			mqttPollHandle = setTimeout(poll, delay);
-		};
-		scheduleNextPoll(initialMqttPollDelay);
-	}
-
-	function stopMqttPolling() {
-		if (mqttPollHandle) {
-			clearTimeout(mqttPollHandle);
-			mqttPollHandle = null;
-			mqttPollAttempt = 0;
-		}
-	}
 
 	async function loadAllSettings() {
 		loading = true;
 		registrationError = null;
 		authenticationError = null;
-		mqttClientsError = null;
 		oidcProvidersError = null;
 		agentCertificateError = null;
 		enrollmentTokenError = null;
 
-		const results = await Promise.allSettled([getCombinedSettings(), getOidcProviders(), getMqttClients()]);
+		const results = await Promise.allSettled([getCombinedSettings(), getOidcProviders()]);
 
 		if (results[0].status === 'fulfilled') {
 			const combined = results[0].value;
@@ -197,13 +152,6 @@
 		} else {
 			oidcProvidersError =
 				results[1].reason instanceof Error ? results[1].reason.message : 'Failed to load OIDC providers.';
-		}
-
-		if (results[2].status === 'fulfilled') {
-			mqttClients = results[2].value;
-		} else {
-			mqttClientsError =
-				results[2].reason instanceof Error ? results[2].reason.message : 'Failed to load MQTT clients.';
 		}
 
 		loading = false;
@@ -299,13 +247,6 @@
 			{#if authenticationError}
 				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
 					<p>{authenticationError}</p>
-					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
-				</aside>
-			{/if}
-			<MqttClientsSettings clients={mqttClients} onSuccess={showSuccess} onError={showError} />
-			{#if mqttClientsError}
-				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-					<p>{mqttClientsError}</p>
 					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
 				</aside>
 			{/if}

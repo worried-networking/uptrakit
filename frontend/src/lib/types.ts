@@ -276,64 +276,6 @@ export interface UpdateNetworkSettings {
 	regenerate_cert?: boolean;
 }
 
-export type MqttTransport = 'tcp' | 'tls';
-export type MqttConnectionStatus = 'online' | 'offline' | 'connecting';
-
-export interface MqttClientResponse {
-	id: string;
-	enabled: boolean;
-	transport: MqttTransport;
-	host: string;
-	port: number;
-	url: string;
-	client_id: string;
-	username: string | null;
-	has_password: boolean;
-	has_ca_cert: boolean;
-	topic_prefix: string;
-	ha_discovery: boolean;
-	ha_discovery_prefix: string;
-	connection_status: MqttConnectionStatus;
-}
-
-export interface CreateMqttClient {
-	url?: string;
-	transport?: MqttTransport;
-	host?: string;
-	port?: number;
-	enabled?: boolean;
-	client_id?: string;
-	username?: string;
-	password?: string;
-	ca_pem?: string;
-	topic_prefix?: string;
-	ha_discovery?: boolean;
-	ha_discovery_prefix?: string;
-}
-
-export interface UpdateMqttClient {
-	url?: string;
-	transport?: MqttTransport;
-	host?: string;
-	port?: number;
-	enabled?: boolean;
-	client_id?: string;
-	username?: string | null;
-	password?: string;
-	ca_pem?: string | null;
-	topic_prefix?: string;
-	ha_discovery?: boolean;
-	ha_discovery_prefix?: string;
-}
-
-export interface MqttLimitResponse {
-	max_clients_per_tenant: number;
-}
-
-export interface UpdateMqttLimitRequest {
-	max_clients_per_tenant: number;
-}
-
 export interface HostAgentSummary {
 	id: string;
 	friendly_name: string;

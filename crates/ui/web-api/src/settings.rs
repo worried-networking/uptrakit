@@ -15,7 +15,6 @@ use crate::auth::registration::RegistrationSettings;
 use crate::settings_store::{RawSettings, RawSettingsExt};
 
 const DEFAULT_AGENT_CERT_LIFETIME_HOURS: u32 = 168;
-const DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT: u16 = 10;
 
 /// Maximum automatic renewal window in days (ceiling, matches scheduler-engine executor).
 pub const MAX_RENEWAL_WINDOW_DAYS: u16 = 14;
@@ -109,7 +108,6 @@ pub struct SettingsSnapshot {
     /// `None` means use the automatic 1/5-of-lifetime default.
     pub renewal_window_hours_override: Option<u16>,
     pub network: NetworkSettings,
-    pub mqtt_max_clients_per_tenant: u16,
     /// NATS server URL (raw, decrypted). `None` when not configured.
     /// Stored as `Option<MaskedUrl>` so `Debug` automatically masks any password.
     pub nats_url: Option<MaskedUrl>,
@@ -156,7 +154,6 @@ impl Settings {
             agent_cert_lifetime_hours,
             renewal_window_hours_override,
             network: NetworkSettings::default(),
-            mqtt_max_clients_per_tenant: DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT,
             nats_url: None,
             zeroconf: ZeroconfSnapshot::default(),
         };
@@ -205,11 +202,6 @@ impl Settings {
 
         let network = Self::load_network_settings(&combined);
 
-        let mqtt_max_clients_per_tenant = combined
-            .get_setting(SettingKey::MqttMaxClientsPerTenant)
-            .and_then(|v| v.as_u64()?.try_into().ok())
-            .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
-
         let nats_url = Self::load_nats_url(&global_raw);
         let zeroconf = Self::load_zeroconf_settings(&global_raw);
 
@@ -223,7 +215,6 @@ impl Settings {
             agent_cert_lifetime_hours,
             renewal_window_hours_override,
             network,
-            mqtt_max_clients_per_tenant,
             nats_url,
             zeroconf,
         };
@@ -334,11 +325,6 @@ impl Settings {
 
         let network = Self::load_network_settings(&combined);
 
-        let mqtt_max_clients_per_tenant = combined
-            .get_setting(SettingKey::MqttMaxClientsPerTenant)
-            .and_then(|v| v.as_u64()?.try_into().ok())
-            .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
-
         // NatsUrl is a global-only key, so it is present in `combined` (which
         // started as a copy of global_raw extended with per-tenant rows).
         let nats_url = Self::load_nats_url(&combined);
@@ -352,7 +338,6 @@ impl Settings {
             agent_cert_lifetime_hours,
             renewal_window_hours_override,
             network,
-            mqtt_max_clients_per_tenant,
             nats_url,
             zeroconf,
         });
@@ -599,21 +584,6 @@ impl Settings {
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.network.pki_addr = url);
-    }
-
-    // --- MQTT settings ---
-
-    /// Read the maximum number of MQTT clients per tenant (synchronous).
-    pub fn mqtt_max_clients_per_tenant(&self) -> u16 {
-        self.inner.snapshot_rx.borrow().mqtt_max_clients_per_tenant
-    }
-
-    /// Update the maximum number of MQTT clients per tenant.
-    pub async fn set_mqtt_max_clients_per_tenant(&self, max: u16) {
-        let _guard = self.inner.write_mutex.lock().await;
-        self.inner
-            .snapshot_tx
-            .send_modify(|snap| snap.mqtt_max_clients_per_tenant = max);
     }
 
     // --- NATS settings ---

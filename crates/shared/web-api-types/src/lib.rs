@@ -23,9 +23,6 @@ pub mod extensions;
 pub mod host_tags;
 pub mod hosts;
 pub mod masked_url;
-pub mod mqtt_services;
-pub mod mqtt_transport;
-pub mod mqtt_url;
 pub mod notifications;
 pub mod oidc_auth;
 pub mod oidc_providers;
@@ -44,7 +41,6 @@ pub mod settings_agent_certs;
 pub mod settings_auth;
 pub mod settings_ca;
 pub mod settings_combined;
-pub mod settings_mqtt;
 pub mod settings_network;
 pub mod settings_reset;
 pub mod system_services;
@@ -764,10 +760,6 @@ mod tests {
         // OIDC
         let _: OidcProviderResponse;
         let _: AuthMethodsResponse;
-
-        // MQTT
-        let _ = MqttClientConnectionStatus::Online;
-        let _ = MqttTransport::Tcp;
 
         // Notifications
         let _ = NotificationEventType::UpdateAvailable;

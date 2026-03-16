@@ -41,10 +41,6 @@ pub use crate::oidc_providers::OidcProviderResponse;
 // ── Settings ─────────────────────────────────────────────────────────
 pub use crate::settings::RegistrationSettingsResponse;
 
-// ── MQTT ─────────────────────────────────────────────────────────────
-pub use crate::mqtt_transport::{MqttTransport, ParseMqttTransportError};
-pub use crate::settings_mqtt::MqttClientConnectionStatus;
-
 // ── System alerts ────────────────────────────────────────────────────
 pub use crate::system_alerts::AlertSeverity;
 

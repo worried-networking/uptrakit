@@ -31,8 +31,6 @@ const UPGRADE_CHUNK_SIZE: u64 = 100;
 
 const AAD_CA_KEY_PEM: &str = "uptrakit:ca_certificates:key_pem";
 const AAD_OIDC_CLIENT_SECRET: &str = "uptrakit:oidc_providers:client_secret";
-const AAD_MQTT_PASSWORD: &str = "uptrakit:mqtt_clients:password";
-const AAD_MQTT_CA_CERT_PEM: &str = "uptrakit:mqtt_clients:ca_cert_pem";
 const AAD_PKCE_VERIFIER: &str = "uptrakit:pending_oidc_flows:pkce_verifier";
 const AAD_NOTIFICATION_CONFIG: &str = "uptrakit:notification_channels:config";
 
@@ -65,16 +63,6 @@ pub(crate) fn register_column_aad_mappings() {
             table: "oidc_providers",
             column: "client_secret",
             aad: AAD_OIDC_CLIENT_SECRET,
-        },
-        ColumnAadEntry {
-            table: "mqtt_clients",
-            column: "password",
-            aad: AAD_MQTT_PASSWORD,
-        },
-        ColumnAadEntry {
-            table: "mqtt_clients",
-            column: "ca_cert_pem",
-            aad: AAD_MQTT_CA_CERT_PEM,
         },
         ColumnAadEntry {
             table: "pending_oidc_flows",
@@ -110,8 +98,6 @@ pub(crate) async fn reencrypt_to_v3(db: &DatabaseConnection) {
     // Database columns
     total += upgrade_ca_certificate_keys(db).await;
     total += upgrade_oidc_client_secrets(db).await;
-    total += upgrade_mqtt_passwords(db).await;
-    total += upgrade_mqtt_ca_certs(db).await;
     total += upgrade_oidc_flow_pkce_verifiers(db).await;
     total += upgrade_notification_channel_configs(db).await;
 
@@ -261,142 +247,6 @@ async fn upgrade_oidc_client_secrets(db: &DatabaseConnection) -> u64 {
         tracing::info!(
             table = "oidc_providers",
             column = "client_secret",
-            count,
-            "upgraded to ENC:v3"
-        );
-    }
-    count
-}
-
-async fn upgrade_mqtt_passwords(db: &DatabaseConnection) -> u64 {
-    use sea_orm::ActiveModelTrait;
-    use uptrakit_shared_db::entity::prelude::MqttClient;
-
-    let mut count = 0u64;
-    let mut offset = 0u64;
-
-    loop {
-        let rows = match MqttClient::find()
-            .offset(offset)
-            .limit(UPGRADE_CHUNK_SIZE)
-            .all(db)
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to query mqtt_clients for v3 upgrade (password)");
-                break;
-            }
-        };
-
-        if rows.is_empty() {
-            break;
-        }
-        let page_len = rows.len() as u64;
-
-        for row in rows {
-            let Some(ref password) = row.password else {
-                continue;
-            };
-            if !password.needs_v3_upgrade() {
-                continue;
-            }
-            let plaintext = password.expose_secret().to_string();
-            let id = row.id;
-            match EncryptedString::new(plaintext, AAD_MQTT_PASSWORD) {
-                Ok(encrypted) => {
-                    let mut am = row.into_active_model();
-                    am.password = sea_orm::Set(Some(encrypted));
-                    if let Err(e) = am.update(db).await {
-                        tracing::warn!(id = %id, error = %e, "v3 upgrade failed: mqtt_clients.password");
-                    } else {
-                        count += 1;
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(id = %id, error = %e, "v3 encrypt failed: mqtt_clients.password");
-                }
-            }
-        }
-
-        if page_len < UPGRADE_CHUNK_SIZE {
-            break;
-        }
-        offset += UPGRADE_CHUNK_SIZE;
-    }
-
-    if count > 0 {
-        tracing::info!(
-            table = "mqtt_clients",
-            column = "password",
-            count,
-            "upgraded to ENC:v3"
-        );
-    }
-    count
-}
-
-async fn upgrade_mqtt_ca_certs(db: &DatabaseConnection) -> u64 {
-    use sea_orm::ActiveModelTrait;
-    use uptrakit_shared_db::entity::prelude::MqttClient;
-
-    let mut count = 0u64;
-    let mut offset = 0u64;
-
-    loop {
-        let rows = match MqttClient::find()
-            .offset(offset)
-            .limit(UPGRADE_CHUNK_SIZE)
-            .all(db)
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to query mqtt_clients for v3 upgrade (ca_cert_pem)");
-                break;
-            }
-        };
-
-        if rows.is_empty() {
-            break;
-        }
-        let page_len = rows.len() as u64;
-
-        for row in rows {
-            let Some(ref ca_cert) = row.ca_cert_pem else {
-                continue;
-            };
-            if !ca_cert.needs_v3_upgrade() {
-                continue;
-            }
-            let plaintext = ca_cert.expose_secret().to_string();
-            let id = row.id;
-            match EncryptedString::new(plaintext, AAD_MQTT_CA_CERT_PEM) {
-                Ok(encrypted) => {
-                    let mut am = row.into_active_model();
-                    am.ca_cert_pem = sea_orm::Set(Some(encrypted));
-                    if let Err(e) = am.update(db).await {
-                        tracing::warn!(id = %id, error = %e, "v3 upgrade failed: mqtt_clients.ca_cert_pem");
-                    } else {
-                        count += 1;
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(id = %id, error = %e, "v3 encrypt failed: mqtt_clients.ca_cert_pem");
-                }
-            }
-        }
-
-        if page_len < UPGRADE_CHUNK_SIZE {
-            break;
-        }
-        offset += UPGRADE_CHUNK_SIZE;
-    }
-
-    if count > 0 {
-        tracing::info!(
-            table = "mqtt_clients",
-            column = "ca_cert_pem",
             count,
             "upgraded to ENC:v3"
         );
@@ -601,14 +451,9 @@ async fn upgrade_setting(db: &DatabaseConnection, key: &str, aad: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{
-        ActiveModelTrait, ColumnTrait, ConnectOptions, Database, EntityTrait, QueryFilter, Set,
-    };
+    use sea_orm::{ActiveModelTrait, ConnectOptions, Database, EntityTrait, Set};
     use time::OffsetDateTime;
-    use uptrakit_shared_db::entity::{
-        ca_certificate, mqtt_client, oidc_provider, pending_oidc_flow, tenant,
-    };
-    use uptrakit_shared_types::{MqttClientConnectionStatus, MqttTransport};
+    use uptrakit_shared_db::entity::{ca_certificate, oidc_provider, pending_oidc_flow, tenant};
     use uuid::Uuid;
 
     /// Create a fresh in-memory SQLite database with all migrations applied.
@@ -617,7 +462,7 @@ mod tests {
     /// silently ignored if the key is already set to the same value).
     ///
     /// A tenant with the nil UUID is inserted so that FK constraints on
-    /// `oidc_providers.tenant_id` and `mqtt_clients.tenant_id` are satisfied.
+    /// `oidc_providers.tenant_id` are satisfied.
     async fn test_db() -> DatabaseConnection {
         let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
         register_column_aad_mappings();
@@ -629,7 +474,7 @@ mod tests {
             .expect("run migrations");
 
         // Insert a tenant with the nil UUID so FK constraints on
-        // oidc_providers.tenant_id and mqtt_clients.tenant_id are satisfied.
+        // oidc_providers.tenant_id are satisfied.
         let now = OffsetDateTime::now_utc();
         tenant::ActiveModel {
             id: Set(Uuid::nil()),
@@ -671,30 +516,6 @@ mod tests {
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set(None),
-        }
-    }
-
-    fn mqtt_client_am(id: Uuid, now: OffsetDateTime) -> mqtt_client::ActiveModel {
-        mqtt_client::ActiveModel {
-            id: Set(id),
-            tenant_id: Set(Uuid::nil()),
-            enabled: Set(true),
-            transport: Set(MqttTransport::Tcp),
-            host: Set("mqtt.example.com".to_string()),
-            port: Set(1883),
-            client_id: Set(format!("client-{id}")),
-            username: Set(Some("user".to_string())),
-            password: Set(Some(
-                EncryptedString::new("mqtt-pass".to_string(), AAD_MQTT_PASSWORD).unwrap(),
-            )),
-            ca_cert_pem: Set(None),
-            topic_prefix: Set("uptrakit".to_string()),
-            connection_status: Set(MqttClientConnectionStatus::Offline),
-            status_updated_at: Set(now),
-            ha_discovery: Set(false),
-            ha_discovery_prefix: Set("homeassistant".to_string()),
-            created_at: Set(now),
-            updated_at: Set(now),
         }
     }
 
@@ -803,98 +624,6 @@ mod tests {
             .expect("row");
         assert!(row.client_secret.is_db_value_encrypted());
         assert_eq!(row.client_secret.expose_secret(), "client-secret-val");
-    }
-
-    // ── mqtt_clients.password ─────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn mqtt_password_gets_upgraded() {
-        let db = test_db().await;
-        let now = OffsetDateTime::now_utc();
-        let id = Uuid::now_v7();
-
-        mqtt_client_am(id, now).insert(&db).await.expect("insert");
-
-        let count = upgrade_mqtt_passwords(&db).await;
-        assert_eq!(count, 1);
-
-        let row = uptrakit_shared_db::entity::prelude::MqttClient::find_by_id(id)
-            .one(&db)
-            .await
-            .expect("query")
-            .expect("row");
-        assert!(row.password.as_ref().unwrap().is_db_value_encrypted());
-        assert_eq!(row.password.as_ref().unwrap().expose_secret(), "mqtt-pass");
-    }
-
-    #[tokio::test]
-    async fn mqtt_password_null_is_skipped() {
-        let db = test_db().await;
-        let now = OffsetDateTime::now_utc();
-        let id = Uuid::now_v7();
-
-        let mut am = mqtt_client_am(id, now);
-        am.password = Set(None);
-        am.insert(&db).await.expect("insert");
-
-        let count = upgrade_mqtt_passwords(&db).await;
-        assert_eq!(count, 0, "NULL password must not be counted");
-    }
-
-    // ── mqtt_clients.ca_cert_pem ──────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn mqtt_ca_cert_plaintext_gets_upgraded() {
-        let db = test_db().await;
-        let now = OffsetDateTime::now_utc();
-        let id = Uuid::now_v7();
-
-        let mut am = mqtt_client_am(id, now);
-        am.ca_cert_pem = Set(Some(
-            EncryptedString::new(
-                "-----BEGIN CERTIFICATE-----".to_string(),
-                AAD_MQTT_CA_CERT_PEM,
-            )
-            .unwrap(),
-        ));
-        am.insert(&db).await.expect("insert");
-
-        // Simulate legacy plaintext.
-        {
-            let model = mqtt_client::Entity::find()
-                .filter(mqtt_client::Column::ClientId.eq(format!("client-{id}")))
-                .one(&db)
-                .await
-                .expect("query")
-                .expect("row");
-            let mut am: mqtt_client::ActiveModel = model.into();
-            am.ca_cert_pem = Set(Some(EncryptedString::plaintext_for_test(
-                "-----BEGIN CERTIFICATE-----".to_string(),
-            )));
-            am.update(&db).await.expect("set plaintext");
-        }
-
-        let count = upgrade_mqtt_ca_certs(&db).await;
-        assert_eq!(count, 1);
-
-        let row = uptrakit_shared_db::entity::prelude::MqttClient::find_by_id(id)
-            .one(&db)
-            .await
-            .expect("query")
-            .expect("row");
-        assert!(row.ca_cert_pem.as_ref().unwrap().is_db_value_encrypted());
-    }
-
-    #[tokio::test]
-    async fn mqtt_ca_cert_null_is_skipped() {
-        let db = test_db().await;
-        let now = OffsetDateTime::now_utc();
-        let id = Uuid::now_v7();
-
-        mqtt_client_am(id, now).insert(&db).await.expect("insert");
-
-        let count = upgrade_mqtt_ca_certs(&db).await;
-        assert_eq!(count, 0, "NULL ca_cert_pem must not be counted");
     }
 
     // ── pending_oidc_flows.pkce_verifier ──────────────────────────────────────
@@ -1093,12 +822,6 @@ mod tests {
             .await
             .expect("insert");
 
-        let mqtt_id = Uuid::now_v7();
-        mqtt_client_am(mqtt_id, now)
-            .insert(&db)
-            .await
-            .expect("insert");
-
         pending_oidc_flow::ActiveModel {
             csrf_state: Set("v3_all_csrf".to_string()),
             provider_id: Set(Uuid::nil()),
@@ -1136,16 +859,6 @@ mod tests {
         assert!(
             oidc.client_secret.is_db_value_encrypted(),
             "client_secret must be encrypted"
-        );
-
-        let mqtt = uptrakit_shared_db::entity::prelude::MqttClient::find_by_id(mqtt_id)
-            .one(&db)
-            .await
-            .expect("query")
-            .expect("row");
-        assert!(
-            mqtt.password.as_ref().unwrap().is_db_value_encrypted(),
-            "password must be encrypted"
         );
 
         let flow = uptrakit_shared_db::entity::prelude::PendingOidcFlow::find_by_id(

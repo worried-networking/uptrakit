@@ -1,6 +1,5 @@
 pub mod authentication;
 pub mod certificates;
-pub mod mqtt;
 pub mod nats;
 pub mod network;
 pub mod oidc;
@@ -8,7 +7,6 @@ pub mod registration;
 
 pub use authentication::AuthenticationCommands;
 pub use certificates::CertificateCommands;
-pub use mqtt::{MqttCommands, MqttLimitCommands};
 pub use nats::NatsCommands;
 pub use network::NetworkCommands;
 pub use oidc::OidcCommands;
@@ -29,7 +27,6 @@ use uptrakit_openapi_client::types::system_alerts::SystemAlertsResponse;
 
 use self::authentication::{authentication_show, authentication_update};
 use self::certificates::{certificates_show, certificates_update};
-use self::mqtt::dispatch_mqtt;
 use self::nats::{nats_clear, nats_set, nats_show};
 use self::network::{NetworkUpdateParams, network_show, network_update};
 use self::oidc::dispatch_oidc;
@@ -63,11 +60,6 @@ pub enum SettingsCommands {
     RotateCa,
     /// Renew the server TLS certificate
     RenewServerCert,
-    /// MQTT client configuration
-    Mqtt {
-        #[command(subcommand)]
-        command: MqttCommands,
-    },
     /// OIDC provider management
     Oidc {
         #[command(subcommand)]
@@ -325,7 +317,6 @@ pub async fn dispatch(command: SettingsCommands, ctx: &CliContext) -> Result<()>
             .await?;
             crate::output::print_output(ctx.format, &resp)?;
         }
-        SettingsCommands::Mqtt { command } => dispatch_mqtt(command, ctx).await?,
         SettingsCommands::Oidc { command } => dispatch_oidc(command, ctx).await?,
         SettingsCommands::Alerts => {
             let resp = alerts(
@@ -491,7 +482,7 @@ mod tests {
     #[test]
     fn deleted_output_human() {
         let out = DeletedOutput {
-            message: "MQTT configuration abc deleted.".to_string(),
+            message: "Item abc deleted.".to_string(),
         };
         assert!(out.to_human_string().contains("abc deleted"));
     }

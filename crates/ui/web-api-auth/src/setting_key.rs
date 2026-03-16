@@ -24,7 +24,6 @@ pub enum SettingKey {
     PkiCaVersion,
     MultiTenancyEnabled,
     RegistrationRequireTokenForOidc,
-    MqttMaxClientsPerTenant,
     JwtSigningKey,
     MasterKeyVerification,
     NatsUrl,
@@ -74,7 +73,6 @@ impl SettingKey {
             Self::PkiCaVersion => "pki.ca_version",
             Self::MultiTenancyEnabled => "multi_tenancy.enabled",
             Self::RegistrationRequireTokenForOidc => "registration.require_token_for_oidc",
-            Self::MqttMaxClientsPerTenant => "mqtt.max_clients_per_tenant",
             Self::JwtSigningKey => "auth.jwt_signing_key",
             Self::MasterKeyVerification => "crypto.master_key_verification",
             Self::NatsUrl => "nats.url",
@@ -107,7 +105,6 @@ impl SettingKey {
             "pki.ca_version" => Some(Self::PkiCaVersion),
             "multi_tenancy.enabled" => Some(Self::MultiTenancyEnabled),
             "registration.require_token_for_oidc" => Some(Self::RegistrationRequireTokenForOidc),
-            "mqtt.max_clients_per_tenant" => Some(Self::MqttMaxClientsPerTenant),
             "auth.jwt_signing_key" => Some(Self::JwtSigningKey),
             "crypto.master_key_verification" => Some(Self::MasterKeyVerification),
             "nats.url" => Some(Self::NatsUrl),
@@ -134,7 +131,6 @@ impl SettingKey {
                 | Self::PkiActiveCaFingerprint
                 | Self::PkiCaVersion
                 | Self::MultiTenancyEnabled
-                | Self::MqttMaxClientsPerTenant
                 | Self::JwtSigningKey
                 | Self::MasterKeyVerification
                 | Self::NatsUrl
@@ -191,7 +187,6 @@ mod tests {
         assert!(SettingKey::PkiActiveCaFingerprint.is_global());
         assert!(SettingKey::PkiCaVersion.is_global());
         assert!(SettingKey::MultiTenancyEnabled.is_global());
-        assert!(SettingKey::MqttMaxClientsPerTenant.is_global());
         assert!(SettingKey::JwtSigningKey.is_global());
         // Per-tenant keys
         assert!(!SettingKey::RegistrationMode.is_global());

@@ -15,14 +15,13 @@ use axum::{
 use crate::AppState;
 use crate::middleware::permission::CanManageGlobalSettings;
 use uptrakit_web_api_types::settings_combined::GlobalSettingsCombinedResponse;
-use uptrakit_web_api_types::settings_mqtt::MqttLimitResponse;
 use uptrakit_web_api_types::settings_nats::NatsSettingsResponse;
 use uptrakit_web_api_types::settings_network::NetworkSettingsResponse;
 
 /// Get all global settings
 ///
-/// Returns network settings, MQTT client limit, and (when NATS support is
-/// compiled in) the NATS URL configuration in a single response. Requires the
+/// Returns network settings and (when NATS support is compiled in) the NATS
+/// URL configuration in a single response. Requires the
 /// `manage_global_settings` permission.
 ///
 /// System service enrollment tokens are managed via the dedicated
@@ -61,10 +60,6 @@ pub async fn get_global_combined_settings(
         cert_regenerated: None,
     };
 
-    let mqtt_limit = MqttLimitResponse {
-        max_clients_per_tenant: state.settings.mqtt_max_clients_per_tenant(),
-    };
-
     #[allow(unused_assignments, unused_mut)]
     let mut nats: Option<NatsSettingsResponse> = None;
     #[cfg(feature = "nats")]
@@ -79,7 +74,6 @@ pub async fn get_global_combined_settings(
 
     let response = GlobalSettingsCombinedResponse {
         network: network_response,
-        mqtt_limit,
         nats,
     };
 

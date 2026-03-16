@@ -5,8 +5,8 @@ use uptrakit_openapi_client::Uuid;
 // Sub-enum re-imports for tests that destructure into nested variants.
 use commands::autodiscovery::IgnoresCommands;
 use commands::settings::{
-    AuthenticationCommands, CertificateCommands, MqttCommands, MqttLimitCommands, NatsCommands,
-    NetworkCommands, OidcCommands, RegistrationCommands,
+    AuthenticationCommands, CertificateCommands, NatsCommands, NetworkCommands, OidcCommands,
+    RegistrationCommands,
 };
 
 /// Test UUID constants for readability.
@@ -15,7 +15,6 @@ const ITEM_UUID: &str = "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6";
 const SVC_UUID: &str = "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6";
 const TASK_UUID: &str = "d1d2d3d4-e1e2-f1f2-a1a2-b1b2b3b4b5b6";
 const HIST_UUID: &str = "e1e2e3e4-f1f2-a1a2-b1b2-c1c2c3c4c5c6";
-const MQTT_UUID: &str = "01020304-0506-0708-090a-0b0c0d0e0f10";
 const OIDC_UUID: &str = "11121314-1516-1718-191a-1b1c1d1e1f20";
 const TARGET_UUID: &str = "aa000000-bb00-cc00-dd00-ee0000000001";
 const SOURCE_UUID: &str = "aa000000-bb00-cc00-dd00-ee0000000002";
@@ -926,159 +925,6 @@ fn settings_renew_server_cert_parses() {
             command: SettingsCommands::RenewServerCert
         })
     ));
-}
-
-#[test]
-fn settings_mqtt_list_parses() {
-    let args = Cli::try_parse_from(["uptrakit", "settings", "mqtt", "list"]).expect("should parse");
-    assert!(matches!(
-        args.command,
-        Some(Commands::Settings {
-            command: SettingsCommands::Mqtt {
-                command: MqttCommands::List
-            }
-        })
-    ));
-}
-
-#[test]
-fn settings_mqtt_show_parses() {
-    let args = Cli::try_parse_from(["uptrakit", "settings", "mqtt", "show", MQTT_UUID])
-        .expect("should parse");
-    match args.command {
-        Some(Commands::Settings {
-            command:
-                SettingsCommands::Mqtt {
-                    command: MqttCommands::Show { id },
-                },
-        }) => {
-            assert_eq!(id, uuid(MQTT_UUID));
-        }
-        _ => panic!("expected Settings Mqtt Show"),
-    }
-}
-
-#[test]
-fn settings_mqtt_create_parses() {
-    let args = Cli::try_parse_from([
-        "uptrakit",
-        "settings",
-        "mqtt",
-        "create",
-        "--url",
-        "mqtt://broker:1883",
-        "--enabled",
-        "true",
-        "--client-id",
-        "uptrakit-1",
-    ])
-    .expect("should parse");
-    match args.command {
-        Some(Commands::Settings {
-            command:
-                SettingsCommands::Mqtt {
-                    command:
-                        MqttCommands::Create {
-                            url,
-                            enabled,
-                            client_id,
-                            ..
-                        },
-                },
-        }) => {
-            assert_eq!(url.as_deref(), Some("mqtt://broker:1883"));
-            assert_eq!(enabled, Some(true));
-            assert_eq!(client_id.as_deref(), Some("uptrakit-1"));
-        }
-        _ => panic!("expected Settings Mqtt Create"),
-    }
-}
-
-#[test]
-fn settings_mqtt_update_parses() {
-    let args = Cli::try_parse_from([
-        "uptrakit",
-        "settings",
-        "mqtt",
-        "update",
-        MQTT_UUID,
-        "--enabled",
-        "false",
-        "--host",
-        "new-broker",
-    ])
-    .expect("should parse");
-    match args.command {
-        Some(Commands::Settings {
-            command:
-                SettingsCommands::Mqtt {
-                    command:
-                        MqttCommands::Update {
-                            id, enabled, host, ..
-                        },
-                },
-        }) => {
-            assert_eq!(id, uuid(MQTT_UUID));
-            assert_eq!(enabled, Some(false));
-            assert_eq!(host.as_deref(), Some("new-broker"));
-        }
-        _ => panic!("expected Settings Mqtt Update"),
-    }
-}
-
-#[test]
-fn settings_mqtt_delete_parses() {
-    let args = Cli::try_parse_from(["uptrakit", "settings", "mqtt", "delete", MQTT_UUID])
-        .expect("should parse");
-    match args.command {
-        Some(Commands::Settings {
-            command:
-                SettingsCommands::Mqtt {
-                    command: MqttCommands::Delete { id },
-                },
-        }) => {
-            assert_eq!(id, uuid(MQTT_UUID));
-        }
-        _ => panic!("expected Settings Mqtt Delete"),
-    }
-}
-
-#[test]
-fn settings_mqtt_limit_show_parses() {
-    let args = Cli::try_parse_from(["uptrakit", "settings", "mqtt", "limit", "show"])
-        .expect("should parse");
-    assert!(matches!(
-        args.command,
-        Some(Commands::Settings {
-            command: SettingsCommands::Mqtt {
-                command: MqttCommands::Limit {
-                    command: MqttLimitCommands::Show
-                }
-            }
-        })
-    ));
-}
-
-#[test]
-fn settings_mqtt_limit_update_parses() {
-    let args = Cli::try_parse_from([
-        "uptrakit", "settings", "mqtt", "limit", "update", "--max", "10",
-    ])
-    .expect("should parse");
-    match args.command {
-        Some(Commands::Settings {
-            command:
-                SettingsCommands::Mqtt {
-                    command:
-                        MqttCommands::Limit {
-                            command: MqttLimitCommands::Update { max },
-                        },
-                },
-        }) => {
-            assert_eq!(max, 10);
-        }
-        _ => panic!("expected Settings Mqtt Limit Update"),
-    }
 }
 
 #[test]

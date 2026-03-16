@@ -19,11 +19,8 @@ import type {
 	HostResponse,
 	LoginRequest,
 	MessageResponse,
-	MqttClientResponse,
-	MqttLimitResponse,
 	PaginatedResponse,
 	PluginConfigResponse,
-	CreateMqttClient,
 	CreatePluginConfigRequest,
 	CreateSoftwareItemRequest,
 	NetworkSettings,
@@ -49,8 +46,6 @@ import type {
 	UpdateHistoryResponse,
 	UpdateHostAssignmentRequest,
 	UpdateHostRequest,
-	UpdateMqttClient,
-	UpdateMqttLimitRequest,
 	UpdateNetworkSettings,
 	UpdateOidcProviderRequest,
 	UpdatePluginConfigRequest,
@@ -500,32 +495,6 @@ export function getNetworkSettings(): Promise<NetworkSettings> {
 
 export function updateNetworkSettings(data: UpdateNetworkSettings): Promise<NetworkSettings> {
 	return request('/global-settings/network', { method: 'PUT', body: JSON.stringify(data) });
-}
-
-// --- MQTT Client APIs ---
-
-export function getMqttClients(): Promise<MqttClientResponse[]> {
-	return request('/settings/mqtt');
-}
-
-export function createMqttClient(data: CreateMqttClient): Promise<MqttClientResponse> {
-	return request('/settings/mqtt', { method: 'POST', body: JSON.stringify(data) });
-}
-
-export function updateMqttClient(id: string, data: UpdateMqttClient): Promise<MqttClientResponse> {
-	return request(`/settings/mqtt/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) });
-}
-
-export function deleteMqttClient(id: string): Promise<void> {
-	return requestVoid(`/settings/mqtt/${encodeURIComponent(id)}`, { method: 'DELETE' });
-}
-
-export function getMqttLimit(): Promise<MqttLimitResponse> {
-	return request('/global-settings/mqtt-limit');
-}
-
-export function updateMqttLimit(data: UpdateMqttLimitRequest): Promise<MqttLimitResponse> {
-	return request('/global-settings/mqtt-limit', { method: 'PUT', body: JSON.stringify(data) });
 }
 
 // --- OIDC Provider APIs ---

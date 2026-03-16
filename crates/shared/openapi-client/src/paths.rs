@@ -309,18 +309,6 @@ pub(crate) mod settings_nats {
     pub(crate) const BASE: &str = "/api/v1/global-settings/nats";
 }
 
-pub(crate) mod settings_mqtt {
-    use uuid::Uuid;
-    /// `GET /api/v1/settings/mqtt` · `POST …`
-    pub(crate) const BASE: &str = "/api/v1/settings/mqtt";
-    /// `GET /api/v1/global-settings/mqtt-limit` · `PUT …`
-    pub(crate) const LIMIT: &str = "/api/v1/global-settings/mqtt-limit";
-    /// `GET /api/v1/settings/mqtt/{id}` · `PUT …` · `DELETE …`
-    pub(crate) fn by_id(id: &Uuid) -> String {
-        format!("/api/v1/settings/mqtt/{id}")
-    }
-}
-
 pub(crate) mod software_items {
     use uuid::Uuid;
     /// `GET /api/v1/software-items` · `POST …`
