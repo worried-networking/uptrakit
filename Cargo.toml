@@ -59,7 +59,7 @@ x509-cert = { version = "0.2", default-features = false }
 const-oid = { version = "0.9", features = ["db"] }
 aws-lc-rs = "1"
 # strum stays at 0.27 — blocked by sea-orm macros which depend on strum 0.27 derive internals
-strum = { version = "0.27", features = ["derive"] }
+strum = { version = "0.28", features = ["derive"] }
 regex = "1"
 semver = "1"
 tokio-stream = "0.1"
