@@ -112,7 +112,7 @@ Each service sends a `BTreeSet<Capability>` in its `EnrollPayload` during enroll
 | `SoftwareDiscovery` | `software_discovery` | Supports `discover_software` / `discovery_results` flow |
 | `UpdateHooks` | `update_hooks` | Pre/post-update lifecycle hook plugin execution |
 | `GracefulShutdown` | `graceful_shutdown` | Supports coordinated shutdown |
-| `MqttBridge` | `mqtt_bridge` | MQTT bridge: handles `register`, `tenant_assignments`, `release_tenants`, etc. |
+| `UpdateTracking` | `update_tracking` | Update tracking service: handles `register`, `tenant_assignments`, `release_tenants`, etc. |
 | `SshRemote` | `ssh_remote` | Manages remote hosts over SSH |
 | `Scheduler` | `scheduler` | Marker: service is an external task scheduler |
 | `DatabaseAccess` | `database_access` | Service requires direct database access credentials |
@@ -129,12 +129,12 @@ but is never persisted to the database.
 
 | Profile | Key capability | Typical services | Default ping | Shutdown timeout |
 | --- | --- | --- | --- | --- |
-| `MqttBridge` | `MqttBridge` | MQTT service | 15 s | None |
+| `UpdateTracker` | `UpdateTracking` | MQTT service | 15 s | None |
 | `Scheduler` | `Scheduler` | External scheduler | 60 s | 30 s |
 | `Agent` | `SoftwareDiscovery` | Local agent, SSH agent | 300 s | 120 s |
 | `Unknown` | (none of the above) | Future services | 300 s | 120 s |
 
-`MqttBridge` takes precedence over `Scheduler`, which takes precedence over `Agent`. For `Agent` profiles, the `SshRemote` capability
+`UpdateTracker` takes precedence over `Scheduler`, which takes precedence over `Agent`. For `Agent` profiles, the `SshRemote` capability
 distinguishes SSH-backed agents from local agents in UI labels (`service_label`).
 
 ### Enrollment tokens
@@ -161,7 +161,7 @@ former per-type registration and broadcast paths.
 
 - `services.capabilities` -- JSON text column holding a serialized `Vec<Capability>`
   (e.g. `["software_discovery","update_hooks","graceful_shutdown"]`).
-- Cross-controller event routing uses capability strings (`"software_discovery"`, `"mqtt_bridge"`, etc.) via NATS
+- Cross-controller event routing uses capability strings (`"software_discovery"`, `"update_tracking"`, etc.) via NATS
   JetStream subjects when NATS is configured. See [Cross-Controller Communication](docs/development/cross-controller-comm.md).
 
 ### Credential delivery

@@ -491,6 +491,6 @@ the `settings mqtt create` and `settings mqtt update` subcommands.
 
 **Update command received but nothing happens:**
 
-- Check the Uptrakit controller logs for `mqtt_trigger_update` errors.
+- Check the Uptrakit controller logs for `service_trigger_update` errors.
 - Verify the agent for the target host is connected (`uptrakit services list` or the web UI).
 - Check whether an update is already pending for that `(host, software item)` pair in the update history.

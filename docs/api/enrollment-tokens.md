@@ -25,7 +25,7 @@ once; it cannot be retrieved later.
 ```json
 {
   "name": "CI Deploy Token",
-  "allowed_capabilities": ["software_discovery", "mqtt_bridge"],
+  "allowed_capabilities": ["software_discovery", "update_tracking"],
   "max_uses": 10,
   "expires_in_seconds": 86400
 }
@@ -45,7 +45,7 @@ once; it cannot be retrieved later.
   "id": "019...",
   "token": "upt_abc123def456...",
   "name": "CI Deploy Token",
-  "allowed_capabilities": ["software_discovery", "mqtt_bridge"],
+  "allowed_capabilities": ["software_discovery", "update_tracking"],
   "max_uses": 10,
   "current_uses": 0,
   "expires_at": "2026-02-28T00:00:00Z",
@@ -142,8 +142,8 @@ Tokens can restrict which service types they approve by listing allowed capabili
 | --- | --- | --- |
 | `null` (wildcard) | any | Match |
 | `["software_discovery"]` | `["software_discovery", "update_hooks"]` | Match (intersection: `software_discovery`) |
-| `["mqtt_bridge"]` | `["software_discovery"]` | No match (empty intersection) |
-| `["software_discovery", "mqtt_bridge"]` | `["mqtt_bridge"]` | Match (intersection: `mqtt_bridge`) |
+| `["update_tracking"]` | `["software_discovery"]` | No match (empty intersection) |
+| `["software_discovery", "update_tracking"]` | `["update_tracking"]` | Match (intersection: `update_tracking`) |
 
 ## Token Lifecycle States
 

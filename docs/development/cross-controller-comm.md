@@ -20,7 +20,7 @@ This is the default and is sufficient for single-controller deployments.
    (`source_controller_id == self`), and delivers them to locally connected services using the shared
    `event_delivery` routing logic.
 4. Messages are routed based on `target_service_id` (specific service) and `target_capability` (a `Capability`
-   string such as `"software_discovery"`, `"mqtt_bridge"`, or broadcast to all services).
+   string such as `"software_discovery"`, `"update_tracking"`, or broadcast to all services).
 5. Failed deliveries are nacked and retried up to 3 times. Messages older than 24 hours are automatically
    discarded by the JetStream stream retention policy.
 
@@ -69,7 +69,7 @@ Messages are serialized as JSON `NatsEventEnvelope`:
 {
   "source_controller_id": "01234567-89ab-cdef-0123-456789abcdef",
   "target_service_id": null,
-  "target_capability": "mqtt_bridge",
+  "target_capability": "update_tracking",
   "message": { "type": "software_states", "..." : "..." },
   "created_at": "2026-02-27T12:00:00Z"
 }

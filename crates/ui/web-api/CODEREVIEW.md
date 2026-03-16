@@ -948,7 +948,7 @@ Recommended tests:
 
 **[SECURITY] MQTT trigger — tenant assignment check (0% coverage)**
 
-`handle_mqtt_trigger_update` and `handle_mqtt_trigger_host_package_update` verify that the
+`handle_service_trigger_update` and `handle_service_trigger_host_batch_update` verify that the
 target tenant is assigned to the calling MQTT service before dispatching updates. A bypass
 would allow update injection from any MQTT service to any tenant.
 
@@ -956,7 +956,7 @@ Recommended tests:
 
 - Unassigned tenant returns `BadRequest` error
 - Assigned tenant dispatches update correctly
-- `handle_mqtt_trigger_host_package_update` with no outdated packages returns `BadRequest`
+- `handle_service_trigger_host_batch_update` with no outdated packages returns `BadRequest`
 
 **[DATA INTEGRITY] Update result handling (0% coverage)**
 

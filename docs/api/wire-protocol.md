@@ -57,10 +57,10 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 > and are safe to process at any point during an authenticated session. See
 > [Dynamic Host Reload](../architecture/ssh-agent.md#dynamic-host-reload) for the full mechanism.
 
-### MQTT-specific (service -> controller)
+### Update-tracking service (service -> controller)
 
-`register`, `release_tenants`, `mqtt_client_status`, `mqtt_trigger_update`,
-`mqtt_trigger_host_batch_update`
+`register`, `release_tenants`, `mqtt_client_status`, `service_trigger_update`,
+`service_trigger_host_batch_update`
 
 ### Shared (controller -> service)
 
@@ -458,7 +458,7 @@ notification (if rules are configured for the `StdinAttention` event type).
 
 #### `host_connectivity_updated` payload
 
-Sent by the controller (and forwarded via NATS JetStream with `target_capability = "mqtt_bridge"`)
+Sent by the controller (and forwarded via NATS JetStream with `target_capability = "update_tracking"`)
 whenever an agent connects or disconnects. MQTT services use this to publish
 `{prefix}/hosts/{host_id}/connectivity/state` and `{prefix}/hosts/{host_id}/connectivity/attributes`
 on behalf of the affected tenant.
@@ -498,7 +498,7 @@ This message is safe for NATS publication (`is_nats_publishable() = true`): it c
 credentials, no PEM data, and no plugin configuration.
 
 **Multi-controller behaviour:** The event is always published by the controller that owns the
-agent's WebSocket connection — not inferred from a database scan. MQTT services on all controllers
+agent's WebSocket connection — not inferred from a database scan. Update-tracking services on all controllers
 receive the event via NATS and update their in-memory connectivity cache accordingly. This ensures
 that `connectivity/state` is correct even in deployments with multiple controllers.
 
@@ -614,8 +614,8 @@ deserialization failures (hard fail, connection close).
 | `MAX_DISCOVERY_PLUGIN_RESULTS` | 50 | `DiscoveryResultsPayload.results` |
 | `MAX_DISCOVERIES_PER_PLUGIN` | 1,000 | `DiscoveryPluginResult.discoveries` |
 | `MAX_RELEASE_ASSETS` | 500 | `ReleaseInfo.assets` |
-| `MAX_MQTT_HOSTS` | 5,000 | `MqttSoftwareStatesPayload.hosts` (host metadata entries) |
-| `MAX_HOST_TAGS` | 100 | `MqttHostMetadata.tags` (tags per host) |
+| `MAX_MQTT_HOSTS` | 5,000 | `SoftwareStatesPayload.hosts` (host metadata entries) |
+| `MAX_HOST_TAGS` | 100 | `HostStateMetadata.tags` (tags per host) |
 | `MAX_CONNECTIVITY_UPDATES` | 500 | `HostConnectivityUpdatedPayload.updates` |
 
 #### String length limits
@@ -711,7 +711,7 @@ All limits are defined in `crates/shared/wire/src/limits.rs`.
    which pages have arrived.
 3. For `discovery_results`, the accumulated discovered-software count is tracked across
    pages; the `NewSoftwareDiscovered` notification is emitted only on the final page.
-4. For other report types, each page's finalization (e.g. `push_software_states_for_tenant`)
+4. For other report types, each page's finalization (e.g. software states push)
    runs independently -- the controller does not defer processing.
 5. Expired reports (idle timeout or total timeout exceeded) are evicted automatically.
 
@@ -859,9 +859,9 @@ The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incomp
 | `SoftwareDiscovery` | `software_discovery` | Service supports `discover_software` → `discovery_results` flow. Controller gates autodiscovery requests on this capability. |
 | `UpdateHooks` | `update_hooks` | Service supports pre-/post-update hook plugin assignments in `execute_update`. Controller omits hook plugins when absent. |
 | `GracefulShutdown` | `graceful_shutdown` | Service sends `disconnecting` before clean exit and honours `shutdown_timeout_seconds`. |
-| `MqttBridge` | `mqtt_bridge` | Service is an MQTT bridge: handles `register`, `tenant_assignments`, `release_tenants`, `mqtt_client_status`, etc. Maps to `ServiceProfile::MqttBridge`. |
+| `UpdateTracking` | `update_tracking` | Service is an update-tracking service: handles `register`, `tenant_assignments`, `release_tenants`, `mqtt_client_status`, etc. Maps to `ServiceProfile::UpdateTracker`. |
 | `SshRemote` | `ssh_remote` | Service manages remote hosts over SSH. Combined with `SoftwareDiscovery`, maps to `ServiceProfile::Agent` with SSH label. |
-| `SystemService` | `system_service` | Routes enrollment to the `system_services` table instead of `services`. Required for any service that requests system credentials. The MQTT bridge declares this alongside `mqtt_bridge`. See [System Services Architecture](../architecture/system-services.md). |
+| `SystemService` | `system_service` | Routes enrollment to the `system_services` table instead of `services`. Required for any service that requests system credentials. The MQTT bridge declares this alongside `update_tracking`. See [System Services Architecture](../architecture/system-services.md). |
 | `Scheduler` | `scheduler` | Marker: service is an external task scheduler. Maps to `ServiceProfile::Scheduler`. |
 | `DatabaseAccess` | `database_access` | Service requires direct database access credentials. Requires `system_service`. |
 | `NatsAccess` | `nats_access` | Service requires NATS connection details. Requires `system_service`. |
@@ -874,12 +874,12 @@ The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incomp
 
 ### Advertised Sets per Component
 
-| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `mqtt_bridge` | `ssh_remote` | `system_service` | `scheduler` | `database_access` | `nats_access` | `master_key_access` | `ca_management` | `ui_extensions` | `interactive_updates` | `reset_data` |
+| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `update_tracking` | `ssh_remote` | `system_service` | `scheduler` | `database_access` | `nats_access` | `master_key_access` | `ca_management` | `ui_extensions` | `interactive_updates` | `reset_data` |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | Controller | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Agent | ✓ | ✓ | ✓ | — | — | — | — | — | — | — | — | — | ✓\* | — |
 | SSH Agent | ✓ | ✓ | ✓ | — | ✓ | — | — | — | — | — | — | ✓ | ✓\* | ✓\*\* |
-| MQTT Bridge | — | — | ✓ | ✓ | — | ✓ | — | — | — | — | — | — | — | — |
+| Update Tracker | — | — | ✓ | ✓ | — | ✓ | — | — | — | — | — | — | — | — |
 | External Scheduler | — | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | — |
 
 \* Only when compiled with the `interactive` Cargo feature.
@@ -896,9 +896,9 @@ stored -- it is always computed from capabilities.
 
 | Capability set | `ServiceProfile` | Label |
 | --- | --- | --- |
-| Has `mqtt_bridge` | `MqttBridge` | "MQTT Bridge" |
+| Has `update_tracking` | `UpdateTracker` | "Update Tracker" |
 | Has `ssh_remote` + `software_discovery` | `Agent` | "SSH Agent" |
-| Has `software_discovery`, no `mqtt_bridge`, no `ssh_remote` | `Agent` | "Agent" |
+| Has `software_discovery`, no `update_tracking`, no `ssh_remote` | `Agent` | "Agent" |
 | Unrecognized combination | `Unknown` | "Unknown" |
 
 `EnrollPayload.capabilities` is a required `BTreeSet<Capability>` field. The controller persists the
@@ -1002,9 +1002,9 @@ fields are included in the config hash computation for change detection.
 
 ## `software_states` Payload
 
-The controller pushes this message to all locally connected MQTT services for a tenant whenever version
+The controller pushes this message to all locally connected update-tracking services for a tenant whenever version
 data changes. It is also published to NATS (when configured) for cross-controller delivery (contains no
-credentials). MQTT services filter by `tenant_id`.
+credentials). Update-tracking services filter by `tenant_id`.
 
 **Push triggers:**
 
@@ -1017,8 +1017,8 @@ credentials). MQTT services filter by `tenant_id`.
 
 ### Paginated delivery
 
-State is delivered in pages of up to `MQTT_STATES_HOST_PAGE_SIZE` (100) active hosts per page. The
-`page` field is **required** on every payload. MQTT services must accumulate pages until the last page
+State is delivered in pages of up to `STATES_HOST_PAGE_SIZE` (100) active hosts per page. The
+`page` field is **required** on every payload. Update-tracking services must accumulate pages until the last page
 (`page_index + 1 == total_pages`) before running the diff and publishing to retained MQTT topics.
 
 | `page` field | Type | Description |
@@ -1095,7 +1095,7 @@ Releases). They are absent (`null` / omitted) for plugins that track only versio
 ### `host_summaries` field
 
 The `host_summaries` field (defaults to `[]` when absent -- older controllers omit it) carries one
-`MqttHostSummaryState` entry per host that has at least one tracked non-featured software item for
+`HostPackageSummary` entry per host that has at least one tracked non-featured software item for
 the tenant.
 
 | Field | Type | Description |
@@ -1129,18 +1129,20 @@ state topics from this payload. The `update_in_progress` field is published to t
 Home Assistant uses to display a live installing indicator on the `update` entity. See
 [Home Assistant Integration](../end-user/home-assistant-mqtt.md).
 
-## `mqtt_trigger_update` Payload
+## `service_trigger_update` Payload
 
 Sent by the MQTT service to the controller when a Home Assistant user presses **Install** on a tracked
 software item. The controller validates the request and dispatches `execute_update` to the appropriate
 agent. On validation failure the controller sends `error` back to the MQTT service (soft error — the
 WebSocket connection is not closed).
 
+> **Wire compatibility:** The legacy type string `mqtt_trigger_update` is accepted as a serde alias.
+
 ```json
 {
   "protocol_version": 1,
   "seq": 2,
-  "type": "mqtt_trigger_update",
+  "type": "service_trigger_update",
   "tenant_id": "550e8400-e29b-41d4-a716-446655440001",
   "software_item_id": "660e8400-e29b-41d4-a716-446655440002",
   "host_id": "770e8400-e29b-41d4-a716-446655440003",
@@ -1166,17 +1168,19 @@ The controller rejects the request with an `error` message (no WS close) in the 
 - The host has no approved agent linked.
 - An update with status `pending` or `in_progress` already exists for the same `(host_id, software_item_id)` pair.
 
-## `mqtt_trigger_host_batch_update` Payload
+## `service_trigger_host_batch_update` Payload
 
 Sent by the MQTT service to the controller when a Home Assistant user presses **Install** on a
 per-host summary or security updates entity. The controller finds all qualifying outdated
 non-featured software items for the host and dispatches a batch update to the agent.
 
+> **Wire compatibility:** The legacy type strings `mqtt_trigger_host_batch_update` and `mqtt_trigger_host_package_update` are accepted as serde aliases.
+
 ```json
 {
   "protocol_version": 1,
   "seq": 3,
-  "type": "mqtt_trigger_host_batch_update",
+  "type": "service_trigger_host_batch_update",
   "tenant_id": "550e8400-e29b-41d4-a716-446655440001",
   "host_id": "770e8400-e29b-41d4-a716-446655440003",
   "mqtt_client_id": "880e8400-e29b-41d4-a716-446655440004",

@@ -39,7 +39,7 @@ tracking, certificate lookup, and status polling all branch on `is_system`.
 
 | Component | Capabilities |
 | --- | --- |
-| MQTT bridge (`uptrakit-mqtt`) | `system_service`, `mqtt_bridge`, `graceful_shutdown` |
+| MQTT bridge (`uptrakit-mqtt`) | `system_service`, `update_tracking`, `graceful_shutdown` |
 | External scheduler (`uptrakit-scheduler`) | `system_service`, `scheduler`, `database_access`, `nats_access`, `master_key_access`, `ca_management`, `graceful_shutdown` |
 
 ## Database Schema

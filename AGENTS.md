@@ -113,7 +113,7 @@ uptrakit/
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API + SSE streaming coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing; sse.rs provides lightweight SSE parser; update_output_stream.rs provides typed stream_update_output() method; device_auth_stream.rs provides SSE-first device auth; events_stream.rs provides typed admin event SSE client
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
-│   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, interval+jitter scheduling (interval.rs: compute_next_run_at), TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); tasks categorised as internal (CrlRenewal, CaRotationCheck, ServiceCertCheck — embedded scheduler only) vs external (AuthCleanup, StaleLeaseCleanup, FetchReleases, DetectVersion — deferrable to external scheduler); `external_scheduler_connected: Arc<AtomicBool>` flag skips external tasks when set; FetchReleasesExecutor Phase B sends fetch assignments for host_software_items so that latest_version is populated; `software_states.rs` — **canonical** `load_software_states_for_tenant(&TenantDb)` (all items, single page) and `load_software_states_page_for_tenant(&TenantDb, host_page, page_size)` (paginated: up to `MQTT_STATES_HOST_PAGE_SIZE` hosts per page, ordered by host.id); both re-exported by `web-api-queries/mqtt_software_states.rs`
+│   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, interval+jitter scheduling (interval.rs: compute_next_run_at), TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); tasks categorised as internal (CrlRenewal, CaRotationCheck, ServiceCertCheck — embedded scheduler only) vs external (AuthCleanup, StaleLeaseCleanup, FetchReleases, DetectVersion — deferrable to external scheduler); `external_scheduler_connected: Arc<AtomicBool>` flag skips external tasks when set; FetchReleasesExecutor Phase B sends fetch assignments for host_software_items so that latest_version is populated; `software_states.rs` — **canonical** `load_software_states_for_tenant(&TenantDb)` (all items, single page) and `load_software_states_page_for_tenant(&TenantDb, host_page, page_size)` (paginated: up to `STATES_HOST_PAGE_SIZE` hosts per page, ordered by host.id); canonical owner is now `web-api-queries/software_states.rs`
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity (ServiceIdentityState: service_id + enrollment_secret + tenant_id in service.json), TLS, CA bootstrap, main helpers; default_resolve_shutdown(); `decrypt_sensitive_params<T>()` generic ECIES sealed-box decryption for extension sensitive params; `zeroconf` feature (default): mDNS/DNS-SD discovery module (browse for `_uptrakit._tcp.local.`, cache in `discovery.json` with 0o600 permissions); when `--url` omitted + feature enabled, auto-discovers controller on LAN
 │   │   ├── audit-log/                  # uptrakit-audit-log                      (lib)  — AuditLogBackend trait, AuditEntry, AuditFilter, AuditLogDispatcher; backends: NoopBackend, DatabaseBackend (cfg db), JournaldBackend (cfg journald), MultiplexBackend; fire-and-forget dispatcher pattern
 │   │   ├── update-hooks/               # uptrakit-config-merge                  (lib)  — config merge utilities: resolve_effective_config(), merge_config(), shallow_merge_into()
@@ -787,7 +787,7 @@ Key invariants:
    `in_progress` flag) retained topics to the broker for **all** connected clients, plus HA discovery
    config topics for HA-enabled clients.
 3. **`SoftwareStates` is safe for cross-controller delivery.** It contains no credentials and is published
-   to NATS (when configured) with `target_capability = "mqtt_bridge"` so only MQTT services receive it.
+   to NATS (when configured) with `target_capability = "update_tracking"` so only update-tracking services receive it.
 4. **Reconnect resilience.** On every `ConnAck` the MQTT service emits a `Reconnected` event, causing
    `TenantManager` to republish all state/version topics (for all clients) and HA discovery config topics
    (for HA-enabled clients) from the in-memory cache.
@@ -797,12 +797,12 @@ Key invariants:
    the broker and do not need re-sending after an HA restart.
 6. **Updates triggered via MQTT (software items).** When a user presses Install in HA on a software-item
    entity, HA publishes `"install"` to the entity's command topic. The MQTT service resolves `to_version`
-   from the in-memory state cache and sends `ServiceMessage::MqttTriggerUpdate` to the controller. The
+   from the in-memory state cache and sends `ServiceMessage::ServiceTriggerUpdate` to the controller. The
    controller validates the request and dispatches `execute_update` to the agent. On failure the
    controller sends `error` back (soft error — WebSocket is not closed).
 7. **Updates triggered via MQTT (host batch).** When a user presses Install in HA on the per-host
    packages entity or the security updates entity, the MQTT service sends
-   `ServiceMessage::MqttTriggerHostBatchUpdate` to the controller (with `security_only = true` for
+   `ServiceMessage::ServiceTriggerHostBatchUpdate` to the controller (with `security_only = true` for
    the security entity). The controller finds all qualifying outdated non-featured items, creates an
    `update_batch`, and dispatches `execute_batch_update` to the agent. On completion
    the controller pushes `software_states`
@@ -881,11 +881,11 @@ Published immediately on agent connect/disconnect via `ControllerMessage::HostCo
 | `crates/core/mqtt/src/client_manager.rs` | `MqttClientHandle`, `build_config_from_wire`, `compute_config_hash` (split from `tenant_manager.rs`) |
 | `crates/core/mqtt/src/state_publisher.rs` | All `publish_*` and `cleanup_*` methods (`publish_host_metadata`, `publish_connectivity_for_host`, `handle_host_connectivity_updated`; `publish_or_abort!` macro); second `impl TenantManager` block (split from `tenant_manager.rs`) |
 | `crates/core/mqtt/src/mqtt_client.rs` | `MqttServiceEvent` enum, `publish_retained` (5 s `OPERATION_TIMEOUT`), `subscribe_topic` (5 s timeout), `shutdown` (5 s timeout on offline publish + disconnect), HA status topic handling; timeouts prevent indefinite blocking when broker connection is down |
-| `crates/core/mqtt/src/main.rs` | `on_service_event` dispatch; `ControllerMessage::SoftwareStates` handler; `ControllerMessage::HostConnectivityUpdated` handler; `MqttTriggerHostBatchUpdate` dispatch |
-| `crates/shared/scheduler-engine/src/software_states.rs` | **Canonical** `load_software_states_for_tenant(&TenantDb)` (single page, all hosts) and `load_software_states_page_for_tenant(&TenantDb, host_page, page_size)` (paginated, ≤ `MQTT_STATES_HOST_PAGE_SIZE` hosts per page, ordered by `host.id`). Both functions now accept `&TenantDb` (from `shared-db`) instead of `(db, tenant_id)`. |
-| `crates/ui/web-api-queries/src/queries/mqtt_software_states.rs` | Re-exports both `load_software_states_for_tenant` and `load_software_states_page_for_tenant` from `scheduler-engine`; adds `AgentConnectivityInfo` + `load_agent_connectivity_for_tenant` |
-| `crates/ui/web-api/src/notification_service.rs` | `push_software_states_for_tenant` (constructs `TenantDb`, single-page load); `push_software_states_paginated_for_tenant` (loops over `load_software_states_page_for_tenant`, delivers each page immediately); `send_connectivity_update` (wraps `HostConnectivityUpdated`, local broadcast + NATS) |
-| `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs` | `MqttTriggerUpdate` and `MqttTriggerHostBatchUpdate` handlers |
+| `crates/core/mqtt/src/main.rs` | `on_service_event` dispatch; `ControllerMessage::SoftwareStates` handler; `ControllerMessage::HostConnectivityUpdated` handler; `ServiceTriggerHostBatchUpdate` dispatch |
+| `crates/ui/web-api-queries/src/queries/software_states.rs` | **Canonical** `load_software_states_for_tenant(&TenantDb)` (single page, all hosts) and `load_software_states_page_for_tenant(&TenantDb, host_page, page_size)` (paginated, ≤ `STATES_HOST_PAGE_SIZE` hosts per page, ordered by `host.id`). Both functions now accept `&TenantDb` (from `shared-db`) instead of `(db, tenant_id)`. |
+| `crates/ui/web-api-queries/src/queries/software_states.rs` | Canonical `load_software_states_for_tenant` and `load_software_states_page_for_tenant`; adds `AgentConnectivityInfo` + `load_agent_connectivity_for_tenant` |
+| `crates/ui/web-api/src/notification_service.rs` | `push_software_states_paginated_for_tenant` (loops over `load_software_states_page_for_tenant`, delivers each page immediately); `send_connectivity_update` (wraps `HostConnectivityUpdated`, local broadcast + NATS) |
+| `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs` | `ServiceTriggerUpdate` and `ServiceTriggerHostBatchUpdate` handlers |
 | `crates/ui/web-api-queries/src/queries/update_dispatch.rs` | Shared update-dispatch primitives: `validate_update_preconditions`, `create_update_history_record`, `dispatch_update_to_agent`, `TriggerUpdateError`, `ValidatedUpdateTarget`, `config_prefers_interactive`; used by both `update_triggers.rs` and `update_batches/` |
 | `crates/ui/web-api-queries/src/queries/update_triggers.rs` | `trigger_update_for_host` convenience wrapper (calls all three dispatch layers); shared by REST and MQTT handlers; resolves `interactive` flag (caller + `config_prefers_interactive`) before `create_update_history_record` so the column is persisted accurately |
 | `crates/ui/web-api-queries/src/queries/update_batches.rs` | Batch update logic: `find_outdated_items_for_host`, `create_batch`, `dispatch_next_in_batch`, `trigger_all_host_batch_updates_for_host` |
@@ -897,14 +897,14 @@ Published immediately on agent connect/disconnect via `ControllerMessage::HostCo
 | `crates/shared/openapi-client/src/batch_progress_stream.rs` | SSE streaming client for batch progress events |
 | `crates/ui/cli/src/commands/batch_update.rs` | CLI batch update commands |
 | `docs/end-user/home-assistant-mqtt.md` | Full end-user setup guide including host summary entities, metadata topics, and connectivity sensor |
-| `docs/api/wire-protocol.md` | `software_states`, `host_connectivity_updated`, `mqtt_trigger_update`, and `mqtt_trigger_host_batch_update` payload docs |
+| `docs/api/wire-protocol.md` | `software_states`, `host_connectivity_updated`, `service_trigger_update`, and `service_trigger_host_batch_update` payload docs |
 | `crates/shared/wire/asyncapi.yaml` | AsyncAPI schemas for all messages and schemas |
 
 ### Service ping interval
 
 The ping interval is controller-managed and per-service configurable. The `services` DB table has a nullable
 `ping_interval_seconds INTEGER` column. The controller reads this value per-service and falls back to
-profile-based defaults (300s for `Agent` profile, 15s for `MqttBridge` profile) when the column is `NULL`.
+profile-based defaults (300s for `Agent` profile, 15s for `UpdateTracker` profile) when the column is `NULL`.
 Defaults are provided by `ServiceProfile::default_ping_interval_secs()`.
 
 Key integration points:
@@ -937,7 +937,7 @@ Each service declares a `BTreeSet<Capability>` at enrollment time. The set is pe
 | `SoftwareDiscovery` | `software_discovery` | yes | yes | -- | -- | yes |
 | `UpdateHooks` | `update_hooks` | yes | yes | -- | -- | yes |
 | `GracefulShutdown` | `graceful_shutdown` | yes | yes | yes | yes | yes |
-| `MqttBridge` | `mqtt_bridge` | -- | -- | yes | -- | yes |
+| `UpdateTracking` | `update_tracking` | -- | -- | yes | -- | yes |
 | `SshRemote` | `ssh_remote` | -- | yes | -- | -- | yes |
 | `SystemService` | `system_service` | -- | -- | yes | yes | yes |
 | `Scheduler` | `scheduler` | -- | -- | -- | yes | yes |
@@ -962,13 +962,13 @@ behavioral defaults (ping interval, shutdown timeout, human-readable label). It 
 
 | Profile | Key capability | Services | Default ping | Shutdown timeout |
 | --- | --- | --- | --- | --- |
-| `MqttBridge` | `Capability::MqttBridge` | MQTT service | 15 s | None |
+| `UpdateTracker` | `Capability::UpdateTracking` | MQTT service | 15 s | None |
 | `Scheduler` | `Capability::Scheduler` | External scheduler | 60 s | 30 s |
 | `Agent` | `Capability::SoftwareDiscovery` | Local agent, SSH agent | 300 s | 120 s |
 | `Unknown` | (none of the above) | Unrecognized | 300 s | 120 s |
 
 `ServiceProfile::service_label(has_ssh_remote)` provides the human-readable label: "Agent", "SSH Agent",
-"MQTT Bridge", "Scheduler", or "Unknown".
+"Update Tracker", "Scheduler", or "Unknown".
 
 #### Capability negotiation (wire protocol)
 
@@ -1069,7 +1069,7 @@ The `is_system: bool` flag derived at enrollment threads through every subsequen
 operation: certificate lookup (tries `service_certificates` then `system_service_certificates`),
 activity recording, status checks, credential delivery, and registered-connection management.
 
-The MQTT bridge now enrolls as a system service (`system_service + mqtt_bridge + graceful_shutdown`)
+The MQTT bridge now enrolls as a system service (`system_service + update_tracking + graceful_shutdown`)
 and appears in `/api/v1/system-services`, not `/api/v1/services`.
 
 #### System services key files

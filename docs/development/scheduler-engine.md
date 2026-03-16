@@ -74,7 +74,7 @@ pub trait SchedulerNotifier: Send + Sync {
     async fn broadcast(&self, msg: ControllerMessage);
     async fn send_by_capability(&self, capability: &str, msg: ControllerMessage);
     async fn signal_ca_rotation(&self, reason: &str);
-    async fn push_software_states_for_tenant(&self, payload: MqttSoftwareStatesPayload);
+    async fn signal_software_states_changed(&self, tenant_id: Uuid);
     /// Trigger an immediate CRL rebuild on all controller instances.
     async fn signal_crl_renewal(&self);
 }
@@ -140,8 +140,9 @@ Handles the `fetch_releases` task. Phase A and Phase B run concurrently via `tok
 instantiates plugins, then spawns them all into a `JoinSet` bounded by a
 `Semaphore(MAX_CONCURRENT_CONTROLLER_FETCHES = 10)`. After all spawned tasks complete, the
 DB update loop runs sequentially: updates `host_software_items.latest_version`, batch-updates
-`software_item.last_checked_at`, and pushes MQTT software states via
-`SchedulerNotifier::push_software_states_for_tenant()`.
+`software_item.last_checked_at`, and signals that software states have changed via
+`SchedulerNotifier::signal_software_states_changed(tenant_id)`. The controller's event delivery
+layer handles loading and pushing the states to update-tracking services.
 
 **Phase B — Agent-side dispatch:** Calls `query_agent_assignment_rows` with `roles = ["fetch_releases"]`,
 builds `VersionCheckAssignment` with only `fetch_releases` set, and sends `CheckVersions` messages
@@ -188,8 +189,9 @@ Used by both the embedded and external CA rotation check executors.
 
 ### `load_software_states_for_tenant(db, tenant_id) -> Vec<SoftwareStateEntry>`
 
-Loads all enabled software items with per-host version data for a tenant. Used by
-`FetchReleasesExecutor` and `SchedulerNotifier::push_software_states_for_tenant()`.
+Loads all enabled software items with per-host version data for a tenant. The canonical
+implementation now lives in `web-api-queries/software_states.rs`. Used by the controller's
+event delivery layer when handling `SoftwareStatesChanged` signals.
 
 ## Testing
 

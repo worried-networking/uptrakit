@@ -253,7 +253,7 @@ with `ControllerSideFetchReleases` capability). Groups by `(plugin_config_id, pa
 instantiates each plugin, then spawns all fetch calls into a `JoinSet` bounded by a `Semaphore`
 (max [`MAX_CONCURRENT_CONTROLLER_FETCHES`] = 10). After all fetches complete, stores
 `latest_version` in `host_software_items`, batch-updates `software_item.last_checked_at`, and
-pushes MQTT software states.
+signals `SoftwareStatesChanged` so the controller pushes updated states to update-tracking services.
 
 **Phase B — Agent-side dispatch:** Builds `VersionCheckAssignment` per
 `(service_id, host_machine_id)` with only `fetch_releases` set (no `detect_version`, no host

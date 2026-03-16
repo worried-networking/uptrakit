@@ -17,7 +17,7 @@
 3. The MQTT service's `resolve_update_trigger()` parses the topic, extracts the
    host ID and software item ID, and checks them against its in-memory
    `software_states` cache.
-4. If the IDs match known entries, the MQTT service sends a `mqtt_trigger_update`
+4. If the IDs match known entries, the MQTT service sends a `service_trigger_update`
    message to the controller over the mTLS WebSocket.
 5. The controller validates the request and dispatches `execute_update` to the
    appropriate agent, installing the latest known version.
@@ -53,7 +53,7 @@ Alternatively, the attacker can:
 ## Current mitigations
 
 - **Update targets are validated server-side.** The controller validates the
-  `mqtt_trigger_update` request against the database: the software item, host, and
+  `service_trigger_update` request against the database: the software item, host, and
   host assignment must exist and be active, and the tenant ID must match.
 - **Version is controller-controlled.** The `to_version` in a triggered update comes
   from the controller's cached `latest_version`, not from the MQTT message payload.
@@ -96,7 +96,7 @@ Alternatively, the attacker can:
   command messages to verify they originate from a legitimate Home Assistant instance.
 - Add a configuration option to require TLS for MQTT connections and emit a startup
   error (not just a warning) when plaintext transport is used in production.
-- Implement application-level rate limiting on `mqtt_trigger_update` messages per
+- Implement application-level rate limiting on `service_trigger_update` messages per
   tenant to prevent update flood attacks.
 - Document recommended MQTT broker ACL configuration that restricts publish access
   on command topics to only the Home Assistant instance.

@@ -41,7 +41,7 @@
   and soft-delete revocation. Expired or exhausted tokens are excluded from the
   verification loop.
 - **Capability scoping.** Tokens can restrict which service types they approve by
-  requiring capability intersection. A token scoped to `mqtt_bridge` will not approve
+  requiring capability intersection. A token scoped to `update_tracking` will not approve
   an agent-type service.
 - **WebSocket connection rate limiting.** The controller enforces 30 connections per
   60 seconds per IP and 10 authentication failures per 300 seconds per IP.

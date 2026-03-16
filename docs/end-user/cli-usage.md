@@ -114,7 +114,7 @@ uptrakit system-services list
 uptrakit system-services list --page 2 --per-page 10
 
 # Filter by capability or status
-uptrakit system-services list --capability mqtt_bridge
+uptrakit system-services list --capability update_tracking
 uptrakit system-services list --status pending
 uptrakit system-services list --capability scheduler --status approved
 
@@ -139,7 +139,7 @@ uptrakit system-services update <SERVICE_ID> --ping-interval 0
 uptrakit system-services update <SERVICE_ID> --cert-lifetime-hours 0
 ```
 
-`--capability` accepts any capability string, e.g. `mqtt_bridge` or `scheduler`.
+`--capability` accepts any capability string, e.g. `update_tracking` or `scheduler`.
 
 `--ping-interval` sets the ping interval in seconds. `0` clears the override and reverts to the
 service-profile default. The minimum positive value is `5`.

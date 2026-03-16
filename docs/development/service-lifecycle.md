@@ -72,7 +72,7 @@ The default implementation returns an empty set. Services should override this t
 capabilities. For example, the local agent returns `{GracefulShutdown, SoftwareDiscovery, UpdateHooks}`.
 
 On the controller side, the persisted capability set is used to derive a `ServiceProfile` (Agent,
-MqttBridge, or Unknown) which drives behavioral defaults such as ping interval, shutdown timeout, and
+UpdateTracker, or Unknown) which drives behavioral defaults such as ping interval, shutdown timeout, and
 human-readable `service_label`. See [ServiceProfile derivation](#serviceprofile-derivation) below.
 
 ### `ServiceEvent` associated type
@@ -175,7 +175,7 @@ per-page limits.
 This design means the ping interval is fully controller-managed. The `ServiceHandler` trait no longer
 exposes a `ping_interval()` method. The controller derives the interval from a per-service database
 override (`services.ping_interval_seconds`) or falls back to `ServiceProfile`-based defaults (300s for
-Agent profile, 15s for MqttBridge profile).
+Agent profile, 15s for UpdateTracker profile).
 
 ### `EventLoopContext`
 
@@ -417,20 +417,20 @@ derived from the service's persisted capability set via `ServiceProfile::from_ca
 
 | Profile | Key capability | Example services |
 | --- | --- | --- |
-| `MqttBridge` | `Capability::MqttBridge` | MQTT service |
+| `UpdateTracker` | `Capability::UpdateTracking` | MQTT service |
 | `Agent` | `Capability::SoftwareDiscovery` | Local agent, SSH agent |
 | `Unknown` | (fallback) | Unrecognized combinations |
 
-`MqttBridge` takes precedence if both `MqttBridge` and `SoftwareDiscovery` are present.
+`UpdateTracker` takes precedence if both `UpdateTracking` and `SoftwareDiscovery` are present.
 
 The profile drives behavioral defaults:
 
-| Default | MqttBridge | Agent | Unknown |
+| Default | UpdateTracker | Agent | Unknown |
 | --- | --- | --- | --- |
 | `default_ping_interval_secs` | 15 | 300 | 300 |
 | `shutdown_timeout_secs` | None | Some(120) | Some(120) |
-| `service_label(false)` | "MQTT Bridge" | "Agent" | "Unknown" |
-| `service_label(true)` | "MQTT Bridge" | "SSH Agent" | "Unknown" |
+| `service_label(false)` | "Update Tracker" | "Agent" | "Unknown" |
+| `service_label(true)` | "Update Tracker" | "SSH Agent" | "Unknown" |
 
 The `service_label` column in API responses (`ServiceResponse.service_label`) is derived at query time
 from the profile and the presence of `Capability::SshRemote`. It is not stored in the database.

@@ -181,7 +181,7 @@ second time while a scheduler is already running — has no test. A regression h
 a double-start or a leaked `CancellationToken` child task.
 
 **[LOW]** `src/nats_notifier.rs` -- `send_to_service`, `broadcast`, `send_by_capability`,
-`signal_ca_rotation`, `push_software_states_for_tenant`, and `signal_crl_renewal` all have no
+`signal_ca_rotation`, `signal_software_states_changed`, and `signal_crl_renewal` all have no
 tests. These are thin NATS publish wrappers, but the topic construction and payload serialization
 inside each method are exercised only by integration. At minimum, the `signal_ca_rotation`
 topic format should be asserted with a mock NATS connection to guard against breaking the

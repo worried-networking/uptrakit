@@ -10,7 +10,7 @@
 scheduler used by both `uptrakit-controller` (embedded) and `uptrakit-scheduler` (standalone
 binary). The core claim/release cycle uses TOCTOU-free optimistic locking and stale-claim recovery,
 which are strong correctness properties. The `SchedulerNotifier` ORM coupling has been fixed
-(callers now load and pass a `MqttSoftwareStatesPayload`), and the sequential execution model
+(callers now load and pass a `SoftwareStatesPayload`), and the sequential execution model
 now uses a `JoinSet` for parallel task execution within each poll cycle. The anonymous tuple
 `FetchGroupValue` accumulator in `version_check.rs` has been refactored to named structs
 (`AgentAssignmentRow`, `HostPackageAssignmentRow`), eliminating index-fragility. All five executors now have tests.
@@ -189,8 +189,8 @@ marking tasks as errored on clean shutdown) would make this asymmetry self-docum
 `VersionCheckExecutor` uses `send_agent_assignments` (via `notifier.broadcast`) while
 `CaRotationCheckExecutor` calls `notifier.signal_ca_rotation` and `CrlRenewalExecutor` calls
 `notifier.signal_crl_renewal`. The trait methods for CA and CRL are named `signal_*` (verb
-"signal") while the software-state push is named `push_software_states_for_tenant` (verb
-"push") and the general delivery methods are `send_*` / `broadcast`. The verb prefix varies
+"signal") while the software-state signal is named `signal_software_states_changed` (verb
+"signal") and the general delivery methods are `send_*` / `broadcast`. The verb prefix varies
 across methods without a consistent naming convention, making the intent of each method harder
 to infer from the trait definition alone.
 
@@ -202,7 +202,7 @@ to infer from the trait definition alone.
   doc comments explaining the 5-field vs 6-field distinction. The module has nine tests covering
   valid/invalid expressions, field normalization, and an invalid expression that returns `None`.
 - `src/notifier.rs` -- `SchedulerNotifier` trait methods all have doc comments. The comment on
-  `push_software_states_for_tenant` explicitly documents the caller's responsibility to pre-load
+  `signal_software_states_changed` explicitly documents the signal-only contract (no DB access);
   the payload, which is a non-obvious API design decision.
 - `src/claim.rs` -- Constants (`STALE_CLAIM_SECONDS`) are documented with rationale.
   The claim-and-release pattern is explained in the struct-level doc.
@@ -318,7 +318,7 @@ The assignment-building logic groups by host and sends batch version check messa
 
 **[BUSINESS] `software_states.rs` — MQTT state push (27.2% coverage)**
 
-`push_software_states` builds the state payload and publishes to MQTT services. The state
+`load_software_states` builds the state payload for update-tracking services. The state
 aggregation logic (combining host software items + host packages) has low coverage.
 
 ---

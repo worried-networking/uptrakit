@@ -530,7 +530,7 @@ MQTT services use the unified service entity:
 
 | Method | Path | Permission | Description |
 | --- | --- | --- | --- |
-| GET | `/api/v1/services?capability=mqtt_bridge&status=...` | ViewAgents | List MQTT services (filter by capability) |
+| GET | `/api/v1/services?capability=update_tracking&status=...` | ViewAgents | List update-tracking services (filter by capability) |
 | POST | `/api/v1/services/{id}/approve` | ManageAgents | Approve a pending service |
 | POST | `/api/v1/services/{id}/reject` | ManageAgents | Reject a pending service |
 | DELETE | `/api/v1/services/{id}` | ManageAgents | Deactivate a service |

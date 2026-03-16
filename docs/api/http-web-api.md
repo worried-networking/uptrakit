@@ -154,7 +154,7 @@ ping interval override. When `null`, the service uses its profile default (300s 
 
 `ServiceResponse` uses `capabilities: Vec<String>` and `service_label: String` instead of the former `service_type`
 field. The `service_label` is a human-readable display name derived from the service's capability set via
-`ServiceProfile` (e.g. "Agent", "SSH Agent", "MQTT Bridge").
+`ServiceProfile` (e.g. "Agent", "SSH Agent", "Update Tracker").
 
 ### `PUT /api/v1/services/{id}`
 
@@ -576,7 +576,7 @@ They are stored in the `system_services` table and managed independently of tena
 See [System Services Architecture](../architecture/system-services.md) for the full design.
 
 - `GET /api/v1/system-services`: list system services (requires `view_system_services`).
-  Filterable by `?capability=mqtt_bridge` or `?status=pending`. Paginated.
+  Filterable by `?capability=update_tracking` or `?status=pending`. Paginated.
 - `GET /api/v1/system-services/{id}`: get a single system service by UUID
   (requires `view_system_services`).
 - `PUT /api/v1/system-services/{id}`: update configurable settings — `ping_interval_seconds` and
@@ -669,7 +669,7 @@ See [Audit Logs API Reference](audit-logs.md) for the full specification.
 | Field | Type | Description |
 | --- | --- | --- |
 | `id` | UUID | System service identifier |
-| `capabilities` | `string[]` | Snake-case capability strings (e.g. `["mqtt_bridge","graceful_shutdown"]`) |
+| `capabilities` | `string[]` | Snake-case capability strings (e.g. `["update_tracking","graceful_shutdown"]`) |
 | `hostname` | string | Hostname reported at enrollment |
 | `friendly_name` | string | Human-readable display name |
 | `ip_address` | `string?` | Client IP address |

@@ -1215,8 +1215,8 @@ These files contain zero test-exercised code paths:
 2. **`validate_update_ownership`** (`handler/updates.rs`): Cross-tenant isolation gate. Must
    reject update records belonging to unlinked hosts.
 
-3. **MQTT trigger tenant assignment** (`handler/mqtt.rs`): `handle_mqtt_trigger_update` and
-   `handle_mqtt_trigger_host_package_update` must reject operations for unassigned tenants.
+3. **Service trigger tenant assignment** (`handler/mqtt.rs`): `handle_service_trigger_update` and
+   `handle_service_trigger_host_batch_update` must reject operations for unassigned tenants.
 
 4. ~~**`find_active_system_tokens` compound filter** (`system_enrollment_tokens.rs`): All three
    conditions (not revoked, not expired, uses remaining) must be ANDed correctly. A logic bug

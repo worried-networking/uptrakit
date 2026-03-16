@@ -131,7 +131,7 @@ Key methods:
 | `send(service_id, msg)` | Local delivery + NATS publish (unless MQTT credential message) |
 | `broadcast(msg)` | Local broadcast + NATS publish (unless MQTT credential message) |
 | `publish_controller_event(msg)` | NATS-only publish to controller subject (no-op without NATS) |
-| `push_software_states_for_tenant(db, tenant_id)` | Local capability broadcast + NATS publish to `mqtt_bridge` |
+| `signal_software_states_changed(tenant_id)` | Sends `SoftwareStatesChanged` signal; controller's event delivery loads and pushes states to `update_tracking` services |
 
 ### NatsTransport (controller-specific)
 
