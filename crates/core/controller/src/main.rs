@@ -722,7 +722,7 @@ async fn spawn_background_tasks(
                     info.capabilities
                         .contains(&uptrakit_internal_wire::Capability::Scheduler)
                 })),
-                move |transport, cancel| {
+                move |transport, tokens| {
                     Box::pin(async move {
                         let notifier: std::sync::Arc<
                             dyn uptrakit_scheduler_engine::SchedulerNotifier,
@@ -810,7 +810,7 @@ async fn spawn_background_tasks(
                             )),
                         );
 
-                        sched.run(cancel).await;
+                        sched.run(tokens.drain, tokens.abort).await;
                     })
                 },
                 app_state,
@@ -850,10 +850,10 @@ async fn spawn_background_tasks(
                 false, // tenant service (not system)
                 Some(default_tenant_id),
                 Some(yield_check),
-                move |transport, cancel| {
+                move |transport, tokens| {
                     Box::pin(agent::run_embedded_agent(
                         transport,
-                        cancel,
+                        tokens.abort,
                         state_dir_for_agent,
                     ))
                 },

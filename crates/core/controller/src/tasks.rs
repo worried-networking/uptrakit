@@ -11,6 +11,7 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use uptrakit_web_api::AppState;
+use uuid::Uuid;
 
 use crate::durations;
 
@@ -21,6 +22,12 @@ pub(crate) struct BackgroundTasks {
     cancellable: Vec<(&'static str, JoinHandle<()>, Duration)>,
     /// Tasks that are forcefully aborted.
     abortable: Vec<(&'static str, JoinHandle<()>)>,
+    /// Service IDs for embedded services registered in the `ServiceConnectionRegistry`.
+    /// These are unregistered before the external-service drain wait (Phase 2.5).
+    embedded_service_ids: Vec<Uuid>,
+    /// Drain tokens for embedded services — cancelled to stop new work gracefully
+    /// before the service drain wait, so the drain loop only counts external services.
+    embedded_drain_tokens: Vec<CancellationToken>,
 }
 
 impl BackgroundTasks {
@@ -29,6 +36,8 @@ impl BackgroundTasks {
             shutdown_token,
             cancellable: Vec::new(),
             abortable: Vec::new(),
+            embedded_service_ids: Vec::new(),
+            embedded_drain_tokens: Vec::new(),
         }
     }
 
@@ -37,10 +46,16 @@ impl BackgroundTasks {
         self.shutdown_token.child_token()
     }
 
+    /// Register an embedded service so its drain token is cancelled and its registry
+    /// entry is removed before the external-service drain wait (Phase 2.5 of shutdown).
+    pub(crate) fn mark_embedded(&mut self, service_id: Uuid, drain_token: CancellationToken) {
+        self.embedded_service_ids.push(service_id);
+        self.embedded_drain_tokens.push(drain_token);
+    }
+
     /// Register a task that listens for the [`CancellationToken`].
     ///
     /// Uses [`durations::BACKGROUND_TASK_SHUTDOWN_TIMEOUT`] as the shutdown timeout.
-    /// For tasks that need more time (e.g. the scheduler), use [`track_with_timeout`](Self::track_with_timeout).
     pub(crate) fn track(&mut self, name: &'static str, handle: JoinHandle<()>) {
         self.cancellable
             .push((name, handle, durations::BACKGROUND_TASK_SHUTDOWN_TIMEOUT));
@@ -69,6 +84,23 @@ impl BackgroundTasks {
         // 1. Stop accepting new connections
         tracing::debug!("stopping HTTP server (no new connections accepted)");
         server_handle.graceful_shutdown(Some(shutdown_timeout));
+
+        // 2.5. Gracefully drain embedded services before counting connections.
+        //      Cancelling each drain token tells the embedded service to stop
+        //      claiming new work. Unregistering the service IDs from the registry
+        //      ensures the drain loop below counts only external services.
+        if !self.embedded_service_ids.is_empty() {
+            tracing::debug!(
+                count = self.embedded_service_ids.len(),
+                "draining embedded services (stop new work)"
+            );
+            for token in &self.embedded_drain_tokens {
+                token.cancel();
+            }
+            for id in &self.embedded_service_ids {
+                service_connections.unregister(id).await;
+            }
+        }
 
         // 2. Scatter restart notifications, then wait for services to disconnect.
         //    `broadcast_server_restarting_scattered` returns immediately after
@@ -578,6 +610,46 @@ mod tests {
         assert!(
             elapsed < Duration::from_secs(30),
             "should have exited before the 30 s timeout, elapsed = {elapsed:?}"
+        );
+    }
+
+    /// After unregistering embedded services in Phase 2.5, the drain loop exits
+    /// as soon as all *external* services disconnect, not when embedded ones do.
+    #[tokio::test(start_paused = true)]
+    async fn drain_ignores_embedded_services_after_unregister() {
+        let registry = ServiceConnectionRegistry::new();
+
+        // Register one external service.
+        let external_id = Uuid::now_v7();
+        registry
+            .register(external_id, BTreeSet::new(), None, None, None)
+            .await;
+
+        // Register one embedded service and immediately unregister it (simulating Phase 2.5).
+        let embedded_id = Uuid::now_v7();
+        registry
+            .register(embedded_id, BTreeSet::new(), None, None, None)
+            .await;
+        registry.unregister(&embedded_id).await;
+
+        // Disconnect the external service after 2 s (simulated).
+        let registry_clone = registry.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            registry_clone.unregister(&external_id).await;
+        });
+
+        let start = tokio::time::Instant::now();
+        wait_for_service_drain(&registry, Duration::from_secs(30)).await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed >= Duration::from_secs(2),
+            "should have waited at least 2 s for the external service, elapsed = {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(30),
+            "should have exited before the 30 s timeout (embedded unregistered), elapsed = {elapsed:?}"
         );
     }
 
