@@ -151,6 +151,9 @@ pub const MAX_ICON_URL_LEN: usize = 2_048;
 /// Maximum number of pages in a single paginated report.
 pub const MAX_REPORT_PAGES: u32 = 50;
 
+/// Number of active hosts processed per page in paginated MQTT software-states delivery.
+pub const MQTT_STATES_HOST_PAGE_SIZE: u64 = 100;
+
 /// Maximum number of concurrent pending (incomplete) paginated reports per
 /// WebSocket connection. Prevents memory exhaustion from abandoned reports.
 pub const MAX_PENDING_REPORTS_PER_CONNECTION: usize = 10;

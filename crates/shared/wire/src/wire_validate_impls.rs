@@ -1045,6 +1045,21 @@ impl WireValidate for MqttTenantRevokedPayload {
 
 impl WireValidate for MqttSoftwareStatesPayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
+        if self.page.total_pages < 1 {
+            return Err(WireValidationError {
+                field: "page.total_pages",
+                message: "total_pages must be at least 1".to_string(),
+            });
+        }
+        if self.page.page_index >= self.page.total_pages {
+            return Err(WireValidationError {
+                field: "page.page_index",
+                message: format!(
+                    "page_index {} must be less than total_pages {}",
+                    self.page.page_index, self.page.total_pages
+                ),
+            });
+        }
         check_vec_len(&self.items, MAX_SOFTWARE_STATE_ITEMS, "items")?;
         check_vec_len(
             &self.host_summaries,

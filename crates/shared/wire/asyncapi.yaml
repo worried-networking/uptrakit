@@ -3677,6 +3677,28 @@ components:
             service when the user presses "Install" on the security updates
             entity. Defaults to `false` (all outdated packages included).
 
+    softwareStatesPage:
+      type: object
+      required:
+        - page_index
+        - total_pages
+      properties:
+        page_index:
+          type: integer
+          format: int32
+          minimum: 0
+          description: |
+            Zero-based index of this page. For single-page delivery this is `0`.
+            For multi-page delivery this is `0…total_pages-1`.
+        total_pages:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Total number of pages in this delivery batch. Receivers must
+            accumulate pages until `page_index + 1 == total_pages` before
+            applying the diff and publishing to MQTT topics.
+
     softwareStatesPayload:
       type: object
       required:
@@ -3685,6 +3707,7 @@ components:
         - type
         - tenant_id
         - items
+        - page
       properties:
         protocol_version:
           type: integer
@@ -3736,6 +3759,14 @@ components:
             Limited to `MAX_MQTT_HOSTS` (5,000) entries.
           items:
             $ref: "#/components/schemas/mqttHostMetadata"
+        page:
+          $ref: "#/components/schemas/softwareStatesPage"
+          description: |
+            Pagination metadata for this delivery batch. Required on all
+            payloads. Single-page delivery: `{ page_index: 0, total_pages: 1 }`.
+            Receivers must accumulate pages with the same `tenant_id` until the
+            last page (`page_index + 1 == total_pages`) before applying the diff
+            and publishing to MQTT topics.
 
     mqttTriggerUpdatePayload:
       type: object

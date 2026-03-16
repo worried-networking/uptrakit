@@ -915,10 +915,38 @@ impl HostConnectivityUpdatedPayload {
     }
 }
 
+/// Pagination metadata for a [`MqttSoftwareStatesPayload`] message.
+///
+/// All payloads carry a `page` field. For single-page delivery use
+/// `{ page_index: 0, total_pages: 1 }`. Multi-page delivery uses
+/// `page_index` 0…N-1; the last page satisfies `page_index + 1 == total_pages`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SoftwareStatesPage {
+    /// Zero-based index of this page.
+    pub page_index: u32,
+    /// Total number of pages in this delivery batch.
+    pub total_pages: u32,
+}
+
+impl SoftwareStatesPage {
+    /// Creates a single-page marker (the only page in a single-page delivery).
+    pub fn single() -> Self {
+        Self {
+            page_index: 0,
+            total_pages: 1,
+        }
+    }
+}
+
 /// Controller -> MQTT service: current software version state for a tenant.
 ///
 /// Sent after tenant assignment and after any version check or update result.
 /// Safe to write to the outbox (contains no credentials).
+///
+/// Large tenants use multi-page delivery. The `page` field indicates which
+/// page this payload represents. Receivers must accumulate all pages before
+/// applying the full state update (see `page_index + 1 == total_pages` for
+/// the last-page signal).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MqttSoftwareStatesPayload {
     /// Tenant this state belongs to.
@@ -939,6 +967,8 @@ pub struct MqttSoftwareStatesPayload {
     /// Defaults to an empty list for backward compatibility with older MQTT services.
     #[serde(default)]
     pub hosts: Vec<MqttHostMetadata>,
+    /// Pagination metadata indicating which page this payload represents.
+    pub page: SoftwareStatesPage,
 }
 
 /// A single software item entry in [`MqttSoftwareStatesPayload`].

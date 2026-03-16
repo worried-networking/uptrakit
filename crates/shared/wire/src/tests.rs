@@ -2498,7 +2498,7 @@ fn mqtt_host_summary_roundtrip() {
 #[test]
 fn mqtt_software_states_payload_default_host_summaries() {
     // Deserializing a payload without host_summaries should default to empty vec.
-    let json = r#"{"tenant_id":"11111111-1111-1111-1111-111111111111","items":[]}"#;
+    let json = r#"{"tenant_id":"11111111-1111-1111-1111-111111111111","items":[],"page":{"page_index":0,"total_pages":1}}"#;
     let payload: MqttSoftwareStatesPayload = serde_json::from_str(json).unwrap();
     assert!(payload.host_summaries.is_empty());
 }
@@ -2506,7 +2506,7 @@ fn mqtt_software_states_payload_default_host_summaries() {
 #[test]
 fn mqtt_software_states_payload_backward_compat_host_package_hosts() {
     // Old wire messages with "host_package_hosts" should deserialize via alias.
-    let json = r#"{"tenant_id":"11111111-1111-1111-1111-111111111111","items":[],"host_package_hosts":[{"host_id":"550e8400-e29b-41d4-a716-446655440001","hostname":"host1","pending_count":5,"security_pending_count":2,"total_count":100,"update_in_progress":true}]}"#;
+    let json = r#"{"tenant_id":"11111111-1111-1111-1111-111111111111","items":[],"host_package_hosts":[{"host_id":"550e8400-e29b-41d4-a716-446655440001","hostname":"host1","pending_count":5,"security_pending_count":2,"total_count":100,"update_in_progress":true}],"page":{"page_index":0,"total_pages":1}}"#;
     let payload: MqttSoftwareStatesPayload = serde_json::from_str(json).unwrap();
     assert_eq!(payload.host_summaries.len(), 1);
     assert_eq!(payload.host_summaries[0].pending_count, 5);
@@ -2529,6 +2529,10 @@ fn mqtt_software_states_payload_with_host_summaries_roundtrip() {
             update_in_progress: true,
         }],
         hosts: vec![],
+        page: SoftwareStatesPage {
+            page_index: 0,
+            total_pages: 1,
+        },
     };
     let json = serde_json::to_string(&payload).unwrap();
     let deserialized: MqttSoftwareStatesPayload = serde_json::from_str(&json).unwrap();
