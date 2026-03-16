@@ -116,6 +116,11 @@ Main functionality that delivers the core value proposition.
 - **Scheduling System** — Cron expressions, schedule persistence, background task runner, shared
   `uptrakit-scheduler-engine` crate, external scheduler binary with service enrollment, embedded
   scheduler feature, credential delivery, shared NATS crate.
+- **Embedded Services Infrastructure** — Unified `EmbeddedServiceHost` in the controller for
+  embedding any service (agent, mqtt, scheduler) in-process via mpsc channels. Coexistence
+  policies (`YieldAlways`, `NeverYield`), auto-provisioning of `system_services` DB records,
+  `EmbeddedServiceNotifier` trait for WS handler hooks. The existing embedded scheduler has been
+  refactored to use this infrastructure.
 - **Software Autodiscovery** — Event-driven trigger, `discovery_state` field, ignore table,
   `DiscoverSoftware` / `DiscoveryResults` wire messages, agent-core shared implementation,
   plugin-driven `DiscoveryTarget`, REST API (approve, discover, ignore), version check excludes
@@ -961,6 +966,10 @@ Items to consider for future versions but not currently prioritized:
   settings cache, CRL cross-instance propagation, NATS JetStream push notifications, DB-backed
   JWT signing key, master key mismatch detection, external scheduler with optimistic locking).
   Remaining: token denylist HA sync, full active-active controller support.
+- **Embedded MQTT service** — Use `EmbeddedServiceHost::add()` to embed the MQTT bridge service
+  in the controller for single-binary homelab deployments. Infrastructure is ready.
+- **Embedded agent** — Use `EmbeddedServiceHost::add()` to embed the agent for single-binary
+  deployments. Infrastructure is ready.
 - **Agent clustering** — Multiple agents cooperating on a single host or agent pools.
 - **Update preview / dry-run mode** — Simulate an update without executing it.
 - **Compliance reporting** — Export update audit trails for compliance frameworks.
