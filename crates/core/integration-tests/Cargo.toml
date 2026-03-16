@@ -17,7 +17,7 @@ serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 
 # Reverse proxy integration test helpers
-uptrakit-web-api = { workspace = true, features = ["db-sqlite"] }
+uptrakit-web-api = { workspace = true, features = ["db-all", "oidc", "notifications-all", "interactive", "reset-data"] }
 uptrakit-plugin-infrastructure-registry = { workspace = true }
 uptrakit-crypto = { workspace = true, features = ["testing"] }
 axum = { workspace = true }
@@ -38,6 +38,21 @@ spki = { workspace = true }
 x509-ocsp = { workspace = true }
 const-oid = { workspace = true }
 rootcause = { workspace = true }
+
+# Database integration test helpers
+testcontainers-modules = { workspace = true }
+paste = { workspace = true }
+uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite", "db-postgres", "db-mysql"] }
+uptrakit-web-api-types = { workspace = true }
+uptrakit-audit-log = { workspace = true }
+uptrakit-internal-wire = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+tower = { workspace = true }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+jsonwebtoken = { workspace = true }
 
 [lints]
 workspace = true
