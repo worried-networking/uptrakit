@@ -251,6 +251,9 @@ skip = [
     # untrusted: 0.7.1 via aws-lc-rs, 0.9.0 via ring/rustls-webpki. Will resolve with dependency updates.
     { crate = "untrusted@0.7.1", reason = "pulled by aws-lc-rs; waiting for upstream convergence" },
 
+    # windows-sys 0.48.0 via etcetera (sqlx-postgres dep); newer versions used by tokio/clap/socket-pktinfo
+    { crate = "windows-sys@0.48.0", reason = "pulled by etcetera via sqlx-postgres; waiting for upstream convergence" },
+
     # windows-sys 0.60.2 via socket-pktinfo (mdns-sd 0.18 dep); newer 0.61.x used by tokio/clap
     { crate = "windows-sys@0.60.2", reason = "pulled by socket-pktinfo (mdns-sd 0.18); newer 0.61.x used by tokio, clap" },
     { crate = "windows-targets@0.53.5", reason = "pulled by windows-sys@0.60.2 (socket-pktinfo → mdns-sd 0.18)" },
