@@ -66,9 +66,14 @@ Tasks are categorised based on whether they require direct in-process access to 
 | `DiscoverSoftware` | External | DB + agent dispatch (periodic software rediscovery) |
 
 The `ScheduledTaskType::is_internal()` method encodes this categorisation. The `Scheduler` struct
-holds an `external_scheduler_connected: Arc<AtomicBool>` flag that is set/cleared by the WebSocket
-handler when an external scheduler connects/disconnects. During each poll cycle, the embedded
-scheduler skips non-internal tasks when the flag is `true`.
+accepts a `should_yield_external: Box<dyn Fn() -> bool + Send + Sync>` closure in its constructor.
+When the closure returns `true`, the poll cycle skips non-internal tasks, deferring them to the
+external scheduler. Internal tasks always execute regardless of the closure's return value.
+
+In the embedded scheduler, this closure queries the `EmbeddedServiceNotifier` trait to check
+whether the `Scheduler` capability is currently yielded (i.e., an external scheduler with
+overlapping capabilities is connected). See [Embedded Services](embedded-services.md) for the
+coexistence framework.
 
 See [External Scheduler Deployment](../end-user/deployment/external-scheduler.md) for production guidance
 and [Scheduler Engine (Development)](../development/scheduler-engine.md) for engine internals.
@@ -355,6 +360,7 @@ All endpoints require the `ManageSoftware` permission.
 
 ## Related Documentation
 
+- [Embedded Services](embedded-services.md) -- unified embedded service infrastructure (coexistence, transport)
 - [Scheduler Engine (Development)](../development/scheduler-engine.md) -- engine crate internals
 - [External Scheduler Deployment](../end-user/deployment/external-scheduler.md) -- production deployment
 - [Cross-Controller Communication](../development/cross-controller-comm.md) -- NATS-based cross-controller messaging

@@ -103,11 +103,18 @@ pub struct SchedulerConfig {
 
 ## Scheduler fields
 
-The `Scheduler` struct accepts an `external_scheduler_connected: Arc<AtomicBool>` parameter in its
-constructor. When this flag is `true`, the poll cycle skips non-internal tasks (tasks where
-`ScheduledTaskType::is_internal()` returns `false`), deferring them to the external scheduler.
-Internal tasks (CRL renewal, CA rotation check, service cert check) always execute regardless of
-this flag.
+The `Scheduler` struct accepts a `should_yield_external: Box<dyn Fn() -> bool + Send + Sync>`
+closure in its constructor. When the closure returns `true`, the poll cycle skips non-internal
+tasks (tasks where `ScheduledTaskType::is_internal()` returns `false`), deferring them to the
+external scheduler. Internal tasks (CRL renewal, CA rotation check, service cert check) always
+execute regardless of the closure's return value.
+
+In the embedded scheduler, this closure queries the `EmbeddedServiceNotifier` trait to check
+whether the `Scheduler` capability is currently yielded. In the external scheduler binary, the
+closure always returns `false` (the external scheduler never skips its own tasks).
+
+See [Embedded Services Architecture](../architecture/embedded-services.md) for how the controller
+manages the yield lifecycle.
 
 ## Feature flags
 

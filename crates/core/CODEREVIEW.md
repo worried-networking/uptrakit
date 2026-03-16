@@ -151,7 +151,7 @@ Rust idioms, crate structure, database, documentation, and cross-cutting concern
 | --- | --- | --- |
 | INFO | D5 | Optimistic locking for task claiming — HA-safe across multiple instances |
 | INFO | D5 | Stale claim recovery (600s timeout) handles crashed controllers |
-| INFO | D5 | External scheduler handoff via `external_scheduler_connected` flag |
+| INFO | D5 | External scheduler handoff via `EmbeddedServiceNotifier` coexistence policy |
 | LOW | D14 | Dead `oidc = []` feature flag — gates no code |
 
 ### Integration Tests

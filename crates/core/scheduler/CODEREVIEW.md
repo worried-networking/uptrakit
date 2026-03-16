@@ -85,12 +85,13 @@ a bounded task-pool (`tokio::task::JoinSet` with concurrency cap) for parallel e
 notification interface. Replace with a boxed async closure or a simpler trait.
 
 **[MEDIUM]** (2026-03-06 parallel review, HA-9) Race window between external scheduler
-disconnect and embedded scheduler noticing. The `external_scheduler_connected` flag is an
-`AtomicBool` set by the WebSocket connection handler. If the external scheduler disconnects
-between poll cycles (15-second default interval), there is up to a 15-second window where
-external tasks are neither executed by the (now-disconnected) external scheduler nor by the
-embedded scheduler (which still sees the flag as `true`). In practice the flag is likely
-cleared promptly on disconnect, but the worst case is a single missed poll cycle.
+disconnect and embedded scheduler noticing. The `should_yield_external` closure (querying
+`EmbeddedServiceNotifier::is_capability_yielded`) is evaluated each poll cycle. If the
+external scheduler disconnects between poll cycles (15-second default interval), there is
+up to a 15-second window where external tasks are neither executed by the (now-disconnected)
+external scheduler nor by the embedded scheduler (which still sees the capability as yielded).
+In practice the flag is likely cleared promptly on disconnect, but the worst case is a single
+missed poll cycle.
 
 **[LOW]** (2026-03-06 parallel review, HA-2) Scheduler claim release on shutdown is
 best-effort. In `scheduler-engine/src/scheduler.rs:113-122`, the `release_all_claims` call
@@ -336,9 +337,9 @@ and maintainability.
 - Shutdown cancellation has priority in the biased `select!`: the `token.cancelled()` arm is
   evaluated before the poll-cycle arm, ensuring a shutdown signal is never missed due to a
   runaway task occupying the loop.
-- External vs. embedded scheduler is controlled by the `external_scheduler_connected` flag.
-  When the external scheduler disconnects, the embedded scheduler takes over within one poll
-  cycle.
+- External vs. embedded scheduler is controlled by the `should_yield_external` closure
+  (querying `EmbeddedServiceNotifier::is_capability_yielded`). When the external scheduler
+  disconnects, the embedded scheduler takes over within one poll cycle.
 
 #### Issues
 

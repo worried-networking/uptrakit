@@ -12,6 +12,11 @@ controller (`--features embedded-scheduler`) or as a standalone **external binar
 infrastructure credentials (database, NATS, master key) via the wire protocol.
 See [External Scheduler Deployment](docs/end-user/deployment/external-scheduler.md).
 
+The controller supports a unified [embedded service infrastructure](docs/architecture/embedded-services.md) that allows any service
+(scheduler, agent, MQTT, agent-ssh) to run inside the controller process via in-process mpsc channels. Each embedded service is
+auto-provisioned in the database and registered in the `ServiceConnectionRegistry`. A capability-based coexistence policy controls
+whether an embedded service yields to an external counterpart when one connects.
+
 ## Key references
 
 - Detailed entity documentation: [docs/architecture/](docs/architecture/) (multi-tenancy, hosts, software items,

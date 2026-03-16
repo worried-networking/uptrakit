@@ -84,11 +84,11 @@ the in-progress task's `JoinHandle`. This creates a window where the task's `rel
 DB write may be abandoned mid-execution. Await the handle before propagating shutdown.
 
 **[LOW]** *(HA-9)* `src/scheduler.rs:170-179` -- Race window between external scheduler
-disconnect and embedded scheduler noticing. The `external_scheduler_connected` flag is an
-`AtomicBool` set by the WebSocket connection handler. If the external scheduler disconnects
-between poll cycles (15-second default interval), there is up to a 15-second window where
-external tasks are neither executed by the (now-disconnected) external scheduler nor by the
-embedded scheduler (which still sees the flag as `true`).
+disconnect and embedded scheduler noticing. The `should_yield_external` closure (querying
+`EmbeddedServiceNotifier::is_capability_yielded`) is evaluated each poll cycle. If the
+external scheduler disconnects between poll cycles (15-second default interval), there is
+up to a 15-second window where external tasks are neither executed by the (now-disconnected)
+external scheduler nor by the embedded scheduler (which still sees the capability as yielded).
 *(2026-03-06 parallel review -- HA)*
 
 ## Coding Standards
