@@ -23,7 +23,7 @@ use uptrakit_scheduler_engine::executors::{
 use uptrakit_scheduler_engine::{Scheduler, SchedulerConfig, SchedulerNotifier};
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ShutdownCause,
-    default_resolve_shutdown,
+    Signal, default_resolve_shutdown,
 };
 use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
 use uuid::Uuid;
@@ -32,7 +32,10 @@ use crate::nats_notifier::NatsSchedulerNotifier;
 
 /// Active scheduler runtime spawned after credential delivery.
 struct SchedulerRuntime {
-    cancel: CancellationToken,
+    /// Cancel to stop claiming new work; in-flight tasks complete naturally.
+    drain: CancellationToken,
+    /// Cancel to abort in-flight work immediately.
+    abort: CancellationToken,
     scheduler_handle: tokio::task::JoinHandle<()>,
 }
 
@@ -73,13 +76,23 @@ impl SchedulerHandler {
 
     /// Tear down the running scheduler, releasing DB claims.
     ///
-    /// Cancels the token and awaits the scheduler task with a timeout to
-    /// ensure the old scheduler has fully stopped before a new one starts
-    /// (prevents two scheduler instances racing on claim operations).
-    async fn stop_scheduler(&mut self) {
+    /// When `graceful` is `true`, cancels the drain token so that no new tasks
+    /// are claimed while currently in-flight tasks are allowed to complete
+    /// naturally. When `false`, cancels the abort token to interrupt in-flight
+    /// tasks immediately.
+    ///
+    /// In both cases the scheduler task is awaited with a timeout to ensure the
+    /// old instance has fully stopped before a new one starts (prevents two
+    /// scheduler instances racing on claim operations).
+    async fn stop_scheduler(&mut self, graceful: bool) {
         if let Some(rt) = self.runtime.take() {
-            tracing::info!("stopping scheduler engine");
-            rt.cancel.cancel();
+            if graceful {
+                tracing::info!("stopping scheduler engine (graceful drain)");
+                rt.drain.cancel();
+            } else {
+                tracing::info!("stopping scheduler engine (hard abort)");
+                rt.abort.cancel();
+            }
             match tokio::time::timeout(STOP_SCHEDULER_TIMEOUT, rt.scheduler_handle).await {
                 Ok(Ok(())) => {
                     tracing::info!("scheduler engine stopped cleanly");
@@ -139,8 +152,8 @@ impl ServiceHandler for SchedulerHandler {
                 );
 
                 // If there's already a running scheduler (re-sent credentials),
-                // stop the existing one first.
-                self.stop_scheduler().await;
+                // drain it gracefully before starting the new instance.
+                self.stop_scheduler(true).await;
 
                 // 1. Initialize master encryption key (if provided and not already set).
                 if let Some(ref hex) = creds.master_key_hex
@@ -250,14 +263,17 @@ impl ServiceHandler for SchedulerHandler {
                 );
 
                 // 8. Spawn the scheduler loop.
-                let cancel = CancellationToken::new();
-                let cancel_clone = cancel.clone();
+                let drain = CancellationToken::new();
+                let abort = CancellationToken::new();
+                let drain_clone = drain.clone();
+                let abort_clone = abort.clone();
                 let handle = tokio::spawn(async move {
-                    scheduler.run(cancel_clone).await;
+                    scheduler.run(drain_clone, abort_clone).await;
                 });
 
                 self.runtime = Some(SchedulerRuntime {
-                    cancel,
+                    drain,
+                    abort,
                     scheduler_handle: handle,
                 });
 
@@ -296,8 +312,15 @@ impl ServiceHandler for SchedulerHandler {
     ) -> LoopOutcome {
         let (disconnect_reason, outcome) = default_resolve_shutdown(cause);
 
-        // Stop the scheduler engine (releases DB claims).
-        self.stop_scheduler().await;
+        // Stop the scheduler engine.
+        // Graceful drain (soft stop) for reconnect scenarios: ServerRestarting
+        // and SIGHUP let in-flight tasks complete before the engine exits.
+        // Hard abort for SIGTERM/SIGINT to exit promptly.
+        let graceful = matches!(
+            cause,
+            ShutdownCause::ServerRestarting | ShutdownCause::Signal(Signal::Hangup)
+        );
+        self.stop_scheduler(graceful).await;
 
         // Send disconnect message to the controller.
         let _ = conn
