@@ -369,8 +369,17 @@ export enum PluginCapability {
 	DiscoverLocalSoftware = 'discover_local_software',
 	RefreshPackageIndex = 'refresh_package_index',
 	DetectHostCompatibility = 'detect_host_compatibility',
-	UpdateLifecycle = 'update_lifecycle',
-	ControllerSideFetchReleases = 'controller_side_fetch_releases'
+	ControllerSideFetchReleases = 'controller_side_fetch_releases',
+	VersionDetection = 'version_detection',
+	ReleaseFetching = 'release_fetching',
+	UpdateExecution = 'update_execution',
+	NotificationDelivery = 'notification_delivery',
+	HostLifecycle = 'host_lifecycle',
+	HostReport = 'host_report',
+	GuestExec = 'guest_exec',
+	ServiceMigrations = 'service_migrations',
+	ControllerMigrations = 'controller_migrations',
+	UpdateLifecycle = 'update_lifecycle'
 }
 
 /** Static metadata for a plugin type, returned by `GET /api/v1/plugin-types`. */
