@@ -4,7 +4,7 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::response::IntoResponse;
 use std::sync::Arc;
-use uptrakit_web_api_queries::TenantDb as TenantDbInner;
+use uptrakit_shared_db::TenantDb as TenantDbInner;
 
 /// Axum extractor wrapping [`TenantDbInner`] with `FromRequestParts`.
 ///
