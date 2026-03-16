@@ -111,6 +111,16 @@ pub enum Capability {
     ///
     /// Wire string: `reset_data`.
     ResetData,
+    /// Service participates in the workload claim protocol for exclusive
+    /// config-key ownership.
+    ///
+    /// Services with this capability send `WorkloadClaim` after receiving
+    /// `ServiceConfigDelivery` to request exclusive ownership of config keys.
+    /// The controller responds with `WorkloadClaimResult` and routes
+    /// tenant-scoped messages only to services that hold granted claims.
+    ///
+    /// Wire string: `workload_claims`.
+    WorkloadClaims,
     /// Unknown capability from a newer peer; never participates in intersection.
     ///
     /// Provides forward compatibility: a newer peer may advertise capabilities
@@ -137,6 +147,7 @@ impl Capability {
             Self::UiExtensions => "ui_extensions",
             Self::InteractiveUpdates => "interactive_updates",
             Self::ResetData => "reset_data",
+            Self::WorkloadClaims => "workload_claims",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -175,6 +186,7 @@ impl FromStr for Capability {
             "ui_extensions" => Self::UiExtensions,
             "interactive_updates" => Self::InteractiveUpdates,
             "reset_data" => Self::ResetData,
+            "workload_claims" => Self::WorkloadClaims,
             other => {
                 tracing::debug!(capability = other, "received unknown capability from peer");
                 Self::Other(other.to_string())

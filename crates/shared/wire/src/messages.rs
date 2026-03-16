@@ -15,6 +15,8 @@ use super::payloads::{
     SetUpdateFreezePayload, SoftwareStatesChangedPayload, SoftwareStatesPayload,
     StdinAttentionPayload, StoreServiceConfigPayload, TokenRevokedPayload, UpdateOutputPayload,
     UpdateResultPayload, UpdateStartedPayload, UpdateStdinDataPayload, VersionCheckResultsPayload,
+    WorkloadClaimAnnouncementPayload, WorkloadClaimPayload, WorkloadClaimResultPayload,
+    WorkloadClaimSyncRequestPayload, WorkloadClaimSyncResponsePayload, WorkloadReleasePayload,
 };
 
 /// Messages sent from a service (agent or MQTT) to the controller.
@@ -120,6 +122,18 @@ pub enum ServiceMessage {
     ///
     /// The controller deletes, ACKs, and broadcasts `ServiceConfigUpdated`.
     DeleteServiceConfig(DeleteServiceConfigPayload),
+    // -- Workload claim protocol --
+    /// Service → Controller: request exclusive ownership of config keys.
+    ///
+    /// Sent after `ServiceConfigDelivery` is processed and whenever the
+    /// desired config set changes. Uses full replacement semantics.
+    /// Requires the `WorkloadClaims` capability.
+    WorkloadClaim(WorkloadClaimPayload),
+    /// Service → Controller: voluntarily release config keys.
+    ///
+    /// Sent when a service no longer wants to serve certain configs.
+    /// Requires the `WorkloadClaims` capability.
+    WorkloadRelease(WorkloadReleasePayload),
     /// Unknown message type from a newer service build.
     ///
     /// Deserialized when the `type` tag does not match any known variant.
@@ -266,6 +280,35 @@ pub enum ControllerMessage {
     ///
     /// **Safe to publish via NATS** — contains no credential material.
     BroadcastAdminEvent(BroadcastAdminEventPayload),
+    // -- Workload claim protocol --
+    /// Controller → Service: grant/reject response for a workload claim.
+    ///
+    /// Sent in response to `WorkloadClaim`, unsolicited for proactive
+    /// re-grants when previously rejected keys become available, or for
+    /// revocations during cross-controller conflict resolution.
+    ///
+    /// **Session-targeted**: NEVER published to NATS.
+    WorkloadClaimResult(WorkloadClaimResultPayload),
+    /// Controller → NATS: announce claim state changes for cross-controller sync.
+    ///
+    /// Published to the `controller` NATS subject after granting or releasing
+    /// claims. Other controllers update their global claim registry from this.
+    ///
+    /// **Safe to publish via NATS** — contains no credential material.
+    WorkloadClaimAnnouncement(WorkloadClaimAnnouncementPayload),
+    /// Controller → NATS: request full claim state from all active controllers.
+    ///
+    /// Published on controller startup. Each active controller responds with
+    /// `WorkloadClaimSyncResponse`.
+    ///
+    /// **NATS-only** (controller-to-controller).
+    WorkloadClaimSyncRequest(WorkloadClaimSyncRequestPayload),
+    /// Controller → NATS: respond with full local claim state.
+    ///
+    /// Sent in response to `WorkloadClaimSyncRequest`.
+    ///
+    /// **NATS-only** (controller-to-controller).
+    WorkloadClaimSyncResponse(WorkloadClaimSyncResponsePayload),
     /// Unknown message type from a newer controller build.
     ///
     /// Deserialized when the `type` tag does not match any known variant.
@@ -298,6 +341,7 @@ impl ControllerMessage {
                 | ControllerMessage::ServiceConfigDelivery(_)
                 | ControllerMessage::ServiceConfigAck(_)
                 | ControllerMessage::ServiceConfigUpdated(_)
+                | ControllerMessage::WorkloadClaimResult(_)
                 | ControllerMessage::Unknown
         )
     }

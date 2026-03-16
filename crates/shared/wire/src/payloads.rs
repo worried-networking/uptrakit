@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
@@ -1401,4 +1401,185 @@ pub struct BroadcastAdminEventPayload {
     pub tenant_id: Option<Uuid>,
     /// JSON-serialised `AdminEvent`.
     pub event_json: String,
+}
+
+// =============================================================================
+// Workload Claim Protocol Payloads
+// =============================================================================
+
+/// Service → Controller: request exclusive ownership of config keys.
+///
+/// Each key in `claims` is a config key (e.g. `"clients.{uuid}"`) and the
+/// value is the `tenant_id` that config belongs to. The controller grants
+/// unclaimed keys and rejects keys already claimed by another service.
+///
+/// Uses **full replacement semantics**: each `WorkloadClaim` sends the
+/// complete desired config key set. The controller diffs against current
+/// grants to determine what to claim/release.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkloadClaimPayload {
+    /// Map of `config_key → tenant_id` representing the full desired set.
+    pub claims: BTreeMap<String, Uuid>,
+}
+
+impl WorkloadClaimPayload {
+    /// Create a new `WorkloadClaimPayload`.
+    pub fn new(claims: BTreeMap<String, Uuid>) -> Self {
+        Self { claims }
+    }
+}
+
+/// Controller → Service: grant/reject response for a workload claim request.
+///
+/// Sent in response to `WorkloadClaim`, or unsolicited when the controller
+/// proactively re-grants previously rejected keys that became available
+/// (e.g. after another service disconnected), or when revoking keys due
+/// to cross-controller conflict resolution.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkloadClaimResultPayload {
+    /// Config keys that were granted (exclusive ownership).
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub granted: BTreeSet<String>,
+    /// Config keys that were rejected (already claimed by another service).
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub rejected: BTreeSet<String>,
+}
+
+impl WorkloadClaimResultPayload {
+    /// Create a new `WorkloadClaimResultPayload`.
+    pub fn new(granted: BTreeSet<String>, rejected: BTreeSet<String>) -> Self {
+        Self { granted, rejected }
+    }
+}
+
+/// Service → Controller: voluntarily release config keys.
+///
+/// Sent when a service no longer wants to serve certain configs (e.g. after
+/// a config deletion). The controller releases the keys and makes them
+/// available for other services.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkloadReleasePayload {
+    /// Config keys to release.
+    pub keys: BTreeSet<String>,
+}
+
+impl WorkloadReleasePayload {
+    /// Create a new `WorkloadReleasePayload`.
+    pub fn new(keys: BTreeSet<String>) -> Self {
+        Self { keys }
+    }
+}
+
+/// Controller → NATS: announce claim state changes for cross-controller sync.
+///
+/// Published to the `controller` NATS subject after granting or releasing
+/// claims. Other controllers update their global claim registry from this.
+///
+/// **Safe to publish via NATS** — contains no credential material.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkloadClaimAnnouncementPayload {
+    /// The service that owns these claims.
+    pub service_id: Uuid,
+    /// The controller that granted these claims.
+    pub controller_id: Uuid,
+    /// Newly claimed keys: `config_key → tenant_id`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub claimed: BTreeMap<String, Uuid>,
+    /// Keys that were released.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub released: BTreeSet<String>,
+    /// ISO 8601 timestamp when the claims were granted (for conflict resolution).
+    pub claimed_at: String,
+}
+
+impl WorkloadClaimAnnouncementPayload {
+    /// Create a new `WorkloadClaimAnnouncementPayload`.
+    pub fn new(
+        service_id: Uuid,
+        controller_id: Uuid,
+        claimed: BTreeMap<String, Uuid>,
+        released: BTreeSet<String>,
+        claimed_at: String,
+    ) -> Self {
+        Self {
+            service_id,
+            controller_id,
+            claimed,
+            released,
+            claimed_at,
+        }
+    }
+}
+
+/// Controller → NATS: request full claim state from all active controllers.
+///
+/// Published on controller startup to the `controller` NATS subject.
+/// Each active controller responds with `WorkloadClaimSyncResponse`.
+///
+/// **NATS-only** (controller-to-controller), not service-facing.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkloadClaimSyncRequestPayload {
+    /// The requesting controller's ID.
+    pub controller_id: Uuid,
+}
+
+impl WorkloadClaimSyncRequestPayload {
+    /// Create a new `WorkloadClaimSyncRequestPayload`.
+    pub fn new(controller_id: Uuid) -> Self {
+        Self { controller_id }
+    }
+}
+
+/// Controller → NATS: respond with full local claim state.
+///
+/// Sent in response to `WorkloadClaimSyncRequest`. Contains the responding
+/// controller's complete local claim map for merging into the requester's
+/// global registry.
+///
+/// **NATS-only** (controller-to-controller), not service-facing.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkloadClaimSyncResponsePayload {
+    /// The responding controller's ID.
+    pub controller_id: Uuid,
+    /// Full local claim state: `config_key → (service_id, tenant_id)`.
+    pub claims: BTreeMap<String, WorkloadClaimSyncEntry>,
+}
+
+impl WorkloadClaimSyncResponsePayload {
+    /// Create a new `WorkloadClaimSyncResponsePayload`.
+    pub fn new(controller_id: Uuid, claims: BTreeMap<String, WorkloadClaimSyncEntry>) -> Self {
+        Self {
+            controller_id,
+            claims,
+        }
+    }
+}
+
+/// A single entry in a `WorkloadClaimSyncResponse`.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkloadClaimSyncEntry {
+    /// The service that owns this claim.
+    pub service_id: Uuid,
+    /// The tenant this config key belongs to.
+    pub tenant_id: Uuid,
+    /// ISO 8601 timestamp when the claim was granted.
+    pub claimed_at: String,
+}
+
+impl WorkloadClaimSyncEntry {
+    /// Create a new `WorkloadClaimSyncEntry`.
+    pub fn new(service_id: Uuid, tenant_id: Uuid, claimed_at: String) -> Self {
+        Self {
+            service_id,
+            tenant_id,
+            claimed_at,
+        }
+    }
 }

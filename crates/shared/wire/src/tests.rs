@@ -2769,3 +2769,167 @@ fn controller_extension_response_roundtrip() {
     let roundtripped: ControllerMessage = serde_json::from_value(json).unwrap();
     assert_eq!(roundtripped, msg);
 }
+
+// =========================================================================
+// Workload claim protocol tests
+// =========================================================================
+
+#[test]
+fn workload_claim_serialization_roundtrip() {
+    use std::collections::BTreeMap;
+    let mut claims = BTreeMap::new();
+    claims.insert("clients.aaa".to_string(), TEST_UUID_1);
+    claims.insert("clients.bbb".to_string(), TEST_UUID_2);
+    let msg = ServiceMessage::WorkloadClaim(WorkloadClaimPayload::new(claims));
+    let json = serde_json::to_value(&msg).unwrap();
+    assert_eq!(json["type"], "workload_claim");
+    assert!(json["claims"]["clients.aaa"].is_string());
+    let roundtripped: ServiceMessage = serde_json::from_value(json).unwrap();
+    assert_eq!(roundtripped, msg);
+}
+
+#[test]
+fn workload_claim_empty_claims() {
+    use std::collections::BTreeMap;
+    let msg = ServiceMessage::WorkloadClaim(WorkloadClaimPayload::new(BTreeMap::new()));
+    let json = serde_json::to_value(&msg).unwrap();
+    assert_eq!(json["type"], "workload_claim");
+    let roundtripped: ServiceMessage = serde_json::from_value(json).unwrap();
+    assert_eq!(roundtripped, msg);
+}
+
+#[test]
+fn workload_claim_result_serialization_roundtrip() {
+    let msg = ControllerMessage::WorkloadClaimResult(WorkloadClaimResultPayload::new(
+        ["clients.aaa".to_string()].into(),
+        ["clients.bbb".to_string()].into(),
+    ));
+    let json = serde_json::to_value(&msg).unwrap();
+    assert_eq!(json["type"], "workload_claim_result");
+    let roundtripped: ControllerMessage = serde_json::from_value(json).unwrap();
+    assert_eq!(roundtripped, msg);
+}
+
+#[test]
+fn workload_claim_result_empty_sets_omitted() {
+    let msg = ControllerMessage::WorkloadClaimResult(WorkloadClaimResultPayload::new(
+        BTreeSet::new(),
+        BTreeSet::new(),
+    ));
+    let json = serde_json::to_string(&msg).unwrap();
+    assert!(!json.contains("granted"));
+    assert!(!json.contains("rejected"));
+    let roundtripped: ControllerMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(roundtripped, msg);
+}
+
+#[test]
+fn workload_release_serialization_roundtrip() {
+    let msg = ServiceMessage::WorkloadRelease(WorkloadReleasePayload::new(
+        ["clients.aaa".to_string()].into(),
+    ));
+    let json = serde_json::to_value(&msg).unwrap();
+    assert_eq!(json["type"], "workload_release");
+    let roundtripped: ServiceMessage = serde_json::from_value(json).unwrap();
+    assert_eq!(roundtripped, msg);
+}
+
+#[test]
+fn workload_claim_announcement_roundtrip() {
+    use std::collections::BTreeMap;
+    let mut claimed = BTreeMap::new();
+    claimed.insert("clients.aaa".to_string(), TEST_UUID_1);
+    let msg = ControllerMessage::WorkloadClaimAnnouncement(WorkloadClaimAnnouncementPayload::new(
+        TEST_UUID_1,
+        TEST_UUID_2,
+        claimed,
+        ["clients.old".to_string()].into(),
+        "2026-03-16T12:00:00Z".to_string(),
+    ));
+    let json = serde_json::to_value(&msg).unwrap();
+    assert_eq!(json["type"], "workload_claim_announcement");
+    let roundtripped: ControllerMessage = serde_json::from_value(json).unwrap();
+    assert_eq!(roundtripped, msg);
+}
+
+#[test]
+fn workload_claim_announcement_is_nats_publishable() {
+    use std::collections::BTreeMap;
+    let msg = ControllerMessage::WorkloadClaimAnnouncement(WorkloadClaimAnnouncementPayload::new(
+        TEST_UUID_1,
+        TEST_UUID_2,
+        BTreeMap::new(),
+        BTreeSet::new(),
+        "2026-03-16T12:00:00Z".to_string(),
+    ));
+    assert!(msg.is_nats_publishable());
+}
+
+#[test]
+fn workload_claim_result_is_not_nats_publishable() {
+    let msg = ControllerMessage::WorkloadClaimResult(WorkloadClaimResultPayload::new(
+        BTreeSet::new(),
+        BTreeSet::new(),
+    ));
+    assert!(!msg.is_nats_publishable());
+}
+
+#[test]
+fn workload_claim_sync_request_roundtrip() {
+    let msg = ControllerMessage::WorkloadClaimSyncRequest(WorkloadClaimSyncRequestPayload::new(
+        TEST_UUID_1,
+    ));
+    let json = serde_json::to_value(&msg).unwrap();
+    assert_eq!(json["type"], "workload_claim_sync_request");
+    let roundtripped: ControllerMessage = serde_json::from_value(json).unwrap();
+    assert_eq!(roundtripped, msg);
+}
+
+#[test]
+fn workload_claim_sync_response_roundtrip() {
+    use std::collections::BTreeMap;
+    let mut claims = BTreeMap::new();
+    claims.insert(
+        "clients.aaa".to_string(),
+        WorkloadClaimSyncEntry::new(TEST_UUID_1, TEST_UUID_2, "2026-03-16T12:00:00Z".to_string()),
+    );
+    let msg = ControllerMessage::WorkloadClaimSyncResponse(WorkloadClaimSyncResponsePayload::new(
+        TEST_UUID_3,
+        claims,
+    ));
+    let json = serde_json::to_value(&msg).unwrap();
+    assert_eq!(json["type"], "workload_claim_sync_response");
+    let roundtripped: ControllerMessage = serde_json::from_value(json).unwrap();
+    assert_eq!(roundtripped, msg);
+}
+
+#[test]
+fn workload_claim_sync_request_is_nats_publishable() {
+    let msg = ControllerMessage::WorkloadClaimSyncRequest(WorkloadClaimSyncRequestPayload::new(
+        TEST_UUID_1,
+    ));
+    assert!(msg.is_nats_publishable());
+}
+
+#[test]
+fn workload_claim_sync_response_is_nats_publishable() {
+    use std::collections::BTreeMap;
+    let msg = ControllerMessage::WorkloadClaimSyncResponse(WorkloadClaimSyncResponsePayload::new(
+        TEST_UUID_1,
+        BTreeMap::new(),
+    ));
+    assert!(msg.is_nats_publishable());
+}
+
+#[test]
+fn workload_claims_capability_roundtrip() {
+    let cap = Capability::WorkloadClaims;
+    assert_eq!(cap.as_str(), "workload_claims");
+    assert!(cap.is_known());
+    let parsed: Capability = "workload_claims".parse().unwrap();
+    assert_eq!(parsed, Capability::WorkloadClaims);
+    let json = serde_json::to_value(&cap).unwrap();
+    assert_eq!(json, "workload_claims");
+    let deserialized: Capability = serde_json::from_value(json).unwrap();
+    assert_eq!(deserialized, cap);
+}

@@ -54,6 +54,8 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::ExtensionRequest(p) => p.wire_validate(),
             ServiceMessage::StoreServiceConfig(p) => p.wire_validate(),
             ServiceMessage::DeleteServiceConfig(p) => p.wire_validate(),
+            ServiceMessage::WorkloadClaim(p) => p.wire_validate(),
+            ServiceMessage::WorkloadRelease(p) => p.wire_validate(),
             // Forward-compatible: unknown variants from newer peers pass validation.
             _ => {
                 tracing::debug!(
@@ -98,6 +100,10 @@ impl WireValidate for ControllerMessage {
             ControllerMessage::RequestCaRotation(p) => p.wire_validate(),
             ControllerMessage::RequestCrlRenewal(_) => Ok(()),
             ControllerMessage::TokenRevoked(_) => Ok(()),
+            ControllerMessage::WorkloadClaimResult(p) => p.wire_validate(),
+            ControllerMessage::WorkloadClaimAnnouncement(p) => p.wire_validate(),
+            ControllerMessage::WorkloadClaimSyncRequest(_) => Ok(()),
+            ControllerMessage::WorkloadClaimSyncResponse(p) => p.wire_validate(),
             // Forward-compatible: unknown variants from newer peers pass validation.
             _ => {
                 tracing::debug!(
@@ -1158,6 +1164,72 @@ impl WireValidate for ServiceConfigUpdatedPayload {
         }
         for key in &self.deleted {
             key.wire_validate()?;
+        }
+        Ok(())
+    }
+}
+
+// ── Workload claim protocol ─────────────────────────────────────────────────
+
+impl WireValidate for WorkloadClaimPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_map_len(&self.claims, MAX_WORKLOAD_CLAIM_KEYS, "claims")?;
+        for key in self.claims.keys() {
+            check_string_len(key, MAX_SHORT_STRING_LEN, "claims[key]")?;
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for WorkloadClaimResultPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_set_len(&self.granted, MAX_WORKLOAD_CLAIM_KEYS, "granted")?;
+        check_set_len(&self.rejected, MAX_WORKLOAD_CLAIM_KEYS, "rejected")?;
+        for key in &self.granted {
+            check_string_len(key, MAX_SHORT_STRING_LEN, "granted[key]")?;
+        }
+        for key in &self.rejected {
+            check_string_len(key, MAX_SHORT_STRING_LEN, "rejected[key]")?;
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for WorkloadReleasePayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_set_len(&self.keys, MAX_WORKLOAD_CLAIM_KEYS, "keys")?;
+        for key in &self.keys {
+            check_string_len(key, MAX_SHORT_STRING_LEN, "keys[key]")?;
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for WorkloadClaimAnnouncementPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_map_len(&self.claimed, MAX_WORKLOAD_CLAIM_KEYS, "claimed")?;
+        check_set_len(&self.released, MAX_WORKLOAD_CLAIM_KEYS, "released")?;
+        check_string_len(&self.claimed_at, MAX_SHORT_STRING_LEN, "claimed_at")?;
+        for key in self.claimed.keys() {
+            check_string_len(key, MAX_SHORT_STRING_LEN, "claimed[key]")?;
+        }
+        for key in &self.released {
+            check_string_len(key, MAX_SHORT_STRING_LEN, "released[key]")?;
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for WorkloadClaimSyncResponsePayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_map_len(&self.claims, MAX_WORKLOAD_CLAIM_KEYS, "claims")?;
+        for (key, entry) in &self.claims {
+            check_string_len(key, MAX_SHORT_STRING_LEN, "claims[key]")?;
+            check_string_len(
+                &entry.claimed_at,
+                MAX_SHORT_STRING_LEN,
+                "claims[].claimed_at",
+            )?;
         }
         Ok(())
     }

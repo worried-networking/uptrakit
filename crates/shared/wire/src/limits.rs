@@ -98,7 +98,7 @@ pub const MAX_HOST_TAGS: usize = 100;
 pub const MAX_CONNECTIVITY_UPDATES: usize = 500;
 
 /// Maximum number of active MQTT client IDs.
-pub const MAX_ACTIVE_MQTT_CLIENTS: usize = 500;
+pub const MAX_ACTIVE_MQTT_CLIENTS: usize = 50_000;
 
 /// Maximum number of capabilities in a single `Register` message.
 ///
@@ -204,10 +204,13 @@ pub const MAX_OUTPUT_STRING_LEN: usize = 1_048_576;
 pub const MAX_RELEASE_ASSETS: usize = 500;
 
 /// Maximum number of entries in a `ServiceConfigDelivery` or `ServiceConfigUpdated` message.
-pub const MAX_SERVICE_CONFIG_ENTRIES: usize = 10_000;
+pub const MAX_SERVICE_CONFIG_ENTRIES: usize = 1_000_000;
 
 /// Maximum byte length of a service config value (serialized JSON).
 pub const MAX_SERVICE_CONFIG_VALUE_LEN: usize = 65_536;
+
+/// Maximum number of config keys in a single `WorkloadClaim` message.
+pub const MAX_WORKLOAD_CLAIM_KEYS: usize = 100_000;
 
 /// Expected byte length of a SHA-256 hex digest string (64 hex characters).
 pub const SHA256_DIGEST_LEN: usize = 64;
@@ -239,6 +242,36 @@ pub fn check_string_len(
         return Err(WireValidationError {
             field,
             message: format!("string is {} bytes, max {max}", s.len()),
+        });
+    }
+    Ok(())
+}
+
+/// Check that a `BTreeMap` does not exceed the given length limit.
+pub fn check_map_len<K, V>(
+    items: &std::collections::BTreeMap<K, V>,
+    max: usize,
+    field: &'static str,
+) -> Result<(), WireValidationError> {
+    if items.len() > max {
+        return Err(WireValidationError {
+            field,
+            message: format!("map has {} entries, max {max}", items.len()),
+        });
+    }
+    Ok(())
+}
+
+/// Check that a `BTreeSet` does not exceed the given length limit.
+pub fn check_set_len<T>(
+    items: &std::collections::BTreeSet<T>,
+    max: usize,
+    field: &'static str,
+) -> Result<(), WireValidationError> {
+    if items.len() > max {
+        return Err(WireValidationError {
+            field,
+            message: format!("set has {} items, max {max}", items.len()),
         });
     }
     Ok(())
