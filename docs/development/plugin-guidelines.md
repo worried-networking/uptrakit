@@ -255,6 +255,30 @@ logic from the execution transport, enabling the same plugin code to run command
 See [Command Executor](command-executor.md) for the full trait reference, `CommandSpec` constructors,
 and guidance on implementing custom executors.
 
+### `execute_and_capture` helper
+
+For the common pattern of running a command and capturing its stdout as a `String`, use the shared
+helper from `uptrakit-plugin-infrastructure-core`:
+
+```rust
+use uptrakit_plugin_infrastructure_core::execute_and_capture;
+
+let output = execute_and_capture(
+    self.executor.as_ref(),
+    CommandSpec::exec("dpkg-query", [...]),
+    "dpkg-query list",
+).await?;
+```
+
+This helper calls `execute_quiet`, maps any spawn/IO error to
+`PluginError::PluginInternal(context)`, and propagates a non-zero exit code as
+`PluginError::CommandFailed(code)`. Use it instead of inline `.execute_quiet()` + `.map_err()`
+boilerplate.
+
+**Do not use it** for commands where a non-zero exit code has a meaningful non-error
+interpretation (e.g. `rpm -q` exit 1 = package not installed, `dnf check-update` exit 100 =
+updates available). In those cases, call `execute_quiet` directly and inspect `exit_code`.
+
 ### Declaring privileged commands with `required_sudo_commands()`
 
 If your plugin needs passwordless `sudo` to run certain commands, implement
@@ -371,19 +395,41 @@ Plugin crates:
 | `uptrakit-plugin-hook-systemd` | `crates/plugins/hooks/systemd/` | Systemd hook: stops/starts a systemd service around updates. Implements `UpdateLifecycle`. |
 | `uptrakit-plugin-hook-shell` | `crates/plugins/hooks/shell/` | Shell hook: runs arbitrary shell commands before/after updates. Implements `UpdateLifecycle`. |
 
+## Plugin Source Layout
+
+For package-manager and similar multi-trait plugins, split implementation across focused submodules
+rather than putting everything in a single `plugin.rs` god file. The canonical structure is:
+
+```text
+crates/plugins/package-managers/mypkg/src/
+  lib.rs         — crate root: module declarations + pub re-exports
+  config.rs      — Config struct + Serde impl + validate_identifier/validate_version
+  error.rs       — plugin-specific error type (if needed)
+  plugin.rs      — MyPlugin struct + PluginBase impls + constants (~200 lines)
+  discovery.rs   — DiscoveryPlugin impl + discovery helpers
+  detection.rs   — VersionDetectorPlugin impl + parsing helpers
+  releases.rs    — ReleaseFetcherPlugin impl (or ControllerSideFetchReleases)
+  update.rs      — UpdateExecutorPlugin + PackageIndexPlugin impls
+```
+
+Tests live at the bottom of the file containing the code under test (using `#[cfg(test)]`).
+The `#[cfg(test)] use super::*;` pattern gives test blocks access to private helpers in the
+same module.
+
 ## Adding a New Plugin
 
 Checklist for adding a new first-party plugin:
 
 1. **Create crate** — add a new crate under `crates/plugins/` (e.g. `crates/plugins/my-plugin/`).
-2. **Implement `PluginBase` trait** — implement `plugin_type()`, `capabilities()`, and all relevant
+2. **Follow the plugin source layout** above — split trait impls into focused submodules from the start.
+3. **Implement `PluginBase` trait** — implement `plugin_type()`, `capabilities()`, and all relevant
    optional methods. Implement `PluginOps` for runtime operations (discover, detect, fetch, update).
-3. **Declare capabilities** — include only the `PluginCapability` variants your plugin actually
+4. **Declare capabilities** — include only the `PluginCapability` variants your plugin actually
    supports. Avoid declaring capabilities the plugin does not implement.
-4. **Register in `PluginRegistry`** — add a single entry to the `register_plugins!` macro invocation
+5. **Register in `PluginRegistry`** — add a single entry to the `register_plugins!` macro invocation
    in `crates/plugins/infrastructure/registry/src/registry.rs`. The macro generates all dispatch methods
    automatically.
-5. **Add tests** — cover success and failure paths for all implemented methods.
+6. **Add tests** — cover success and failure paths for all implemented methods.
 
 ### The `register_plugins!` macro
 

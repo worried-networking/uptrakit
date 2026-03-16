@@ -260,60 +260,45 @@ Apply this pattern to every `#[non_exhaustive]` enum that:
 - is returned as a JSON string in a REST API response (`NotificationEventType`, `NotificationDeliveryStatus`, etc.),
 - or is persisted in a column and read back by potentially older software versions.
 
-### Required implementation
+### Required implementation — use `wire_safe_enum!`
 
-Because `Other(String)` cannot implement `Copy`, and the standard `serde` `rename_all` derive
-cannot produce it automatically, use a manual `Serialize`/`Deserialize` implementation with an
-`as_str()` helper:
+Use the `wire_safe_enum!` macro from `uptrakit-shared-macros` to generate all required boilerplate.
+The macro emits: `#[non_exhaustive]` + `Other(String)`, `as_str()`, `Display`, `From<String>`
+(infallible with `tracing::debug!` on unknown), `Serialize`, `Deserialize`, a named parse-error
+type, and strict `FromStr`.
+
+```rust
+use uptrakit_shared_macros::wire_safe_enum;
+
+wire_safe_enum! {
+    /// The status of a thing.
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    pub enum MyStatus {
+        Pending  => "pending",
+        Approved => "approved",
+    }
+    parse_error = ParseMyStatusError("invalid my status");
+}
+```
+
+This generates an enum equivalent to:
 
 ```rust
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum MyStatus {
     Pending,
     Approved,
     /// Unknown variant received from a newer peer or future schema version.
     Other(String),
 }
-
-impl MyStatus {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Pending  => "pending",
-            Self::Approved => "approved",
-            Self::Other(s) => s.as_str(),
-        }
-    }
-}
-
-impl std::fmt::Display for MyStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl From<String> for MyStatus {
-    fn from(s: String) -> Self {
-        match s.as_str() {
-            "pending"  => Self::Pending,
-            "approved" => Self::Approved,
-            _          => Self::Other(s),
-        }
-    }
-}
-
-impl serde::Serialize for MyStatus {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for MyStatus {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        String::deserialize(d).map(Self::from)
-    }
-}
+// + as_str(), Display, From<String>, Serialize, Deserialize,
+// + ParseMyStatusError, FromStr
 ```
+
+For enums whose `From<String>` or `FromStr` impls require custom logic not expressible as a simple
+string table (e.g. infallible `FromStr` that maps unknowns to a sentinel rather than `Err`), write
+the impls by hand following the pattern in `crates/shared/wire/src/lib.rs`.
 
 ### Consequences
 
