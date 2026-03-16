@@ -55,7 +55,7 @@ use uptrakit_internal_wire::limits::WireValidate;
 use uptrakit_internal_wire::report_tracker::ReportTracker;
 use uptrakit_internal_wire::{
     Capability, CloseReason, ControllerMessage, ErrorCode, ErrorPayload, HostConnectivityUpdate,
-    IncomingSeq, OutgoingSeq, PingPayload, ReportPagination, ServiceMessage,
+    IncomingSeq, OutgoingSeq, PingPayload, RegisterPayload, ReportPagination, ServiceMessage,
     UpdateCapabilitiesPayload,
 };
 use uptrakit_shared_db::entity::{service, system_service as sys_svc_entity};
@@ -716,42 +716,137 @@ fn spawn_message_processor(processor: MessageProcessor) -> ProcessorChannels {
 }
 
 // ---------------------------------------------------------------------------
+// receive_register_message
+// ---------------------------------------------------------------------------
+
+/// Read the first frame from the service and expect it to be a `Register` message.
+///
+/// Called as Stage 3 of [`setup_authenticated_session`], immediately after
+/// credential and config delivery, before the service begins sending
+/// operational messages. The service must send `Register` synchronously from
+/// `on_connected` so it arrives here before any other message.
+///
+/// Returns `Some(RegisterPayload)` on success, or `None` if:
+/// - The connection closed or produced a read error.
+/// - Rate limiting was exceeded.
+/// - Deserialization failed (hard error — malformed frame).
+/// - The first message was not `ServiceMessage::Register`.
+///
+/// On failure the connection is closed with [`CloseReason::ProtocolError`].
+#[allow(clippy::too_many_arguments)]
+async fn receive_register_message(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    stream: &mut futures_util::stream::SplitStream<WebSocket>,
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
+    rate_limiter: &mut MessageRateLimiter,
+) -> Option<RegisterPayload> {
+    use futures_util::StreamExt as _;
+
+    let _ = (state, out_seq); // unused but kept for consistency with other stage helpers
+
+    let frame = match stream.next().await {
+        Some(Ok(f)) => f,
+        Some(Err(e)) => {
+            tracing::debug!(%service_id, error = %e, "websocket read error waiting for Register");
+            return None;
+        }
+        None => {
+            tracing::debug!(%service_id, "connection closed before Register was received");
+            return None;
+        }
+    };
+
+    let text = match frame {
+        Message::Text(t) => t,
+        Message::Close(_) => {
+            tracing::debug!(%service_id, "received Close frame waiting for Register");
+            return None;
+        }
+        _ => {
+            tracing::warn!(%service_id, "expected text frame for Register, got non-text frame");
+            let _ = close_with_reason(sink, CloseReason::ProtocolError).await;
+            return None;
+        }
+    };
+
+    if !rate_limiter.allow() {
+        tracing::warn!(%service_id, "rate limit exceeded on Register frame");
+        let _ = close_with_reason(sink, CloseReason::RateLimitExceeded).await;
+        return None;
+    }
+
+    let deserialized = match deserialize_service_msg(in_seq, &text) {
+        Ok(Some(d)) => d,
+        Ok(None) => {
+            tracing::warn!(%service_id, "Register frame could not be deserialized (unknown type)");
+            let _ = close_with_reason(sink, CloseReason::ProtocolError).await;
+            return None;
+        }
+        Err(e) => {
+            tracing::debug!(%service_id, error = %e, "hard deserialize error on Register frame");
+            let _ = close_with_reason(sink, CloseReason::ProtocolError).await;
+            return None;
+        }
+    };
+
+    match deserialized.message {
+        ServiceMessage::Register(payload) => {
+            tracing::debug!(
+                %service_id,
+                capabilities = ?payload.capabilities,
+                "received Register from service"
+            );
+            Some(payload)
+        }
+        other => {
+            tracing::warn!(
+                %service_id,
+                message_type = ?std::mem::discriminant(&other),
+                "expected Register as first message, got unexpected variant; closing connection"
+            );
+            let _ = close_with_reason(sink, CloseReason::ProtocolError).await;
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // setup_authenticated_session
 // ---------------------------------------------------------------------------
 
 /// Perform all pre-loop setup for the authenticated handler.
 ///
-/// Loads the service from the DB, delivers credentials, runs the MQTT
-/// handshake (if applicable), registers the connection, spawns the background
-/// processor, and delivers pending updates.
+/// Loads the service from the DB, delivers credentials, receives the Register
+/// handshake, registers the connection, spawns the background processor, and
+/// delivers pending updates.
 ///
-/// Returns `None` if the connection must be closed early (e.g. failed MQTT
+/// Returns `None` if the connection must be closed early (e.g. failed Register
 /// handshake or write failure).
 // All parameters originate from the caller's `AuthenticatedContext` and cannot
 // be meaningfully grouped without introducing a wrapper that duplicates it.
 #[allow(clippy::too_many_arguments)]
 async fn setup_authenticated_session(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    _stream: &mut futures_util::stream::SplitStream<WebSocket>,
+    stream: &mut futures_util::stream::SplitStream<WebSocket>,
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     cert: &CertIdentity,
     is_system: bool,
     out_seq: &mut OutgoingSeq,
-    _in_seq: &mut IncomingSeq,
+    in_seq: &mut IncomingSeq,
 ) -> Option<AuthenticatedSessionState> {
-    // Stage 1: Load service record from DB. The DB capabilities are used only
-    // for credential delivery (which checks DatabaseAccess, NatsAccess, etc.),
-    // not for service-type detection. Service-type detection happens on the
-    // live wire in Stage 3 below.
+    // Stage 1: Load service record from DB. The DB capabilities are used for
+    // credential delivery (DatabaseAccess, NatsAccess, etc.). Session-level
+    // capability flags (is_mqtt, has_software_discovery, etc.) come from the
+    // Register handshake in Stage 3 so they are correct on first connect even
+    // when the DB row has no stored capabilities yet.
     let (db_capabilities, service_app_name, service_tenant_id) =
         load_service_capabilities(state, service_id, is_system).await;
 
-    let is_mqtt = db_capabilities.contains(&Capability::UpdateTracking);
-    let has_software_discovery = db_capabilities.contains(&Capability::SoftwareDiscovery);
-    let has_update_hooks = db_capabilities.contains(&Capability::UpdateHooks);
-    let has_ui_extensions = db_capabilities.contains(&Capability::UiExtensions);
-    let rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
+    let mut rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
 
     // Stage 2: Deliver credentials to services that have credential capabilities.
     deliver_service_credentials(sink, state, &db_capabilities, service_id, out_seq).await?;
@@ -761,22 +856,59 @@ async fn setup_authenticated_session(
         service_config::deliver_service_config(sink, state, app_name, out_seq).await?;
     }
 
-    // Stage 3: Register the connection and notify embedded services.
+    // Stage 3: Receive the Register handshake from the service.
+    //
+    // The service sends `Register` from `on_connected` immediately after the
+    // controller completes credential + config delivery. This gives us the
+    // authoritative session-level capability set before we register the
+    // connection, so all downstream decisions use live data rather than
+    // potentially-stale DB values.
+    let register_payload = receive_register_message(
+        sink,
+        stream,
+        state,
+        service_id,
+        out_seq,
+        in_seq,
+        &mut rate_limiter,
+    )
+    .await?;
+
+    let session_capabilities = register_payload.capabilities.clone();
+    let is_mqtt = session_capabilities.contains(&Capability::UpdateTracking);
+    let has_software_discovery = session_capabilities.contains(&Capability::SoftwareDiscovery);
+    let has_update_hooks = session_capabilities.contains(&Capability::UpdateHooks);
+    let has_ui_extensions = session_capabilities.contains(&Capability::UiExtensions);
+
+    // Persist the session capabilities to the DB so that subsequent reconnects
+    // (and other controller instances) see the up-to-date capability set.
+    upgrade_service_capabilities(
+        state.db(),
+        service_id,
+        is_system,
+        UpdateCapabilitiesPayload {
+            capabilities: register_payload.capabilities,
+        },
+        &mut { has_ui_extensions },
+    )
+    .await;
+
+    // Stage 4: Register the connection and notify embedded services.
     let (push_rx, cancel_token) = register_connection(
         state,
         service_id,
-        &db_capabilities,
+        &session_capabilities,
         service_app_name.clone(),
     )
     .await;
 
-    // Stage 4: Load linked host IDs shared between the main loop and the processor.
+    // Stage 5: Load linked host IDs shared between the main loop and the processor.
     let linked_host_ids = load_session_host_ids(state, service_id, has_software_discovery).await;
 
-    // Stage 5: Deliver pending updates to services with the `UpdateHooks` capability.
+    // Stage 6: Deliver pending updates to services with the `UpdateHooks` capability.
     deliver_pending_updates_on_connect(sink, state, service_id, has_update_hooks, out_seq).await;
 
-    // Stage 6: Spawn the background message processor.
+    // Stage 7: Spawn the background message processor.
     let processor = MessageProcessor {
         state: Arc::clone(state),
         service_id,

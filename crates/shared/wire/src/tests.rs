@@ -58,6 +58,36 @@ fn ssh_agent_capabilities() -> BTreeSet<Capability> {
 }
 
 #[test]
+fn register_agent_serialization_roundtrip() {
+    let msg = ServiceMessage::Register(RegisterPayload::new(agent_capabilities()));
+    let json = serde_json::to_string(&msg).unwrap();
+    assert!(json.contains(r#""type":"register""#));
+    assert!(json.contains(r#""software_discovery""#));
+    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized, msg);
+}
+
+#[test]
+fn register_mqtt_serialization_roundtrip() {
+    let msg = ServiceMessage::Register(RegisterPayload::new(mqtt_capabilities()));
+    let json = serde_json::to_string(&msg).unwrap();
+    assert!(json.contains(r#""type":"register""#));
+    assert!(json.contains(r#""update_tracking""#));
+    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized, msg);
+}
+
+#[test]
+fn register_empty_capabilities_omitted_from_json() {
+    let msg = ServiceMessage::Register(RegisterPayload::new(BTreeSet::new()));
+    let json = serde_json::to_string(&msg).unwrap();
+    // Empty capabilities BTreeSet must be omitted (skip_serializing_if).
+    assert!(!json.contains(r#""capabilities""#));
+    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized, msg);
+}
+
+#[test]
 fn enroll_agent_serialization_roundtrip() {
     let msg = ServiceMessage::Enroll(EnrollPayload {
         hostname: "node-1".to_string(),

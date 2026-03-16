@@ -22,10 +22,17 @@ fn validate_report_page_limit(
 
 // ── ServiceMessage dispatcher ─────────────────────────────────────────────────
 
+impl WireValidate for RegisterPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        Ok(())
+    }
+}
+
 impl WireValidate for ServiceMessage {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         match self {
             ServiceMessage::Ping(_) => Ok(()),
+            ServiceMessage::Register(_) => Ok(()),
             ServiceMessage::Enroll(p) => p.wire_validate(),
             ServiceMessage::RequestCertificate(p) => p.wire_validate(),
             ServiceMessage::RenewCertificate(p) => p.wire_validate(),

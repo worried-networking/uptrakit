@@ -20,7 +20,7 @@ use rootcause::prelude::*;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
-use uptrakit_internal_wire::{Capability, ControllerMessage};
+use uptrakit_internal_wire::{Capability, ControllerMessage, RegisterPayload, ServiceMessage};
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
     ShutdownCause, default_resolve_shutdown,
@@ -216,9 +216,17 @@ impl ServiceHandler for SshAgentHandler {
 
     async fn on_connected(
         &mut self,
-        _conn: &mut ControllerConnection,
+        conn: &mut ControllerConnection,
         identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
+        // Declare capabilities immediately so the controller can set session
+        // flags correctly even on first connect (before DB has stored caps).
+        conn.send(ServiceMessage::Register(RegisterPayload::new(
+            client::ssh_agent_capabilities(),
+        )))
+        .await
+        .context_to::<LoopError>()?;
+
         // Store identity state for extension use.
         self.service_id = identity.service_id();
         self.private_key_der = identity.private_key_pkcs8_der();

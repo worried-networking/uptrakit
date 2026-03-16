@@ -7,7 +7,7 @@ use super::payloads::{
     CertificatePayload, CheckVersionsPayload, DeleteServiceConfigPayload, DisconnectingPayload,
     DiscoverSoftwarePayload, DiscoveryResultsPayload, EnrollPayload, EnrolledPayload,
     ExecuteBatchUpdatePayload, ExecuteUpdatePayload, HostConnectivityUpdatedPayload, PingPayload,
-    PongPayload, RejectedPayload, ReportHostsPayload, ReportPluginConfigPayload,
+    PongPayload, RegisterPayload, RejectedPayload, ReportHostsPayload, ReportPluginConfigPayload,
     ReportPluginConfigResponsePayload, RequestCaRotationPayload, RequestCertRenewalPayload,
     RequestCrlRenewalPayload, ServerRestartingPayload, ServiceConfigAckPayload,
     ServiceConfigDeliveryPayload, ServiceConfigUpdatedPayload, ServiceCredentialsPayload,
@@ -63,6 +63,13 @@ pub enum ServiceMessage {
         alias = "mqtt_trigger_host_package_update"
     )]
     ServiceTriggerHostBatchUpdate(ServiceHostBatchUpdateTriggerPayload),
+    // -- Capability declaration --
+    /// Service declares its capabilities immediately on connect.
+    ///
+    /// Sent from `on_connected` before `ServiceSettings` is processed.
+    /// The controller uses this to establish session-level capability flags
+    /// without relying on DB-stored values (which may be absent on first connect).
+    Register(RegisterPayload),
     // -- Capability management --
     /// Service announces its current capability set to the controller.
     ///

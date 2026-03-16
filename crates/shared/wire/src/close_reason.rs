@@ -41,6 +41,12 @@ pub enum CloseReason {
     EnrollmentTimeout,
     /// The service exceeded the connection rate limit.
     RateLimitExceeded,
+    /// The service sent an unexpected or malformed protocol message.
+    ///
+    /// Used when the service violates the expected message sequence, for
+    /// example by sending a message other than `Register` as the first
+    /// frame after authentication completes.
+    ProtocolError,
     /// A newer connection from the same service superseded this one.
     Superseded,
     /// A close reason string not recognized by this build.
@@ -64,6 +70,7 @@ impl CloseReason {
             Self::ServiceNotFound => "service not found",
             Self::EnrollmentTimeout => "enrollment timeout",
             Self::RateLimitExceeded => "rate limit exceeded",
+            Self::ProtocolError => "protocol error",
             Self::Superseded => "superseded by new connection",
             Self::Unknown(s) => s,
         }
@@ -100,6 +107,7 @@ impl FromStr for CloseReason {
             "service not found" => Self::ServiceNotFound,
             "enrollment timeout" => Self::EnrollmentTimeout,
             "rate limit exceeded" => Self::RateLimitExceeded,
+            "protocol error" => Self::ProtocolError,
             "superseded by new connection" => Self::Superseded,
             other => Self::Unknown(other.to_string()),
         })

@@ -12,7 +12,9 @@ use std::time::Duration;
 use rootcause::prelude::*;
 use sea_orm::{ConnectOptions, Database};
 use tokio_util::sync::CancellationToken;
-use uptrakit_internal_wire::{Capability, ControllerMessage, DisconnectingPayload, ServiceMessage};
+use uptrakit_internal_wire::{
+    Capability, ControllerMessage, DisconnectingPayload, RegisterPayload, ServiceMessage,
+};
 use uptrakit_scheduler_engine::executors::{
     auth_cleanup::AuthCleanupExecutor, detect_version::DetectVersionExecutor,
     discover_software::DiscoverSoftwareExecutor, fetch_releases::FetchReleasesExecutor,
@@ -106,9 +108,17 @@ impl ServiceHandler for SchedulerHandler {
 
     async fn on_connected(
         &mut self,
-        _conn: &mut ControllerConnection,
+        conn: &mut ControllerConnection,
         identity: &uptrakit_service_sdk::ServiceIdentityState,
     ) -> LoopResult<()> {
+        // Declare capabilities immediately so the controller can set session
+        // flags correctly even on first connect (before DB has stored caps).
+        conn.send(ServiceMessage::Register(RegisterPayload::new(
+            scheduler_capabilities(),
+        )))
+        .await
+        .context_to::<LoopError>()?;
+
         self.service_id = identity.service_id();
         tracing::info!("connected to controller, waiting for ServiceCredentials");
         Ok(())

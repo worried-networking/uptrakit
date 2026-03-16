@@ -50,7 +50,7 @@ use std::collections::BTreeSet;
 use uuid::Uuid;
 
 use uptrakit_internal_wire::{
-    Capability, ControllerMessage, DisconnectingPayload, ServiceMessage,
+    Capability, ControllerMessage, DisconnectingPayload, RegisterPayload, ServiceMessage,
     payloads::{ServiceConfigEntry, ServiceConfigUpdatedPayload},
 };
 use uptrakit_service_sdk::{
@@ -95,11 +95,17 @@ impl ServiceHandler for MqttHandler {
 
     async fn on_connected(
         &mut self,
-        _conn: &mut ControllerConnection,
+        conn: &mut ControllerConnection,
         _identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
-        // Nothing to send on connect — the controller will deliver
-        // ServiceConfigDelivery after authentication completes.
+        // Declare capabilities immediately so the controller can set session
+        // flags correctly even on first connect (before DB has stored caps).
+        conn.send(ServiceMessage::Register(RegisterPayload::new(
+            mqtt_capabilities(),
+        )))
+        .await
+        .context_to::<LoopError>()?;
+
         Ok(())
     }
 

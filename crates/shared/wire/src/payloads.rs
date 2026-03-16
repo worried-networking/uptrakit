@@ -572,6 +572,39 @@ impl DisconnectingPayload {
 // Capability Management Payloads
 // =============================================================================
 
+/// Payload sent by every service on connect to declare its capabilities.
+///
+/// Sent from `on_connected` before any other messages. The controller uses
+/// this as the authoritative source for capability detection on the current
+/// session. Subsequent `UpdateCapabilities` messages are also accepted and
+/// persist the capability set to the DB.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegisterPayload {
+    /// Capabilities declared by this service instance.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub capabilities: BTreeSet<Capability>,
+}
+
+impl RegisterPayload {
+    /// Create a new [`RegisterPayload`] with the given capability set.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::collections::BTreeSet;
+    /// use uptrakit_internal_wire::{Capability, RegisterPayload};
+    ///
+    /// let payload = RegisterPayload::new([Capability::SoftwareDiscovery, Capability::UpdateHooks]);
+    /// assert!(payload.capabilities.contains(&Capability::SoftwareDiscovery));
+    /// ```
+    pub fn new(capabilities: impl IntoIterator<Item = Capability>) -> Self {
+        Self {
+            capabilities: capabilities.into_iter().collect(),
+        }
+    }
+}
+
 /// Payload for `ServiceMessage::UpdateCapabilities`.
 ///
 /// Contains the full set of capabilities declared by the service in its
