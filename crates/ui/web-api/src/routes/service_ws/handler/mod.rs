@@ -30,6 +30,7 @@ mod discovery;
 pub(super) mod messages;
 mod mqtt;
 mod renewal;
+mod service_config;
 mod shared_types;
 mod updates;
 
@@ -310,6 +311,24 @@ impl MessageProcessor {
             }
             ServiceMessage::ReportPluginConfig(payload) => {
                 messages::handle_report_plugin_config(&self.state, self.service_id, &payload).await
+            }
+            ServiceMessage::StoreServiceConfig(payload) => {
+                service_config::handle_store_service_config(
+                    &self.state,
+                    self.service_app_name.as_deref().unwrap_or(""),
+                    self.service_id,
+                    payload,
+                )
+                .await
+            }
+            ServiceMessage::DeleteServiceConfig(payload) => {
+                service_config::handle_delete_service_config(
+                    &self.state,
+                    self.service_app_name.as_deref().unwrap_or(""),
+                    self.service_id,
+                    payload,
+                )
+                .await
             }
             _ => ProcessorResponse::reply_and_break(ControllerMessage::Error(ErrorPayload {
                 code: ErrorCode::BadRequest,
@@ -698,6 +717,7 @@ async fn register_connection(
     service_id: uuid::Uuid,
     capabilities: &BTreeSet<Capability>,
     mqtt_handshake: Option<&mqtt::MqttHandshake>,
+    service_app_name: Option<String>,
 ) -> (
     tokio::sync::mpsc::Receiver<ControllerMessage>,
     tokio_util::sync::CancellationToken,
@@ -710,12 +730,19 @@ async fn register_connection(
                 capabilities.clone(),
                 Some(h.instance_id.clone()),
                 Some(h.max_tenants),
+                service_app_name,
             )
             .await
     } else {
         state
             .service_connections
-            .register(service_id, capabilities.clone(), None, None)
+            .register(
+                service_id,
+                capabilities.clone(),
+                None,
+                None,
+                service_app_name,
+            )
             .await
     };
 
@@ -872,6 +899,11 @@ async fn setup_authenticated_session(
 
     // Stage 2: Deliver credentials to services that have credential capabilities.
     deliver_service_credentials(sink, state, &db_capabilities, service_id, out_seq).await?;
+
+    // Stage 2.5: Deliver stored service config entries to services with a known app name.
+    if let Some(ref app_name) = service_app_name {
+        service_config::deliver_service_config(sink, state, app_name, out_seq).await?;
+    }
 
     // Stage 3: Receive the Register message sent by every service on connect.
     // All service types send Register from on_connected, before ServiceSettings
@@ -1418,7 +1450,7 @@ async fn setup_enrolled_session(
     // Register in service_connections.
     let (push_rx, cancel_token) = state
         .service_connections
-        .register(service_id, capabilities.clone(), None, None)
+        .register(service_id, capabilities.clone(), None, None, None)
         .await;
 
     // Notify embedded services about the new external connection.

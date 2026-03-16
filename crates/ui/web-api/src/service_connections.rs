@@ -32,6 +32,9 @@ struct ServiceConnection {
     assigned_mqtt_clients: HashSet<Uuid>,
     /// Timestamp of last heartbeat received (MQTT only).
     last_heartbeat: Option<Instant>,
+    /// The `service_app_name` from the service record, used to fan out
+    /// `ServiceConfigUpdated` to all instances of the same app.
+    service_app_name: Option<String>,
     /// Timestamp when the connection was registered.
     connected_at: OffsetDateTime,
 }
@@ -100,12 +103,17 @@ impl ServiceConnectionRegistry {
     /// bridge services (those with `Capability::UpdateTracking`), `instance_id`
     /// and `max_tenants` should be provided; for all other services they
     /// can be `None`.
+    ///
+    /// `service_app_name` is stored per-connection so that
+    /// [`broadcast_to_app_except`](Self::broadcast_to_app_except) can fan out
+    /// `ServiceConfigUpdated` to all instances of the same service app.
     pub async fn register(
         &self,
         service_id: Uuid,
         capabilities: BTreeSet<Capability>,
         instance_id: Option<String>,
         max_tenants: Option<u32>,
+        service_app_name: Option<String>,
     ) -> (mpsc::Receiver<ControllerMessage>, CancellationToken) {
         let (tx, rx) = mpsc::channel(PUSH_CHANNEL_CAPACITY);
         let cancel_token = CancellationToken::new();
@@ -120,6 +128,7 @@ impl ServiceConnectionRegistry {
             max_tenants,
             assigned_mqtt_clients: HashSet::new(),
             last_heartbeat: if is_mqtt { Some(Instant::now()) } else { None },
+            service_app_name,
             connected_at: OffsetDateTime::now_utc(),
         };
 
@@ -458,6 +467,34 @@ impl ServiceConnectionRegistry {
             .any(|c| c.capabilities.contains(capability))
     }
 
+    /// Broadcast a message to all connected instances of `service_app_name`
+    /// except the given `exclude_service_id`.
+    ///
+    /// Used by the service config store to push `ServiceConfigUpdated` to all
+    /// instances of the same service app after a config write.
+    pub async fn broadcast_to_app_except(
+        &self,
+        service_app_name: &str,
+        exclude_service_id: Uuid,
+        msg: ControllerMessage,
+    ) {
+        let senders: Vec<mpsc::Sender<ControllerMessage>> = {
+            let inner = self.inner.read();
+            inner
+                .connections
+                .iter()
+                .filter(|(id, conn)| {
+                    **id != exclude_service_id
+                        && conn.service_app_name.as_deref() == Some(service_app_name)
+                })
+                .map(|(_, conn)| conn.sender.clone())
+                .collect()
+        };
+        for sender in senders {
+            let _ = sender.try_send(msg.clone());
+        }
+    }
+
     /// Returns the subset of the given service IDs that are currently connected.
     ///
     /// Acquires a single read lock to check all IDs efficiently.
@@ -601,8 +638,10 @@ mod tests {
         let svc_b = Uuid::now_v7();
 
         let caps = BTreeSet::from([Capability::GracefulShutdown]);
-        let (mut rx_a, _) = registry.register(svc_a, caps.clone(), None, None).await;
-        let (mut rx_b, _) = registry.register(svc_b, caps, None, None).await;
+        let (mut rx_a, _) = registry
+            .register(svc_a, caps.clone(), None, None, None)
+            .await;
+        let (mut rx_b, _) = registry.register(svc_b, caps, None, None, None).await;
 
         let payload = uptrakit_internal_wire::ServerRestartingPayload {
             reason: "test".to_string(),
@@ -640,8 +679,10 @@ mod tests {
         let svc_b = Uuid::now_v7();
 
         let caps = BTreeSet::from([Capability::GracefulShutdown]);
-        let (mut rx_a, _) = registry.register(svc_a, caps.clone(), None, None).await;
-        let (mut rx_b, _) = registry.register(svc_b, caps, None, None).await;
+        let (mut rx_a, _) = registry
+            .register(svc_a, caps.clone(), None, None, None)
+            .await;
+        let (mut rx_b, _) = registry.register(svc_b, caps, None, None, None).await;
 
         let msg =
             ControllerMessage::ServerRestarting(uptrakit_internal_wire::ServerRestartingPayload {
@@ -660,12 +701,13 @@ mod tests {
         let svc_other = Uuid::now_v7();
 
         let (mut rx_mqtt, _) = registry
-            .register(svc_mqtt, mqtt_caps(), Some("m".to_string()), Some(10))
+            .register(svc_mqtt, mqtt_caps(), Some("m".to_string()), Some(10), None)
             .await;
         let (mut rx_other, _) = registry
             .register(
                 svc_other,
                 BTreeSet::from([Capability::GracefulShutdown]),
+                None,
                 None,
                 None,
             )
@@ -698,7 +740,7 @@ mod tests {
         let svc = Uuid::now_v7();
 
         let caps = BTreeSet::from([Capability::GracefulShutdown]);
-        let (rx, _) = registry.register(svc, caps, None, None).await;
+        let (rx, _) = registry.register(svc, caps, None, None, None).await;
 
         // Fill the channel to capacity (PUSH_CHANNEL_CAPACITY = 32)
         // without consuming from rx so the channel is full.
@@ -737,7 +779,7 @@ mod tests {
         let registry = ServiceConnectionRegistry::new();
         let svc = Uuid::now_v7();
         let caps = BTreeSet::from([Capability::GracefulShutdown]);
-        let (_rx, cancel_token) = registry.register(svc, caps, None, None).await;
+        let (_rx, cancel_token) = registry.register(svc, caps, None, None, None).await;
 
         assert!(registry.is_connected(&svc).await);
         assert!(!cancel_token.is_cancelled());
@@ -762,10 +804,10 @@ mod tests {
         let svc_b = Uuid::now_v7();
 
         let _ = registry
-            .register(svc_a, mqtt_caps(), Some("a".to_string()), Some(4))
+            .register(svc_a, mqtt_caps(), Some("a".to_string()), Some(4), None)
             .await;
         let _ = registry
-            .register(svc_b, mqtt_caps(), Some("b".to_string()), Some(2))
+            .register(svc_b, mqtt_caps(), Some("b".to_string()), Some(2), None)
             .await;
 
         let _ = registry.assign_mqtt_client(&svc_a, Uuid::now_v7()).await;
@@ -788,10 +830,17 @@ mod tests {
                 mqtt_caps(),
                 Some("unlimited".to_string()),
                 Some(0),
+                None,
             )
             .await;
         let _ = registry
-            .register(svc_idle, mqtt_caps(), Some("idle".to_string()), Some(10))
+            .register(
+                svc_idle,
+                mqtt_caps(),
+                Some("idle".to_string()),
+                Some(10),
+                None,
+            )
             .await;
 
         for _ in 0..3 {
@@ -813,8 +862,12 @@ mod tests {
         let id3 = uuid::Uuid::now_v7();
 
         // Register id1 and id2 only.
-        let _ = registry.register(id1, BTreeSet::new(), None, None).await;
-        let _ = registry.register(id2, BTreeSet::new(), None, None).await;
+        let _ = registry
+            .register(id1, BTreeSet::new(), None, None, None)
+            .await;
+        let _ = registry
+            .register(id2, BTreeSet::new(), None, None, None)
+            .await;
 
         let result = registry.filter_connected(&[id1, id2, id3]).await;
         assert!(result.contains(&id1));

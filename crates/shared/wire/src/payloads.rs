@@ -738,6 +738,17 @@ pub struct ServiceConfigEntry {
     pub value: serde_json::Value,
 }
 
+impl ServiceConfigEntry {
+    /// Create a new `ServiceConfigEntry`.
+    pub fn new(tenant_id: Option<Uuid>, key: String, value: serde_json::Value) -> Self {
+        Self {
+            tenant_id,
+            key,
+            value,
+        }
+    }
+}
+
 /// Identifies a service config entry by scope and key (used in delete notifications).
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -747,6 +758,13 @@ pub struct ServiceConfigKey {
     pub tenant_id: Option<Uuid>,
     /// Entry key.
     pub key: String,
+}
+
+impl ServiceConfigKey {
+    /// Create a new `ServiceConfigKey`.
+    pub fn new(tenant_id: Option<Uuid>, key: String) -> Self {
+        Self { tenant_id, key }
+    }
 }
 
 /// Service → Controller: write or update a config entry.
@@ -864,6 +882,13 @@ pub struct ServiceConfigDeliveryPayload {
     pub entries: Vec<ServiceConfigEntry>,
 }
 
+impl ServiceConfigDeliveryPayload {
+    /// Create a new `ServiceConfigDeliveryPayload`.
+    pub fn new(entries: Vec<ServiceConfigEntry>) -> Self {
+        Self { entries }
+    }
+}
+
 /// Controller → Service: incremental config update notification.
 ///
 /// Pushed to all connected instances of the same `service_app_name` when
@@ -878,6 +903,13 @@ pub struct ServiceConfigUpdatedPayload {
     /// Keys that were deleted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deleted: Vec<ServiceConfigKey>,
+}
+
+impl ServiceConfigUpdatedPayload {
+    /// Create a new `ServiceConfigUpdatedPayload`.
+    pub fn new(changed: Vec<ServiceConfigEntry>, deleted: Vec<ServiceConfigKey>) -> Self {
+        Self { changed, deleted }
+    }
 }
 
 // =============================================================================
