@@ -14,7 +14,7 @@ impl MigrationTrait for Migration {
                     .table(HostTags::Table)
                     .col(ColumnDef::new(HostTags::Id).uuid().not_null().primary_key())
                     .col(ColumnDef::new(HostTags::TenantId).uuid().not_null())
-                    .col(ColumnDef::new(HostTags::Name).text().not_null())
+                    .col(ColumnDef::new(HostTags::Name).string().not_null())
                     .col(ColumnDef::new(HostTags::Color).text().not_null())
                     .col(ColumnDef::new(HostTags::Description).text().null())
                     .col(
@@ -60,22 +60,30 @@ impl MigrationTrait for Migration {
         // so we use `execute_unprepared` with DB-specific raw SQL. This is the
         // same pattern used by other migrations that need partial unique indexes.
         let backend = manager.get_database_backend();
-        let partial_unique_sql = match backend {
-            sea_orm::DatabaseBackend::Sqlite => {
-                "CREATE UNIQUE INDEX uix_host_tags_tenant_name \
+        if backend == sea_orm::DatabaseBackend::MySql {
+            // MariaDB does not support partial indexes. Use a regular composite
+            // unique index on (tenant_id, name, deactivated_at) instead.
+            manager
+                .create_index(
+                    Index::create()
+                        .name("uix_host_tags_tenant_name")
+                        .table(HostTags::Table)
+                        .col(HostTags::TenantId)
+                        .col(HostTags::Name)
+                        .col(HostTags::DeactivatedAt)
+                        .unique()
+                        .to_owned(),
+                )
+                .await?;
+        } else {
+            let partial_unique_sql = "CREATE UNIQUE INDEX uix_host_tags_tenant_name \
                  ON host_tags (tenant_id, name) \
-                 WHERE deactivated_at IS NULL"
-            }
-            _ => {
-                "CREATE UNIQUE INDEX uix_host_tags_tenant_name \
-                 ON host_tags (tenant_id, name) \
-                 WHERE deactivated_at IS NULL"
-            }
-        };
-        manager
-            .get_connection()
-            .execute_unprepared(partial_unique_sql)
-            .await?;
+                 WHERE deactivated_at IS NULL";
+            manager
+                .get_connection()
+                .execute_unprepared(partial_unique_sql)
+                .await?;
+        }
 
         // ── host_tag_assignments ─────────────────────────────────────────
         manager

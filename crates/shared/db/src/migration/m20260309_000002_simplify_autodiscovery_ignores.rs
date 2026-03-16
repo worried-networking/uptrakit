@@ -46,36 +46,22 @@ enum Tenants {
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let is_sqlite = helpers::is_sqlite(manager);
+        let is_postgres = manager.get_database_backend() == sea_orm::DbBackend::Postgres;
 
-        if is_sqlite {
-            // SQLite: drop + recreate (ALTER TABLE cannot drop columns on older
-            // SQLite builds, and we're truncating data anyway).
-            manager
-                .drop_table(
-                    Table::drop()
-                        .table(AutodiscoveryIgnores::Table)
-                        .if_exists()
-                        .to_owned(),
-                )
-                .await?;
-        } else {
-            // PostgreSQL / MySQL: truncate, drop old columns and indexes, add new column.
+        if is_postgres {
+            // PostgreSQL: truncate, drop old columns and indexes, add new column.
             manager
                 .get_connection()
                 .execute_unprepared("DELETE FROM autodiscovery_ignores")
                 .await?;
 
-            // Drop the old unique index first (it references the columns we're about to drop).
-            manager
-                .drop_index(
-                    Index::drop()
-                        .name("uix_autodiscovery_ignores_tenant_config_pkg")
-                        .table(AutodiscoveryIgnores::Table)
-                        .to_owned(),
-                )
-                .await
-                .ok(); // Ignore if the index name differs across backends.
+            // Drop the old unique index (it references the columns we're about to drop).
+            helpers::drop_index_if_exists(
+                manager,
+                "uq_autodiscovery_ignores_tenant_config_package",
+                "autodiscovery_ignores",
+            )
+            .await?;
 
             manager
                 .alter_table(
@@ -99,7 +85,11 @@ impl MigrationTrait for Migration {
                 .alter_table(
                     Table::alter()
                         .table(AutodiscoveryIgnores::Table)
-                        .add_column(ColumnDef::new(AutodiscoveryIgnores::Name).text().not_null())
+                        .add_column(
+                            ColumnDef::new(AutodiscoveryIgnores::Name)
+                                .string()
+                                .not_null(),
+                        )
                         .to_owned(),
                 )
                 .await?;
@@ -120,7 +110,19 @@ impl MigrationTrait for Migration {
             return Ok(());
         }
 
-        // SQLite: recreate the table from scratch.
+        // SQLite / MariaDB: drop + recreate (SQLite cannot ALTER TABLE DROP
+        // COLUMN reliably; MariaDB has FK-backed index constraints that make
+        // column drops painful — and we're truncating data anyway).
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(AutodiscoveryIgnores::Table)
+                    .if_exists()
+                    .to_owned(),
+            )
+            .await?;
+
+        // Recreate the table from scratch.
         manager
             .create_table(
                 Table::create()
@@ -135,10 +137,14 @@ impl MigrationTrait for Migration {
                             .uuid()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(AutodiscoveryIgnores::Name).text().not_null())
+                    .col(
+                        ColumnDef::new(AutodiscoveryIgnores::Name)
+                            .string()
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(AutodiscoveryIgnores::CreatedAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .foreign_key(

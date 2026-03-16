@@ -5,6 +5,8 @@ use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 use uuid::Uuid;
 
+use super::helpers::{timestamp, timestamp_null};
+
 /// Add a surrogate UUID `id` primary key and nullable `qualifier` column to
 /// `host_software_items`, and add `host_software_item_id` FK column to
 /// `host_software_item_plugins`.
@@ -176,7 +178,10 @@ async fn set_foreign_keys(manager: &SchemaManager<'_>, enabled: bool) -> Result<
 
 /// Build the new `host_software_items` schema (with `id` surrogate PK and
 /// `qualifier`), targeting `table_name`.
-fn build_hsi_table(table_name: impl IntoTableRef + Clone) -> TableCreateStatement {
+///
+/// `fk_suffix` differentiates FK constraint names when creating a temp table
+/// alongside the original (MariaDB/InnoDB requires globally unique FK names).
+fn build_hsi_table(table_name: impl IntoTableRef + Clone, fk_suffix: &str) -> TableCreateStatement {
     Table::create()
         .table(table_name.clone())
         .col(
@@ -191,7 +196,7 @@ fn build_hsi_table(table_name: impl IntoTableRef + Clone) -> TableCreateStatemen
                 .uuid()
                 .not_null(),
         )
-        .col(ColumnDef::new(HostSoftwareItems::Qualifier).text().null())
+        .col(ColumnDef::new(HostSoftwareItems::Qualifier).string().null())
         .col(string_null(HostSoftwareItems::InstalledVersion))
         .col(timestamp_null(
             HostSoftwareItems::InstalledVersionDetectedAt,
@@ -207,20 +212,20 @@ fn build_hsi_table(table_name: impl IntoTableRef + Clone) -> TableCreateStatemen
         .col(timestamp(HostSoftwareItems::LinkedAt))
         .col(
             ColumnDef::new(HostSoftwareItems::UpdateCategory)
-                .text()
+                .string()
                 .not_null()
                 .default("unknown"),
         )
         .foreign_key(
             ForeignKey::create()
-                .name("fk_host_software_items_host")
+                .name(format!("fk_host_software_items_host{fk_suffix}"))
                 .from(table_name.clone(), HostSoftwareItems::HostId)
                 .to(Hosts::Table, Hosts::Id)
                 .on_delete(ForeignKeyAction::Cascade),
         )
         .foreign_key(
             ForeignKey::create()
-                .name("fk_host_software_items_software_item")
+                .name(format!("fk_host_software_items_software_item{fk_suffix}"))
                 .from(table_name, HostSoftwareItems::SoftwareItemId)
                 .to(SoftwareItems::Table, SoftwareItems::Id)
                 .on_delete(ForeignKeyAction::Cascade),
@@ -230,7 +235,10 @@ fn build_hsi_table(table_name: impl IntoTableRef + Clone) -> TableCreateStatemen
 
 /// Build the old `host_software_items` schema (composite PK, no `id`/`qualifier`),
 /// targeting `table_name`. Used by `down`.
-fn build_hsi_table_old(table_name: impl IntoTableRef + Clone) -> TableCreateStatement {
+fn build_hsi_table_old(
+    table_name: impl IntoTableRef + Clone,
+    fk_suffix: &str,
+) -> TableCreateStatement {
     Table::create()
         .table(table_name.clone())
         .col(ColumnDef::new(HostSoftwareItems::HostId).uuid().not_null())
@@ -254,7 +262,7 @@ fn build_hsi_table_old(table_name: impl IntoTableRef + Clone) -> TableCreateStat
         .col(timestamp(HostSoftwareItems::LinkedAt))
         .col(
             ColumnDef::new(HostSoftwareItems::UpdateCategory)
-                .text()
+                .string()
                 .not_null()
                 .default("unknown"),
         )
@@ -265,14 +273,14 @@ fn build_hsi_table_old(table_name: impl IntoTableRef + Clone) -> TableCreateStat
         )
         .foreign_key(
             ForeignKey::create()
-                .name("fk_host_software_items_host")
+                .name(format!("fk_host_software_items_host{fk_suffix}"))
                 .from(table_name.clone(), HostSoftwareItems::HostId)
                 .to(Hosts::Table, Hosts::Id)
                 .on_delete(ForeignKeyAction::Cascade),
         )
         .foreign_key(
             ForeignKey::create()
-                .name("fk_host_software_items_software_item")
+                .name(format!("fk_host_software_items_software_item{fk_suffix}"))
                 .from(table_name, HostSoftwareItems::SoftwareItemId)
                 .to(SoftwareItems::Table, SoftwareItems::Id)
                 .on_delete(ForeignKeyAction::Cascade),
@@ -285,6 +293,7 @@ fn build_hsi_table_old(table_name: impl IntoTableRef + Clone) -> TableCreateStat
 fn build_hsip_table(
     table_name: impl IntoTableRef + Clone,
     hsi_target: impl IntoTableRef,
+    fk_suffix: &str,
 ) -> TableCreateStatement {
     Table::create()
         .table(table_name.clone())
@@ -337,14 +346,14 @@ fn build_hsip_table(
         .col(timestamp(HostSoftwareItemPlugins::UpdatedAt))
         .foreign_key(
             ForeignKey::create()
-                .name("fk_hsip_plugin_config")
+                .name(format!("fk_hsip_plugin_config{fk_suffix}"))
                 .from(table_name.clone(), HostSoftwareItemPlugins::PluginConfigId)
                 .to(PluginConfigs::Table, PluginConfigs::Id)
                 .on_delete(ForeignKeyAction::Restrict),
         )
         .foreign_key(
             ForeignKey::create()
-                .name("fk_hsip_host_software_item_id")
+                .name(format!("fk_hsip_host_software_item_id{fk_suffix}"))
                 .from(table_name, HostSoftwareItemPlugins::HostSoftwareItemId)
                 .to(hsi_target, HostSoftwareItems::Id)
                 .on_delete(ForeignKeyAction::Cascade),
@@ -354,7 +363,10 @@ fn build_hsip_table(
 
 /// Build the old `host_software_item_plugins` schema (composite FK, no
 /// `host_software_item_id`), targeting `table_name`. Used by `down`.
-fn build_hsip_table_old(table_name: impl IntoTableRef + Clone) -> TableCreateStatement {
+fn build_hsip_table_old(
+    table_name: impl IntoTableRef + Clone,
+    fk_suffix: &str,
+) -> TableCreateStatement {
     Table::create()
         .table(table_name.clone())
         .col(
@@ -401,14 +413,14 @@ fn build_hsip_table_old(table_name: impl IntoTableRef + Clone) -> TableCreateSta
         .col(timestamp(HostSoftwareItemPlugins::UpdatedAt))
         .foreign_key(
             ForeignKey::create()
-                .name("fk_hsip_plugin_config")
+                .name(format!("fk_hsip_plugin_config{fk_suffix}"))
                 .from(table_name.clone(), HostSoftwareItemPlugins::PluginConfigId)
                 .to(PluginConfigs::Table, PluginConfigs::Id)
                 .on_delete(ForeignKeyAction::Restrict),
         )
         .foreign_key(
             &mut ForeignKey::create()
-                .name("fk_hsip_host_software_item")
+                .name(format!("fk_hsip_host_software_item{fk_suffix}"))
                 .from_tbl(table_name)
                 .from_col(HostSoftwareItemPlugins::HostId)
                 .from_col(HostSoftwareItemPlugins::SoftwareItemId)
@@ -451,7 +463,7 @@ impl MigrationTrait for Migration {
         if hsi_orig_exists {
             // Create the new table.
             manager
-                .create_table(build_hsi_table(HostSoftwareItemsNew::Table))
+                .create_table(build_hsi_table(HostSoftwareItemsNew::Table, "_new"))
                 .await?;
 
             // Read all existing rows.
@@ -537,6 +549,7 @@ impl MigrationTrait for Migration {
                     .create_table(build_hsip_table(
                         HostSoftwareItemPluginsNew::Table,
                         HostSoftwareItemsNew::Table,
+                        "_new",
                     ))
                     .await?;
 
@@ -652,34 +665,55 @@ impl MigrationTrait for Migration {
 
         // ── Step 4: Create indexes ───────────────────────────────────────────
 
-        // Partial unique index: unqualified rows (qualifier IS NULL).
-        manager
-            .create_index(
-                Index::create()
-                    .name("uix_hsi_unqualified")
-                    .table(HostSoftwareItems::Table)
-                    .col(HostSoftwareItems::HostId)
-                    .col(HostSoftwareItems::SoftwareItemId)
-                    .unique()
-                    .and_where(Expr::col(HostSoftwareItems::Qualifier).is_null())
-                    .to_owned(),
-            )
-            .await?;
+        // Partial unique indexes (SQLite/PostgreSQL) or a single composite
+        // unique index (MySQL/MariaDB, which doesn't support partial indexes).
+        if manager.get_database_backend() == DbBackend::MySql {
+            // MySQL/MariaDB: single composite unique index on (host_id,
+            // software_item_id, qualifier). NULLs are considered distinct in
+            // MySQL unique indexes, so multiple NULL-qualifier rows per
+            // (host_id, software_item_id) are allowed — matching the semantics
+            // of the two partial indexes on the other backends.
+            manager
+                .create_index(
+                    Index::create()
+                        .name("uix_hsi_host_item_qualifier")
+                        .table(HostSoftwareItems::Table)
+                        .col(HostSoftwareItems::HostId)
+                        .col(HostSoftwareItems::SoftwareItemId)
+                        .col(HostSoftwareItems::Qualifier)
+                        .unique()
+                        .to_owned(),
+                )
+                .await?;
+        } else {
+            // SQLite/PostgreSQL: two partial unique indexes.
+            manager
+                .create_index(
+                    Index::create()
+                        .name("uix_hsi_unqualified")
+                        .table(HostSoftwareItems::Table)
+                        .col(HostSoftwareItems::HostId)
+                        .col(HostSoftwareItems::SoftwareItemId)
+                        .unique()
+                        .and_where(Expr::col(HostSoftwareItems::Qualifier).is_null())
+                        .to_owned(),
+                )
+                .await?;
 
-        // Partial unique index: qualified rows (qualifier IS NOT NULL).
-        manager
-            .create_index(
-                Index::create()
-                    .name("uix_hsi_qualified")
-                    .table(HostSoftwareItems::Table)
-                    .col(HostSoftwareItems::HostId)
-                    .col(HostSoftwareItems::SoftwareItemId)
-                    .col(HostSoftwareItems::Qualifier)
-                    .unique()
-                    .and_where(Expr::col(HostSoftwareItems::Qualifier).is_not_null())
-                    .to_owned(),
-            )
-            .await?;
+            manager
+                .create_index(
+                    Index::create()
+                        .name("uix_hsi_qualified")
+                        .table(HostSoftwareItems::Table)
+                        .col(HostSoftwareItems::HostId)
+                        .col(HostSoftwareItems::SoftwareItemId)
+                        .col(HostSoftwareItems::Qualifier)
+                        .unique()
+                        .and_where(Expr::col(HostSoftwareItems::Qualifier).is_not_null())
+                        .to_owned(),
+                )
+                .await?;
+        }
 
         // Unique index for plugins: one plugin per role per host_software_item row.
         manager
@@ -753,7 +787,7 @@ impl MigrationTrait for Migration {
 
         if hsi_orig_exists {
             manager
-                .create_table(build_hsi_table_old(HostSoftwareItemsBak::Table))
+                .create_table(build_hsi_table_old(HostSoftwareItemsBak::Table, "_bak"))
                 .await?;
 
             // Read from the new schema (has `id` and `qualifier`); write to old
@@ -820,7 +854,10 @@ impl MigrationTrait for Migration {
 
             if hsip_orig_exists {
                 manager
-                    .create_table(build_hsip_table_old(HostSoftwareItemPluginsBak::Table))
+                    .create_table(build_hsip_table_old(
+                        HostSoftwareItemPluginsBak::Table,
+                        "_bak",
+                    ))
                     .await?;
 
                 let hsip_down_select = Query::select()

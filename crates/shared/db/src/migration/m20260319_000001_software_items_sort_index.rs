@@ -12,11 +12,13 @@ impl MigrationName for Migration {
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // sea_query Index::create() does not support expression columns (functional indexes);
-        // raw SQL required. All three backends support LOWER() functional indexes; MySQL 8+
-        // requires double parens around the expression per its CREATE INDEX syntax.
+        // raw SQL required. SQLite and PostgreSQL support LOWER() functional indexes natively.
+        // MariaDB does not support expression indexes — fall back to a plain (tenant_id, name)
+        // index which still accelerates the common case-insensitive sort (MariaDB collations
+        // are case-insensitive by default).
         let sql = if manager.get_database_backend() == sea_orm::DatabaseBackend::MySql {
             "CREATE INDEX idx_software_items_tenant_lower_name \
-             ON software_items (tenant_id, (lower(name)))"
+             ON software_items (tenant_id, name)"
         } else {
             "CREATE INDEX idx_software_items_tenant_lower_name \
              ON software_items (tenant_id, lower(name))"

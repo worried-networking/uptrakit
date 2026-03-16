@@ -2,28 +2,29 @@ use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 
 use crate::migration::helpers;
+use crate::migration::helpers::{timestamp, timestamp_null};
 
 /// Unify the two parallel software tracking systems (software items + host
 /// packages) into a single model.
 ///
 /// ## Changes
 ///
-/// ### `software_items` — table recreation
+/// ### `software_items` — table recreation (SQLite) / ALTER TABLE (PG/MySQL)
 /// - Remove `enabled` and `discovery_state` columns
 /// - Add `featured BOOL NOT NULL DEFAULT false`
 ///
-/// ### `host_software_items` — table recreation
-/// - Add `plugin_config_id UUID NULL` (FK → plugin_configs)
+/// ### `host_software_items` — table recreation (SQLite) / ALTER TABLE (PG/MySQL)
+/// - Add `plugin_config_id UUID NULL` (FK -> plugin_configs)
 /// - Add `package_identifier TEXT NULL`
 /// - Add `deactivated_at TIMESTAMP NULL`
 ///
-/// ### `update_history` — table recreation
-/// - Add `tenant_id UUID NOT NULL` (FK → tenants)
-/// - Add `host_software_item_id UUID NULL` (FK → host_software_items)
+/// ### `update_history` — table recreation (SQLite) / ALTER TABLE (PG/MySQL)
+/// - Add `tenant_id UUID NOT NULL` (FK -> tenants)
+/// - Add `host_software_item_id UUID NULL` (FK -> host_software_items)
 /// - Change `to_version` from NOT NULL to NULL
 /// - Change `started_at` from NOT NULL to NULL
 ///
-/// ### `update_batches` — table recreation
+/// ### `update_batches` — table recreation (SQLite) / ALTER TABLE (PG/MySQL)
 /// - Add `output TEXT NOT NULL DEFAULT ''`
 /// - Add `output_bytes BIGINT NOT NULL DEFAULT 0`
 ///
@@ -37,7 +38,7 @@ use crate::migration::helpers;
 /// - `autodiscovery_ignores`
 ///
 /// ### Scheduler tasks
-/// - Rename `discover_host_packages` → `discover_software`
+/// - Rename `discover_host_packages` -> `discover_software`
 #[derive(DeriveMigrationName)]
 pub(super) struct Migration;
 
@@ -52,6 +53,10 @@ enum SoftwareItems {
     TenantId,
     Name,
     Featured,
+    #[allow(dead_code)]
+    Enabled,
+    #[allow(dead_code)]
+    DiscoveryState,
     LastCheckedAt,
     CreatedAt,
     UpdatedAt,
@@ -162,6 +167,8 @@ enum Tenants {
 enum Hosts {
     Table,
     Id,
+    #[allow(dead_code)]
+    TenantId,
 }
 
 #[derive(DeriveIden)]
@@ -185,25 +192,19 @@ impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         helpers::set_foreign_keys(manager, false).await?;
 
-        // ── 1. Rebuild software_items ──────────────────────────────────────
-        rebuild_software_items(manager).await?;
+        if helpers::is_sqlite(manager) {
+            up_sqlite(manager).await?;
+        } else {
+            up_alter(manager).await?;
+        }
 
-        // ── 2. Rebuild host_software_items ─────────────────────────────────
-        rebuild_host_software_items(manager).await?;
-
-        // ── 3. Rebuild update_history (depends on host_software_items) ─────
-        rebuild_update_history(manager).await?;
-
-        // ── 4. Rebuild update_batches ──────────────────────────────────────
-        rebuild_update_batches(manager).await?;
-
-        // ── 5. Create software_ignores ─────────────────────────────────────
+        // ── Shared: Create software_ignores ──────────────────────────────
         create_software_ignores(manager).await?;
 
-        // ── 6. Drop old tables ─────────────────────────────────────────────
+        // ── Shared: Drop old tables ──────────────────────────────────────
         drop_old_tables(manager).await?;
 
-        // ── 7. Rename scheduler task ───────────────────────────────────────
+        // ── Shared: Rename scheduler task ────────────────────────────────
         rename_scheduler_task(manager).await?;
 
         helpers::set_foreign_keys(manager, true).await?;
@@ -220,10 +221,36 @@ impl MigrationTrait for Migration {
 }
 
 // ---------------------------------------------------------------------------
-// Step 1: Rebuild software_items
+// SQLite path — table recreation
 // ---------------------------------------------------------------------------
 
-async fn rebuild_software_items(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+async fn up_sqlite(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    rebuild_software_items_sqlite(manager).await?;
+    rebuild_host_software_items_sqlite(manager).await?;
+    rebuild_update_history_sqlite(manager).await?;
+    rebuild_update_batches_sqlite(manager).await?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// PG/MySQL path — ALTER TABLE
+// ---------------------------------------------------------------------------
+
+async fn up_alter(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    alter_software_items(manager).await?;
+    alter_host_software_items(manager).await?;
+    alter_update_history(manager).await?;
+    alter_update_batches(manager).await?;
+    Ok(())
+}
+
+// ===========================================================================
+// Step 1: software_items
+// ===========================================================================
+
+// -- SQLite ----------------------------------------------------------------
+
+async fn rebuild_software_items_sqlite(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let state =
         helpers::check_crash_recovery(manager, "software_items", "software_items_new").await?;
 
@@ -262,24 +289,16 @@ async fn rebuild_software_items(manager: &SchemaManager<'_>) -> Result<(), DbErr
             )
             .await?;
 
-        // Copy data: discovery_state=approved or manually created → featured=true,
-        // discovery_state=pending → featured=false.
+        // Copy data: discovery_state=approved or manually created -> featured=true,
+        // discovery_state=pending -> featured=false.
         //
         // SQLite does not support CASE in sea_query INSERT...SELECT well, so we
         // use execute_unprepared for the data copy.
-        let copy_sql = if helpers::is_sqlite(manager) {
-            "INSERT INTO software_items_new (id, tenant_id, name, featured, last_checked_at, created_at, updated_at, deactivated_at) \
+        let copy_sql = "INSERT INTO software_items_new (id, tenant_id, name, featured, last_checked_at, created_at, updated_at, deactivated_at) \
              SELECT id, tenant_id, name, \
                     CASE WHEN discovery_state = 'pending' THEN 0 ELSE 1 END, \
                     last_checked_at, created_at, updated_at, deactivated_at \
-             FROM software_items"
-        } else {
-            "INSERT INTO software_items_new (id, tenant_id, name, featured, last_checked_at, created_at, updated_at, deactivated_at) \
-             SELECT id, tenant_id, name, \
-                    CASE WHEN discovery_state = 'pending' THEN false ELSE true END, \
-                    last_checked_at, created_at, updated_at, deactivated_at \
-             FROM software_items"
-        };
+             FROM software_items";
         manager
             .get_connection()
             .execute_unprepared(copy_sql)
@@ -291,18 +310,121 @@ async fn rebuild_software_items(manager: &SchemaManager<'_>) -> Result<(), DbErr
     helpers::rename_temp(manager, "software_items_new", "software_items").await?;
 
     // Recreate indexes.
+    create_software_items_indexes(manager).await?;
+
+    Ok(())
+}
+
+// -- PG/MySQL --------------------------------------------------------------
+
+async fn alter_software_items(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    // Add the new `featured` column.
     manager
-        .create_index(
-            Index::create()
-                .name("uq_software_items_active_name")
+        .alter_table(
+            Table::alter()
                 .table(SoftwareItems::Table)
-                .col(SoftwareItems::TenantId)
-                .col(SoftwareItems::Name)
-                .unique()
-                .and_where(Expr::col(SoftwareItems::DeactivatedAt).is_null())
+                .add_column(
+                    ColumnDef::new(SoftwareItems::Featured)
+                        .boolean()
+                        .not_null()
+                        .default(false),
+                )
                 .to_owned(),
         )
         .await?;
+
+    // Backfill featured from discovery_state: anything not 'pending' becomes featured.
+    // sea_query cannot express UPDATE ... SET col = CASE WHEN ... in its builder API,
+    // so we use execute_unprepared.
+    manager
+        .get_connection()
+        .execute_unprepared(
+            "UPDATE software_items SET featured = true WHERE discovery_state != 'pending'",
+        )
+        .await?;
+
+    // Drop the old columns.
+    manager
+        .alter_table(
+            Table::alter()
+                .table(SoftwareItems::Table)
+                .drop_column(SoftwareItems::Enabled)
+                .to_owned(),
+        )
+        .await?;
+
+    manager
+        .alter_table(
+            Table::alter()
+                .table(SoftwareItems::Table)
+                .drop_column(SoftwareItems::DiscoveryState)
+                .to_owned(),
+        )
+        .await?;
+
+    // On MariaDB, temporarily drop FKs since InnoDB uses user-created indexes
+    // as FK backing indexes and refuses to drop them otherwise.
+    let si_fks = helpers::drop_mysql_foreign_keys(manager, "software_items").await?;
+
+    // Drop existing indexes first — PG doesn't drop indexes when columns are removed
+    // via ALTER TABLE (unlike SQLite table recreation which drops everything).
+    drop_software_items_indexes(manager).await?;
+
+    // Recreate indexes with the updated schema.
+    create_software_items_indexes(manager).await?;
+
+    // Recreate FKs on MariaDB.
+    helpers::recreate_mysql_foreign_keys(manager, "software_items", &si_fks).await?;
+
+    Ok(())
+}
+
+// -- Shared indexes --------------------------------------------------------
+
+/// Drop all `software_items` indexes (used by the PG/MySQL ALTER TABLE path
+/// before recreating them to ensure no "already exists" errors).
+async fn drop_software_items_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    for name in [
+        "uq_software_items_active_name",
+        "idx_software_items_tenant_id",
+        "idx_software_items_deactivated_at",
+    ] {
+        helpers::drop_index_if_exists(manager, name, "software_items").await?;
+    }
+    Ok(())
+}
+
+async fn create_software_items_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    let is_mysql = manager.get_database_backend() == sea_orm::DbBackend::MySql;
+
+    if is_mysql {
+        // MariaDB: no partial indexes. Use non-partial unique on (tenant_id, name, deactivated_at).
+        manager
+            .create_index(
+                Index::create()
+                    .name("uq_software_items_active_name")
+                    .table(SoftwareItems::Table)
+                    .col(SoftwareItems::TenantId)
+                    .col(SoftwareItems::Name)
+                    .col(SoftwareItems::DeactivatedAt)
+                    .unique()
+                    .to_owned(),
+            )
+            .await?;
+    } else {
+        manager
+            .create_index(
+                Index::create()
+                    .name("uq_software_items_active_name")
+                    .table(SoftwareItems::Table)
+                    .col(SoftwareItems::TenantId)
+                    .col(SoftwareItems::Name)
+                    .unique()
+                    .and_where(Expr::col(SoftwareItems::DeactivatedAt).is_null())
+                    .to_owned(),
+            )
+            .await?;
+    }
 
     manager
         .create_index(
@@ -327,11 +449,13 @@ async fn rebuild_software_items(manager: &SchemaManager<'_>) -> Result<(), DbErr
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Step 2: Rebuild host_software_items
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// Step 2: host_software_items
+// ===========================================================================
 
-async fn rebuild_host_software_items(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+// -- SQLite ----------------------------------------------------------------
+
+async fn rebuild_host_software_items_sqlite(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let state =
         helpers::check_crash_recovery(manager, "host_software_items", "host_software_items_new")
             .await?;
@@ -341,7 +465,7 @@ async fn rebuild_host_software_items(manager: &SchemaManager<'_>) -> Result<(), 
             .create_table(build_hsi_table(HostSoftwareItemsNew::Table))
             .await?;
 
-        // Copy existing data — new columns get defaults (plugin_config_id=NULL,
+        // Copy existing data -- new columns get defaults (plugin_config_id=NULL,
         // package_identifier=NULL, deactivated_at=NULL).
         let copy_sql = "\
             INSERT INTO host_software_items_new \
@@ -370,6 +494,75 @@ async fn rebuild_host_software_items(manager: &SchemaManager<'_>) -> Result<(), 
     Ok(())
 }
 
+// -- PG/MySQL --------------------------------------------------------------
+
+async fn alter_host_software_items(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    // Add new columns.
+    manager
+        .alter_table(
+            Table::alter()
+                .table(HostSoftwareItems::Table)
+                .add_column(
+                    ColumnDef::new(HostSoftwareItems::PluginConfigId)
+                        .uuid()
+                        .null(),
+                )
+                .to_owned(),
+        )
+        .await?;
+
+    manager
+        .alter_table(
+            Table::alter()
+                .table(HostSoftwareItems::Table)
+                .add_column(
+                    ColumnDef::new(HostSoftwareItems::PackageIdentifier)
+                        .text()
+                        .null(),
+                )
+                .to_owned(),
+        )
+        .await?;
+
+    manager
+        .alter_table(
+            Table::alter()
+                .table(HostSoftwareItems::Table)
+                .add_column(timestamp_null(HostSoftwareItems::DeactivatedAt))
+                .to_owned(),
+        )
+        .await?;
+
+    // Add FK constraint for plugin_config_id.
+    manager
+        .create_foreign_key(
+            ForeignKey::create()
+                .name("fk_host_software_items_plugin_config")
+                .from(HostSoftwareItems::Table, HostSoftwareItems::PluginConfigId)
+                .to(PluginConfigs::Table, PluginConfigs::Id)
+                .on_delete(ForeignKeyAction::SetNull)
+                .to_owned(),
+        )
+        .await?;
+
+    // On MariaDB, InnoDB uses user-created indexes as FK backing indexes.
+    // Temporarily drop all FKs before dropping/recreating indexes.
+    let hsi_fks = helpers::drop_mysql_foreign_keys(manager, "host_software_items").await?;
+
+    // Drop existing indexes before recreating — PG doesn't drop them on ALTER TABLE.
+    drop_hsi_indexes(manager).await?;
+
+    // Recreate indexes with the updated schema.
+    create_hsi_indexes(manager).await?;
+
+    // Recreate the FKs we dropped on MariaDB.
+    helpers::recreate_mysql_foreign_keys(manager, "host_software_items", &hsi_fks).await?;
+
+    Ok(())
+}
+
+// -- Shared ----------------------------------------------------------------
+
 fn build_hsi_table(table_name: impl IntoTableRef + Clone) -> TableCreateStatement {
     Table::create()
         .table(table_name.clone())
@@ -385,7 +578,7 @@ fn build_hsi_table(table_name: impl IntoTableRef + Clone) -> TableCreateStatemen
                 .uuid()
                 .not_null(),
         )
-        .col(ColumnDef::new(HostSoftwareItems::Qualifier).text().null())
+        .col(ColumnDef::new(HostSoftwareItems::Qualifier).string().null())
         .col(
             ColumnDef::new(HostSoftwareItems::PluginConfigId)
                 .uuid()
@@ -411,7 +604,7 @@ fn build_hsi_table(table_name: impl IntoTableRef + Clone) -> TableCreateStatemen
         .col(timestamp(HostSoftwareItems::LinkedAt))
         .col(
             ColumnDef::new(HostSoftwareItems::UpdateCategory)
-                .text()
+                .string()
                 .not_null()
                 .default("unknown"),
         )
@@ -440,37 +633,66 @@ fn build_hsi_table(table_name: impl IntoTableRef + Clone) -> TableCreateStatemen
         .to_owned()
 }
 
-async fn create_hsi_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-    // Partial unique: unqualified rows.
-    manager
-        .create_index(
-            Index::create()
-                .name("uix_hsi_unqualified")
-                .table(HostSoftwareItems::Table)
-                .col(HostSoftwareItems::HostId)
-                .col(HostSoftwareItems::SoftwareItemId)
-                .unique()
-                .and_where(Expr::col(HostSoftwareItems::Qualifier).is_null())
-                .and_where(Expr::col(HostSoftwareItems::DeactivatedAt).is_null())
-                .to_owned(),
-        )
-        .await?;
+/// Drop all `host_software_items` indexes (used by the PG/MySQL ALTER TABLE path).
+async fn drop_hsi_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    for name in [
+        "uix_hsi_unqualified",
+        "uix_hsi_qualified",
+        "uix_hsi_host_item_qualifier",
+        "idx_hsi_host_category",
+        "idx_hsi_deactivated_at",
+    ] {
+        helpers::drop_index_if_exists(manager, name, "host_software_items").await?;
+    }
+    Ok(())
+}
 
-    // Partial unique: qualified rows.
-    manager
-        .create_index(
-            Index::create()
-                .name("uix_hsi_qualified")
-                .table(HostSoftwareItems::Table)
-                .col(HostSoftwareItems::HostId)
-                .col(HostSoftwareItems::SoftwareItemId)
-                .col(HostSoftwareItems::Qualifier)
-                .unique()
-                .and_where(Expr::col(HostSoftwareItems::Qualifier).is_not_null())
-                .and_where(Expr::col(HostSoftwareItems::DeactivatedAt).is_null())
-                .to_owned(),
-        )
-        .await?;
+async fn create_hsi_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    // Partial unique indexes (SQLite/PostgreSQL) or a single composite unique
+    // index (MySQL/MariaDB, which doesn't support partial indexes).
+    if manager.get_database_backend() == sea_orm::DbBackend::MySql {
+        manager
+            .create_index(
+                Index::create()
+                    .name("uix_hsi_host_item_qualifier")
+                    .table(HostSoftwareItems::Table)
+                    .col(HostSoftwareItems::HostId)
+                    .col(HostSoftwareItems::SoftwareItemId)
+                    .col(HostSoftwareItems::Qualifier)
+                    .unique()
+                    .to_owned(),
+            )
+            .await?;
+    } else {
+        manager
+            .create_index(
+                Index::create()
+                    .name("uix_hsi_unqualified")
+                    .table(HostSoftwareItems::Table)
+                    .col(HostSoftwareItems::HostId)
+                    .col(HostSoftwareItems::SoftwareItemId)
+                    .unique()
+                    .and_where(Expr::col(HostSoftwareItems::Qualifier).is_null())
+                    .and_where(Expr::col(HostSoftwareItems::DeactivatedAt).is_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("uix_hsi_qualified")
+                    .table(HostSoftwareItems::Table)
+                    .col(HostSoftwareItems::HostId)
+                    .col(HostSoftwareItems::SoftwareItemId)
+                    .col(HostSoftwareItems::Qualifier)
+                    .unique()
+                    .and_where(Expr::col(HostSoftwareItems::Qualifier).is_not_null())
+                    .and_where(Expr::col(HostSoftwareItems::DeactivatedAt).is_null())
+                    .to_owned(),
+            )
+            .await?;
+    }
 
     // Category lookup.
     manager
@@ -498,17 +720,15 @@ async fn create_hsi_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Step 3: Rebuild update_history
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// Step 3: update_history
+// ===========================================================================
 
-async fn rebuild_update_history(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+// -- SQLite ----------------------------------------------------------------
+
+async fn rebuild_update_history_sqlite(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     // Drop update_output_lines first (FK dependency).
-    if manager.has_table("update_output_lines").await? {
-        manager
-            .drop_table(Table::drop().table(UpdateOutputLines::Table).to_owned())
-            .await?;
-    }
+    drop_update_output_lines(manager).await?;
 
     let state =
         helpers::check_crash_recovery(manager, "update_history", "update_history_new").await?;
@@ -518,7 +738,7 @@ async fn rebuild_update_history(manager: &SchemaManager<'_>) -> Result<(), DbErr
             .create_table(build_update_history_table(UpdateHistoryNew::Table))
             .await?;
 
-        // Copy data. Derive tenant_id from host → tenant lookup.
+        // Copy data. Derive tenant_id from host -> tenant lookup.
         // host_software_item_id is left NULL for all existing rows.
         let copy_sql = "INSERT INTO update_history_new \
                 (id, tenant_id, host_id, software_item_id, host_software_item_id, \
@@ -541,49 +761,134 @@ async fn rebuild_update_history(manager: &SchemaManager<'_>) -> Result<(), DbErr
 
     helpers::rename_temp(manager, "update_history_new", "update_history").await?;
 
-    // Recreate indexes.
+    // Recreate indexes and update_output_lines (shared with alter path).
+    create_update_history_indexes(manager).await?;
+    recreate_update_output_lines(manager).await?;
+
+    Ok(())
+}
+
+// -- PG/MySQL --------------------------------------------------------------
+
+async fn alter_update_history(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    // Drop update_output_lines first (FK dependency on update_history).
+    drop_update_output_lines(manager).await?;
+
+    // Add tenant_id as nullable first, backfill, then set NOT NULL.
+    manager
+        .alter_table(
+            Table::alter()
+                .table(UpdateHistory::Table)
+                .add_column(ColumnDef::new(UpdateHistory::TenantId).uuid().null())
+                .to_owned(),
+        )
+        .await?;
+
+    // Backfill tenant_id from the hosts table via a correlated subquery.
+    // sea_query cannot express UPDATE ... SET col = (SELECT ...) correlated
+    // subqueries in its builder API, so we use execute_unprepared.
+    manager
+        .get_connection()
+        .execute_unprepared(
+            "UPDATE update_history SET tenant_id = \
+             (SELECT h.tenant_id FROM hosts h WHERE h.id = update_history.host_id)",
+        )
+        .await?;
+
+    // Now make tenant_id NOT NULL.
+    manager
+        .alter_table(
+            Table::alter()
+                .table(UpdateHistory::Table)
+                .modify_column(ColumnDef::new(UpdateHistory::TenantId).uuid().not_null())
+                .to_owned(),
+        )
+        .await?;
+
+    // Add host_software_item_id column.
+    manager
+        .alter_table(
+            Table::alter()
+                .table(UpdateHistory::Table)
+                .add_column(
+                    ColumnDef::new(UpdateHistory::HostSoftwareItemId)
+                        .uuid()
+                        .null(),
+                )
+                .to_owned(),
+        )
+        .await?;
+
+    // Change to_version from NOT NULL to NULL.
+    manager
+        .alter_table(
+            Table::alter()
+                .table(UpdateHistory::Table)
+                .modify_column(ColumnDef::new(UpdateHistory::ToVersion).string().null())
+                .to_owned(),
+        )
+        .await?;
+
+    // Change started_at from NOT NULL to NULL.
+    manager
+        .alter_table(
+            Table::alter()
+                .table(UpdateHistory::Table)
+                .modify_column(timestamp_null(UpdateHistory::StartedAt))
+                .to_owned(),
+        )
+        .await?;
+
+    // Add FK constraints for the new columns.
+    manager
+        .create_foreign_key(
+            ForeignKey::create()
+                .name("fk_update_history_tenant")
+                .from(UpdateHistory::Table, UpdateHistory::TenantId)
+                .to(Tenants::Table, Tenants::Id)
+                .on_delete(ForeignKeyAction::Restrict)
+                .to_owned(),
+        )
+        .await?;
+
+    manager
+        .create_foreign_key(
+            ForeignKey::create()
+                .name("fk_update_history_host_software_item")
+                .from(UpdateHistory::Table, UpdateHistory::HostSoftwareItemId)
+                .to(HostSoftwareItems::Table, HostSoftwareItems::Id)
+                .on_delete(ForeignKeyAction::SetNull)
+                .to_owned(),
+        )
+        .await?;
+
+    // On MariaDB, temporarily drop FKs before dropping indexes (InnoDB uses
+    // user-created indexes as FK backing indexes).
+    let uh_fks = helpers::drop_mysql_foreign_keys(manager, "update_history").await?;
+
+    // Drop pre-existing indexes (they survive ALTER TABLE on PG/MySQL, unlike
+    // SQLite table-recreation which drops everything automatically).
+    drop_update_history_indexes(manager).await?;
+
+    // Recreate indexes and update_output_lines (shared with SQLite path).
     create_update_history_indexes(manager).await?;
 
-    // Recreate update_output_lines.
-    manager
-        .create_table(
-            Table::create()
-                .table(UpdateOutputLines::Table)
-                .col(
-                    ColumnDef::new(Alias::new("id"))
-                        .uuid()
-                        .not_null()
-                        .primary_key(),
-                )
-                .col(
-                    ColumnDef::new(UpdateOutputLines::UpdateHistoryId)
-                        .uuid()
-                        .not_null(),
-                )
-                .col(string(Alias::new("stream")))
-                .col(ColumnDef::new(Alias::new("output")).text().not_null())
-                .col(timestamp(Alias::new("created_at")))
-                .foreign_key(
-                    ForeignKey::create()
-                        .name("fk_update_output_lines_update_history")
-                        .from(UpdateOutputLines::Table, UpdateOutputLines::UpdateHistoryId)
-                        .to(UpdateHistory::Table, UpdateHistory::Id)
-                        .on_delete(ForeignKeyAction::Cascade),
-                )
-                .to_owned(),
-        )
-        .await?;
+    // Recreate FKs on MariaDB.
+    helpers::recreate_mysql_foreign_keys(manager, "update_history", &uh_fks).await?;
 
-    manager
-        .create_index(
-            Index::create()
-                .name("idx_update_output_lines_update_history")
-                .table(UpdateOutputLines::Table)
-                .col(UpdateOutputLines::UpdateHistoryId)
-                .to_owned(),
-        )
-        .await?;
+    recreate_update_output_lines(manager).await?;
 
+    Ok(())
+}
+
+// -- Shared ----------------------------------------------------------------
+
+async fn drop_update_output_lines(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    if manager.has_table("update_output_lines").await? {
+        manager
+            .drop_table(Table::drop().table(UpdateOutputLines::Table).to_owned())
+            .await?;
+    }
     Ok(())
 }
 
@@ -683,6 +988,22 @@ fn build_update_history_table(table_name: impl IntoTableRef + Clone) -> TableCre
         .to_owned()
 }
 
+async fn drop_update_history_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    for name in [
+        "idx_update_history_host_id",
+        "idx_update_history_software_item_id",
+        "idx_update_history_status",
+        "idx_update_history_host_software_item",
+        "idx_uh_batch_id",
+        "idx_update_history_created_at",
+        "uix_update_history_host_active",
+        "idx_update_history_tenant_id",
+    ] {
+        helpers::drop_index_if_exists(manager, name, "update_history").await?;
+    }
+    Ok(())
+}
+
 async fn create_update_history_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     for (name, cols) in [
         ("idx_update_history_host_id", vec![UpdateHistory::HostId]),
@@ -729,11 +1050,56 @@ async fn create_update_history_indexes(manager: &SchemaManager<'_>) -> Result<()
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Step 4: Rebuild update_batches
-// ---------------------------------------------------------------------------
+async fn recreate_update_output_lines(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .create_table(
+            Table::create()
+                .table(UpdateOutputLines::Table)
+                .col(
+                    ColumnDef::new(Alias::new("id"))
+                        .uuid()
+                        .not_null()
+                        .primary_key(),
+                )
+                .col(
+                    ColumnDef::new(UpdateOutputLines::UpdateHistoryId)
+                        .uuid()
+                        .not_null(),
+                )
+                .col(string(Alias::new("stream")))
+                .col(ColumnDef::new(Alias::new("output")).text().not_null())
+                .col(timestamp(Alias::new("created_at")))
+                .foreign_key(
+                    ForeignKey::create()
+                        .name("fk_update_output_lines_update_history")
+                        .from(UpdateOutputLines::Table, UpdateOutputLines::UpdateHistoryId)
+                        .to(UpdateHistory::Table, UpdateHistory::Id)
+                        .on_delete(ForeignKeyAction::Cascade),
+                )
+                .to_owned(),
+        )
+        .await?;
 
-async fn rebuild_update_batches(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .create_index(
+            Index::create()
+                .name("idx_update_output_lines_update_history")
+                .table(UpdateOutputLines::Table)
+                .col(UpdateOutputLines::UpdateHistoryId)
+                .to_owned(),
+        )
+        .await?;
+
+    Ok(())
+}
+
+// ===========================================================================
+// Step 4: update_batches
+// ===========================================================================
+
+// -- SQLite ----------------------------------------------------------------
+
+async fn rebuild_update_batches_sqlite(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let state =
         helpers::check_crash_recovery(manager, "update_batches", "update_batches_new").await?;
 
@@ -749,10 +1115,10 @@ async fn rebuild_update_batches(manager: &SchemaManager<'_>) -> Result<(), DbErr
                             .primary_key(),
                     )
                     .col(ColumnDef::new(UpdateBatches::TenantId).uuid().not_null())
-                    .col(ColumnDef::new(UpdateBatches::BatchType).text().not_null())
+                    .col(ColumnDef::new(UpdateBatches::BatchType).string().not_null())
                     .col(
                         ColumnDef::new(UpdateBatches::Status)
-                            .text()
+                            .string()
                             .not_null()
                             .default("in_progress"),
                     )
@@ -761,8 +1127,8 @@ async fn rebuild_update_batches(manager: &SchemaManager<'_>) -> Result<(), DbErr
                             .integer()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(UpdateBatches::ActorType).text().not_null())
-                    .col(ColumnDef::new(UpdateBatches::ActorId).text().not_null())
+                    .col(ColumnDef::new(UpdateBatches::ActorType).string().not_null())
+                    .col(ColumnDef::new(UpdateBatches::ActorId).string().not_null())
                     .col(
                         ColumnDef::new(UpdateBatches::Output)
                             .text()
@@ -807,6 +1173,68 @@ async fn rebuild_update_batches(manager: &SchemaManager<'_>) -> Result<(), DbErr
     helpers::rename_temp(manager, "update_batches_new", "update_batches").await?;
 
     // Recreate index.
+    create_update_batches_indexes(manager).await?;
+
+    Ok(())
+}
+
+// -- PG/MySQL --------------------------------------------------------------
+
+async fn alter_update_batches(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    // Add new columns with defaults so existing rows are populated.
+    manager
+        .alter_table(
+            Table::alter()
+                .table(UpdateBatches::Table)
+                .add_column(
+                    ColumnDef::new(UpdateBatches::Output)
+                        .text()
+                        .not_null()
+                        .default(""),
+                )
+                .to_owned(),
+        )
+        .await?;
+
+    manager
+        .alter_table(
+            Table::alter()
+                .table(UpdateBatches::Table)
+                .add_column(
+                    ColumnDef::new(UpdateBatches::OutputBytes)
+                        .big_integer()
+                        .not_null()
+                        .default(0),
+                )
+                .to_owned(),
+        )
+        .await?;
+
+    // On MariaDB, temporarily drop FKs before index operations.
+    let ub_fks = helpers::drop_mysql_foreign_keys(manager, "update_batches").await?;
+
+    // Drop pre-existing indexes (they survive ALTER TABLE on PG/MySQL).
+    drop_update_batches_indexes(manager).await?;
+
+    // Recreate indexes.
+    create_update_batches_indexes(manager).await?;
+
+    // Recreate FKs on MariaDB.
+    helpers::recreate_mysql_foreign_keys(manager, "update_batches", &ub_fks).await?;
+
+    Ok(())
+}
+
+// -- Shared indexes --------------------------------------------------------
+
+async fn drop_update_batches_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    for name in ["idx_ub_tenant_status"] {
+        helpers::drop_index_if_exists(manager, name, "update_batches").await?;
+    }
+    Ok(())
+}
+
+async fn create_update_batches_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     manager
         .create_index(
             Index::create()
@@ -821,9 +1249,9 @@ async fn rebuild_update_batches(manager: &SchemaManager<'_>) -> Result<(), DbErr
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
 // Step 5: Create software_ignores
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
 async fn create_software_ignores(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     if manager.has_table("software_ignores").await? {
@@ -891,7 +1319,7 @@ async fn create_software_ignores(manager: &SchemaManager<'_>) -> Result<(), DbEr
         )
         .await?;
 
-    // Migrate existing autodiscovery_ignores → software_ignores (tenant-wide).
+    // Migrate existing autodiscovery_ignores -> software_ignores (tenant-wide).
     if manager.has_table("autodiscovery_ignores").await? {
         let migrate_sql = "\
             INSERT INTO software_ignores (id, tenant_id, host_id, name, created_at) \
@@ -906,9 +1334,9 @@ async fn create_software_ignores(manager: &SchemaManager<'_>) -> Result<(), DbEr
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
 // Step 6: Drop old tables
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
 async fn drop_old_tables(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     // Drop in FK-dependency order.
@@ -928,9 +1356,9 @@ async fn drop_old_tables(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
 // Step 7: Rename scheduler task
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
 async fn rename_scheduler_task(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let update_stmt = Query::update()
