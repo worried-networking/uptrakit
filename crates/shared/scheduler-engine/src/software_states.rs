@@ -6,17 +6,20 @@
 //! - The external-scheduler path calls it directly from this module.
 
 use sea_orm::{
-    ColumnTrait, Condition, EntityTrait, FromQueryResult, JoinType, QueryFilter, QuerySelect,
-    RelationTrait as _,
+    ColumnTrait, Condition, EntityTrait, FromQueryResult, JoinType, PaginatorTrait, QueryFilter,
+    QueryOrder, QuerySelect, RelationTrait as _,
 };
 use std::collections::{HashMap, HashSet};
 use uptrakit_internal_wire::{
     MqttHostMetadata, MqttHostSummary, MqttSoftwareStateHostEntry, MqttSoftwareStateItem,
-    MqttSoftwareStatesPayload,
+    MqttSoftwareStatesPayload, SoftwareStatesPage,
 };
-use uptrakit_shared_db::entity::{
-    host, host_software_item, host_tag, host_tag_assignment, prelude::*, service, service_host,
-    software_item, update_history,
+use uptrakit_shared_db::{
+    TenantDb,
+    entity::{
+        host, host_software_item, host_tag, host_tag_assignment, prelude::*, service, service_host,
+        software_item, update_history,
+    },
 };
 use uptrakit_shared_types::ServiceStatus;
 use uuid::Uuid;
@@ -55,14 +58,16 @@ struct ActiveUpdateRow {
 /// # Errors
 ///
 /// Returns a [`sea_orm::DbErr`] if any database query fails.
-#[tracing::instrument(skip_all, fields(%tenant_id))]
+#[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id))]
 pub async fn load_software_states_for_tenant(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
+    tenant_db: &TenantDb,
 ) -> Result<MqttSoftwareStatesPayload, sea_orm::DbErr> {
+    let tenant_id = tenant_db.tenant_id;
+    let db = tenant_db.db();
+
     // 1. Load all active, non-deactivated software items for the tenant.
-    let items = SoftwareItem::find()
-        .filter(software_item::Column::TenantId.eq(tenant_id))
+    let items = tenant_db
+        .find::<SoftwareItem>()
         .filter(software_item::Column::DeactivatedAt.is_null())
         .all(db)
         .await?;
@@ -74,6 +79,7 @@ pub async fn load_software_states_for_tenant(
             items: vec![],
             host_summaries: vec![],
             hosts: vec![],
+            page: SoftwareStatesPage::single(),
         });
     }
 
@@ -283,6 +289,273 @@ pub async fn load_software_states_for_tenant(
         items: result_items,
         host_summaries,
         hosts: host_metadata,
+        page: SoftwareStatesPage::single(),
+    })
+}
+
+/// Load a single page of software state data for a tenant, scoped to a slice of hosts.
+///
+/// Hosts are ordered by `id` for stable pagination. The `host_page` parameter
+/// is zero-based; the total number of pages is computed from the active host
+/// count divided by `host_page_size`.
+///
+/// Only **featured** software items for the page's hosts are included as
+/// individual MQTT entities. Non-featured items are aggregated into per-host
+/// summaries.
+///
+/// # Errors
+///
+/// Returns a [`sea_orm::DbErr`] if any database query fails.
+#[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id, host_page))]
+pub async fn load_software_states_page_for_tenant(
+    tenant_db: &TenantDb,
+    host_page: u64,
+    host_page_size: u64,
+) -> Result<MqttSoftwareStatesPayload, sea_orm::DbErr> {
+    let tenant_id = tenant_db.tenant_id;
+    let db = tenant_db.db();
+
+    // 1. Count active hosts for this tenant to compute total_pages.
+    let total_hosts: u64 = tenant_db
+        .find::<Host>()
+        .filter(host::Column::DeactivatedAt.is_null())
+        .count(db)
+        .await?;
+
+    let total_pages = if total_hosts == 0 {
+        1u32
+    } else {
+        u32::try_from(total_hosts.div_ceil(host_page_size)).unwrap_or(u32::MAX)
+    };
+
+    let page_info = SoftwareStatesPage {
+        page_index: u32::try_from(host_page).unwrap_or(u32::MAX),
+        total_pages,
+    };
+
+    // 2. Load the ordered host slice for this page.
+    let page_hosts: Vec<host::Model> = tenant_db
+        .find::<Host>()
+        .filter(host::Column::DeactivatedAt.is_null())
+        .order_by_asc(host::Column::Id)
+        .limit(host_page_size)
+        .offset(host_page * host_page_size)
+        .all(db)
+        .await?;
+
+    if page_hosts.is_empty() {
+        return Ok(MqttSoftwareStatesPayload {
+            tenant_id,
+            items: vec![],
+            host_summaries: vec![],
+            hosts: vec![],
+            page: page_info,
+        });
+    }
+
+    let page_host_ids: Vec<Uuid> = page_hosts.iter().map(|h| h.id).collect();
+    let page_hosts_map: HashMap<Uuid, host::Model> =
+        page_hosts.into_iter().map(|h| (h.id, h)).collect();
+
+    // 3. Load HSI rows for this page's hosts.
+    let hsi_rows: Vec<HostSoftwareItemRow> = HostSoftwareItem::find()
+        .select_only()
+        .column(host_software_item::Column::HostId)
+        .column(host_software_item::Column::SoftwareItemId)
+        .column(host_software_item::Column::InstalledVersion)
+        .column(host_software_item::Column::InstalledVersionDetectedAt)
+        .column(host_software_item::Column::LatestVersion)
+        .column(host_software_item::Column::LatestReleaseMetadata)
+        .column(host_software_item::Column::UpdateCategory)
+        .filter(host_software_item::Column::HostId.is_in(page_host_ids.clone()))
+        .filter(host_software_item::Column::DeactivatedAt.is_null())
+        .into_model::<HostSoftwareItemRow>()
+        .all(db)
+        .await?;
+
+    // 4. Load software item metadata for all unique item_ids in this page.
+    let unique_item_ids: Vec<Uuid> = {
+        let mut seen = HashSet::new();
+        hsi_rows
+            .iter()
+            .filter(|r| seen.insert(r.software_item_id))
+            .map(|r| r.software_item_id)
+            .collect()
+    };
+
+    let items_meta: HashMap<Uuid, software_item::Model> = if unique_item_ids.is_empty() {
+        HashMap::new()
+    } else {
+        tenant_db
+            .find::<SoftwareItem>()
+            .filter(software_item::Column::Id.is_in(unique_item_ids))
+            .filter(software_item::Column::DeactivatedAt.is_null())
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|i| (i.id, i))
+            .collect()
+    };
+
+    // 5. Load active updates for this page's hosts.
+    let active_updates: HashSet<(Uuid, Uuid)> = UpdateHistory::find()
+        .select_only()
+        .column(update_history::Column::HostId)
+        .column(update_history::Column::SoftwareItemId)
+        .filter(update_history::Column::HostId.is_in(page_host_ids.clone()))
+        .filter(
+            Condition::any()
+                .add(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
+                .add(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
+                .add(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress)),
+        )
+        .into_model::<ActiveUpdateRow>()
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|r| (r.host_id, r.software_item_id))
+        .collect();
+
+    // Build a set of featured item IDs.
+    let featured_item_ids: HashSet<Uuid> = items_meta
+        .values()
+        .filter(|i| i.featured)
+        .map(|i| i.id)
+        .collect();
+
+    // Index hsi rows by software_item_id.
+    let mut hsi_by_item: HashMap<Uuid, Vec<&HostSoftwareItemRow>> = HashMap::new();
+    for row in &hsi_rows {
+        hsi_by_item
+            .entry(row.software_item_id)
+            .or_default()
+            .push(row);
+    }
+
+    // 6. Assemble featured items, sorted deterministically by item id.
+    let mut featured_items: Vec<&software_item::Model> =
+        items_meta.values().filter(|i| i.featured).collect();
+    featured_items.sort_by_key(|i| i.id);
+
+    let mut result_items: Vec<MqttSoftwareStateItem> = Vec::new();
+    for item in featured_items {
+        let host_entries: Vec<MqttSoftwareStateHostEntry> = hsi_by_item
+            .get(&item.id)
+            .map(|links| {
+                links
+                    .iter()
+                    .filter_map(|link| {
+                        let host = page_hosts_map.get(&link.host_id)?;
+                        let update_available = match (
+                            link.installed_version.as_deref(),
+                            link.latest_version.as_deref(),
+                        ) {
+                            (Some(installed), Some(latest)) => installed != latest,
+                            _ => false,
+                        };
+                        let update_in_progress =
+                            active_updates.contains(&(link.host_id, link.software_item_id));
+                        let (release_url, release_notes, release_date) =
+                            extract_release_info(link.latest_release_metadata.as_ref());
+                        let last_checked_at = link.installed_version_detected_at.map(|dt| {
+                            dt.format(&time::format_description::well_known::Rfc3339)
+                                .unwrap_or_default()
+                        });
+                        Some(MqttSoftwareStateHostEntry {
+                            host_id: host.id,
+                            hostname: host.hostname.clone(),
+                            friendly_name: host.friendly_name.clone(),
+                            installed_version: link.installed_version.clone(),
+                            latest_version: link.latest_version.clone(),
+                            update_available,
+                            update_in_progress,
+                            release_url,
+                            release_notes,
+                            update_category: Some(link.update_category.clone()),
+                            release_date,
+                            last_checked_at,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if host_entries.is_empty() {
+            continue;
+        }
+
+        result_items.push(MqttSoftwareStateItem {
+            software_item_id: item.id,
+            name: item.name.clone(),
+            icon_url: item.icon_url.clone(),
+            hosts: host_entries,
+        });
+    }
+
+    // 7. Build per-host summaries for unfeatured items.
+    let mut unfeatured_by_host: HashMap<Uuid, Vec<&HostSoftwareItemRow>> = HashMap::new();
+    for row in &hsi_rows {
+        if !featured_item_ids.contains(&row.software_item_id) {
+            unfeatured_by_host.entry(row.host_id).or_default().push(row);
+        }
+    }
+
+    let unfeatured_in_progress_hosts: HashSet<Uuid> = active_updates
+        .iter()
+        .filter(|(_, si_id)| !featured_item_ids.contains(si_id))
+        .map(|(h_id, _)| *h_id)
+        .collect();
+
+    let mut host_summaries: Vec<MqttHostSummary> = Vec::with_capacity(unfeatured_by_host.len());
+    for (host_id, rows) in unfeatured_by_host {
+        let Some(host) = page_hosts_map.get(&host_id) else {
+            continue;
+        };
+
+        let is_outdated = |r: &&&HostSoftwareItemRow| {
+            matches!(
+                (&r.installed_version, &r.latest_version),
+                (Some(installed), Some(latest)) if installed != latest
+            )
+        };
+        let total_count = rows.len() as u32;
+        let pending_count = rows.iter().filter(is_outdated).count() as u32;
+        let security_pending_count = rows
+            .iter()
+            .filter(|r| is_outdated(r) && r.update_category == "security")
+            .count() as u32;
+        let bugfix_count = rows
+            .iter()
+            .filter(|r| is_outdated(r) && r.update_category == "bugfix")
+            .count() as u32;
+        let feature_count = rows
+            .iter()
+            .filter(|r| is_outdated(r) && r.update_category == "feature")
+            .count() as u32;
+        let update_in_progress = unfeatured_in_progress_hosts.contains(&host_id);
+
+        host_summaries.push(MqttHostSummary {
+            host_id,
+            hostname: host.hostname.clone(),
+            friendly_name: host.friendly_name.clone(),
+            pending_count,
+            security_pending_count,
+            total_count,
+            update_in_progress,
+            bugfix_count,
+            feature_count,
+        });
+    }
+
+    // 8. Build MqttHostMetadata for all page hosts.
+    let host_metadata = build_host_metadata(db, &page_hosts_map).await?;
+
+    Ok(MqttSoftwareStatesPayload {
+        tenant_id,
+        items: result_items,
+        host_summaries,
+        hosts: host_metadata,
+        page: page_info,
     })
 }
 

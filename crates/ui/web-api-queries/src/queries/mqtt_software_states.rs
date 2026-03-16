@@ -11,6 +11,7 @@ use uptrakit_shared_db::entity::{service, service_host};
 // that both the embedded-scheduler and the web-API code paths share one
 // implementation.  The scheduler-engine crate owns the single source of truth.
 pub use uptrakit_scheduler_engine::software_states::load_software_states_for_tenant;
+pub use uptrakit_scheduler_engine::software_states::load_software_states_page_for_tenant;
 
 /// Projection: one row per (service, host) pair for agent connectivity queries.
 #[derive(Debug, FromQueryResult)]
