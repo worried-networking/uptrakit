@@ -337,6 +337,33 @@ cargo test -p uptrakit-web-api --features db-sqlite integration_tests::auth_flow
 cargo test --all-features
 ```
 
+## Plugin Unit Test Utilities
+
+Package-manager and release plugins test their logic by injecting mock `CommandExecutor`
+implementations. Shared mock types live in `uptrakit-plugin-infrastructure-core` behind the
+`testing` feature. Enable them in dev-dependencies:
+
+```toml
+[dev-dependencies]
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing"] }
+```
+
+Then import the types inside your test module:
+
+```rust
+use uptrakit_plugin_infrastructure_core::testing::{FixedOutputExecutor, RoutedOutputExecutor};
+```
+
+| Type | Constructor | Behaviour |
+| --- | --- | --- |
+| `FixedOutputExecutor` | `::success(stdout)` | All commands return `Ok` with exit 0 and the given output |
+| `FixedOutputExecutor` | `::failure(exit_code)` | All commands return empty output; `execute_quiet` returns `Err(CommandFailed)` |
+| `FixedOutputExecutor` | `::new(stdout, exit_code)` | `execute` always `Ok`; `execute_quiet` returns `Err` for non-zero |
+| `RoutedOutputExecutor` | `::success(pairs)` | Routes by program name; all routes succeed with exit 0 |
+| `RoutedOutputExecutor` | `::new(triples)` | Routes by program name; each route has its own `(output, exit_code)` |
+
+Do not define local mock executor structs in plugin test modules — always use the shared types above.
+
 ## Testing Expectations - Detailed
 
 Every behaviour change must include tests. Types of tests used:

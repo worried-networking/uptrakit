@@ -211,39 +211,39 @@ See [Dependency Policy](dependency-policy.md) for the full re-export strategy.
 
 ## HTTP Client Requirements
 
-Any plugin that builds its own `reqwest::Client` (e.g. for fetching upstream release metadata) **must**
-configure at minimum a connect timeout and a total request timeout. An unconfigured client will hang
-indefinitely against an unresponsive or slow registry, creating a denial-of-service vector against the
-agent or controller process that loaded the plugin.
+Any plugin that makes outbound HTTP requests (e.g. to fetch upstream release metadata) **must** use
+`build_plugin_http_client` from `uptrakit-plugin-infrastructure-core` (enable the `http-client`
+feature). This function enforces all security and reliability requirements centrally:
 
 ```rust
-use std::time::Duration;
+use uptrakit_plugin_infrastructure_core::{
+    PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
+};
 
-let client = reqwest::Client::builder()
-    .user_agent(concat!(
-        "uptrakit-plugin-my-plugin/",
-        env!("CARGO_PKG_VERSION")
-    ))
-    .redirect(reqwest::redirect::Policy::none()) // SSRF protection
-    .connect_timeout(Duration::from_secs(10))    // prevents hangs on unreachable hosts
-    .timeout(Duration::from_secs(60))             // caps total request duration
-    .build()
-    .context_to::<MyPluginError>()?;
+let client = build_plugin_http_client(PluginHttpClientConfig {
+    user_agent: concat!("uptrakit-my-plugin/", env!("CARGO_PKG_VERSION")),
+    ssrf_mode: SsrfMode::Strict,          // use Permissive only for self-hosted registries
+    request_timeout_secs: 60,
+    redirect_policy: reqwest::redirect::Policy::none(),
+    default_headers: None,
+})
+.map_err(|e| report!(PluginError::Configuration(e)))?;
 ```
 
-**Required settings:**
+**What `build_plugin_http_client` enforces:**
 
-- `.redirect(Policy::none())` — disables automatic redirect following. Prevents SSRF via
-  attacker-controlled redirect targets (e.g., a 301 to `http://169.254.169.254/...`). Plugin API
-  endpoints should not redirect; any 3xx response should be treated as an error.
-- `.connect_timeout(Duration::from_secs(10))` — prevents hanging on a host that accepts the TCP
-  connection but never sends data.
-- `.timeout(Duration::from_secs(60))` — caps the total wall-clock time of any single request
-  (connect + read + write). Adjust upward only for endpoints with documented large response bodies.
+- **SSRF protection** — `SsrfMode::Strict` installs `SsrfSafeResolver` to block requests to
+  private IP ranges and link-local addresses. Use `SsrfMode::Permissive` only when the plugin
+  connects to user-controlled self-hosted registries (e.g. Docker, GitLab, Forgejo) and the
+  deployment explicitly allows private URLs.
+- **TLS hardening** — WebPKI roots via `webpki_client_config()`, no system-trust drift.
+- **Connect timeout** — always 10 s; non-configurable.
+- **Request timeout** — configurable via `request_timeout_secs` (default 60 s).
+- **Redirect policy** — caller-specified; `Policy::none()` is the safe default.
 
-**User-Agent:** Set a descriptive `User-Agent` that includes the crate name and version so that
-upstream services can identify traffic originating from uptrakit. Use `env!("CARGO_PKG_VERSION")` to
-keep the version in sync automatically.
+Do **not** call `reqwest::Client::builder()` directly in plugin code. Using `build_plugin_http_client`
+ensures that all security settings are applied consistently and that future hardening improvements
+propagate automatically.
 
 ## Command Executor Pattern
 
@@ -450,25 +450,42 @@ human-readable message when the identifier is invalid.
 
 **When adding a new plugin with identifier constraints:**
 
-1. Add a crate-level `pub fn validate_identifier(value: &str) -> std::result::Result<(), String>`
-   in your plugin crate (e.g. `crates/plugins/my-plugin/src/lib.rs`).
+1. Declare a `const IDENTIFIER_RULES: PackageIdentifierRules` in your plugin crate using the
+   shared struct from `uptrakit-shared-types`:
+
+   ```rust
+   use uptrakit_shared_types::PackageIdentifierRules;
+
+   const IDENTIFIER_RULES: PackageIdentifierRules = PackageIdentifierRules {
+       min_len: 2,
+       max_len: 64,
+       first_char_valid: |c| c.is_ascii_alphanumeric() || c == '_',
+       char_valid: |c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'),
+       reject_double_dot: true,
+   };
+
+   pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+       IDENTIFIER_RULES.validate(value)
+   }
+   ```
+
+   For plugins with non-trivial identifier formats (e.g. npm's `@scope/name`), add extra checks
+   after calling `IDENTIFIER_RULES.validate(value)?`.
+
+   If your plugin imposes **no** constraints on `package_identifier`, add a no-op:
+
+   ```rust
+   pub fn validate_identifier(_value: &str) -> std::result::Result<(), String> {
+       Ok(())
+   }
+   ```
+
 2. Add an associated function on your config struct that delegates to the crate-level function:
 
    ```rust
    impl MyPluginConfig {
        pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
            crate::validate_identifier(value)
-       }
-   }
-   ```
-
-   If your plugin imposes **no** constraints on `package_identifier`, add a no-op associated
-   function that always returns `Ok(())`:
-
-   ```rust
-   impl MyPluginConfig {
-       pub fn validate_identifier(_value: &str) -> std::result::Result<(), String> {
-           Ok(())
        }
    }
    ```
