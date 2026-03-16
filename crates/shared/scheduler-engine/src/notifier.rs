@@ -19,16 +19,14 @@ pub trait SchedulerNotifier: Send + Sync {
     /// Signal the controller(s) to perform CA certificate rotation.
     async fn signal_ca_rotation(&self, reason: &str);
 
-    /// Load software states for a tenant and push to MQTT services.
+    /// Signal that software states have changed for a tenant.
     ///
-    /// Each concrete implementation is responsible for loading the payload
-    /// from the database and delivering it via the appropriate transport
-    /// (in-process `NotificationService` or NATS publish).
-    async fn push_software_states_for_tenant(
-        &self,
-        db: &sea_orm::DatabaseConnection,
-        tenant_id: Uuid,
-    );
+    /// The embedded-controller implementation loads states and pushes them
+    /// directly via `NotificationService`. The NATS-only implementation
+    /// (external scheduler) publishes a `SoftwareStatesChanged` signal to
+    /// the controller NATS subject; the receiving controller performs the
+    /// actual load-and-push.
+    async fn signal_software_states_changed(&self, tenant_id: Uuid);
 
     /// Signal all controller instances to rebuild the CRL immediately.
     ///
@@ -52,11 +50,6 @@ impl SchedulerNotifier for NoopSchedulerNotifier {
     async fn broadcast(&self, _msg: ControllerMessage) {}
     async fn send_by_capability(&self, _capability: &str, _msg: ControllerMessage) {}
     async fn signal_ca_rotation(&self, _reason: &str) {}
-    async fn push_software_states_for_tenant(
-        &self,
-        _db: &sea_orm::DatabaseConnection,
-        _tenant_id: Uuid,
-    ) {
-    }
+    async fn signal_software_states_changed(&self, _tenant_id: Uuid) {}
     async fn signal_crl_renewal(&self) {}
 }

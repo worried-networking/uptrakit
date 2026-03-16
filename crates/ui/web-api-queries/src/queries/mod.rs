@@ -17,6 +17,7 @@ pub mod reset_data;
 pub mod scheduled_tasks;
 pub mod services;
 pub mod software_items;
+pub mod software_states;
 pub mod system_enrollment_tokens;
 pub mod system_services;
 pub mod update_batches;

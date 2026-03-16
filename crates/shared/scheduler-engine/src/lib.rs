@@ -12,7 +12,6 @@
 //! - [`SchedulerNotifier`] abstracts message delivery so the same executors can
 //!   run in-process (via `NotificationService`) or out-of-process (via NATS).
 //! - [`ca_utils`] provides shared CA certificate rotation checks.
-//! - [`software_states`] loads MQTT software state data from the database.
 
 pub mod ca_utils;
 pub mod claim;
@@ -21,7 +20,6 @@ pub mod executor;
 pub mod executors;
 pub mod interval;
 pub mod notifier;
-pub mod software_states;
 
 pub use error::{Result, SchedulerError};
 pub use executor::TaskExecutor;

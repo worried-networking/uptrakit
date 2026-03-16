@@ -72,6 +72,7 @@ impl TaskExecutor for CaRotationCheckExecutor {
 /// `NotificationService` the controller uses for other WebSocket push messages.
 pub(crate) struct ControllerSchedulerNotifier {
     notification_service: uptrakit_web_api::notification_service::NotificationService,
+    db: sea_orm::DatabaseConnection,
     ca_rotation_trigger: Arc<Notify>,
     revocation_notify: Arc<Notify>,
 }
@@ -79,11 +80,13 @@ pub(crate) struct ControllerSchedulerNotifier {
 impl ControllerSchedulerNotifier {
     pub(crate) fn new(
         notification_service: uptrakit_web_api::notification_service::NotificationService,
+        db: sea_orm::DatabaseConnection,
         ca_rotation_trigger: Arc<Notify>,
         revocation_notify: Arc<Notify>,
     ) -> Self {
         Self {
             notification_service,
+            db,
             ca_rotation_trigger,
             revocation_notify,
         }
@@ -119,13 +122,9 @@ impl SchedulerNotifier for ControllerSchedulerNotifier {
             .await;
     }
 
-    async fn push_software_states_for_tenant(
-        &self,
-        db: &sea_orm::DatabaseConnection,
-        tenant_id: uuid::Uuid,
-    ) {
+    async fn signal_software_states_changed(&self, tenant_id: uuid::Uuid) {
         self.notification_service
-            .push_software_states_for_tenant(db, tenant_id)
+            .push_software_states_for_tenant(&self.db, tenant_id)
             .await;
     }
 

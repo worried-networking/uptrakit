@@ -1,9 +1,8 @@
-//! Query helper that loads software state data for MQTT `SoftwareStates` push messages.
+//! Query helper that loads software state data for `SoftwareStates` push messages.
 //!
-//! This is the **single canonical implementation** shared by all code paths:
-//! - The web-API tier re-exports [`load_software_states_for_tenant`] via
-//!   `uptrakit_web_api_queries::queries::mqtt_software_states`.
-//! - The external-scheduler path calls it directly from this module.
+//! This is the **single canonical implementation** for loading software state
+//! data used by the notification service to push state to update-tracking
+//! services (e.g. MQTT bridge).
 
 use sea_orm::{
     ColumnTrait, Condition, EntityTrait, FromQueryResult, JoinType, PaginatorTrait, QueryFilter,
@@ -11,8 +10,8 @@ use sea_orm::{
 };
 use std::collections::{HashMap, HashSet};
 use uptrakit_internal_wire::{
-    MqttHostMetadata, MqttHostSummary, MqttSoftwareStateHostEntry, MqttSoftwareStateItem,
-    MqttSoftwareStatesPayload, SoftwareStatesPage,
+    HostPackageSummary, HostStateMetadata, SoftwareStateHostEntry, SoftwareStateItem,
+    SoftwareStatesPage, SoftwareStatesPayload,
 };
 use uptrakit_shared_db::{
     TenantDb,
@@ -43,7 +42,7 @@ struct ActiveUpdateRow {
     software_item_id: Uuid,
 }
 
-/// Load all software state data for a tenant and assemble a [`MqttSoftwareStatesPayload`].
+/// Load all software state data for a tenant and assemble a [`SoftwareStatesPayload`].
 ///
 /// Only **featured** software items are included as individual MQTT entities in
 /// `payload.items`. Non-featured items are aggregated into per-host summaries in
@@ -61,7 +60,7 @@ struct ActiveUpdateRow {
 #[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id))]
 pub async fn load_software_states_for_tenant(
     tenant_db: &TenantDb,
-) -> Result<MqttSoftwareStatesPayload, sea_orm::DbErr> {
+) -> Result<SoftwareStatesPayload, sea_orm::DbErr> {
     let tenant_id = tenant_db.tenant_id;
     let db = tenant_db.db();
 
@@ -74,7 +73,7 @@ pub async fn load_software_states_for_tenant(
 
     // 2. Nothing to do — return early with an empty payload.
     if items.is_empty() {
-        return Ok(MqttSoftwareStatesPayload {
+        return Ok(SoftwareStatesPayload {
             tenant_id,
             items: vec![],
             host_summaries: vec![],
@@ -162,7 +161,7 @@ pub async fn load_software_states_for_tenant(
     }
 
     // 6. Assemble the featured items payload (individual MQTT entities).
-    let mut result_items: Vec<MqttSoftwareStateItem> = Vec::with_capacity(items.len());
+    let mut result_items: Vec<SoftwareStateItem> = Vec::with_capacity(items.len());
 
     for item in &items {
         // Only featured items get individual MQTT entities.
@@ -170,7 +169,7 @@ pub async fn load_software_states_for_tenant(
             continue;
         }
 
-        let host_entries: Vec<MqttSoftwareStateHostEntry> = hsi_by_item
+        let host_entries: Vec<SoftwareStateHostEntry> = hsi_by_item
             .get(&item.id)
             .map(|links| {
                 links
@@ -192,7 +191,7 @@ pub async fn load_software_states_for_tenant(
                             dt.format(&time::format_description::well_known::Rfc3339)
                                 .unwrap_or_default()
                         });
-                        Some(MqttSoftwareStateHostEntry {
+                        Some(SoftwareStateHostEntry {
                             host_id: host.id,
                             hostname: host.hostname.clone(),
                             friendly_name: host.friendly_name.clone(),
@@ -216,7 +215,7 @@ pub async fn load_software_states_for_tenant(
             continue;
         }
 
-        result_items.push(MqttSoftwareStateItem {
+        result_items.push(SoftwareStateItem {
             software_item_id: item.id,
             name: item.name.clone(),
             icon_url: item.icon_url.clone(),
@@ -240,7 +239,7 @@ pub async fn load_software_states_for_tenant(
         .map(|(h_id, _)| *h_id)
         .collect();
 
-    let mut host_summaries: Vec<MqttHostSummary> = Vec::with_capacity(unfeatured_by_host.len());
+    let mut host_summaries: Vec<HostPackageSummary> = Vec::with_capacity(unfeatured_by_host.len());
     for (host_id, rows) in unfeatured_by_host {
         let Some(host) = active_hosts.get(&host_id) else {
             continue;
@@ -268,7 +267,7 @@ pub async fn load_software_states_for_tenant(
             .count() as u32;
         let update_in_progress = unfeatured_in_progress_hosts.contains(&host_id);
 
-        host_summaries.push(MqttHostSummary {
+        host_summaries.push(HostPackageSummary {
             host_id,
             hostname: host.hostname.clone(),
             friendly_name: host.friendly_name.clone(),
@@ -281,10 +280,10 @@ pub async fn load_software_states_for_tenant(
         });
     }
 
-    // 8. Build MqttHostMetadata for all active hosts.
+    // 8. Build HostStateMetadata for all active hosts.
     let host_metadata = build_host_metadata(db, &active_hosts).await?;
 
-    Ok(MqttSoftwareStatesPayload {
+    Ok(SoftwareStatesPayload {
         tenant_id,
         items: result_items,
         host_summaries,
@@ -311,7 +310,7 @@ pub async fn load_software_states_page_for_tenant(
     tenant_db: &TenantDb,
     host_page: u64,
     host_page_size: u64,
-) -> Result<MqttSoftwareStatesPayload, sea_orm::DbErr> {
+) -> Result<SoftwareStatesPayload, sea_orm::DbErr> {
     let tenant_id = tenant_db.tenant_id;
     let db = tenant_db.db();
 
@@ -344,7 +343,7 @@ pub async fn load_software_states_page_for_tenant(
         .await?;
 
     if page_hosts.is_empty() {
-        return Ok(MqttSoftwareStatesPayload {
+        return Ok(SoftwareStatesPayload {
             tenant_id,
             items: vec![],
             host_summaries: vec![],
@@ -437,9 +436,9 @@ pub async fn load_software_states_page_for_tenant(
         items_meta.values().filter(|i| i.featured).collect();
     featured_items.sort_by_key(|i| i.id);
 
-    let mut result_items: Vec<MqttSoftwareStateItem> = Vec::new();
+    let mut result_items: Vec<SoftwareStateItem> = Vec::new();
     for item in featured_items {
-        let host_entries: Vec<MqttSoftwareStateHostEntry> = hsi_by_item
+        let host_entries: Vec<SoftwareStateHostEntry> = hsi_by_item
             .get(&item.id)
             .map(|links| {
                 links
@@ -461,7 +460,7 @@ pub async fn load_software_states_page_for_tenant(
                             dt.format(&time::format_description::well_known::Rfc3339)
                                 .unwrap_or_default()
                         });
-                        Some(MqttSoftwareStateHostEntry {
+                        Some(SoftwareStateHostEntry {
                             host_id: host.id,
                             hostname: host.hostname.clone(),
                             friendly_name: host.friendly_name.clone(),
@@ -484,7 +483,7 @@ pub async fn load_software_states_page_for_tenant(
             continue;
         }
 
-        result_items.push(MqttSoftwareStateItem {
+        result_items.push(SoftwareStateItem {
             software_item_id: item.id,
             name: item.name.clone(),
             icon_url: item.icon_url.clone(),
@@ -506,7 +505,7 @@ pub async fn load_software_states_page_for_tenant(
         .map(|(h_id, _)| *h_id)
         .collect();
 
-    let mut host_summaries: Vec<MqttHostSummary> = Vec::with_capacity(unfeatured_by_host.len());
+    let mut host_summaries: Vec<HostPackageSummary> = Vec::with_capacity(unfeatured_by_host.len());
     for (host_id, rows) in unfeatured_by_host {
         let Some(host) = page_hosts_map.get(&host_id) else {
             continue;
@@ -534,7 +533,7 @@ pub async fn load_software_states_page_for_tenant(
             .count() as u32;
         let update_in_progress = unfeatured_in_progress_hosts.contains(&host_id);
 
-        host_summaries.push(MqttHostSummary {
+        host_summaries.push(HostPackageSummary {
             host_id,
             hostname: host.hostname.clone(),
             friendly_name: host.friendly_name.clone(),
@@ -547,10 +546,10 @@ pub async fn load_software_states_page_for_tenant(
         });
     }
 
-    // 8. Build MqttHostMetadata for all page hosts.
+    // 8. Build HostStateMetadata for all page hosts.
     let host_metadata = build_host_metadata(db, &page_hosts_map).await?;
 
-    Ok(MqttSoftwareStatesPayload {
+    Ok(SoftwareStatesPayload {
         tenant_id,
         items: result_items,
         host_summaries,
@@ -578,7 +577,7 @@ struct AgentInfoRow {
     last_seen_at: Option<time::OffsetDateTime>,
 }
 
-/// Build `Vec<MqttHostMetadata>` for all hosts in `active_hosts`.
+/// Build `Vec<HostStateMetadata>` for all hosts in `active_hosts`.
 ///
 /// Performs two additional bulk queries:
 /// 1. `host_tag_assignments JOIN host_tags` to get tag names per host.
@@ -586,7 +585,7 @@ struct AgentInfoRow {
 async fn build_host_metadata(
     db: &sea_orm::DatabaseConnection,
     active_hosts: &HashMap<Uuid, host::Model>,
-) -> Result<Vec<MqttHostMetadata>, sea_orm::DbErr> {
+) -> Result<Vec<HostStateMetadata>, sea_orm::DbErr> {
     if active_hosts.is_empty() {
         return Ok(vec![]);
     }
@@ -648,7 +647,7 @@ async fn build_host_metadata(
     }
 
     // 3. Build result.
-    let mut metadata: Vec<MqttHostMetadata> = Vec::with_capacity(active_hosts.len());
+    let mut metadata: Vec<HostStateMetadata> = Vec::with_capacity(active_hosts.len());
     for host in active_hosts.values() {
         let tags = tags_by_host.remove(&host.id).unwrap_or_default();
         let agent = agent_by_host.remove(&host.id);
@@ -661,7 +660,7 @@ async fn build_host_metadata(
         let agent_version = agent.and_then(|a| a.client_version);
 
         let mut m =
-            MqttHostMetadata::new(host.id, host.hostname.clone(), host.friendly_name.clone());
+            HostStateMetadata::new(host.id, host.hostname.clone(), host.friendly_name.clone());
         m.os_type = host.os_type.clone();
         m.os_version = host.os_version.clone();
         m.architecture = host.architecture.clone();

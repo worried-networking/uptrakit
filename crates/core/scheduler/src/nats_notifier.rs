@@ -6,6 +6,7 @@
 
 use uptrakit_internal_wire::{
     ControllerMessage, RequestCaRotationPayload, RequestCrlRenewalPayload,
+    SoftwareStatesChangedPayload,
 };
 use uptrakit_nats::NatsConnection;
 use uptrakit_scheduler_engine::SchedulerNotifier;
@@ -55,42 +56,12 @@ impl SchedulerNotifier for NatsSchedulerNotifier {
             .await;
     }
 
-    async fn push_software_states_for_tenant(
-        &self,
-        db: &sea_orm::DatabaseConnection,
-        tenant_id: uuid::Uuid,
-    ) {
-        let tenant_db = uptrakit_shared_db::TenantDb::new(db.clone(), tenant_id);
-        let page_size = uptrakit_internal_wire::limits::MQTT_STATES_HOST_PAGE_SIZE;
-        let mut host_page: u64 = 0;
-        loop {
-            match uptrakit_scheduler_engine::software_states::load_software_states_page_for_tenant(
-                &tenant_db, host_page, page_size,
-            )
-            .await
-            {
-                Ok(payload) => {
-                    let total_pages = u64::from(payload.page.total_pages);
-                    let msg = ControllerMessage::SoftwareStates(payload);
-                    self.nats
-                        .publish(self.scheduler_id, None, Some("mqtt_bridge"), msg)
-                        .await;
-                    host_page += 1;
-                    if host_page >= total_pages {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        %tenant_id,
-                        host_page,
-                        "failed to load software states page for MQTT push"
-                    );
-                    break;
-                }
-            }
-        }
+    async fn signal_software_states_changed(&self, tenant_id: uuid::Uuid) {
+        let msg =
+            ControllerMessage::SoftwareStatesChanged(SoftwareStatesChangedPayload::new(tenant_id));
+        self.nats
+            .publish(self.scheduler_id, None, Some("controller"), msg)
+            .await;
     }
 
     async fn signal_crl_renewal(&self) {

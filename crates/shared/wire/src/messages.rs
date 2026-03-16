@@ -8,14 +8,14 @@ use super::payloads::{
     DiscoveryResultsPayload, EnrollPayload, EnrolledPayload, ExecuteBatchUpdatePayload,
     ExecuteUpdatePayload, HostConnectivityUpdatedPayload, MqttClientCreatedPayload,
     MqttClientStatusPayload, MqttRegisterPayload, MqttRegisteredPayload, MqttReleaseTenantsPayload,
-    MqttSoftwareStatesPayload, MqttTenantAssignmentsPayload, MqttTenantConfigUpdatedPayload,
-    MqttTenantRevokedPayload, MqttTriggerHostBatchUpdatePayload, MqttUpdateTriggerPayload,
+    MqttTenantAssignmentsPayload, MqttTenantConfigUpdatedPayload, MqttTenantRevokedPayload,
     PingPayload, PongPayload, RejectedPayload, ReportHostsPayload, ReportPluginConfigPayload,
     ReportPluginConfigResponsePayload, RequestCaRotationPayload, RequestCertRenewalPayload,
     RequestCrlRenewalPayload, ServerRestartingPayload, ServiceCredentialsPayload,
-    ServiceSettingsPayload, SetUpdateFreezePayload, StdinAttentionPayload, TokenRevokedPayload,
-    UpdateCapabilitiesPayload, UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload,
-    UpdateStdinDataPayload, VersionCheckResultsPayload,
+    ServiceHostBatchUpdateTriggerPayload, ServiceSettingsPayload, ServiceUpdateTriggerPayload,
+    SetUpdateFreezePayload, SoftwareStatesChangedPayload, SoftwareStatesPayload,
+    StdinAttentionPayload, TokenRevokedPayload, UpdateCapabilitiesPayload, UpdateOutputPayload,
+    UpdateResultPayload, UpdateStartedPayload, UpdateStdinDataPayload, VersionCheckResultsPayload,
 };
 
 /// Messages sent from a service (agent or MQTT) to the controller.
@@ -57,15 +57,16 @@ pub enum ServiceMessage {
     Register(MqttRegisterPayload),
     ReleaseTenants(MqttReleaseTenantsPayload),
     MqttClientStatus(MqttClientStatusPayload),
-    MqttTriggerUpdate(MqttUpdateTriggerPayload),
-    /// MQTT service → Controller: trigger a batch update of all outdated software items on a host.
+    #[serde(alias = "mqtt_trigger_update")]
+    ServiceTriggerUpdate(ServiceUpdateTriggerPayload),
+    /// Service → Controller: trigger a batch update of all outdated software items on a host.
     ///
     /// Sent when a Home Assistant user presses "Install" on a host update entity.
     #[serde(
-        rename = "mqtt_trigger_host_batch_update",
+        alias = "mqtt_trigger_host_batch_update",
         alias = "mqtt_trigger_host_package_update"
     )]
-    MqttTriggerHostBatchUpdate(MqttTriggerHostBatchUpdatePayload),
+    ServiceTriggerHostBatchUpdate(ServiceHostBatchUpdateTriggerPayload),
     // -- Capability management --
     /// Service announces its current capability set to the controller.
     ///
@@ -177,10 +178,10 @@ pub enum ControllerMessage {
     TenantConfigUpdated(MqttTenantConfigUpdatedPayload),
     TenantRevoked(MqttTenantRevokedPayload),
     MqttClientCreated(MqttClientCreatedPayload),
-    SoftwareStates(MqttSoftwareStatesPayload),
+    SoftwareStates(SoftwareStatesPayload),
     /// Agent connectivity changed for one or more hosts.
     ///
-    /// Published to NATS with `target_capability = "mqtt_bridge"` by the controller
+    /// Published to NATS with `target_capability = "update_tracking"` by the controller
     /// that owns the agent WebSocket connection (on connect and disconnect). The MQTT
     /// service updates its per-tenant connectivity cache and publishes the
     /// `{prefix}/hosts/{h}/connectivity/state` retained topic.
@@ -228,6 +229,12 @@ pub enum ControllerMessage {
     /// Receiving controllers fire `revocation_notify.notify_one()` so that
     /// `CrlManager::run()` rebuilds and hot-reloads the TLS configuration.
     RequestCrlRenewal(RequestCrlRenewalPayload),
+    /// Signal that software states have changed for a tenant.
+    ///
+    /// Published to the `controller` NATS subject by the external scheduler
+    /// after a version-check run completes. The receiving controller loads
+    /// the states from the database and pushes them to update-tracking services.
+    SoftwareStatesChanged(SoftwareStatesChangedPayload),
     /// Token revocation event published by the originating controller to the
     /// "controller" NATS subject so that all other instances update their
     /// in-memory denylist caches without a per-request DB query.

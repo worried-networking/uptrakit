@@ -757,6 +757,27 @@ pub struct RequestCaRotationPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RequestCrlRenewalPayload {}
 
+/// Signal that software states have changed for a tenant and need to be
+/// re-loaded and pushed to update-tracking services.
+///
+/// Published to the `controller` NATS subject by the external scheduler after
+/// a version-check run completes. The receiving controller loads the states
+/// from the database and pushes them to all connected update-tracking services.
+///
+/// This is a lightweight signal — it carries only the tenant ID, not the state
+/// data itself. This decouples the scheduler from the state-loading logic.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SoftwareStatesChangedPayload {
+    pub tenant_id: uuid::Uuid,
+}
+
+impl SoftwareStatesChangedPayload {
+    pub fn new(tenant_id: uuid::Uuid) -> Self {
+        Self { tenant_id }
+    }
+}
+
 /// Cross-controller token revocation event.
 ///
 /// Published to the `controller` NATS subject by the controller that wrote
@@ -791,14 +812,14 @@ fn default_ha_discovery_prefix() -> String {
 
 /// Per-host metadata published to MQTT for MQTT-browser visibility and Home Assistant.
 ///
-/// Included in [`MqttSoftwareStatesPayload`]. All fields are sourced exclusively
+/// Included in [`SoftwareStatesPayload`]. All fields are sourced exclusively
 /// from the shared DB — safe for multi-controller deployments.
 ///
 /// Intentionally excludes `ip_address` (network topology risk) and `agent_online`
 /// (must come from the event-driven [`HostConnectivityUpdatedPayload`]).
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttHostMetadata {
+pub struct HostStateMetadata {
     /// Host UUID.
     pub host_id: Uuid,
     /// Hostname as reported by the agent.
@@ -830,8 +851,8 @@ pub struct MqttHostMetadata {
     pub agent_last_seen_at: Option<String>,
 }
 
-impl MqttHostMetadata {
-    /// Creates a new `MqttHostMetadata` with required fields.
+impl HostStateMetadata {
+    /// Creates a new `HostStateMetadata` with required fields.
     pub fn new(host_id: Uuid, hostname: String, friendly_name: String) -> Self {
         Self {
             host_id,
@@ -891,7 +912,7 @@ impl HostConnectivityUpdate {
 
 /// Controller → MQTT service: agent connectivity changed for one or more hosts.
 ///
-/// Published to NATS with `target_capability = "mqtt_bridge"` so that the MQTT
+/// Published to NATS with `target_capability = "update_tracking"` so that the MQTT
 /// service on whichever controller the agent is connected to broadcasts the
 /// connectivity state to **all** MQTT services across the cluster. This is the
 /// canonical source of truth for `{prefix}/hosts/{h}/connectivity/state`.
@@ -915,7 +936,7 @@ impl HostConnectivityUpdatedPayload {
     }
 }
 
-/// Pagination metadata for a [`MqttSoftwareStatesPayload`] message.
+/// Pagination metadata for a [`SoftwareStatesPayload`] message.
 ///
 /// All payloads carry a `page` field. For single-page delivery use
 /// `{ page_index: 0, total_pages: 1 }`. Multi-page delivery uses
@@ -948,11 +969,11 @@ impl SoftwareStatesPage {
 /// applying the full state update (see `page_index + 1 == total_pages` for
 /// the last-page signal).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttSoftwareStatesPayload {
+pub struct SoftwareStatesPayload {
     /// Tenant this state belongs to.
     pub tenant_id: Uuid,
     /// All active software items for the tenant with per-host version data.
-    pub items: Vec<MqttSoftwareStateItem>,
+    pub items: Vec<SoftwareStateItem>,
     /// Per-host aggregate summary of unpinned (unfeatured) software items.
     ///
     /// Each entry summarises all enabled, non-deactivated unfeatured items for
@@ -960,20 +981,20 @@ pub struct MqttSoftwareStatesPayload {
     /// Defaults to an empty list on deserialization for backward compatibility
     /// with older MQTT services.
     #[serde(default, alias = "host_package_hosts")]
-    pub host_summaries: Vec<MqttHostSummary>,
+    pub host_summaries: Vec<HostPackageSummary>,
     /// Per-host metadata for all hosts referenced in `items` or `host_summaries`.
     ///
     /// Includes OS info, tags, and agent last-seen data. Sourced exclusively from DB.
     /// Defaults to an empty list for backward compatibility with older MQTT services.
     #[serde(default)]
-    pub hosts: Vec<MqttHostMetadata>,
+    pub hosts: Vec<HostStateMetadata>,
     /// Pagination metadata indicating which page this payload represents.
     pub page: SoftwareStatesPage,
 }
 
-/// A single software item entry in [`MqttSoftwareStatesPayload`].
+/// A single software item entry in [`SoftwareStatesPayload`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttSoftwareStateItem {
+pub struct SoftwareStateItem {
     /// Software item UUID.
     pub software_item_id: Uuid,
     /// Human-readable software item name.
@@ -982,12 +1003,12 @@ pub struct MqttSoftwareStateItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon_url: Option<String>,
     /// Per-host version data for this software item.
-    pub hosts: Vec<MqttSoftwareStateHostEntry>,
+    pub hosts: Vec<SoftwareStateHostEntry>,
 }
 
 /// Per-host version data for a software item.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttSoftwareStateHostEntry {
+pub struct SoftwareStateHostEntry {
     /// Host UUID.
     pub host_id: Uuid,
     /// Human-readable hostname.
@@ -1032,12 +1053,12 @@ pub struct MqttSoftwareStateHostEntry {
     pub last_checked_at: Option<String>,
 }
 
-/// MQTT service -> Controller: request to trigger a software update.
+/// Service -> Controller: request to trigger a software update.
 ///
 /// Sent when a Home Assistant user presses "Install" on an update entity.
 /// The controller validates and dispatches the update to the appropriate agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttUpdateTriggerPayload {
+pub struct ServiceUpdateTriggerPayload {
     /// Tenant UUID (for validation).
     pub tenant_id: Uuid,
     /// Software item to update.
@@ -1052,10 +1073,10 @@ pub struct MqttUpdateTriggerPayload {
 
 /// Per-host aggregate summary of unpinned (unfeatured) software items.
 ///
-/// Included in [`MqttSoftwareStatesPayload`] to surface overall update
+/// Included in [`SoftwareStatesPayload`] to surface overall update
 /// status per host to Home Assistant via a single `update` entity per host.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttHostSummary {
+pub struct HostPackageSummary {
     /// Host UUID.
     pub host_id: Uuid,
     /// Human-readable hostname.
@@ -1083,13 +1104,13 @@ pub struct MqttHostSummary {
     pub feature_count: u32,
 }
 
-/// MQTT service → Controller: trigger a batch update of all outdated software items on a host.
+/// Service → Controller: trigger a batch update of all outdated software items on a host.
 ///
 /// Sent when a Home Assistant user presses "Install" on a host update
 /// entity. The controller resolves the latest versions for all outdated items
 /// at trigger time and dispatches a `ExecuteBatchUpdate` to the agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttTriggerHostBatchUpdatePayload {
+pub struct ServiceHostBatchUpdateTriggerPayload {
     /// Tenant UUID (for validation).
     pub tenant_id: Uuid,
     /// Host whose items should be updated.

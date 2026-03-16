@@ -663,6 +663,7 @@ fn spawn_background_tasks(
         let notifier: std::sync::Arc<dyn uptrakit_scheduler_engine::SchedulerNotifier> =
             std::sync::Arc::new(ControllerSchedulerNotifier::new(
                 app_state.notification_service.clone(),
+                app_state.db().clone(),
                 Arc::clone(&app_state.cert.ca_rotation_trigger),
                 Arc::clone(&app_state.cert.revocation_notify),
             ));
@@ -768,6 +769,7 @@ fn spawn_background_tasks(
             uptrakit_web_api::nats_transport::NatsConsumerConfig {
                 registry: service_connections.clone(),
                 db: app_state.db().clone(),
+                notification_service: app_state.notification_service.clone(),
                 event_broadcaster: app_state.broadcast.event_broadcaster.clone(),
                 ca_rotation_trigger: Some(Arc::clone(&app_state.cert.ca_rotation_trigger)),
                 revocation_notify: Some(Arc::clone(&app_state.cert.revocation_notify)),

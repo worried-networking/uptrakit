@@ -466,9 +466,9 @@ impl FetchReleasesExecutor {
                 );
             }
 
-            // Push software states to MQTT services.
+            // Signal that software states changed so controllers push to update-tracking services.
             self.notifier
-                .push_software_states_for_tenant(&self.db, tenant_id)
+                .signal_software_states_changed(tenant_id)
                 .await;
         }
 
