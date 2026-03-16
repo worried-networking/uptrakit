@@ -11,6 +11,50 @@ use crate::state_publisher::{compute_removed_host_ids, compute_removed_items};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::MqttClientConnectionStatus;
 
+/// In-flight accumulator for multi-page `SoftwareStates` delivery.
+///
+/// Holds partial state as pages arrive. Once the last page is received
+/// (`page_index + 1 == total_pages`), the accumulated data is applied to the
+/// caches and published to connected MQTT clients.
+struct PartialSoftwareStates {
+    items: Vec<uptrakit_internal_wire::MqttSoftwareStateItem>,
+    /// Index from `software_item_id` → position in `items` for O(1) merge.
+    items_index: HashMap<Uuid, usize>,
+    host_summaries: Vec<uptrakit_internal_wire::MqttHostSummary>,
+    hosts: Vec<uptrakit_internal_wire::MqttHostMetadata>,
+}
+
+impl PartialSoftwareStates {
+    fn new() -> Self {
+        Self {
+            items: Vec::new(),
+            items_index: HashMap::new(),
+            host_summaries: Vec::new(),
+            hosts: Vec::new(),
+        }
+    }
+
+    /// Merge one page into the accumulator.
+    ///
+    /// Featured items with the same `software_item_id` across pages have their
+    /// `hosts` lists merged so that the final state contains all per-host
+    /// entries regardless of which page they appeared in.
+    fn extend(&mut self, page: uptrakit_internal_wire::MqttSoftwareStatesPayload) {
+        self.host_summaries.extend(page.host_summaries);
+        self.hosts.extend(page.hosts);
+        for item in page.items {
+            let id = item.software_item_id;
+            if let Some(&idx) = self.items_index.get(&id) {
+                self.items[idx].hosts.extend(item.hosts);
+            } else {
+                let idx = self.items.len();
+                self.items_index.insert(id, idx);
+                self.items.push(item);
+            }
+        }
+    }
+}
+
 /// Cached connectivity state for a single host within a tenant.
 #[derive(Debug, Clone)]
 pub(crate) struct ConnectivityState {
@@ -38,6 +82,11 @@ pub(crate) struct TenantManager {
     /// always receive the authoritative online/offline state from whichever
     /// controller holds the agent WebSocket connection.
     pub(crate) connectivity_cache: HashMap<(Uuid, Uuid), ConnectivityState>,
+    /// In-flight page accumulators for multi-page `SoftwareStates` delivery.
+    ///
+    /// Keyed by `tenant_id`. An entry is inserted on receipt of page 0 of a
+    /// multi-page batch and removed (applied) when the last page arrives.
+    partial_states: HashMap<Uuid, PartialSoftwareStates>,
 }
 
 impl TenantManager {
@@ -49,6 +98,7 @@ impl TenantManager {
             host_summary_states: HashMap::new(),
             host_metadata: HashMap::new(),
             connectivity_cache: HashMap::new(),
+            partial_states: HashMap::new(),
         }
     }
 
@@ -115,6 +165,11 @@ impl TenantManager {
     /// Store new software state data for a tenant and push to all connected
     /// clients for that tenant.
     ///
+    /// Handles both single-page and multi-page payloads. For multi-page
+    /// delivery, pages are accumulated in `partial_states` until the last page
+    /// arrives (i.e. `page_index + 1 == total_pages`), at which point the
+    /// full merged state is applied atomically.
+    ///
     /// State and version topics are published for every connected client.
     /// Home Assistant discovery config topics are published only for clients
     /// that have `ha_discovery` enabled.
@@ -126,30 +181,77 @@ impl TenantManager {
         &mut self,
         payload: uptrakit_internal_wire::MqttSoftwareStatesPayload,
     ) {
+        let page_index = payload.page.page_index;
+        let total_pages = payload.page.total_pages;
         let tenant_id = payload.tenant_id;
+        let is_last = page_index + 1 == total_pages;
+
+        if page_index == 0 {
+            let mut buf = PartialSoftwareStates::new();
+            buf.extend(payload);
+            if is_last {
+                // Single-page delivery — apply immediately without buffering.
+                self.apply_full_states(tenant_id, buf).await;
+            } else {
+                // First page of a multi-page batch — store in accumulator.
+                self.partial_states.insert(tenant_id, buf);
+            }
+        } else if is_last {
+            // Last page of a multi-page batch — merge and apply.
+            if let Some(mut buf) = self.partial_states.remove(&tenant_id) {
+                buf.extend(payload);
+                self.apply_full_states(tenant_id, buf).await;
+            } else {
+                tracing::warn!(
+                    %tenant_id,
+                    page_index,
+                    "received last software-states page without prior page-0 buffer; discarding"
+                );
+            }
+        } else {
+            // Mid-batch page — merge into existing accumulator.
+            if let Some(buf) = self.partial_states.get_mut(&tenant_id) {
+                buf.extend(payload);
+            } else {
+                tracing::warn!(
+                    %tenant_id,
+                    page_index,
+                    "received mid-batch software-states page without prior page-0 buffer; discarding"
+                );
+            }
+        }
+    }
+
+    /// Apply fully-assembled software state data to the caches and notify
+    /// all connected clients for `tenant_id`.
+    ///
+    /// This is called from `update_software_states` once all pages have been
+    /// accumulated (or immediately for single-page delivery).
+    async fn apply_full_states(&mut self, tenant_id: Uuid, buf: PartialSoftwareStates) {
+        let items = buf.items;
+        let host_summaries = buf.host_summaries;
+        let hosts = buf.hosts;
 
         // Compute removed sets before replacing the caches.
-        let removed_items =
-            compute_removed_items(self.software_states.get(&tenant_id), &payload.items);
+        let removed_items = compute_removed_items(self.software_states.get(&tenant_id), &items);
         let removed_summary_hosts = compute_removed_host_ids(
             self.host_summary_states
                 .get(&tenant_id)
                 .map(|v| v.iter().map(|h| h.host_id)),
-            payload.host_summaries.iter().map(|h| h.host_id),
+            host_summaries.iter().map(|h| h.host_id),
         );
         let removed_metadata_hosts = compute_removed_host_ids(
             self.host_metadata
                 .get(&tenant_id)
                 .map(|v| v.iter().map(|h| h.host_id)),
-            payload.hosts.iter().map(|h| h.host_id),
+            hosts.iter().map(|h| h.host_id),
         );
 
         // Replace caches with new data.
-        self.software_states
-            .insert(tenant_id, payload.items.clone());
+        self.software_states.insert(tenant_id, items.clone());
         self.host_summary_states
-            .insert(tenant_id, payload.host_summaries.clone());
-        self.host_metadata.insert(tenant_id, payload.hosts.clone());
+            .insert(tenant_id, host_summaries.clone());
+        self.host_metadata.insert(tenant_id, hosts.clone());
 
         // Clean up connectivity cache entries for removed metadata hosts.
         for host_id in &removed_metadata_hosts {
@@ -180,11 +282,10 @@ impl TenantManager {
             }
 
             // Publish new state.
-            self.publish_software_states(*client_id, &payload.items)
+            self.publish_software_states(*client_id, &items).await;
+            self.publish_host_summary_states(*client_id, &host_summaries)
                 .await;
-            self.publish_host_summary_states(*client_id, &payload.host_summaries)
-                .await;
-            self.publish_host_metadata(*client_id, &payload.hosts).await;
+            self.publish_host_metadata(*client_id, &hosts).await;
         }
     }
 
@@ -718,6 +819,10 @@ mod tests {
             }],
             host_summaries: vec![],
             hosts: vec![],
+            page: uptrakit_internal_wire::SoftwareStatesPage {
+                page_index: 0,
+                total_pages: 1,
+            },
         };
 
         // No connected clients — but the cache must still be updated.
@@ -763,6 +868,10 @@ mod tests {
             }],
             host_summaries: vec![],
             hosts: vec![],
+            page: uptrakit_internal_wire::SoftwareStatesPage {
+                page_index: 0,
+                total_pages: 1,
+            },
         };
         manager.update_software_states(first).await;
 
@@ -784,6 +893,10 @@ mod tests {
             ],
             host_summaries: vec![],
             hosts: vec![],
+            page: uptrakit_internal_wire::SoftwareStatesPage {
+                page_index: 0,
+                total_pages: 1,
+            },
         };
         manager.update_software_states(second).await;
 
@@ -919,5 +1032,159 @@ mod tests {
 
         let removed = compute_removed_host_ids(Some(old.into_iter()), new.into_iter());
         assert!(removed.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Multi-page software states accumulation
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn update_software_states_multi_page_accumulates_items() {
+        // A two-page delivery should accumulate both pages before applying.
+        let mut manager = TenantManager::new(None);
+        let tenant_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440010").unwrap();
+
+        // Page 0 of 2 — not yet applied.
+        let page0 = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+            tenant_id,
+            items: vec![uptrakit_internal_wire::MqttSoftwareStateItem {
+                software_item_id: Uuid::from_u128(1),
+                name: "nginx".to_string(),
+                icon_url: None,
+                hosts: vec![],
+            }],
+            host_summaries: vec![],
+            hosts: vec![],
+            page: uptrakit_internal_wire::SoftwareStatesPage {
+                page_index: 0,
+                total_pages: 2,
+            },
+        };
+        manager.update_software_states(page0).await;
+
+        // Cache must NOT be updated yet.
+        assert!(!manager.software_states.contains_key(&tenant_id));
+        assert!(manager.partial_states.contains_key(&tenant_id));
+
+        // Page 1 of 2 (last) — triggers apply.
+        let page1 = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+            tenant_id,
+            items: vec![uptrakit_internal_wire::MqttSoftwareStateItem {
+                software_item_id: Uuid::from_u128(2),
+                name: "redis".to_string(),
+                icon_url: None,
+                hosts: vec![],
+            }],
+            host_summaries: vec![],
+            hosts: vec![],
+            page: uptrakit_internal_wire::SoftwareStatesPage {
+                page_index: 1,
+                total_pages: 2,
+            },
+        };
+        manager.update_software_states(page1).await;
+
+        // Cache must now contain both items; partial_states buffer cleared.
+        assert!(manager.software_states.contains_key(&tenant_id));
+        assert_eq!(manager.software_states[&tenant_id].len(), 2);
+        assert!(!manager.partial_states.contains_key(&tenant_id));
+        let names: Vec<&str> = manager.software_states[&tenant_id]
+            .iter()
+            .map(|i| i.name.as_str())
+            .collect();
+        assert!(names.contains(&"nginx"));
+        assert!(names.contains(&"redis"));
+    }
+
+    #[tokio::test]
+    async fn update_software_states_multi_page_merges_same_item_hosts() {
+        // Pages with the same software_item_id should merge host lists.
+        let mut manager = TenantManager::new(None);
+        let tenant_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440011").unwrap();
+        let item_id = Uuid::from_u128(42);
+        let host_a = Uuid::from_u128(100);
+        let host_b = Uuid::from_u128(200);
+
+        let make_host_entry = |host_id: Uuid| uptrakit_internal_wire::MqttSoftwareStateHostEntry {
+            host_id,
+            hostname: format!("host-{host_id}"),
+            friendly_name: String::new(),
+            installed_version: None,
+            latest_version: None,
+            update_available: false,
+            update_in_progress: false,
+            release_url: None,
+            release_notes: None,
+            update_category: None,
+            release_date: None,
+            last_checked_at: None,
+        };
+
+        let page0 = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+            tenant_id,
+            items: vec![uptrakit_internal_wire::MqttSoftwareStateItem {
+                software_item_id: item_id,
+                name: "myapp".to_string(),
+                icon_url: None,
+                hosts: vec![make_host_entry(host_a)],
+            }],
+            host_summaries: vec![],
+            hosts: vec![],
+            page: uptrakit_internal_wire::SoftwareStatesPage {
+                page_index: 0,
+                total_pages: 2,
+            },
+        };
+        manager.update_software_states(page0).await;
+
+        let page1 = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+            tenant_id,
+            items: vec![uptrakit_internal_wire::MqttSoftwareStateItem {
+                software_item_id: item_id,
+                name: "myapp".to_string(),
+                icon_url: None,
+                hosts: vec![make_host_entry(host_b)],
+            }],
+            host_summaries: vec![],
+            hosts: vec![],
+            page: uptrakit_internal_wire::SoftwareStatesPage {
+                page_index: 1,
+                total_pages: 2,
+            },
+        };
+        manager.update_software_states(page1).await;
+
+        // Should have one item with two hosts.
+        assert_eq!(manager.software_states[&tenant_id].len(), 1);
+        assert_eq!(manager.software_states[&tenant_id][0].hosts.len(), 2);
+        let host_ids: Vec<Uuid> = manager.software_states[&tenant_id][0]
+            .hosts
+            .iter()
+            .map(|h| h.host_id)
+            .collect();
+        assert!(host_ids.contains(&host_a));
+        assert!(host_ids.contains(&host_b));
+    }
+
+    #[tokio::test]
+    async fn update_software_states_orphan_last_page_discarded() {
+        // A last-page message with no matching page-0 buffer is silently discarded.
+        let mut manager = TenantManager::new(None);
+        let tenant_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440012").unwrap();
+
+        let orphan = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+            tenant_id,
+            items: vec![],
+            host_summaries: vec![],
+            hosts: vec![],
+            page: uptrakit_internal_wire::SoftwareStatesPage {
+                page_index: 1,
+                total_pages: 2,
+            },
+        };
+        // Must not panic.
+        manager.update_software_states(orphan).await;
+        // No state applied.
+        assert!(!manager.software_states.contains_key(&tenant_id));
     }
 }
