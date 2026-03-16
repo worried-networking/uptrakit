@@ -629,7 +629,7 @@ async fn send_mqtt_post_registration(
         if seen.insert(cfg.tenant_id) {
             state
                 .notification_service
-                .push_software_states_for_tenant(state.db(), cfg.tenant_id)
+                .push_software_states_paginated_for_tenant(state.db(), cfg.tenant_id)
                 .await;
             state
                 .notification_service

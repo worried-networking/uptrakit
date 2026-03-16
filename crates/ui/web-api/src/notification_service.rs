@@ -118,23 +118,64 @@ impl NotificationService {
         db: &sea_orm::DatabaseConnection,
         tenant_id: uuid::Uuid,
     ) {
-        let payload = match crate::queries::mqtt_software_states::load_software_states_for_tenant(
-            db, tenant_id,
-        )
-        .await
-        {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    %tenant_id,
-                    "failed to load software states for MQTT push"
-                );
-                return;
-            }
-        };
+        let tenant_db = uptrakit_shared_db::TenantDb::new(db.clone(), tenant_id);
+        let payload =
+            match crate::queries::mqtt_software_states::load_software_states_for_tenant(&tenant_db)
+                .await
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        %tenant_id,
+                        "failed to load software states for MQTT push"
+                    );
+                    return;
+                }
+            };
 
         self.deliver_software_states(payload).await;
+    }
+
+    /// Load software states for a tenant using paginated host delivery and push
+    /// each page to all locally connected MQTT services and to NATS.
+    ///
+    /// Pages are delivered in order (page 0 first). The receiver accumulates
+    /// pages until `page_index + 1 == total_pages` before applying state.
+    #[tracing::instrument(skip_all, fields(%tenant_id))]
+    pub async fn push_software_states_paginated_for_tenant(
+        &self,
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: uuid::Uuid,
+    ) {
+        let tenant_db = uptrakit_shared_db::TenantDb::new(db.clone(), tenant_id);
+        let page_size = uptrakit_internal_wire::limits::MQTT_STATES_HOST_PAGE_SIZE;
+        let mut host_page: u64 = 0;
+        loop {
+            let payload =
+                match crate::queries::mqtt_software_states::load_software_states_page_for_tenant(
+                    &tenant_db, host_page, page_size,
+                )
+                .await
+                {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            %tenant_id,
+                            host_page,
+                            "failed to load software states page for MQTT push"
+                        );
+                        return;
+                    }
+                };
+            let total_pages = u64::from(payload.page.total_pages);
+            self.deliver_software_states(payload).await;
+            host_page += 1;
+            if host_page >= total_pages {
+                break;
+            }
+        }
     }
 
     /// Deliver a pre-loaded `MqttSoftwareStatesPayload` to all locally connected
