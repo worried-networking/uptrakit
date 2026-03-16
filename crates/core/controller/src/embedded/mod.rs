@@ -97,7 +97,6 @@ impl EmbeddedServiceHost {
         capabilities: BTreeSet<Capability>,
         is_system_service: bool,
         tenant_id: Option<Uuid>,
-        coexistence_policy: CoexistencePolicy,
         yield_check: Option<YieldCheckFn>,
         run_fn: impl FnOnce(
             EmbeddedTransport,

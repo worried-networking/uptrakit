@@ -709,7 +709,6 @@ async fn spawn_background_tasks(
                 scheduler_caps,
                 true, // is_system_service
                 None, // tenant_id (not needed for system services)
-                CoexistencePolicy::YieldAlways,
                 // Only yield to services that explicitly carry the Scheduler
                 // capability. Agents, SSH agents, and MQTT services share
                 // GracefulShutdown with the embedded scheduler but must NOT
@@ -822,8 +821,6 @@ async fn spawn_background_tasks(
     // Only available in single-tenant deployments (uses default_tenant_id).
     #[cfg(feature = "embedded-agent")]
     {
-        use embedded::types::CoexistencePolicy;
-
         let agent_caps = agent::agent_capabilities();
         let default_tenant_id = app_state.default_tenant_id;
 
@@ -847,7 +844,6 @@ async fn spawn_background_tasks(
                 agent_caps.clone(),
                 false, // tenant service (not system)
                 Some(default_tenant_id),
-                CoexistencePolicy::YieldAlways, // custom yield_check overrides
                 Some(yield_check),
                 move |transport, cancel| {
                     Box::pin(agent::run_embedded_agent(
