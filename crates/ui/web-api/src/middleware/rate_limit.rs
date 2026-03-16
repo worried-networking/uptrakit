@@ -192,6 +192,7 @@ pub async fn rate_limit_auth(
     let key = format!("{path}:{ip}");
 
     match state
+        .auth
         .rate_limit_store
         .check_rate_limit(&key, limit.max_requests, limit.window_secs)
         .await

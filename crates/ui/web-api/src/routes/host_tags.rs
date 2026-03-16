@@ -121,6 +121,7 @@ pub async fn create_host_tag(
     match tag_queries::create_host_tag(&tenant_db, &body).await {
         Ok(resp) => {
             state
+                .broadcast
                 .event_broadcaster
                 .send(
                     tenant_db.tenant_id,
@@ -176,6 +177,7 @@ pub async fn update_host_tag(
     match tag_queries::update_host_tag(&tenant_db, tag_id, &body).await {
         Ok(Some(resp)) => {
             state
+                .broadcast
                 .event_broadcaster
                 .send(
                     tenant_db.tenant_id,
@@ -224,6 +226,7 @@ pub async fn delete_host_tag(
     match tag_queries::delete_host_tag(&tenant_db, tag_id).await {
         Ok(true) => {
             state
+                .broadcast
                 .event_broadcaster
                 .send(
                     tenant_db.tenant_id,
@@ -286,6 +289,7 @@ pub async fn batch_host_tags(
 
     for id in &succeeded_ids {
         state
+            .broadcast
             .event_broadcaster
             .send(tenant_db.tenant_id, AdminEvent::HostTagDeleted { id: *id })
             .await;
@@ -362,6 +366,7 @@ pub async fn set_host_tags(
         Ok(tags) => {
             let tenant_id = tenant_db.tenant_id;
             state
+                .broadcast
                 .event_broadcaster
                 .send(tenant_id, AdminEvent::HostTagsChanged { host_id })
                 .await;

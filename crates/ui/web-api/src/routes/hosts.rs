@@ -124,6 +124,7 @@ pub async fn update_host(
     match host_queries::update_host(&tenant_db, host_id, &body).await {
         Ok(Some(resp)) => {
             state
+                .broadcast
                 .event_broadcaster
                 .send(tenant_db.tenant_id, AdminEvent::HostUpdated { id: host_id })
                 .await;
@@ -164,6 +165,7 @@ pub async fn deactivate_host(
     match host_queries::deactivate_host(&tenant_db, host_id).await {
         Ok(true) => {
             state
+                .broadcast
                 .event_broadcaster
                 .send(tenant_db.tenant_id, AdminEvent::HostDeleted { id: host_id })
                 .await;
@@ -305,6 +307,7 @@ pub async fn batch_hosts(
     // Dispatch side effects per succeeded item.
     for id in &succeeded_ids {
         state
+            .broadcast
             .event_broadcaster
             .send(tenant_db.tenant_id, AdminEvent::HostDeleted { id: *id })
             .await;

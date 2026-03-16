@@ -57,7 +57,12 @@ pub async fn service_ws(
     // Fail-closed on DB error to prevent bypass under load.
     if let Some(Extension(ClientIp(ref ip))) = client_ip {
         let key = format!("ws_connect:{ip}");
-        match state.rate_limit_store.check_rate_limit(&key, 30, 60).await {
+        match state
+            .auth
+            .rate_limit_store
+            .check_rate_limit(&key, 30, 60)
+            .await
+        {
             Ok(RateLimitOutcome::Limited { retry_after_secs }) => {
                 tracing::warn!(%ip, "WS connection rate limited");
                 return (
@@ -106,6 +111,7 @@ pub async fn service_ws(
                 if let Some(Extension(ClientIp(ref ip))) = client_ip {
                     let fail_key = format!("ws_auth_fail:{ip}");
                     match state
+                        .auth
                         .rate_limit_store
                         .check_rate_limit(&fail_key, 10, 300)
                         .await

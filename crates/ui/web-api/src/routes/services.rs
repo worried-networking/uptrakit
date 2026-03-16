@@ -225,6 +225,7 @@ pub async fn approve_service(
     }
 
     state
+        .broadcast
         .event_broadcaster
         .send(
             tenant_db.tenant_id,
@@ -300,6 +301,7 @@ pub async fn reject_service(
         .await;
 
     state
+        .broadcast
         .event_broadcaster
         .send(
             tenant_db.tenant_id,
@@ -339,7 +341,7 @@ pub async fn deactivate_service(
 ) -> Response {
     match svc_queries::deactivate_service(&tenant_db, service_id, state.default_tenant_id).await {
         Ok(true) => {
-            state.revocation_notify.notify_one();
+            state.cert.revocation_notify.notify_one();
             state
                 .notification_service
                 .publish_controller_event(ControllerMessage::RequestCrlRenewal(
@@ -351,6 +353,7 @@ pub async fn deactivate_service(
                 .force_disconnect(&service_id)
                 .await;
             state
+                .broadcast
                 .event_broadcaster
                 .send(
                     tenant_db.tenant_id,
@@ -529,7 +532,7 @@ pub async fn merge_service(
         }
     };
 
-    state.revocation_notify.notify_one();
+    state.cert.revocation_notify.notify_one();
     state
         .notification_service
         .publish_controller_event(ControllerMessage::RequestCrlRenewal(
@@ -642,6 +645,7 @@ pub async fn batch_services(
                     )
                     .await;
                 state
+                    .broadcast
                     .event_broadcaster
                     .send(
                         tenant_db.tenant_id,
@@ -662,6 +666,7 @@ pub async fn batch_services(
                     .await;
                 state.service_connections.force_disconnect(id).await;
                 state
+                    .broadcast
                     .event_broadcaster
                     .send(
                         tenant_db.tenant_id,
@@ -673,7 +678,7 @@ pub async fn batch_services(
                     .await;
             }
             "deactivate" => {
-                state.revocation_notify.notify_one();
+                state.cert.revocation_notify.notify_one();
                 state
                     .notification_service
                     .publish_controller_event(ControllerMessage::RequestCrlRenewal(
@@ -682,6 +687,7 @@ pub async fn batch_services(
                     .await;
                 state.service_connections.force_disconnect(id).await;
                 state
+                    .broadcast
                     .event_broadcaster
                     .send(
                         tenant_db.tenant_id,
@@ -843,47 +849,51 @@ mod tests {
         );
 
         Arc::new(AppState {
-            ca_snapshot: ca_rx,
-            ca_key_store,
+            db: db.clone(),
+            cert: crate::app_state::CertState {
+                ca_snapshot: ca_rx,
+                ca_key_store,
+                revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
+                crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
+                ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
+            },
+            auth: crate::app_state::AuthState {
+                jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
+                    b"test-secret-for-service-merge-tests",
+                )),
+                device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
+                rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
+                token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
+            },
+            broadcast: crate::app_state::BroadcastState {
+                event_broadcaster: crate::event_broadcaster::EventBroadcaster::new(),
+                device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(
+                ),
+                update_output_broadcaster:
+                    crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
+                batch_progress_broadcaster:
+                    crate::batch_progress_broadcaster::BatchProgressBroadcaster::new(),
+            },
             #[cfg(feature = "oidc")]
-            oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
-            #[cfg(feature = "oidc")]
-            account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
-            #[cfg(feature = "oidc")]
-            oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
-                db.clone(),
-            ),
-            #[cfg(feature = "oidc")]
-            oidc_registration_store: crate::auth::oidc_state::OidcRegistrationStore::new(
-                db.clone(),
-            ),
-            device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
-            rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
-            db,
+            oidc: crate::app_state::OidcState {
+                oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
+                account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
+                oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
+                    db.clone(),
+                ),
+                oidc_registration_store: crate::auth::oidc_state::OidcRegistrationStore::new(
+                    db.clone(),
+                ),
+            },
             default_tenant_id: tenant_id,
             settings,
             cert_signer: Arc::new(NoopCertSigner),
             service_connections: crate::service_connections::ServiceConnectionRegistry::new(),
-            revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
-            jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
-                b"test-secret-for-service-merge-tests",
-            )),
-            pki_path: std::path::PathBuf::from("/tmp/test-pki"),
-            rustls_config: rustls_cfg,
-            crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
-            ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
             controller_id: uuid::Uuid::nil(),
             notification_service,
             notification_dispatcher,
-            token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
             plugin_ops,
             credential_sources: ServiceCredentialSources::default(),
-            event_broadcaster: crate::event_broadcaster::EventBroadcaster::new(),
-            device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(),
-            update_output_broadcaster:
-                crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
-            batch_progress_broadcaster:
-                crate::batch_progress_broadcaster::BatchProgressBroadcaster::new(),
             shutdown_token: Default::default(),
             external_scheduler_connected: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
@@ -892,6 +902,8 @@ mod tests {
             )),
             extension_registry: Arc::new(crate::extension_registry::ExtensionRegistry::new(vec![])),
             extension_proxy: Arc::new(crate::extension_proxy::ExtensionProxy::new()),
+            pki_path: std::path::PathBuf::from("/tmp/test-pki"),
+            rustls_config: rustls_cfg,
             reject_dangerous_commands: false,
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),

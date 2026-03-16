@@ -490,6 +490,7 @@ async fn broadcast_update_started_events(
     // Broadcast AdminEvent::UpdateStarted so the history-list SSE subscribers
     // can update the "Input Required" badge in real-time without reloading.
     state
+        .broadcast
         .event_broadcaster
         .send(
             info.tenant_id,
@@ -540,6 +541,7 @@ pub(super) async fn handle_update_started(
 
     // Create a broadcast channel so SSE subscribers can receive live output.
     state
+        .broadcast
         .update_output_broadcaster
         .create_channel(payload.update_history_id)
         .await;
@@ -637,6 +639,7 @@ pub(super) async fn handle_update_output(
                     tracing::warn!(error = %e, "failed to insert truncation notice line");
                 }
                 state
+                    .broadcast
                     .update_output_broadcaster
                     .send_line(
                         payload.update_history_id,
@@ -687,6 +690,7 @@ pub(super) async fn handle_update_output(
 
     // Fan out to SSE subscribers.
     state
+        .broadcast
         .update_output_broadcaster
         .send_line(
             payload.update_history_id,
@@ -806,6 +810,7 @@ async fn emit_update_completed_event(
     status: &UpdateFinalStatus,
 ) {
     state
+        .broadcast
         .event_broadcaster
         .send(
             tenant_id,
@@ -924,6 +929,7 @@ pub(super) async fn handle_update_result(
 
     // Notify SSE subscribers and clean up streaming output lines.
     state
+        .broadcast
         .update_output_broadcaster
         .send_completed(
             payload.update_history_id,
@@ -1084,11 +1090,13 @@ async fn notify_failed_reconnect_update(
     );
 
     state
+        .broadcast
         .update_output_broadcaster
         .send_completed(record.id, "failed".to_string(), Some(reason.to_string()))
         .await;
 
     state
+        .broadcast
         .event_broadcaster
         .send(
             tenant_id,
@@ -1182,6 +1190,7 @@ async fn handle_batch_completion(
 
     // Send batch completed event via broadcaster (removes the channel).
     state
+        .broadcast
         .batch_progress_broadcaster
         .send_batch_completed(batch_id, completion.status.as_str().to_string())
         .await;
@@ -1258,7 +1267,11 @@ async fn emit_batch_progress_event(
     batch_id: uuid::Uuid,
     event: crate::batch_progress_broadcaster::BatchProgressEvent,
 ) {
-    state.batch_progress_broadcaster.send(batch_id, event).await;
+    state
+        .broadcast
+        .batch_progress_broadcaster
+        .send(batch_id, event)
+        .await;
 }
 
 /// Compute and emit a progress summary from the DB for an in-progress batch.
@@ -1526,6 +1539,7 @@ pub(crate) async fn handle_stdin_attention(
     }
 
     state
+        .broadcast
         .update_output_broadcaster
         .send_stdin_attention(payload.update_history_id, payload.hint.clone())
         .await;

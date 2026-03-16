@@ -196,6 +196,7 @@ pub async fn oidc_authorize(
 
     // Store the pending flow in the database
     if let Err(e) = state
+        .oidc
         .oidc_flow_store
         .insert(
             csrf_state.secret().clone(),
@@ -286,7 +287,7 @@ async fn validate_oidc_state(
     headers: &HeaderMap,
 ) -> Result<ValidatedOidcCallback, Response> {
     // Retrieve pending flow from database
-    let flow = match state.oidc_flow_store.take(csrf_state).await {
+    let flow = match state.oidc.oidc_flow_store.take(csrf_state).await {
         Ok(Some(f)) => f,
         Ok(None) => return Err(Redirect::to("/login?error=oidc_state_expired").into_response()),
         Err(e) => {
@@ -593,6 +594,7 @@ async fn check_registration_eligibility(
     };
 
     if let Err(e) = state
+        .oidc
         .oidc_registration_store
         .insert(crate::auth::oidc_state::PendingOidcRegistrationParams {
             registration_code: code.clone(),
@@ -862,7 +864,7 @@ pub async fn oidc_exchange(
     State(state): State<Arc<AppState>>,
     Json(req): Json<OidcExchangeRequest>,
 ) -> Response {
-    let pending = match state.oidc_token_exchange_store.take(&req.code).await {
+    let pending = match state.oidc.oidc_token_exchange_store.take(&req.code).await {
         Ok(Some(p)) => p,
         Ok(None) => {
             return error_response(StatusCode::BAD_REQUEST, "Invalid or expired exchange code");
@@ -906,6 +908,7 @@ pub async fn oidc_complete_registration(
 
     // 2. Atomically consume the pending registration so the code is one-time use.
     let pending = match state
+        .oidc
         .oidc_registration_store
         .take(req.registration_code.expose_secret())
         .await
@@ -1072,6 +1075,7 @@ pub async fn oidc_link(
 
     // Retrieve pending link from database
     let pending = match state
+        .oidc
         .account_link_store
         .take(link_req.link_token.expose_secret())
         .await
@@ -1114,7 +1118,7 @@ pub async fn oidc_link(
             .map(|s| s.to_string());
 
         if let Some(token) = bearer {
-            match state.jwt.decode_access_token(&token) {
+            match state.auth.jwt.decode_access_token(&token) {
                 Ok(claims) => uuid::Uuid::parse_str(&claims.sub)
                     .map(|uid| uid == pending.user_id)
                     .unwrap_or(false),
@@ -1314,6 +1318,7 @@ async fn mint_oidc_auth_response(state: &AppState, user_id: Uuid, provider_id: U
 
     let access_token =
         match state
+            .auth
             .jwt
             .create_access_token(user_id, &permissions, "oidc", Some(provider_id))
         {
@@ -1328,7 +1333,7 @@ async fn mint_oidc_auth_response(state: &AppState, user_id: Uuid, provider_id: U
     let response = AuthResponse {
         access_token: SecretString::new(access_token),
         refresh_token: SecretString::new(refresh_token),
-        expires_in: state.jwt.expires_in(),
+        expires_in: state.auth.jwt.expires_in(),
         token_type: "Bearer".to_string(),
         user: super::auth::UserResponse {
             id: user.id,
@@ -1364,6 +1369,7 @@ async fn create_oidc_exchange_and_redirect(
     };
 
     if let Err(e) = state
+        .oidc
         .oidc_token_exchange_store
         .insert(exchange_code.clone(), user_id, provider_id)
         .await
@@ -1380,7 +1386,7 @@ async fn store_pending_link(
     params: crate::auth::oidc_state::PendingAccountLinkParams,
 ) -> std::result::Result<String, rootcause::Report<crate::auth::oidc_state::OidcStoreError>> {
     let link_token = params.token.clone();
-    state.account_link_store.insert(params).await?;
+    state.oidc.account_link_store.insert(params).await?;
     Ok(link_token)
 }
 

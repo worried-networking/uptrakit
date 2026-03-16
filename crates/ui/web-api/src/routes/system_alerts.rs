@@ -27,7 +27,7 @@ pub async fn get_system_alerts(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
 ) -> Response {
-    let snapshot = state.ca_snapshot.borrow().clone();
+    let snapshot = state.cert.ca_snapshot.borrow().clone();
     let mut alerts = Vec::new();
 
     // Check if managed CA is approaching expiration

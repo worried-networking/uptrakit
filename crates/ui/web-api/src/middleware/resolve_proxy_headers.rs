@@ -254,7 +254,7 @@ fn verify_issuer_cn(issuer_dn: &str, state: &AppState) -> bool {
 
 /// Verify that the issuer CN string matches a known CA CN.
 fn verify_issuer_cn_str(issuer_cn: &str, state: &AppState) -> bool {
-    let snapshot = state.ca_snapshot.borrow().clone();
+    let snapshot = state.cert.ca_snapshot.borrow().clone();
     snapshot.trusted_ca_cns.iter().any(|cn| cn == issuer_cn)
 }
 

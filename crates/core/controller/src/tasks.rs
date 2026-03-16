@@ -279,7 +279,7 @@ pub(crate) fn spawn_ca_reload(
 ) -> JoinHandle<()> {
     let db = app_state.db().clone();
     let settings = app_state.settings.clone();
-    let ca_key_store = Arc::clone(&app_state.ca_key_store);
+    let ca_key_store = Arc::clone(&app_state.cert.ca_key_store);
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(durations::SETTINGS_POLL_INTERVAL);
@@ -350,9 +350,9 @@ pub(crate) fn spawn_ca_rotation(
 ) -> JoinHandle<()> {
     let db = app_state.db().clone();
     let settings = app_state.settings.clone();
-    let ca_key_store = Arc::clone(&app_state.ca_key_store);
+    let ca_key_store = Arc::clone(&app_state.cert.ca_key_store);
     let notification_service = app_state.notification_service.clone();
-    let trigger = Arc::clone(&app_state.ca_rotation_trigger);
+    let trigger = Arc::clone(&app_state.cert.ca_rotation_trigger);
 
     tokio::spawn(async move {
         loop {
@@ -452,7 +452,7 @@ pub(crate) fn spawn_server_cert_renewal(
     crl_manager: Arc<crate::crl_manager::CrlManager>,
 ) -> JoinHandle<()> {
     let pki_path = app_state.pki_path.clone();
-    let ca_key_store = Arc::clone(&app_state.ca_key_store);
+    let ca_key_store = Arc::clone(&app_state.cert.ca_key_store);
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(durations::SERVER_CERT_RENEWAL_CHECK_INTERVAL);
@@ -483,7 +483,7 @@ pub(crate) fn spawn_server_cert_renewal(
             tracing::info!("server certificate is within renewal window, renewing");
 
             // Get current active CA from watch channel and key store
-            let snapshot = app_state.ca_snapshot.borrow().clone();
+            let snapshot = app_state.cert.ca_snapshot.borrow().clone();
             let key_store = ca_key_store.read().await;
 
             // Build a temporary CaBundle for renewal

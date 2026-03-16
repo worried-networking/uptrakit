@@ -150,7 +150,11 @@ pub async fn stream_update_output(
 
     // 2. Subscribe to the broadcast channel BEFORE loading DB lines to avoid
     //    a gap where lines arrive after the DB query but before subscription.
-    let broadcast_rx = state.update_output_broadcaster.subscribe(record_id).await;
+    let broadcast_rx = state
+        .broadcast
+        .update_output_broadcaster
+        .subscribe(record_id)
+        .await;
 
     // 3. Load existing output lines from the DB for replay.
     let db_lines = match update_output_line::Entity::find()

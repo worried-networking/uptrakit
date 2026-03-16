@@ -119,6 +119,7 @@ pub async fn create_software_item(
     match item_queries::create_software_item(&tenant_db, req).await {
         Ok(resp) => {
             state
+                .broadcast
                 .event_broadcaster
                 .send(
                     tenant_db.tenant_id,
@@ -219,6 +220,7 @@ pub async fn update_software_item(
     match item_queries::update_software_item(&tenant_db, item_id, req).await {
         Ok(resp) => {
             state
+                .broadcast
                 .event_broadcaster
                 .send(
                     tenant_db.tenant_id,
@@ -607,6 +609,7 @@ pub async fn trigger_update(
             // Notify SSE subscribers so the History page shows the new entry
             // immediately, without waiting for the agent's UpdateStarted message.
             state
+                .broadcast
                 .event_broadcaster
                 .send(
                     tenant_db.tenant_id,
@@ -922,7 +925,7 @@ pub async fn check_versions_host(
     let controller_checks_run = run_controller_fetch_jobs(
         tenant_db.db(),
         &state.notification_service,
-        &state.event_broadcaster,
+        &state.broadcast.event_broadcaster,
         tenant_db.tenant_id,
         controller_fetch_jobs,
     )
@@ -1047,6 +1050,7 @@ pub async fn batch_software_items(
     // Dispatch side effects per succeeded item.
     for id in &succeeded_ids {
         state
+            .broadcast
             .event_broadcaster
             .send(
                 tenant_db.tenant_id,

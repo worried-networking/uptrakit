@@ -204,6 +204,7 @@ pub async fn approve_system_service(
         .await;
 
     state
+        .broadcast
         .event_broadcaster
         .send_global(AdminEvent::SystemServiceStatusChanged {
             id: service_id,
@@ -277,6 +278,7 @@ pub async fn reject_system_service(
         .await;
 
     state
+        .broadcast
         .event_broadcaster
         .send_global(AdminEvent::SystemServiceStatusChanged {
             id: service_id,
@@ -312,7 +314,7 @@ pub async fn deactivate_system_service(
 ) -> Response {
     match ss_queries::deactivate_system_service(state.db(), service_id).await {
         Ok(true) => {
-            state.revocation_notify.notify_one();
+            state.cert.revocation_notify.notify_one();
             state
                 .notification_service
                 .publish_controller_event(ControllerMessage::RequestCrlRenewal(
@@ -324,6 +326,7 @@ pub async fn deactivate_system_service(
                 .force_disconnect(&service_id)
                 .await;
             state
+                .broadcast
                 .event_broadcaster
                 .send_global(AdminEvent::SystemServiceStatusChanged {
                     id: service_id,
@@ -425,6 +428,7 @@ pub async fn batch_system_services(
                     )
                     .await;
                 state
+                    .broadcast
                     .event_broadcaster
                     .send_global(AdminEvent::SystemServiceStatusChanged {
                         id: *id,
@@ -442,6 +446,7 @@ pub async fn batch_system_services(
                     .await;
                 state.service_connections.force_disconnect(id).await;
                 state
+                    .broadcast
                     .event_broadcaster
                     .send_global(AdminEvent::SystemServiceStatusChanged {
                         id: *id,
@@ -450,7 +455,7 @@ pub async fn batch_system_services(
                     .await;
             }
             "deactivate" => {
-                state.revocation_notify.notify_one();
+                state.cert.revocation_notify.notify_one();
                 state
                     .notification_service
                     .publish_controller_event(ControllerMessage::RequestCrlRenewal(
@@ -459,6 +464,7 @@ pub async fn batch_system_services(
                     .await;
                 state.service_connections.force_disconnect(id).await;
                 state
+                    .broadcast
                     .event_broadcaster
                     .send_global(AdminEvent::SystemServiceStatusChanged {
                         id: *id,

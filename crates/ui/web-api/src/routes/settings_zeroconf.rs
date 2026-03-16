@@ -47,7 +47,7 @@ pub async fn get_zeroconf_settings(
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
 ) -> Response {
     let snap = state.settings.zeroconf();
-    let ca_fingerprint = state.ca_snapshot.borrow().active_fingerprint.clone();
+    let ca_fingerprint = state.cert.ca_snapshot.borrow().active_fingerprint.clone();
     let resp = ZeroconfSettingsResponse {
         enabled: snap.enabled,
         url: snap.url,
@@ -142,7 +142,7 @@ pub async fn update_zeroconf_settings(
     };
     state.settings.set_zeroconf(updated).await;
 
-    let ca_fingerprint = state.ca_snapshot.borrow().active_fingerprint.clone();
+    let ca_fingerprint = state.cert.ca_snapshot.borrow().active_fingerprint.clone();
     let resp = ZeroconfSettingsResponse {
         enabled: snap.enabled,
         url: snap.url,

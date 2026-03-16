@@ -422,11 +422,16 @@ async fn run(args: cli::Args) -> Result<()> {
 
     // Seed the in-memory token denylist from DB before accepting traffic.
     // This ensures revocations made before a controller restart are honoured.
-    app_state.token_denylist.load_from_db().await.map_err(|e| {
-        report!(AppError::Config(format!(
-            "failed to seed token denylist: {e}"
-        )))
-    })?;
+    app_state
+        .auth
+        .token_denylist
+        .load_from_db()
+        .await
+        .map_err(|e| {
+            report!(AppError::Config(format!(
+                "failed to seed token denylist: {e}"
+            )))
+        })?;
 
     // Spawn background tasks
     let mut bg = tasks::BackgroundTasks::new(shutdown_token);
@@ -627,7 +632,8 @@ fn spawn_background_tasks(
     bg.track("crl-manager", crl_handle);
 
     // Token denylist cleanup (in-memory, per-instance — not in scheduler)
-    let h = tasks::spawn_denylist_cleanup(bg.child_token(), Arc::clone(&app_state.token_denylist));
+    let h =
+        tasks::spawn_denylist_cleanup(bg.child_token(), Arc::clone(&app_state.auth.token_denylist));
     bg.track("denylist-cleanup", h);
 
     let h = tasks::spawn_settings_reload(bg.child_token(), Arc::clone(app_state));
@@ -657,8 +663,8 @@ fn spawn_background_tasks(
         let notifier: std::sync::Arc<dyn uptrakit_scheduler_engine::SchedulerNotifier> =
             std::sync::Arc::new(ControllerSchedulerNotifier::new(
                 app_state.notification_service.clone(),
-                Arc::clone(&app_state.ca_rotation_trigger),
-                Arc::clone(&app_state.revocation_notify),
+                Arc::clone(&app_state.cert.ca_rotation_trigger),
+                Arc::clone(&app_state.cert.revocation_notify),
             ));
 
         let mut sched = uptrakit_scheduler_engine::Scheduler::new(
@@ -684,7 +690,7 @@ fn spawn_background_tasks(
                 ScheduledTaskType::CaRotationCheck,
                 Box::new(scheduler::CaRotationCheckExecutor::new(
                     ca_tx.subscribe(),
-                    Arc::clone(&app_state.ca_rotation_trigger),
+                    Arc::clone(&app_state.cert.ca_rotation_trigger),
                 )),
             );
         }
@@ -762,10 +768,10 @@ fn spawn_background_tasks(
             uptrakit_web_api::nats_transport::NatsConsumerConfig {
                 registry: service_connections.clone(),
                 db: app_state.db().clone(),
-                event_broadcaster: app_state.event_broadcaster.clone(),
-                ca_rotation_trigger: Some(Arc::clone(&app_state.ca_rotation_trigger)),
-                revocation_notify: Some(Arc::clone(&app_state.revocation_notify)),
-                token_denylist: Some(Arc::clone(&app_state.token_denylist)),
+                event_broadcaster: app_state.broadcast.event_broadcaster.clone(),
+                ca_rotation_trigger: Some(Arc::clone(&app_state.cert.ca_rotation_trigger)),
+                revocation_notify: Some(Arc::clone(&app_state.cert.revocation_notify)),
+                token_denylist: Some(Arc::clone(&app_state.auth.token_denylist)),
             },
         );
         bg.track("nats-consumer", h);
@@ -813,7 +819,7 @@ fn spawn_zeroconf(
 ) {
     let zeroconf_settings = app_state.settings.zeroconf();
     if zeroconf_settings.enabled {
-        let ca_snap = app_state.ca_snapshot.borrow().clone();
+        let ca_snap = app_state.cert.ca_snapshot.borrow().clone();
         let zc_cancel = bg.child_token();
         let handle = tokio::spawn(zeroconf::run_advertiser(
             zc_cancel,

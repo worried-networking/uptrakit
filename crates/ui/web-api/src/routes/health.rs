@@ -32,7 +32,7 @@ struct ReadinessChecks {
 pub async fn readyz(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let db_ok = state.db().execute_unprepared("SELECT 1").await.is_ok();
 
-    let ca_ok = !state.ca_snapshot.borrow().bundle_pem.is_empty();
+    let ca_ok = !state.cert.ca_snapshot.borrow().bundle_pem.is_empty();
 
     let response = ReadinessResponse {
         status: if db_ok && ca_ok {

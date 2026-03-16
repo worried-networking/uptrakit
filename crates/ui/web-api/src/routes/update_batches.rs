@@ -109,6 +109,7 @@ pub async fn trigger_host_batch_update(
             // Create broadcast channel for batch progress SSE streaming.
             if let Some(batch_id) = resp.batch_id {
                 state
+                    .broadcast
                     .batch_progress_broadcaster
                     .create_channel(batch_id)
                     .await;
@@ -121,6 +122,7 @@ pub async fn trigger_host_batch_update(
             // Notify SSE subscribers for each created update_history entry.
             for item in &resp.updates {
                 state
+                    .broadcast
                     .event_broadcaster
                     .send(
                         tenant_db.tenant_id,
@@ -203,6 +205,7 @@ pub async fn trigger_item_batch_update(
             // Create broadcast channel for batch progress SSE streaming.
             if let Some(batch_id) = resp.batch_id {
                 state
+                    .broadcast
                     .batch_progress_broadcaster
                     .create_channel(batch_id)
                     .await;
@@ -214,6 +217,7 @@ pub async fn trigger_item_batch_update(
             // Notify SSE subscribers for each created update_history entry.
             for item in &resp.updates {
                 state
+                    .broadcast
                     .event_broadcaster
                     .send(
                         tenant_db.tenant_id,
@@ -577,7 +581,11 @@ pub async fn stream_batch_progress(
     let is_terminal = ctx.is_terminal();
 
     // Subscribe to the broadcast channel BEFORE replaying DB state to avoid gaps.
-    let broadcast_rx = state.batch_progress_broadcaster.subscribe(batch_id).await;
+    let broadcast_rx = state
+        .broadcast
+        .batch_progress_broadcaster
+        .subscribe(batch_id)
+        .await;
 
     let (completed, failed, pending) = calculate_batch_progress(&ctx.children);
     let total = ctx.batch.total_count;
@@ -649,7 +657,7 @@ pub async fn stream_batch_progress(
         // No local channel: the batch is running on another controller instance.
         // Fall back to a NATS subscription when NATS is configured.
         #[cfg(feature = "nats")]
-        if let Some(mut nats_sub) = state.batch_progress_broadcaster.subscribe_nats(batch_id).await {
+        if let Some(mut nats_sub) = state.broadcast.batch_progress_broadcaster.subscribe_nats(batch_id).await {
             tracing::debug!(
                 batch_id = %batch_id,
                 "no local broadcast channel; falling back to NATS subscription for SSE stream"

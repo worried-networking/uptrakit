@@ -42,7 +42,8 @@ pub async fn device_auth_start(
     headers: HeaderMap,
     Json(req): Json<DeviceAuthStartRequest>,
 ) -> Response {
-    let (device_code, user_code) = match state.device_flow_store.create(req.client_name).await {
+    let (device_code, user_code) = match state.auth.device_flow_store.create(req.client_name).await
+    {
         Ok(result) => result,
         Err(e) => {
             tracing::error!("Failed to create device flow: {e}");
@@ -53,6 +54,7 @@ pub async fn device_auth_start(
     // Create a broadcaster channel for SSE subscribers.
     let device_code_hash = hash_token(&device_code);
     state
+        .broadcast
         .device_flow_broadcaster
         .create_channel(&device_code_hash)
         .await;
@@ -105,7 +107,12 @@ pub async fn device_auth_poll(
     Json(req): Json<DeviceAuthPollRequest>,
 ) -> Response {
     // Check status
-    let status = match state.device_flow_store.get_status(&req.device_code).await {
+    let status = match state
+        .auth
+        .device_flow_store
+        .get_status(&req.device_code)
+        .await
+    {
         Ok(s) => s,
         Err(e) => match e.current_context() {
             DeviceFlowError::NotFound => {
@@ -140,7 +147,7 @@ pub async fn device_auth_poll(
         DeviceFlowStatus::Authorized { .. } => {
             // Consume the flow (one-time use)
             let (user_id, client_name) =
-                match state.device_flow_store.consume(&req.device_code).await {
+                match state.auth.device_flow_store.consume(&req.device_code).await {
                     Ok(result) => result,
                     Err(e) => match e.current_context() {
                         DeviceFlowError::NotFound => {
@@ -207,6 +214,7 @@ pub async fn device_auth_approve(
     let normalized = req.user_code.replace('-', "").to_uppercase();
 
     match state
+        .auth
         .device_flow_store
         .approve(&normalized, auth_user.user_id)
         .await
@@ -214,11 +222,13 @@ pub async fn device_auth_approve(
         Ok(()) => {
             // Notify SSE subscribers that the flow was approved.
             if let Ok(hash) = state
+                .auth
                 .device_flow_store
                 .get_device_code_hash_by_user_code(&normalized)
                 .await
             {
                 state
+                    .broadcast
                     .device_flow_broadcaster
                     .notify_status_changed(&hash)
                     .await;
@@ -273,12 +283,13 @@ pub async fn device_auth_stream(
 
     // Subscribe to the broadcaster for live notifications.
     let broadcast_rx = state
+        .broadcast
         .device_flow_broadcaster
         .subscribe(&device_code_hash)
         .await;
 
     // Check current status in the DB.
-    let current_status = match state.device_flow_store.get_status(&device_code).await {
+    let current_status = match state.auth.device_flow_store.get_status(&device_code).await {
         Ok(s) => s,
         Err(e) => match e.current_context() {
             DeviceFlowError::NotFound => {
@@ -298,7 +309,7 @@ pub async fn device_auth_stream(
                 if let Some(event) = consume_and_yield(&state, &device_code).await {
                     yield Ok::<_, Infallible>(event);
                 }
-                state.device_flow_broadcaster.remove_channel(&device_code_hash).await;
+                state.broadcast.device_flow_broadcaster.remove_channel(&device_code_hash).await;
                 return;
             }
             DeviceFlowStatus::Expired => {
@@ -308,7 +319,7 @@ pub async fn device_auth_stream(
                 if let Ok(json) = serde_json::to_string(&payload) {
                     yield Ok::<_, Infallible>(Event::default().event("expired").data(json));
                 }
-                state.device_flow_broadcaster.remove_channel(&device_code_hash).await;
+                state.broadcast.device_flow_broadcaster.remove_channel(&device_code_hash).await;
                 return;
             }
             DeviceFlowStatus::Pending => {
@@ -329,7 +340,7 @@ pub async fn device_auth_stream(
                                 if let Some(event) = consume_and_yield(&state, &device_code).await {
                                     yield Ok::<_, Infallible>(event);
                                 }
-                                state.device_flow_broadcaster.remove_channel(&device_code_hash).await;
+                                state.broadcast.device_flow_broadcaster.remove_channel(&device_code_hash).await;
                                 return;
                             }
                             Ok(DeviceFlowEvent::Expired) => {
@@ -339,7 +350,7 @@ pub async fn device_auth_stream(
                                 if let Ok(json) = serde_json::to_string(&payload) {
                                     yield Ok::<_, Infallible>(Event::default().event("expired").data(json));
                                 }
-                                state.device_flow_broadcaster.remove_channel(&device_code_hash).await;
+                                state.broadcast.device_flow_broadcaster.remove_channel(&device_code_hash).await;
                                 return;
                             }
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
@@ -357,11 +368,11 @@ pub async fn device_auth_stream(
                         if let Ok(json) = serde_json::to_string(&payload) {
                             yield Ok::<_, Infallible>(Event::default().event("expired").data(json));
                         }
-                        state.device_flow_broadcaster.remove_channel(&device_code_hash).await;
+                        state.broadcast.device_flow_broadcaster.remove_channel(&device_code_hash).await;
                         return;
                     }
                     _ = shutdown_token.cancelled() => {
-                        state.device_flow_broadcaster.remove_channel(&device_code_hash).await;
+                        state.broadcast.device_flow_broadcaster.remove_channel(&device_code_hash).await;
                         return;
                     }
                 }
@@ -376,7 +387,7 @@ pub async fn device_auth_stream(
 
 /// Consume the device flow and return an SSE `authorized` event with the token.
 async fn consume_and_yield(state: &AppState, device_code: &str) -> Option<Event> {
-    let (user_id, client_name) = match state.device_flow_store.consume(device_code).await {
+    let (user_id, client_name) = match state.auth.device_flow_store.consume(device_code).await {
         Ok(result) => result,
         Err(e) => {
             tracing::error!("Device flow consume failed during SSE: {e}");

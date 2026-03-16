@@ -146,7 +146,7 @@ pub(super) async fn handle_renew_certificate(
                 {
                     tracing::warn!(error = ?e, "failed to bump revocation version counter");
                 }
-                state.revocation_notify.notify_one();
+                state.cert.revocation_notify.notify_one();
                 state
                     .notification_service
                     .publish_controller_event(ControllerMessage::RequestCrlRenewal(
@@ -221,7 +221,7 @@ pub(super) async fn handle_renew_certificate(
                 {
                     tracing::warn!(error = ?e, "failed to bump revocation version counter");
                 }
-                state.revocation_notify.notify_one();
+                state.cert.revocation_notify.notify_one();
                 state
                     .notification_service
                     .publish_controller_event(ControllerMessage::RequestCrlRenewal(
@@ -596,6 +596,7 @@ async fn finalize_version_check_results(
     if let Some(tenant_id) = svc_tenant_id {
         for (host_id, software_item_id) in completed_pairs {
             state
+                .broadcast
                 .event_broadcaster
                 .send(
                     tenant_id,

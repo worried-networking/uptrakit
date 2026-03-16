@@ -123,6 +123,7 @@ async fn oidc_callback_provider_gone_redirects_to_oidc_provider_gone() {
     // PkceCodeVerifier and Nonce are constructed from raw strings — the token
     // exchange never happens so their exact values do not matter.
     app.state
+        .oidc
         .oidc_flow_store
         .insert(
             csrf_state.to_string(),

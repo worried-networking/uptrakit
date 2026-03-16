@@ -36,67 +36,39 @@ pub struct ServiceCredentialSources {
     pub master_key_hex: Option<uptrakit_internal_wire::SecretString>,
 }
 
-/// Shared application state available to all handlers.
+/// Certificate-authority related state: snapshot receiver, key store, and
+/// notification/cache handles for CRL and rotation operations.
 #[derive(Clone)]
-pub struct AppState {
+pub struct CertState {
     /// Watch receiver for the current CA snapshot (bundle PEM, fingerprints, etc.).
     pub ca_snapshot: CaSnapshotReceiver,
     /// Private CA key store — only for OCSP, CRL, and cert signing operations.
     pub ca_key_store: CaKeyStoreRef,
-    /// Database connection pool.
-    pub(crate) db: DatabaseConnection,
-    /// Application settings catalogue (includes network settings).
-    pub settings: Settings,
-    /// Agent certificate signer for mTLS enrollment.
-    pub cert_signer: Arc<dyn crate::cert_signer::AgentCertSigner>,
-    /// Unified registry of connected services (agents and MQTT) for push notifications.
-    pub service_connections: ServiceConnectionRegistry,
     /// Notify channel: fire after any certificate revocation to trigger CRL rebuild.
     pub revocation_notify: Arc<tokio::sync::Notify>,
-    /// Database-backed store for pending OIDC authorization flows.
-    #[cfg(feature = "oidc")]
-    pub oidc_flow_store: OidcFlowStore,
-    /// Database-backed store for pending OIDC account links.
-    #[cfg(feature = "oidc")]
-    pub account_link_store: AccountLinkStore,
-    /// JWT signing/validation manager for access tokens.
-    pub jwt: Arc<JwtManager>,
-    /// Database-backed store for pending OIDC token exchanges.
-    #[cfg(feature = "oidc")]
-    pub oidc_token_exchange_store: OidcTokenExchangeStore,
-    /// Database-backed store for pending OIDC registrations (token-gated).
-    #[cfg(feature = "oidc")]
-    pub oidc_registration_store: OidcRegistrationStore,
-    /// Database-backed store for pending device authorization flows.
-    pub device_flow_store: DeviceFlowStore,
-    /// Database-backed rate limiter for public authentication endpoints.
-    pub rate_limit_store: RateLimitStore,
-    /// Path to the PKI directory (for server cert renewal).
-    pub pki_path: std::path::PathBuf,
-    /// RustlsConfig handle for hot-reloading TLS.
-    pub rustls_config: axum_server::tls_rustls::RustlsConfig,
     /// Cached PEM-encoded CRL bundle, updated by the CRL manager.
     pub crl_pem_cache: Arc<tokio::sync::RwLock<String>>,
     /// Trigger for immediate CA rotation (fired by the rotate-ca API endpoint).
     pub ca_rotation_trigger: Arc<tokio::sync::Notify>,
-    /// UUID of the default (seeded) tenant. Used as fallback when no tenant header is present.
-    pub default_tenant_id: uuid::Uuid,
-    /// Unique identifier for this controller instance (used for cross-controller notification delivery).
-    pub controller_id: uuid::Uuid,
-    /// Cross-controller notification service for push message delivery via outbox pattern.
-    pub notification_service: NotificationService,
-    /// Notification dispatcher for fire-and-forget event delivery.
-    pub notification_dispatcher: crate::notifications::dispatcher::NotificationDispatcher,
+}
+
+/// Authentication state: JWT manager, device/OIDC flow stores, rate limiter,
+/// and token denylist.
+#[derive(Clone)]
+pub struct AuthState {
+    /// JWT signing/validation manager for access tokens.
+    pub jwt: Arc<JwtManager>,
+    /// Database-backed store for pending device authorization flows.
+    pub device_flow_store: DeviceFlowStore,
+    /// Database-backed rate limiter for public authentication endpoints.
+    pub rate_limit_store: RateLimitStore,
     /// In-memory denylist for immediate JWT access token revocation.
     pub token_denylist: Arc<crate::auth::token_denylist::TokenDenylist>,
-    /// Plugin operations abstraction used by plugin-config route handlers.
-    ///
-    /// Injected via `Arc<dyn PluginOps>` so that route handlers and query
-    /// helpers are decoupled from the concrete [`uptrakit_plugin_infrastructure_registry::PluginRegistry`]
-    /// and can be tested with a mock implementation.
-    pub plugin_ops: Arc<dyn PluginOps>,
-    /// Credential sources for services with credential capabilities.
-    pub credential_sources: ServiceCredentialSources,
+}
+
+/// Real-time broadcast channels for SSE event delivery.
+#[derive(Clone)]
+pub struct BroadcastState {
     /// Per-tenant broadcast channels for real-time admin event SSE delivery.
     pub event_broadcaster: crate::event_broadcaster::EventBroadcaster,
     /// Per-device-flow broadcast channels for real-time device auth SSE delivery.
@@ -105,6 +77,54 @@ pub struct AppState {
     pub update_output_broadcaster: crate::update_output_broadcaster::UpdateOutputBroadcaster,
     /// Per-batch broadcast channels for real-time batch progress streaming via SSE.
     pub batch_progress_broadcaster: crate::batch_progress_broadcaster::BatchProgressBroadcaster,
+}
+
+/// OIDC-specific flow stores (only compiled when the `oidc` feature is active).
+#[cfg(feature = "oidc")]
+#[derive(Clone)]
+pub struct OidcState {
+    /// Database-backed store for pending OIDC authorization flows.
+    pub oidc_flow_store: OidcFlowStore,
+    /// Database-backed store for pending OIDC account links.
+    pub account_link_store: AccountLinkStore,
+    /// Database-backed store for pending OIDC token exchanges.
+    pub oidc_token_exchange_store: OidcTokenExchangeStore,
+    /// Database-backed store for pending OIDC registrations (token-gated).
+    pub oidc_registration_store: OidcRegistrationStore,
+}
+
+/// Shared application state available to all handlers.
+#[derive(Clone)]
+pub struct AppState {
+    /// Database connection pool.
+    pub(crate) db: DatabaseConnection,
+    /// Certificate-authority state: snapshot, key store, revocation, CRL, rotation.
+    pub cert: CertState,
+    /// Authentication state: JWT, device flow, rate limiting, token denylist.
+    pub auth: AuthState,
+    /// Real-time broadcast channels for SSE delivery.
+    pub broadcast: BroadcastState,
+    /// OIDC flow stores (feature-gated).
+    #[cfg(feature = "oidc")]
+    pub oidc: OidcState,
+    /// Application settings catalogue (includes network settings).
+    pub settings: Settings,
+    /// Agent certificate signer for mTLS enrollment.
+    pub cert_signer: Arc<dyn crate::cert_signer::AgentCertSigner>,
+    /// Unified registry of connected services (agents and MQTT) for push notifications.
+    pub service_connections: ServiceConnectionRegistry,
+    /// Cross-controller notification service for push message delivery via outbox pattern.
+    pub notification_service: NotificationService,
+    /// Notification dispatcher for fire-and-forget event delivery.
+    pub notification_dispatcher: crate::notifications::dispatcher::NotificationDispatcher,
+    /// Plugin operations abstraction used by plugin-config route handlers.
+    ///
+    /// Injected via `Arc<dyn PluginOps>` so that route handlers and query
+    /// helpers are decoupled from the concrete [`uptrakit_plugin_infrastructure_registry::PluginRegistry`]
+    /// and can be tested with a mock implementation.
+    pub plugin_ops: Arc<dyn PluginOps>,
+    /// Credential sources for services with credential capabilities.
+    pub credential_sources: ServiceCredentialSources,
     /// Cancellation token signalled during server shutdown to terminate open SSE streams.
     ///
     /// SSE handler loops `tokio::select!` on this token so that in-flight streams exit
@@ -122,6 +142,14 @@ pub struct AppState {
     pub extension_registry: Arc<ExtensionRegistry>,
     /// Request/response proxy for extension action invocations.
     pub extension_proxy: Arc<ExtensionProxy>,
+    /// Path to the PKI directory (for server cert renewal).
+    pub pki_path: std::path::PathBuf,
+    /// RustlsConfig handle for hot-reloading TLS.
+    pub rustls_config: axum_server::tls_rustls::RustlsConfig,
+    /// UUID of the default (seeded) tenant. Used as fallback when no tenant header is present.
+    pub default_tenant_id: uuid::Uuid,
+    /// Unique identifier for this controller instance (used for cross-controller notification delivery).
+    pub controller_id: uuid::Uuid,
     /// When `true` (default), plugin config create/update requests that contain
     /// dangerous command patterns (e.g. `curl|bash`, `rm -rf /`) are rejected
     /// with HTTP 400. Set to `false` via `--allow-dangerous-commands` CLI flag
@@ -473,75 +501,70 @@ impl AppStateBuilder {
     /// Returns an error if any required field was not set before calling `build`.
     pub fn build(self) -> Result<AppState, AppStateBuildError> {
         Ok(AppState {
-            ca_snapshot: self.ca_snapshot.ok_or(AppStateBuildError("ca_snapshot"))?,
-            ca_key_store: self
-                .ca_key_store
-                .ok_or(AppStateBuildError("ca_key_store"))?,
             db: self.db.ok_or(AppStateBuildError("db"))?,
+            cert: CertState {
+                ca_snapshot: self.ca_snapshot.ok_or(AppStateBuildError("ca_snapshot"))?,
+                ca_key_store: self
+                    .ca_key_store
+                    .ok_or(AppStateBuildError("ca_key_store"))?,
+                revocation_notify: self
+                    .revocation_notify
+                    .ok_or(AppStateBuildError("revocation_notify"))?,
+                crl_pem_cache: self
+                    .crl_pem_cache
+                    .ok_or(AppStateBuildError("crl_pem_cache"))?,
+                ca_rotation_trigger: self
+                    .ca_rotation_trigger
+                    .ok_or(AppStateBuildError("ca_rotation_trigger"))?,
+            },
+            auth: AuthState {
+                jwt: self.jwt.ok_or(AppStateBuildError("jwt"))?,
+                device_flow_store: self
+                    .device_flow_store
+                    .ok_or(AppStateBuildError("device_flow_store"))?,
+                rate_limit_store: self
+                    .rate_limit_store
+                    .ok_or(AppStateBuildError("rate_limit_store"))?,
+                token_denylist: self
+                    .token_denylist
+                    .ok_or(AppStateBuildError("token_denylist"))?,
+            },
+            broadcast: BroadcastState {
+                event_broadcaster: self.event_broadcaster.unwrap_or_default(),
+                device_flow_broadcaster: self.device_flow_broadcaster.unwrap_or_default(),
+                update_output_broadcaster: self.update_output_broadcaster.unwrap_or_default(),
+                batch_progress_broadcaster: self.batch_progress_broadcaster.unwrap_or_default(),
+            },
+            #[cfg(feature = "oidc")]
+            oidc: OidcState {
+                oidc_flow_store: self
+                    .oidc_flow_store
+                    .ok_or(AppStateBuildError("oidc_flow_store"))?,
+                account_link_store: self
+                    .account_link_store
+                    .ok_or(AppStateBuildError("account_link_store"))?,
+                oidc_token_exchange_store: self
+                    .oidc_token_exchange_store
+                    .ok_or(AppStateBuildError("oidc_token_exchange_store"))?,
+                oidc_registration_store: self
+                    .oidc_registration_store
+                    .ok_or(AppStateBuildError("oidc_registration_store"))?,
+            },
             settings: self.settings.ok_or(AppStateBuildError("settings"))?,
             cert_signer: self.cert_signer.ok_or(AppStateBuildError("cert_signer"))?,
             service_connections: self
                 .service_connections
                 .ok_or(AppStateBuildError("service_connections"))?,
-            revocation_notify: self
-                .revocation_notify
-                .ok_or(AppStateBuildError("revocation_notify"))?,
-            #[cfg(feature = "oidc")]
-            oidc_flow_store: self
-                .oidc_flow_store
-                .ok_or(AppStateBuildError("oidc_flow_store"))?,
-            #[cfg(feature = "oidc")]
-            account_link_store: self
-                .account_link_store
-                .ok_or(AppStateBuildError("account_link_store"))?,
-            jwt: self.jwt.ok_or(AppStateBuildError("jwt"))?,
-            #[cfg(feature = "oidc")]
-            oidc_token_exchange_store: self
-                .oidc_token_exchange_store
-                .ok_or(AppStateBuildError("oidc_token_exchange_store"))?,
-            #[cfg(feature = "oidc")]
-            oidc_registration_store: self
-                .oidc_registration_store
-                .ok_or(AppStateBuildError("oidc_registration_store"))?,
-            device_flow_store: self
-                .device_flow_store
-                .ok_or(AppStateBuildError("device_flow_store"))?,
-            rate_limit_store: self
-                .rate_limit_store
-                .ok_or(AppStateBuildError("rate_limit_store"))?,
-            pki_path: self.pki_path.ok_or(AppStateBuildError("pki_path"))?,
-            rustls_config: self
-                .rustls_config
-                .ok_or(AppStateBuildError("rustls_config"))?,
-            crl_pem_cache: self
-                .crl_pem_cache
-                .ok_or(AppStateBuildError("crl_pem_cache"))?,
-            ca_rotation_trigger: self
-                .ca_rotation_trigger
-                .ok_or(AppStateBuildError("ca_rotation_trigger"))?,
-            default_tenant_id: self
-                .default_tenant_id
-                .ok_or(AppStateBuildError("default_tenant_id"))?,
-            controller_id: self
-                .controller_id
-                .ok_or(AppStateBuildError("controller_id"))?,
             notification_service: self
                 .notification_service
                 .ok_or(AppStateBuildError("notification_service"))?,
             notification_dispatcher: self
                 .notification_dispatcher
                 .ok_or(AppStateBuildError("notification_dispatcher"))?,
-            token_denylist: self
-                .token_denylist
-                .ok_or(AppStateBuildError("token_denylist"))?,
             plugin_ops: self.plugin_ops.unwrap_or_else(|| {
                 Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry::new())
             }),
             credential_sources: self.credential_sources.unwrap_or_default(),
-            event_broadcaster: self.event_broadcaster.unwrap_or_default(),
-            device_flow_broadcaster: self.device_flow_broadcaster.unwrap_or_default(),
-            update_output_broadcaster: self.update_output_broadcaster.unwrap_or_default(),
-            batch_progress_broadcaster: self.batch_progress_broadcaster.unwrap_or_default(),
             shutdown_token: self.shutdown_token.unwrap_or_default(),
             external_scheduler_connected: self
                 .external_scheduler_connected
@@ -558,6 +581,16 @@ impl AppStateBuilder {
             extension_proxy: self
                 .extension_proxy
                 .unwrap_or_else(|| Arc::new(ExtensionProxy::new())),
+            pki_path: self.pki_path.ok_or(AppStateBuildError("pki_path"))?,
+            rustls_config: self
+                .rustls_config
+                .ok_or(AppStateBuildError("rustls_config"))?,
+            default_tenant_id: self
+                .default_tenant_id
+                .ok_or(AppStateBuildError("default_tenant_id"))?,
+            controller_id: self
+                .controller_id
+                .ok_or(AppStateBuildError("controller_id"))?,
             reject_dangerous_commands: self.reject_dangerous_commands,
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),

@@ -33,7 +33,7 @@ pub async fn rotate_ca(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
 ) -> impl IntoResponse {
-    let snapshot = state.ca_snapshot.borrow().clone();
+    let snapshot = state.cert.ca_snapshot.borrow().clone();
     if !snapshot.managed {
         return error_response(
             StatusCode::BAD_REQUEST,
@@ -42,7 +42,7 @@ pub async fn rotate_ca(
     }
 
     // Signal the CA rotation background task to run immediately
-    state.ca_rotation_trigger.notify_one();
+    state.cert.ca_rotation_trigger.notify_one();
 
     // Dispatch notification event for CA rotation.
     state

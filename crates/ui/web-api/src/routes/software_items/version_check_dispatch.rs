@@ -226,7 +226,7 @@ pub(super) async fn collect_and_run_controller_fetches(
     run_controller_fetch_jobs(
         tenant_db.db(),
         &state.notification_service,
-        &state.event_broadcaster,
+        &state.broadcast.event_broadcaster,
         tenant_db.tenant_id,
         controller_job_map.into_values().collect(),
     )

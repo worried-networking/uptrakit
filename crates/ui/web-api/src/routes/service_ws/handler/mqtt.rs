@@ -333,6 +333,7 @@ pub(super) async fn handle_mqtt_trigger_update(
                 .await;
             // Notify SSE subscribers so the History page shows the new entry.
             state
+                .broadcast
                 .event_broadcaster
                 .send(
                     payload.tenant_id,

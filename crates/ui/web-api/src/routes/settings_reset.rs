@@ -55,6 +55,7 @@ pub async fn reset_data(
 
     // Broadcast SSE event to admin subscribers
     state
+        .broadcast
         .event_broadcaster
         .send(tenant_id, AdminEvent::DataReset)
         .await;

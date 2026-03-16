@@ -429,7 +429,7 @@ async fn send_service_settings(
     out_seq: &mut OutgoingSeq,
 ) -> Result<(), ()> {
     let renewal_window_hours = state.settings.renewal_window_hours();
-    let ca_bundle_hash = state.ca_snapshot.borrow().bundle_hash.clone();
+    let ca_bundle_hash = state.cert.ca_snapshot.borrow().bundle_hash.clone();
     let capabilities = parse_capabilities(&service_status.capabilities_json);
     let profile = ServiceProfile::from_capabilities(&capabilities);
     let shutdown_timeout = profile.shutdown_timeout_secs();

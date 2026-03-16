@@ -209,6 +209,7 @@ async fn handle_interactive_session(
 
     // Subscribe to the output broadcaster for this update.
     let broadcast_rx = state
+        .broadcast
         .update_output_broadcaster
         .subscribe(update_history_id)
         .await;

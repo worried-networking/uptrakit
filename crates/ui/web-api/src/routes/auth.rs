@@ -165,22 +165,24 @@ pub async fn register(
     };
 
     // Create JWT access token
-    let access_token = match state
-        .jwt
-        .create_access_token(user_id, &permissions, "password", None)
-    {
-        Ok(token) => token,
-        Err(e) => {
-            tracing::error!("Failed to create access token: {:?}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
+    let access_token =
+        match state
+            .auth
+            .jwt
+            .create_access_token(user_id, &permissions, "password", None)
+        {
+            Ok(token) => token,
+            Err(e) => {
+                tracing::error!("Failed to create access token: {:?}", e);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
 
     let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
         access_token: SecretString::new(access_token),
         refresh_token: SecretString::new(refresh_token),
-        expires_in: state.jwt.expires_in(),
+        expires_in: state.auth.jwt.expires_in(),
         token_type: "Bearer".to_string(),
         user: UserResponse {
             id: user_id,
@@ -289,22 +291,24 @@ pub async fn login(
     };
 
     // Create JWT access token
-    let access_token = match state
-        .jwt
-        .create_access_token(user.id, &permissions, "password", None)
-    {
-        Ok(token) => token,
-        Err(e) => {
-            tracing::error!("Failed to create access token: {:?}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
+    let access_token =
+        match state
+            .auth
+            .jwt
+            .create_access_token(user.id, &permissions, "password", None)
+        {
+            Ok(token) => token,
+            Err(e) => {
+                tracing::error!("Failed to create access token: {:?}", e);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
 
     let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
         access_token: SecretString::new(access_token),
         refresh_token: SecretString::new(refresh_token),
-        expires_in: state.jwt.expires_in(),
+        expires_in: state.auth.jwt.expires_in(),
         token_type: "Bearer".to_string(),
         user: UserResponse {
             id: user.id,
@@ -380,6 +384,7 @@ pub async fn logout(
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
             let purge_after = now + crate::auth::jwt::ACCESS_TOKEN_EXPIRY_SECS;
             state
+                .auth
                 .token_denylist
                 .deny_user(verified.user_id, now, purge_after)
                 .await;
@@ -535,47 +540,51 @@ mod tests {
         );
 
         Arc::new(AppState {
-            ca_snapshot: ca_rx,
-            ca_key_store,
+            db: db.clone(),
+            cert: crate::app_state::CertState {
+                ca_snapshot: ca_rx,
+                ca_key_store,
+                revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
+                crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
+                ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
+            },
+            auth: crate::app_state::AuthState {
+                jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
+                    b"test-secret-for-logout-tests",
+                )),
+                device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
+                rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
+                token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
+            },
+            broadcast: crate::app_state::BroadcastState {
+                event_broadcaster: crate::event_broadcaster::EventBroadcaster::new(),
+                device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(
+                ),
+                update_output_broadcaster:
+                    crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
+                batch_progress_broadcaster:
+                    crate::batch_progress_broadcaster::BatchProgressBroadcaster::new(),
+            },
             #[cfg(feature = "oidc")]
-            oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
-            #[cfg(feature = "oidc")]
-            account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
-            #[cfg(feature = "oidc")]
-            oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
-                db.clone(),
-            ),
-            #[cfg(feature = "oidc")]
-            oidc_registration_store: crate::auth::oidc_state::OidcRegistrationStore::new(
-                db.clone(),
-            ),
-            device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
-            rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
-            db,
+            oidc: crate::app_state::OidcState {
+                oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
+                account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
+                oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
+                    db.clone(),
+                ),
+                oidc_registration_store: crate::auth::oidc_state::OidcRegistrationStore::new(
+                    db.clone(),
+                ),
+            },
             default_tenant_id: uuid::Uuid::nil(),
             settings,
             cert_signer: Arc::new(NoopCertSigner),
             service_connections: crate::service_connections::ServiceConnectionRegistry::new(),
-            revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
-            jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
-                b"test-secret-for-logout-tests",
-            )),
-            pki_path: std::path::PathBuf::from("/tmp/test-pki"),
-            rustls_config: rustls_cfg,
-            crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
-            ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
             controller_id: uuid::Uuid::nil(),
             notification_service,
             notification_dispatcher,
-            token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
             plugin_ops,
             credential_sources: ServiceCredentialSources::default(),
-            event_broadcaster: crate::event_broadcaster::EventBroadcaster::new(),
-            device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(),
-            update_output_broadcaster:
-                crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
-            batch_progress_broadcaster:
-                crate::batch_progress_broadcaster::BatchProgressBroadcaster::new(),
             shutdown_token: Default::default(),
             external_scheduler_connected: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
@@ -584,6 +593,8 @@ mod tests {
             )),
             extension_registry: Arc::new(crate::extension_registry::ExtensionRegistry::new(vec![])),
             extension_proxy: Arc::new(crate::extension_proxy::ExtensionProxy::new()),
+            pki_path: std::path::PathBuf::from("/tmp/test-pki"),
+            rustls_config: rustls_cfg,
             reject_dangerous_commands: false,
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
@@ -797,23 +808,24 @@ pub async fn refresh(State(state): State<Arc<AppState>>, req: axum::extract::Req
     let auth_method = verified.auth_method.kind();
     let oidc_provider_id = verified.auth_method.oidc_provider_id();
 
-    let access_token =
-        match state
-            .jwt
-            .create_access_token(user.id, &permissions, auth_method, oidc_provider_id)
-        {
-            Ok(token) => token,
-            Err(e) => {
-                tracing::error!("Failed to create access token: {:?}", e);
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        };
+    let access_token = match state.auth.jwt.create_access_token(
+        user.id,
+        &permissions,
+        auth_method,
+        oidc_provider_id,
+    ) {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::error!("Failed to create access token: {:?}", e);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
     let cookie = set_refresh_token_cookie(&new_refresh_token);
     let response = RefreshResponse {
         access_token: SecretString::new(access_token),
         refresh_token: SecretString::new(new_refresh_token),
-        expires_in: state.jwt.expires_in(),
+        expires_in: state.auth.jwt.expires_in(),
         token_type: "Bearer".to_string(),
     };
 
