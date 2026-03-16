@@ -35,6 +35,7 @@ pub(crate) async fn setup_postgres() -> (
     DatabaseConnection,
     Option<Arc<dyn std::any::Any + Send + Sync>>,
 ) {
+    use testcontainers::ImageExt;
     use testcontainers::runners::AsyncRunner;
     use testcontainers_modules::postgres::Postgres;
 
@@ -44,6 +45,7 @@ pub(crate) async fn setup_postgres() -> (
     let (_container, host_port) = CONTAINER
         .get_or_init(|| async {
             let container = Postgres::default()
+                .with_tag("17-alpine")
                 .start()
                 .await
                 .expect("start PostgreSQL container");
@@ -73,7 +75,7 @@ pub(crate) async fn setup_postgres() -> (
     let opt = ConnectOptions::new(url);
     let db = Database::connect(opt).await.expect("connect to test PG db");
 
-    uptrakit_shared_db::migration::run_migrations(&db)
+    uptrakit_shared_db::migration::run_migrations_debug(&db)
         .await
         .expect("run PG migrations");
 
@@ -89,6 +91,7 @@ pub(crate) async fn setup_mariadb() -> (
     DatabaseConnection,
     Option<Arc<dyn std::any::Any + Send + Sync>>,
 ) {
+    use testcontainers::ImageExt;
     use testcontainers::runners::AsyncRunner;
     use testcontainers_modules::mariadb::Mariadb;
 
@@ -98,6 +101,7 @@ pub(crate) async fn setup_mariadb() -> (
     let (_container, host_port) = CONTAINER
         .get_or_init(|| async {
             let container = Mariadb::default()
+                .with_tag("11")
                 .start()
                 .await
                 .expect("start MariaDB container");
@@ -129,7 +133,7 @@ pub(crate) async fn setup_mariadb() -> (
         .await
         .expect("connect to test MariaDB db");
 
-    uptrakit_shared_db::migration::run_migrations(&db)
+    uptrakit_shared_db::migration::run_migrations_debug(&db)
         .await
         .expect("run MariaDB migrations");
 
