@@ -161,6 +161,13 @@ docker build -f docker/Dockerfile \
   --build-arg BINARY=uptrakit-controller \
   --build-arg FEATURES=embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all \
   -t uptrakit-controller .
+
+# Single-tenant with embedded agent (manages the controller host):
+docker build -f docker/Dockerfile \
+  --build-arg PACKAGE=uptrakit-controller \
+  --build-arg BINARY=uptrakit-controller \
+  --build-arg FEATURES=embed-frontend,db-all,oidc,embedded-scheduler,embedded-agent,notifications-all \
+  -t uptrakit-controller-with-agent .
 ```
 
 ## Upgrading

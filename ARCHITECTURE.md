@@ -17,6 +17,11 @@ The controller supports a unified [embedded service infrastructure](docs/archite
 auto-provisioned in the database and registered in the `ServiceConnectionRegistry`. A capability-based coexistence policy controls
 whether an embedded service yields to an external counterpart when one connects.
 
+Similarly, the controller can embed a local agent (`--features embedded-agent`) that manages the host the controller runs on,
+providing software discovery, version checks, and updates without a separate `uptrakit-agent` binary. The embedded agent is
+provisioned as a tenant service under the default tenant and yields to an external agent with the same `machine_id`.
+See [Embedded Services](docs/architecture/embedded-services.md#embedded-agent).
+
 ## Key references
 
 - Detailed entity documentation: [docs/architecture/](docs/architecture/) (multi-tenancy, hosts, software items,

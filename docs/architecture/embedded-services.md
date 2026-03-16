@@ -101,6 +101,57 @@ The method:
 | Service | Feature flag | Coexistence | Notes |
 | --- | --- | --- | --- |
 | Scheduler | `embedded-scheduler` | `YieldAlways` | Defers external tasks when an external scheduler connects; internal tasks always run. |
+| Agent | `embedded-agent` | `YieldAlways` + custom `yield_check` | Yields only when an external agent with the same `machine_id` connects. Tenant service, not system. |
+
+## Embedded Agent
+
+When the `embedded-agent` feature is enabled, the controller runs a local agent inside its own
+process. This eliminates the need for a separate `uptrakit-agent` binary in single-tenant
+deployments (homelab, appliance).
+
+### Provisioning
+
+Unlike the embedded scheduler (which is a system service), the embedded agent is provisioned as
+a **tenant service** in the `services` table under `AppState.default_tenant_id`. This is because
+agent operations (discovery, updates) are tenant-scoped. The feature requires single-tenant mode.
+
+### Transport and message flow
+
+The embedded agent communicates with the controller through `EmbeddedTransport` (in-process mpsc
+channels). Messages flow through the same `MessageProcessor` pipeline as WebSocket-connected
+services, so the controller applies identical validation, routing, and side effects. The
+`ServiceTransport` trait (defined in `uptrakit-internal-wire`) abstracts the transport layer,
+allowing `uptrakit-agent-core` to operate identically over both WebSocket and in-process channels.
+
+### Yield behaviour (same-host coexistence)
+
+The embedded agent uses `CoexistencePolicy::YieldAlways` with a custom `yield_check` closure.
+The closure compares the external service's `machine_id` (reported via
+`on_machine_id_reported()`) against the embedded agent's own `machine_id`. The embedded agent
+yields **only** when an external agent on the same physical host connects. This allows external
+agents on other hosts to coexist without affecting the embedded agent.
+
+While yielded, the embedded agent stops processing inbound commands (discovery requests, update
+execution) and defers to the external agent.
+
+### Update safety
+
+- **Freeze file**: `<state_dir>/embedded-agent/update-freeze` prevents updates when present.
+- **Rate limiting**: A 5-second cooldown between accepted `ExecuteUpdate` / `ExecuteBatchUpdate`
+  messages prevents runaway update loops.
+- **Machine ID validation**: All inbound messages are validated against the embedded agent's
+  `machine_id` to prevent cross-service message routing errors.
+
+### Interactive updates
+
+When the controller is compiled with both `embedded-agent` and `interactive`, the embedded agent
+supports PTY-based interactive update sessions. The `interactive` feature propagates to
+`uptrakit-agent-core` via `uptrakit-agent-core?/interactive`.
+
+### Module location
+
+The embedded agent module lives at `crates/core/controller/src/agent/mod.rs` and reuses all
+business logic from `uptrakit-agent-core` (the same crate used by the standalone agent binary).
 
 ## Module Structure
 
@@ -110,6 +161,9 @@ crates/core/controller/src/embedded/
     types.rs      -- CoexistencePolicy, EmbeddedTransport, ExternalServiceInfo
     bridge.rs     -- run_response_forwarder() (push_rx -> ctrl_tx bridge)
     provision.rs  -- provision_embedded_system_service()
+
+crates/core/controller/src/agent/
+    mod.rs        -- (cfg: embedded-agent) Embedded agent using uptrakit-agent-core
 ```
 
 ## Related Documentation
