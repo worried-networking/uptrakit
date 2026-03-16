@@ -1206,13 +1206,21 @@ pub(crate) async fn handle_authenticated_loop(
                 }
             }
 
-            // 4. Connection superseded
+            // 4. Connection superseded or force-disconnected
             _ = session.cancel_token.cancelled() => {
                 tracing::info!(%service_id, "connection superseded by new registration");
                 let _ = close_with_reason(sink, CloseReason::Superseded).await;
-                // Do NOT unregister -- the new connection owns the registry entry.
                 session.processor_cancel.cancel();
                 let _ = session.processor_handle.await;
+                // Genuine supersession: the new connection owns the registry
+                // entry so cleanup is skipped. Force-disconnect: the entry was
+                // already removed by force_disconnect(), so we must notify
+                // embedded services that the yield condition may have cleared.
+                if !state.service_connections.is_connected(&service_id).await
+                    && let Some(ref notifier) = state.embedded_service_notifier
+                {
+                    notifier.on_external_disconnected(&service_id);
+                }
                 return;
             }
         }
@@ -1550,7 +1558,13 @@ pub(crate) async fn handle_enrolled_loop(
             _ = session.cancel_token.cancelled() => {
                 tracing::info!(%service_id, "enrolled connection superseded by new registration");
                 let _ = close_with_reason(sink, CloseReason::Superseded).await;
-                // Do NOT unregister -- the new connection owns the registry entry.
+                // Same as authenticated: genuine supersession skips cleanup, but
+                // force-disconnect removes the registry entry so we must notify.
+                if !state.service_connections.is_connected(&service_id).await
+                    && let Some(ref notifier) = state.embedded_service_notifier
+                {
+                    notifier.on_external_disconnected(&service_id);
+                }
                 return;
             }
         }
