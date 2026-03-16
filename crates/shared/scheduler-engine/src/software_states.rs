@@ -1,10 +1,9 @@
 //! Query helper that loads software state data for MQTT `SoftwareStates` push messages.
 //!
-//! This is the canonical implementation for the **external scheduler** path.
-//! It is functionally equivalent to
-//! `uptrakit_web_api_queries::queries::mqtt_software_states::load_software_states_for_tenant`,
-//! which is used by all web-API code paths. Both implementations must be kept
-//! in sync when the `MqttSoftwareStatesPayload` schema changes.
+//! This is the **single canonical implementation** shared by all code paths:
+//! - The web-API tier re-exports [`load_software_states_for_tenant`] via
+//!   `uptrakit_web_api_queries::queries::mqtt_software_states`.
+//! - The external-scheduler path calls it directly from this module.
 
 use sea_orm::{
     ColumnTrait, Condition, EntityTrait, FromQueryResult, JoinType, QueryFilter, QuerySelect,
@@ -45,11 +44,13 @@ struct ActiveUpdateRow {
 ///
 /// Only **featured** software items are included as individual MQTT entities in
 /// `payload.items`. Non-featured items are aggregated into per-host summaries in
-/// `payload.host_summaries`. This mirrors the logic in
-/// `uptrakit_web_api_queries::queries::mqtt_software_states`.
+/// `payload.host_summaries`.
 ///
 /// This function executes five bulk queries (no N+1) and is safe to call on
 /// every version-check result or update completion event.
+///
+/// The web-API tier re-exports this function from
+/// `uptrakit_web_api_queries::queries::mqtt_software_states`.
 ///
 /// # Errors
 ///

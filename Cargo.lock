@@ -7448,6 +7448,7 @@ dependencies = [
  "uptrakit-crypto",
  "uptrakit-internal-wire",
  "uptrakit-plugin-infrastructure-core",
+ "uptrakit-scheduler-engine",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
