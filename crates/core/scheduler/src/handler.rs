@@ -7,7 +7,6 @@
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use rootcause::prelude::*;
@@ -223,8 +222,7 @@ impl ServiceHandler for SchedulerHandler {
                     task_execution_timeout: uptrakit_scheduler_engine::TASK_EXECUTION_TIMEOUT,
                 };
 
-                let mut scheduler =
-                    Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
+                let mut scheduler = Scheduler::new(db.clone(), config, Box::new(|| false));
 
                 // Register all 4 external executors.
                 // Internal tasks (CrlRenewal, CaRotationCheck, ServiceCertCheck)

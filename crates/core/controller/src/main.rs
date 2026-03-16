@@ -668,10 +668,11 @@ fn spawn_background_tasks(
                 Arc::clone(&app_state.cert.revocation_notify),
             ));
 
+        let external_flag = Arc::clone(&app_state.external_scheduler_connected);
         let mut sched = uptrakit_scheduler_engine::Scheduler::new(
             app_state.db().clone(),
             uptrakit_scheduler_engine::SchedulerConfig::new(controller_id),
-            Arc::clone(&app_state.external_scheduler_connected),
+            Box::new(move || external_flag.load(std::sync::atomic::Ordering::Relaxed)),
         );
 
         sched.register(

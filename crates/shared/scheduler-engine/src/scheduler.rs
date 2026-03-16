@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use rootcause::prelude::*;
@@ -57,24 +55,25 @@ impl SchedulerConfig {
 pub struct Scheduler {
     db: DatabaseConnection,
     config: SchedulerConfig,
-    executors: HashMap<ScheduledTaskType, Arc<dyn TaskExecutor>>,
-    /// When `true`, the embedded scheduler defers non-internal tasks to the
-    /// external scheduler. Internal tasks (CRL renewal, CA rotation check,
-    /// service cert check) always run regardless of this flag.
-    external_scheduler_connected: Arc<AtomicBool>,
+    executors: HashMap<ScheduledTaskType, std::sync::Arc<dyn TaskExecutor>>,
+    /// Closure that returns `true` when non-internal tasks should be deferred
+    /// (e.g. because an external scheduler with overlapping capabilities is
+    /// connected). Internal tasks (CRL renewal, CA rotation check, service
+    /// cert check) always run regardless of the return value.
+    should_yield_external: Box<dyn Fn() -> bool + Send + Sync>,
 }
 
 impl Scheduler {
     pub fn new(
         db: DatabaseConnection,
         config: SchedulerConfig,
-        external_scheduler_connected: Arc<AtomicBool>,
+        should_yield_external: Box<dyn Fn() -> bool + Send + Sync>,
     ) -> Self {
         Self {
             db,
             config,
             executors: HashMap::new(),
-            external_scheduler_connected,
+            should_yield_external,
         }
     }
 
@@ -90,7 +89,8 @@ impl Scheduler {
             !self.executors.contains_key(&task_type),
             "BUG: executor for {task_type:?} is already registered; double-registration detected"
         );
-        self.executors.insert(task_type, Arc::from(executor));
+        self.executors
+            .insert(task_type, std::sync::Arc::from(executor));
     }
 
     /// Run the scheduler loop until the cancellation token is triggered.
@@ -103,7 +103,7 @@ impl Scheduler {
             controller_id = %self.config.controller_id,
             poll_interval_secs = self.config.poll_interval.as_secs(),
             registered_executors = self.executors.len(),
-            external_scheduler_connected = self.external_scheduler_connected.load(Ordering::Relaxed),
+            yielding_external = (self.should_yield_external)(),
             "scheduler started"
         );
 
@@ -167,13 +167,12 @@ impl Scheduler {
                 break;
             }
 
-            // Defer non-internal tasks to the external scheduler when one is connected.
-            if self.external_scheduler_connected.load(Ordering::Relaxed)
-                && !task.task_type.is_internal()
-            {
+            // Defer non-internal tasks when a yield condition is active (e.g.
+            // an external scheduler with overlapping capabilities is connected).
+            if (self.should_yield_external)() && !task.task_type.is_internal() {
                 tracing::debug!(
                     task_type = ?task.task_type,
-                    "skipping external task (external scheduler connected)"
+                    "skipping external task (yield condition active)"
                 );
                 continue;
             }
@@ -349,7 +348,7 @@ mod tests {
     async fn scheduler_poll_cycle_empty_db_leaves_no_locked_tasks() {
         let db = setup_test_db().await;
         let config = SchedulerConfig::new(Uuid::now_v7());
-        let scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
+        let scheduler = Scheduler::new(db.clone(), config, Box::new(|| false));
         let token = CancellationToken::new();
 
         scheduler.poll_cycle(&token).await;
@@ -371,7 +370,7 @@ mod tests {
             controller_id,
             task_execution_timeout: TASK_EXECUTION_TIMEOUT,
         };
-        let scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
+        let scheduler = Scheduler::new(db.clone(), config, Box::new(|| false));
 
         let token = CancellationToken::new();
 
@@ -431,7 +430,7 @@ mod tests {
         .expect("insert task");
 
         let config = SchedulerConfig::new(Uuid::now_v7());
-        let scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
+        let scheduler = Scheduler::new(db.clone(), config, Box::new(|| false));
 
         let token = CancellationToken::new();
         scheduler.poll_cycle(&token).await;
@@ -482,7 +481,7 @@ mod tests {
         .expect("insert task");
 
         let config = SchedulerConfig::new(Uuid::now_v7());
-        let scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
+        let scheduler = Scheduler::new(db.clone(), config, Box::new(|| false));
         let token = CancellationToken::new();
 
         scheduler.poll_cycle(&token).await;
@@ -564,7 +563,7 @@ mod tests {
             controller_id,
             task_execution_timeout: TASK_EXECUTION_TIMEOUT,
         };
-        let mut scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
+        let mut scheduler = Scheduler::new(db.clone(), config, Box::new(|| false));
         scheduler.register(
             ScheduledTaskType::StaleLeaseCleanup,
             Box::new(BlockingExecutor {
@@ -639,7 +638,7 @@ mod tests {
             rt.block_on(async { sea_orm::Database::connect("sqlite::memory:").await.unwrap() })
         };
         let config = SchedulerConfig::new(Uuid::now_v7());
-        let mut scheduler = Scheduler::new(db, config, Arc::new(AtomicBool::new(false)));
+        let mut scheduler = Scheduler::new(db, config, Box::new(|| false));
 
         struct NoopExecutor;
         #[async_trait::async_trait]
@@ -697,7 +696,7 @@ mod tests {
         }
 
         let config = SchedulerConfig::new(Uuid::now_v7());
-        let mut scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
+        let mut scheduler = Scheduler::new(db.clone(), config, Box::new(|| false));
         scheduler.register(
             ScheduledTaskType::StaleLeaseCleanup,
             Box::new(TrackingExecutor(executed_clone)),
@@ -759,9 +758,8 @@ mod tests {
             }
         }
 
-        let flag = Arc::new(AtomicBool::new(true)); // external scheduler connected
         let config = SchedulerConfig::new(Uuid::now_v7());
-        let mut scheduler = Scheduler::new(db.clone(), config, flag);
+        let mut scheduler = Scheduler::new(db.clone(), config, Box::new(|| true));
         scheduler.register(
             ScheduledTaskType::AuthCleanup,
             Box::new(TrackingExecutor(executed_clone)),
@@ -826,9 +824,8 @@ mod tests {
             }
         }
 
-        let flag = Arc::new(AtomicBool::new(true)); // external scheduler connected
         let config = SchedulerConfig::new(Uuid::now_v7());
-        let mut scheduler = Scheduler::new(db.clone(), config, flag);
+        let mut scheduler = Scheduler::new(db.clone(), config, Box::new(|| true));
         scheduler.register(
             ScheduledTaskType::CrlRenewal,
             Box::new(TrackingExecutor(executed_clone)),
