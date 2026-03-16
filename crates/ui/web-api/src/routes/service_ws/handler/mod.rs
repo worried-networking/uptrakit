@@ -38,7 +38,7 @@ use cert::{
 };
 use credentials::deliver_service_credentials;
 pub(crate) use discovery::trigger_discovery_for_agent_host;
-use mqtt::{complete_mqtt_registration, handle_mqtt_register_handshake};
+use mqtt::{FirstServiceMessage, complete_mqtt_registration, receive_first_service_message};
 use shared_types::{ProcessorAction, ProcessorResponse, load_linked_host_ids};
 use updates::deliver_pending_updates;
 
@@ -692,36 +692,6 @@ async fn load_service_capabilities(
     }
 }
 
-/// Stage 2: Run the MQTT register handshake for services with the `UpdateTracking`
-/// capability.
-///
-/// Returns `Some(handshake)` when the handshake succeeds, or `None` when the
-/// connection closes before the `Register` message arrives (the caller should
-/// abort setup).
-///
-/// Only call this function when the service has the `UpdateTracking` capability;
-/// the coordinator is responsible for the conditional check.
-async fn negotiate_mqtt_handshake(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    stream: &mut futures_util::stream::SplitStream<WebSocket>,
-    state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    out_seq: &mut OutgoingSeq,
-    in_seq: &mut IncomingSeq,
-    rate_limiter: &mut MessageRateLimiter,
-) -> Option<mqtt::MqttHandshake> {
-    handle_mqtt_register_handshake(
-        sink,
-        stream,
-        state,
-        service_id,
-        out_seq,
-        in_seq,
-        rate_limiter,
-    )
-    .await
-}
-
 /// Stage 3: Register the connection in `ServiceConnectionRegistry` and detect
 /// whether the service carries the external `Scheduler` capability.
 ///
@@ -901,40 +871,74 @@ async fn setup_authenticated_session(
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
 ) -> Option<AuthenticatedSessionState> {
-    // Stage 1: Load service record and derive capability set.
-    let (capabilities, service_app_name, service_tenant_id) =
+    // Stage 1: Load service record from DB. The DB capabilities are used only
+    // for credential delivery (which checks DatabaseAccess, NatsAccess, etc.),
+    // not for service-type detection. Service-type detection happens on the
+    // live wire in Stage 3 below.
+    let (db_capabilities, service_app_name, service_tenant_id) =
         load_service_capabilities(state, service_id, is_system).await;
 
-    let is_mqtt = capabilities.contains(&Capability::UpdateTracking);
-    let has_software_discovery = capabilities.contains(&Capability::SoftwareDiscovery);
-    let has_update_hooks = capabilities.contains(&Capability::UpdateHooks);
-    let has_ui_extensions = capabilities.contains(&Capability::UiExtensions);
     let mut rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
 
     // Stage 2: Deliver credentials to services that have credential capabilities.
-    deliver_service_credentials(sink, state, &capabilities, service_id, out_seq).await?;
+    deliver_service_credentials(sink, state, &db_capabilities, service_id, out_seq).await?;
 
-    // Stage 3: Run the MQTT register handshake when applicable.
-    let mqtt_handshake = if is_mqtt {
-        Some(
-            negotiate_mqtt_handshake(
-                sink,
-                stream,
-                state,
-                service_id,
-                out_seq,
-                in_seq,
-                &mut rate_limiter,
-            )
-            .await?,
-        )
-    } else {
-        None
+    // Stage 3: Detect service type by reading the first wire message.
+    // The MQTT service sends Register before processing ServiceSettings (from
+    // on_connected). Non-MQTT services send UpdateCapabilities after processing
+    // ServiceSettings. Reading from the wire — rather than from DB capabilities —
+    // ensures correct detection even when the DB stores a stale capability string
+    // from before a rename.
+    let first_msg = receive_first_service_message(
+        sink,
+        stream,
+        state,
+        service_id,
+        out_seq,
+        in_seq,
+        &mut rate_limiter,
+    )
+    .await?;
+
+    let (mqtt_handshake, session_capabilities) = match first_msg {
+        FirstServiceMessage::Mqtt {
+            handshake,
+            capabilities,
+        } => (Some(handshake), capabilities),
+        FirstServiceMessage::NonMqtt(capabilities) => (None, capabilities),
     };
 
+    let is_mqtt = mqtt_handshake.is_some();
+    let has_software_discovery = session_capabilities.contains(&Capability::SoftwareDiscovery);
+    let has_update_hooks = session_capabilities.contains(&Capability::UpdateHooks);
+    let mut has_ui_extensions = session_capabilities.contains(&Capability::UiExtensions);
+
+    // Persist the service's current capabilities to the DB immediately on every
+    // reconnect. This rewrites any stale capability strings (e.g. a renamed
+    // capability from a previous enrollment) so that subsequent reconnects —
+    // and the ServiceProfile derivation in send_service_settings — use the
+    // canonical current names.
+    if !session_capabilities.is_empty() {
+        upgrade_service_capabilities(
+            state.db(),
+            service_id,
+            is_system,
+            UpdateCapabilitiesPayload {
+                capabilities: session_capabilities.clone(),
+            },
+            &mut has_ui_extensions,
+        )
+        .await;
+    }
+
     // Stage 4: Register the connection and detect the external scheduler.
-    let (push_rx, cancel_token, is_external_scheduler) =
-        register_connection(state, service_id, &capabilities, mqtt_handshake.as_ref()).await;
+    let (push_rx, cancel_token, is_external_scheduler) = register_connection(
+        state,
+        service_id,
+        &session_capabilities,
+        mqtt_handshake.as_ref(),
+    )
+    .await;
 
     // Stage 5: Complete MQTT setup and load linked host IDs.
     let (mqtt_context, linked_host_ids) = complete_mqtt_setup(
