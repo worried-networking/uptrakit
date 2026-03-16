@@ -9,13 +9,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
-use uptrakit_plugin_infrastructure_core::agent_infra::{
-    GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult, InfraActionInvoker,
-    InfraPluginContext,
-};
 use uptrakit_plugin_infrastructure_registry::{PluginRegistry, create_agent_infra_plugins};
 
 use crate::commands::sudoers::{
@@ -26,10 +21,12 @@ use crate::commands::sudoers::{
 use crate::db::entity::ssh_host::Model;
 use crate::error::{Error, Result};
 use crate::host_ops::{self, update_host_sudo_state};
+use crate::operations::sync::{NoopGuestBootstrap, NoopInfraActionInvoker};
 use crate::remote_exec::SshRemoteExecutor;
 use crate::ssh_executor::SshCommandExecutor;
 use crate::ssh_target::SshTarget;
 use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
+use uptrakit_plugin_infrastructure_core::agent_infra::InfraPluginContext;
 
 /// Arguments for the `sync` command.
 pub(crate) struct SyncArgs {
@@ -104,38 +101,35 @@ async fn resolve_host(
     }
 }
 
-/// Run the `sync` command.
-pub(crate) async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
-    // 1. Load SSH host from DB (supports name, UUID, and SSH address).
-    let (host, url_username) = resolve_host(db, &args.name_or_id).await?;
-
-    // 2. Determine connection username and authentication method.
-    let connect_username: &str;
-    let auth: AuthMethod<'_>;
-
-    // `key_pem` owns the PEM string when we borrow from the stored host key.
-    // Declared here so its lifetime covers the `auth` borrow below.
-    let key_pem: String;
-
+/// Resolve the connection username and `AuthMethod` for a CLI sync invocation.
+///
+/// Returns `(connect_username, auth, auth_override)` where `auth_override` is
+/// `true` when the caller supplied an explicit username that differs from the
+/// stored host username.
+///
+/// `key_pem` must be declared by the caller so its lifetime covers the
+/// returned `AuthMethod` borrow.
+fn resolve_cli_auth<'a>(
+    host: &'a Model,
+    url_username: Option<&'a str>,
+    auth_password: Option<&'a str>,
+    auth_private_key_pem: Option<&'a str>,
+    use_ssh_agent: bool,
+    key_pem: &'a str,
+) -> Result<(&'a str, AuthMethod<'a>, bool)> {
     let auth_override = url_username
-        .as_deref()
         .map(|u| u != host.username.as_str())
         .unwrap_or(false);
 
     if auth_override {
-        let override_user = url_username.as_deref().ok_or_else(|| {
+        let override_user = url_username.ok_or_else(|| {
             report!(Error::InvalidInput(
                 "expected username from SSH address but none was present".to_string()
             ))
         })?;
-        connect_username = override_user;
-        auth = match (
-            &args.auth_password,
-            &args.auth_private_key_pem,
-            args.use_ssh_agent,
-        ) {
-            (Some(pw), _, _) => AuthMethod::Password(pw.as_str()),
-            (_, Some(pem), _) => AuthMethod::PrivateKey(pem.as_str()),
+        let auth = match (auth_password, auth_private_key_pem, use_ssh_agent) {
+            (Some(pw), _, _) => AuthMethod::Password(pw),
+            (_, Some(pem), _) => AuthMethod::PrivateKey(pem),
             (_, _, true) => AuthMethod::Agent,
             _ => bail!(Error::InvalidInput(format!(
                 "no authentication method available for '{override_user}': use \
@@ -143,13 +137,18 @@ pub(crate) async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> 
                  is set for SSH agent forwarding"
             ))),
         };
+        Ok((override_user, auth, true))
     } else {
-        key_pem = host.private_key.expose_secret().to_string();
-        connect_username = &host.username;
-        auth = AuthMethod::PrivateKey(&key_pem);
+        Ok((&host.username, AuthMethod::PrivateKey(key_pem), false))
     }
+}
 
-    // 3. Establish SSH session (strict host key checking — no TOFU allowed).
+/// Open an SSH connection and return an authenticated session.
+async fn connect_ssh(
+    host: &Model,
+    connect_username: &str,
+    auth: &AuthMethod<'_>,
+) -> Result<Arc<SshSession>> {
     let stored_fingerprint = host.host_key_fingerprint.as_deref().ok_or_else(|| {
         report!(Error::InvalidInput(format!(
             "host '{}' has no stored key fingerprint; cannot connect without \
@@ -172,30 +171,38 @@ pub(crate) async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> 
     let (session, _fingerprint) = crate::ssh_transport::connect_and_authenticate(
         &config,
         connect_username,
-        &auth,
+        auth,
         Some(stored_fingerprint),
     )
     .await?;
 
-    let session = Arc::new(session);
-    let executor = SshRemoteExecutor::new(Arc::clone(&session));
+    Ok(Arc::new(session))
+}
 
-    // 4. Detect sudo state.
+/// Detect root / sudo state and persist it (when not using an auth override).
+///
+/// Returns `(is_root, sudo_available)`.
+async fn detect_and_persist_sudo(
+    executor: &SshRemoteExecutor,
+    db: &DatabaseConnection,
+    host: &Model,
+    auth_override: bool,
+) -> Result<(bool, bool)> {
     println!("Detecting privilege context...");
-    let is_root = detect_is_root(&executor).await?;
+    let is_root = detect_is_root(executor).await?;
     let sudo_available = if is_root {
         false
     } else {
-        detect_sudo_available(&executor).await?
+        detect_sudo_available(executor).await?
     };
 
     let agent_is_root = if auth_override { false } else { is_root };
-
     let persisted_sudo_available = if auth_override {
         None
     } else {
         Some(sudo_available)
     };
+
     update_host_sudo_state(
         db,
         host.id,
@@ -213,23 +220,20 @@ pub(crate) async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> 
         "sudo state detected and persisted"
     );
 
-    // 5. Permission check.
-    if !is_root && !sudo_available {
-        bail!(Error::InvalidInput(format!(
-            "sudo is not available for user '{}' on '{}'. Cannot sync. \
-             Either connect as root or ensure the user has passwordless sudo first.",
-            connect_username, host.hostname
-        )));
-    }
+    Ok((is_root, sudo_available))
+}
 
-    let privileged = !is_root;
-
-    // Configure docker group membership when Docker is installed on the host.
-    println!("Configuring docker group membership...");
-    ensure_docker_group_membership(&executor, &host.username, privileged).await?;
-
-    // 6. Collect plugin commands + resolve paths + write sudoers.
-    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
+/// Collect sudo commands from all registered plugins and resolve their paths
+/// on the remote host, installing any required helper scripts.
+///
+/// Returns the list of [`ResolvedSudoCommand`] entries, with unresolved
+/// commands silently skipped.
+async fn collect_plugin_sudo_commands(
+    session: &Arc<SshSession>,
+    executor: &SshRemoteExecutor,
+    privileged: bool,
+) -> Result<Vec<ResolvedSudoCommand>> {
+    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(session)))
         as Arc<dyn uptrakit_command::CommandExecutor>;
     let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
@@ -238,14 +242,14 @@ pub(crate) async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> 
         for entry in entries {
             if let Some(helper) = &entry.helper_script {
                 println!("  Installing helper script '{}'...", helper.install_path);
-                install_helper_script(&executor, helper, privileged).await?;
+                install_helper_script(executor, helper, privileged).await?;
                 resolved.push(ResolvedSudoCommand {
                     command_path: helper.install_path.to_string(),
                     explanation: entry.explanation.clone(),
                     needs_setenv: entry.needs_setenv,
                 });
             } else {
-                match resolve_command_path(&executor, &entry.command).await? {
+                match resolve_command_path(executor, &entry.command).await? {
                     Some(path) => {
                         tracing::debug!(command = %entry.command, path = %path, "resolved command path");
                         let command_path = match &entry.args_suffix {
@@ -269,11 +273,25 @@ pub(crate) async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> 
         }
     }
 
-    // Ask infra plugins for additional sudo commands required by this host.
+    Ok(resolved)
+}
+
+/// Run infra plugin host-sync hooks and append their sudo commands to
+/// `resolved`.
+///
+/// Summary lines from each plugin are printed to stdout. Failures from
+/// individual plugins are logged at `warn` level and do not abort the sync.
+async fn run_infra_sync(
+    db: &DatabaseConnection,
+    executor: &SshRemoteExecutor,
+    host: &Model,
+    tenant_id: Option<uuid::Uuid>,
+    resolved: &mut Vec<ResolvedSudoCommand>,
+) -> Result<()> {
     let infra_plugins = create_agent_infra_plugins();
     let noop_invoker = NoopInfraActionInvoker;
     let noop_bootstrap = NoopGuestBootstrap;
-    let tenant_id_str = args.tenant_id.map(|t| t.to_string());
+    let tenant_id_str = tenant_id.map(|t| t.to_string());
     let infra_ctx = InfraPluginContext {
         db,
         tenant_id: tenant_id_str.as_deref(),
@@ -283,15 +301,13 @@ pub(crate) async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> 
         action_invoker: &noop_invoker,
         guest_bootstrap: &noop_bootstrap,
     };
+
     for plugin in &infra_plugins {
         let Some(lifecycle) = plugin.as_host_lifecycle() else {
             continue;
         };
         if lifecycle.has_infra_state(db, host.id).await {
-            match lifecycle
-                .on_host_synced(&infra_ctx, &executor, host.id)
-                .await
-            {
+            match lifecycle.on_host_synced(&infra_ctx, executor, host.id).await {
                 Ok(sync_result) => {
                     for cmd in sync_result.sudo_commands {
                         resolved.push(ResolvedSudoCommand {
@@ -311,24 +327,43 @@ pub(crate) async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> 
         }
     }
 
-    let sudoers_content: Option<SudoersContent> = if !resolved.is_empty() {
+    Ok(())
+}
+
+/// Determine the sudoers content from resolved commands and `allow_all` flag.
+fn build_sudoers_content(
+    resolved: Vec<ResolvedSudoCommand>,
+    allow_all: bool,
+) -> Option<SudoersContent> {
+    if !resolved.is_empty() {
         Some(SudoersContent::SpecificCommands(resolved))
-    } else if args.allow_all {
+    } else if allow_all {
         println!("  No plugin commands resolved; using NOPASSWD: ALL (--allow-all).");
         Some(SudoersContent::AllCommands)
     } else {
         println!("  No plugin-specific commands found for this host; nothing to write.");
         println!("  Install supported tools or re-run with --allow-all.");
         None
-    };
+    }
+}
 
+/// Write the sudoers file (or print the dry-run preview) and update DB state.
+async fn write_or_preview_sudoers(
+    executor: &SshRemoteExecutor,
+    db: &DatabaseConnection,
+    host: &Model,
+    sudoers_content: Option<&SudoersContent>,
+    privileged: bool,
+    agent_is_root: bool,
+    dry_run: bool,
+) -> Result<()> {
     let sudoers_file = format!("/etc/sudoers.d/uptrakit-{}", host.username);
 
-    if !args.dry_run {
-        if let Some(ref content) = sudoers_content {
+    if !dry_run {
+        if let Some(content) = sudoers_content {
             let preview_text = sudoers::generate_sudoers_content(&host.username, content);
             println!("Writing {sudoers_file}...");
-            write_sudoers_file(&executor, &host.username, content, privileged).await?;
+            write_sudoers_file(executor, &host.username, content, privileged).await?;
             update_host_sudo_state(db, host.id, Some(true), Some(agent_is_root), None).await?;
 
             println!();
@@ -345,7 +380,7 @@ pub(crate) async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> 
                 host.name
             );
         }
-    } else if let Some(ref content) = sudoers_content {
+    } else if let Some(content) = sudoers_content {
         let preview_text = sudoers::generate_sudoers_content(&host.username, content);
         println!();
         println!("Dry run — sudoers file that would be written to {sudoers_file}:");
@@ -356,6 +391,71 @@ pub(crate) async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> 
         println!();
         println!("Dry run — no sudoers file would be written (no commands resolved).");
     }
+
+    Ok(())
+}
+
+/// Run the `sync` command.
+pub(crate) async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
+    // 1. Load SSH host from DB (supports name, UUID, and SSH address).
+    let (host, url_username) = resolve_host(db, &args.name_or_id).await?;
+
+    // 2. Determine connection username and authentication method.
+    //    `key_pem` owns the PEM string when we borrow from the stored host key.
+    //    Declared here so its lifetime covers the `auth` borrow below.
+    let key_pem: String = host.private_key.expose_secret().to_string();
+    let (connect_username, auth, auth_override) = resolve_cli_auth(
+        &host,
+        url_username.as_deref(),
+        args.auth_password.as_deref(),
+        args.auth_private_key_pem.as_deref(),
+        args.use_ssh_agent,
+        &key_pem,
+    )?;
+
+    // 3. Establish SSH session (strict host key checking — no TOFU allowed).
+    let session = connect_ssh(&host, connect_username, &auth).await?;
+    let executor = SshRemoteExecutor::new(Arc::clone(&session));
+
+    // 4. Detect sudo state and persist it.
+    let (is_root, sudo_available) =
+        detect_and_persist_sudo(&executor, db, &host, auth_override).await?;
+
+    let agent_is_root = if auth_override { false } else { is_root };
+
+    // 5. Permission check.
+    if !is_root && !sudo_available {
+        bail!(Error::InvalidInput(format!(
+            "sudo is not available for user '{}' on '{}'. Cannot sync. \
+             Either connect as root or ensure the user has passwordless sudo first.",
+            connect_username, host.hostname
+        )));
+    }
+
+    let privileged = !is_root;
+
+    // Configure docker group membership when Docker is installed on the host.
+    println!("Configuring docker group membership...");
+    ensure_docker_group_membership(&executor, &host.username, privileged).await?;
+
+    // 6. Collect plugin commands + resolve paths.
+    let mut resolved = collect_plugin_sudo_commands(&session, &executor, privileged).await?;
+
+    // 7. Run infra plugin sync hooks (appends additional sudo commands).
+    run_infra_sync(db, &executor, &host, args.tenant_id, &mut resolved).await?;
+
+    // 8. Build sudoers content and write (or preview for dry-run).
+    let sudoers_content = build_sudoers_content(resolved, args.allow_all);
+    write_or_preview_sudoers(
+        &executor,
+        db,
+        &host,
+        sudoers_content.as_ref(),
+        privileged,
+        agent_is_root,
+        args.dry_run,
+    )
+    .await?;
 
     // Drop the executor before disconnecting so the session Arc has a single
     // owner — `disconnect_shared` requires sole ownership to cleanly close the
@@ -369,265 +469,4 @@ pub(crate) async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> 
     }
 
     Ok(())
-}
-
-// ── Noop infra impls for sync context ────────────────────────────────
-
-/// No-op [`InfraActionInvoker`] for sync context.
-struct NoopInfraActionInvoker;
-
-#[async_trait]
-impl InfraActionInvoker for NoopInfraActionInvoker {
-    async fn invoke(
-        &self,
-        _extension_id: &str,
-        _action_id: &str,
-        _params: serde_json::Value,
-    ) -> std::result::Result<uptrakit_internal_wire::extension::ExtensionResponsePayload, String>
-    {
-        Err("InfraActionInvoker not available during sync".to_string())
-    }
-}
-
-/// No-op [`GuestBootstrapExecutor`] for sync context.
-struct NoopGuestBootstrap;
-
-#[async_trait]
-impl GuestBootstrapExecutor for NoopGuestBootstrap {
-    async fn bootstrap_guest(
-        &self,
-        _params: GuestBootstrapParams,
-    ) -> std::result::Result<GuestBootstrapResult, String> {
-        Err("GuestBootstrapExecutor not available during sync".to_string())
-    }
-}
-
-/// Authentication override for the extension sync action.
-///
-/// When the UI user selects a non-stored auth method, the extension handler
-/// populates this struct from the form fields and ECIES-decrypted sensitive
-/// params.
-pub(crate) struct SyncAuthOverride {
-    /// Username to connect as (e.g. `root`).
-    pub username: String,
-    /// Password authentication (mutually exclusive with `auth_private_key_pem`).
-    pub auth_password: Option<String>,
-    /// PEM-encoded private key (mutually exclusive with `auth_password`).
-    pub auth_private_key_pem: Option<String>,
-}
-
-/// Run the sync command from an extension action.
-///
-/// When `auth_override` is `None`, uses the stored SSH key and username.
-/// When `Some`, connects as the specified user with the provided credentials
-/// (sudo state is not persisted for the override user, matching CLI behavior).
-pub(crate) async fn run_for_extension(
-    host_id: &str,
-    db: &DatabaseConnection,
-    tenant_id: Option<uuid::Uuid>,
-    auth_override: Option<&SyncAuthOverride>,
-    allow_all: bool,
-) -> std::result::Result<String, String> {
-    let host = host_ops::find_host(db, host_id)
-        .await
-        .map_err(|e| format!("database error: {e}"))?
-        .ok_or_else(|| format!("host '{host_id}' not found"))?;
-
-    let stored_fingerprint = host
-        .host_key_fingerprint
-        .as_deref()
-        .ok_or_else(|| format!("host '{}' has no stored key fingerprint", host.name))?;
-
-    let config = SshConnectionConfig {
-        hostname: host.hostname.clone(),
-        port: host.port as u16,
-        connect_timeout: Duration::from_secs(30),
-    };
-
-    // Determine connection username and auth method.
-    let key_pem: String;
-    let connect_username: &str;
-    let auth: AuthMethod<'_>;
-    let has_auth_override = auth_override.is_some();
-
-    if let Some(ov) = auth_override {
-        connect_username = &ov.username;
-        if let Some(ref pw) = ov.auth_password {
-            auth = AuthMethod::Password(pw.as_str());
-        } else if let Some(ref pem) = ov.auth_private_key_pem {
-            auth = AuthMethod::PrivateKey(pem.as_str());
-        } else {
-            return Err(
-                "auth override provided but neither password nor private key set".to_string(),
-            );
-        }
-    } else {
-        key_pem = host.private_key.expose_secret().to_string();
-        connect_username = &host.username;
-        auth = AuthMethod::PrivateKey(&key_pem);
-    }
-
-    let (session, _fingerprint) = crate::ssh_transport::connect_and_authenticate(
-        &config,
-        connect_username,
-        &auth,
-        Some(stored_fingerprint),
-    )
-    .await
-    .map_err(|e| format!("SSH connection failed: {e}"))?;
-
-    let session = Arc::new(session);
-    let executor = SshRemoteExecutor::new(Arc::clone(&session));
-
-    // Detect sudo state.
-    let is_root = detect_is_root(&executor)
-        .await
-        .map_err(|e| format!("failed to detect root status: {e}"))?;
-    let sudo_available = if is_root {
-        false
-    } else {
-        detect_sudo_available(&executor)
-            .await
-            .map_err(|e| format!("failed to detect sudo status: {e}"))?
-    };
-
-    // Only persist sudo state when using stored credentials (not override).
-    let agent_is_root = if has_auth_override { false } else { is_root };
-    let persisted_sudo_available = if has_auth_override {
-        None
-    } else {
-        Some(sudo_available)
-    };
-    update_host_sudo_state(
-        db,
-        host.id,
-        persisted_sudo_available,
-        Some(agent_is_root),
-        None,
-    )
-    .await
-    .map_err(|e| format!("failed to update sudo state: {e}"))?;
-
-    if !is_root && !sudo_available {
-        drop(executor);
-        SshSession::disconnect_shared(session).await;
-        return Err(format!(
-            "sudo is not available for user '{}' on '{}'; cannot sync",
-            connect_username, host.hostname
-        ));
-    }
-
-    let privileged = !is_root;
-
-    // Collect + write sudoers.  `ssh_executor` is consumed by
-    // `compatible_sudo_commands_for_host` so only `executor` remains.
-    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
-        as Arc<dyn uptrakit_command::CommandExecutor>;
-    let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
-    let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
-
-    for (_plugin_type, entries) in &plugin_sudo_cmds {
-        for entry in entries {
-            if let Some(helper) = &entry.helper_script {
-                install_helper_script(&executor, helper, privileged)
-                    .await
-                    .map_err(|e| format!("failed to install helper script: {e}"))?;
-                resolved.push(ResolvedSudoCommand {
-                    command_path: helper.install_path.to_string(),
-                    explanation: entry.explanation.clone(),
-                    needs_setenv: entry.needs_setenv,
-                });
-            } else if let Some(path) = resolve_command_path(&executor, &entry.command)
-                .await
-                .map_err(|e| format!("failed to resolve command path: {e}"))?
-            {
-                let command_path = match &entry.args_suffix {
-                    Some(suffix) => format!("{path} {suffix}"),
-                    None => path,
-                };
-                resolved.push(ResolvedSudoCommand {
-                    command_path,
-                    explanation: entry.explanation.clone(),
-                    needs_setenv: entry.needs_setenv,
-                });
-            }
-        }
-    }
-
-    let mut summary = Vec::new();
-
-    // Ask infra plugins for additional sudo commands required by this host.
-    let infra_plugins = create_agent_infra_plugins();
-    let noop_invoker = NoopInfraActionInvoker;
-    let noop_bootstrap = NoopGuestBootstrap;
-    let tenant_id_str = tenant_id.map(|t| t.to_string());
-    let infra_ctx = InfraPluginContext {
-        db,
-        tenant_id: tenant_id_str.as_deref(),
-        service_id: None,
-        state_dir: std::path::Path::new("."),
-        private_key_der: None,
-        action_invoker: &noop_invoker,
-        guest_bootstrap: &noop_bootstrap,
-    };
-    for plugin in &infra_plugins {
-        let Some(lifecycle) = plugin.as_host_lifecycle() else {
-            continue;
-        };
-        if lifecycle.has_infra_state(db, host.id).await {
-            match lifecycle
-                .on_host_synced(&infra_ctx, &executor, host.id)
-                .await
-            {
-                Ok(sync_result) => {
-                    for cmd in sync_result.sudo_commands {
-                        resolved.push(ResolvedSudoCommand {
-                            command_path: cmd.command_path,
-                            explanation: cmd.explanation,
-                            needs_setenv: cmd.needs_setenv,
-                        });
-                    }
-                    for line in sync_result.summary_lines {
-                        summary.push(format!("{}: {line}", plugin.plugin_type_id()));
-                    }
-                }
-                Err(e) => {
-                    summary.push(format!("{}: sync failed ({e})", plugin.plugin_type_id()));
-                }
-            }
-        }
-    }
-
-    let has_resolved_commands = !resolved.is_empty();
-    let sudoers_content: Option<SudoersContent> = if has_resolved_commands {
-        Some(SudoersContent::SpecificCommands(resolved))
-    } else if allow_all {
-        Some(SudoersContent::AllCommands)
-    } else {
-        None
-    };
-
-    if let Some(ref content) = sudoers_content {
-        write_sudoers_file(&executor, &host.username, content, privileged)
-            .await
-            .map_err(|e| format!("failed to write sudoers file: {e}"))?;
-        // Persist sudo state only for stored-credentials runs.
-        if !has_auth_override {
-            update_host_sudo_state(db, host.id, Some(true), Some(is_root), None)
-                .await
-                .map_err(|e| format!("failed to update sudo state: {e}"))?;
-        }
-        if allow_all && !has_resolved_commands {
-            summary.push("sudoers: updated (NOPASSWD: ALL)".to_string());
-        } else {
-            summary.push("sudoers: updated".to_string());
-        }
-    } else {
-        summary.push("sudoers: no commands to write".to_string());
-    }
-
-    drop(executor);
-    SshSession::disconnect_shared(session).await;
-
-    Ok(summary.join("; "))
 }

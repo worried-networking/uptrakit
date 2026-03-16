@@ -40,7 +40,7 @@ use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
 // ── Noop infra impls for sync context ────────────────────────────────
 
 /// No-op [`InfraActionInvoker`] for sync context.
-struct NoopInfraActionInvoker;
+pub(crate) struct NoopInfraActionInvoker;
 
 #[async_trait]
 impl InfraActionInvoker for NoopInfraActionInvoker {
@@ -56,7 +56,7 @@ impl InfraActionInvoker for NoopInfraActionInvoker {
 }
 
 /// No-op [`GuestBootstrapExecutor`] for sync context.
-struct NoopGuestBootstrap;
+pub(crate) struct NoopGuestBootstrap;
 
 #[async_trait]
 impl GuestBootstrapExecutor for NoopGuestBootstrap {
