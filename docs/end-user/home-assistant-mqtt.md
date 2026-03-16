@@ -10,6 +10,14 @@ Uptrakit also publishes **per-host summary entities**: a single `update` entity 
 the overall state of all non-featured software items (APT packages, Homebrew formulae, npm globals,
 etc.) on that host. See [Host Summary Update Entities](#host-summary-update-entities) below.
 
+## Startup state delivery
+
+When an MQTT service first connects and receives its tenant assignment, the controller delivers the
+complete current state as a series of **host-batched pages** (up to 100 active hosts per page). The
+MQTT service accumulates all pages before publishing retained topics to the broker. For small tenants
+this is typically a single message; for large deployments it is transparent — retained topics appear
+on the broker once the last page is received.
+
 ## MQTT State Topics (always active)
 
 Once an MQTT client is **enabled** and connected to the broker, Uptrakit publishes the following retained

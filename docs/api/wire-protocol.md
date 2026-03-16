@@ -1012,8 +1012,27 @@ credentials). MQTT services filter by `tenant_id`.
 - An update is triggered (REST, MQTT command, or scheduler) — sets `update_in_progress: true`
 - An agent sends `update_started` (status transitions to `in_progress`) — `update_in_progress` stays `true`
 - An update result (completed or failed) is received — clears `update_in_progress: false`
-- An MQTT service first connects and receives its tenant assignments
+- An MQTT service first connects and receives its tenant assignments (delivered as host-batched pages)
 - A batch update is triggered or completed
+
+### Paginated delivery
+
+State is delivered in pages of up to `MQTT_STATES_HOST_PAGE_SIZE` (100) active hosts per page. The
+`page` field is **required** on every payload. MQTT services must accumulate pages until the last page
+(`page_index + 1 == total_pages`) before running the diff and publishing to retained MQTT topics.
+
+| `page` field | Type | Description |
+| --- | --- | --- |
+| `page_index` | u32 | Zero-based index of this page |
+| `total_pages` | u32 | Total pages in this batch (≥ 1) |
+
+**Single-page delivery** (most incremental updates): `{ "page_index": 0, "total_pages": 1 }` — apply
+immediately without buffering.
+
+**Multi-page delivery** (startup state for large tenants): pages `0…N-1`; accumulate all pages before
+applying. Featured `items` may appear across multiple pages — the MQTT service merges host entries by
+`software_item_id`. `host_summaries` and `hosts` are disjoint across pages (each host appears in
+exactly one page).
 
 ```json
 {
@@ -1021,6 +1040,7 @@ credentials). MQTT services filter by `tenant_id`.
   "seq": 1,
   "type": "software_states",
   "tenant_id": "550e8400-e29b-41d4-a716-446655440001",
+  "page": { "page_index": 0, "total_pages": 1 },
   "items": [
     {
       "software_item_id": "660e8400-e29b-41d4-a716-446655440002",
