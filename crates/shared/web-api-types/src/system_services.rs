@@ -127,7 +127,7 @@ mod tests {
     fn system_service_response_round_trip_all_fields() {
         let resp = SystemServiceResponse {
             id: sample_uuid(),
-            capabilities: vec!["mqtt_bridge".into(), "graceful_shutdown".into()],
+            capabilities: vec!["update_tracking".into(), "graceful_shutdown".into()],
             hostname: "mqtt-host.local".to_string(),
             friendly_name: "MQTT Bridge".to_string(),
             ip_address: Some("10.0.0.2".to_string()),
@@ -145,7 +145,7 @@ mod tests {
         assert_eq!(deserialized.id, sample_uuid());
         assert_eq!(
             deserialized.capabilities,
-            vec!["mqtt_bridge", "graceful_shutdown"]
+            vec!["update_tracking", "graceful_shutdown"]
         );
         assert_eq!(deserialized.hostname, "mqtt-host.local");
         assert_eq!(deserialized.friendly_name, "MQTT Bridge");
@@ -186,7 +186,7 @@ mod tests {
     fn system_service_response_status_deactivated() {
         let resp = SystemServiceResponse {
             id: sample_uuid(),
-            capabilities: vec!["mqtt_bridge".into()],
+            capabilities: vec!["update_tracking".into()],
             hostname: "old-broker".to_string(),
             friendly_name: "Deactivated MQTT".to_string(),
             ip_address: None,
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn list_system_services_query_round_trip_all_fields() {
         let query = ListSystemServicesQuery {
-            capability: Some("mqtt_bridge".into()),
+            capability: Some("update_tracking".into()),
             status: Some(ServiceStatus::Approved),
             page: Some(2),
             per_page: Some(50),
@@ -219,7 +219,7 @@ mod tests {
         let json = serde_json::to_string(&query).expect("serialization should succeed");
         let deserialized: ListSystemServicesQuery =
             serde_json::from_str(&json).expect("deserialization should succeed");
-        assert_eq!(deserialized.capability.as_deref(), Some("mqtt_bridge"));
+        assert_eq!(deserialized.capability.as_deref(), Some("update_tracking"));
         assert_eq!(deserialized.status, Some(ServiceStatus::Approved));
         assert_eq!(deserialized.page, Some(2));
         assert_eq!(deserialized.per_page, Some(50));
@@ -365,7 +365,7 @@ mod tests {
     fn system_service_response_includes_cert_lifetime_hours() {
         let resp = SystemServiceResponse {
             id: sample_uuid(),
-            capabilities: vec!["mqtt_bridge".into()],
+            capabilities: vec!["update_tracking".into()],
             hostname: "host".to_string(),
             friendly_name: "H".to_string(),
             ip_address: None,
@@ -388,7 +388,7 @@ mod tests {
     fn system_service_response_omits_cert_lifetime_hours_when_none() {
         let resp = SystemServiceResponse {
             id: sample_uuid(),
-            capabilities: vec!["mqtt_bridge".into()],
+            capabilities: vec!["update_tracking".into()],
             hostname: "host".to_string(),
             friendly_name: "H".to_string(),
             ip_address: None,

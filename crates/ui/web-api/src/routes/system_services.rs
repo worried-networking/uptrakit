@@ -38,7 +38,7 @@ pub use uptrakit_web_api_types::system_services::{
     get,
     path = "/api/v1/system-services",
     params(
-        ("capability" = Option<String>, Query, description = "Filter by capability (mqtt_bridge, scheduler)"),
+        ("capability" = Option<String>, Query, description = "Filter by capability (update_tracking, scheduler)"),
         ("status" = Option<String>, Query, description = "Filter by status (pending, approved, rejected, deactivated)"),
         ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
         ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")

@@ -40,7 +40,7 @@ pub use uptrakit_web_api_types::services::{
     get,
     path = "/api/v1/services",
     params(
-        ("capability" = Option<String>, Query, description = "Filter by capability (software_discovery, mqtt_bridge, ssh_remote, scheduler)"),
+        ("capability" = Option<String>, Query, description = "Filter by capability (software_discovery, update_tracking, ssh_remote, scheduler)"),
         ("status" = Option<String>, Query, description = "Filter by status (pending, approved, rejected, deactivated)"),
         ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
         ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")

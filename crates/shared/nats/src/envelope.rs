@@ -29,7 +29,7 @@ mod tests {
         let envelope = NatsEventEnvelope {
             source_controller_id: Uuid::nil(),
             target_service_id: Some(Uuid::nil()),
-            target_capability: Some("mqtt_bridge".to_string()),
+            target_capability: Some("update_tracking".to_string()),
             trace_context: current_trace_context(),
             message: ControllerMessage::CaBundleUpdated(CaBundleUpdatedPayload {
                 ca_bundle_pem: "pem-data".to_string(),

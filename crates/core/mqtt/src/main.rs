@@ -184,19 +184,19 @@ impl ServiceHandler for MqttHandler {
                     .tenant_mgr
                     .resolve_host_security_batch_update_trigger(mqtt_client_id, &topic)
                 {
-                    conn.send_best_effort(ServiceMessage::MqttTriggerHostBatchUpdate(payload))
+                    conn.send_best_effort(ServiceMessage::ServiceTriggerHostBatchUpdate(payload))
                         .await;
                 } else if let Some(payload) = self
                     .tenant_mgr
                     .resolve_host_batch_update_trigger(mqtt_client_id, &topic)
                 {
-                    conn.send_best_effort(ServiceMessage::MqttTriggerHostBatchUpdate(payload))
+                    conn.send_best_effort(ServiceMessage::ServiceTriggerHostBatchUpdate(payload))
                         .await;
                 } else if let Some(payload) = self
                     .tenant_mgr
                     .resolve_update_trigger(mqtt_client_id, &topic)
                 {
-                    conn.send_best_effort(ServiceMessage::MqttTriggerUpdate(payload))
+                    conn.send_best_effort(ServiceMessage::ServiceTriggerUpdate(payload))
                         .await;
                 } else {
                     tracing::debug!(
@@ -249,7 +249,7 @@ impl ServiceHandler for MqttHandler {
 fn mqtt_capabilities() -> BTreeSet<Capability> {
     [
         Capability::SystemService,
-        Capability::MqttBridge,
+        Capability::UpdateTracking,
         Capability::GracefulShutdown,
     ]
     .into_iter()

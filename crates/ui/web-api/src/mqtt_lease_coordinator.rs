@@ -770,7 +770,7 @@ mod tests {
     use uptrakit_shared_types::MqttTransport;
 
     fn mqtt_caps() -> BTreeSet<Capability> {
-        BTreeSet::from([Capability::GracefulShutdown, Capability::MqttBridge])
+        BTreeSet::from([Capability::GracefulShutdown, Capability::UpdateTracking])
     }
 
     async fn test_db() -> DatabaseConnection {

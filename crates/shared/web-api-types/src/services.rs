@@ -196,8 +196,8 @@ mod tests {
     fn service_response_round_trip_none_fields() {
         let resp = ServiceResponse {
             id: sample_uuid(),
-            capabilities: vec!["mqtt_bridge".into(), "graceful_shutdown".into()],
-            service_label: "MQTT Bridge".into(),
+            capabilities: vec!["update_tracking".into(), "graceful_shutdown".into()],
+            service_label: "Update Tracker".into(),
             hostname: "mqtt-broker".to_string(),
             friendly_name: "MQTT Service".to_string(),
             ip_address: None,

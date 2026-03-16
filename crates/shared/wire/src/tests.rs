@@ -41,7 +41,7 @@ fn agent_capabilities() -> BTreeSet<Capability> {
 }
 
 fn mqtt_capabilities() -> BTreeSet<Capability> {
-    [Capability::GracefulShutdown, Capability::MqttBridge]
+    [Capability::GracefulShutdown, Capability::UpdateTracking]
         .into_iter()
         .collect()
 }
@@ -85,7 +85,7 @@ fn enroll_mqtt_serialization_roundtrip() {
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""type":"enroll"#));
     assert!(json.contains(r#""hostname":"mqtt-service-1"#));
-    assert!(json.contains(r#""mqtt_bridge""#));
+    assert!(json.contains(r#""update_tracking""#));
     let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, msg);
 }
@@ -1952,7 +1952,7 @@ fn spec_conformance_register() {
         instance_id: "mqtt-node1-01936a1e".to_string(),
         max_tenants: 10,
         active_mqtt_clients: vec![TEST_UUID_1],
-        capabilities: [Capability::MqttBridge, Capability::GracefulShutdown]
+        capabilities: [Capability::UpdateTracking, Capability::GracefulShutdown]
             .into_iter()
             .collect(),
     }));
@@ -2050,7 +2050,7 @@ fn spec_conformance_service_settings() {
                 Capability::SoftwareDiscovery,
                 Capability::UpdateHooks,
                 Capability::GracefulShutdown,
-                Capability::MqttBridge,
+                Capability::UpdateTracking,
                 Capability::SshRemote,
             ]
             .into_iter()
@@ -2479,7 +2479,7 @@ fn spec_conformance_batch_update_result() {
 
 #[test]
 fn mqtt_host_summary_roundtrip() {
-    let state = MqttHostSummary {
+    let state = HostPackageSummary {
         host_id: TEST_UUID_1,
         hostname: "myserver.local".to_string(),
         friendly_name: "My Server".to_string(),
@@ -2491,7 +2491,7 @@ fn mqtt_host_summary_roundtrip() {
         update_in_progress: false,
     };
     let json = serde_json::to_string(&state).unwrap();
-    let deserialized: MqttHostSummary = serde_json::from_str(&json).unwrap();
+    let deserialized: HostPackageSummary = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, state);
 }
 
@@ -2499,7 +2499,7 @@ fn mqtt_host_summary_roundtrip() {
 fn mqtt_software_states_payload_default_host_summaries() {
     // Deserializing a payload without host_summaries should default to empty vec.
     let json = r#"{"tenant_id":"11111111-1111-1111-1111-111111111111","items":[],"page":{"page_index":0,"total_pages":1}}"#;
-    let payload: MqttSoftwareStatesPayload = serde_json::from_str(json).unwrap();
+    let payload: SoftwareStatesPayload = serde_json::from_str(json).unwrap();
     assert!(payload.host_summaries.is_empty());
 }
 
@@ -2507,17 +2507,17 @@ fn mqtt_software_states_payload_default_host_summaries() {
 fn mqtt_software_states_payload_backward_compat_host_package_hosts() {
     // Old wire messages with "host_package_hosts" should deserialize via alias.
     let json = r#"{"tenant_id":"11111111-1111-1111-1111-111111111111","items":[],"host_package_hosts":[{"host_id":"550e8400-e29b-41d4-a716-446655440001","hostname":"host1","pending_count":5,"security_pending_count":2,"total_count":100,"update_in_progress":true}],"page":{"page_index":0,"total_pages":1}}"#;
-    let payload: MqttSoftwareStatesPayload = serde_json::from_str(json).unwrap();
+    let payload: SoftwareStatesPayload = serde_json::from_str(json).unwrap();
     assert_eq!(payload.host_summaries.len(), 1);
     assert_eq!(payload.host_summaries[0].pending_count, 5);
 }
 
 #[test]
 fn mqtt_software_states_payload_with_host_summaries_roundtrip() {
-    let payload = MqttSoftwareStatesPayload {
+    let payload = SoftwareStatesPayload {
         tenant_id: TEST_UUID_1,
         items: vec![],
-        host_summaries: vec![MqttHostSummary {
+        host_summaries: vec![HostPackageSummary {
             host_id: TEST_UUID_2,
             hostname: "host1".to_string(),
             friendly_name: "Host 1".to_string(),
@@ -2535,27 +2535,27 @@ fn mqtt_software_states_payload_with_host_summaries_roundtrip() {
         },
     };
     let json = serde_json::to_string(&payload).unwrap();
-    let deserialized: MqttSoftwareStatesPayload = serde_json::from_str(&json).unwrap();
+    let deserialized: SoftwareStatesPayload = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, payload);
 }
 
 #[test]
-fn mqtt_trigger_host_batch_update_roundtrip() {
-    let msg = ServiceMessage::MqttTriggerHostBatchUpdate(MqttTriggerHostBatchUpdatePayload {
+fn service_trigger_host_batch_update_roundtrip() {
+    let msg = ServiceMessage::ServiceTriggerHostBatchUpdate(ServiceHostBatchUpdateTriggerPayload {
         tenant_id: TEST_UUID_1,
         host_id: TEST_UUID_2,
         mqtt_client_id: TEST_UUID_3,
         security_only: false,
     });
     let json = serde_json::to_string(&msg).unwrap();
-    assert!(json.contains(r#""type":"mqtt_trigger_host_batch_update""#));
+    assert!(json.contains(r#""type":"service_trigger_host_batch_update""#));
     let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, msg);
 }
 
 #[test]
-fn mqtt_trigger_host_batch_update_security_only_roundtrip() {
-    let msg = ServiceMessage::MqttTriggerHostBatchUpdate(MqttTriggerHostBatchUpdatePayload {
+fn service_trigger_host_batch_update_security_only_roundtrip() {
+    let msg = ServiceMessage::ServiceTriggerHostBatchUpdate(ServiceHostBatchUpdateTriggerPayload {
         tenant_id: TEST_UUID_1,
         host_id: TEST_UUID_2,
         mqtt_client_id: TEST_UUID_3,
@@ -2568,26 +2568,50 @@ fn mqtt_trigger_host_batch_update_security_only_roundtrip() {
 }
 
 #[test]
-fn mqtt_trigger_host_batch_update_backward_compat_old_type_tag() {
+fn service_trigger_host_batch_update_backward_compat_old_type_tag() {
     // When old wire messages use the old type tag, they should still deserialize.
     let json = r#"{"protocol_version":1,"seq":1,"type":"mqtt_trigger_host_package_update","tenant_id":"11111111-1111-1111-1111-111111111111","host_id":"22222222-2222-2222-2222-222222222222","mqtt_client_id":"33333333-3333-3333-3333-333333333333"}"#;
     let msg: ServiceMessage = serde_json::from_str(json).unwrap();
-    if let ServiceMessage::MqttTriggerHostBatchUpdate(p) = msg {
+    if let ServiceMessage::ServiceTriggerHostBatchUpdate(p) = msg {
         assert!(!p.security_only);
     } else {
-        panic!("expected MqttTriggerHostBatchUpdate");
+        panic!("expected ServiceTriggerHostBatchUpdate");
     }
 }
 
 #[test]
-fn mqtt_trigger_host_batch_update_security_only_defaults_false() {
-    // When `security_only` is absent in wire messages, it should deserialize as false.
+fn service_trigger_host_batch_update_backward_compat_mqtt_trigger() {
+    // When old wire messages use the mqtt_trigger_host_batch_update type tag, they should still deserialize.
     let json = r#"{"protocol_version":1,"seq":1,"type":"mqtt_trigger_host_batch_update","tenant_id":"11111111-1111-1111-1111-111111111111","host_id":"22222222-2222-2222-2222-222222222222","mqtt_client_id":"33333333-3333-3333-3333-333333333333"}"#;
     let msg: ServiceMessage = serde_json::from_str(json).unwrap();
-    if let ServiceMessage::MqttTriggerHostBatchUpdate(p) = msg {
+    if let ServiceMessage::ServiceTriggerHostBatchUpdate(p) = msg {
         assert!(!p.security_only);
     } else {
-        panic!("expected MqttTriggerHostBatchUpdate");
+        panic!("expected ServiceTriggerHostBatchUpdate");
+    }
+}
+
+#[test]
+fn service_trigger_host_batch_update_security_only_defaults_false() {
+    // When `security_only` is absent in wire messages, it should deserialize as false.
+    let json = r#"{"protocol_version":1,"seq":1,"type":"service_trigger_host_batch_update","tenant_id":"11111111-1111-1111-1111-111111111111","host_id":"22222222-2222-2222-2222-222222222222","mqtt_client_id":"33333333-3333-3333-3333-333333333333"}"#;
+    let msg: ServiceMessage = serde_json::from_str(json).unwrap();
+    if let ServiceMessage::ServiceTriggerHostBatchUpdate(p) = msg {
+        assert!(!p.security_only);
+    } else {
+        panic!("expected ServiceTriggerHostBatchUpdate");
+    }
+}
+
+#[test]
+fn service_trigger_update_backward_compat_mqtt_trigger() {
+    // When old wire messages use the mqtt_trigger_update type tag, they should still deserialize.
+    let json = r#"{"protocol_version":1,"seq":1,"type":"mqtt_trigger_update","tenant_id":"11111111-1111-1111-1111-111111111111","software_item_id":"22222222-2222-2222-2222-222222222222","host_id":"33333333-3333-3333-3333-333333333333","to_version":"2.0.0","mqtt_client_id":"44444444-4444-4444-4444-444444444444"}"#;
+    let msg: ServiceMessage = serde_json::from_str(json).unwrap();
+    if let ServiceMessage::ServiceTriggerUpdate(p) = msg {
+        assert_eq!(p.to_version, "2.0.0");
+    } else {
+        panic!("expected ServiceTriggerUpdate");
     }
 }
 
@@ -2601,7 +2625,7 @@ fn capability_serde_known_variants() {
         (Capability::SoftwareDiscovery, "software_discovery"),
         (Capability::UpdateHooks, "update_hooks"),
         (Capability::GracefulShutdown, "graceful_shutdown"),
-        (Capability::MqttBridge, "mqtt_bridge"),
+        (Capability::UpdateTracking, "update_tracking"),
         (Capability::SshRemote, "ssh_remote"),
     ];
     for (variant, wire_str) in &cases {
@@ -2626,7 +2650,7 @@ fn capability_display_matches_serde() {
         Capability::SoftwareDiscovery,
         Capability::UpdateHooks,
         Capability::GracefulShutdown,
-        Capability::MqttBridge,
+        Capability::UpdateTracking,
         Capability::SshRemote,
     ] {
         let serde_str = serde_json::to_value(&cap).unwrap();
@@ -2660,7 +2684,7 @@ fn capability_is_known() {
     assert!(Capability::SoftwareDiscovery.is_known());
     assert!(Capability::UpdateHooks.is_known());
     assert!(Capability::GracefulShutdown.is_known());
-    assert!(Capability::MqttBridge.is_known());
+    assert!(Capability::UpdateTracking.is_known());
     assert!(Capability::SshRemote.is_known());
     assert!(!Capability::Other("future".to_string()).is_known());
 }
@@ -2695,7 +2719,7 @@ fn capability_intersection_excludes_other() {
     let controller_caps: BTreeSet<Capability> = [
         Capability::SoftwareDiscovery,
         Capability::GracefulShutdown,
-        Capability::MqttBridge,
+        Capability::UpdateTracking,
     ]
     .into_iter()
     .collect();

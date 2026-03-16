@@ -97,7 +97,7 @@ impl ServiceConnectionRegistry {
     /// registers again (connection deduplication).
     ///
     /// The `capabilities` set describes what the service can do.  For MQTT
-    /// bridge services (those with `Capability::MqttBridge`), `instance_id`
+    /// bridge services (those with `Capability::UpdateTracking`), `instance_id`
     /// and `max_tenants` should be provided; for all other services they
     /// can be `None`.
     pub async fn register(
@@ -110,7 +110,7 @@ impl ServiceConnectionRegistry {
         let (tx, rx) = mpsc::channel(PUSH_CHANNEL_CAPACITY);
         let cancel_token = CancellationToken::new();
 
-        let is_mqtt = capabilities.contains(&Capability::MqttBridge);
+        let is_mqtt = capabilities.contains(&Capability::UpdateTracking);
 
         let conn = ServiceConnection {
             sender: tx,
@@ -500,7 +500,7 @@ impl ServiceConnectionRegistry {
         let mut loads = Vec::new();
 
         for (service_id, conn) in guard.connections.iter() {
-            if !conn.capabilities.contains(&Capability::MqttBridge) {
+            if !conn.capabilities.contains(&Capability::UpdateTracking) {
                 continue;
             }
 
@@ -587,7 +587,7 @@ mod tests {
 
     /// Helper: build a capability set for an MQTT bridge service.
     fn mqtt_caps() -> BTreeSet<Capability> {
-        BTreeSet::from([Capability::MqttBridge, Capability::GracefulShutdown])
+        BTreeSet::from([Capability::UpdateTracking, Capability::GracefulShutdown])
     }
 
     /// `broadcast_server_restarting_scattered` must return immediately rather than
@@ -676,7 +676,7 @@ mod tests {
                 reason: "test".to_string(),
             });
         registry
-            .broadcast_by_capability(&Capability::MqttBridge, msg)
+            .broadcast_by_capability(&Capability::UpdateTracking, msg)
             .await;
 
         assert!(

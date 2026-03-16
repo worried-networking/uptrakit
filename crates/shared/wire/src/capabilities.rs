@@ -22,14 +22,14 @@ pub enum Capability {
     ///
     /// Wire string: `graceful_shutdown`.
     GracefulShutdown,
-    /// Service is an MQTT bridge: handles `Register`, `TenantAssignments`,
-    /// `ReleaseTenants`, `MqttClientStatus`, etc.
+    /// Service tracks software update state and host connectivity.
     ///
-    /// Identifies an MQTT bridge service. The controller uses this capability
-    /// to gate MQTT-specific message handling and lease coordination.
+    /// The controller uses this capability to route software-state broadcasts
+    /// and connectivity updates. Also gates MQTT-specific lease coordination
+    /// for MQTT bridge services.
     ///
-    /// Wire string: `mqtt_bridge`.
-    MqttBridge,
+    /// Wire string: `update_tracking`.
+    UpdateTracking,
     /// Service supports `DiscoverSoftware` → `DiscoveryResults` flow.
     ///
     /// The controller gates autodiscovery requests on this capability.
@@ -126,7 +126,7 @@ impl Capability {
             Self::SoftwareDiscovery => "software_discovery",
             Self::UpdateHooks => "update_hooks",
             Self::GracefulShutdown => "graceful_shutdown",
-            Self::MqttBridge => "mqtt_bridge",
+            Self::UpdateTracking => "update_tracking",
             Self::SshRemote => "ssh_remote",
             Self::Scheduler => "scheduler",
             Self::DatabaseAccess => "database_access",
@@ -164,7 +164,7 @@ impl FromStr for Capability {
             "software_discovery" => Self::SoftwareDiscovery,
             "update_hooks" => Self::UpdateHooks,
             "graceful_shutdown" => Self::GracefulShutdown,
-            "mqtt_bridge" => Self::MqttBridge,
+            "update_tracking" => Self::UpdateTracking,
             "ssh_remote" => Self::SshRemote,
             "scheduler" => Self::Scheduler,
             "database_access" => Self::DatabaseAccess,

@@ -10,7 +10,7 @@ use serde::Serialize;
 pub enum ServicesCommands {
     /// List all services
     List {
-        /// Filter by capability (software_discovery, mqtt_bridge, ssh_remote)
+        /// Filter by capability (software_discovery, update_tracking, ssh_remote)
         #[arg(long)]
         capability: Option<String>,
         /// Filter by status (pending, approved, rejected, deactivated)

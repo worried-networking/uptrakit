@@ -13,7 +13,7 @@ use crate::Capability;
 ///
 /// | Profile | Key capability | Services |
 /// | --- | --- | --- |
-/// | `MqttBridge` | `Capability::MqttBridge` | MQTT service |
+/// | `UpdateTracker` | `Capability::UpdateTracking` | MQTT service |
 /// | `Agent` | `Capability::SoftwareDiscovery` | Local agent, SSH agent |
 /// | `Scheduler` | `Capability::Scheduler` | External task scheduler |
 ///
@@ -22,8 +22,8 @@ use crate::Capability;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ServiceProfile {
-    /// MQTT bridge service (has `MqttBridge` capability).
-    MqttBridge,
+    /// Update-tracking service (has `UpdateTracking` capability).
+    UpdateTracker,
     /// Agent service — local or SSH-backed (has `SoftwareDiscovery` capability).
     Agent,
     /// External task scheduler service (has `Scheduler` capability).
@@ -35,10 +35,10 @@ pub enum ServiceProfile {
 impl ServiceProfile {
     /// Derive the behavioral profile from a capability set.
     ///
-    /// Precedence: `MqttBridge` > `Scheduler` > `Agent` > `Unknown`.
+    /// Precedence: `UpdateTracker` > `Scheduler` > `Agent` > `Unknown`.
     pub fn from_capabilities(caps: &BTreeSet<Capability>) -> Self {
-        if caps.contains(&Capability::MqttBridge) {
-            Self::MqttBridge
+        if caps.contains(&Capability::UpdateTracking) {
+            Self::UpdateTracker
         } else if caps.contains(&Capability::Scheduler) {
             Self::Scheduler
         } else if caps.contains(&Capability::SoftwareDiscovery) {
@@ -50,12 +50,12 @@ impl ServiceProfile {
 
     /// Default ping interval in seconds for this profile.
     ///
-    /// - `MqttBridge`: 15 seconds (MQTT lease heartbeat).
+    /// - `UpdateTracker`: 15 seconds (MQTT lease heartbeat).
     /// - `Scheduler`: 60 seconds (less latency-sensitive).
     /// - `Agent` / `Unknown`: 300 seconds (5 minutes).
     pub const fn default_ping_interval_secs(&self) -> u32 {
         match self {
-            Self::MqttBridge => 15,
+            Self::UpdateTracker => 15,
             Self::Scheduler => 60,
             Self::Agent | Self::Unknown => 300,
         }
@@ -63,12 +63,12 @@ impl ServiceProfile {
 
     /// Shutdown timeout in seconds, if applicable.
     ///
-    /// - `MqttBridge`: `None` (no graceful shutdown timeout).
+    /// - `UpdateTracker`: `None` (no graceful shutdown timeout).
     /// - `Scheduler`: `Some(30)` (allow claim release).
     /// - `Agent` / `Unknown`: `Some(120)` (2 minutes).
     pub const fn shutdown_timeout_secs(&self) -> Option<u32> {
         match self {
-            Self::MqttBridge => None,
+            Self::UpdateTracker => None,
             Self::Scheduler => Some(30),
             Self::Agent | Self::Unknown => Some(120),
         }
@@ -80,7 +80,7 @@ impl ServiceProfile {
     /// SSH-backed agents from local agents.
     pub const fn service_label(&self, has_ssh_remote: bool) -> &'static str {
         match self {
-            Self::MqttBridge => "MQTT Bridge",
+            Self::UpdateTracker => "Update Tracker",
             Self::Scheduler => "Scheduler",
             Self::Agent if has_ssh_remote => "SSH Agent",
             Self::Agent => "Agent",
@@ -124,11 +124,11 @@ mod tests {
     // ---------------------------------------------------------------
 
     #[test]
-    fn profile_mqtt_bridge() {
-        let c = caps(&[Capability::MqttBridge, Capability::GracefulShutdown]);
+    fn profile_update_tracker() {
+        let c = caps(&[Capability::UpdateTracking, Capability::GracefulShutdown]);
         assert_eq!(
             ServiceProfile::from_capabilities(&c),
-            ServiceProfile::MqttBridge
+            ServiceProfile::UpdateTracker
         );
     }
 
@@ -177,11 +177,11 @@ mod tests {
     }
 
     #[test]
-    fn mqtt_bridge_takes_precedence_over_scheduler() {
-        let c = caps(&[Capability::MqttBridge, Capability::Scheduler]);
+    fn update_tracker_takes_precedence_over_scheduler() {
+        let c = caps(&[Capability::UpdateTracking, Capability::Scheduler]);
         assert_eq!(
             ServiceProfile::from_capabilities(&c),
-            ServiceProfile::MqttBridge
+            ServiceProfile::UpdateTracker
         );
     }
 
@@ -203,11 +203,11 @@ mod tests {
     }
 
     #[test]
-    fn mqtt_bridge_takes_precedence() {
-        let c = caps(&[Capability::MqttBridge, Capability::SoftwareDiscovery]);
+    fn update_tracker_takes_precedence() {
+        let c = caps(&[Capability::UpdateTracking, Capability::SoftwareDiscovery]);
         assert_eq!(
             ServiceProfile::from_capabilities(&c),
-            ServiceProfile::MqttBridge
+            ServiceProfile::UpdateTracker
         );
     }
 
@@ -216,8 +216,11 @@ mod tests {
     // ---------------------------------------------------------------
 
     #[test]
-    fn ping_interval_mqtt() {
-        assert_eq!(ServiceProfile::MqttBridge.default_ping_interval_secs(), 15);
+    fn ping_interval_update_tracker() {
+        assert_eq!(
+            ServiceProfile::UpdateTracker.default_ping_interval_secs(),
+            15
+        );
     }
 
     #[test]
@@ -240,8 +243,8 @@ mod tests {
     // ---------------------------------------------------------------
 
     #[test]
-    fn shutdown_timeout_mqtt() {
-        assert_eq!(ServiceProfile::MqttBridge.shutdown_timeout_secs(), None);
+    fn shutdown_timeout_update_tracker() {
+        assert_eq!(ServiceProfile::UpdateTracker.shutdown_timeout_secs(), None);
     }
 
     #[test]
@@ -274,10 +277,10 @@ mod tests {
     }
 
     #[test]
-    fn label_mqtt_bridge() {
+    fn label_update_tracker() {
         assert_eq!(
-            ServiceProfile::MqttBridge.service_label(false),
-            "MQTT Bridge"
+            ServiceProfile::UpdateTracker.service_label(false),
+            "Update Tracker"
         );
     }
 
@@ -324,11 +327,11 @@ mod tests {
 
     #[test]
     fn parse_preserves_all_known_capabilities() {
-        let json = r#"["graceful_shutdown","mqtt_bridge","software_discovery","ssh_remote","update_hooks"]"#;
+        let json = r#"["graceful_shutdown","software_discovery","ssh_remote","update_hooks","update_tracking"]"#;
         let parsed = parse_capabilities(json);
         assert_eq!(parsed.len(), 5);
         assert!(parsed.contains(&Capability::GracefulShutdown));
-        assert!(parsed.contains(&Capability::MqttBridge));
+        assert!(parsed.contains(&Capability::UpdateTracking));
         assert!(parsed.contains(&Capability::SoftwareDiscovery));
         assert!(parsed.contains(&Capability::SshRemote));
         assert!(parsed.contains(&Capability::UpdateHooks));

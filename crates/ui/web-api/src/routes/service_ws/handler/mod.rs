@@ -268,11 +268,11 @@ impl MessageProcessor {
                 self.dispatch_update_hooks(msg).await
             }
 
-            // -- MqttBridge capability --
+            // -- UpdateTracking capability --
             msg @ (ServiceMessage::ReleaseTenants(_)
             | ServiceMessage::MqttClientStatus(_)
-            | ServiceMessage::MqttTriggerUpdate(_)
-            | ServiceMessage::MqttTriggerHostBatchUpdate(_))
+            | ServiceMessage::ServiceTriggerUpdate(_)
+            | ServiceMessage::ServiceTriggerHostBatchUpdate(_))
                 if self.is_mqtt =>
             {
                 self.dispatch_mqtt(msg).await
@@ -372,7 +372,7 @@ impl MessageProcessor {
         }
     }
 
-    /// Dispatch MQTT bridge messages (ReleaseTenants, MqttClientStatus, etc.).
+    /// Dispatch update-tracking messages (ReleaseTenants, MqttClientStatus, etc.).
     async fn dispatch_mqtt(&self, msg: ServiceMessage) -> ProcessorResponse {
         match msg {
             ServiceMessage::ReleaseTenants(payload) => {
@@ -387,12 +387,16 @@ impl MessageProcessor {
             ServiceMessage::MqttClientStatus(payload) => {
                 mqtt::handle_mqtt_client_status(&self.state, &payload).await
             }
-            ServiceMessage::MqttTriggerUpdate(payload) => {
-                mqtt::handle_mqtt_trigger_update(&self.state, &payload, self.mqtt_context.as_ref())
-                    .await
+            ServiceMessage::ServiceTriggerUpdate(payload) => {
+                mqtt::handle_service_trigger_update(
+                    &self.state,
+                    &payload,
+                    self.mqtt_context.as_ref(),
+                )
+                .await
             }
-            ServiceMessage::MqttTriggerHostBatchUpdate(payload) => {
-                mqtt::handle_mqtt_trigger_host_batch_update(
+            ServiceMessage::ServiceTriggerHostBatchUpdate(payload) => {
+                mqtt::handle_service_trigger_host_batch_update(
                     &self.state,
                     &payload,
                     self.mqtt_context.as_ref(),
@@ -688,14 +692,14 @@ async fn load_service_capabilities(
     }
 }
 
-/// Stage 2: Run the MQTT register handshake for services with the `MqttBridge`
+/// Stage 2: Run the MQTT register handshake for services with the `UpdateTracking`
 /// capability.
 ///
 /// Returns `Some(handshake)` when the handshake succeeds, or `None` when the
 /// connection closes before the `Register` message arrives (the caller should
 /// abort setup).
 ///
-/// Only call this function when the service has the `MqttBridge` capability;
+/// Only call this function when the service has the `UpdateTracking` capability;
 /// the coordinator is responsible for the conditional check.
 async fn negotiate_mqtt_handshake(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
@@ -901,7 +905,7 @@ async fn setup_authenticated_session(
     let (capabilities, service_app_name, service_tenant_id) =
         load_service_capabilities(state, service_id, is_system).await;
 
-    let is_mqtt = capabilities.contains(&Capability::MqttBridge);
+    let is_mqtt = capabilities.contains(&Capability::UpdateTracking);
     let has_software_discovery = capabilities.contains(&Capability::SoftwareDiscovery);
     let has_update_hooks = capabilities.contains(&Capability::UpdateHooks);
     let has_ui_extensions = capabilities.contains(&Capability::UiExtensions);

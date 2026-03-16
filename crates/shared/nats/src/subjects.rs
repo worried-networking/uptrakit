@@ -74,8 +74,8 @@ mod tests {
     #[test]
     fn determine_capability() {
         assert_eq!(
-            determine(None, Some("mqtt_bridge")),
-            "uptrakit.events.capability.mqtt_bridge"
+            determine(None, Some("update_tracking")),
+            "uptrakit.events.capability.update_tracking"
         );
     }
 
@@ -91,7 +91,7 @@ mod tests {
     fn determine_service_takes_precedence_over_capability() {
         let id = Uuid::nil();
         assert_eq!(
-            determine(Some(id), Some("mqtt_bridge")),
+            determine(Some(id), Some("update_tracking")),
             format!("uptrakit.events.service.{id}")
         );
     }

@@ -87,13 +87,13 @@ mod tests {
     #[test]
     fn list_system_services_query_serialization_with_all_fields() {
         let query = ListSystemServicesQuery {
-            capability: Some("mqtt_bridge".to_string()),
+            capability: Some("update_tracking".to_string()),
             status: Some(ServiceStatus::Approved),
             page: Some(2),
             per_page: Some(50),
         };
         let qs = serde_urlencoded::to_string(&query).expect("serialize");
-        assert!(qs.contains("capability=mqtt_bridge"));
+        assert!(qs.contains("capability=update_tracking"));
         assert!(qs.contains("status=approved"));
         assert!(qs.contains("page=2"));
         assert!(qs.contains("per_page=50"));

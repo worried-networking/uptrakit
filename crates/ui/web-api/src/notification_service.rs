@@ -1,6 +1,6 @@
 use uptrakit_internal_wire::{
     Capability, ControllerMessage, HostConnectivityUpdate, HostConnectivityUpdatedPayload,
-    MqttSoftwareStatesPayload,
+    SoftwareStatesPayload,
 };
 use uuid::Uuid;
 
@@ -85,7 +85,7 @@ impl NotificationService {
 
     /// Send a message to all services with a specific capability (local + optional NATS).
     ///
-    /// The `capability_str` is the wire-format capability name (e.g. `"mqtt_bridge"`).
+    /// The `capability_str` is the wire-format capability name (e.g. `"update_tracking"`).
     /// It is parsed to a [`Capability`] for local delivery via the registry.
     #[tracing::instrument(skip_all, fields(capability_str))]
     pub async fn send_by_capability(&self, capability_str: &str, msg: ControllerMessage) {
@@ -128,7 +128,7 @@ impl NotificationService {
                     tracing::warn!(
                         error = %e,
                         %tenant_id,
-                        "failed to load software states for MQTT push"
+                        "failed to load software states for push"
                     );
                     return;
                 }
@@ -138,7 +138,7 @@ impl NotificationService {
     }
 
     /// Load software states for a tenant using paginated host delivery and push
-    /// each page to all locally connected MQTT services and to NATS.
+    /// each page to all locally connected update-tracking services and to NATS.
     ///
     /// Pages are delivered in order (page 0 first). The receiver accumulates
     /// pages until `page_index + 1 == total_pages` before applying state.
@@ -149,7 +149,7 @@ impl NotificationService {
         tenant_id: uuid::Uuid,
     ) {
         let tenant_db = uptrakit_shared_db::TenantDb::new(db.clone(), tenant_id);
-        let page_size = uptrakit_internal_wire::limits::MQTT_STATES_HOST_PAGE_SIZE;
+        let page_size = uptrakit_internal_wire::limits::STATES_HOST_PAGE_SIZE;
         let mut host_page: u64 = 0;
         loop {
             let payload =
@@ -164,7 +164,7 @@ impl NotificationService {
                             error = %e,
                             %tenant_id,
                             host_page,
-                            "failed to load software states page for MQTT push"
+                            "failed to load software states page for push"
                         );
                         return;
                     }
@@ -178,35 +178,37 @@ impl NotificationService {
         }
     }
 
-    /// Deliver a pre-loaded `MqttSoftwareStatesPayload` to all locally connected
-    /// MQTT services and publish to NATS for cross-controller delivery.
+    /// Deliver a pre-loaded `SoftwareStatesPayload` to all locally connected
+    /// update-tracking services and publish to NATS for cross-controller delivery.
     ///
     /// Used by `ControllerSchedulerNotifier` to avoid re-loading an already-loaded
     /// payload through the ORM layer.
     #[tracing::instrument(skip_all)]
-    pub async fn deliver_software_states(&self, payload: MqttSoftwareStatesPayload) {
+    pub async fn deliver_software_states(&self, payload: SoftwareStatesPayload) {
         let msg = ControllerMessage::SoftwareStates(payload);
-        // Deliver to locally connected MQTT services immediately.
+        // Deliver to locally connected update-tracking services immediately.
         self.registry
-            .broadcast_by_capability(&Capability::MqttBridge, msg.clone())
+            .broadcast_by_capability(&Capability::UpdateTracking, msg.clone())
             .await;
-        // Publish to NATS for cross-controller delivery (MQTT-only).
-        self.maybe_publish_nats(None, Some("mqtt_bridge"), msg)
+        // Publish to NATS for cross-controller delivery.
+        self.maybe_publish_nats(None, Some("update_tracking"), msg)
             .await;
     }
 
-    /// Publish a `HostConnectivityUpdated` event to all locally connected MQTT
-    /// services and to NATS for cross-controller delivery.
+    /// Publish a `HostConnectivityUpdated` event to all locally connected
+    /// update-tracking services and to NATS for cross-controller delivery.
     ///
-    /// This is the authoritative mechanism for notifying MQTT services that an
-    /// agent has connected or disconnected. Unlike `SoftwareStates`, connectivity
-    /// state is sourced from the live WebSocket session on the controller that
-    /// owns the agent connection — not from a DB query — so it must be delivered
-    /// as an event rather than included in the `SoftwareStates` payload.
+    /// This is the authoritative mechanism for notifying update-tracking services
+    /// that an agent has connected or disconnected. Unlike `SoftwareStates`,
+    /// connectivity state is sourced from the live WebSocket session on the
+    /// controller that owns the agent connection — not from a DB query — so it
+    /// must be delivered as an event rather than included in the
+    /// `SoftwareStates` payload.
     ///
     /// Multi-controller safety: `HostConnectivityUpdated` is NATS-publishable
-    /// (contains no credentials) so all MQTT services across the cluster receive
-    /// it regardless of which controller holds the agent WebSocket.
+    /// (contains no credentials) so all update-tracking services across the
+    /// cluster receive it regardless of which controller holds the agent
+    /// WebSocket.
     #[tracing::instrument(skip_all, fields(%tenant_id))]
     pub async fn send_connectivity_update(
         &self,
@@ -215,21 +217,21 @@ impl NotificationService {
     ) {
         let payload = HostConnectivityUpdatedPayload::new(tenant_id, updates);
         let msg = ControllerMessage::HostConnectivityUpdated(payload);
-        // Deliver to locally connected MQTT services immediately.
+        // Deliver to locally connected update-tracking services immediately.
         self.registry
-            .broadcast_by_capability(&Capability::MqttBridge, msg.clone())
+            .broadcast_by_capability(&Capability::UpdateTracking, msg.clone())
             .await;
-        // Publish to NATS for cross-controller delivery (MQTT-only).
-        self.maybe_publish_nats(None, Some("mqtt_bridge"), msg)
+        // Publish to NATS for cross-controller delivery.
+        self.maybe_publish_nats(None, Some("update_tracking"), msg)
             .await;
     }
 
     /// Push `HostConnectivityUpdated` "online" events for all agents that are
     /// currently connected and serve hosts in `tenant_id`.
     ///
-    /// Called when an MQTT service (re)connects to ensure the MQTT broker
+    /// Called when an update-tracking service (re)connects to ensure the service
     /// receives retained connectivity state for hosts whose agents were already
-    /// online before the MQTT service connected.
+    /// online before the service connected.
     ///
     /// Only services that are currently registered in the connection registry
     /// receive an "online" event.  Services not in the registry are skipped —
@@ -252,7 +254,7 @@ impl NotificationService {
                     tracing::warn!(
                         error = %e,
                         %tenant_id,
-                        "failed to load agent connectivity for MQTT push"
+                        "failed to load agent connectivity for push"
                     );
                     return;
                 }

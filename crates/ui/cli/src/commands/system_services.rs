@@ -18,7 +18,7 @@ use uptrakit_openapi_client::types::system_services::{
 pub enum SystemServicesCommands {
     /// List all system services
     List {
-        /// Filter by capability (mqtt_bridge, scheduler)
+        /// Filter by capability (update_tracking, scheduler)
         #[arg(long)]
         capability: Option<String>,
         /// Filter by status (pending, approved, rejected, deactivated)
@@ -384,7 +384,10 @@ mod tests {
             id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
                 .parse::<Uuid>()
                 .unwrap(),
-            capabilities: vec!["mqtt_bridge".to_string(), "graceful_shutdown".to_string()],
+            capabilities: vec![
+                "update_tracking".to_string(),
+                "graceful_shutdown".to_string(),
+            ],
             hostname: "mqtt-bridge.local".to_string(),
             friendly_name: "MQTT Bridge".to_string(),
             ip_address: None,
@@ -406,7 +409,7 @@ mod tests {
         assert!(s.contains("MQTT Bridge"), "friendly name missing");
         assert!(s.contains("approved"), "status missing");
         assert!(s.contains("2.0.0"), "client version missing");
-        assert!(s.contains("mqtt_bridge"), "capabilities missing");
+        assert!(s.contains("update_tracking"), "capabilities missing");
     }
 
     #[test]

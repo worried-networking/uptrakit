@@ -1730,7 +1730,7 @@ fn enrollment_tokens_create_parses() {
         "--name",
         "CI Token",
         "--capabilities",
-        "software_discovery,mqtt_bridge",
+        "software_discovery,update_tracking",
         "--max-uses",
         "10",
         "--expires-in",
@@ -1750,7 +1750,7 @@ fn enrollment_tokens_create_parses() {
             assert_eq!(name, "CI Token");
             assert_eq!(
                 capabilities.as_deref(),
-                Some("software_discovery,mqtt_bridge")
+                Some("software_discovery,update_tracking")
             );
             assert_eq!(max_uses, Some(10));
             assert_eq!(expires_in, Some(86400));

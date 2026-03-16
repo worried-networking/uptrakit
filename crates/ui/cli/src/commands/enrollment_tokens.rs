@@ -22,7 +22,7 @@ pub enum EnrollmentTokensCommands {
         /// Human-readable token name
         #[arg(long)]
         name: String,
-        /// Comma-separated list of allowed capabilities (e.g. software_discovery,mqtt_bridge).
+        /// Comma-separated list of allowed capabilities (e.g. software_discovery,update_tracking).
         /// Omit for a wildcard token that allows any service type.
         #[arg(long)]
         capabilities: Option<String>,

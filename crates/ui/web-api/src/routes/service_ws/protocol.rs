@@ -239,7 +239,7 @@ pub(crate) fn controller_capabilities() -> BTreeSet<Capability> {
         Capability::SoftwareDiscovery,
         Capability::UpdateHooks,
         Capability::GracefulShutdown,
-        Capability::MqttBridge,
+        Capability::UpdateTracking,
         Capability::SshRemote,
         Capability::Scheduler,
         Capability::DatabaseAccess,

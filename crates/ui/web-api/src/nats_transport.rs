@@ -48,6 +48,8 @@ pub struct NatsConsumerConfig {
     pub registry: ServiceConnectionRegistry,
     /// Database connection for MQTT lease coordination.
     pub db: DatabaseConnection,
+    /// Notification service for software-states push on `SoftwareStatesChanged`.
+    pub notification_service: crate::notification_service::NotificationService,
     /// Admin-event broadcaster — relays cross-controller SSE events locally.
     pub event_broadcaster: crate::event_broadcaster::EventBroadcaster,
     /// Trigger for CA certificate rotation (optional).
@@ -152,6 +154,7 @@ impl NatsTransport {
         let NatsConsumerConfig {
             registry,
             db,
+            notification_service,
             event_broadcaster,
             ca_rotation_trigger,
             revocation_notify,
@@ -246,6 +249,7 @@ impl NatsTransport {
                     uptrakit_nats::config_protection::decrypt_message_configs(envelope.message);
 
                 let resources = crate::event_delivery::ControllerResources {
+                    notification_service: Some(&notification_service),
                     ca_rotation_trigger: ca_rotation_trigger.as_ref(),
                     revocation_notify: revocation_notify.as_ref(),
                     token_denylist: token_denylist.as_ref(),
@@ -332,8 +336,8 @@ mod tests {
     #[test]
     fn determine_subject_capability() {
         assert_eq!(
-            determine(None, Some("mqtt_bridge")),
-            "uptrakit.events.capability.mqtt_bridge"
+            determine(None, Some("update_tracking")),
+            "uptrakit.events.capability.update_tracking"
         );
     }
 
@@ -349,7 +353,7 @@ mod tests {
     fn determine_subject_service_takes_precedence_over_capability() {
         let id = Uuid::nil();
         assert_eq!(
-            determine(Some(id), Some("mqtt_bridge")),
+            determine(Some(id), Some("update_tracking")),
             format!("uptrakit.events.service.{id}")
         );
     }
@@ -363,7 +367,7 @@ mod tests {
         let envelope = NatsEventEnvelope {
             source_controller_id: Uuid::nil(),
             target_service_id: Some(Uuid::nil()),
-            target_capability: Some("mqtt_bridge".to_string()),
+            target_capability: Some("update_tracking".to_string()),
             trace_context: uptrakit_internal_wire::current_trace_context(),
             message: ControllerMessage::CaBundleUpdated(
                 uptrakit_internal_wire::CaBundleUpdatedPayload {

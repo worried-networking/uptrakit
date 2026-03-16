@@ -56,8 +56,8 @@ async fn all_components_enroll_concurrently() {
         "missing scheduler capability: {capabilities:?}"
     );
     assert!(
-        capabilities.contains(&"mqtt_bridge"),
-        "missing mqtt_bridge capability: {capabilities:?}"
+        capabilities.contains(&"update_tracking"),
+        "missing update_tracking capability: {capabilities:?}"
     );
     assert!(
         capabilities.contains(&"ssh_remote"),

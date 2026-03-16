@@ -31,8 +31,8 @@ async fn mqtt_enrolls_as_system_service() {
         "mqtt service should be auto-approved"
     );
     assert!(
-        service.capabilities.iter().any(|c| c == "mqtt_bridge"),
-        "mqtt should have mqtt_bridge capability, got: {:?}",
+        service.capabilities.iter().any(|c| c == "update_tracking"),
+        "mqtt should have update_tracking capability, got: {:?}",
         service.capabilities,
     );
 }

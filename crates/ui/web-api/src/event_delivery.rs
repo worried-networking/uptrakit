@@ -10,7 +10,7 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::Notify;
 use uptrakit_internal_wire::{
     BroadcastAdminEventPayload, Capability, ControllerMessage, MqttClientCreatedPayload,
-    MqttTenantRevokedPayload, TokenRevokedPayload,
+    MqttTenantRevokedPayload, SoftwareStatesChangedPayload, TokenRevokedPayload,
 };
 use uptrakit_web_api_types::events::AdminEvent;
 use uuid::Uuid;
@@ -22,6 +22,9 @@ use crate::service_connections::ServiceConnectionRegistry;
 ///
 /// All fields may be `None` when the corresponding subsystem is not running on this instance.
 pub struct ControllerResources<'a> {
+    /// Notification service for loading and pushing software states on
+    /// `SoftwareStatesChanged` signals from the external scheduler.
+    pub notification_service: Option<&'a crate::notification_service::NotificationService>,
     pub ca_rotation_trigger: Option<&'a Arc<Notify>>,
     pub revocation_notify: Option<&'a Arc<Notify>>,
     pub token_denylist: Option<&'a Arc<crate::auth::token_denylist::TokenDenylist>>,
@@ -42,7 +45,7 @@ pub fn parse_capability_str(s: &str) -> Option<Capability> {
         "software_discovery" => Some(Capability::SoftwareDiscovery),
         "update_hooks" => Some(Capability::UpdateHooks),
         "graceful_shutdown" => Some(Capability::GracefulShutdown),
-        "mqtt_bridge" => Some(Capability::MqttBridge),
+        "update_tracking" => Some(Capability::UpdateTracking),
         "ssh_remote" => Some(Capability::SshRemote),
         "scheduler" => Some(Capability::Scheduler),
         "database_access" => Some(Capability::DatabaseAccess),
@@ -83,7 +86,7 @@ pub async fn deliver_event(
         }
         // Targeted to services with a specific capability
         (None, Some(cap_str)) => match cap_str {
-            "mqtt_bridge" => deliver_mqtt_event(registry, msg).await,
+            "update_tracking" => deliver_mqtt_event(registry, msg).await,
             _ => {
                 // For any known capability, broadcast to services with that capability
                 if let Some(capability) = parse_capability_str(cap_str) {
@@ -138,7 +141,7 @@ pub async fn deliver_mqtt_event(
         _ => {
             // Other MQTT messages: broadcast to all local MQTT services
             registry
-                .broadcast_by_capability(&Capability::MqttBridge, msg)
+                .broadcast_by_capability(&Capability::UpdateTracking, msg)
                 .await;
             true
         }
@@ -241,6 +244,19 @@ pub async fn deliver_controller_event(
             }
             true
         }
+        ControllerMessage::SoftwareStatesChanged(SoftwareStatesChangedPayload {
+            tenant_id,
+            ..
+        }) => {
+            if let Some(ns) = resources.notification_service {
+                ns.push_software_states_for_tenant(db, tenant_id).await;
+            } else {
+                tracing::debug!(
+                    "received SoftwareStatesChanged but no notification_service configured"
+                );
+            }
+            true
+        }
         _ => {
             tracing::warn!(
                 msg_type = ?std::mem::discriminant(&msg),
@@ -270,8 +286,8 @@ mod tests {
             Some(Capability::GracefulShutdown)
         );
         assert_eq!(
-            parse_capability_str("mqtt_bridge"),
-            Some(Capability::MqttBridge)
+            parse_capability_str("update_tracking"),
+            Some(Capability::UpdateTracking)
         );
         assert_eq!(
             parse_capability_str("ssh_remote"),
@@ -316,6 +332,7 @@ mod tests {
             });
         // With no connected services, broadcast succeeds.
         let resources = ControllerResources {
+            notification_service: None,
             ca_rotation_trigger: None,
             revocation_notify: None,
             token_denylist: None,
@@ -337,6 +354,7 @@ mod tests {
             });
         // Service not on this controller — returns true (not our responsibility).
         let resources = ControllerResources {
+            notification_service: None,
             ca_rotation_trigger: None,
             revocation_notify: None,
             token_denylist: None,
@@ -356,6 +374,7 @@ mod tests {
                 ca_bundle_pem: "pem".to_string(),
             });
         let resources = ControllerResources {
+            notification_service: None,
             ca_rotation_trigger: None,
             revocation_notify: None,
             token_denylist: None,
