@@ -46,11 +46,12 @@ mod tenant_manager;
 
 use clap::Parser;
 use rootcause::prelude::*;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 use uptrakit_internal_wire::{
     Capability, ControllerMessage, DisconnectingPayload, RegisterPayload, ServiceMessage,
+    WorkloadClaimPayload,
     payloads::{ServiceConfigEntry, ServiceConfigUpdatedPayload},
 };
 use uptrakit_service_sdk::{
@@ -81,6 +82,11 @@ struct MqttHandler {
     ///
     /// Updated on `ServiceConfigDelivery` and `ServiceConfigUpdated`.
     configs: Vec<ParsedMqttClientConfig>,
+    /// Config keys that the controller has granted to this instance.
+    ///
+    /// Only clients whose config key is in this set should be started.
+    /// Updated on `WorkloadClaimResult`.
+    granted_keys: BTreeSet<String>,
     /// Correlates `StoreServiceConfig` / `DeleteServiceConfig` requests with ACKs.
     config_proxy: ServiceConfigProxy,
 }
@@ -145,7 +151,7 @@ impl ServiceHandler for MqttHandler {
     async fn on_message(
         &mut self,
         msg: ControllerMessage,
-        _conn: &mut ControllerConnection,
+        conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>> {
         match msg {
             ControllerMessage::ServiceConfigDelivery(payload) => {
@@ -155,12 +161,36 @@ impl ServiceHandler for MqttHandler {
                 );
                 let parsed = parse_client_configs(payload.entries);
                 self.configs = parsed.clone();
-                self.tenant_mgr.apply_configs(parsed).await;
+                // Send WorkloadClaim with the full desired config set.
+                self.send_workload_claim(conn).await;
+                // Apply configs for any already-granted keys (empty on first connect,
+                // populated on reconnect if WorkloadClaimResult arrives before this).
+                self.apply_granted_configs().await;
                 Ok(None)
             }
             ControllerMessage::ServiceConfigUpdated(payload) => {
                 tracing::debug!("received ServiceConfigUpdated");
                 self.apply_config_update(payload).await;
+                // Re-claim with updated config set.
+                self.send_workload_claim(conn).await;
+                self.apply_granted_configs().await;
+                Ok(None)
+            }
+            ControllerMessage::WorkloadClaimResult(payload) => {
+                tracing::info!(
+                    granted = payload.granted.len(),
+                    rejected = payload.rejected.len(),
+                    "received WorkloadClaimResult"
+                );
+                self.granted_keys = payload.granted;
+                // Stop clients for rejected/revoked keys.
+                for key in &payload.rejected {
+                    if let Some(client_id) = parse_client_key(key) {
+                        self.tenant_mgr.stop_client(&client_id).await;
+                    }
+                }
+                // Apply configs for granted keys.
+                self.apply_granted_configs().await;
                 Ok(None)
             }
             ControllerMessage::SoftwareStates(payload) => {
@@ -355,10 +385,58 @@ impl MqttHandler {
         // Stop deleted clients.
         for mqtt_client_id in deleted_ids {
             self.tenant_mgr.stop_client(&mqtt_client_id).await;
+            // Remove deleted keys from granted set.
+            self.granted_keys
+                .remove(&format!("{CONFIG_KEY_PREFIX}{mqtt_client_id}"));
         }
+    }
 
-        // Apply changed configs to the tenant manager.
-        self.tenant_mgr.apply_configs(changed).await;
+    /// Compute the desired config claims from the current in-memory configs.
+    ///
+    /// Returns a `BTreeMap<config_key, tenant_id>` for all enabled configs with
+    /// a valid (non-nil) tenant_id.
+    fn compute_desired_claims(&self) -> BTreeMap<String, Uuid> {
+        self.configs
+            .iter()
+            .filter(|c| c.enabled && c.tenant_id != Uuid::nil())
+            .map(|c| {
+                (
+                    format!("{CONFIG_KEY_PREFIX}{}", c.mqtt_client_id),
+                    c.tenant_id,
+                )
+            })
+            .collect()
+    }
+
+    /// Send a `WorkloadClaim` with the full desired config set to the controller.
+    async fn send_workload_claim(&self, conn: &mut ControllerConnection) {
+        let claims = self.compute_desired_claims();
+        tracing::info!(keys = claims.len(), "sending WorkloadClaim");
+        if let Err(e) = conn
+            .send(ServiceMessage::WorkloadClaim(WorkloadClaimPayload::new(
+                claims,
+            )))
+            .await
+        {
+            tracing::warn!(error = %e, "failed to send WorkloadClaim");
+        }
+    }
+
+    /// Apply only configs whose keys are in `granted_keys` to the tenant manager.
+    ///
+    /// Configs for keys that have not been granted are retained in memory but
+    /// their MQTT clients are not started.
+    async fn apply_granted_configs(&mut self) {
+        let granted: Vec<ParsedMqttClientConfig> = self
+            .configs
+            .iter()
+            .filter(|c| {
+                let key = format!("{CONFIG_KEY_PREFIX}{}", c.mqtt_client_id);
+                self.granted_keys.contains(&key)
+            })
+            .cloned()
+            .collect();
+        self.tenant_mgr.apply_configs(granted).await;
     }
 
     /// Handle `ACTION_CREATE`: store a new MQTT client config.
@@ -568,6 +646,7 @@ fn mqtt_capabilities() -> BTreeSet<Capability> {
         Capability::UpdateTracking,
         Capability::GracefulShutdown,
         Capability::UiExtensions,
+        Capability::WorkloadClaims,
     ]
     .into_iter()
     .collect()
@@ -597,6 +676,7 @@ async fn main() {
         tenant_mgr,
         event_rx,
         configs: Vec::new(),
+        granted_keys: BTreeSet::new(),
         config_proxy: ServiceConfigProxy::new(),
     };
 
