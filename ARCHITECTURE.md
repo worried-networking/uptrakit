@@ -214,6 +214,21 @@ See [System Services Architecture](docs/architecture/system-services.md) for the
 All services connect to `/api/v1/ws/service` over mTLS and exchange shared `ServiceMessage`/`ControllerMessage` enums. The
 AsyncAPI definition lives at `crates/shared/wire/asyncapi.yaml` and is described in [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
 
+## Database backend support
+
+Uptrakit supports three database backends via SeaORM:
+
+| Backend | Feature flag | Notes |
+| --- | --- | --- |
+| SQLite | `db-sqlite` (default) | In-memory or file-based; single-server deployments |
+| PostgreSQL | `db-postgres` | Multi-server deployments; HA with external scheduler |
+| MariaDB/MySQL | `db-mysql` | MariaDB 11+; index key limits and partial index workarounds apply |
+
+All migrations use the same schema definitions across backends with backend-specific code paths
+where needed (e.g., table recreation vs. ALTER TABLE, partial indexes vs. composite indexes).
+See [Database Migrations](docs/development/database-migrations.md#mysqlmariadb-compatibility-workarounds)
+for MariaDB-specific migration patterns.
+
 ## Notification subsystem
 
 The controller includes a channel-agnostic notification subsystem that delivers event-driven alerts through

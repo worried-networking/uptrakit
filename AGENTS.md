@@ -350,8 +350,15 @@ These are non-negotiable design constraints. Do not violate them.
    - `CREATE TABLE new AS SELECT * FROM old` in tests — SQLite-specific shorthand for crash simulation.
    - `CASE` expressions in `INSERT...SELECT` during table recreation — sea_query's builder
      does not support `CASE` in the SELECT column list.
-   See [database-migrations.md](docs/development/database-migrations.md) for the full exceptions table
-   and the table recreation guide with shared helpers.
+   - `INSERT...WHERE NOT EXISTS` for idempotent permission inserts — sea_query's
+     `on_conflict(do_nothing)` generates invalid MySQL syntax.
+   - `information_schema` queries in `helpers::drop_mysql_foreign_keys()` — introspection
+     of FK metadata has no sea_query equivalent.
+   - Backend-conditional expression indexes (`LOWER()`) — MariaDB does not support
+     expression indexes; falls back to plain column indexes.
+   See [database-migrations.md](docs/development/database-migrations.md) for the full exceptions table,
+   the table recreation guide with shared helpers, and
+   [MySQL/MariaDB Compatibility Workarounds](docs/development/database-migrations.md#mysqlmariadb-compatibility-workarounds).
 1. **Cover new logic with tests.** Cover success and failure paths.
 1. **Document everything.** Any code change must be properly documented either in the code, or in the separate
    documentation. Any changes to the agent-controller wire protocol must be documented in
