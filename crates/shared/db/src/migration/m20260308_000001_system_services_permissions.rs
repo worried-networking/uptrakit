@@ -1,3 +1,4 @@
+use sea_orm::ConnectionTrait;
 use sea_orm_migration::prelude::*;
 use uuid::Uuid;
 
@@ -18,13 +19,11 @@ use uuid::Uuid;
 #[derive(DeriveMigrationName)]
 pub(super) struct Migration;
 
-/// Insert a permission by name.  Idempotent (`ON CONFLICT DO NOTHING` on
-/// the unique `name` column).
+/// Insert a permission by name.  Idempotent (check-then-insert).
 ///
-/// The `perm_id` UUID is bound as a 16-byte BLOB via sea-query so that
-/// SQLite stores it identically to the initial migration.  Never pass a UUID
-/// as a `format!`-interpolated string — that stores TEXT instead of BLOB and
-/// breaks SeaORM's uuid deserialiser.
+/// Uses check-then-insert instead of ON CONFLICT DO NOTHING because
+/// sea-query generates invalid MySQL syntax for INSERT ... ON CONFLICT.
+/// UUIDs must be bound via sea-query (not format!) to store as BLOB on SQLite.
 async fn insert_permission(
     manager: &SchemaManager<'_>,
     perm_id: uuid::Uuid,
@@ -32,6 +31,16 @@ async fn insert_permission(
     description: &str,
     now: time::OffsetDateTime,
 ) -> Result<(), DbErr> {
+    let exists = manager
+        .get_connection()
+        .query_one_raw(sea_orm::Statement::from_string(
+            manager.get_database_backend(),
+            format!("SELECT 1 FROM permissions WHERE name = '{name}' LIMIT 1"),
+        ))
+        .await?;
+    if exists.is_some() {
+        return Ok(());
+    }
     manager
         .exec_stmt(
             Query::insert()
@@ -43,45 +52,30 @@ async fn insert_permission(
                     Alias::new("created_at"),
                 ])
                 .values_panic([perm_id.into(), name.into(), description.into(), now.into()])
-                .on_conflict(
-                    OnConflict::column(Alias::new("name"))
-                        .do_nothing()
-                        .to_owned(),
-                )
                 .to_owned(),
         )
         .await
 }
 
 /// Grant a permission to a role by resolving both by name via a subquery.
-/// Idempotent (`ON CONFLICT DO NOTHING` on the composite PK).
+/// Idempotent (uses `WHERE NOT EXISTS` — portable across all backends).
 async fn grant_permission(
     manager: &SchemaManager<'_>,
     role_name: &str,
     perm_name: &str,
 ) -> Result<(), DbErr> {
-    let insert = Query::insert()
-        .into_table(Alias::new("role_permissions"))
-        .columns([Alias::new("role_id"), Alias::new("permission_id")])
-        .select_from(
-            Query::select()
-                .from_as(Alias::new("roles"), Alias::new("r"))
-                .from_as(Alias::new("permissions"), Alias::new("p"))
-                .column((Alias::new("r"), Alias::new("id")))
-                .column((Alias::new("p"), Alias::new("id")))
-                .and_where(Expr::col((Alias::new("r"), Alias::new("name"))).eq(role_name))
-                .and_where(Expr::col((Alias::new("p"), Alias::new("name"))).eq(perm_name))
-                .to_owned(),
-        )
-        .map_err(|e| DbErr::Migration(e.to_string()))?
-        .on_conflict(
-            OnConflict::columns([Alias::new("role_id"), Alias::new("permission_id")])
-                .do_nothing()
-                .to_owned(),
-        )
-        .to_owned();
-
-    manager.exec_stmt(insert).await
+    let sql = format!(
+        "INSERT INTO role_permissions (role_id, permission_id) \
+         SELECT r.id, p.id \
+         FROM roles r, permissions p \
+         WHERE r.name = '{role_name}' AND p.name = '{perm_name}' \
+         AND NOT EXISTS ( \
+           SELECT 1 FROM role_permissions rp \
+           WHERE rp.role_id = r.id AND rp.permission_id = p.id \
+         )"
+    );
+    manager.get_connection().execute_unprepared(&sql).await?;
+    Ok(())
 }
 
 #[async_trait::async_trait]

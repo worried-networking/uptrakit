@@ -1,3 +1,4 @@
+use sea_orm::ConnectionTrait;
 use sea_orm_migration::prelude::*;
 use uuid::Uuid;
 
@@ -24,34 +25,24 @@ use uuid::Uuid;
 pub(super) struct Migration;
 
 /// Grant a permission to a role by resolving both by name via a subquery.
-/// Idempotent (`ON CONFLICT DO NOTHING` on the composite PK).
+/// Idempotent (uses `WHERE NOT EXISTS` — portable across all backends).
 async fn grant_permission(
     manager: &SchemaManager<'_>,
     role_name: &str,
     perm_name: &str,
 ) -> Result<(), DbErr> {
-    let insert = Query::insert()
-        .into_table(Alias::new("role_permissions"))
-        .columns([Alias::new("role_id"), Alias::new("permission_id")])
-        .select_from(
-            Query::select()
-                .from_as(Alias::new("roles"), Alias::new("r"))
-                .from_as(Alias::new("permissions"), Alias::new("p"))
-                .column((Alias::new("r"), Alias::new("id")))
-                .column((Alias::new("p"), Alias::new("id")))
-                .and_where(Expr::col((Alias::new("r"), Alias::new("name"))).eq(role_name))
-                .and_where(Expr::col((Alias::new("p"), Alias::new("name"))).eq(perm_name))
-                .to_owned(),
-        )
-        .map_err(|e| DbErr::Migration(e.to_string()))?
-        .on_conflict(
-            OnConflict::columns([Alias::new("role_id"), Alias::new("permission_id")])
-                .do_nothing()
-                .to_owned(),
-        )
-        .to_owned();
-
-    manager.exec_stmt(insert).await
+    let sql = format!(
+        "INSERT INTO role_permissions (role_id, permission_id) \
+         SELECT r.id, p.id \
+         FROM roles r, permissions p \
+         WHERE r.name = '{role_name}' AND p.name = '{perm_name}' \
+         AND NOT EXISTS ( \
+           SELECT 1 FROM role_permissions rp \
+           WHERE rp.role_id = r.id AND rp.permission_id = p.id \
+         )"
+    );
+    manager.get_connection().execute_unprepared(&sql).await?;
+    Ok(())
 }
 
 #[async_trait::async_trait]
@@ -59,57 +50,46 @@ impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let now = time::OffsetDateTime::now_utc();
 
-        // Insert view_notifications permission (idempotent).
-        manager
-            .exec_stmt(
-                Query::insert()
-                    .into_table(Alias::new("permissions"))
-                    .columns([
-                        Alias::new("id"),
-                        Alias::new("name"),
-                        Alias::new("description"),
-                        Alias::new("created_at"),
-                    ])
-                    .values_panic([
-                        Uuid::now_v7().into(),
-                        "view_notifications".into(),
-                        "View notification channels, rules, and delivery log.".into(),
-                        now.into(),
-                    ])
-                    .on_conflict(
-                        OnConflict::column(Alias::new("name"))
-                            .do_nothing()
+        // Insert view_notifications permission (idempotent check-then-insert).
+        for (perm_name, perm_desc) in [
+            (
+                "view_notifications",
+                "View notification channels, rules, and delivery log.",
+            ),
+            (
+                "manage_notifications",
+                "Create, update, delete, and test notification channels and rules.",
+            ),
+        ] {
+            let exists = manager
+                .get_connection()
+                .query_one_raw(sea_orm::Statement::from_string(
+                    manager.get_database_backend(),
+                    format!("SELECT 1 FROM permissions WHERE name = '{perm_name}' LIMIT 1"),
+                ))
+                .await?;
+            if exists.is_none() {
+                manager
+                    .exec_stmt(
+                        Query::insert()
+                            .into_table(Alias::new("permissions"))
+                            .columns([
+                                Alias::new("id"),
+                                Alias::new("name"),
+                                Alias::new("description"),
+                                Alias::new("created_at"),
+                            ])
+                            .values_panic([
+                                Uuid::now_v7().into(),
+                                perm_name.into(),
+                                perm_desc.into(),
+                                now.into(),
+                            ])
                             .to_owned(),
                     )
-                    .to_owned(),
-            )
-            .await?;
-
-        // Insert manage_notifications permission (idempotent).
-        manager
-            .exec_stmt(
-                Query::insert()
-                    .into_table(Alias::new("permissions"))
-                    .columns([
-                        Alias::new("id"),
-                        Alias::new("name"),
-                        Alias::new("description"),
-                        Alias::new("created_at"),
-                    ])
-                    .values_panic([
-                        Uuid::now_v7().into(),
-                        "manage_notifications".into(),
-                        "Create, update, delete, and test notification channels and rules.".into(),
-                        now.into(),
-                    ])
-                    .on_conflict(
-                        OnConflict::column(Alias::new("name"))
-                            .do_nothing()
-                            .to_owned(),
-                    )
-                    .to_owned(),
-            )
-            .await?;
+                    .await?;
+            }
+        }
 
         // Assign both permissions to the settings_manager role.
         grant_permission(manager, "settings_manager", "view_notifications").await?;

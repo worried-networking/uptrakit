@@ -1,3 +1,4 @@
+use sea_orm::ConnectionTrait;
 use sea_orm_migration::prelude::*;
 use uuid::Uuid;
 
@@ -27,8 +28,11 @@ pub(super) struct Migration;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
-/// Insert a permission by name. Idempotent (`ON CONFLICT DO NOTHING` on
-/// the unique `name` column).
+/// Insert a permission by name. Idempotent (check-then-insert).
+///
+/// Uses check-then-insert instead of ON CONFLICT DO NOTHING because
+/// sea-query generates invalid MySQL syntax for INSERT ... ON CONFLICT.
+/// UUIDs must be bound via sea-query (not format!) to store as BLOB on SQLite.
 async fn insert_permission(
     manager: &SchemaManager<'_>,
     perm_id: Uuid,
@@ -36,6 +40,16 @@ async fn insert_permission(
     description: &str,
     now: time::OffsetDateTime,
 ) -> Result<(), DbErr> {
+    let exists = manager
+        .get_connection()
+        .query_one_raw(sea_orm::Statement::from_string(
+            manager.get_database_backend(),
+            format!("SELECT 1 FROM permissions WHERE name = '{name}' LIMIT 1"),
+        ))
+        .await?;
+    if exists.is_some() {
+        return Ok(());
+    }
     manager
         .exec_stmt(
             Query::insert()
@@ -47,18 +61,12 @@ async fn insert_permission(
                     Alias::new("created_at"),
                 ])
                 .values_panic([perm_id.into(), name.into(), description.into(), now.into()])
-                .on_conflict(
-                    OnConflict::column(Alias::new("name"))
-                        .do_nothing()
-                        .to_owned(),
-                )
                 .to_owned(),
         )
         .await
 }
 
-/// Insert a role by name. Idempotent (`ON CONFLICT DO NOTHING` on the unique
-/// `name` column).
+/// Insert a role by name. Idempotent (check-then-insert).
 async fn insert_role(
     manager: &SchemaManager<'_>,
     role_id: Uuid,
@@ -66,6 +74,16 @@ async fn insert_role(
     description: &str,
     now: time::OffsetDateTime,
 ) -> Result<(), DbErr> {
+    let exists = manager
+        .get_connection()
+        .query_one_raw(sea_orm::Statement::from_string(
+            manager.get_database_backend(),
+            format!("SELECT 1 FROM roles WHERE name = '{name}' LIMIT 1"),
+        ))
+        .await?;
+    if exists.is_some() {
+        return Ok(());
+    }
     manager
         .exec_stmt(
             Query::insert()
@@ -84,101 +102,58 @@ async fn insert_role(
                     true.into(),
                     now.into(),
                 ])
-                .on_conflict(
-                    OnConflict::column(Alias::new("name"))
-                        .do_nothing()
-                        .to_owned(),
-                )
                 .to_owned(),
         )
         .await
 }
 
 /// Grant a permission to a role by resolving both by name via a subquery.
-/// Idempotent (`ON CONFLICT DO NOTHING` on the composite PK).
+/// Idempotent (uses `WHERE NOT EXISTS` — portable across all backends).
 async fn grant_permission(
     manager: &SchemaManager<'_>,
     role_name: &str,
     perm_name: &str,
 ) -> Result<(), DbErr> {
-    let insert = Query::insert()
-        .into_table(Alias::new("role_permissions"))
-        .columns([Alias::new("role_id"), Alias::new("permission_id")])
-        .select_from(
-            Query::select()
-                .from_as(Alias::new("roles"), Alias::new("r"))
-                .from_as(Alias::new("permissions"), Alias::new("p"))
-                .column((Alias::new("r"), Alias::new("id")))
-                .column((Alias::new("p"), Alias::new("id")))
-                .and_where(Expr::col((Alias::new("r"), Alias::new("name"))).eq(role_name))
-                .and_where(Expr::col((Alias::new("p"), Alias::new("name"))).eq(perm_name))
-                .to_owned(),
-        )
-        .map_err(|e| DbErr::Migration(e.to_string()))?
-        .on_conflict(
-            OnConflict::columns([Alias::new("role_id"), Alias::new("permission_id")])
-                .do_nothing()
-                .to_owned(),
-        )
-        .to_owned();
-
-    manager.exec_stmt(insert).await
+    let sql = format!(
+        "INSERT INTO role_permissions (role_id, permission_id) \
+         SELECT r.id, p.id \
+         FROM roles r, permissions p \
+         WHERE r.name = '{role_name}' AND p.name = '{perm_name}' \
+         AND NOT EXISTS ( \
+           SELECT 1 FROM role_permissions rp \
+           WHERE rp.role_id = r.id AND rp.permission_id = p.id \
+         )"
+    );
+    manager.get_connection().execute_unprepared(&sql).await?;
+    Ok(())
 }
 
 /// Migrate user_role assignments from an old role to a set of new roles.
 ///
 /// For every `user_role` row referencing `old_role_name`, insert new rows for
 /// each `new_role_name` (preserving tenant_id, user_id, assigned_at).
+/// Uses `WHERE NOT EXISTS` for idempotency — portable across all backends.
 async fn migrate_user_roles(
     manager: &SchemaManager<'_>,
     old_role_name: &str,
     new_role_names: &[&str],
 ) -> Result<(), DbErr> {
     for new_role_name in new_role_names {
-        let insert = Query::insert()
-            .into_table(Alias::new("user_roles"))
-            .columns([
-                Alias::new("tenant_id"),
-                Alias::new("user_id"),
-                Alias::new("role_id"),
-                Alias::new("assigned_at"),
-            ])
-            .select_from(
-                Query::select()
-                    .from_as(Alias::new("user_roles"), Alias::new("ur"))
-                    .join_as(
-                        JoinType::InnerJoin,
-                        Alias::new("roles"),
-                        Alias::new("old_r"),
-                        Expr::col((Alias::new("old_r"), Alias::new("id")))
-                            .equals((Alias::new("ur"), Alias::new("role_id"))),
-                    )
-                    .from_as(Alias::new("roles"), Alias::new("new_r"))
-                    .column((Alias::new("ur"), Alias::new("tenant_id")))
-                    .column((Alias::new("ur"), Alias::new("user_id")))
-                    .column((Alias::new("new_r"), Alias::new("id")))
-                    .column((Alias::new("ur"), Alias::new("assigned_at")))
-                    .and_where(
-                        Expr::col((Alias::new("old_r"), Alias::new("name"))).eq(old_role_name),
-                    )
-                    .and_where(
-                        Expr::col((Alias::new("new_r"), Alias::new("name"))).eq(*new_role_name),
-                    )
-                    .to_owned(),
-            )
-            .map_err(|e| DbErr::Migration(e.to_string()))?
-            .on_conflict(
-                OnConflict::columns([
-                    Alias::new("tenant_id"),
-                    Alias::new("user_id"),
-                    Alias::new("role_id"),
-                ])
-                .do_nothing()
-                .to_owned(),
-            )
-            .to_owned();
-
-        manager.exec_stmt(insert).await?;
+        let sql = format!(
+            "INSERT INTO user_roles (tenant_id, user_id, role_id, assigned_at) \
+             SELECT ur.tenant_id, ur.user_id, new_r.id, ur.assigned_at \
+             FROM user_roles ur \
+             INNER JOIN roles old_r ON old_r.id = ur.role_id \
+             CROSS JOIN roles new_r \
+             WHERE old_r.name = '{old_role_name}' AND new_r.name = '{new_role_name}' \
+             AND NOT EXISTS ( \
+               SELECT 1 FROM user_roles ur2 \
+               WHERE ur2.tenant_id = ur.tenant_id \
+                 AND ur2.user_id = ur.user_id \
+                 AND ur2.role_id = new_r.id \
+             )"
+        );
+        manager.get_connection().execute_unprepared(&sql).await?;
     }
     Ok(())
 }

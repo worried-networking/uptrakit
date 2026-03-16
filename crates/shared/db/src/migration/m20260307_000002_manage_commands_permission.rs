@@ -1,3 +1,4 @@
+use sea_orm::ConnectionTrait;
 use sea_orm_migration::prelude::*;
 use uuid::Uuid;
 
@@ -32,35 +33,28 @@ use uuid::Uuid;
 pub(super) struct Migration;
 
 /// Helper: insert a row into `role_permissions` by resolving role and
-/// permission by name via a subquery.  Idempotent (`ON CONFLICT DO NOTHING`
-/// on the composite PK).
+/// permission by name via a subquery.  Idempotent (uses `WHERE NOT EXISTS`
+/// to skip if the assignment already exists — portable across all backends).
 async fn grant_permission(
     manager: &SchemaManager<'_>,
     role_name: &str,
     perm_name: &str,
 ) -> Result<(), DbErr> {
-    let insert = Query::insert()
-        .into_table(Alias::new("role_permissions"))
-        .columns([Alias::new("role_id"), Alias::new("permission_id")])
-        .select_from(
-            Query::select()
-                .from_as(Alias::new("roles"), Alias::new("r"))
-                .from_as(Alias::new("permissions"), Alias::new("p"))
-                .column((Alias::new("r"), Alias::new("id")))
-                .column((Alias::new("p"), Alias::new("id")))
-                .and_where(Expr::col((Alias::new("r"), Alias::new("name"))).eq(role_name))
-                .and_where(Expr::col((Alias::new("p"), Alias::new("name"))).eq(perm_name))
-                .to_owned(),
-        )
-        .map_err(|e| DbErr::Migration(e.to_string()))?
-        .on_conflict(
-            OnConflict::columns([Alias::new("role_id"), Alias::new("permission_id")])
-                .do_nothing()
-                .to_owned(),
-        )
-        .to_owned();
-
-    manager.exec_stmt(insert).await
+    // `INSERT ... SELECT ... ON CONFLICT DO NOTHING` doesn't translate to
+    // valid MySQL/MariaDB syntax in sea_query. Use raw SQL with
+    // `WHERE NOT EXISTS` which is portable across SQLite, PG, and MariaDB.
+    let sql = format!(
+        "INSERT INTO role_permissions (role_id, permission_id) \
+         SELECT r.id, p.id \
+         FROM roles r, permissions p \
+         WHERE r.name = '{role_name}' AND p.name = '{perm_name}' \
+         AND NOT EXISTS ( \
+           SELECT 1 FROM role_permissions rp \
+           WHERE rp.role_id = r.id AND rp.permission_id = p.id \
+         )"
+    );
+    manager.get_connection().execute_unprepared(&sql).await?;
+    Ok(())
 }
 
 #[async_trait::async_trait]
@@ -69,39 +63,42 @@ impl MigrationTrait for Migration {
         let now = time::OffsetDateTime::now_utc();
         let perm_id = Uuid::now_v7();
 
-        // 1. Insert the new permission (idempotent: ignore if already exists).
-        //    The permission name must match `Permission::ManageCommands::as_str()`.
-        //
-        //    Use Query::insert() so that sea-query binds the Uuid as a 16-byte
-        //    BLOB on SQLite.  execute_unprepared(&format!("VALUES ('{id}', …)"))
-        //    would embed the UUID as a 36-char TEXT literal, causing SeaORM to
-        //    fail with `ParseByteLength { len: 36 }` when reading it back.
-        manager
-            .exec_stmt(
-                Query::insert()
-                    .into_table(Alias::new("permissions"))
-                    .columns([
-                        Alias::new("id"),
-                        Alias::new("name"),
-                        Alias::new("description"),
-                        Alias::new("created_at"),
-                    ])
-                    .values_panic([
-                        perm_id.into(),
-                        "manage_commands".into(),
-                        "Modify command-bearing plugin config fields (shell commands, hooks). \
-                         Grants effective code-execution authority on managed hosts."
-                            .into(),
-                        now.into(),
-                    ])
-                    .on_conflict(
-                        OnConflict::column(Alias::new("name"))
-                            .do_nothing()
+        // 1. Insert the new permission (idempotent: skip if already exists).
+        //    Uses check-then-insert instead of ON CONFLICT DO NOTHING because
+        //    sea-query generates invalid MySQL syntax for INSERT ... ON CONFLICT.
+        //    UUIDs must be bound via sea-query (not format!) to store as BLOB on SQLite.
+        {
+            let exists = manager
+                .get_connection()
+                .query_one_raw(sea_orm::Statement::from_string(
+                    manager.get_database_backend(),
+                    "SELECT 1 FROM permissions WHERE name = 'manage_commands' LIMIT 1".to_owned(),
+                ))
+                .await?;
+            if exists.is_none() {
+                manager
+                    .exec_stmt(
+                        Query::insert()
+                            .into_table(Alias::new("permissions"))
+                            .columns([
+                                Alias::new("id"),
+                                Alias::new("name"),
+                                Alias::new("description"),
+                                Alias::new("created_at"),
+                            ])
+                            .values_panic([
+                                perm_id.into(),
+                                "manage_commands".into(),
+                                "Modify command-bearing plugin config fields (shell commands, hooks). \
+                                 Grants effective code-execution authority on managed hosts."
+                                    .into(),
+                                now.into(),
+                            ])
                             .to_owned(),
                     )
-                    .to_owned(),
-            )
-            .await?;
+                    .await?;
+            }
+        }
 
         // 2. Grant to owner and admin (join by name to avoid hardcoding UUIDs).
         grant_permission(manager, "owner", "manage_commands").await?;
