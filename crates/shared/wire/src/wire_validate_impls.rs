@@ -40,8 +40,8 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::Register(p) => p.wire_validate(),
             ServiceMessage::ReleaseTenants(p) => p.wire_validate(),
             ServiceMessage::MqttClientStatus(_) => Ok(()),
-            ServiceMessage::MqttTriggerUpdate(p) => p.wire_validate(),
-            ServiceMessage::MqttTriggerHostBatchUpdate(_) => Ok(()),
+            ServiceMessage::ServiceTriggerUpdate(p) => p.wire_validate(),
+            ServiceMessage::ServiceTriggerHostBatchUpdate(_) => Ok(()),
             ServiceMessage::Disconnecting(p) => p.wire_validate(),
             ServiceMessage::UpdateCapabilities(p) => p.wire_validate(),
             ServiceMessage::ReportPluginConfig(p) => p.wire_validate(),
@@ -323,7 +323,7 @@ impl WireValidate for MqttReleaseTenantsPayload {
     }
 }
 
-impl WireValidate for MqttUpdateTriggerPayload {
+impl WireValidate for ServiceUpdateTriggerPayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.to_version, MAX_SHORT_STRING_LEN, "to_version")?;
         Ok(())
@@ -1043,7 +1043,7 @@ impl WireValidate for MqttTenantRevokedPayload {
     }
 }
 
-impl WireValidate for MqttSoftwareStatesPayload {
+impl WireValidate for SoftwareStatesPayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         if self.page.total_pages < 1 {
             return Err(WireValidationError {
@@ -1080,7 +1080,7 @@ impl WireValidate for MqttSoftwareStatesPayload {
     }
 }
 
-impl WireValidate for MqttSoftwareStateItem {
+impl WireValidate for SoftwareStateItem {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.name, MAX_SHORT_STRING_LEN, "name")?;
         check_opt_string_len(&self.icon_url, MAX_ICON_URL_LEN, "icon_url")?;
@@ -1092,7 +1092,7 @@ impl WireValidate for MqttSoftwareStateItem {
     }
 }
 
-impl WireValidate for MqttSoftwareStateHostEntry {
+impl WireValidate for SoftwareStateHostEntry {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.hostname, MAX_SHORT_STRING_LEN, "hostname")?;
         check_string_len(&self.friendly_name, MAX_SHORT_STRING_LEN, "friendly_name")?;
@@ -1119,7 +1119,7 @@ impl WireValidate for MqttSoftwareStateHostEntry {
     }
 }
 
-impl WireValidate for MqttHostSummary {
+impl WireValidate for HostPackageSummary {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.hostname, MAX_SHORT_STRING_LEN, "hostname")?;
         check_string_len(&self.friendly_name, MAX_SHORT_STRING_LEN, "friendly_name")?;
@@ -1127,7 +1127,7 @@ impl WireValidate for MqttHostSummary {
     }
 }
 
-impl WireValidate for MqttHostMetadata {
+impl WireValidate for HostStateMetadata {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.hostname, MAX_SHORT_STRING_LEN, "hostname")?;
         check_string_len(&self.friendly_name, MAX_SHORT_STRING_LEN, "friendly_name")?;

@@ -91,7 +91,7 @@ pub const MAX_HOST_PACKAGE_HOST_STATES: usize = 2_000;
 /// Maximum number of host metadata entries in a `SoftwareStates` message.
 pub const MAX_MQTT_HOSTS: usize = 2_000;
 
-/// Maximum number of tags per host in a `MqttHostMetadata` entry.
+/// Maximum number of tags per host in a `HostStateMetadata` entry.
 pub const MAX_HOST_TAGS: usize = 100;
 
 /// Maximum number of connectivity updates in a `HostConnectivityUpdated` message.
@@ -152,7 +152,7 @@ pub const MAX_ICON_URL_LEN: usize = 2_048;
 pub const MAX_REPORT_PAGES: u32 = 50;
 
 /// Number of active hosts processed per page in paginated MQTT software-states delivery.
-pub const MQTT_STATES_HOST_PAGE_SIZE: u64 = 100;
+pub const STATES_HOST_PAGE_SIZE: u64 = 100;
 
 /// Maximum number of concurrent pending (incomplete) paginated reports per
 /// WebSocket connection. Prevents memory exhaustion from abandoned reports.

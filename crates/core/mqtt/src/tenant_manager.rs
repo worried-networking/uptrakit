@@ -17,11 +17,11 @@ use uptrakit_internal_wire::MqttClientConnectionStatus;
 /// (`page_index + 1 == total_pages`), the accumulated data is applied to the
 /// caches and published to connected MQTT clients.
 struct PartialSoftwareStates {
-    items: Vec<uptrakit_internal_wire::MqttSoftwareStateItem>,
+    items: Vec<uptrakit_internal_wire::SoftwareStateItem>,
     /// Index from `software_item_id` → position in `items` for O(1) merge.
     items_index: HashMap<Uuid, usize>,
-    host_summaries: Vec<uptrakit_internal_wire::MqttHostSummary>,
-    hosts: Vec<uptrakit_internal_wire::MqttHostMetadata>,
+    host_summaries: Vec<uptrakit_internal_wire::HostPackageSummary>,
+    hosts: Vec<uptrakit_internal_wire::HostStateMetadata>,
 }
 
 impl PartialSoftwareStates {
@@ -39,7 +39,7 @@ impl PartialSoftwareStates {
     /// Featured items with the same `software_item_id` across pages have their
     /// `hosts` lists merged so that the final state contains all per-host
     /// entries regardless of which page they appeared in.
-    fn extend(&mut self, page: uptrakit_internal_wire::MqttSoftwareStatesPayload) {
+    fn extend(&mut self, page: uptrakit_internal_wire::SoftwareStatesPayload) {
         self.host_summaries.extend(page.host_summaries);
         self.hosts.extend(page.hosts);
         for item in page.items {
@@ -70,11 +70,11 @@ pub(crate) struct ConnectivityState {
 pub(crate) struct TenantManager {
     pub(crate) clients: HashMap<Uuid, ClientState>,
     pub(crate) event_tx: Option<mpsc::Sender<MqttServiceEvent>>,
-    pub(crate) software_states: HashMap<Uuid, Vec<uptrakit_internal_wire::MqttSoftwareStateItem>>,
+    pub(crate) software_states: HashMap<Uuid, Vec<uptrakit_internal_wire::SoftwareStateItem>>,
     /// Cached per-host summary states, keyed by tenant_id.
-    pub(crate) host_summary_states: HashMap<Uuid, Vec<uptrakit_internal_wire::MqttHostSummary>>,
+    pub(crate) host_summary_states: HashMap<Uuid, Vec<uptrakit_internal_wire::HostPackageSummary>>,
     /// Cached per-host metadata (OS info, tags, agent last_seen), keyed by tenant_id.
-    pub(crate) host_metadata: HashMap<Uuid, Vec<uptrakit_internal_wire::MqttHostMetadata>>,
+    pub(crate) host_metadata: HashMap<Uuid, Vec<uptrakit_internal_wire::HostStateMetadata>>,
     /// Cached per-host connectivity state, keyed by `(tenant_id, host_id)`.
     ///
     /// Updated by `HostConnectivityUpdated` events from the controller. Not
@@ -179,7 +179,7 @@ impl TenantManager {
     #[tracing::instrument(skip_all, fields(tenant_id = %payload.tenant_id))]
     pub(crate) async fn update_software_states(
         &mut self,
-        payload: uptrakit_internal_wire::MqttSoftwareStatesPayload,
+        payload: uptrakit_internal_wire::SoftwareStatesPayload,
     ) {
         let page_index = payload.page.page_index;
         let total_pages = payload.page.total_pages;
@@ -398,8 +398,8 @@ impl TenantManager {
         }
     }
 
-    /// Given an inbound MQTT command topic, resolve it to an
-    /// [`MqttUpdateTriggerPayload`](uptrakit_internal_wire::MqttUpdateTriggerPayload).
+    /// Given an inbound MQTT command topic, resolve it to a
+    /// [`ServiceUpdateTriggerPayload`](uptrakit_internal_wire::ServiceUpdateTriggerPayload).
     ///
     /// Returns `None` if the topic doesn't match any known `(item, host)` in
     /// the stored states.
@@ -407,7 +407,7 @@ impl TenantManager {
         &self,
         mqtt_client_id: uuid::Uuid,
         topic: &str,
-    ) -> Option<uptrakit_internal_wire::MqttUpdateTriggerPayload> {
+    ) -> Option<uptrakit_internal_wire::ServiceUpdateTriggerPayload> {
         let state = self.clients.get(&mqtt_client_id)?;
         let (item_id, host_id) =
             crate::ha_discovery::parse_command_topic(&state.topic_prefix, topic)?;
@@ -416,7 +416,7 @@ impl TenantManager {
         let item = items.iter().find(|i| i.software_item_id == item_id)?;
         let host = item.hosts.iter().find(|h| h.host_id == host_id)?;
         let to_version = host.latest_version.clone()?;
-        Some(uptrakit_internal_wire::MqttUpdateTriggerPayload {
+        Some(uptrakit_internal_wire::ServiceUpdateTriggerPayload {
             tenant_id,
             software_item_id: item_id,
             host_id,
@@ -425,8 +425,8 @@ impl TenantManager {
         })
     }
 
-    /// Given an inbound MQTT command topic, resolve it to an
-    /// [`MqttTriggerHostBatchUpdatePayload`](uptrakit_internal_wire::MqttTriggerHostBatchUpdatePayload).
+    /// Given an inbound MQTT command topic, resolve it to a
+    /// [`ServiceHostBatchUpdateTriggerPayload`](uptrakit_internal_wire::ServiceHostBatchUpdateTriggerPayload).
     ///
     /// Returns `None` if the topic doesn't match the host-packages command
     /// pattern `{prefix}/hosts/{host_id}/set`.
@@ -434,20 +434,22 @@ impl TenantManager {
         &self,
         mqtt_client_id: uuid::Uuid,
         topic: &str,
-    ) -> Option<uptrakit_internal_wire::MqttTriggerHostBatchUpdatePayload> {
+    ) -> Option<uptrakit_internal_wire::ServiceHostBatchUpdateTriggerPayload> {
         let state = self.clients.get(&mqtt_client_id)?;
         let host_id =
             crate::ha_discovery::parse_host_packages_command_topic(&state.topic_prefix, topic)?;
-        Some(uptrakit_internal_wire::MqttTriggerHostBatchUpdatePayload {
-            tenant_id: state.tenant_id,
-            host_id,
-            mqtt_client_id,
-            security_only: false,
-        })
+        Some(
+            uptrakit_internal_wire::ServiceHostBatchUpdateTriggerPayload {
+                tenant_id: state.tenant_id,
+                host_id,
+                mqtt_client_id,
+                security_only: false,
+            },
+        )
     }
 
-    /// Given an inbound MQTT security-entity command topic, resolve it to an
-    /// [`MqttTriggerHostBatchUpdatePayload`](uptrakit_internal_wire::MqttTriggerHostBatchUpdatePayload)
+    /// Given an inbound MQTT security-entity command topic, resolve it to a
+    /// [`ServiceHostBatchUpdateTriggerPayload`](uptrakit_internal_wire::ServiceHostBatchUpdateTriggerPayload)
     /// with `security_only = true`.
     ///
     /// Returns `None` if the topic doesn't match the security command
@@ -456,16 +458,18 @@ impl TenantManager {
         &self,
         mqtt_client_id: uuid::Uuid,
         topic: &str,
-    ) -> Option<uptrakit_internal_wire::MqttTriggerHostBatchUpdatePayload> {
+    ) -> Option<uptrakit_internal_wire::ServiceHostBatchUpdateTriggerPayload> {
         let state = self.clients.get(&mqtt_client_id)?;
         let host_id =
             crate::ha_discovery::parse_host_security_command_topic(&state.topic_prefix, topic)?;
-        Some(uptrakit_internal_wire::MqttTriggerHostBatchUpdatePayload {
-            tenant_id: state.tenant_id,
-            host_id,
-            mqtt_client_id,
-            security_only: true,
-        })
+        Some(
+            uptrakit_internal_wire::ServiceHostBatchUpdateTriggerPayload {
+                tenant_id: state.tenant_id,
+                host_id,
+                mqtt_client_id,
+                security_only: true,
+            },
+        )
     }
 
     /// Start or update an MQTT client.
@@ -809,9 +813,9 @@ mod tests {
         let mut manager = TenantManager::new(None);
         let tenant_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap();
 
-        let payload = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+        let payload = uptrakit_internal_wire::SoftwareStatesPayload {
             tenant_id,
-            items: vec![uptrakit_internal_wire::MqttSoftwareStateItem {
+            items: vec![uptrakit_internal_wire::SoftwareStateItem {
                 software_item_id: Uuid::nil(),
                 name: "nginx".to_string(),
                 icon_url: None,
@@ -858,9 +862,9 @@ mod tests {
         let mut manager = TenantManager::new(None);
         let tenant_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap();
 
-        let first = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+        let first = uptrakit_internal_wire::SoftwareStatesPayload {
             tenant_id,
-            items: vec![uptrakit_internal_wire::MqttSoftwareStateItem {
+            items: vec![uptrakit_internal_wire::SoftwareStateItem {
                 software_item_id: Uuid::nil(),
                 name: "nginx".to_string(),
                 icon_url: None,
@@ -875,16 +879,16 @@ mod tests {
         };
         manager.update_software_states(first).await;
 
-        let second = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+        let second = uptrakit_internal_wire::SoftwareStatesPayload {
             tenant_id,
             items: vec![
-                uptrakit_internal_wire::MqttSoftwareStateItem {
+                uptrakit_internal_wire::SoftwareStateItem {
                     software_item_id: Uuid::nil(),
                     name: "nginx".to_string(),
                     icon_url: None,
                     hosts: vec![],
                 },
-                uptrakit_internal_wire::MqttSoftwareStateItem {
+                uptrakit_internal_wire::SoftwareStateItem {
                     software_item_id: Uuid::from_u128(1),
                     name: "redis".to_string(),
                     icon_url: None,
@@ -908,17 +912,14 @@ mod tests {
     // compute_removed_items
     // -------------------------------------------------------------------------
 
-    fn make_item(
-        item_id: Uuid,
-        host_ids: &[Uuid],
-    ) -> uptrakit_internal_wire::MqttSoftwareStateItem {
-        uptrakit_internal_wire::MqttSoftwareStateItem {
+    fn make_item(item_id: Uuid, host_ids: &[Uuid]) -> uptrakit_internal_wire::SoftwareStateItem {
+        uptrakit_internal_wire::SoftwareStateItem {
             software_item_id: item_id,
             name: "test".to_string(),
             icon_url: None,
             hosts: host_ids
                 .iter()
-                .map(|&hid| uptrakit_internal_wire::MqttSoftwareStateHostEntry {
+                .map(|&hid| uptrakit_internal_wire::SoftwareStateHostEntry {
                     host_id: hid,
                     hostname: "host".to_string(),
                     friendly_name: String::new(),
@@ -1045,9 +1046,9 @@ mod tests {
         let tenant_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440010").unwrap();
 
         // Page 0 of 2 — not yet applied.
-        let page0 = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+        let page0 = uptrakit_internal_wire::SoftwareStatesPayload {
             tenant_id,
-            items: vec![uptrakit_internal_wire::MqttSoftwareStateItem {
+            items: vec![uptrakit_internal_wire::SoftwareStateItem {
                 software_item_id: Uuid::from_u128(1),
                 name: "nginx".to_string(),
                 icon_url: None,
@@ -1067,9 +1068,9 @@ mod tests {
         assert!(manager.partial_states.contains_key(&tenant_id));
 
         // Page 1 of 2 (last) — triggers apply.
-        let page1 = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+        let page1 = uptrakit_internal_wire::SoftwareStatesPayload {
             tenant_id,
-            items: vec![uptrakit_internal_wire::MqttSoftwareStateItem {
+            items: vec![uptrakit_internal_wire::SoftwareStateItem {
                 software_item_id: Uuid::from_u128(2),
                 name: "redis".to_string(),
                 icon_url: None,
@@ -1105,7 +1106,7 @@ mod tests {
         let host_a = Uuid::from_u128(100);
         let host_b = Uuid::from_u128(200);
 
-        let make_host_entry = |host_id: Uuid| uptrakit_internal_wire::MqttSoftwareStateHostEntry {
+        let make_host_entry = |host_id: Uuid| uptrakit_internal_wire::SoftwareStateHostEntry {
             host_id,
             hostname: format!("host-{host_id}"),
             friendly_name: String::new(),
@@ -1120,9 +1121,9 @@ mod tests {
             last_checked_at: None,
         };
 
-        let page0 = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+        let page0 = uptrakit_internal_wire::SoftwareStatesPayload {
             tenant_id,
-            items: vec![uptrakit_internal_wire::MqttSoftwareStateItem {
+            items: vec![uptrakit_internal_wire::SoftwareStateItem {
                 software_item_id: item_id,
                 name: "myapp".to_string(),
                 icon_url: None,
@@ -1137,9 +1138,9 @@ mod tests {
         };
         manager.update_software_states(page0).await;
 
-        let page1 = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+        let page1 = uptrakit_internal_wire::SoftwareStatesPayload {
             tenant_id,
-            items: vec![uptrakit_internal_wire::MqttSoftwareStateItem {
+            items: vec![uptrakit_internal_wire::SoftwareStateItem {
                 software_item_id: item_id,
                 name: "myapp".to_string(),
                 icon_url: None,
@@ -1172,7 +1173,7 @@ mod tests {
         let mut manager = TenantManager::new(None);
         let tenant_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440012").unwrap();
 
-        let orphan = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+        let orphan = uptrakit_internal_wire::SoftwareStatesPayload {
             tenant_id,
             items: vec![],
             host_summaries: vec![],
