@@ -668,11 +668,18 @@ fn spawn_background_tasks(
                 Arc::clone(&app_state.cert.revocation_notify),
             ));
 
-        let external_flag = Arc::clone(&app_state.external_scheduler_connected);
+        // The embedded scheduler yields non-internal tasks when the notifier
+        // reports that an external service with the Scheduler capability is
+        // connected.
+        let notifier_ref = app_state.embedded_service_notifier.clone();
         let mut sched = uptrakit_scheduler_engine::Scheduler::new(
             app_state.db().clone(),
             uptrakit_scheduler_engine::SchedulerConfig::new(controller_id),
-            Box::new(move || external_flag.load(std::sync::atomic::Ordering::Relaxed)),
+            Box::new(move || {
+                notifier_ref.as_ref().is_some_and(|n| {
+                    n.is_capability_yielded(&uptrakit_internal_wire::Capability::Scheduler)
+                })
+            }),
         );
 
         sched.register(

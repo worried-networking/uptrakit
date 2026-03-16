@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
 use sea_orm::DatabaseConnection;
 use tokio_util::sync::CancellationToken;
@@ -13,6 +12,7 @@ use crate::auth::oidc_state::{
 };
 use crate::auth::rate_limit::RateLimitStore;
 use crate::ca_snapshot::{CaKeyStoreRef, CaSnapshotReceiver};
+use crate::embedded_support::EmbeddedServiceNotifier;
 use crate::extension_proxy::ExtensionProxy;
 use crate::extension_registry::ExtensionRegistry;
 use crate::notification_service::NotificationService;
@@ -131,9 +131,12 @@ pub struct AppState {
     /// cleanly when axum initiates a graceful shutdown rather than blocking indefinitely
     /// on a broadcast channel that may never close.
     pub shutdown_token: CancellationToken,
-    /// Set to `true` when an external scheduler service is connected. The embedded
-    /// scheduler reads this flag to defer non-internal tasks.
-    pub external_scheduler_connected: Arc<AtomicBool>,
+    /// Notifier for the embedded service infrastructure. Set by the controller
+    /// when embedded services are active; `None` when no services are embedded.
+    ///
+    /// The WS handler calls methods on this trait at service connect/disconnect
+    /// points so that embedded services can yield to external counterparts.
+    pub embedded_service_notifier: Option<Arc<dyn EmbeddedServiceNotifier>>,
     /// Audit log filter (global mode, per-tenant overrides checked at log time).
     pub audit_log_filter: uptrakit_audit_log::AuditFilter,
     /// Audit log dispatcher for fire-and-forget entry persistence.
@@ -211,7 +214,7 @@ pub struct AppStateBuilder {
     update_output_broadcaster: Option<crate::update_output_broadcaster::UpdateOutputBroadcaster>,
     batch_progress_broadcaster: Option<crate::batch_progress_broadcaster::BatchProgressBroadcaster>,
     shutdown_token: Option<CancellationToken>,
-    external_scheduler_connected: Option<Arc<AtomicBool>>,
+    embedded_service_notifier: Option<Arc<dyn EmbeddedServiceNotifier>>,
     audit_log_filter: Option<uptrakit_audit_log::AuditFilter>,
     audit_log_dispatcher: Option<uptrakit_audit_log::AuditLogDispatcher>,
     extension_registry: Option<Arc<ExtensionRegistry>>,
@@ -256,7 +259,7 @@ impl AppStateBuilder {
             update_output_broadcaster: None,
             batch_progress_broadcaster: None,
             shutdown_token: None,
-            external_scheduler_connected: None,
+            embedded_service_notifier: None,
             audit_log_filter: None,
             audit_log_dispatcher: None,
             extension_registry: None,
@@ -440,12 +443,13 @@ impl AppStateBuilder {
         self
     }
 
-    /// Set the external scheduler connected flag.
+    /// Set the embedded service notifier.
     ///
-    /// Optional — defaults to `Arc::new(AtomicBool::new(false))`. The embedded
-    /// scheduler and WebSocket handler share this flag to coordinate task deferral.
-    pub fn external_scheduler_connected(mut self, v: Arc<AtomicBool>) -> Self {
-        self.external_scheduler_connected = Some(v);
+    /// Optional — defaults to `None` (no embedded services). When set, the WS
+    /// handler calls trait methods at service connect/disconnect points so that
+    /// embedded services can yield to external counterparts.
+    pub fn embedded_service_notifier(mut self, v: Arc<dyn EmbeddedServiceNotifier>) -> Self {
+        self.embedded_service_notifier = Some(v);
         self
     }
 
@@ -566,9 +570,7 @@ impl AppStateBuilder {
             }),
             credential_sources: self.credential_sources.unwrap_or_default(),
             shutdown_token: self.shutdown_token.unwrap_or_default(),
-            external_scheduler_connected: self
-                .external_scheduler_connected
-                .unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
+            embedded_service_notifier: self.embedded_service_notifier,
             audit_log_filter: self.audit_log_filter.unwrap_or_default(),
             audit_log_dispatcher: self.audit_log_dispatcher.unwrap_or_else(|| {
                 uptrakit_audit_log::AuditLogDispatcher::new(std::sync::Arc::new(

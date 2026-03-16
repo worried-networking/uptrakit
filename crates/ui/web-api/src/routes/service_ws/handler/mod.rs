@@ -42,12 +42,10 @@ use mqtt::{complete_mqtt_registration, receive_first_service_message};
 use shared_types::{ProcessorAction, ProcessorResponse, load_linked_host_ids};
 use updates::deliver_pending_updates;
 
-use std::collections::{BTreeSet, HashSet};
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
-
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
+use std::collections::{BTreeSet, HashSet};
+use std::sync::Arc;
 use thiserror::Error;
 
 use rootcause::prelude::*;
@@ -572,7 +570,6 @@ struct AuthenticatedSessionState {
     is_mqtt: bool,
     has_software_discovery: bool,
     has_ui_extensions: bool,
-    is_external_scheduler: bool,
     service_tenant_id: Option<uuid::Uuid>,
     linked_host_ids: Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
     lease_coordinator: Option<MqttLeaseCoordinator>,
@@ -692,10 +689,40 @@ async fn load_service_capabilities(
     }
 }
 
-/// Stage 3: Register the connection in `ServiceConnectionRegistry` and detect
-/// whether the service carries the external `Scheduler` capability.
+/// Stage 2: Run the MQTT register handshake for services with the `MqttBridge`
+/// capability.
 ///
-/// Returns `(push_rx, cancel_token, is_external_scheduler)`.
+/// Returns `Some(handshake)` when the handshake succeeds, or `None` when the
+/// connection closes before the `Register` message arrives (the caller should
+/// abort setup).
+///
+/// Only call this function when the service has the `MqttBridge` capability;
+/// the coordinator is responsible for the conditional check.
+async fn negotiate_mqtt_handshake(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    stream: &mut futures_util::stream::SplitStream<WebSocket>,
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
+    rate_limiter: &mut MessageRateLimiter,
+) -> Option<mqtt::MqttHandshake> {
+    handle_mqtt_register_handshake(
+        sink,
+        stream,
+        state,
+        service_id,
+        out_seq,
+        in_seq,
+        rate_limiter,
+    )
+    .await
+}
+
+/// Stage 3: Register the connection in `ServiceConnectionRegistry` and notify
+/// the embedded service infrastructure about the new external connection.
+///
+/// Returns `(push_rx, cancel_token)`.
 async fn register_connection(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
@@ -704,7 +731,6 @@ async fn register_connection(
 ) -> (
     tokio::sync::mpsc::Receiver<ControllerMessage>,
     tokio_util::sync::CancellationToken,
-    bool,
 ) {
     let (push_rx, cancel_token) = if let Some(h) = mqtt_handshake {
         state
@@ -723,18 +749,12 @@ async fn register_connection(
             .await
     };
 
-    let is_external_scheduler = capabilities.contains(&Capability::Scheduler);
-    if is_external_scheduler {
-        state
-            .external_scheduler_connected
-            .store(true, Ordering::Relaxed);
-        tracing::info!(
-            %service_id,
-            "external scheduler connected; embedded scheduler deferring external tasks"
-        );
+    // Notify embedded services about the new external connection.
+    if let Some(ref notifier) = state.embedded_service_notifier {
+        notifier.on_external_connected(service_id, capabilities, None, false);
     }
 
-    (push_rx, cancel_token, is_external_scheduler)
+    (push_rx, cancel_token)
 }
 
 /// Stage 4: Complete MQTT setup — assign/reconcile leases, send `Registered`
@@ -932,8 +952,8 @@ async fn setup_authenticated_session(
         .await;
     }
 
-    // Stage 4: Register the connection and detect the external scheduler.
-    let (push_rx, cancel_token, is_external_scheduler) = register_connection(
+    // Stage 4: Register the connection and notify embedded services.
+    let (push_rx, cancel_token) = register_connection(
         state,
         service_id,
         &session_capabilities,
@@ -988,7 +1008,6 @@ async fn setup_authenticated_session(
         is_mqtt,
         has_software_discovery,
         has_ui_extensions,
-        is_external_scheduler,
         service_tenant_id,
         linked_host_ids,
         lease_coordinator,
@@ -1015,7 +1034,6 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
         is_mqtt,
         has_software_discovery,
         has_ui_extensions,
-        is_external_scheduler,
         service_tenant_id,
         linked_host_ids,
         lease_coordinator,
@@ -1061,25 +1079,13 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
         }
     }
 
-    if is_external_scheduler {
-        // Unregister first so has_capability_connected excludes this service.
-        state.service_connections.unregister(&service_id).await;
-        if !state
-            .service_connections
-            .has_capability_connected(&Capability::Scheduler)
-            .await
-        {
-            state
-                .external_scheduler_connected
-                .store(false, Ordering::Relaxed);
-            tracing::info!(
-                %service_id,
-                "external scheduler disconnected; embedded scheduler resuming all tasks"
-            );
-        }
-    } else {
-        state.service_connections.unregister(&service_id).await;
+    state.service_connections.unregister(&service_id).await;
+
+    // Notify embedded services about the disconnection.
+    if let Some(ref notifier) = state.embedded_service_notifier {
+        notifier.on_external_disconnected(&service_id);
     }
+
     tracing::debug!(%service_id, "authenticated service disconnected");
 }
 
@@ -1400,7 +1406,6 @@ async fn upgrade_service_capabilities(
 /// All state produced during enrolled session setup that the main loop and
 /// cleanup phases need.
 struct EnrolledSessionState {
-    is_external_scheduler: bool,
     push_rx: tokio::sync::mpsc::Receiver<ControllerMessage>,
     cancel_token: tokio_util::sync::CancellationToken,
     approved: bool,
@@ -1446,16 +1451,9 @@ async fn setup_enrolled_session(
         .register(service_id, capabilities.clone(), None, None)
         .await;
 
-    // External scheduler detection.
-    let is_external_scheduler = capabilities.contains(&Capability::Scheduler);
-    if is_external_scheduler {
-        state
-            .external_scheduler_connected
-            .store(true, Ordering::Relaxed);
-        tracing::info!(
-            %service_id,
-            "external scheduler connected (enrolled); embedded scheduler deferring external tasks"
-        );
+    // Notify embedded services about the new external connection.
+    if let Some(ref notifier) = state.embedded_service_notifier {
+        notifier.on_external_connected(service_id, &capabilities, None, is_system);
     }
 
     // Check current status to set initial approved flag.
@@ -1483,7 +1481,6 @@ async fn setup_enrolled_session(
     approval_poll.tick().await; // skip immediate first tick
 
     EnrolledSessionState {
-        is_external_scheduler,
         push_rx,
         cancel_token,
         approved,
@@ -1501,24 +1498,13 @@ async fn cleanup_enrolled_session(
     if session.cancel_token.is_cancelled() {
         return;
     }
-    if session.is_external_scheduler {
-        state.service_connections.unregister(&service_id).await;
-        if !state
-            .service_connections
-            .has_capability_connected(&Capability::Scheduler)
-            .await
-        {
-            state
-                .external_scheduler_connected
-                .store(false, Ordering::Relaxed);
-            tracing::info!(
-                %service_id,
-                "external scheduler disconnected (enrolled); embedded scheduler resuming all tasks"
-            );
-        }
-    } else {
-        state.service_connections.unregister(&service_id).await;
+    state.service_connections.unregister(&service_id).await;
+
+    // Notify embedded services about the disconnection.
+    if let Some(ref notifier) = state.embedded_service_notifier {
+        notifier.on_external_disconnected(&service_id);
     }
+
     tracing::debug!(%service_id, "enrolled service disconnected");
 }
 

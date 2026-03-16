@@ -586,7 +586,7 @@ mod tests {
             plugin_ops,
             credential_sources: ServiceCredentialSources::default(),
             shutdown_token: Default::default(),
-            external_scheduler_connected: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            embedded_service_notifier: None,
             audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
             audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
                 uptrakit_audit_log::NoopBackend,

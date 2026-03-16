@@ -1,4 +1,5 @@
 pub mod app_state;
+pub mod embedded_support;
 pub use uptrakit_web_api_auth::auth;
 pub mod batch_progress_broadcaster;
 pub mod ca_snapshot;
@@ -41,6 +42,7 @@ pub use app_state::{
     ServiceCredentialSources,
 };
 pub use ca_snapshot::{CaKeyStoreRef, CaSnapshotReceiver};
+pub use embedded_support::EmbeddedServiceNotifier;
 pub use router::{api_not_found, build_pki_router, build_router};
 pub use uptrakit_web_api_auth::SettingKey;
 pub use uptrakit_web_api_types::MaskedUrl;
@@ -220,7 +222,7 @@ mod tests {
             plugin_ops,
             credential_sources: ServiceCredentialSources::default(),
             shutdown_token: Default::default(),
-            external_scheduler_connected: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            embedded_service_notifier: None,
             audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
             audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
                 uptrakit_audit_log::NoopBackend,
