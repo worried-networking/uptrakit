@@ -1,8 +1,8 @@
-//! MQTT register phase handler and MQTT-specific message handlers.
+//! MQTT register phase handler and update-tracking message handlers.
 //!
 //! Contains the `MqttContext` struct, `handle_mqtt_register_phase`, and
-//! handler functions for MQTT-specific match arms (`ReleaseTenants`,
-//! `MqttClientStatus`, `MqttTriggerUpdate`).
+//! handler functions for update-tracking match arms (`ReleaseTenants`,
+//! `MqttClientStatus`, `ServiceTriggerUpdate`).
 
 use std::sync::Arc;
 
@@ -12,8 +12,8 @@ use futures_util::{SinkExt, StreamExt};
 use uptrakit_internal_wire::{
     CloseReason, ControllerMessage, ErrorCode, ErrorPayload, IncomingSeq,
     MqttClientConnectionStatus as WireMqttClientConnectionStatus, MqttClientStatusPayload,
-    MqttReleaseTenantsPayload, MqttTenantConfig, MqttTriggerHostBatchUpdatePayload,
-    MqttUpdateTriggerPayload, OutgoingSeq, PingPayload, ServiceMessage,
+    MqttReleaseTenantsPayload, MqttTenantConfig, OutgoingSeq, PingPayload,
+    ServiceHostBatchUpdateTriggerPayload, ServiceMessage, ServiceUpdateTriggerPayload,
 };
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::settings_mqtt::MqttClientConnectionStatus as ApiMqttClientConnectionStatus;
@@ -272,15 +272,15 @@ pub(super) async fn handle_mqtt_client_status(
 }
 
 // ---------------------------------------------------------------------------
-// handle_mqtt_trigger_update
+// handle_service_trigger_update
 // ---------------------------------------------------------------------------
 
-/// Handle a `MqttTriggerUpdate` message: validate tenant assignment, trigger
+/// Handle a `ServiceTriggerUpdate` message: validate tenant assignment, trigger
 /// update for host.
 #[tracing::instrument(skip_all)]
-pub(super) async fn handle_mqtt_trigger_update(
+pub(super) async fn handle_service_trigger_update(
     state: &Arc<AppState>,
-    payload: &MqttUpdateTriggerPayload,
+    payload: &ServiceUpdateTriggerPayload,
     mqtt_context: Option<&MqttContext>,
 ) -> ProcessorResponse {
     // Validate tenant is assigned to this MQTT service.
@@ -363,15 +363,15 @@ pub(super) async fn handle_mqtt_trigger_update(
 }
 
 // ---------------------------------------------------------------------------
-// handle_mqtt_trigger_host_batch_update
+// handle_service_trigger_host_batch_update
 // ---------------------------------------------------------------------------
 
-/// Handle a `MqttTriggerHostBatchUpdate` message: trigger a batch update of
+/// Handle a `ServiceTriggerHostBatchUpdate` message: trigger a batch update of
 /// all outdated software items on a host.
 #[tracing::instrument(skip_all)]
-pub(super) async fn handle_mqtt_trigger_host_batch_update(
+pub(super) async fn handle_service_trigger_host_batch_update(
     state: &Arc<AppState>,
-    payload: &MqttTriggerHostBatchUpdatePayload,
+    payload: &ServiceHostBatchUpdateTriggerPayload,
     mqtt_context: Option<&MqttContext>,
 ) -> ProcessorResponse {
     // Validate tenant is assigned to this MQTT service.

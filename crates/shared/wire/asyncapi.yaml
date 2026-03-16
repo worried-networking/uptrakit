@@ -671,7 +671,7 @@ operations:
       Published by the controller that owns the agent's WebSocket connection
       whenever an agent connects (`online: true`) or disconnects (`online: false`).
       Forwarded to all controllers via NATS JetStream with
-      `target_capability = "mqtt_bridge"` so every MQTT service sees it regardless
+      `target_capability = "update_tracking"` so every MQTT service sees it regardless
       of which controller the agent is connected to.
 
       The MQTT service updates its in-memory connectivity cache and publishes:
@@ -680,13 +680,13 @@ operations:
 
       Safe for cross-controller delivery via NATS (contains no credentials).
 
-  sendMqttTriggerUpdate:
+  sendServiceTriggerUpdate:
     action: send
     channel:
       $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/serviceConnection/messages/mqttTriggerUpdate"
-    summary: MQTT service requests software update via Home Assistant (MQTT-only)
+      - $ref: "#/channels/serviceConnection/messages/serviceTriggerUpdate"
+    summary: Service requests software update (e.g. via Home Assistant)
     description: |
       Sent when a Home Assistant user presses "Install" on an update entity.
       The controller validates the request, checks for in-progress updates,
@@ -695,13 +695,13 @@ operations:
 
       Attribution: `actor_type = "mqtt"`, `actor_id = mqtt_client_id`.
 
-  sendMqttTriggerHostPackageUpdate:
+  sendServiceTriggerHostBatchUpdate:
     action: send
     channel:
       $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/serviceConnection/messages/mqttTriggerHostPackageUpdate"
-    summary: MQTT service requests a batch host package update via Home Assistant (MQTT-only)
+      - $ref: "#/channels/serviceConnection/messages/serviceTriggerHostBatchUpdate"
+    summary: Service requests a batch host update (e.g. via Home Assistant)
     description: |
       Sent when a Home Assistant user presses "Install" on a host-packages update
       entity (the per-host aggregated entity, not a software-item entity).
@@ -1313,7 +1313,7 @@ components:
         Published by the controller that owns the agent's WebSocket connection
         immediately when an agent connects (`online: true`) or disconnects
         (`online: false`). Forwarded to all other controllers via NATS JetStream
-        with `target_capability = "mqtt_bridge"` so every MQTT service sees it.
+        with `target_capability = "update_tracking"` so every MQTT service sees it.
 
         The MQTT service updates its connectivity cache and publishes retained topics:
         - `{prefix}/hosts/{host_id}/connectivity/state` — `"online"` or `"offline"`
@@ -1324,21 +1324,21 @@ components:
       payload:
         $ref: "#/components/schemas/hostConnectivityUpdatedPayload"
 
-    mqttTriggerUpdate:
-      name: mqtt_trigger_update
-      title: MQTT Trigger Update Message
-      summary: MQTT service requests an update be triggered for a software item on a host (MQTT-only)
+    serviceTriggerUpdate:
+      name: service_trigger_update
+      title: Service Trigger Update Message
+      summary: Service requests an update be triggered for a software item on a host
       contentType: application/json
       payload:
-        $ref: "#/components/schemas/mqttTriggerUpdatePayload"
+        $ref: "#/components/schemas/serviceTriggerUpdatePayload"
 
-    mqttTriggerHostPackageUpdate:
-      name: mqtt_trigger_host_package_update
-      title: MQTT Trigger Host Package Update Message
-      summary: MQTT service requests a batch update of all outdated host packages on a host (MQTT-only)
+    serviceTriggerHostBatchUpdate:
+      name: service_trigger_host_batch_update
+      title: Service Trigger Host Batch Update Message
+      summary: Service requests a batch update of all outdated host packages on a host
       contentType: application/json
       payload:
-        $ref: "#/components/schemas/mqttTriggerHostPackageUpdatePayload"
+        $ref: "#/components/schemas/serviceTriggerHostBatchUpdatePayload"
 
     discoverSoftware:
       name: discover_software
@@ -1703,7 +1703,7 @@ components:
             Capabilities this service supports. The controller persists these
             and derives behavioral defaults from the resulting service profile.
             Known capabilities: software_discovery, update_hooks, graceful_shutdown,
-            mqtt_bridge, ssh_remote, scheduler, database_access, nats_access,
+            update_tracking, ssh_remote, scheduler, database_access, nats_access,
             master_key_access, ca_management, system_service.
           examples:
             - - graceful_shutdown
@@ -2074,7 +2074,7 @@ components:
             type: string
             enum:
               - graceful_shutdown
-              - mqtt_bridge
+              - update_tracking
               - software_discovery
               - ssh_remote
               - update_hooks
@@ -2172,7 +2172,7 @@ components:
             type: string
             enum:
               - graceful_shutdown
-              - mqtt_bridge
+              - update_tracking
               - software_discovery
               - ssh_remote
               - update_hooks
@@ -2963,7 +2963,7 @@ components:
             type: string
             enum:
               - graceful_shutdown
-              - mqtt_bridge
+              - update_tracking
               - software_discovery
               - ssh_remote
               - update_hooks
@@ -3284,7 +3284,7 @@ components:
           examples:
             - 660e8400-e29b-41d4-a716-446655440002
 
-    mqttSoftwareStateHostEntry:
+    softwareStateHostEntry:
       type: object
       required:
         - host_id
@@ -3365,7 +3365,7 @@ components:
           examples:
             - "2025-01-15T12:00:00Z"
 
-    mqttSoftwareStateItem:
+    softwareStateItem:
       type: object
       required:
         - software_item_id
@@ -3397,9 +3397,9 @@ components:
           type: array
           description: Per-host version data for this software item
           items:
-            $ref: "#/components/schemas/mqttSoftwareStateHostEntry"
+            $ref: "#/components/schemas/softwareStateHostEntry"
 
-    mqttHostPackageHostState:
+    hostPackageSummary:
       type: object
       required:
         - host_id
@@ -3471,7 +3471,7 @@ components:
             for this host. Set to `true` from the moment a batch is created until
             all history records reach a terminal state.
 
-    mqttHostMetadata:
+    hostStateMetadata:
       type: object
       required:
         - host_id
@@ -3557,7 +3557,7 @@ components:
       description: |
         Published by the controller that owns the agent's WebSocket connection when
         an agent connects or disconnects. Forwarded via NATS JetStream to all
-        controllers with `target_capability = "mqtt_bridge"`.
+        controllers with `target_capability = "update_tracking"`.
       properties:
         protocol_version:
           type: integer
@@ -3619,7 +3619,7 @@ components:
           examples:
             - "1.2.3"
 
-    mqttTriggerHostPackageUpdatePayload:
+    serviceTriggerHostBatchUpdatePayload:
       type: object
       required:
         - protocol_version
@@ -3629,7 +3629,7 @@ components:
         - host_id
         - mqtt_client_id
       description: |
-        Sent by the MQTT service when a Home Assistant user presses "Install"
+        Sent by a service when a user triggers an "Install all" action
         on the per-host packages update entity. The controller resolves all
         currently outdated packages and dispatches a single batch update.
       properties:
@@ -3648,7 +3648,7 @@ components:
           description: Monotonically increasing sequence number for replay protection
         type:
           type: string
-          const: mqtt_trigger_host_package_update
+          const: service_trigger_host_batch_update
           description: Message type discriminator
         tenant_id:
           type: string
@@ -3736,7 +3736,7 @@ components:
           type: array
           description: All active software items for the tenant with per-host version data
           items:
-            $ref: "#/components/schemas/mqttSoftwareStateItem"
+            $ref: "#/components/schemas/softwareStateItem"
         host_package_hosts:
           type: array
           default: []
@@ -3746,7 +3746,7 @@ components:
             tenant. Absent from payloads generated by older controllers (defaults to
             empty array — receivers must tolerate the missing field).
           items:
-            $ref: "#/components/schemas/mqttHostPackageHostState"
+            $ref: "#/components/schemas/hostPackageSummary"
         hosts:
           type: array
           default: []
@@ -3758,7 +3758,7 @@ components:
             empty array — receivers must tolerate the missing field).
             Limited to `MAX_MQTT_HOSTS` (5,000) entries.
           items:
-            $ref: "#/components/schemas/mqttHostMetadata"
+            $ref: "#/components/schemas/hostStateMetadata"
         page:
           $ref: "#/components/schemas/softwareStatesPage"
           description: |
@@ -3768,7 +3768,7 @@ components:
             last page (`page_index + 1 == total_pages`) before applying the diff
             and publishing to MQTT topics.
 
-    mqttTriggerUpdatePayload:
+    serviceTriggerUpdatePayload:
       type: object
       required:
         - protocol_version
@@ -3795,7 +3795,7 @@ components:
           description: Monotonically increasing sequence number for replay protection
         type:
           type: string
-          const: mqtt_trigger_update
+          const: service_trigger_update
           description: Message type discriminator
         tenant_id:
           type: string
@@ -4583,7 +4583,7 @@ components:
             The controller replaces the stored capability set with this list and
             refreshes in-session gating flags. Known capability strings include
             `software_discovery`, `update_hooks`, `graceful_shutdown`,
-            `mqtt_bridge`, `ssh_remote`, `scheduler`, `database_access`,
+            `update_tracking`, `ssh_remote`, `scheduler`, `database_access`,
             `nats_access`, `master_key_access`, `ca_management`,
             `system_service`, `ui_extensions`, `interactive_updates`, and
             `reset_data`. Unknown strings are stored as forward-compat `Other`
