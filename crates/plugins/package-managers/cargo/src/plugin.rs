@@ -2,14 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_util::StreamExt as _;
 use rootcause::prelude::*;
-use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
-use uptrakit_plugin_infrastructure_core::mpsc;
+use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
-    BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, DiscoveredSoftware,
-    DiscoveryTarget, HostCompatibility, OutputStreamType, PluginCapability, PluginError,
-    PluginRole, PluginType, ReleaseInfo, Result, UpdateOutputLine, UpstreamRelease, Version,
+    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, PluginCapability, PluginError,
+    PluginRole, PluginType, Result,
 };
 use uptrakit_plugin_infrastructure_core::{
     PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
@@ -17,7 +14,6 @@ use uptrakit_plugin_infrastructure_core::{
 use uptrakit_shared_types::PackageIdentifierRules;
 
 use crate::config::CargoConfig;
-use crate::error::CargoError;
 
 const IDENTIFIER_RULES: PackageIdentifierRules = PackageIdentifierRules {
     min_len: 1,
@@ -42,7 +38,7 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
 ///
 /// A version is considered pre-release when it contains `-` after the numeric
 /// parts (e.g. `1.0.0-alpha.1`, `2.0.0-beta`, `0.9.0-rc.1`).
-fn is_prerelease_version(version: &str) -> bool {
+pub(crate) fn is_prerelease_version(version: &str) -> bool {
     version.contains('-')
 }
 
@@ -94,108 +90,6 @@ pub fn parse_cargo_install_list(output: &str) -> HashMap<String, String> {
     result
 }
 
-/// Compute the sparse index URL path fragment for a crate name.
-///
-/// Implements the standard Cargo sparse index path computation:
-/// - 1 char:  `1/{name}`
-/// - 2 chars: `2/{name}`
-/// - 3 chars: `3/{first}/{name}`
-/// - 4+ chars: `{first_two}/{next_two}/{name}`
-///
-/// The name is lowercased, as required by the index format.
-fn sparse_index_url(registry_base: &str, crate_name: &str) -> String {
-    let name = crate_name.to_lowercase();
-    let prefix = match name.len() {
-        1 => "1".to_string(),
-        2 => "2".to_string(),
-        3 => format!("3/{}", &name[..1]),
-        _ => format!("{}/{}", &name[..2], &name[2..4]),
-    };
-    format!(
-        "{}/{}/{}",
-        registry_base.trim_end_matches('/'),
-        prefix,
-        name
-    )
-}
-
-/// Fetch upstream releases for a single crate from the sparse registry index.
-///
-/// Makes a single HTTP `GET` request to the sparse index URL, parses the
-/// newline-delimited JSON response with `tame_index::IndexKrate::from_slice`,
-/// and returns filtered [`UpstreamRelease`] entries sorted in **descending
-/// semver order** (newest first), so callers can simply use `.find()` to
-/// obtain the latest release.
-async fn fetch_crate_releases(
-    client: &reqwest::Client,
-    registry_base: &str,
-    include_prereleases: bool,
-    crate_name: &str,
-) -> crate::error::Result<Vec<UpstreamRelease>> {
-    let url = sparse_index_url(registry_base, crate_name);
-    tracing::debug!(crate_name, %url, "fetching crate releases from sparse index");
-
-    let response = client
-        .get(&url)
-        .header(reqwest::header::ACCEPT, "text/plain")
-        .send()
-        .await
-        .map_err(|e| report!(CargoError::Request(e.to_string())))?;
-
-    let status = response.status();
-
-    if status == reqwest::StatusCode::NOT_FOUND {
-        tracing::debug!(crate_name, "crate not found in registry index");
-        return Ok(vec![]);
-    }
-
-    if !status.is_success() {
-        let message = response.text().await.unwrap_or_default();
-        bail!(CargoError::ApiError { status, message });
-    }
-
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| report!(CargoError::Request(e.to_string())))?;
-
-    let krate = tame_index::IndexKrate::from_slice(&bytes).map_err(|e| {
-        report!(CargoError::Request(format!(
-            "failed to parse sparse index response for '{crate_name}': {e}"
-        )))
-    })?;
-
-    let mut releases: Vec<UpstreamRelease> = krate
-        .versions
-        .iter()
-        .filter(|v| {
-            if v.yanked {
-                return false;
-            }
-            let prerelease = is_prerelease_version(v.version.as_str());
-            !prerelease || include_prereleases
-        })
-        .map(|v| {
-            let version_str = v.version.as_str().to_string();
-            let release_url = format!("https://crates.io/crates/{crate_name}/{version_str}");
-            let is_pre = is_prerelease_version(&version_str);
-            UpstreamRelease::new(Version::new(&version_str), version_str, is_pre, release_url)
-        })
-        .collect();
-
-    // The sparse index stores versions in chronological (oldest-first) order.
-    // Sort descending so the scheduler's `.find(|r| !r.is_prerelease)` picks
-    // the newest stable release instead of the oldest.
-    releases.sort_by(|a, b| b.version.cmp(&a.version));
-
-    tracing::debug!(
-        crate_name,
-        count = releases.len(),
-        "fetched crate releases from sparse index"
-    );
-    Ok(releases)
-}
-
 /// Plugin for tracking and updating Rust binaries installed via `cargo install`.
 ///
 /// - **Discovery**: `cargo install --list` -- finds all installed crates and their versions.
@@ -207,9 +101,9 @@ async fn fetch_crate_releases(
 /// A [`DiscoveryTarget`] is always emitted per installed crate so the controller
 /// can find-or-create plugin config and role assignments.
 pub struct CargoPlugin {
-    config: CargoConfig,
-    executor: Arc<dyn CommandExecutor>,
-    client: reqwest::Client,
+    pub(crate) config: CargoConfig,
+    pub(crate) executor: Arc<dyn CommandExecutor>,
+    pub(crate) client: reqwest::Client,
 }
 
 impl CargoPlugin {
@@ -252,7 +146,7 @@ impl CargoPlugin {
         })
     }
 
-    fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
+    pub(crate) fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
         validate_identifier(package_identifier).map_err(|e| report!(PluginError::Configuration(e)))
     }
 }
@@ -363,236 +257,6 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for CargoPlugin {
                 "cargo not found in PATH".to_string(),
             )),
         }
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for CargoPlugin {
-    /// Detect the installed version of a single crate.
-    #[tracing::instrument(skip_all)]
-    async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
-        self.require_package_identifier(package_identifier)?;
-        tracing::debug!(package = %package_identifier, "detecting cargo-installed version");
-
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "cargo",
-                ["install".to_string(), "--list".to_string()],
-            ))
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "cargo install --list failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
-
-        let installed = parse_cargo_install_list(&cmd_output.output);
-        let version = installed.get(package_identifier).map(Version::new);
-
-        if let Some(ref v) = version {
-            tracing::debug!(version = %v, "cargo installed version detected");
-        } else {
-            tracing::debug!(package = %package_identifier, "crate not found in cargo install list");
-        }
-
-        Ok(version)
-    }
-
-    /// Detect installed versions for multiple crates using a single `cargo install --list` call.
-    #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Validate all identifiers up front.
-        for item in items {
-            validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
-        }
-
-        tracing::debug!(
-            count = items.len(),
-            "batch detecting cargo-installed versions"
-        );
-
-        let stdout = match self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "cargo",
-                ["install".to_string(), "--list".to_string()],
-            ))
-            .await
-        {
-            Ok(o) => {
-                if o.exit_code != 0 {
-                    let error_str =
-                        format!("cargo install --list failed with exit code {}", o.exit_code);
-                    return Ok(items
-                        .iter()
-                        .map(|item| {
-                            BatchDetectResult::error(
-                                item.package_identifier.clone(),
-                                error_str.clone(),
-                            )
-                        })
-                        .collect());
-                }
-                o.output
-            }
-            Err(e) => {
-                let error_str = format!("cargo install --list failed: {e}");
-                return Ok(items
-                    .iter()
-                    .map(|item| {
-                        BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
-                    })
-                    .collect());
-            }
-        };
-
-        let installed = parse_cargo_install_list(&stdout);
-
-        Ok(items
-            .iter()
-            .map(|item| {
-                let installed_version = installed.get(&item.package_identifier).map(Version::new);
-                BatchDetectResult::new(item.package_identifier.clone(), installed_version, None)
-            })
-            .collect())
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for CargoPlugin {
-    /// Fetch available releases for a single crate from the sparse registry index.
-    #[tracing::instrument(skip_all)]
-    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
-        self.require_package_identifier(package_identifier)?;
-
-        fetch_crate_releases(
-            &self.client,
-            self.config.effective_registry_url(),
-            self.config.include_prereleases,
-            package_identifier,
-        )
-        .await
-        .map_err(|e| report!(PluginError::PluginInternal(e.to_string())))
-    }
-
-    /// Fetch releases for multiple crates in parallel, bounded to 10 concurrent requests.
-    #[tracing::instrument(skip_all)]
-    async fn batch_fetch_releases(
-        &self,
-        items: &[BatchFetchItem],
-    ) -> Result<Vec<BatchFetchResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        tracing::debug!(count = items.len(), "batch fetching cargo crate releases");
-
-        // Clone cheap handles before moving into stream closures.
-        let client = self.client.clone();
-        let registry_base = self.config.effective_registry_url().to_string();
-        let include_prereleases = self.config.include_prereleases;
-
-        // Pre-collect owned identifiers so each future can own its data (`'static`).
-        let ids: Vec<String> = items.iter().map(|i| i.package_identifier.clone()).collect();
-
-        let results = futures_util::stream::iter(ids)
-            .map(|id| {
-                let client = client.clone();
-                let registry_base = registry_base.clone();
-                async move {
-                    match fetch_crate_releases(&client, &registry_base, include_prereleases, &id)
-                        .await
-                    {
-                        Ok(releases) => BatchFetchResult::found(id, releases),
-                        Err(e) => BatchFetchResult::error(id, e.to_string()),
-                    }
-                }
-            })
-            .buffer_unordered(10)
-            .collect::<Vec<_>>()
-            .await;
-
-        Ok(results)
-    }
-}
-
-#[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for CargoPlugin {
-    /// Execute a `cargo install` update for a single crate.
-    #[tracing::instrument(skip_all)]
-    async fn execute_update(
-        &self,
-        package_identifier: &str,
-        to_version: &str,
-        _release_info: Option<&ReleaseInfo>,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
-        self.require_package_identifier(package_identifier)?;
-
-        let mut args = vec![
-            "install".to_string(),
-            package_identifier.to_string(),
-            "--version".to_string(),
-            to_version.to_string(),
-        ];
-        if self.config.use_locked {
-            args.push("--locked".to_string());
-        }
-
-        let display_cmd = if self.config.use_locked {
-            format!(
-                "cargo install {} --version {} --locked",
-                package_identifier, to_version
-            )
-        } else {
-            format!(
-                "cargo install {} --version {}",
-                package_identifier, to_version
-            )
-        };
-        tracing::debug!(
-            package = %package_identifier,
-            to_version = %to_version,
-            "running cargo install"
-        );
-
-        send_output(
-            output_tx,
-            &format!("Updating {package_identifier} to {to_version}\nRunning: {display_cmd}"),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        let mut output = format!("Running: {display_cmd}\n");
-
-        // No `.privileged()` -- cargo install does not require sudo.
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("cargo", args), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::InstallFailed(format!(
-                "cargo install failed with exit code {}",
-                cmd_output.exit_code
-            )));
-        }
-
-        output.push_str(&cmd_output.output);
-        Ok(output)
     }
 }
 
@@ -746,60 +410,6 @@ mod tests {
         assert!(!map.contains_key("    bat"));
     }
 
-    // ── sparse_index_url ──────────────────────────────────────────────────────
-
-    #[test]
-    fn sparse_index_url_one_char() {
-        assert_eq!(
-            sparse_index_url("https://index.crates.io", "a"),
-            "https://index.crates.io/1/a"
-        );
-    }
-
-    #[test]
-    fn sparse_index_url_two_chars() {
-        assert_eq!(
-            sparse_index_url("https://index.crates.io", "ab"),
-            "https://index.crates.io/2/ab"
-        );
-    }
-
-    #[test]
-    fn sparse_index_url_three_chars() {
-        assert_eq!(
-            sparse_index_url("https://index.crates.io", "bat"),
-            "https://index.crates.io/3/b/bat"
-        );
-    }
-
-    #[test]
-    fn sparse_index_url_four_plus_chars() {
-        assert_eq!(
-            sparse_index_url("https://index.crates.io", "ripgrep"),
-            "https://index.crates.io/ri/pg/ripgrep"
-        );
-        assert_eq!(
-            sparse_index_url("https://index.crates.io", "cargo-nextest"),
-            "https://index.crates.io/ca/rg/cargo-nextest"
-        );
-    }
-
-    #[test]
-    fn sparse_index_url_uppercase_lowercased() {
-        assert_eq!(
-            sparse_index_url("https://index.crates.io", "MyTool"),
-            "https://index.crates.io/my/to/mytool"
-        );
-    }
-
-    #[test]
-    fn sparse_index_url_trailing_slash_stripped() {
-        assert_eq!(
-            sparse_index_url("https://index.crates.io/", "bat"),
-            "https://index.crates.io/3/b/bat"
-        );
-    }
-
     // ── detect_host_compatibility ─────────────────────────────────────────────
 
     #[tokio::test]
@@ -841,92 +451,6 @@ mod tests {
         assert!(CargoPlugin::CAPABILITIES.contains(&PluginCapability::DiscoverLocalSoftware));
         assert!(CargoPlugin::CAPABILITIES.contains(&PluginCapability::DetectHostCompatibility));
         assert!(CargoPlugin::CAPABILITIES.contains(&PluginCapability::ControllerSideFetchReleases));
-    }
-
-    // ── detect_installed_version ──────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn detect_installed_version_found() {
-        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
-        let output = "bat v0.24.0:\n    bat\nripgrep v14.1.1:\n    rg\n";
-        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(output))
-            .await
-            .unwrap();
-
-        let result = plugin.detect_installed_version("bat").await.unwrap();
-        assert_eq!(result, Some(Version::new("0.24.0")));
-    }
-
-    #[tokio::test]
-    async fn detect_installed_version_not_found() {
-        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
-        let output = "bat v0.24.0:\n    bat\n";
-        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(output))
-            .await
-            .unwrap();
-
-        let result = plugin.detect_installed_version("ripgrep").await.unwrap();
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn detect_installed_version_invalid_identifier_fails() {
-        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
-        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(""))
-            .await
-            .unwrap();
-
-        assert!(plugin.detect_installed_version("1invalid").await.is_err());
-        assert!(plugin.detect_installed_version("owner/repo").await.is_err());
-    }
-
-    // ── batch_detect_installed_version ────────────────────────────────────────
-
-    #[tokio::test]
-    async fn batch_detect_installed_version_basic() {
-        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
-        let output = "bat v0.24.0:\n    bat\nripgrep v14.1.1:\n    rg\n";
-        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(output))
-            .await
-            .unwrap();
-
-        let items = vec![
-            BatchDetectItem::new("bat".to_string()),
-            BatchDetectItem::new("ripgrep".to_string()),
-            BatchDetectItem::new("notinstalled".to_string()),
-        ];
-
-        let results = plugin.batch_detect_installed_version(&items).await.unwrap();
-        assert_eq!(results.len(), 3);
-
-        let bat = results
-            .iter()
-            .find(|r| r.package_identifier == "bat")
-            .unwrap();
-        assert_eq!(bat.installed_version, Some(Version::new("0.24.0")));
-
-        let rg = results
-            .iter()
-            .find(|r| r.package_identifier == "ripgrep")
-            .unwrap();
-        assert_eq!(rg.installed_version, Some(Version::new("14.1.1")));
-
-        let missing = results
-            .iter()
-            .find(|r| r.package_identifier == "notinstalled")
-            .unwrap();
-        assert!(missing.installed_version.is_none());
-    }
-
-    #[tokio::test]
-    async fn batch_detect_installed_version_empty_returns_empty() {
-        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
-        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(""))
-            .await
-            .unwrap();
-
-        let results = plugin.batch_detect_installed_version(&[]).await.unwrap();
-        assert!(results.is_empty());
     }
 
     // ── discover_software ─────────────────────────────────────────────────────
@@ -977,63 +501,5 @@ mod tests {
 
         let discovered = plugin.discover_software().await.unwrap();
         assert!(discovered.is_empty());
-    }
-
-    // ── fetch_releases sort order ─────────────────────────────────────────────
-
-    /// Verify that `fetch_crate_releases` returns versions in descending semver
-    /// order (newest first), matching the contract expected by the scheduler's
-    /// `.find(|r| !r.is_prerelease)` logic.
-    #[test]
-    fn fetch_releases_sorted_newest_first() {
-        // Simulate the chronological (oldest-first) order from the sparse index.
-        let mut releases: Vec<UpstreamRelease> = [
-            UpstreamRelease::new(
-                Version::new("0.1.0"),
-                "0.1.0".to_string(),
-                false,
-                "https://crates.io/crates/example/0.1.0".to_string(),
-            ),
-            UpstreamRelease::new(
-                Version::new("0.9.0"),
-                "0.9.0".to_string(),
-                false,
-                "https://crates.io/crates/example/0.9.0".to_string(),
-            ),
-            UpstreamRelease::new(
-                Version::new("1.0.0-alpha"),
-                "1.0.0-alpha".to_string(),
-                true,
-                "https://crates.io/crates/example/1.0.0-alpha".to_string(),
-            ),
-            UpstreamRelease::new(
-                Version::new("1.0.0"),
-                "1.0.0".to_string(),
-                false,
-                "https://crates.io/crates/example/1.0.0".to_string(),
-            ),
-            UpstreamRelease::new(
-                Version::new("1.2.3"),
-                "1.2.3".to_string(),
-                false,
-                "https://crates.io/crates/example/1.2.3".to_string(),
-            ),
-        ]
-        .into();
-
-        // Apply the same sort used in `fetch_crate_releases`.
-        releases.sort_by(|a, b| b.version.cmp(&a.version));
-
-        // Newest must be first.
-        assert_eq!(releases[0].version, Version::new("1.2.3"));
-        // Oldest must be last.
-        assert_eq!(releases[releases.len() - 1].version, Version::new("0.1.0"));
-
-        // The scheduler's "find latest stable" logic must now pick 1.2.3, not 0.1.0.
-        let latest_stable = releases.iter().find(|r| !r.is_prerelease);
-        assert_eq!(
-            latest_stable.map(|r| r.version.clone()),
-            Some(Version::new("1.2.3")),
-        );
     }
 }

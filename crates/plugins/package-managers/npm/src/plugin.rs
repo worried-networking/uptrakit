@@ -1,34 +1,26 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
-use rootcause::prelude::*;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use uptrakit_backoff::Backoff;
-use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
-use uptrakit_plugin_infrastructure_core::mpsc;
+use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    BatchDetectItem, BatchDetectResult, BatchUpdateItem, BatchUpdateResult, DiscoveredSoftware,
-    DiscoveryPlugin, DiscoveryTarget, HostCompatibility, OutputStreamType, PluginCapability,
-    PluginError, PluginRole, PluginType, ReleaseFetcherPlugin, ReleaseInfo, Result,
-    SudoCommandEntry, UpdateExecutorPlugin, UpdateOutputLine, UpstreamRelease, Version,
-    VersionDetectorPlugin,
+    PluginCapability, PluginError, Result, SudoCommandEntry, UpstreamRelease, Version,
 };
 use uptrakit_plugin_infrastructure_core::{PluginHttpClientConfig, build_plugin_http_client};
 
 use crate::config::NpmConfig;
 
 /// Maximum number of retry attempts for transient npm registry request failures.
-const FETCH_MAX_RETRIES: usize = 3;
+pub(crate) const FETCH_MAX_RETRIES: usize = 3;
 
 /// Initial backoff delay for npm registry retries.
-const FETCH_BACKOFF_BASE: Duration = Duration::from_secs(1);
+pub(crate) const FETCH_BACKOFF_BASE: Duration = Duration::from_secs(1);
 
 /// Maximum backoff delay between retry attempts.
-const FETCH_BACKOFF_MAX: Duration = Duration::from_secs(10);
+pub(crate) const FETCH_BACKOFF_MAX: Duration = Duration::from_secs(10);
 
 /// npm packages that are package-manager infrastructure, not tracked applications.
 ///
@@ -37,7 +29,7 @@ const FETCH_BACKOFF_MAX: Duration = Duration::from_secs(10);
 pub const SYSTEM_NPM_PACKAGES: &[&str] = &["npm", "n", "nvm", "yarn", "pnpm", "corepack"];
 
 /// Pre-release dist-tags that may be emitted when `include_prereleases` is true.
-const PRERELEASE_DIST_TAGS: &[&str] = &["next", "beta", "alpha", "rc", "canary"];
+pub(crate) const PRERELEASE_DIST_TAGS: &[&str] = &["next", "beta", "alpha", "rc", "canary"];
 
 /// Validate an npm package identifier.
 ///
@@ -175,9 +167,9 @@ pub fn npm_release_url(package_identifier: &str, version: &str) -> String {
 /// - Autodiscovery of globally-installed npm packages.
 /// - Privileged updates via `npm install -g <package>@<version>`.
 pub struct NpmPlugin {
-    config: NpmConfig,
-    executor: Arc<dyn CommandExecutor>,
-    client: reqwest::Client,
+    pub(crate) config: NpmConfig,
+    pub(crate) executor: Arc<dyn CommandExecutor>,
+    pub(crate) client: reqwest::Client,
 }
 
 impl NpmPlugin {
@@ -192,7 +184,7 @@ impl NpmPlugin {
     pub async fn new(config: NpmConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
         config
             .validate()
-            .map_err(|e| report!(PluginError::Configuration(e.to_string())))?;
+            .map_err(|e| rootcause::report!(PluginError::Configuration(e.to_string())))?;
 
         let client = build_plugin_http_client(PluginHttpClientConfig {
             user_agent: concat!(
@@ -201,7 +193,7 @@ impl NpmPlugin {
             ),
             ..Default::default()
         })
-        .map_err(|e| report!(PluginError::PluginInternal(e)))?;
+        .map_err(|e| rootcause::report!(PluginError::PluginInternal(e)))?;
 
         Ok(Self {
             config,
@@ -210,8 +202,9 @@ impl NpmPlugin {
         })
     }
 
-    fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
-        validate_identifier(package_identifier).map_err(|e| report!(PluginError::Configuration(e)))
+    pub(crate) fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
+        validate_identifier(package_identifier)
+            .map_err(|e| rootcause::report!(PluginError::Configuration(e)))
     }
 
     /// Parse installed version from `npm list -g <package> --depth=0 --json` output.
@@ -220,7 +213,7 @@ impl NpmPlugin {
     /// ```json
     /// { "dependencies": { "<package>": { "version": "X.Y.Z" } } }
     /// ```
-    fn parse_npm_list_version(output: &str, package: &str) -> Option<String> {
+    pub(crate) fn parse_npm_list_version(output: &str, package: &str) -> Option<String> {
         let json: serde_json::Value = serde_json::from_str(output).ok()?;
         let version = json
             .get("dependencies")?
@@ -238,7 +231,7 @@ impl NpmPlugin {
     /// Parse all globally installed packages from `npm list -g --depth=0 --json`.
     ///
     /// Returns `(name, version)` pairs for all entries in `dependencies`.
-    fn parse_npm_list_all(output: &str) -> Vec<(String, String)> {
+    pub(crate) fn parse_npm_list_all(output: &str) -> Vec<(String, String)> {
         let Ok(json) = serde_json::from_str::<serde_json::Value>(output) else {
             return vec![];
         };
@@ -262,7 +255,7 @@ impl NpmPlugin {
     /// Reads `dist-tags.latest` as the primary release. If `include_prereleases`
     /// is enabled, also emits entries for dist-tags `next`, `beta`, `alpha`,
     /// `rc`, `canary` — deduplicated against the `latest` version.
-    fn parse_registry_response(
+    pub(crate) fn parse_registry_response(
         &self,
         json: &serde_json::Value,
         package_identifier: &str,
@@ -275,7 +268,7 @@ impl NpmPlugin {
         let time_map = json.get("time").and_then(|t| t.as_object());
 
         let mut releases = Vec::new();
-        let mut seen_versions = std::collections::HashSet::new();
+        let mut seen_versions = HashSet::new();
 
         // Always emit `latest`.
         if let Some(latest_version) = dist_tags.get("latest").and_then(|v| v.as_str()) {
@@ -351,6 +344,11 @@ impl NpmPlugin {
 
         releases
     }
+
+    /// Returns the plugin type for this instance.
+    pub fn plugin_type(&self) -> uptrakit_plugin_infrastructure_core::PluginType {
+        uptrakit_plugin_infrastructure_core::PluginType::PackageManagerNpm
+    }
 }
 
 // ── PluginBase + subtrait implementations ────────────────────────────────
@@ -397,399 +395,10 @@ uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
     }
 );
 
-impl NpmPlugin {
-    /// Returns the plugin type for this instance.
-    pub fn plugin_type(&self) -> PluginType {
-        PluginType::PackageManagerNpm
-    }
-}
-
-#[async_trait]
-impl DiscoveryPlugin for NpmPlugin {
-    #[tracing::instrument(skip_all)]
-    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
-        tracing::info!("discovering globally installed npm packages");
-
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "npm",
-                [
-                    "list".to_string(),
-                    "-g".to_string(),
-                    "--depth=0".to_string(),
-                    "--json".to_string(),
-                ],
-            ))
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "npm list -g failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
-
-        let all_packages = Self::parse_npm_list_all(&cmd_output.output);
-
-        let packages: Vec<DiscoveredSoftware> = all_packages
-            .into_iter()
-            .filter(|(name, _)| !SYSTEM_NPM_PACKAGES.contains(&name.as_str()))
-            .map(|(name, version)| {
-                let targets = vec![DiscoveryTarget {
-                    plugin_type: PluginType::PackageManagerNpm,
-                    plugin_config: serde_json::json!({}),
-                    plugin_config_name: "npm".to_string(),
-                    roles: vec![
-                        PluginRole::DetectVersion,
-                        PluginRole::FetchReleases,
-                        PluginRole::ExecuteUpdate,
-                    ],
-                    package_identifier: None,
-                    config_override: None,
-                    execution_site: None,
-                }];
-                DiscoveredSoftware {
-                    package_identifier: name.clone(),
-                    name,
-                    installed_version: version,
-                    targets,
-                    extra: None,
-                    qualifier: None,
-                    plugin_package_identifier: None,
-                    featured: false,
-                    installed_display_version: None,
-                }
-            })
-            .collect();
-
-        tracing::debug!(count = packages.len(), "npm software discovery complete");
-        Ok(packages)
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        match self
-            .executor
-            .execute_quiet(&CommandSpec::exec("which", ["npm".to_string()]))
-            .await
-        {
-            Ok(_) => Ok(HostCompatibility::Compatible),
-            Err(_) => Ok(HostCompatibility::Incompatible("npm not found".to_string())),
-        }
-    }
-}
-
-#[async_trait]
-impl VersionDetectorPlugin for NpmPlugin {
-    #[tracing::instrument(skip_all)]
-    async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
-        self.require_package_identifier(package_identifier)?;
-        tracing::debug!(package = %package_identifier, "detecting npm installed version");
-
-        // npm exits non-zero when a package is not found; treat any non-zero
-        // (Err from execute_quiet) as not installed.
-        let cmd_output = match self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "npm",
-                [
-                    "list".to_string(),
-                    "-g".to_string(),
-                    package_identifier.to_string(),
-                    "--depth=0".to_string(),
-                    "--json".to_string(),
-                ],
-            ))
-            .await
-        {
-            Ok(output) => output,
-            Err(_) => {
-                tracing::debug!(
-                    package = %package_identifier,
-                    "npm list returned non-zero; package not installed"
-                );
-                return Ok(None);
-            }
-        };
-
-        let version = Self::parse_npm_list_version(&cmd_output.output, package_identifier);
-        tracing::debug!(package = %package_identifier, version = ?version, "npm installed version");
-        Ok(version.map(|v| Version::new(&v)))
-    }
-
-    /// Detect installed versions for multiple packages using a single `npm list -g` call.
-    ///
-    /// Runs:
-    /// ```text
-    /// npm list -g --depth=0 --json
-    /// ```
-    ///
-    /// Fetches all globally installed packages in one subprocess call and filters
-    /// the results in memory. This is more efficient than per-package calls when
-    /// checking many packages.
-    ///
-    /// If the command fails (non-zero exit or process error), all items are treated
-    /// as not installed rather than erroring — consistent with the single-item
-    /// `detect_installed_version` behaviour.
-    #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Validate all identifiers up front.
-        for item in items {
-            self.require_package_identifier(&item.package_identifier)?;
-        }
-
-        tracing::debug!(
-            count = items.len(),
-            "batch detecting npm installed versions"
-        );
-
-        // Run a single `npm list -g --depth=0 --json` without a package filter.
-        // npm exits non-zero when there are peer-dep issues; treat any failure as
-        // "not installed" for all items (consistent with the single-item behaviour).
-        let all_packages: HashMap<String, String> = match self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "npm",
-                [
-                    "list".to_string(),
-                    "-g".to_string(),
-                    "--depth=0".to_string(),
-                    "--json".to_string(),
-                ],
-            ))
-            .await
-        {
-            Ok(output) => Self::parse_npm_list_all(&output.output)
-                .into_iter()
-                .collect(),
-            Err(_) => {
-                tracing::debug!(
-                    "npm list -g returned non-zero; treating all packages as not installed"
-                );
-                HashMap::new()
-            }
-        };
-
-        let results = items
-            .iter()
-            .map(|item| {
-                BatchDetectResult::new(
-                    item.package_identifier.clone(),
-                    all_packages.get(&item.package_identifier).map(Version::new),
-                    None,
-                )
-            })
-            .collect();
-
-        tracing::debug!(count = items.len(), "npm batch version detection complete");
-        Ok(results)
-    }
-}
-
-#[async_trait]
-impl ReleaseFetcherPlugin for NpmPlugin {
-    #[tracing::instrument(skip_all)]
-    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
-        self.require_package_identifier(package_identifier)?;
-        tracing::debug!(package = %package_identifier, "fetching npm releases from registry");
-
-        let url = npm_registry_url(package_identifier, self.config.registry_url.as_deref());
-        let mut backoff = Backoff::new(FETCH_BACKOFF_BASE, FETCH_BACKOFF_MAX);
-        let mut last_err: Option<String> = None;
-
-        for attempt in 1..=FETCH_MAX_RETRIES {
-            let response = match self.client.get(&url).send().await {
-                Ok(r) => r,
-                Err(e) => {
-                    let msg = format!("npm registry request failed: {e}");
-                    tracing::warn!(
-                        package = %package_identifier,
-                        attempt,
-                        error = %e,
-                        "transient npm registry request error; will retry"
-                    );
-                    last_err = Some(msg);
-                    if attempt < FETCH_MAX_RETRIES {
-                        tokio::time::sleep(backoff.next_delay()).await;
-                    }
-                    continue;
-                }
-            };
-
-            let status = response.status();
-
-            // 404 is a permanent, non-retryable condition.
-            if status == reqwest::StatusCode::NOT_FOUND {
-                tracing::debug!(package = %package_identifier, "package not found in npm registry");
-                return Ok(vec![]);
-            }
-
-            // 5xx responses are transient; retry after backoff.
-            if status.is_server_error() {
-                let msg = format!("npm registry returned HTTP {status}");
-                tracing::warn!(
-                    package = %package_identifier,
-                    attempt,
-                    %status,
-                    "transient npm registry server error; will retry"
-                );
-                last_err = Some(msg);
-                if attempt < FETCH_MAX_RETRIES {
-                    tokio::time::sleep(backoff.next_delay()).await;
-                }
-                continue;
-            }
-
-            if !status.is_success() {
-                bail!(PluginError::PluginInternal(format!(
-                    "npm registry returned HTTP {status}"
-                )));
-            }
-
-            let json: serde_json::Value = response.json().await.map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "failed to parse npm registry response: {e}"
-                )))
-            })?;
-
-            let releases = self.parse_registry_response(&json, package_identifier);
-            tracing::debug!(
-                package = %package_identifier,
-                count = releases.len(),
-                "npm releases fetched"
-            );
-            return Ok(releases);
-        }
-
-        // All retries exhausted.
-        bail!(PluginError::PluginInternal(last_err.unwrap_or_else(|| {
-            "npm registry request failed after retries".to_string()
-        })));
-    }
-}
-
-#[async_trait]
-impl UpdateExecutorPlugin for NpmPlugin {
-    #[tracing::instrument(skip_all)]
-    async fn execute_update(
-        &self,
-        package_identifier: &str,
-        to_version: &str,
-        _release_info: Option<&ReleaseInfo>,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
-        self.require_package_identifier(package_identifier)?;
-        validate_version(to_version).map_err(|e| report!(PluginError::Configuration(e)))?;
-
-        let pkg_version = format!("{package_identifier}@{to_version}");
-        let args = vec!["install".to_string(), "-g".to_string(), pkg_version];
-
-        tracing::debug!(
-            package = %package_identifier,
-            version = %to_version,
-            "running npm install -g"
-        );
-
-        let display_args = std::iter::once("npm")
-            .chain(args.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ");
-        send_output(
-            output_tx,
-            &format!("Running: {display_args}"),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        let mut output = format!("Running: {display_args}\n");
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("npm", args).privileged(), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::InstallFailed(format!(
-                "npm install -g failed with exit code {}",
-                cmd_output.exit_code
-            )));
-        }
-
-        output.push_str(&cmd_output.output);
-        Ok(output)
-    }
-
-    /// Execute batch updates using a single `npm install -g pkg1@v1 pkg2@v2 ...` command.
-    #[tracing::instrument(skip_all)]
-    async fn execute_batch_update(
-        &self,
-        items: &[BatchUpdateItem],
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<Vec<BatchUpdateResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        for item in items {
-            self.require_package_identifier(&item.package_identifier)?;
-            validate_version(&item.to_version)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
-        }
-
-        let mut args = vec!["install".to_string(), "-g".to_string()];
-        for item in items {
-            args.push(format!("{}@{}", item.package_identifier, item.to_version));
-        }
-
-        let display_args = std::iter::once("npm")
-            .chain(args.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        send_output(
-            output_tx,
-            &format!(
-                "Batch updating {} packages\nRunning: {display_args}",
-                items.len()
-            ),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        let mut output = format!("Running: {display_args}\n");
-
-        tracing::debug!(count = items.len(), "running npm batch install -g");
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("npm", args).privileged(), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-        output.push_str(&cmd_output.output);
-
-        let success = cmd_output.exit_code == 0;
-        let results = items
-            .iter()
-            .map(|item| {
-                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
-            })
-            .collect();
-
-        Ok(results)
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{LocalCommandExecutor, PluginBase};
@@ -1078,228 +687,6 @@ mod tests {
         assert!(releases.is_empty());
     }
 
-    // ── discover_software ─────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn discover_software_always_emits_targets() {
-        let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"}}}"#;
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new(json, 0))
-            .await
-            .expect("create");
-        let discovered = plugin.discover_software().await.expect("ok");
-        assert_eq!(discovered.len(), 1);
-        assert_eq!(discovered[0].targets.len(), 1);
-        assert_eq!(
-            discovered[0].targets[0].plugin_type,
-            PluginType::PackageManagerNpm
-        );
-        assert_eq!(discovered[0].targets[0].plugin_config_name, "npm");
-        assert_eq!(discovered[0].targets[0].roles.len(), 3);
-    }
-
-    #[tokio::test]
-    async fn discover_software_excludes_system_packages() {
-        let json = r#"{"dependencies":{"npm":{"version":"10.0.0"},"n8n":{"version":"1.18.0"}}}"#;
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new(json, 0))
-            .await
-            .expect("create");
-        let discovered = plugin.discover_software().await.expect("ok");
-        assert_eq!(discovered.len(), 1);
-        assert_eq!(discovered[0].name, "n8n");
-    }
-
-    // ── capabilities ──────────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn npm_plugin_capabilities() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
-            .await
-            .expect("create");
-        assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
-        assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
-        assert!(plugin.has_capability(PluginCapability::ControllerSideFetchReleases));
-        assert!(!plugin.has_capability(PluginCapability::RefreshPackageIndex));
-        assert_eq!(plugin.capabilities().len(), 3);
-    }
-
-    // ── required_sudo_commands ────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn npm_plugin_required_sudo_commands() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
-            .await
-            .expect("create");
-        let entries = plugin.required_sudo_commands();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].command, "npm");
-        assert!(!entries[0].needs_setenv);
-        assert!(entries[0].helper_script.is_none());
-        assert_eq!(entries[0].args_suffix.as_deref(), Some("install -g *"));
-    }
-
-    // ── detect_host_compatibility ─────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn detect_host_compatibility_compatible_when_which_exits_zero() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new("", 0))
-            .await
-            .expect("create");
-        let result = plugin.detect_host_compatibility().await.expect("ok");
-        assert_eq!(result, HostCompatibility::Compatible);
-    }
-
-    #[tokio::test]
-    async fn detect_host_compatibility_incompatible_when_which_exits_nonzero() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new("", 1))
-            .await
-            .expect("create");
-        let result = plugin.detect_host_compatibility().await.expect("ok");
-        match result {
-            HostCompatibility::Incompatible(msg) => {
-                assert_eq!(msg, "npm not found");
-            }
-            HostCompatibility::Compatible => panic!("expected Incompatible"),
-            _ => panic!("unexpected HostCompatibility variant"),
-        }
-    }
-
-    // ── detect_installed_version ──────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn detect_installed_version_found() {
-        let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"}}}"#;
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new(json, 0))
-            .await
-            .expect("create");
-        let result = plugin.detect_installed_version("n8n").await.expect("ok");
-        assert_eq!(result, Some(Version::new("1.18.0")));
-    }
-
-    #[tokio::test]
-    async fn detect_installed_version_not_installed() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new("", 1))
-            .await
-            .expect("create");
-        let result = plugin.detect_installed_version("n8n").await.expect("ok");
-        assert_eq!(result, None);
-    }
-
-    #[tokio::test]
-    async fn detect_installed_version_empty_identifier_fails() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
-            .await
-            .expect("create");
-        let result = plugin.detect_installed_version("").await;
-        assert!(result.is_err());
-    }
-
-    // ── batch_detect_installed_version ────────────────────────────────────────
-
-    #[tokio::test]
-    async fn batch_detect_installed_version_empty_returns_empty() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
-            .await
-            .expect("create");
-        let result = plugin
-            .batch_detect_installed_version(&[])
-            .await
-            .expect("ok");
-        assert!(result.is_empty());
-    }
-
-    #[tokio::test]
-    async fn batch_detect_installed_version_found() {
-        let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"},"pm2":{"version":"5.3.0"}}}"#;
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new(json, 0))
-            .await
-            .expect("create");
-        let items = vec![
-            BatchDetectItem::new("n8n".to_string()),
-            BatchDetectItem::new("pm2".to_string()),
-        ];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("ok");
-        assert_eq!(results.len(), 2);
-        let n8n = results
-            .iter()
-            .find(|r| r.package_identifier == "n8n")
-            .expect("n8n");
-        assert_eq!(n8n.installed_version, Some(Version::new("1.18.0")));
-        assert!(n8n.error.is_none());
-        let pm2 = results
-            .iter()
-            .find(|r| r.package_identifier == "pm2")
-            .expect("pm2");
-        assert_eq!(pm2.installed_version, Some(Version::new("5.3.0")));
-        assert!(pm2.error.is_none());
-    }
-
-    #[tokio::test]
-    async fn batch_detect_installed_version_not_installed_package() {
-        // The package "missing" is not in the npm list output.
-        let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"}}}"#;
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new(json, 0))
-            .await
-            .expect("create");
-        let items = vec![
-            BatchDetectItem::new("n8n".to_string()),
-            BatchDetectItem::new("missing".to_string()),
-        ];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("ok");
-        assert_eq!(results.len(), 2);
-        let found = results
-            .iter()
-            .find(|r| r.package_identifier == "n8n")
-            .expect("n8n");
-        assert_eq!(found.installed_version, Some(Version::new("1.18.0")));
-        assert!(found.error.is_none());
-        let missing = results
-            .iter()
-            .find(|r| r.package_identifier == "missing")
-            .expect("missing");
-        assert_eq!(missing.installed_version, None);
-        assert!(missing.error.is_none());
-    }
-
-    #[tokio::test]
-    async fn batch_detect_installed_version_command_fails_all_not_installed() {
-        // When npm list -g exits non-zero, all items are treated as not installed.
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new("", 1))
-            .await
-            .expect("create");
-        let items = vec![
-            BatchDetectItem::new("n8n".to_string()),
-            BatchDetectItem::new("pm2".to_string()),
-        ];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("ok");
-        assert_eq!(results.len(), 2);
-        for r in &results {
-            assert_eq!(r.installed_version, None);
-            assert!(r.error.is_none());
-        }
-    }
-
-    #[tokio::test]
-    async fn batch_detect_installed_version_invalid_identifier_fails() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
-            .await
-            .expect("create");
-        let items = vec![
-            BatchDetectItem::new("valid".to_string()),
-            BatchDetectItem::new("Invalid Package!".to_string()),
-        ];
-        let result = plugin.batch_detect_installed_version(&items).await;
-        assert!(result.is_err());
-    }
-
     // ── plugin_type ───────────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -1307,6 +694,7 @@ mod tests {
         let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
             .await
             .expect("create");
+        use uptrakit_plugin_infrastructure_core::PluginType;
         assert_eq!(plugin.plugin_type(), PluginType::PackageManagerNpm);
     }
 
@@ -1361,5 +749,67 @@ mod tests {
     fn validate_version_max_length_ok() {
         let v = "1".repeat(256);
         assert!(validate_version(&v).is_ok());
+    }
+
+    // ── capabilities ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn npm_plugin_capabilities() {
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
+            .await
+            .expect("create");
+        assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
+        assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
+        assert!(plugin.has_capability(PluginCapability::ControllerSideFetchReleases));
+        assert!(!plugin.has_capability(PluginCapability::RefreshPackageIndex));
+        assert_eq!(plugin.capabilities().len(), 3);
+    }
+
+    // ── required_sudo_commands ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn npm_plugin_required_sudo_commands() {
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
+            .await
+            .expect("create");
+        let entries = plugin.required_sudo_commands();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].command, "npm");
+        assert!(!entries[0].needs_setenv);
+        assert!(entries[0].helper_script.is_none());
+        assert_eq!(entries[0].args_suffix.as_deref(), Some("install -g *"));
+    }
+
+    // ── detect_host_compatibility (via discovery module, tested here for convenience)
+
+    #[tokio::test]
+    async fn detect_host_compatibility_compatible_when_which_exits_zero() {
+        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
+        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new("", 0))
+            .await
+            .expect("create");
+        let result = plugin.detect_host_compatibility().await.expect("ok");
+        assert_eq!(
+            result,
+            uptrakit_plugin_infrastructure_core::HostCompatibility::Compatible
+        );
+    }
+
+    #[tokio::test]
+    async fn detect_host_compatibility_incompatible_when_which_exits_nonzero() {
+        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
+        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new("", 1))
+            .await
+            .expect("create");
+        let result = plugin.detect_host_compatibility().await.expect("ok");
+        match result {
+            uptrakit_plugin_infrastructure_core::HostCompatibility::Incompatible(msg) => {
+                assert_eq!(msg, "npm not found");
+            }
+            uptrakit_plugin_infrastructure_core::HostCompatibility::Compatible => {
+                panic!("expected Incompatible")
+            }
+            _ => panic!("unexpected HostCompatibility variant"),
+        }
     }
 }
