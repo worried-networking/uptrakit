@@ -217,8 +217,6 @@ channels:
         $ref: "#/components/messages/batchHostPackageUpdateResult"
       setUpdateFreeze:
         $ref: "#/components/messages/setUpdateFreeze"
-      updateCapabilities:
-        $ref: "#/components/messages/updateCapabilities"
       extensionRegister:
         $ref: "#/components/messages/extensionRegister"
       extensionActionsRegister:
@@ -815,20 +813,6 @@ operations:
       the process is still alive). The controller broadcasts this as an SSE
       event and dispatches a notification if rules are configured.
 
-  sendUpdateCapabilities:
-    action: send
-    channel:
-      $ref: "#/channels/serviceConnection"
-    messages:
-      - $ref: "#/channels/serviceConnection/messages/updateCapabilities"
-    summary: Service announces its current capability set
-    description: |
-      Sent automatically by the SDK on every reconnect immediately after
-      `ServiceSettings` is processed. The controller replaces the stored
-      capability set in the database and refreshes in-session gating flags.
-      This allows services to add or drop capabilities across version upgrades
-      without re-enrollment. Maximum 64 capability entries per message.
-
   sendExtensionRegister:
     action: send
     channel:
@@ -1364,25 +1348,6 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/stdinAttentionPayload"
-
-    updateCapabilities:
-      name: update_capabilities
-      title: Update Capabilities Message
-      summary: Service announces its current capability set to the controller
-      description: |
-        Sent automatically by the SDK after `ServiceSettings` is processed on every
-        reconnect. Contains the full set of capabilities declared by the installed
-        service binary. The controller persists the new capability set in the
-        database (replacing the previously stored set) and refreshes in-memory
-        gating flags for the current session. This allows services to gain or drop
-        capabilities across version upgrades without requiring re-enrollment.
-
-        The SDK sends this before calling `on_settings`, so any capability-gated
-        messages sent from `on_settings` (e.g. `ExtensionRegister`) will be
-        accepted by the controller with the updated flags.
-      contentType: application/json
-      payload:
-        $ref: "#/components/schemas/updateCapabilitiesPayload"
 
     extensionRegister:
       name: extension_register
@@ -4344,44 +4309,6 @@ components:
             via `send_local` / `send_global_local` without re-publishing to NATS.
           examples:
             - '{"update_triggered":{"update_history_id":"...","host_id":"...","software_item_id":"..."}}'
-
-    updateCapabilitiesPayload:
-      type: object
-      required:
-        - protocol_version
-        - seq
-        - type
-        - capabilities
-      properties:
-        protocol_version:
-          type: integer
-          format: int32
-          minimum: 1
-          description: Wire protocol version
-        seq:
-          type: integer
-          format: int64
-          minimum: 1
-          description: Monotonically increasing sequence number
-        type:
-          type: string
-          const: update_capabilities
-          description: Message type discriminator
-        capabilities:
-          type: array
-          maxItems: 64
-          items:
-            type: string
-          description: |
-            Full set of capabilities declared by the service's installed binary.
-            The controller replaces the stored capability set with this list and
-            refreshes in-session gating flags. Known capability strings include
-            `software_discovery`, `update_hooks`, `graceful_shutdown`,
-            `update_tracking`, `ssh_remote`, `scheduler`, `database_access`,
-            `nats_access`, `master_key_access`, `ca_management`,
-            `system_service`, `ui_extensions`, `interactive_updates`, and
-            `reset_data`. Unknown strings are stored as forward-compat `Other`
-            variants and are ignored for gating decisions.
 
     extensionRegisterPayload:
       type: object

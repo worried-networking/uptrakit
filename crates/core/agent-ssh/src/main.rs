@@ -478,9 +478,9 @@ impl ServiceHandler for SshAgentHandler {
         }
 
         // Register UI extensions only when the agreed capability set includes
-        // UiExtensions. The SDK sends UpdateCapabilities before calling
-        // on_settings, so the controller has already refreshed its gating flags
-        // by the time ExtensionRegister is received.
+        // UiExtensions. The controller refreshes its gating flags from the
+        // Register message before delivering ServiceSettings, so the controller
+        // has already updated its flags by the time ExtensionRegister is received.
         if conn
             .agreed_capabilities()
             .contains(&Capability::UiExtensions)

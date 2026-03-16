@@ -13,9 +13,8 @@ use super::payloads::{
     ServiceConfigDeliveryPayload, ServiceConfigUpdatedPayload, ServiceCredentialsPayload,
     ServiceHostBatchUpdateTriggerPayload, ServiceSettingsPayload, ServiceUpdateTriggerPayload,
     SetUpdateFreezePayload, SoftwareStatesChangedPayload, SoftwareStatesPayload,
-    StdinAttentionPayload, StoreServiceConfigPayload, TokenRevokedPayload,
-    UpdateCapabilitiesPayload, UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload,
-    UpdateStdinDataPayload, VersionCheckResultsPayload,
+    StdinAttentionPayload, StoreServiceConfigPayload, TokenRevokedPayload, UpdateOutputPayload,
+    UpdateResultPayload, UpdateStartedPayload, UpdateStdinDataPayload, VersionCheckResultsPayload,
 };
 
 /// Messages sent from a service (agent or MQTT) to the controller.
@@ -70,17 +69,6 @@ pub enum ServiceMessage {
     /// The controller uses this to establish session-level capability flags
     /// without relying on DB-stored values (which may be absent on first connect).
     Register(RegisterPayload),
-    // -- Capability management --
-    /// Service announces its current capability set to the controller.
-    ///
-    /// Sent automatically by the SDK after `ServiceSettings` is processed.
-    /// The controller persists the new capability set in the database so that
-    /// routing and gating decisions reflect the service's installed version,
-    /// even across upgrades that add or remove capabilities. On the current
-    /// session the controller also refreshes its in-memory capability flags
-    /// so that subsequent messages are gated correctly without requiring a
-    /// reconnect.
-    UpdateCapabilities(UpdateCapabilitiesPayload),
     // -- Plugin config reporting --
     /// Service reports a plugin configuration to the controller.
     ///

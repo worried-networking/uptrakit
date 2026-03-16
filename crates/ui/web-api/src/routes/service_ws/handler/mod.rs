@@ -56,7 +56,6 @@ use uptrakit_internal_wire::report_tracker::ReportTracker;
 use uptrakit_internal_wire::{
     Capability, CloseReason, ControllerMessage, ErrorCode, ErrorPayload, HostConnectivityUpdate,
     IncomingSeq, OutgoingSeq, PingPayload, RegisterPayload, ReportPagination, ServiceMessage,
-    UpdateCapabilitiesPayload,
 };
 use uptrakit_shared_db::entity::{service, system_service as sys_svc_entity};
 use uptrakit_shared_macros::impl_report_conversion;
@@ -291,17 +290,6 @@ impl MessageProcessor {
                     self.is_system,
                 )
                 .await
-            }
-            ServiceMessage::UpdateCapabilities(payload) => {
-                upgrade_service_capabilities(
-                    self.state.db(),
-                    self.service_id,
-                    self.is_system,
-                    payload,
-                    &mut self.has_ui_extensions,
-                )
-                .await;
-                ProcessorResponse::cont()
             }
             ServiceMessage::ReportPluginConfig(payload) => {
                 messages::handle_report_plugin_config(&self.state, self.service_id, &payload).await
@@ -886,9 +874,7 @@ async fn setup_authenticated_session(
         state.db(),
         service_id,
         is_system,
-        UpdateCapabilitiesPayload {
-            capabilities: register_payload.capabilities,
-        },
+        register_payload.capabilities,
         &mut { has_ui_extensions },
     )
     .await;
@@ -1248,15 +1234,15 @@ async fn upgrade_service_capabilities(
     db: &sea_orm::DatabaseConnection,
     service_id: uuid::Uuid,
     is_system: bool,
-    payload: UpdateCapabilitiesPayload,
+    capabilities: std::collections::BTreeSet<Capability>,
     has_ui_extensions: &mut bool,
 ) {
     use sea_orm::{ActiveModelTrait, Set};
     use uptrakit_internal_wire::service_profile::serialize_capabilities;
 
-    let new_caps_json = serialize_capabilities(&payload.capabilities);
+    let new_caps_json = serialize_capabilities(&capabilities);
     let had_ui_extensions = *has_ui_extensions;
-    *has_ui_extensions = payload.capabilities.contains(&Capability::UiExtensions);
+    *has_ui_extensions = capabilities.contains(&Capability::UiExtensions);
 
     if had_ui_extensions != *has_ui_extensions {
         tracing::info!(

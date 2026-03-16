@@ -100,7 +100,7 @@ pub const MAX_CONNECTIVITY_UPDATES: usize = 500;
 /// Maximum number of active MQTT client IDs.
 pub const MAX_ACTIVE_MQTT_CLIENTS: usize = 500;
 
-/// Maximum number of capabilities in a single `UpdateCapabilities` message.
+/// Maximum number of capabilities in a single `Register` message.
 ///
 /// Bounds the `BTreeSet<Capability>` sent by services, accommodating all known
 /// variants plus a reasonable number of forward-compatibility `Other(String)`

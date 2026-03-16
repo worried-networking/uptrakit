@@ -576,8 +576,7 @@ impl DisconnectingPayload {
 ///
 /// Sent from `on_connected` before any other messages. The controller uses
 /// this as the authoritative source for capability detection on the current
-/// session. Subsequent `UpdateCapabilities` messages are also accepted and
-/// persist the capability set to the DB.
+/// session and persists the capability set to the DB.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegisterPayload {
@@ -603,17 +602,6 @@ impl RegisterPayload {
             capabilities: capabilities.into_iter().collect(),
         }
     }
-}
-
-/// Payload for `ServiceMessage::UpdateCapabilities`.
-///
-/// Contains the full set of capabilities declared by the service in its
-/// current installed version. Sent automatically by the SDK after
-/// `ServiceSettings` is received. The controller stores this in the database
-/// and updates in-memory gating flags for the current session.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UpdateCapabilitiesPayload {
-    pub capabilities: BTreeSet<Capability>,
 }
 
 // =============================================================================
