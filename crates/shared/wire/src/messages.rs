@@ -54,15 +54,10 @@ pub enum ServiceMessage {
     /// The controller broadcasts this to interactive session subscribers and may
     /// trigger notifications.
     StdinAttention(StdinAttentionPayload),
-    #[serde(alias = "mqtt_trigger_update")]
     ServiceTriggerUpdate(ServiceUpdateTriggerPayload),
     /// Service → Controller: trigger a batch update of all outdated software items on a host.
     ///
     /// Sent when a Home Assistant user presses "Install" on a host update entity.
-    #[serde(
-        alias = "mqtt_trigger_host_batch_update",
-        alias = "mqtt_trigger_host_package_update"
-    )]
     ServiceTriggerHostBatchUpdate(ServiceHostBatchUpdateTriggerPayload),
     // -- Capability declaration --
     /// Service declares its capabilities immediately on connect.

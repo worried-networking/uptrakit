@@ -2255,7 +2255,7 @@ fn service_trigger_host_batch_update_roundtrip() {
     let msg = ServiceMessage::ServiceTriggerHostBatchUpdate(ServiceHostBatchUpdateTriggerPayload {
         tenant_id: TEST_UUID_1,
         host_id: TEST_UUID_2,
-        mqtt_client_id: TEST_UUID_3,
+        actor_service_id: TEST_UUID_3,
         security_only: false,
     });
     let json = serde_json::to_string(&msg).unwrap();
@@ -2269,7 +2269,7 @@ fn service_trigger_host_batch_update_security_only_roundtrip() {
     let msg = ServiceMessage::ServiceTriggerHostBatchUpdate(ServiceHostBatchUpdateTriggerPayload {
         tenant_id: TEST_UUID_1,
         host_id: TEST_UUID_2,
-        mqtt_client_id: TEST_UUID_3,
+        actor_service_id: TEST_UUID_3,
         security_only: true,
     });
     let json = serde_json::to_string(&msg).unwrap();
@@ -2279,50 +2279,14 @@ fn service_trigger_host_batch_update_security_only_roundtrip() {
 }
 
 #[test]
-fn service_trigger_host_batch_update_backward_compat_old_type_tag() {
-    // When old wire messages use the old type tag, they should still deserialize.
-    let json = r#"{"protocol_version":1,"seq":1,"type":"mqtt_trigger_host_package_update","tenant_id":"11111111-1111-1111-1111-111111111111","host_id":"22222222-2222-2222-2222-222222222222","mqtt_client_id":"33333333-3333-3333-3333-333333333333"}"#;
-    let msg: ServiceMessage = serde_json::from_str(json).unwrap();
-    if let ServiceMessage::ServiceTriggerHostBatchUpdate(p) = msg {
-        assert!(!p.security_only);
-    } else {
-        panic!("expected ServiceTriggerHostBatchUpdate");
-    }
-}
-
-#[test]
-fn service_trigger_host_batch_update_backward_compat_mqtt_trigger() {
-    // When old wire messages use the mqtt_trigger_host_batch_update type tag, they should still deserialize.
-    let json = r#"{"protocol_version":1,"seq":1,"type":"mqtt_trigger_host_batch_update","tenant_id":"11111111-1111-1111-1111-111111111111","host_id":"22222222-2222-2222-2222-222222222222","mqtt_client_id":"33333333-3333-3333-3333-333333333333"}"#;
-    let msg: ServiceMessage = serde_json::from_str(json).unwrap();
-    if let ServiceMessage::ServiceTriggerHostBatchUpdate(p) = msg {
-        assert!(!p.security_only);
-    } else {
-        panic!("expected ServiceTriggerHostBatchUpdate");
-    }
-}
-
-#[test]
 fn service_trigger_host_batch_update_security_only_defaults_false() {
     // When `security_only` is absent in wire messages, it should deserialize as false.
-    let json = r#"{"protocol_version":1,"seq":1,"type":"service_trigger_host_batch_update","tenant_id":"11111111-1111-1111-1111-111111111111","host_id":"22222222-2222-2222-2222-222222222222","mqtt_client_id":"33333333-3333-3333-3333-333333333333"}"#;
+    let json = r#"{"protocol_version":1,"seq":1,"type":"service_trigger_host_batch_update","tenant_id":"11111111-1111-1111-1111-111111111111","host_id":"22222222-2222-2222-2222-222222222222","actor_service_id":"33333333-3333-3333-3333-333333333333"}"#;
     let msg: ServiceMessage = serde_json::from_str(json).unwrap();
     if let ServiceMessage::ServiceTriggerHostBatchUpdate(p) = msg {
         assert!(!p.security_only);
     } else {
         panic!("expected ServiceTriggerHostBatchUpdate");
-    }
-}
-
-#[test]
-fn service_trigger_update_backward_compat_mqtt_trigger() {
-    // When old wire messages use the mqtt_trigger_update type tag, they should still deserialize.
-    let json = r#"{"protocol_version":1,"seq":1,"type":"mqtt_trigger_update","tenant_id":"11111111-1111-1111-1111-111111111111","software_item_id":"22222222-2222-2222-2222-222222222222","host_id":"33333333-3333-3333-3333-333333333333","to_version":"2.0.0","mqtt_client_id":"44444444-4444-4444-4444-444444444444"}"#;
-    let msg: ServiceMessage = serde_json::from_str(json).unwrap();
-    if let ServiceMessage::ServiceTriggerUpdate(p) = msg {
-        assert_eq!(p.to_version, "2.0.0");
-    } else {
-        panic!("expected ServiceTriggerUpdate");
     }
 }
 

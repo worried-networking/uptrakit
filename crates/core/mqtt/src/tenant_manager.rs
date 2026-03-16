@@ -405,7 +405,7 @@ impl TenantManager {
             software_item_id: item_id,
             host_id,
             to_version,
-            mqtt_client_id,
+            actor_service_id: mqtt_client_id,
         })
     }
 
@@ -426,7 +426,7 @@ impl TenantManager {
             uptrakit_internal_wire::ServiceHostBatchUpdateTriggerPayload {
                 tenant_id: state.tenant_id,
                 host_id,
-                mqtt_client_id,
+                actor_service_id: mqtt_client_id,
                 security_only: false,
             },
         )
@@ -450,7 +450,7 @@ impl TenantManager {
             uptrakit_internal_wire::ServiceHostBatchUpdateTriggerPayload {
                 tenant_id: state.tenant_id,
                 host_id,
-                mqtt_client_id,
+                actor_service_id: mqtt_client_id,
                 security_only: true,
             },
         )

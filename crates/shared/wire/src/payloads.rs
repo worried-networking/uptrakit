@@ -1152,8 +1152,8 @@ pub struct ServiceUpdateTriggerPayload {
     pub host_id: Uuid,
     /// Target version to install.
     pub to_version: String,
-    /// MQTT client UUID that initiated the trigger (used as actor_id).
-    pub mqtt_client_id: Uuid,
+    /// Service instance UUID that initiated the trigger (used as actor_id).
+    pub actor_service_id: Uuid,
 }
 
 /// Per-host aggregate summary of unpinned (unfeatured) software items.
@@ -1200,8 +1200,8 @@ pub struct ServiceHostBatchUpdateTriggerPayload {
     pub tenant_id: Uuid,
     /// Host whose items should be updated.
     pub host_id: Uuid,
-    /// MQTT client UUID that initiated the trigger (used as actor_id).
-    pub mqtt_client_id: Uuid,
+    /// Service instance UUID that initiated the trigger (used as actor_id).
+    pub actor_service_id: Uuid,
     /// When `true`, only items with `update_category = "security"` are updated.
     #[serde(default)]
     pub security_only: bool,

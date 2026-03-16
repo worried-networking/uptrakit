@@ -190,7 +190,7 @@ struct MessageProcessor {
     service_id: uuid::Uuid,
     cert: Option<CertIdentity>,
     is_system: bool,
-    is_mqtt: bool,
+    has_update_tracking: bool,
     has_software_discovery: bool,
     has_update_hooks: bool,
     has_ui_extensions: bool,
@@ -238,7 +238,7 @@ impl MessageProcessor {
                 .await
             }
             ServiceMessage::VersionCheckResults(payload)
-                if self.has_software_discovery && !self.is_mqtt =>
+                if self.has_software_discovery && !self.has_update_tracking =>
             {
                 messages::handle_version_check_results(&self.state, self.service_id, &payload).await
             }
@@ -267,9 +267,9 @@ impl MessageProcessor {
             // -- UpdateTracking capability --
             msg @ (ServiceMessage::ServiceTriggerUpdate(_)
             | ServiceMessage::ServiceTriggerHostBatchUpdate(_))
-                if self.is_mqtt =>
+                if self.has_update_tracking =>
             {
-                self.dispatch_mqtt(msg).await
+                self.dispatch_update_tracking(msg).await
             }
 
             // -- UiExtensions capability --
@@ -391,7 +391,7 @@ impl MessageProcessor {
     }
 
     /// Dispatch update-tracking messages (ServiceTriggerUpdate, etc.).
-    async fn dispatch_mqtt(&self, msg: ServiceMessage) -> ProcessorResponse {
+    async fn dispatch_update_tracking(&self, msg: ServiceMessage) -> ProcessorResponse {
         match msg {
             ServiceMessage::ServiceTriggerUpdate(payload) => {
                 update_tracking::handle_service_trigger_update(&self.state, &payload).await
@@ -400,7 +400,7 @@ impl MessageProcessor {
                 update_tracking::handle_service_trigger_host_batch_update(&self.state, &payload)
                     .await
             }
-            _ => unreachable!("dispatch_mqtt called with non-update-tracking message"),
+            _ => unreachable!("dispatch_update_tracking called with non-update-tracking message"),
         }
     }
 
@@ -566,7 +566,7 @@ impl MessageProcessor {
 struct AuthenticatedSessionState {
     service_id: uuid::Uuid,
     is_system: bool,
-    is_mqtt: bool,
+    has_update_tracking: bool,
     has_software_discovery: bool,
     has_ui_extensions: bool,
     has_workload_claims: bool,
@@ -922,7 +922,7 @@ async fn setup_authenticated_session(
 ) -> Option<AuthenticatedSessionState> {
     // Stage 1: Load service record from DB. The DB capabilities are used for
     // credential delivery (DatabaseAccess, NatsAccess, etc.). Session-level
-    // capability flags (is_mqtt, has_software_discovery, etc.) come from the
+    // capability flags (has_update_tracking, has_software_discovery, etc.) come from the
     // Register handshake in Stage 3 so they are correct on first connect even
     // when the DB row has no stored capabilities yet.
     let (db_capabilities, service_app_name, service_tenant_id) =
@@ -957,7 +957,7 @@ async fn setup_authenticated_session(
     .await?;
 
     let session_capabilities = register_payload.capabilities.clone();
-    let is_mqtt = session_capabilities.contains(&Capability::UpdateTracking);
+    let has_update_tracking = session_capabilities.contains(&Capability::UpdateTracking);
     let has_software_discovery = session_capabilities.contains(&Capability::SoftwareDiscovery);
     let has_update_hooks = session_capabilities.contains(&Capability::UpdateHooks);
     let has_ui_extensions = session_capabilities.contains(&Capability::UiExtensions);
@@ -995,7 +995,7 @@ async fn setup_authenticated_session(
         service_id,
         cert: Some(cert.clone()),
         is_system,
-        is_mqtt,
+        has_update_tracking,
         has_software_discovery,
         has_update_hooks,
         has_ui_extensions,
@@ -1010,7 +1010,7 @@ async fn setup_authenticated_session(
     Some(AuthenticatedSessionState {
         service_id,
         is_system,
-        is_mqtt,
+        has_update_tracking,
         has_software_discovery,
         has_ui_extensions,
         has_workload_claims,
@@ -1036,7 +1036,7 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
     let AuthenticatedSessionState {
         service_id,
         is_system,
-        is_mqtt,
+        has_update_tracking,
         has_software_discovery,
         has_ui_extensions,
         has_workload_claims,
@@ -1063,7 +1063,7 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
 
     // Notify services that this agent's hosts are now offline.
     if !is_system
-        && !is_mqtt
+        && !has_update_tracking
         && has_software_discovery
         && let Some(tenant_id) = service_tenant_id
     {
