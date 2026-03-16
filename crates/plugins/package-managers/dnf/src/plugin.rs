@@ -10,7 +10,7 @@ use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType,
     PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, UpdateCategory,
-    UpdateOutputLine, UpstreamRelease, Version,
+    UpdateOutputLine, UpstreamRelease, Version, execute_and_capture,
 };
 // Subtrait imports — needed so `use super::*` in tests brings these methods into scope.
 #[cfg(test)]
@@ -281,31 +281,28 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DnfPlugin {
         tracing::info!("discovering DNF-managed software");
 
         // Step 1: Query all installed packages from rpm.
-        let rpm_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
+        let rpm_stdout = execute_and_capture(
+            self.executor.as_ref(),
+            CommandSpec::exec(
                 "rpm",
                 [
                     "-qa".to_string(),
                     "--queryformat".to_string(),
                     "%{NAME}\\t%{VERSION}-%{RELEASE}\\n".to_string(),
                 ],
-            ))
-            .await
-            .map_err(|e| report!(PluginError::PluginInternal(format!("rpm -qa failed: {e}"))))?;
+            ),
+            "rpm -qa",
+        )
+        .await?;
 
-        if rpm_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(rpm_output.exit_code));
-        }
-
-        let all_packages = Self::parse_rpm_output(&rpm_output.output);
+        let all_packages = Self::parse_rpm_output(&rpm_stdout);
 
         // Step 2: For the UserInstalled filter, build a set of user-installed packages.
         let user_installed_set: Option<HashSet<String>> = match self.config.effective_filter() {
             DnfDiscoveryFilter::UserInstalled => {
-                let repoquery_output = self
-                    .executor
-                    .execute_quiet(&CommandSpec::exec(
+                let repoquery_stdout = execute_and_capture(
+                    self.executor.as_ref(),
+                    CommandSpec::exec(
                         "dnf",
                         [
                             "repoquery".to_string(),
@@ -313,20 +310,12 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DnfPlugin {
                             "--queryformat".to_string(),
                             "%{name}".to_string(),
                         ],
-                    ))
-                    .await
-                    .map_err(|e| {
-                        report!(PluginError::PluginInternal(format!(
-                            "dnf repoquery --userinstalled failed: {e}"
-                        )))
-                    })?;
+                    ),
+                    "dnf repoquery --userinstalled",
+                )
+                .await?;
 
-                if repoquery_output.exit_code != 0 {
-                    bail!(PluginError::CommandFailed(repoquery_output.exit_code));
-                }
-
-                let set: HashSet<String> = repoquery_output
-                    .output
+                let set: HashSet<String> = repoquery_stdout
                     .lines()
                     .map(|l| l.trim().to_string())
                     .filter(|l| !l.is_empty())
@@ -667,21 +656,12 @@ impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for DnfPlugin {
     #[tracing::instrument(skip_all)]
     async fn refresh_package_index(&self) -> Result<()> {
         tracing::info!("refreshing DNF package index");
-        let cmd_output = self
-            .executor
-            .execute_quiet(
-                &CommandSpec::exec("dnf", ["makecache".to_string(), "-q".to_string()]).privileged(),
-            )
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "dnf makecache failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
+        execute_and_capture(
+            self.executor.as_ref(),
+            CommandSpec::exec("dnf", ["makecache".to_string(), "-q".to_string()]).privileged(),
+            "dnf makecache",
+        )
+        .await?;
 
         tracing::info!("DNF package index refreshed");
         Ok(())

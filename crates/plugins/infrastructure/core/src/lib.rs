@@ -46,6 +46,9 @@ pub use version::Version;
 #[cfg(feature = "plugin-ops")]
 pub use plugin_ops::{ExtensionActionContext, PluginOps, PluginOpsError};
 
+// Re-export the shared command-capture helper so plugin crates access it through this crate
+pub use command::execute_and_capture;
+
 // Re-export command crate types (keeps existing imports working for plugin crates)
 pub use uptrakit_command::UpdateOutputLine;
 

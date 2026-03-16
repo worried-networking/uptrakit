@@ -10,7 +10,7 @@ use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType,
     PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry,
-    UpdateOutputLine, UpstreamRelease, Version,
+    UpdateOutputLine, UpstreamRelease, Version, execute_and_capture,
 };
 
 // Subtrait imports needed by tests (via `use super::*`) to resolve method calls.
@@ -308,25 +308,14 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ApkPlugin {
         match self.config.effective_filter() {
             ApkDiscoveryFilter::All => {
                 // Run `apk list --installed` to get all installed packages.
-                let list_output = self
-                    .executor
-                    .execute_quiet(&CommandSpec::exec(
-                        "apk",
-                        ["list".to_string(), "--installed".to_string()],
-                    ))
-                    .await
-                    .map_err(|e| {
-                        report!(PluginError::PluginInternal(format!(
-                            "apk list --installed failed: {e}"
-                        )))
-                    })?;
+                let list_stdout = execute_and_capture(
+                    self.executor.as_ref(),
+                    CommandSpec::exec("apk", ["list".to_string(), "--installed".to_string()]),
+                    "apk list --installed",
+                )
+                .await?;
 
-                if list_output.exit_code != 0 {
-                    bail!(PluginError::CommandFailed(list_output.exit_code));
-                }
-
-                let packages: Vec<DiscoveredSoftware> = list_output
-                    .output
+                let packages: Vec<DiscoveredSoftware> = list_stdout
                     .lines()
                     .filter_map(parse_apk_list_line)
                     .map(|(name, version)| {
@@ -363,25 +352,15 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ApkPlugin {
 
             ApkDiscoveryFilter::World => {
                 // Read /etc/apk/world to get explicitly installed package names.
-                let world_output = self
-                    .executor
-                    .execute_quiet(&CommandSpec::exec("cat", ["/etc/apk/world".to_string()]))
-                    .await
-                    .map_err(|e| {
-                        report!(PluginError::PluginInternal(format!(
-                            "cat /etc/apk/world failed: {e}"
-                        )))
-                    })?;
+                let world_stdout = execute_and_capture(
+                    self.executor.as_ref(),
+                    CommandSpec::exec("cat", ["/etc/apk/world".to_string()]),
+                    "cat /etc/apk/world",
+                )
+                .await?;
 
-                if world_output.exit_code != 0 {
-                    bail!(PluginError::CommandFailed(world_output.exit_code));
-                }
-
-                let pkg_names: Vec<String> = world_output
-                    .output
-                    .lines()
-                    .filter_map(parse_world_line)
-                    .collect();
+                let pkg_names: Vec<String> =
+                    world_stdout.lines().filter_map(parse_world_line).collect();
 
                 if pkg_names.is_empty() {
                     tracing::debug!("APK world file is empty; no packages to discover");
@@ -562,25 +541,18 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for ApkPlugin {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "fetching APK releases");
 
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
+        let stdout = execute_and_capture(
+            self.executor.as_ref(),
+            CommandSpec::exec(
                 "apk",
                 ["version".to_string(), package_identifier.to_string()],
-            ))
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "apk version failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
+            ),
+            "apk version",
+        )
+        .await?;
 
         let pkg_names: HashSet<&str> = [package_identifier].into_iter().collect();
-        let version_map = parse_apk_version_output(&cmd_output.output, &pkg_names);
+        let version_map = parse_apk_version_output(&stdout, &pkg_names);
 
         let Some(latest_version) = version_map.get(package_identifier) else {
             bail!(PluginError::PluginInternal(format!(
@@ -630,25 +602,18 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for ApkPlugin {
             args.push(item.package_identifier.clone());
         }
 
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec("apk", args))
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "apk version failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
+        let stdout = execute_and_capture(
+            self.executor.as_ref(),
+            CommandSpec::exec("apk", args),
+            "apk version",
+        )
+        .await?;
 
         let pkg_names: HashSet<&str> = items
             .iter()
             .map(|i| i.package_identifier.as_str())
             .collect();
-        let version_map = parse_apk_version_output(&cmd_output.output, &pkg_names);
+        let version_map = parse_apk_version_output(&stdout, &pkg_names);
 
         let results = items
             .iter()
@@ -689,19 +654,12 @@ impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for ApkPlugin {
     #[tracing::instrument(skip_all)]
     async fn refresh_package_index(&self) -> Result<()> {
         tracing::info!("refreshing APK package index");
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec("apk", ["update".to_string()]).privileged())
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "apk update failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
+        execute_and_capture(
+            self.executor.as_ref(),
+            CommandSpec::exec("apk", ["update".to_string()]).privileged(),
+            "apk update",
+        )
+        .await?;
 
         tracing::info!("APK package index refreshed");
         Ok(())

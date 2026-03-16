@@ -9,6 +9,7 @@ use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, DiscoveredSoftware,
     DiscoveryTarget, HostCompatibility, OutputStreamType, PluginCapability, PluginError,
     PluginRole, PluginType, ReleaseInfo, Result, UpdateOutputLine, UpstreamRelease, Version,
+    execute_and_capture,
 };
 
 use crate::config::MasConfig;
@@ -163,17 +164,12 @@ impl MasPlugin {
 
     /// Run `mas list` and return the raw output.
     async fn run_mas_list(&self) -> Result<String> {
-        let cmd_output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec("mas", ["list".to_string()]))
-            .await
-            .map_err(|e| report!(PluginError::PluginInternal(format!("mas list failed: {e}"))))?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
-
-        Ok(cmd_output.output)
+        execute_and_capture(
+            self.executor.as_ref(),
+            CommandSpec::exec("mas", ["list".to_string()]),
+            "mas list",
+        )
+        .await
     }
 
     /// Run `mas outdated` and return the raw output.

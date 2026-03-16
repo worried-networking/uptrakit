@@ -10,7 +10,7 @@ use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType,
     PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry,
-    UpdateCategory, UpdateOutputLine, UpstreamRelease, Version,
+    UpdateCategory, UpdateOutputLine, UpstreamRelease, Version, execute_and_capture,
 };
 
 // Subtrait imports needed by tests (via `use super::*`) to resolve method calls.
@@ -182,51 +182,37 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for PkgPlugin {
 
         let packages: Vec<DiscoveredSoftware> = match self.config.effective_filter() {
             PkgDiscoveryFilter::All => {
-                let cmd_output = self
-                    .executor
-                    .execute_quiet(&CommandSpec::exec(
+                let stdout = execute_and_capture(
+                    self.executor.as_ref(),
+                    CommandSpec::exec(
                         "pkg",
                         ["query".to_string(), "-a".to_string(), "%n\t%v".to_string()],
-                    ))
-                    .await
-                    .map_err(|e| {
-                        report!(PluginError::PluginInternal(format!(
-                            "pkg query failed: {e}"
-                        )))
-                    })?;
+                    ),
+                    "pkg query",
+                )
+                .await?;
 
-                if cmd_output.exit_code != 0 {
-                    bail!(PluginError::CommandFailed(cmd_output.exit_code));
-                }
-
-                Self::parse_pkg_query_line(&cmd_output.output)
+                Self::parse_pkg_query_line(&stdout)
                     .into_iter()
                     .map(|(name, version)| build_discovered(name, version))
                     .collect()
             }
             PkgDiscoveryFilter::Manual => {
-                let cmd_output = self
-                    .executor
-                    .execute_quiet(&CommandSpec::exec(
+                let stdout = execute_and_capture(
+                    self.executor.as_ref(),
+                    CommandSpec::exec(
                         "pkg",
                         [
                             "query".to_string(),
                             "-a".to_string(),
                             "%a\t%n\t%v".to_string(),
                         ],
-                    ))
-                    .await
-                    .map_err(|e| {
-                        report!(PluginError::PluginInternal(format!(
-                            "pkg query failed: {e}"
-                        )))
-                    })?;
+                    ),
+                    "pkg query",
+                )
+                .await?;
 
-                if cmd_output.exit_code != 0 {
-                    bail!(PluginError::CommandFailed(cmd_output.exit_code));
-                }
-
-                Self::parse_pkg_query_with_auto_line(&cmd_output.output)
+                Self::parse_pkg_query_with_auto_line(&stdout)
                     .into_iter()
                     .filter(|(auto_flag, _, _)| auto_flag == "0")
                     .map(|(_, name, version)| build_discovered(name, version))
@@ -468,21 +454,12 @@ impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for PkgPlugin {
     #[tracing::instrument(skip_all)]
     async fn refresh_package_index(&self) -> Result<()> {
         tracing::info!("refreshing BSD pkg package index");
-        let cmd_output = self
-            .executor
-            .execute_quiet(
-                &CommandSpec::exec("pkg", ["update".to_string(), "-q".to_string()]).privileged(),
-            )
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "pkg update failed: {e}"
-                )))
-            })?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
+        execute_and_capture(
+            self.executor.as_ref(),
+            CommandSpec::exec("pkg", ["update".to_string(), "-q".to_string()]).privileged(),
+            "pkg update",
+        )
+        .await?;
 
         tracing::info!("BSD pkg package index refreshed");
         Ok(())
