@@ -113,7 +113,7 @@ impl EmbeddedServiceHost {
         // 2. Register in ServiceConnectionRegistry.
         let (push_rx, _cancel_token) = state
             .service_connections
-            .register(service_id, capabilities.clone(), None, None)
+            .register(service_id, capabilities.clone(), None, None, None)
             .await;
 
         // 3. Create bidirectional channels.

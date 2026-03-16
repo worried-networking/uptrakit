@@ -762,8 +762,13 @@ async fn setup_authenticated_session(
     }
 
     // Stage 3: Register the connection and notify embedded services.
-    let (push_rx, cancel_token) =
-        register_connection(state, service_id, &db_capabilities, service_app_name.clone()).await;
+    let (push_rx, cancel_token) = register_connection(
+        state,
+        service_id,
+        &db_capabilities,
+        service_app_name.clone(),
+    )
+    .await;
 
     // Stage 4: Load linked host IDs shared between the main loop and the processor.
     let linked_host_ids = load_session_host_ids(state, service_id, has_software_discovery).await;
