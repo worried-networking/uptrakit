@@ -2,6 +2,8 @@ use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 use uuid::Uuid;
 
+use super::helpers::{timestamp, timestamp_null};
+
 #[derive(DeriveMigrationName)]
 pub(super) struct Migration;
 
@@ -99,7 +101,7 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                     .col(
                         ColumnDef::new(CaCertificates::Fingerprint)
-                            .text()
+                            .string()
                             .not_null()
                             .primary_key(),
                     )
@@ -107,23 +109,23 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(CaCertificates::KeyPem).text().not_null())
                     .col(
                         ColumnDef::new(CaCertificates::NotBefore)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .col(
                         ColumnDef::new(CaCertificates::NotAfter)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .col(
                         ColumnDef::new(CaCertificates::ActivatedAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(CaCertificates::DeactivatedAt).timestamp())
+                    .col(ColumnDef::new(CaCertificates::DeactivatedAt).timestamp_with_time_zone())
                     .col(
                         ColumnDef::new(CaCertificates::CreatedAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .to_owned(),
@@ -423,48 +425,54 @@ impl MigrationTrait for Migration {
         // - token_hash → refresh_token_hash
         // - added token_type, revoked_at
         // - removed last_activity_at
-        manager
-            .create_table(
-                Table::create()
-                    .table(Sessions::Table)
-                    .if_not_exists()
-                    .col(ColumnDef::new(Sessions::Id).uuid().not_null().primary_key())
-                    .col(ColumnDef::new(Sessions::UserId).uuid().not_null())
-                    .col(string_uniq(Sessions::RefreshTokenHash))
-                    .col(string(Sessions::AuthMethod))
-                    .col(
-                        ColumnDef::new(Sessions::TokenType)
-                            .string()
-                            .not_null()
-                            .default("refresh_token"),
-                    )
-                    .col(timestamp(Sessions::CreatedAt))
-                    .col(timestamp(Sessions::ExpiresAt))
-                    .col(string_null(Sessions::UserAgent))
-                    .col(string_null(Sessions::IpAddress))
-                    .col(ColumnDef::new(Sessions::OidcProviderId).uuid().null())
-                    .col(timestamp_null(Sessions::RevokedAt))
-                    .foreign_key(
-                        ForeignKey::create()
-                            .from(Sessions::Table, Sessions::UserId)
-                            .to(Users::Table, Users::Id)
-                            .on_delete(ForeignKeyAction::Cascade),
-                    )
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("fk_sessions_oidc_provider_id")
-                            .from(Sessions::Table, Sessions::OidcProviderId)
-                            .to(OidcProviders::Table, OidcProviders::Id)
-                            .on_delete(ForeignKeyAction::SetNull),
-                    )
-                    .check(
-                        Expr::col(Sessions::AuthMethod)
-                            .ne("oidc")
-                            .or(Expr::col(Sessions::OidcProviderId).is_not_null()),
-                    )
-                    .to_owned(),
-            )
-            .await?;
+        {
+            let mut sessions_table = Table::create();
+            sessions_table
+                .table(Sessions::Table)
+                .if_not_exists()
+                .col(ColumnDef::new(Sessions::Id).uuid().not_null().primary_key())
+                .col(ColumnDef::new(Sessions::UserId).uuid().not_null())
+                .col(string_uniq(Sessions::RefreshTokenHash))
+                .col(string(Sessions::AuthMethod))
+                .col(
+                    ColumnDef::new(Sessions::TokenType)
+                        .string()
+                        .not_null()
+                        .default("refresh_token"),
+                )
+                .col(timestamp(Sessions::CreatedAt))
+                .col(timestamp(Sessions::ExpiresAt))
+                .col(string_null(Sessions::UserAgent))
+                .col(string_null(Sessions::IpAddress))
+                .col(ColumnDef::new(Sessions::OidcProviderId).uuid().null())
+                .col(timestamp_null(Sessions::RevokedAt))
+                .foreign_key(
+                    ForeignKey::create()
+                        .from(Sessions::Table, Sessions::UserId)
+                        .to(Users::Table, Users::Id)
+                        .on_delete(ForeignKeyAction::Cascade),
+                )
+                .foreign_key(
+                    ForeignKey::create()
+                        .name("fk_sessions_oidc_provider_id")
+                        .from(Sessions::Table, Sessions::OidcProviderId)
+                        .to(OidcProviders::Table, OidcProviders::Id)
+                        .on_delete(ForeignKeyAction::SetNull),
+                );
+
+            // MariaDB/MySQL do not support CHECK constraints that reference other
+            // columns. Application-level validation enforces this invariant on all
+            // backends; the CHECK is a defence-in-depth layer for SQLite and PG.
+            if manager.get_database_backend() != sea_orm::DbBackend::MySql {
+                sessions_table.check(
+                    Expr::col(Sessions::AuthMethod)
+                        .ne("oidc")
+                        .or(Expr::col(Sessions::OidcProviderId).is_not_null()),
+                );
+            }
+
+            manager.create_table(sessions_table.to_owned()).await?;
+        }
 
         manager
             .create_index(
@@ -642,16 +650,16 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(EnrollmentTokens::Name).text().not_null())
                     .col(
                         ColumnDef::new(EnrollmentTokens::TokenHash)
-                            .text()
+                            .string()
                             .not_null()
                             .unique_key(),
                     )
                     .col(ColumnDef::new(EnrollmentTokens::AllowedCapabilities).text())
                     .col(ColumnDef::new(EnrollmentTokens::MaxUses).integer())
                     .col(integer(EnrollmentTokens::CurrentUses).not_null().default(0))
-                    .col(ColumnDef::new(EnrollmentTokens::ExpiresAt).timestamp())
+                    .col(ColumnDef::new(EnrollmentTokens::ExpiresAt).timestamp_with_time_zone())
                     .col(timestamp(EnrollmentTokens::CreatedAt))
-                    .col(ColumnDef::new(EnrollmentTokens::RevokedAt).timestamp())
+                    .col(ColumnDef::new(EnrollmentTokens::RevokedAt).timestamp_with_time_zone())
                     .col(ColumnDef::new(EnrollmentTokens::CreatedByUserId).uuid())
                     .foreign_key(
                         ForeignKey::create()
@@ -1360,7 +1368,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(MqttClients::StatusUpdatedAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null()
                             .default(Expr::current_timestamp()),
                     )
@@ -1631,13 +1639,13 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(PendingDeviceFlows::DeviceCodeHash)
-                            .text()
+                            .string()
                             .not_null()
                             .unique_key(),
                     )
                     .col(
                         ColumnDef::new(PendingDeviceFlows::UserCode)
-                            .text()
+                            .string()
                             .not_null()
                             .unique_key(),
                     )
@@ -1646,12 +1654,12 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(PendingDeviceFlows::ClientName).text())
                     .col(
                         ColumnDef::new(PendingDeviceFlows::CreatedAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .col(
                         ColumnDef::new(PendingDeviceFlows::ExpiresAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .to_owned(),
@@ -1676,7 +1684,7 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                     .col(
                         ColumnDef::new(PendingOidcFlows::CsrfState)
-                            .text()
+                            .string()
                             .not_null()
                             .primary_key(),
                     )
@@ -1693,12 +1701,12 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(PendingOidcFlows::Nonce).text().not_null())
                     .col(
                         ColumnDef::new(PendingOidcFlows::CreatedAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .col(
                         ColumnDef::new(PendingOidcFlows::ExpiresAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .to_owned(),
@@ -1729,7 +1737,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(PendingAccountLinks::LinkTokenHash)
-                            .text()
+                            .string()
                             .not_null()
                             .unique_key(),
                     )
@@ -1759,12 +1767,12 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(PendingAccountLinks::ExistingLinkProviderId).uuid())
                     .col(
                         ColumnDef::new(PendingAccountLinks::CreatedAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .col(
                         ColumnDef::new(PendingAccountLinks::ExpiresAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .to_owned(),
@@ -1795,7 +1803,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(PendingOidcTokenExchanges::ExchangeCodeHash)
-                            .text()
+                            .string()
                             .not_null()
                             .unique_key(),
                     )
@@ -1811,12 +1819,12 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(PendingOidcTokenExchanges::CreatedAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .col(
                         ColumnDef::new(PendingOidcTokenExchanges::ExpiresAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .to_owned(),
@@ -1847,7 +1855,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(PendingOidcRegistrations::RegistrationCodeHash)
-                            .text()
+                            .string()
                             .not_null()
                             .unique_key(),
                     )
@@ -1875,12 +1883,12 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(PendingOidcRegistrations::CreatedAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .col(
                         ColumnDef::new(PendingOidcRegistrations::ExpiresAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .to_owned(),
@@ -1909,7 +1917,7 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                     .col(
                         ColumnDef::new(ApiRateLimits::Key)
-                            .text()
+                            .string()
                             .not_null()
                             .primary_key(),
                     )
@@ -1920,12 +1928,12 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(ApiRateLimits::WindowStart)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .col(
                         ColumnDef::new(ApiRateLimits::ExpiresAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .to_owned(),
@@ -1973,7 +1981,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(ControllerEvents::CreatedAt)
-                            .timestamp()
+                            .timestamp_with_time_zone()
                             .not_null(),
                     )
                     .to_owned(),

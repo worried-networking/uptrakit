@@ -136,6 +136,42 @@ pub async fn run_migrations(db: &DatabaseConnection) -> Result<(), sea_orm::DbEr
     txn.commit().await
 }
 
+/// Run all pending migrations one at a time, reporting which migration fails.
+///
+/// Useful for debugging migration failures on PostgreSQL, where a failed
+/// statement inside a transaction causes all subsequent statements to fail with
+/// `25P02` ("current transaction is aborted"), masking the original error.
+///
+/// Each migration runs in its own implicit transaction (SeaORM's default for PG),
+/// so only the failing migration's error is reported.
+///
+/// **Not intended for production use.** Use [`run_migrations`] instead.
+pub async fn run_migrations_debug(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
+    use sea_orm::ConnectionTrait;
+    let migrations = Migrator::migrations();
+    let total = migrations.len();
+    for i in 0..total {
+        match Migrator::up(db, Some(1)).await {
+            Ok(()) => {}
+            Err(e) => {
+                // On PG, the error might be 25P02 (cascading from previous statement
+                // in the same migration). Report which migration was being attempted.
+                let name = migrations
+                    .get(i)
+                    .map(|m| m.name().to_string())
+                    .unwrap_or_else(|| format!("migration #{i}"));
+                // Try to clear the aborted transaction state by rolling back.
+                let _ = db.execute_unprepared("ROLLBACK").await;
+                return Err(sea_orm::DbErr::Custom(format!(
+                    "migration {name} (#{}) failed: {e}",
+                    i + 1
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Run all pending migrations, including plugin-contributed ones.
 ///
 /// Core and plugin migrations are combined into a single migrator so that
