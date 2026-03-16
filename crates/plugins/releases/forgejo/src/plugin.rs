@@ -73,8 +73,10 @@ pub struct ForgejoPlugin {
 
 impl ForgejoPlugin {
     /// Compile-time capabilities for the Forgejo plugin.
-    pub const CAPABILITIES: &'static [PluginCapability] =
-        &[PluginCapability::ControllerSideFetchReleases];
+    pub const CAPABILITIES: &'static [PluginCapability] = &[
+        PluginCapability::ControllerSideFetchReleases,
+        PluginCapability::ReleaseFetching,
+    ];
 
     /// Create a new `ForgejoPlugin` from the given configuration.
     ///

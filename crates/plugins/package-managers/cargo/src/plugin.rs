@@ -112,6 +112,9 @@ impl CargoPlugin {
         PluginCapability::DiscoverLocalSoftware,
         PluginCapability::DetectHostCompatibility,
         PluginCapability::ControllerSideFetchReleases,
+        PluginCapability::VersionDetection,
+        PluginCapability::ReleaseFetching,
+        PluginCapability::UpdateExecution,
     ];
 
     /// Create a new Cargo plugin with the given configuration and command executor.
@@ -451,6 +454,9 @@ mod tests {
         assert!(CargoPlugin::CAPABILITIES.contains(&PluginCapability::DiscoverLocalSoftware));
         assert!(CargoPlugin::CAPABILITIES.contains(&PluginCapability::DetectHostCompatibility));
         assert!(CargoPlugin::CAPABILITIES.contains(&PluginCapability::ControllerSideFetchReleases));
+        assert!(CargoPlugin::CAPABILITIES.contains(&PluginCapability::VersionDetection));
+        assert!(CargoPlugin::CAPABILITIES.contains(&PluginCapability::ReleaseFetching));
+        assert!(CargoPlugin::CAPABILITIES.contains(&PluginCapability::UpdateExecution));
     }
 
     // ── discover_software ─────────────────────────────────────────────────────

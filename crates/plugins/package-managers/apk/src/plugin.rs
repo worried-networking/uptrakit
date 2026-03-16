@@ -235,6 +235,9 @@ impl ApkPlugin {
         PluginCapability::DiscoverLocalSoftware,
         PluginCapability::RefreshPackageIndex,
         PluginCapability::DetectHostCompatibility,
+        PluginCapability::VersionDetection,
+        PluginCapability::ReleaseFetching,
+        PluginCapability::UpdateExecution,
     ];
 
     /// Create a new APK plugin with the given configuration.

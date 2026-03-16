@@ -178,6 +178,9 @@ impl NpmPlugin {
         PluginCapability::DiscoverLocalSoftware,
         PluginCapability::DetectHostCompatibility,
         PluginCapability::ControllerSideFetchReleases,
+        PluginCapability::VersionDetection,
+        PluginCapability::ReleaseFetching,
+        PluginCapability::UpdateExecution,
     ];
 
     /// Create a new npm plugin with the given configuration.
@@ -761,8 +764,11 @@ mod tests {
         assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
         assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
         assert!(plugin.has_capability(PluginCapability::ControllerSideFetchReleases));
+        assert!(plugin.has_capability(PluginCapability::VersionDetection));
+        assert!(plugin.has_capability(PluginCapability::ReleaseFetching));
+        assert!(plugin.has_capability(PluginCapability::UpdateExecution));
         assert!(!plugin.has_capability(PluginCapability::RefreshPackageIndex));
-        assert_eq!(plugin.capabilities().len(), 3);
+        assert_eq!(plugin.capabilities().len(), 6);
     }
 
     // ── required_sudo_commands ────────────────────────────────────────────────

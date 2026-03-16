@@ -70,6 +70,9 @@ impl PkgPlugin {
         PluginCapability::DiscoverLocalSoftware,
         PluginCapability::RefreshPackageIndex,
         PluginCapability::DetectHostCompatibility,
+        PluginCapability::VersionDetection,
+        PluginCapability::ReleaseFetching,
+        PluginCapability::UpdateExecution,
     ];
 
     /// Create a new BSD pkg plugin with the given configuration.

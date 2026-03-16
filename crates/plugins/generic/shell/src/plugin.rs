@@ -27,8 +27,11 @@ pub struct ShellPlugin {
 }
 
 impl ShellPlugin {
-    /// Compile-time capabilities for this plugin type (none).
-    pub const CAPABILITIES: &'static [uptrakit_plugin_infrastructure_core::PluginCapability] = &[];
+    /// Compile-time capabilities for this plugin type.
+    pub const CAPABILITIES: &'static [uptrakit_plugin_infrastructure_core::PluginCapability] = &[
+        uptrakit_plugin_infrastructure_core::PluginCapability::VersionDetection,
+        uptrakit_plugin_infrastructure_core::PluginCapability::UpdateExecution,
+    ];
 
     /// Create a new `ShellPlugin` from the given configuration.
     ///

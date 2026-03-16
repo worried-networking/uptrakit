@@ -61,6 +61,9 @@ impl HomebrewPlugin {
         PluginCapability::DiscoverLocalSoftware,
         PluginCapability::RefreshPackageIndex,
         PluginCapability::DetectHostCompatibility,
+        PluginCapability::VersionDetection,
+        PluginCapability::ReleaseFetching,
+        PluginCapability::UpdateExecution,
     ];
 
     /// Create a new Homebrew plugin with the given configuration.
@@ -175,7 +178,10 @@ mod tests {
         assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
         assert!(plugin.has_capability(PluginCapability::RefreshPackageIndex));
         assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
-        assert_eq!(plugin.capabilities().len(), 3);
+        assert!(plugin.has_capability(PluginCapability::VersionDetection));
+        assert!(plugin.has_capability(PluginCapability::ReleaseFetching));
+        assert!(plugin.has_capability(PluginCapability::UpdateExecution));
+        assert_eq!(plugin.capabilities().len(), 6);
     }
 
     #[tokio::test]

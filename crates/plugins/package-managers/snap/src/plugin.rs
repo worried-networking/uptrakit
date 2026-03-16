@@ -185,6 +185,9 @@ impl SnapPlugin {
     pub const CAPABILITIES: &'static [PluginCapability] = &[
         PluginCapability::DiscoverLocalSoftware,
         PluginCapability::DetectHostCompatibility,
+        PluginCapability::VersionDetection,
+        PluginCapability::ReleaseFetching,
+        PluginCapability::UpdateExecution,
     ];
 
     /// Create a new Snap plugin with the given configuration and command executor.

@@ -149,6 +149,9 @@ impl MasPlugin {
     pub const CAPABILITIES: &'static [PluginCapability] = &[
         PluginCapability::DiscoverLocalSoftware,
         PluginCapability::DetectHostCompatibility,
+        PluginCapability::VersionDetection,
+        PluginCapability::ReleaseFetching,
+        PluginCapability::UpdateExecution,
     ];
 
     /// Create a new `mas` plugin with the given configuration and command executor.

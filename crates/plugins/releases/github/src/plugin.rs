@@ -85,8 +85,11 @@ pub struct GitHubPlugin {
 
 impl GitHubPlugin {
     /// Compile-time capabilities for the GitHub plugin.
-    pub const CAPABILITIES: &'static [PluginCapability] =
-        &[PluginCapability::ControllerSideFetchReleases];
+    pub const CAPABILITIES: &'static [PluginCapability] = &[
+        PluginCapability::ControllerSideFetchReleases,
+        PluginCapability::ReleaseFetching,
+        PluginCapability::UpdateExecution,
+    ];
 
     /// Create a new `GitHubPlugin` from the given configuration.
     ///

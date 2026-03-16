@@ -71,8 +71,10 @@ pub struct GitLabPlugin {
 
 impl GitLabPlugin {
     /// Compile-time capabilities for the GitLab plugin.
-    pub const CAPABILITIES: &'static [PluginCapability] =
-        &[PluginCapability::ControllerSideFetchReleases];
+    pub const CAPABILITIES: &'static [PluginCapability] = &[
+        PluginCapability::ControllerSideFetchReleases,
+        PluginCapability::ReleaseFetching,
+    ];
 
     /// Create a new `GitLabPlugin` from the given configuration.
     ///
