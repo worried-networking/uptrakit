@@ -26,11 +26,11 @@ pub(crate) async fn setup_sqlite() -> (
     (db, Some(guard))
 }
 
-/// Set up a PostgreSQL database inside a shared testcontainers instance.
+/// Set up a PostgreSQL database inside a testcontainers instance.
 ///
-/// Each call creates a fresh `test_{uuid}` database and runs all migrations.
-/// The container is shared across all tests (via `OnceCell`) to avoid
-/// spinning up multiple PostgreSQL instances.
+/// Each call starts a fresh container and creates a `test_{uuid}` database
+/// with all migrations applied. The container is returned as a guard so it
+/// is removed when the test function returns.
 pub(crate) async fn setup_postgres() -> (
     DatabaseConnection,
     Option<Arc<dyn std::any::Any + Send + Sync>>,
@@ -39,25 +39,16 @@ pub(crate) async fn setup_postgres() -> (
     use testcontainers::runners::AsyncRunner;
     use testcontainers_modules::postgres::Postgres;
 
-    static CONTAINER: tokio::sync::OnceCell<(testcontainers::ContainerAsync<Postgres>, u16)> =
-        tokio::sync::OnceCell::const_new();
+    let container = Postgres::default()
+        .with_tag("17-alpine")
+        .start()
+        .await
+        .expect("start PostgreSQL container");
+    let host_port = container
+        .get_host_port_ipv4(5432)
+        .await
+        .expect("get PG port");
 
-    let (_container, host_port) = CONTAINER
-        .get_or_init(|| async {
-            let container = Postgres::default()
-                .with_tag("17-alpine")
-                .start()
-                .await
-                .expect("start PostgreSQL container");
-            let port = container
-                .get_host_port_ipv4(5432)
-                .await
-                .expect("get PG port");
-            (container, port)
-        })
-        .await;
-
-    // Create a unique database for this test.
     let db_name = format!("test_{}", uuid::Uuid::now_v7().simple());
     let admin_url = format!("postgres://postgres:postgres@127.0.0.1:{host_port}/postgres");
     let admin_opt = ConnectOptions::new(admin_url);
@@ -79,14 +70,16 @@ pub(crate) async fn setup_postgres() -> (
         .await
         .expect("run PG migrations");
 
-    (db, None)
+    // Keep container alive for the duration of the test; Drop removes it.
+    let guard: Arc<dyn std::any::Any + Send + Sync> = Arc::new(container);
+    (db, Some(guard))
 }
 
-/// Set up a MariaDB database inside a shared testcontainers instance.
+/// Set up a MariaDB database inside a testcontainers instance.
 ///
-/// Each call creates a fresh `test_{uuid}` database and runs all migrations.
-/// The container is shared across all tests (via `OnceCell`) to avoid
-/// spinning up multiple MariaDB instances.
+/// Each call starts a fresh container and creates a `test_{uuid}` database
+/// with all migrations applied. The container is returned as a guard so it
+/// is removed when the test function returns.
 pub(crate) async fn setup_mariadb() -> (
     DatabaseConnection,
     Option<Arc<dyn std::any::Any + Send + Sync>>,
@@ -95,25 +88,16 @@ pub(crate) async fn setup_mariadb() -> (
     use testcontainers::runners::AsyncRunner;
     use testcontainers_modules::mariadb::Mariadb;
 
-    static CONTAINER: tokio::sync::OnceCell<(testcontainers::ContainerAsync<Mariadb>, u16)> =
-        tokio::sync::OnceCell::const_new();
+    let container = Mariadb::default()
+        .with_tag("11")
+        .start()
+        .await
+        .expect("start MariaDB container");
+    let host_port = container
+        .get_host_port_ipv4(3306)
+        .await
+        .expect("get MariaDB port");
 
-    let (_container, host_port) = CONTAINER
-        .get_or_init(|| async {
-            let container = Mariadb::default()
-                .with_tag("11")
-                .start()
-                .await
-                .expect("start MariaDB container");
-            let port = container
-                .get_host_port_ipv4(3306)
-                .await
-                .expect("get MariaDB port");
-            (container, port)
-        })
-        .await;
-
-    // Create a unique database for this test.
     let db_name = format!("test_{}", uuid::Uuid::now_v7().simple());
     let admin_url = format!("mysql://root@127.0.0.1:{host_port}/mysql");
     let admin_opt = ConnectOptions::new(admin_url);
@@ -137,5 +121,7 @@ pub(crate) async fn setup_mariadb() -> (
         .await
         .expect("run MariaDB migrations");
 
-    (db, None)
+    // Keep container alive for the duration of the test; Drop removes it.
+    let guard: Arc<dyn std::any::Any + Send + Sync> = Arc::new(container);
+    (db, Some(guard))
 }
