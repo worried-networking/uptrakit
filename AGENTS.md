@@ -852,7 +852,14 @@ Key invariants:
    the controller pushes `software_states`
    again to reflect the updated `installed_version` values and `update_in_progress = false`.
 8. **Actor attribution.** Updates triggered via MQTT have `actor_type = "mqtt"` and
-   `actor_id = <mqtt_client_id>` in the `update_history` record.
+   `actor_id = <actor_service_id>` in the `update_history` record, where `actor_service_id` is the
+   UUID of the MQTT service instance that received the command.
+9. **Workload claim protocol.** The MQTT service uses the `WorkloadClaims` capability to exclusively
+   own config keys (e.g. `clients.{uuid}`) across service instances. After receiving
+   `ServiceConfigDelivery`, the service sends `WorkloadClaim` with the desired config keys. The
+   controller grants or rejects each key via `WorkloadClaimResult` -- only granted config keys have
+   their MQTT clients started. On disconnect, all claims held by the service are released
+   automatically and become available for other instances to claim.
 
 #### MQTT topic scheme
 
@@ -944,6 +951,10 @@ Published immediately on agent connect/disconnect via `ControllerMessage::HostCo
 | `docs/end-user/home-assistant-mqtt.md` | Full end-user setup guide including host summary entities, metadata topics, and connectivity sensor |
 | `docs/api/wire-protocol.md` | `software_states`, `host_connectivity_updated`, `service_trigger_update`, `service_trigger_host_batch_update`, and generic service config message docs |
 | `docs/development/service-config-store.md` | Generic service config store architecture, DB schema, SDK usage, and security model |
+| `crates/ui/web-api/src/workload_claims.rs` | `WorkloadClaimRegistry` (global claim state, conflict resolution, pending desires for proactive re-grant) |
+| `crates/ui/web-api/src/routes/service_ws/handler/workload.rs` | WebSocket handlers for `WorkloadClaim` and `WorkloadRelease` messages |
+| `crates/ui/web-api/src/event_delivery.rs` | NATS delivery with tenant-scoped routing via claim registry |
+| `crates/ui/web-api/src/notification_service.rs` | Tenant-scoped `SoftwareStates` delivery using claim registry for service routing |
 | `crates/shared/wire/asyncapi.yaml` | AsyncAPI schemas for all messages and schemas |
 
 ### Service ping interval
@@ -993,6 +1004,7 @@ Each service declares a `BTreeSet<Capability>` at enrollment time. The set is pe
 | `CaManagement` | `ca_management` | -- | -- | -- | -- | yes |
 | `InteractiveUpdates` | `interactive_updates` | yes | yes | -- | -- | yes |
 | `ResetData` | `reset_data` | -- | yes | -- | -- | yes |
+| `WorkloadClaims` | `workload_claims` | -- | -- | yes | -- | yes |
 | `Other(String)` | *(unknown)* | -- | -- | -- | -- | -- |
 
 The `interactive` Cargo feature is now a default feature on all three binary crates (agent, agent-ssh, controller).
@@ -1115,7 +1127,7 @@ The `is_system: bool` flag derived at enrollment threads through every subsequen
 operation: certificate lookup (tries `service_certificates` then `system_service_certificates`),
 activity recording, status checks, credential delivery, and registered-connection management.
 
-The MQTT bridge now enrolls as a system service (`system_service + update_tracking + graceful_shutdown`)
+The MQTT bridge now enrolls as a system service (`system_service + update_tracking + graceful_shutdown + workload_claims + ui_extensions`)
 and appears in `/api/v1/system-services`, not `/api/v1/services`.
 
 #### System services key files

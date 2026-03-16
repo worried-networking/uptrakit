@@ -229,6 +229,12 @@ channels:
         $ref: "#/components/messages/reportPluginConfig"
       reportPluginConfigResponse:
         $ref: "#/components/messages/reportPluginConfigResponse"
+      workloadClaim:
+        $ref: "#/components/messages/workloadClaim"
+      workloadClaimResult:
+        $ref: "#/components/messages/workloadClaimResult"
+      workloadRelease:
+        $ref: "#/components/messages/workloadRelease"
 
   controllerEvents:
     address: uptrakit.events.controller
@@ -241,6 +247,8 @@ channels:
         $ref: "#/components/messages/requestCaRotation"
       requestCrlRenewal:
         $ref: "#/components/messages/requestCrlRenewal"
+      workloadClaimAnnouncement:
+        $ref: "#/components/messages/workloadClaimAnnouncement"
 
 operations:
   sendPing:
@@ -641,7 +649,7 @@ operations:
       and dispatches `ExecuteUpdate` to the appropriate agent. On error, the
       controller responds with an `Error` message (soft error — WS not closed).
 
-      Attribution: `actor_type = "mqtt"`, `actor_id = mqtt_client_id`.
+      Attribution: `actor_type = "mqtt"`, `actor_id = actor_service_id`.
 
   sendServiceTriggerHostBatchUpdate:
     action: send
@@ -661,7 +669,7 @@ operations:
       when no outdated packages are found, the controller responds with an
       `Error` message (soft error — WS not closed).
 
-      Attribution: `actor_type = "mqtt"`, `actor_id = mqtt_client_id`.
+      Attribution: `actor_type = "mqtt"`, `actor_id = actor_service_id`.
 
   receiveServiceCredentials:
     action: receive
@@ -920,6 +928,43 @@ operations:
     description: |
       Sent by the controller in response to `ReportPluginConfig`. Contains a success
       flag, optional `plugin_config_id` on success, and optional `error` on failure.
+
+  sendWorkloadClaim:
+    action: send
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/workloadClaim"
+    summary: Service sends workload claim after config delivery.
+    description: |
+      Sent by a service to request exclusive ownership of one or more config keys.
+      Each key maps to the tenant UUID the service intends to manage. The controller
+      grants or rejects each key atomically based on whether another instance already
+      holds the claim.
+
+  receiveWorkloadClaimResult:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/workloadClaimResult"
+    summary: Controller responds with granted/rejected keys.
+    description: |
+      Sent by the controller in response to a `workload_claim` message. Lists the
+      config keys that were successfully granted to the requesting service and those
+      that were rejected because another instance already holds them.
+
+  sendWorkloadRelease:
+    action: send
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/workloadRelease"
+    summary: Service voluntarily releases config keys.
+    description: |
+      Sent by a service to voluntarily release one or more config keys it previously
+      claimed. Typically sent during graceful shutdown or when the service no longer
+      manages a particular tenant/client configuration.
 
 components:
   securitySchemes:
@@ -1443,6 +1488,35 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/ReportPluginConfigResponsePayload"
+
+    workloadClaim:
+      name: workload_claim
+      title: Workload Claim
+      summary: Request exclusive ownership of config keys.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/workloadClaimPayload"
+    workloadClaimResult:
+      name: workload_claim_result
+      title: Workload Claim Result
+      summary: Grant/reject response to a workload claim request.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/workloadClaimResultPayload"
+    workloadRelease:
+      name: workload_release
+      title: Workload Release
+      summary: Voluntarily release specific config keys.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/workloadReleasePayload"
+    workloadClaimAnnouncement:
+      name: workload_claim_announcement
+      title: Workload Claim Announcement
+      summary: Cross-controller sync of claim changes (NATS only).
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/workloadClaimAnnouncementPayload"
 
     serviceCredentials:
       name: service_credentials
@@ -3386,7 +3460,7 @@ components:
         - type
         - tenant_id
         - host_id
-        - mqtt_client_id
+        - actor_service_id
       description: |
         Sent by a service when a user triggers an "Install all" action
         on the per-host packages update entity. The controller resolves all
@@ -3421,10 +3495,10 @@ components:
           description: Host UUID whose outdated packages should be updated
           examples:
             - 770e8400-e29b-41d4-a716-446655440001
-        mqtt_client_id:
+        actor_service_id:
           type: string
           format: uuid
-          description: MQTT client UUID that initiated the trigger (used as actor_id)
+          description: Service UUID that initiated the trigger (used as actor_id for update attribution)
           examples:
             - 660e8400-e29b-41d4-a716-446655440001
         security_only:
@@ -3537,7 +3611,7 @@ components:
         - software_item_id
         - host_id
         - to_version
-        - mqtt_client_id
+        - actor_service_id
       properties:
         protocol_version:
           type: integer
@@ -3579,10 +3653,10 @@ components:
           description: Target version to install
           examples:
             - "1.3.0"
-        mqtt_client_id:
+        actor_service_id:
           type: string
           format: uuid
-          description: MQTT client UUID that initiated the trigger (used as actor_id)
+          description: Service UUID that initiated the trigger (used as actor_id for update attribution)
           examples:
             - 660e8400-e29b-41d4-a716-446655440001
 
@@ -4772,6 +4846,76 @@ components:
           description: Total number of pages in the report
           examples:
             - 3
+
+    workloadClaimPayload:
+      type: object
+      required:
+        - claims
+      properties:
+        claims:
+          type: object
+          description: 'Map of config key to tenant UUID. Example: {"clients.{uuid}": "tenant-uuid"}'
+          additionalProperties:
+            type: string
+            format: uuid
+    workloadClaimResultPayload:
+      type: object
+      required:
+        - granted
+        - rejected
+      properties:
+        granted:
+          type: array
+          items:
+            type: string
+          description: Config keys that this service now exclusively owns.
+        rejected:
+          type: array
+          items:
+            type: string
+          description: Config keys that are already claimed by another instance.
+    workloadReleasePayload:
+      type: object
+      required:
+        - keys
+      properties:
+        keys:
+          type: array
+          items:
+            type: string
+          description: Config keys to release.
+    workloadClaimAnnouncementPayload:
+      type: object
+      required:
+        - service_id
+        - controller_id
+        - claimed
+        - released
+        - claimed_at
+      properties:
+        service_id:
+          type: string
+          format: uuid
+          description: The service instance whose claims changed.
+        controller_id:
+          type: string
+          format: uuid
+          description: The controller that processed the claim.
+        claimed:
+          type: object
+          description: Newly claimed config keys mapped to tenant UUIDs.
+          additionalProperties:
+            type: string
+            format: uuid
+        released:
+          type: array
+          items:
+            type: string
+          description: Config keys that were released.
+        claimed_at:
+          type: string
+          format: date-time
+          description: Timestamp for conflict resolution (earlier wins).
 
     serviceEnvelope:
       type: object

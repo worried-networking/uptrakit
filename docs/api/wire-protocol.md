@@ -61,12 +61,12 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 ### Update-tracking service (service -> controller)
 
 `service_trigger_update`, `service_trigger_host_batch_update`, `store_service_config`,
-`delete_service_config`
+`delete_service_config`, `workload_claim`, `workload_release`
 
 ### Shared (controller -> service)
 
 `pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `service_settings`, `ca_bundle_updated`,
-`request_cert_renewal`, `server_restarting`
+`request_cert_renewal`, `server_restarting`, `workload_claim_result`
 
 #### `server_restarting` payload
 
@@ -1014,17 +1014,18 @@ The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incomp
 | `UiExtensions` | `ui_extensions` | Service has UI extensions to register via `extension_register`. The controller gates `extension_register` processing on this capability. See [UI Extension Architecture](../architecture/ui-extensions.md). |
 | `InteractiveUpdates` | `interactive_updates` | Service supports interactive (PTY-based) update sessions with stdin forwarding. Only advertised when compiled with the `interactive` feature. The controller gates `update_stdin_data` and `interactive: true` on this capability. See [Interactive Updates](interactive-updates.md). |
 | `ResetData` | `reset_data` | Service supports the reset-data protocol: truncates local data stores when the controller broadcasts a data reset. Only advertised when compiled with the `reset-data` feature. |
+| `WorkloadClaims` | `workload_claims` | Service supports the exclusive workload claim protocol: sends `workload_claim` to request ownership of config keys, receives `workload_claim_result` with grant/reject decisions. Required for tenant-scoped SoftwareStates delivery. |
 | `Other(String)` | *(any unknown string)* | Forward-compatible catch-all. Never participates in intersection. |
 
 ### Advertised Sets per Component
 
-| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `update_tracking` | `ssh_remote` | `system_service` | `scheduler` | `database_access` | `nats_access` | `master_key_access` | `ca_management` | `ui_extensions` | `interactive_updates` | `reset_data` |
-| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Controller | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Agent | ✓ | ✓ | ✓ | — | — | — | — | — | — | — | — | — | ✓\* | — |
-| SSH Agent | ✓ | ✓ | ✓ | — | ✓ | — | — | — | — | — | — | ✓ | ✓\* | ✓\*\* |
-| Update Tracker | — | — | ✓ | ✓ | — | ✓ | — | — | — | — | — | — | — | — |
-| External Scheduler | — | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | — |
+| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `update_tracking` | `ssh_remote` | `system_service` | `scheduler` | `database_access` | `nats_access` | `master_key_access` | `ca_management` | `ui_extensions` | `interactive_updates` | `reset_data` | `workload_claims` |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Controller | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Agent | ✓ | ✓ | ✓ | — | — | — | — | — | — | — | — | — | ✓\* | — | — |
+| SSH Agent | ✓ | ✓ | ✓ | — | ✓ | — | — | — | — | — | — | ✓ | ✓\* | ✓\*\* | — |
+| Update Tracker | — | — | ✓ | ✓ | — | ✓ | — | — | — | — | — | ✓ | — | — | ✓ |
+| External Scheduler | — | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | — | — |
 
 \* Only when compiled with the `interactive` Cargo feature.
 
@@ -1053,11 +1054,11 @@ enrollment is routed to `system_services` instead (see [System Services Architec
 ### Capability Evolution Across Versions
 
 Services can add or drop capabilities when their binary is upgraded without re-enrollment. To support
-this, the SDK sends an `update_capabilities` message automatically on every authenticated reconnect,
+this, the SDK sends a `register` message automatically on every authenticated reconnect,
 immediately after processing `service_settings`. The controller replaces the stored capability set
 with the freshly-reported one and refreshes in-session gating flags.
 
-**`update_capabilities` (service → controller)**
+**`register` (service → controller)**
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -1069,7 +1070,7 @@ On receipt the controller:
 2. Re-derives in-session flags such as `has_ui_extensions` without requiring reconnection.
 
 This replaces enrollment-time persistence as the authoritative source of a service's live capability
-set. The enrolled set is only used as a bootstrap value until the first `update_capabilities` message
+set. The enrolled set is only used as a bootstrap value until the first `register` message
 arrives in that session.
 
 ## Forward Compatibility
@@ -1280,8 +1281,6 @@ software item. The controller validates the request and dispatches `execute_upda
 agent. On validation failure the controller sends `error` back to the MQTT service (soft error — the
 WebSocket connection is not closed).
 
-> **Wire compatibility:** The legacy type string `mqtt_trigger_update` is accepted as a serde alias.
-
 ```json
 {
   "protocol_version": 1,
@@ -1291,7 +1290,7 @@ WebSocket connection is not closed).
   "software_item_id": "660e8400-e29b-41d4-a716-446655440002",
   "host_id": "770e8400-e29b-41d4-a716-446655440003",
   "to_version": "1.3.0",
-  "mqtt_client_id": "880e8400-e29b-41d4-a716-446655440004"
+  "actor_service_id": "880e8400-e29b-41d4-a716-446655440004"
 }
 ```
 
@@ -1301,9 +1300,9 @@ WebSocket connection is not closed).
 | `software_item_id` | UUID | The software item to update |
 | `host_id` | UUID | The host on which to apply the update |
 | `to_version` | String | Target version string resolved from the last `software_states` push |
-| `mqtt_client_id` | UUID | The MQTT client that received the Install command; stored as `actor_id` in `update_history` |
+| `actor_service_id` | UUID | Service instance UUID that received the Install command; stored as `actor_id` in `update_history` |
 
-The resulting `update_history` record has `actor_type = "mqtt"` and `actor_id = <mqtt_client_id>`.
+The resulting `update_history` record has `actor_type = "mqtt"` and `actor_id = <actor_service_id>`.
 
 The controller rejects the request with an `error` message (no WS close) in the following cases:
 
@@ -1318,8 +1317,6 @@ Sent by the MQTT service to the controller when a Home Assistant user presses **
 per-host summary or security updates entity. The controller finds all qualifying outdated
 non-featured software items for the host and dispatches a batch update to the agent.
 
-> **Wire compatibility:** The legacy type strings `mqtt_trigger_host_batch_update` and `mqtt_trigger_host_package_update` are accepted as serde aliases.
-
 ```json
 {
   "protocol_version": 1,
@@ -1327,7 +1324,7 @@ non-featured software items for the host and dispatches a batch update to the ag
   "type": "service_trigger_host_batch_update",
   "tenant_id": "550e8400-e29b-41d4-a716-446655440001",
   "host_id": "770e8400-e29b-41d4-a716-446655440003",
-  "mqtt_client_id": "880e8400-e29b-41d4-a716-446655440004",
+  "actor_service_id": "880e8400-e29b-41d4-a716-446655440004",
   "security_only": false
 }
 ```
@@ -1336,7 +1333,7 @@ non-featured software items for the host and dispatches a batch update to the ag
 | --- | --- | --- | --- |
 | `tenant_id` | UUID | -- | Tenant scope -- must match an assigned tenant for this MQTT service |
 | `host_id` | UUID | -- | The host whose outdated non-featured items should be updated |
-| `mqtt_client_id` | UUID | -- | The MQTT client that received the Install command; stored as `actor_id` in `update_history` |
+| `actor_service_id` | UUID | -- | Service instance UUID that received the Install command; stored as `actor_id` in `update_history` |
 | `security_only` | bool | `false` | When `true`, only items with `update_category = "security"` are included in the batch. Set automatically by the MQTT service when the security updates entity is triggered. |
 
 The controller:
@@ -1360,8 +1357,99 @@ The controller responds with an `error` message (no WS close) in the following c
 - A batch is already `pending` or `in_progress` for this host.
 - The host has no connected agent.
 
-The resulting `update_batch` record has `actor_type = "mqtt"`, `actor_id = <mqtt_client_id>`,
+The resulting `update_batch` record has `actor_type = "mqtt"`, `actor_id = <actor_service_id>`,
 and `batch_type = "host_update"`. Each `update_history` row gets the same actor attribution.
+
+## Workload Claim Protocol
+
+The workload claim protocol provides exclusive ownership of config keys across service
+instances. Each config key (e.g. `clients.{uuid}`) is owned by exactly one service instance
+at a time. Multiple instances can serve the same tenant by claiming different config keys
+for it.
+
+### `workload_claim` (service -> controller)
+
+Sent after receiving `service_config_delivery` or `service_config_updated`. Contains the
+full desired config key set (full-replacement semantics). The controller diffs against the
+service's current grants: grants unclaimed keys, rejects already-claimed ones, and releases
+keys the service no longer desires.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 5,
+  "type": "workload_claim",
+  "claims": {
+    "clients.019471a0-0000-7000-8000-000000000001": "550e8400-e29b-41d4-a716-446655440001",
+    "clients.019471a0-0000-7000-8000-000000000002": "550e8400-e29b-41d4-a716-446655440001"
+  }
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `claims` | `BTreeMap<String, UUID>` | Map of config key to tenant UUID. Keys use the same format as `service_config_delivery` entries. |
+
+### `workload_claim_result` (controller -> service)
+
+Response to `workload_claim`. Also sent proactively when previously rejected keys become
+available (e.g. another service disconnected and released them).
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 6,
+  "type": "workload_claim_result",
+  "granted": ["clients.019471a0-0000-7000-8000-000000000001"],
+  "rejected": ["clients.019471a0-0000-7000-8000-000000000002"]
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `granted` | `BTreeSet<String>` | Config keys that this service now exclusively owns. |
+| `rejected` | `BTreeSet<String>` | Config keys that are already claimed by another instance. |
+
+After receiving granted keys, the controller pushes `software_states` (paginated) and
+`host_connectivity_updated` for each newly served tenant.
+
+### `workload_release` (service -> controller)
+
+Voluntary release of specific config keys. Sent when a service no longer wants to serve
+certain configs (e.g. after a config deletion).
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 7,
+  "type": "workload_release",
+  "keys": ["clients.019471a0-0000-7000-8000-000000000001"]
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `keys` | `BTreeSet<String>` | Config keys to release. |
+
+Released keys become available for other service instances to claim. The controller
+proactively re-evaluates pending desires and may send unsolicited `workload_claim_result`
+messages to services that previously had those keys rejected.
+
+### Claim lifecycle
+
+1. Service connects and receives `service_config_delivery`.
+2. Service computes desired config keys and sends `workload_claim`.
+3. Controller checks the global claim registry (local + NATS-synced from other controllers).
+4. Controller responds with `workload_claim_result` (granted/rejected).
+5. Controller pushes `software_states` and `host_connectivity_updated` for newly served tenants.
+6. On config changes, the service sends a new `workload_claim` with the updated full set.
+7. On disconnect, the controller releases all claims and announces via NATS.
+
+### Disconnect cleanup
+
+When a service disconnects, the controller automatically releases all its claims and
+publishes a `workload_claim_announcement` to NATS. Other controllers' services that had
+pending desires for those keys may receive proactive re-grants.
 
 ## Controller–Controller Messages (NATS only)
 
@@ -1435,6 +1523,72 @@ History page updates regardless of which instance processed the original API req
 | `event_json` | string | Yes | JSON-serialised `AdminEvent` (externally-tagged serde format). |
 
 **Safe to publish via NATS** — contains no credential material or plugin configs.
+
+### `workload_claim_announcement`
+
+Published when claims are granted or released. Used by other controllers to update their
+global claim registry.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 1,
+  "type": "workload_claim_announcement",
+  "service_id": "550e8400-e29b-41d4-a716-446655440001",
+  "controller_id": "660e8400-e29b-41d4-a716-446655440002",
+  "claimed": {
+    "clients.019471a0-0000-7000-8000-000000000001": "770e8400-e29b-41d4-a716-446655440003"
+  },
+  "released": ["clients.019471a0-0000-7000-8000-000000000002"],
+  "claimed_at": "2026-03-16T12:00:00Z"
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `service_id` | UUID | The service instance whose claims changed. |
+| `controller_id` | UUID | The controller that processed the claim. |
+| `claimed` | `BTreeMap<String, UUID>` | Newly claimed config keys with their tenant UUIDs. |
+| `released` | `BTreeSet<String>` | Config keys that were released. |
+| `claimed_at` | String (RFC 3339) | Timestamp for conflict resolution (earlier wins). |
+
+When two controllers grant the same key simultaneously, the conflict is resolved by
+`(claimed_at, service_id)` comparison — earlier timestamp wins, lower `service_id`
+breaks ties.
+
+### `workload_claim_sync_request`
+
+Published by a (re)starting controller to request the current claim state from peers.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 1,
+  "type": "workload_claim_sync_request",
+  "controller_id": "660e8400-e29b-41d4-a716-446655440002"
+}
+```
+
+### `workload_claim_sync_response`
+
+Response to `workload_claim_sync_request`. Each active controller responds with its full
+local claim state.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 1,
+  "type": "workload_claim_sync_response",
+  "controller_id": "660e8400-e29b-41d4-a716-446655440002",
+  "claims": {
+    "clients.019471a0-0000-7000-8000-000000000001": {
+      "service_id": "550e8400-e29b-41d4-a716-446655440001",
+      "tenant_id": "770e8400-e29b-41d4-a716-446655440003",
+      "claimed_at": "2026-03-16T12:00:00Z"
+    }
+  }
+}
+```
 
 ## Batch update messages
 

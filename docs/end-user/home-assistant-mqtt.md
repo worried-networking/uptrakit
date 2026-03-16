@@ -229,7 +229,7 @@ command to Uptrakit via the command topic for that entity.
 Uptrakit validates the request and, if accepted, creates an `update_history` record with:
 
 - `actor_type = "mqtt"`
-- `actor_id = <mqtt_client_id>`
+- `actor_id = <actor_service_id>` (the UUID of the MQTT service instance that received the command)
 
 The update is then dispatched to the appropriate agent exactly as if it had been triggered from the web UI
 or CLI.
@@ -384,6 +384,16 @@ If Home Assistant restarts while the broker and Uptrakit remain connected, Uptra
 message (`online` on `{ha_discovery_prefix}/status`) and immediately republishes all HA discovery configs
 so HA picks them up fresh. State and version topics remain retained on the broker and do not need
 re-sending. This follows the standard [HA MQTT birth/will pattern](https://www.home-assistant.io/integrations/mqtt/#birth-and-last-will-messages).
+
+### High Availability and Workload Distribution
+
+When multiple MQTT service instances are deployed, each instance exclusively owns a subset of
+MQTT client configurations via the workload claim protocol. A tenant's clients may be spread
+across different instances, but each individual client is served by exactly one instance.
+
+If an MQTT instance disconnects, its claimed clients become available and are automatically
+re-assigned to other running instances. Home Assistant entities may briefly become unavailable
+during the transition but will recover automatically once the new instance starts serving.
 
 ## Automatic Stale Entity Cleanup
 

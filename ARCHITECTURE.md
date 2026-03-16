@@ -130,6 +130,7 @@ Each service sends a `BTreeSet<Capability>` in its `EnrollPayload` during enroll
 | `MasterKeyAccess` | `master_key_access` | Service requires the master encryption key |
 | `CaManagement` | `ca_management` | Service can request CA certificate rotation |
 | `ResetData` | `reset_data` | Supports reset-data protocol: truncates local data on controller broadcast |
+| `WorkloadClaims` | `workload_claims` | Enables the exclusive workload claim protocol for config-key-level tenant assignment |
 
 ### ServiceProfile (derived, never stored)
 
@@ -166,6 +167,24 @@ See [Enrollment Tokens API](docs/api/enrollment-tokens.md) for full details.
 `service_connections.rs` provides a `ServiceConnectionRegistry` with a unified `register()` method that accepts any capability set, and a
 `broadcast_by_capability()` method that sends a `ControllerMessage` to all connected services holding a given capability. This replaces the
 former per-type registration and broadcast paths.
+
+### Workload Claims
+
+The `WorkloadClaimRegistry` (in `crates/ui/web-api/src/workload_claims.rs`) provides exclusive
+config-key-level ownership across service instances. Each config key (e.g. `clients.{uuid}`) is
+owned by exactly one service at a time, preventing duplicate work (such as duplicate MQTT publishes).
+
+The registry maintains:
+
+- `claims: HashMap<String, ClaimOwner>` -- config key to owner mapping
+- `by_service: HashMap<Uuid, BTreeSet<String>>` -- reverse index for fast release
+- `tenant_services: HashMap<Uuid, BTreeSet<Uuid>>` -- tenant routing index
+- `pending_desires: HashMap<Uuid, BTreeMap<String, Uuid>>` -- rejected claims for proactive re-grant
+
+Cross-controller synchronization uses NATS `WorkloadClaimAnnouncement` messages. Conflict resolution
+is timestamp-based: earlier `claimed_at` wins, with `service_id` as tiebreaker.
+
+See [Workload Claim Protocol](docs/api/wire-protocol.md#workload-claim-protocol) for wire-level details.
 
 ### Database schema
 
