@@ -33,6 +33,7 @@ mod service_config;
 mod shared_types;
 mod update_tracking;
 mod updates;
+mod workload;
 
 use cert::{
     ApprovalPollResult, CertificateResult, handle_request_certificate, poll_approval_status,
@@ -193,6 +194,7 @@ struct MessageProcessor {
     has_software_discovery: bool,
     has_update_hooks: bool,
     has_ui_extensions: bool,
+    has_workload_claims: bool,
     service_app_name: Option<String>,
     service_tenant_id: Option<uuid::Uuid>,
     linked_host_ids: Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
@@ -278,6 +280,14 @@ impl MessageProcessor {
                 if self.has_ui_extensions =>
             {
                 self.dispatch_extensions(msg).await
+            }
+
+            // -- WorkloadClaims capability --
+            ServiceMessage::WorkloadClaim(payload) if self.has_workload_claims => {
+                workload::handle_workload_claim(&self.state, self.service_id, payload).await
+            }
+            ServiceMessage::WorkloadRelease(payload) if self.has_workload_claims => {
+                workload::handle_workload_release(&self.state, self.service_id, payload).await
             }
 
             // -- Universal messages (all capabilities) --
@@ -559,6 +569,7 @@ struct AuthenticatedSessionState {
     is_mqtt: bool,
     has_software_discovery: bool,
     has_ui_extensions: bool,
+    has_workload_claims: bool,
     service_tenant_id: Option<uuid::Uuid>,
     linked_host_ids: Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
     push_rx: tokio::sync::mpsc::Receiver<ControllerMessage>,
@@ -950,6 +961,7 @@ async fn setup_authenticated_session(
     let has_software_discovery = session_capabilities.contains(&Capability::SoftwareDiscovery);
     let has_update_hooks = session_capabilities.contains(&Capability::UpdateHooks);
     let has_ui_extensions = session_capabilities.contains(&Capability::UiExtensions);
+    let has_workload_claims = session_capabilities.contains(&Capability::WorkloadClaims);
 
     // Persist the session capabilities to the DB so that subsequent reconnects
     // (and other controller instances) see the up-to-date capability set.
@@ -987,6 +999,7 @@ async fn setup_authenticated_session(
         has_software_discovery,
         has_update_hooks,
         has_ui_extensions,
+        has_workload_claims,
         service_app_name,
         service_tenant_id,
         linked_host_ids: Arc::clone(&linked_host_ids),
@@ -1000,6 +1013,7 @@ async fn setup_authenticated_session(
         is_mqtt,
         has_software_discovery,
         has_ui_extensions,
+        has_workload_claims,
         service_tenant_id,
         linked_host_ids,
         push_rx,
@@ -1025,6 +1039,7 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
         is_mqtt,
         has_software_discovery,
         has_ui_extensions,
+        has_workload_claims,
         service_tenant_id,
         linked_host_ids,
         processor_cancel,
@@ -1035,6 +1050,11 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
     // Cancel the processor task and wait for it to finish.
     processor_cancel.cancel();
     let _ = processor_handle.await;
+
+    // Release all workload claims held by this service.
+    if has_workload_claims {
+        workload::release_all_claims_on_disconnect(state, service_id).await;
+    }
 
     // Unregister UI extensions before connection teardown.
     if has_ui_extensions {
