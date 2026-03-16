@@ -206,6 +206,9 @@ mod tests {
     fn snap_capabilities_declared() {
         assert!(SnapPlugin::CAPABILITIES.contains(&PluginCapability::DiscoverLocalSoftware));
         assert!(SnapPlugin::CAPABILITIES.contains(&PluginCapability::DetectHostCompatibility));
+        assert!(SnapPlugin::CAPABILITIES.contains(&PluginCapability::VersionDetection));
+        assert!(SnapPlugin::CAPABILITIES.contains(&PluginCapability::ReleaseFetching));
+        assert!(SnapPlugin::CAPABILITIES.contains(&PluginCapability::UpdateExecution));
         // Snap does not need RefreshPackageIndex — snapd manages its own cache.
         assert!(!SnapPlugin::CAPABILITIES.contains(&PluginCapability::RefreshPackageIndex));
     }
