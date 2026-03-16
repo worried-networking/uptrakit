@@ -24,7 +24,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, RelationTrait as _, Set};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::PluginType;

@@ -2,12 +2,10 @@
 
 use std::collections::HashMap;
 
-use sea_orm::{
-    ColumnTrait, EntityTrait, FromQueryResult, QueryFilter, QuerySelect, RelationTrait as _,
-};
+use sea_orm::{ColumnTrait, FromQueryResult, QueryFilter, QuerySelect, RelationTrait as _};
 use uuid::Uuid;
 
-use uptrakit_shared_db::entity::{prelude::*, service, service_host};
+use uptrakit_shared_db::entity::{service, service_host};
 
 // Re-export the canonical software-state loader from the scheduler engine so
 // that both the embedded-scheduler and the web-API code paths share one
