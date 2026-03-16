@@ -6627,6 +6627,7 @@ dependencies = [
 name = "uptrakit-internal-wire"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "serde",
  "serde_json",
  "serde_yaml_ng",

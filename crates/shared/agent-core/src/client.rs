@@ -4,10 +4,11 @@ use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::{
     BatchUpdateItemResult, BatchUpdateResultPayload, DisconnectReason, DisconnectingPayload,
     DiscoverSoftwarePayload, DiscoveryPluginResult, DiscoveryResultsPayload,
-    ExecuteBatchUpdatePayload, ServiceMessage, UpdateFinalStatus, UpdateOutputPayload,
-    UpdateResultPayload, UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
+    ExecuteBatchUpdatePayload, ServiceMessage, ServiceTransport, TransportError, UpdateFinalStatus,
+    UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload, VersionCheckResult,
+    VersionCheckResultsPayload,
 };
-use uptrakit_service_sdk::{ControllerConnection, LoopOutcome, Result};
+use uptrakit_service_sdk::LoopOutcome;
 
 use crate::connection_context::ConnectionContext;
 
@@ -91,11 +92,11 @@ pub enum UpdateEvent {
 /// Send an update output message to the controller.
 #[tracing::instrument(skip_all, fields(%update_history_id))]
 pub async fn send_update_output(
-    conn: &mut ControllerConnection,
+    conn: &mut dyn ServiceTransport,
     update_history_id: uuid::Uuid,
     output_msg: crate::update::UpdateOutputMessage,
 ) {
-    conn.send_best_effort(ServiceMessage::UpdateOutput(UpdateOutputPayload {
+    conn.transport_send_best_effort(ServiceMessage::UpdateOutput(UpdateOutputPayload {
         update_history_id,
         output: output_msg.output,
         stream: output_msg.stream,
@@ -105,21 +106,21 @@ pub async fn send_update_output(
 
 /// Send the final update result to the controller.
 ///
-/// Returns `Err` if the WebSocket write fails. Callers should treat this as a
+/// Returns `Err` if the transport write fails. Callers should treat this as a
 /// reason to terminate the connection so the reconnect loop re-establishes the
 /// session; otherwise the controller has no signal to close the in-progress
 /// update record.
 #[tracing::instrument(skip_all, fields(%update_history_id))]
 pub async fn send_update_result(
-    conn: &mut ControllerConnection,
+    conn: &mut dyn ServiceTransport,
     update_history_id: uuid::Uuid,
     result: std::result::Result<crate::update::UpdateExecutionResult, tokio::task::JoinError>,
-) -> Result<()> {
+) -> std::result::Result<(), TransportError> {
     match result {
         Ok(exec_result) => {
             let status = exec_result.result.status.clone();
             let error = exec_result.result.error.clone();
-            conn.send(ServiceMessage::UpdateResult(exec_result.result))
+            conn.transport_send(ServiceMessage::UpdateResult(exec_result.result))
                 .await?;
             match status {
                 uptrakit_internal_wire::UpdateFinalStatus::Completed => {
@@ -136,7 +137,7 @@ pub async fn send_update_result(
         }
         Err(e) => {
             tracing::error!(error = %e, "update task panicked");
-            conn.send(ServiceMessage::UpdateResult(UpdateResultPayload {
+            conn.transport_send(ServiceMessage::UpdateResult(UpdateResultPayload {
                 update_history_id,
                 status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
                 from_version: None,
@@ -153,7 +154,7 @@ pub async fn send_update_result(
 /// Handle graceful shutdown: drain in-flight update, send Disconnecting.
 #[tracing::instrument(skip_all)]
 pub async fn handle_graceful_shutdown(
-    conn: &mut ControllerConnection,
+    conn: &mut dyn ServiceTransport,
     in_flight_update: Option<InFlightUpdate>,
     shutdown_timeout: std::time::Duration,
     disconnect_reason: DisconnectReason,
@@ -187,7 +188,7 @@ pub async fn handle_graceful_shutdown(
                         update_id = %update.update_history_id,
                         "shutdown timeout reached, abandoning in-flight update"
                     );
-                    conn.send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
+                    conn.transport_send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
                         update_history_id: update.update_history_id,
                         status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
                         from_version: None,
@@ -210,7 +211,7 @@ pub async fn handle_graceful_shutdown(
     let reason_dbg = format!("{disconnect_reason:?}");
     let disconnecting_msg =
         ServiceMessage::Disconnecting(DisconnectingPayload::new(disconnect_reason));
-    if let Err(e) = conn.send(disconnecting_msg).await {
+    if let Err(e) = conn.transport_send(disconnecting_msg).await {
         tracing::debug!(error = %e, "failed to send Disconnecting message");
     } else {
         tracing::debug!(reason = %reason_dbg, "sent Disconnecting message to controller");
@@ -244,10 +245,10 @@ pub fn spawn_background(
 /// caller to break out of the event loop so the reconnect logic can
 /// re-establish the session.
 pub async fn send_background_result(
-    conn: &mut ControllerConnection,
+    conn: &mut dyn ServiceTransport,
     msg: ServiceMessage,
 ) -> Option<LoopOutcome> {
-    if let Err(e) = conn.send_auto_paginate(msg).await {
+    if let Err(e) = conn.transport_send_auto_paginate(msg).await {
         tracing::error!(error = %e, "failed to send background operation result; disconnecting");
         return Some(LoopOutcome::Disconnected);
     }
@@ -294,7 +295,7 @@ pub async fn run_check_versions(
 pub async fn start_update(
     payload: uptrakit_internal_wire::ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
-    conn: &mut ControllerConnection,
+    conn: &mut dyn ServiceTransport,
     ctx: &ConnectionContext,
 ) -> InFlightUpdate {
     // Apply connection context to the plugin configs
@@ -327,7 +328,7 @@ pub async fn start_update(
 
     // Send UpdateStarted
     if let Err(e) = conn
-        .send(ServiceMessage::UpdateStarted(UpdateStartedPayload {
+        .transport_send(ServiceMessage::UpdateStarted(UpdateStartedPayload {
             update_history_id,
             from_version: None,
             interactive: confirmed_interactive,
@@ -365,7 +366,7 @@ pub async fn handle_execute_update(
     payload: uptrakit_internal_wire::ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
     in_flight_update: &mut Option<InFlightUpdate>,
-    conn: &mut ControllerConnection,
+    conn: &mut dyn ServiceTransport,
     ctx: &ConnectionContext,
 ) {
     tracing::info!(
@@ -382,7 +383,7 @@ pub async fn handle_execute_update(
             update_id = %payload.update_history_id,
             "rejecting update: another update is already in progress"
         );
-        conn.send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
+        conn.transport_send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
             update_history_id: payload.update_history_id,
             status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
             from_version: None,

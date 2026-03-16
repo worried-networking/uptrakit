@@ -412,6 +412,41 @@ impl ControllerConnection {
     }
 }
 
+#[async_trait::async_trait]
+impl uptrakit_internal_wire::ServiceTransport for ControllerConnection {
+    async fn transport_send(
+        &mut self,
+        msg: uptrakit_internal_wire::ServiceMessage,
+    ) -> std::result::Result<(), uptrakit_internal_wire::TransportError> {
+        self.send(msg)
+            .await
+            .map_err(|_| uptrakit_internal_wire::TransportError)
+    }
+
+    async fn transport_send_best_effort(&mut self, msg: uptrakit_internal_wire::ServiceMessage) {
+        self.send_best_effort(msg).await;
+    }
+
+    async fn transport_send_auto_paginate(
+        &mut self,
+        msg: uptrakit_internal_wire::ServiceMessage,
+    ) -> std::result::Result<(), uptrakit_internal_wire::TransportError> {
+        self.send_auto_paginate(msg)
+            .await
+            .map_err(|_| uptrakit_internal_wire::TransportError)
+    }
+
+    async fn transport_recv(&mut self) -> Option<uptrakit_internal_wire::ControllerMessage> {
+        match self.recv().await {
+            Ok(msg) => msg,
+            Err(e) => {
+                tracing::debug!(error = %e, "transport_recv: connection error");
+                None
+            }
+        }
+    }
+}
+
 /// Background task that drains the write channel and sends frames to the
 /// WebSocket sink.
 ///
