@@ -791,55 +791,11 @@ impl UpdateExecutorPlugin for NpmPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::{CommandOutput, LocalCommandExecutor, PluginBase};
+    use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
+    use uptrakit_plugin_infrastructure_core::{LocalCommandExecutor, PluginBase};
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)
-    }
-
-    struct FixedOutputExecutor {
-        output: String,
-        exit_code: i32,
-    }
-
-    impl FixedOutputExecutor {
-        fn with_output(output: impl Into<String>, exit_code: i32) -> Arc<dyn CommandExecutor> {
-            Arc::new(Self {
-                output: output.into(),
-                exit_code,
-            })
-        }
-    }
-
-    #[async_trait]
-    impl CommandExecutor for FixedOutputExecutor {
-        async fn execute(
-            &self,
-            _spec: &CommandSpec,
-            _output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            Ok(CommandOutput {
-                output: self.output.clone(),
-                exit_code: self.exit_code,
-            })
-        }
-
-        async fn execute_quiet(
-            &self,
-            _spec: &CommandSpec,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            if self.exit_code == 0 {
-                Ok(CommandOutput {
-                    output: self.output.clone(),
-                    exit_code: 0,
-                })
-            } else {
-                use rootcause::prelude::*;
-                bail!(uptrakit_command::CommandError::CommandFailed(
-                    self.exit_code
-                ))
-            }
-        }
     }
 
     // ── validate_identifier ───────────────────────────────────────────────────
@@ -1127,12 +1083,9 @@ mod tests {
     #[tokio::test]
     async fn discover_software_always_emits_targets() {
         let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"}}}"#;
-        let plugin = NpmPlugin::new(
-            NpmConfig::default(),
-            FixedOutputExecutor::with_output(json, 0),
-        )
-        .await
-        .expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new(json, 0))
+            .await
+            .expect("create");
         let discovered = plugin.discover_software().await.expect("ok");
         assert_eq!(discovered.len(), 1);
         assert_eq!(discovered[0].targets.len(), 1);
@@ -1147,12 +1100,9 @@ mod tests {
     #[tokio::test]
     async fn discover_software_excludes_system_packages() {
         let json = r#"{"dependencies":{"npm":{"version":"10.0.0"},"n8n":{"version":"1.18.0"}}}"#;
-        let plugin = NpmPlugin::new(
-            NpmConfig::default(),
-            FixedOutputExecutor::with_output(json, 0),
-        )
-        .await
-        .expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new(json, 0))
+            .await
+            .expect("create");
         let discovered = plugin.discover_software().await.expect("ok");
         assert_eq!(discovered.len(), 1);
         assert_eq!(discovered[0].name, "n8n");
@@ -1191,24 +1141,18 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_compatible_when_which_exits_zero() {
-        let plugin = NpmPlugin::new(
-            NpmConfig::default(),
-            FixedOutputExecutor::with_output("", 0),
-        )
-        .await
-        .expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new("", 0))
+            .await
+            .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         assert_eq!(result, HostCompatibility::Compatible);
     }
 
     #[tokio::test]
     async fn detect_host_compatibility_incompatible_when_which_exits_nonzero() {
-        let plugin = NpmPlugin::new(
-            NpmConfig::default(),
-            FixedOutputExecutor::with_output("", 1),
-        )
-        .await
-        .expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new("", 1))
+            .await
+            .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         match result {
             HostCompatibility::Incompatible(msg) => {
@@ -1224,24 +1168,18 @@ mod tests {
     #[tokio::test]
     async fn detect_installed_version_found() {
         let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"}}}"#;
-        let plugin = NpmPlugin::new(
-            NpmConfig::default(),
-            FixedOutputExecutor::with_output(json, 0),
-        )
-        .await
-        .expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new(json, 0))
+            .await
+            .expect("create");
         let result = plugin.detect_installed_version("n8n").await.expect("ok");
         assert_eq!(result, Some(Version::new("1.18.0")));
     }
 
     #[tokio::test]
     async fn detect_installed_version_not_installed() {
-        let plugin = NpmPlugin::new(
-            NpmConfig::default(),
-            FixedOutputExecutor::with_output("", 1),
-        )
-        .await
-        .expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new("", 1))
+            .await
+            .expect("create");
         let result = plugin.detect_installed_version("n8n").await.expect("ok");
         assert_eq!(result, None);
     }
@@ -1272,12 +1210,9 @@ mod tests {
     #[tokio::test]
     async fn batch_detect_installed_version_found() {
         let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"},"pm2":{"version":"5.3.0"}}}"#;
-        let plugin = NpmPlugin::new(
-            NpmConfig::default(),
-            FixedOutputExecutor::with_output(json, 0),
-        )
-        .await
-        .expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new(json, 0))
+            .await
+            .expect("create");
         let items = vec![
             BatchDetectItem::new("n8n".to_string()),
             BatchDetectItem::new("pm2".to_string()),
@@ -1305,12 +1240,9 @@ mod tests {
     async fn batch_detect_installed_version_not_installed_package() {
         // The package "missing" is not in the npm list output.
         let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"}}}"#;
-        let plugin = NpmPlugin::new(
-            NpmConfig::default(),
-            FixedOutputExecutor::with_output(json, 0),
-        )
-        .await
-        .expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new(json, 0))
+            .await
+            .expect("create");
         let items = vec![
             BatchDetectItem::new("n8n".to_string()),
             BatchDetectItem::new("missing".to_string()),
@@ -1337,12 +1269,9 @@ mod tests {
     #[tokio::test]
     async fn batch_detect_installed_version_command_fails_all_not_installed() {
         // When npm list -g exits non-zero, all items are treated as not installed.
-        let plugin = NpmPlugin::new(
-            NpmConfig::default(),
-            FixedOutputExecutor::with_output("", 1),
-        )
-        .await
-        .expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new("", 1))
+            .await
+            .expect("create");
         let items = vec![
             BatchDetectItem::new("n8n".to_string()),
             BatchDetectItem::new("pm2".to_string()),

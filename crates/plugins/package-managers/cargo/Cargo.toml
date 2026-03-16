@@ -23,6 +23,7 @@ tame-index = { workspace = true }
 futures-util = { workspace = true, features = ["alloc"] }
 
 [dev-dependencies]
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["macros", "rt"] }
 uptrakit-command = { workspace = true }
 

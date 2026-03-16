@@ -817,100 +817,11 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for DnfPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_plugin_infrastructure_core::testing::{FixedOutputExecutor, RoutedOutputExecutor};
     use uptrakit_plugin_infrastructure_core::{CommandOutput, LocalCommandExecutor};
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)
-    }
-
-    /// Mock executor that routes `execute_quiet` output by the command program name.
-    struct RoutedOutputExecutor {
-        routes: Vec<(&'static str, String, i32)>,
-    }
-
-    impl RoutedOutputExecutor {
-        fn with_routes(routes: Vec<(&'static str, &'static str, i32)>) -> Arc<dyn CommandExecutor> {
-            Arc::new(Self {
-                routes: routes
-                    .into_iter()
-                    .map(|(p, o, c)| (p, o.to_string(), c))
-                    .collect(),
-            })
-        }
-
-        fn output_for(&self, spec: &CommandSpec) -> (String, i32) {
-            use uptrakit_plugin_infrastructure_core::CommandMode;
-            if let CommandMode::Exec { program, .. } = &spec.mode {
-                for (name, out, code) in &self.routes {
-                    if program == *name {
-                        return (out.clone(), *code);
-                    }
-                }
-            }
-            (String::new(), 0)
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl CommandExecutor for RoutedOutputExecutor {
-        async fn execute(
-            &self,
-            spec: &CommandSpec,
-            _output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            let (output, exit_code) = self.output_for(spec);
-            Ok(CommandOutput { output, exit_code })
-        }
-
-        async fn execute_quiet(
-            &self,
-            spec: &CommandSpec,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            let (output, exit_code) = self.output_for(spec);
-            Ok(CommandOutput { output, exit_code })
-        }
-    }
-
-    /// Mock executor that returns a configurable exit code for `execute_quiet`.
-    struct FixedExitCodeExecutor {
-        exit_code: i32,
-    }
-
-    impl FixedExitCodeExecutor {
-        fn with_exit_code(exit_code: i32) -> Arc<dyn CommandExecutor> {
-            Arc::new(Self { exit_code })
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl CommandExecutor for FixedExitCodeExecutor {
-        async fn execute(
-            &self,
-            _spec: &CommandSpec,
-            _output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            Ok(CommandOutput {
-                output: String::new(),
-                exit_code: self.exit_code,
-            })
-        }
-
-        async fn execute_quiet(
-            &self,
-            _spec: &CommandSpec,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            if self.exit_code == 0 {
-                Ok(CommandOutput {
-                    output: String::new(),
-                    exit_code: 0,
-                })
-            } else {
-                use rootcause::prelude::*;
-                bail!(uptrakit_command::CommandError::CommandFailed(
-                    self.exit_code
-                ))
-            }
-        }
     }
 
     // ── validate_identifier ──────────────────────────────────────────────
@@ -1172,7 +1083,7 @@ mod tests {
 
     #[tokio::test]
     async fn host_compat_compatible_when_dnf_found() {
-        let executor = RoutedOutputExecutor::with_routes(vec![("which", "", 0)]);
+        let executor = RoutedOutputExecutor::new([("which", "", 0)]);
         let plugin = DnfPlugin::new(DnfConfig::default(), executor)
             .await
             .unwrap();
@@ -1182,7 +1093,7 @@ mod tests {
 
     #[tokio::test]
     async fn host_compat_incompatible_when_dnf_not_found() {
-        let executor = FixedExitCodeExecutor::with_exit_code(1);
+        let executor = FixedOutputExecutor::failure(1);
         let plugin = DnfPlugin::new(DnfConfig::default(), executor)
             .await
             .unwrap();
@@ -1196,7 +1107,7 @@ mod tests {
     async fn discover_software_emits_targets() {
         // Targets are always emitted regardless of filter.
         let rpm_output = "nginx\t1.24.0-1.fc40\ncurl\t8.0.1-1.fc40\n";
-        let executor = RoutedOutputExecutor::with_routes(vec![("rpm", rpm_output, 0)]);
+        let executor = RoutedOutputExecutor::new([("rpm", rpm_output, 0)]);
         let plugin = DnfPlugin::new(DnfConfig::default(), executor)
             .await
             .unwrap();
@@ -1211,7 +1122,7 @@ mod tests {
     #[tokio::test]
     async fn discover_software_emits_targets_with_explicit_all_filter() {
         let rpm_output = "nginx\t1.24.0-1.fc40\n";
-        let executor = RoutedOutputExecutor::with_routes(vec![("rpm", rpm_output, 0)]);
+        let executor = RoutedOutputExecutor::new([("rpm", rpm_output, 0)]);
         let config = DnfConfig {
             discovery_filter: DnfDiscoveryFilter::All,
         };
@@ -1239,7 +1150,7 @@ mod tests {
     #[tokio::test]
     async fn batch_detect_finds_installed_packages() {
         let rpm_output = "nginx\t1.24.0-1.fc40\ncurl\t8.0.1-1.fc40\n";
-        let executor = RoutedOutputExecutor::with_routes(vec![("rpm", rpm_output, 0)]);
+        let executor = RoutedOutputExecutor::new([("rpm", rpm_output, 0)]);
         let plugin = DnfPlugin::new(DnfConfig::default(), executor)
             .await
             .unwrap();
@@ -1269,7 +1180,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_fetch_exit_0_all_up_to_date() {
-        let executor = RoutedOutputExecutor::with_routes(vec![("dnf", "", 0)]);
+        let executor = RoutedOutputExecutor::new([("dnf", "", 0)]);
         let plugin = DnfPlugin::new(DnfConfig::default(), executor)
             .await
             .unwrap();

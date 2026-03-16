@@ -13,6 +13,7 @@ agent-infra = ["dep:sea-orm", "dep:sea-orm-migration", "dep:uuid", "migrations"]
 http-client = ["dep:reqwest", "uptrakit-shared-types/http-ssrf"]
 migrations = ["dep:sea-orm-migration"]
 plugin-ops = ["dep:sea-orm", "dep:uuid"]
+testing = []
 
 [dependencies]
 serde = { workspace = true }

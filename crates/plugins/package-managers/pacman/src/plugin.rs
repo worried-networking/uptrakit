@@ -718,111 +718,11 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for PacmanPlugin 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::{CommandOutput, LocalCommandExecutor};
+    use uptrakit_plugin_infrastructure_core::LocalCommandExecutor;
+    use uptrakit_plugin_infrastructure_core::testing::{FixedOutputExecutor, RoutedOutputExecutor};
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)
-    }
-
-    /// Mock executor that routes `execute_quiet` output by the command program
-    /// name.
-    ///
-    /// Matches the program name from `CommandSpec::mode` (Exec variant only).
-    /// Falls back to an empty-output success for Shell-mode or unrecognised
-    /// programs.
-    struct RoutedOutputExecutor {
-        /// `(program_name, output_to_return)` entries checked in order.
-        routes: Vec<(&'static str, String)>,
-    }
-
-    impl RoutedOutputExecutor {
-        /// Create an executor from a list of `(program, output)` pairs.
-        fn with_routes(routes: Vec<(&'static str, &'static str)>) -> Arc<dyn CommandExecutor> {
-            Arc::new(Self {
-                routes: routes
-                    .into_iter()
-                    .map(|(p, o)| (p, o.to_string()))
-                    .collect(),
-            })
-        }
-
-        fn output_for(&self, spec: &CommandSpec) -> String {
-            use uptrakit_plugin_infrastructure_core::CommandMode;
-            if let CommandMode::Exec { program, .. } = &spec.mode {
-                for (name, out) in &self.routes {
-                    if program == *name {
-                        return out.clone();
-                    }
-                }
-            }
-            String::new()
-        }
-    }
-
-    #[async_trait]
-    impl CommandExecutor for RoutedOutputExecutor {
-        async fn execute(
-            &self,
-            spec: &CommandSpec,
-            _output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            Ok(CommandOutput {
-                output: self.output_for(spec),
-                exit_code: 0,
-            })
-        }
-
-        async fn execute_quiet(
-            &self,
-            spec: &CommandSpec,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            Ok(CommandOutput {
-                output: self.output_for(spec),
-                exit_code: 0,
-            })
-        }
-    }
-
-    /// Mock executor that returns a configurable exit code for `execute_quiet`.
-    struct FixedExitCodeExecutor {
-        exit_code: i32,
-    }
-
-    impl FixedExitCodeExecutor {
-        fn with_exit_code(exit_code: i32) -> Arc<dyn CommandExecutor> {
-            Arc::new(Self { exit_code })
-        }
-    }
-
-    #[async_trait]
-    impl CommandExecutor for FixedExitCodeExecutor {
-        async fn execute(
-            &self,
-            _spec: &CommandSpec,
-            _output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            Ok(CommandOutput {
-                output: String::new(),
-                exit_code: self.exit_code,
-            })
-        }
-
-        async fn execute_quiet(
-            &self,
-            _spec: &CommandSpec,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            if self.exit_code == 0 {
-                Ok(CommandOutput {
-                    output: String::new(),
-                    exit_code: 0,
-                })
-            } else {
-                use rootcause::prelude::*;
-                bail!(uptrakit_command::CommandError::CommandFailed(
-                    self.exit_code
-                ))
-            }
-        }
     }
 
     // ── validate_identifier ──────────────────────────────────────────────────
@@ -1112,24 +1012,18 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_compatible_when_which_exits_zero() {
-        let plugin = PacmanPlugin::new(
-            PacmanConfig::default(),
-            FixedExitCodeExecutor::with_exit_code(0),
-        )
-        .await
-        .expect("create");
+        let plugin = PacmanPlugin::new(PacmanConfig::default(), FixedOutputExecutor::failure(0))
+            .await
+            .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         assert_eq!(result, HostCompatibility::Compatible);
     }
 
     #[tokio::test]
     async fn detect_host_compatibility_incompatible_when_which_exits_nonzero() {
-        let plugin = PacmanPlugin::new(
-            PacmanConfig::default(),
-            FixedExitCodeExecutor::with_exit_code(1),
-        )
-        .await
-        .expect("create");
+        let plugin = PacmanPlugin::new(PacmanConfig::default(), FixedOutputExecutor::failure(1))
+            .await
+            .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         match result {
             HostCompatibility::Incompatible(msg) => {
@@ -1145,7 +1039,7 @@ mod tests {
     #[tokio::test]
     async fn discover_software_emits_targets() {
         // Targets are always emitted regardless of filter.
-        let executor = RoutedOutputExecutor::with_routes(vec![("pacman", "nginx 1.26.3-1\n")]);
+        let executor = RoutedOutputExecutor::success([("pacman", "nginx 1.26.3-1\n")]);
         let plugin = PacmanPlugin::new(PacmanConfig::default(), executor)
             .await
             .expect("create plugin");
@@ -1165,10 +1059,8 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_default_config_discovers_all_packages() {
-        let executor = RoutedOutputExecutor::with_routes(vec![(
-            "pacman",
-            "nginx 1.26.3-1\npython 3.12.4-1\n",
-        )]);
+        let executor =
+            RoutedOutputExecutor::success([("pacman", "nginx 1.26.3-1\npython 3.12.4-1\n")]);
         let plugin = PacmanPlugin::new(PacmanConfig::default(), executor)
             .await
             .expect("create plugin");
@@ -1179,7 +1071,7 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_emits_targets_with_explicit_all_filter() {
-        let executor = RoutedOutputExecutor::with_routes(vec![("pacman", "nginx 1.26.3-1\n")]);
+        let executor = RoutedOutputExecutor::success([("pacman", "nginx 1.26.3-1\n")]);
         let plugin = PacmanPlugin::new(
             PacmanConfig {
                 discovery_filter: PacmanDiscoveryFilter::All,
@@ -1200,7 +1092,7 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_emits_targets_with_explicit_filter() {
-        let executor = RoutedOutputExecutor::with_routes(vec![("pacman", "nginx 1.26.3-1\n")]);
+        let executor = RoutedOutputExecutor::success([("pacman", "nginx 1.26.3-1\n")]);
         let plugin = PacmanPlugin::new(
             PacmanConfig {
                 discovery_filter: PacmanDiscoveryFilter::Explicit,
@@ -1224,10 +1116,8 @@ mod tests {
 
     #[tokio::test]
     async fn batch_detect_installed_version_found_packages() {
-        let executor = RoutedOutputExecutor::with_routes(vec![(
-            "pacman",
-            "nginx 1.26.3-1\npython 3.12.4-1\n",
-        )]);
+        let executor =
+            RoutedOutputExecutor::success([("pacman", "nginx 1.26.3-1\npython 3.12.4-1\n")]);
         let plugin = PacmanPlugin::new(PacmanConfig::default(), executor)
             .await
             .expect("create");
@@ -1259,7 +1149,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_detect_installed_version_package_not_in_output_is_not_installed() {
-        let executor = RoutedOutputExecutor::with_routes(vec![("pacman", "nginx 1.26.3-1\n")]);
+        let executor = RoutedOutputExecutor::success([("pacman", "nginx 1.26.3-1\n")]);
         let plugin = PacmanPlugin::new(PacmanConfig::default(), executor)
             .await
             .expect("create");
@@ -1308,7 +1198,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_fetch_releases_mixed_packages() {
-        let executor = RoutedOutputExecutor::with_routes(vec![(
+        let executor = RoutedOutputExecutor::success([(
             "pacman",
             concat!(
                 "Repository      : extra\n",

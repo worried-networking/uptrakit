@@ -15,6 +15,8 @@ pub mod plugin_base;
 pub mod plugin_ops;
 pub mod secrets;
 pub mod serde_helpers;
+#[cfg(feature = "testing")]
+pub mod testing;
 pub mod traits;
 pub mod types;
 pub mod version;

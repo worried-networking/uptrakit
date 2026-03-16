@@ -599,44 +599,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for CargoPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::CommandOutput;
-
-    /// Mock executor that returns a fixed output and exit code for all commands.
-    struct FixedOutputExecutor {
-        output: String,
-        exit_code: i32,
-    }
-
-    #[async_trait]
-    impl CommandExecutor for FixedOutputExecutor {
-        async fn execute(
-            &self,
-            _spec: &CommandSpec,
-            _output_tx: &mpsc::Sender<UpdateOutputLine>,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            Ok(CommandOutput {
-                output: self.output.clone(),
-                exit_code: self.exit_code,
-            })
-        }
-
-        async fn execute_quiet(
-            &self,
-            _spec: &CommandSpec,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            Ok(CommandOutput {
-                output: self.output.clone(),
-                exit_code: self.exit_code,
-            })
-        }
-    }
-
-    fn make_executor(stdout: &str, exit_code: i32) -> Arc<dyn CommandExecutor> {
-        Arc::new(FixedOutputExecutor {
-            output: stdout.to_string(),
-            exit_code,
-        })
-    }
+    use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
 
     // ── validate_identifier ───────────────────────────────────────────────────
 
@@ -842,7 +805,7 @@ mod tests {
     #[tokio::test]
     async fn detect_host_compatibility_compatible_when_cargo_found() {
         use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
-        let plugin = CargoPlugin::new(CargoConfig::default(), make_executor("", 0))
+        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(""))
             .await
             .unwrap();
         let result = plugin.detect_host_compatibility().await.unwrap();
@@ -853,7 +816,7 @@ mod tests {
     async fn detect_host_compatibility_incompatible_when_cargo_missing() {
         use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         // Exit code != 0 from `which cargo` -> incompatible.
-        let plugin = CargoPlugin::new(CargoConfig::default(), make_executor("", 1))
+        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::failure(1))
             .await
             .unwrap();
         let result = plugin.detect_host_compatibility().await.unwrap();
@@ -865,7 +828,7 @@ mod tests {
     #[tokio::test]
     async fn required_sudo_commands_empty() {
         use uptrakit_plugin_infrastructure_core::PluginBase;
-        let plugin = CargoPlugin::new(CargoConfig::default(), make_executor("", 0))
+        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(""))
             .await
             .unwrap();
         assert!(plugin.required_sudo_commands().is_empty());
@@ -886,7 +849,7 @@ mod tests {
     async fn detect_installed_version_found() {
         use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
         let output = "bat v0.24.0:\n    bat\nripgrep v14.1.1:\n    rg\n";
-        let plugin = CargoPlugin::new(CargoConfig::default(), make_executor(output, 0))
+        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(output))
             .await
             .unwrap();
 
@@ -898,7 +861,7 @@ mod tests {
     async fn detect_installed_version_not_found() {
         use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
         let output = "bat v0.24.0:\n    bat\n";
-        let plugin = CargoPlugin::new(CargoConfig::default(), make_executor(output, 0))
+        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(output))
             .await
             .unwrap();
 
@@ -909,7 +872,7 @@ mod tests {
     #[tokio::test]
     async fn detect_installed_version_invalid_identifier_fails() {
         use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
-        let plugin = CargoPlugin::new(CargoConfig::default(), make_executor("", 0))
+        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(""))
             .await
             .unwrap();
 
@@ -923,7 +886,7 @@ mod tests {
     async fn batch_detect_installed_version_basic() {
         use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
         let output = "bat v0.24.0:\n    bat\nripgrep v14.1.1:\n    rg\n";
-        let plugin = CargoPlugin::new(CargoConfig::default(), make_executor(output, 0))
+        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(output))
             .await
             .unwrap();
 
@@ -958,7 +921,7 @@ mod tests {
     #[tokio::test]
     async fn batch_detect_installed_version_empty_returns_empty() {
         use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
-        let plugin = CargoPlugin::new(CargoConfig::default(), make_executor("", 0))
+        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(""))
             .await
             .unwrap();
 
@@ -972,7 +935,7 @@ mod tests {
     async fn discover_software_always_emits_targets() {
         use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         let output = "bat v0.24.0:\n    bat\nripgrep v14.1.1:\n    rg\n";
-        let plugin = CargoPlugin::new(CargoConfig::default(), make_executor(output, 0))
+        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(output))
             .await
             .unwrap();
 
@@ -995,7 +958,7 @@ mod tests {
                 registry_url: None,
                 use_locked: true,
             },
-            make_executor(output, 0),
+            FixedOutputExecutor::success(output),
         )
         .await
         .unwrap();
@@ -1008,7 +971,7 @@ mod tests {
     #[tokio::test]
     async fn discover_software_empty_install_list() {
         use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
-        let plugin = CargoPlugin::new(CargoConfig::default(), make_executor("", 0))
+        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(""))
             .await
             .unwrap();
 

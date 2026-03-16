@@ -832,7 +832,8 @@ impl UpdateExecutorPlugin for HomebrewPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::{CommandOutput, LocalCommandExecutor};
+    use uptrakit_plugin_infrastructure_core::LocalCommandExecutor;
+    use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
 
     // ── Sample `brew info --json=v2` output for a formula ───────────────
 
@@ -1169,49 +1170,6 @@ mod tests {
         assert!(packages.is_empty());
     }
 
-    // ── Mock executor ────────────────────────────────────────────────────
-
-    struct FixedExitCodeExecutor {
-        exit_code: i32,
-    }
-
-    impl FixedExitCodeExecutor {
-        fn with_exit_code(exit_code: i32) -> Arc<dyn CommandExecutor> {
-            Arc::new(Self { exit_code })
-        }
-    }
-
-    #[async_trait]
-    impl CommandExecutor for FixedExitCodeExecutor {
-        async fn execute(
-            &self,
-            _spec: &CommandSpec,
-            _output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            Ok(CommandOutput {
-                output: String::new(),
-                exit_code: self.exit_code,
-            })
-        }
-
-        async fn execute_quiet(
-            &self,
-            _spec: &CommandSpec,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            if self.exit_code == 0 {
-                Ok(CommandOutput {
-                    output: String::new(),
-                    exit_code: 0,
-                })
-            } else {
-                use rootcause::prelude::*;
-                bail!(uptrakit_command::CommandError::CommandFailed(
-                    self.exit_code
-                ))
-            }
-        }
-    }
-
     // ── Plugin trait ──────────────────────────────────────────────────
 
     #[tokio::test]
@@ -1286,24 +1244,20 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_compatible_when_which_exits_zero() {
-        let plugin = HomebrewPlugin::new(
-            HomebrewConfig::default(),
-            FixedExitCodeExecutor::with_exit_code(0),
-        )
-        .await
-        .expect("create");
+        let plugin =
+            HomebrewPlugin::new(HomebrewConfig::default(), FixedOutputExecutor::failure(0))
+                .await
+                .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         assert_eq!(result, HostCompatibility::Compatible);
     }
 
     #[tokio::test]
     async fn detect_host_compatibility_incompatible_when_which_exits_nonzero() {
-        let plugin = HomebrewPlugin::new(
-            HomebrewConfig::default(),
-            FixedExitCodeExecutor::with_exit_code(1),
-        )
-        .await
-        .expect("create");
+        let plugin =
+            HomebrewPlugin::new(HomebrewConfig::default(), FixedOutputExecutor::failure(1))
+                .await
+                .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         match result {
             HostCompatibility::Incompatible(msg) => {
@@ -1345,43 +1299,6 @@ mod tests {
     }
 
     // ── batch_detect_installed_version ───────────────────────────────────
-
-    /// Mock executor that returns a specific JSON payload for brew info.
-    struct BrewInfoExecutor {
-        json: String,
-    }
-
-    impl BrewInfoExecutor {
-        fn with_json(json: serde_json::Value) -> Arc<dyn CommandExecutor> {
-            Arc::new(Self {
-                json: json.to_string(),
-            })
-        }
-    }
-
-    #[async_trait]
-    impl CommandExecutor for BrewInfoExecutor {
-        async fn execute(
-            &self,
-            _spec: &CommandSpec,
-            _output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            Ok(CommandOutput {
-                output: self.json.clone(),
-                exit_code: 0,
-            })
-        }
-
-        async fn execute_quiet(
-            &self,
-            _spec: &CommandSpec,
-        ) -> uptrakit_command::Result<CommandOutput> {
-            Ok(CommandOutput {
-                output: self.json.clone(),
-                exit_code: 0,
-            })
-        }
-    }
 
     fn multi_formula_json() -> serde_json::Value {
         serde_json::json!({
@@ -1440,7 +1357,7 @@ mod tests {
             HomebrewConfig {
                 package_type: HomebrewPackageType::Formula,
             },
-            BrewInfoExecutor::with_json(multi_formula_json()),
+            FixedOutputExecutor::success(multi_formula_json().to_string()),
         )
         .await
         .expect("create");
@@ -1487,7 +1404,7 @@ mod tests {
             HomebrewConfig {
                 package_type: HomebrewPackageType::Cask,
             },
-            BrewInfoExecutor::with_json(multi_cask_json()),
+            FixedOutputExecutor::success(multi_cask_json().to_string()),
         )
         .await
         .expect("create");
@@ -1540,7 +1457,7 @@ mod tests {
             HomebrewConfig {
                 package_type: HomebrewPackageType::Formula,
             },
-            BrewInfoExecutor::with_json(multi_formula_json()),
+            FixedOutputExecutor::success(multi_formula_json().to_string()),
         )
         .await
         .expect("create");
@@ -1587,7 +1504,7 @@ mod tests {
             HomebrewConfig {
                 package_type: HomebrewPackageType::Cask,
             },
-            BrewInfoExecutor::with_json(multi_cask_json()),
+            FixedOutputExecutor::success(multi_cask_json().to_string()),
         )
         .await
         .expect("create");
