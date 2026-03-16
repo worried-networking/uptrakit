@@ -8,6 +8,7 @@
 pub mod client;
 pub mod connection_context;
 pub mod error;
+pub mod host_info;
 pub mod update;
 pub mod version_check;
 
