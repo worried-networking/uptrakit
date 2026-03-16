@@ -631,7 +631,24 @@ for user review. Key invariants:
    declarations for use by the SSH agent's sudoers generation logic. See
    [Plugin Guidelines](docs/development/plugin-guidelines.md) and [Sudoers Management](docs/security/sudoers-management.md).
 
-8. **Plugin capabilities.** The `PluginCapability` enum (in `crates/plugins/infrastructure/core/src/types.rs`) has six variants:
+8. **Plugin capabilities.** The `PluginCapability` enum is defined in
+   `crates/shared/types/src/plugin_capability.rs` and has 14 variants.
+
+   **Role-assignment capabilities** (used by the UI `EditHostAssignmentModal` to filter plugin
+   configs for each standard-role dropdown via `GET /api/v1/plugin-types`):
+
+   - `VersionDetection` — the plugin implements `detect_installed_version()` and can be assigned to
+     the `detect_version` role on a host software assignment. Serializes as `"version_detection"`.
+     Implemented by all package-manager plugins and `ShellPlugin` (`generic_shell`).
+   - `ReleaseFetching` — the plugin implements `fetch_releases()` and can be assigned to the
+     `fetch_releases` role. Serializes as `"release_fetching"`. Implemented by all package-manager
+     plugins and all releases plugins (`github`, `gitlab`, `forgejo`, `docker`). Note: `gitlab` and
+     `forgejo` do not declare `UpdateExecution` because they have no `execute_update` implementation.
+   - `UpdateExecution` — the plugin implements `execute_update()` and can be assigned to the
+     `execute_update` role. Serializes as `"update_execution"`. Implemented by all package-manager
+     plugins, `ShellPlugin`, `github`, and `docker`.
+
+   **Autodiscovery capabilities:**
 
    - `DiscoverLocalSoftware` — the plugin can discover locally installed software.
    - `RefreshPackageIndex` — the plugin can refresh/sync a local package index from remote sources.
@@ -643,6 +660,9 @@ for user review. Key invariants:
      External match sites must include a wildcard arm (see `coding-standards.md` § Public Enum
      Extensibility). Implemented by:
      `AptPlugin` (checks `which apt-get`) and `HomebrewPlugin` (checks `which brew`).
+
+   **Update lifecycle and hooks:**
+
    - `UpdateLifecycle` — the plugin implements the `UpdateLifecyclePlugin` subtrait (via
      `as_update_lifecycle()` accessor). Provides `execute_pre_hook()` (returns `PreUpdateHookResult`:
      proceed or abort with reason) and `execute_post_hook()` (non-fatal, errors logged as warnings).
@@ -650,10 +670,19 @@ for user review. Key invariants:
      `release_info`, and `update_succeeded` (`None` during pre-hooks, `Some(bool)` during post-hooks).
      Implemented by `SystemdHookPlugin` and `ShellHookPlugin`.
    - `ControllerSideFetchReleases` — the plugin's `fetch_releases()` requires no local system state
-     and can run on the controller instead of the agent. Implemented by `GithubPlugin` and
-     `DockerPlugin`. This capability interacts with the `execution_site` field on
+     and can run on the controller instead of the agent. Implemented by `GitHubPlugin`, `DockerPlugin`,
+     `NpmPlugin`, and `CargoPlugin`. This capability interacts with the `execution_site` field on
      `host_software_item_plugins`: `auto` (default) delegates to the controller when this capability
      is present, `agent` forces agent-side execution, `controller` forces controller-side execution.
+
+   **Other capabilities:**
+
+   - `NotificationDelivery` — the plugin delivers notifications via a transport channel.
+   - `HostLifecycle` — the plugin manages infrastructure host lifecycle (bootstrap, sync).
+   - `HostReport` — the plugin receives host report callbacks from the agent.
+   - `GuestExec` — the plugin provides guest execution capabilities (e.g. run commands inside VMs).
+   - `ServiceMigrations` — the plugin contributes service-side database migrations.
+   - `ControllerMigrations` — the plugin contributes controller-side database migrations.
 
    Update lifecycle hooks are standalone plugin assignments with roles `PreUpdateHook` and
    `PostUpdateHook` on `host_software_item_plugins`, ordered by `ordinal`. See
