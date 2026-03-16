@@ -71,11 +71,11 @@ async fn handle_set_update_freeze(
     payload: uptrakit_internal_wire::SetUpdateFreezePayload,
 ) {
     if payload.enabled {
-        if let Some(parent) = freeze_file_path.parent() {
-            if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                tracing::error!(error = %e, "failed to create freeze file directory");
-                return;
-            }
+        if let Some(parent) = freeze_file_path.parent()
+            && let Err(e) = tokio::fs::create_dir_all(parent).await
+        {
+            tracing::error!(error = %e, "failed to create freeze file directory");
+            return;
         }
         if let Err(e) = tokio::fs::write(freeze_file_path, b"").await {
             tracing::error!(error = %e, "failed to create update freeze file");
@@ -299,16 +299,15 @@ pub(crate) async fn run_embedded_agent(
                         }
                     }
                     AgentEvent::Update(UpdateEvent::Completed(result)) => {
-                        if let Some(update) = in_flight_update.take() {
-                            if let Err(e) = uptrakit_agent_core::send_update_result(
+                        if let Some(update) = in_flight_update.take()
+                            && let Err(e) = uptrakit_agent_core::send_update_result(
                                 &mut transport,
                                 update.update_history_id,
                                 result,
                             )
                             .await
-                            {
-                                tracing::error!(error = %e, "embedded agent: failed to send UpdateResult");
-                            }
+                        {
+                            tracing::error!(error = %e, "embedded agent: failed to send UpdateResult");
                         }
                     }
                     AgentEvent::Update(UpdateEvent::Attention(update_history_id)) => {
@@ -383,14 +382,14 @@ pub(crate) async fn run_embedded_agent(
                             );
                             continue;
                         }
-                        if let Some(last) = last_update_accepted {
-                            if last.elapsed() < UPDATE_COOLDOWN {
-                                tracing::warn!(
-                                    update_id = %payload.update_history_id,
-                                    "security_audit: ExecuteUpdate rejected — rate limit"
-                                );
-                                continue;
-                            }
+                        if let Some(last) = last_update_accepted
+                            && last.elapsed() < UPDATE_COOLDOWN
+                        {
+                            tracing::warn!(
+                                update_id = %payload.update_history_id,
+                                "security_audit: ExecuteUpdate rejected — rate limit"
+                            );
+                            continue;
                         }
                         last_update_accepted = Some(std::time::Instant::now());
                         uptrakit_agent_core::handle_execute_update(
@@ -437,14 +436,14 @@ pub(crate) async fn run_embedded_agent(
                             );
                             continue;
                         }
-                        if let Some(last) = last_update_accepted {
-                            if last.elapsed() < UPDATE_COOLDOWN {
-                                tracing::warn!(
-                                    batch_id = %payload.batch_id,
-                                    "security_audit: ExecuteBatchUpdate rejected — rate limit"
-                                );
-                                continue;
-                            }
+                        if let Some(last) = last_update_accepted
+                            && last.elapsed() < UPDATE_COOLDOWN
+                        {
+                            tracing::warn!(
+                                batch_id = %payload.batch_id,
+                                "security_audit: ExecuteBatchUpdate rejected — rate limit"
+                            );
+                            continue;
                         }
                         last_update_accepted = Some(std::time::Instant::now());
                         uptrakit_agent_core::spawn_background(&bg_tx, {
