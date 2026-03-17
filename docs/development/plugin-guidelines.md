@@ -38,6 +38,7 @@ other trait methods have default no-op implementations; plugins override only wh
 | `DetectHostCompatibility` | `detect_host_compatibility()` | Determine whether this plugin is applicable to the current host environment. |
 | `UpdateLifecycle` | `as_update_lifecycle()` → `UpdateLifecyclePlugin` | Plugin implements pre/post-update hooks via the `UpdateLifecyclePlugin` subtrait. See [Update Lifecycle Plugins](update-hooks.md). |
 | `ControllerSideFetchReleases` | _(no trait method)_ | Declares that `fetch_releases()` can run on the controller without local system state. See [Declaring ControllerSideFetchReleases](#declaring-controllersidefetchreleases). |
+| `ConfigTest` | _(handled by registry)_ | Plugin supports configuration testing (dry-run validation) without triggering real version checks, updates, or side effects. See [Config Test Capability](#config-test-capability). |
 
 ## Host Compatibility Detection
 
@@ -160,6 +161,57 @@ calls it, the process will panic.
 
 **Current plugins with this capability:** `GitHubPlugin`, `GitLabPlugin`, `ForgejoPlugin`,
 `DockerPlugin`, `NpmPlugin`.
+
+## Config Test Capability
+
+Plugins that declare `PluginCapability::ConfigTest` support dry-run validation of their configuration
+via the `POST /api/v1/plugin-configs/test` endpoint. All 17 built-in plugins declare this capability.
+
+The test executes without creating any database records or triggering real updates. The kind of test
+performed depends on the plugin type and its capabilities:
+
+| `ConfigTestKind` | Description | When used |
+| :--- | :--- | :--- |
+| `VersionDetection` | Runs `detect_installed_version()` against the host and returns the detected version. | Agent-side plugins that support version detection (Shell, APT, Homebrew, etc.). |
+| `UpdateCommandValidation` | Validates the update command syntax (e.g. `sh -n` check) without executing it. | Agent-side plugins with an update command (Shell). |
+| `PreUpdateHook` | Executes the pre-update hook with a mock `UpdateLifecycleContext`. | Hook plugins (hook\_systemd, hook\_shell) assigned to `pre_update_hook`. |
+| `PostUpdateHook` | Executes the post-update hook with a mock `UpdateLifecycleContext`. | Hook plugins (hook\_systemd, hook\_shell) assigned to `post_update_hook`. |
+| `Connectivity` | Tests upstream API connectivity by performing a lightweight `fetch_releases()` call. | Controller-side plugins (GitHub, GitLab, Forgejo, Docker, npm, Cargo). |
+
+### Two execution paths
+
+The test endpoint dispatches to one of two paths based on the plugin's capabilities:
+
+**Controller-side test path** -- For plugins that declare `ControllerSideFetchReleases`, the
+controller runs the test directly in its own process. No agent connection is required and `host_id`
+is optional. The controller instantiates the plugin with a `NoopCommandExecutor`, calls
+`fetch_releases()` (or equivalent), and returns the result. This path handles the `Connectivity`
+test kind.
+
+**Agent-side test path** -- For plugins that require local system access (Shell, package managers,
+hooks), the controller sends a `ControllerMessage::TestPluginConfig` wire message to the agent
+that owns the specified `host_id`. The agent executes the test locally and responds with
+`ServiceMessage::TestPluginConfigResult`. The controller correlates the response via
+`ConfigTestProxy` (same request/response pattern as `ExtensionProxy`) and returns it to the
+HTTP caller. The `host_id` field is required for this path.
+
+### Adding `ConfigTest` to a new plugin
+
+All plugins should declare `ConfigTest` in their `capabilities()` return value:
+
+```rust
+fn capabilities(&self) -> &'static [PluginCapability] {
+    &[
+        PluginCapability::VersionDetection,
+        PluginCapability::ConfigTest,
+        // ... other capabilities
+    ]
+}
+```
+
+The test dispatch logic in the plugin registry selects the appropriate `ConfigTestKind` based on
+the plugin's other declared capabilities. No plugin-specific test code is required -- the registry
+reuses the existing `detect_installed_version()`, `fetch_releases()`, and hook methods.
 
 ## The Role Model for New Plugins
 

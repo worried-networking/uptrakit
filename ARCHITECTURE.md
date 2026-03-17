@@ -567,6 +567,9 @@ Two registration models coexist:
 - **Extension Proxy** (`crates/ui/web-api/src/extension_proxy.rs`): proxies action
   invocations to connected services using request/response correlation via oneshot channels.
   Supports configurable timeouts per action.
+- **Config Test Proxy** (`crates/ui/web-api/src/config_test_proxy.rs`): proxies plugin
+  config dry-run test requests to connected agents. Same correlation pattern as
+  `ExtensionProxy`. Used by `POST /api/v1/plugin-configs/test` for agent-side tests.
 - **REST API**: Three endpoints under `/api/v1/extensions` — list extensions, list providers,
   and invoke actions. The frontend and CLI both use these endpoints.
 - **Frontend**: Schema-driven Svelte components render `DataTable`, `Form`, `KeyValue`, and

@@ -639,7 +639,7 @@ for user review. Key invariants:
    [Plugin Guidelines](docs/development/plugin-guidelines.md) and [Sudoers Management](docs/security/sudoers-management.md).
 
 8. **Plugin capabilities.** The `PluginCapability` enum is defined in
-   `crates/shared/types/src/plugin_capability.rs` and has 14 variants.
+   `crates/shared/types/src/plugin_capability.rs` and has 15 variants.
 
    **Role-assignment capabilities** (used by the UI `EditHostAssignmentModal` to filter plugin
    configs for each standard-role dropdown via `GET /api/v1/plugin-types`):
@@ -690,6 +690,14 @@ for user review. Key invariants:
    - `GuestExec` — the plugin provides guest execution capabilities (e.g. run commands inside VMs).
    - `ServiceMigrations` — the plugin contributes service-side database migrations.
    - `ControllerMigrations` — the plugin contributes controller-side database migrations.
+   - `ConfigTest` — the plugin supports dry-run configuration testing via
+     `POST /api/v1/plugin-configs/test`. Declared by all 17 plugins (10 package managers,
+     4 release plugins, 2 hook plugins, generic shell). Controller-side plugins
+     (`ControllerSideFetchReleases`) test connectivity without a host; agent-side plugins
+     require a `host_id` and run tests on the target host. The proxy pattern
+     (`ConfigTestProxy` in `crates/ui/web-api/src/config_test_proxy.rs`) mirrors
+     `ExtensionProxy`. Wire messages: `TestPluginConfig` / `TestPluginConfigResult`
+     (session-targeted, not NATS-publishable). Gated by `Permission::TestPluginConfigs`.
 
    Update lifecycle hooks are standalone plugin assignments with roles `PreUpdateHook` and
    `PostUpdateHook` on `host_software_item_plugins`, ordered by `ordinal`. See
@@ -1497,7 +1505,7 @@ to be waiting for stdin input.
 
 ### User management
 
-The system uses 32 granular permissions grouped into 8 built-in roles (`viewer`, `operator`,
+The system uses 33 granular permissions grouped into 8 built-in roles (`viewer`, `operator`,
 `service_manager`, `software_manager`, `host_manager`, `settings_manager`, `command_manager`,
 `system_administrator`). Five access presets (`read_only`, `operator`, `manager`, `administrator`,
 `owner`) provide convenient role bundles. The first registered user receives all 8 roles (owner preset);

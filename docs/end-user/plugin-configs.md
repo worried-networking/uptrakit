@@ -450,6 +450,57 @@ characters.
 **Sudoers entries:** None. Users are responsible for ensuring commands have the necessary
 permissions.
 
+## Testing Configurations
+
+You can test a plugin configuration before saving it to verify that the connection settings,
+commands, or credentials work correctly. This dry-run test does not create or modify any records.
+
+### Web UI
+
+When creating or editing a plugin config, click the **Test** button in the modal. The button
+is visible when your user account has the `test_plugin_configs` permission (included in the
+`command_manager` and `software_manager` roles).
+
+- For **controller-side plugins** (GitHub Releases, GitLab, Forgejo, Docker, npm, Cargo), the test
+  checks upstream API connectivity using the provided configuration. No host selection is required.
+- For **agent-side plugins** (Shell, APT, Homebrew, Pacman, DNF, pkg, APK, Snap, mas, hooks), the
+  test runs against a connected host that you select. The test kind is auto-detected (typically
+  version detection for package managers, command validation for shell plugins).
+
+The result shows whether the test passed, the command output (if any), the detected version
+(for version detection tests), and the test duration.
+
+### CLI
+
+```bash
+# Test a GitHub Releases config (controller-side connectivity check)
+uptrakit plugin-configs test \
+  --plugin-type releases_github \
+  --config '{"auth_token":"ghp_yourtoken"}'
+
+# Test a Shell config against a specific host (version detection)
+uptrakit plugin-configs test \
+  --plugin-type generic_shell \
+  --config '{"version_command":"nginx -v"}' \
+  --host-id <HOST_ID> \
+  --package-identifier nginx
+
+# Test with a specific test kind
+uptrakit plugin-configs test \
+  --plugin-type generic_shell \
+  --config '{"update_command":"apt-get install -y nginx={version}"}' \
+  --host-id <HOST_ID> \
+  --test-kind update_command_validation
+
+# Test against an existing saved config (merges your changes on top)
+uptrakit plugin-configs test \
+  --plugin-type releases_github \
+  --config '{"include_prereleases":true}' \
+  --plugin-config-id <PLUGIN_CONFIG_ID>
+```
+
+See [CLI Usage Guide](cli-usage.md#plugin-configurations) for the full flag reference.
+
 ## Plugin Type Settings
 
 Some plugin types support **type-level settings** -- tenant-wide preferences that apply to all

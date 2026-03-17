@@ -146,7 +146,7 @@ validity window.
 ## Permissions Model - Detailed
 
 Authorization uses a typed `Permission` enum (defined in `crates/shared/types/src/permissions.rs`, re-exported
-via `crates/shared/web-api-types/src/permissions.rs`) rather than raw role-name strings. There are 32 granular
+via `crates/shared/web-api-types/src/permissions.rs`) rather than raw role-name strings. There are 33 granular
 permissions organized by domain:
 
 ### Permissions reference
@@ -206,6 +206,7 @@ permissions organized by domain:
 | Permission | Serialized name | Purpose |
 | --- | --- | --- |
 | `ManageCommands` | `manage_commands` | Modify command-bearing plugin config fields (code execution authority) |
+| `TestPluginConfigs` | `test_plugin_configs` | Test plugin configurations against hosts (dry-run validation) |
 
 > **Security note:** `ManageCommands` grants effective code-execution authority on all managed hosts
 > assigned to the affected software items. Users with this permission can configure arbitrary shell
@@ -246,10 +247,10 @@ Eight built-in roles group permissions into logical responsibilities:
 | `viewer` | `view_services`, `view_software`, `view_hosts`, `view_settings` |
 | `operator` | `approve_services`, `reject_services`, `trigger_checks`, `trigger_updates` |
 | `service_manager` | `approve_services`, `reject_services`, `remove_services`, `update_services` |
-| `software_manager` | `create_software`, `update_software`, `delete_software`, `trigger_checks`, `trigger_updates`, `manage_scheduler`, `manage_ignores` |
+| `software_manager` | `create_software`, `update_software`, `delete_software`, `trigger_checks`, `trigger_updates`, `manage_scheduler`, `manage_ignores`, `test_plugin_configs` |
 | `host_manager` | `update_hosts`, `deactivate_hosts` |
 | `settings_manager` | `manage_auth_settings`, `manage_enrollment_tokens`, `manage_agent_certs`, `view_notifications`, `manage_notifications`, `view_audit_logs`, `manage_users` |
-| `command_manager` | `manage_commands` |
+| `command_manager` | `manage_commands`, `test_plugin_configs` |
 | `system_administrator` | `manage_global_settings`, `view_system_services`, `approve_system_services`, `reject_system_services`, `remove_system_services`, `update_system_services`, `view_system_audit_logs` |
 
 Built-in roles are marked with `is_built_in = true` in the `roles` table.
@@ -338,6 +339,7 @@ RBAC permission. Tools must treat `"self"` as "any authenticated user is authori
 | `CanTriggerUpdates` | `Permission::TriggerUpdates` |
 | `CanManageScheduler` | `Permission::ManageScheduler` |
 | `CanManageCommands` | `Permission::ManageCommands` |
+| `CanTestPluginConfigs` | `Permission::TestPluginConfigs` |
 | `CanViewHosts` | `Permission::ViewHosts` |
 | `CanUpdateHosts` | `Permission::UpdateHosts` |
 | `CanDeactivateHosts` | `Permission::DeactivateHosts` |

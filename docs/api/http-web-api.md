@@ -123,13 +123,15 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `/api/v1/update-history`: read-only history with filters by host, software item, or status.
 - `POST /api/v1/hosts/{id}/discover`: trigger software discovery on a specific host. Requires `trigger_checks`.
 - `POST /api/v1/plugin-configs/{id}/discover`: trigger discovery for a specific plugin config. Requires `trigger_checks`.
+- `POST /api/v1/plugin-configs/test`: test a plugin configuration without saving it (dry-run). Requires
+  `test_plugin_configs`. See [Plugin Config Test Endpoint](#plugin-config-test-endpoint) below.
 
 `PluginConfigResponse` includes a `capabilities: Vec<String>` field listing the snake\_case capability strings
 declared by the plugin type (e.g. `["discover_local_software"]`). Clients should use this field to determine
 which actions are valid for a given config — for example, only showing a **Discover** button
-when `"discover_local_software"` is present. Discovery-capable plugin types are `releases_docker`,
-`package_manager_homebrew`, `package_manager_apt`, and `discovery_proxmox_helper_scripts`; non-discovery types
-(`releases_github`, `generic_shell`) return an empty capabilities list for this field.
+when `"discover_local_software"` is present, or a **Test** button when `"config_test"` is present.
+Discovery-capable plugin types are `releases_docker`, `package_manager_homebrew`, `package_manager_apt`, and
+`discovery_proxmox_helper_scripts`; all 17 built-in plugin types declare the `config_test` capability.
 
 - `/api/v1/software-ignores`: CRUD for permanent suppression rules. See [Autodiscovery API](autodiscovery.md) for full details.
 - `/api/v1/discovery-allowlist`: tenant-wide list of plugin types permitted to run during host
@@ -501,6 +503,76 @@ Types are defined in `crates/shared/web-api-types/src/update_batches.rs`:
 | `crates/ui/web-api/src/batch_progress_broadcaster.rs` | In-process broadcast registry |
 | `crates/shared/web-api-types/src/update_batches.rs` | Request/response types |
 | `crates/shared/db/src/entity/update_batch.rs` | SeaORM entity |
+
+## Plugin Config Test Endpoint
+
+`POST /api/v1/plugin-configs/test` -- test a plugin configuration without saving it. The endpoint
+validates the config against the target plugin and, depending on the plugin type, either runs the
+test on the controller (for release plugins with `ControllerSideFetchReleases`) or forwards it to
+an agent via the wire protocol (for agent-side plugins). Requires the `TestPluginConfigs` permission.
+
+The test is correlated via `ConfigTestProxy` (same request/response correlation pattern as `ExtensionProxy`).
+For agent-side tests, the controller sends a `test_plugin_config` wire message to the agent owning the
+specified host, waits for the `test_plugin_config_result` response, and returns it to the HTTP caller.
+
+**Request body** (`TestPluginConfigRequest`):
+
+```json
+{
+  "plugin_type": "generic_shell",
+  "config": { "version_command": "nginx -v" },
+  "host_id": "770e8400-e29b-41d4-a716-446655440001",
+  "test_kind": "version_detection",
+  "package_identifier": "nginx",
+  "plugin_config_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `plugin_type` | string | Yes | Plugin type to test (e.g. `"generic_shell"`, `"releases_github"`). |
+| `config` | object | Yes | Plugin configuration JSON to test. |
+| `plugin_config_id` | UUID | No | Existing config ID. When provided, the saved config is loaded and `config` is shallow-merged on top (same merge semantics as the three-layer config model). |
+| `host_id` | UUID | No | Target host for agent-side tests. Required for plugins that run on the agent (Shell, APT, Homebrew, etc.). Not required for controller-side plugins (GitHub, GitLab, Forgejo, Docker, npm). |
+| `test_kind` | string | No | What to test. Auto-detected from plugin capabilities when omitted. Values: `"version_detection"`, `"update_command_validation"`, `"pre_update_hook"`, `"post_update_hook"`, `"connectivity"`. |
+| `package_identifier` | string | No | Package identifier for testing (e.g. `"nginx"`, `"owner/repo"`). Required for version detection tests. |
+
+**Response** (`200`) (`TestPluginConfigResponse`):
+
+```json
+{
+  "success": true,
+  "test_kind": "version_detection",
+  "output": "nginx version: nginx/1.24.0",
+  "detected_version": "1.24.0",
+  "duration_ms": 150
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `success` | boolean | Whether the test passed. |
+| `test_kind` | string | The kind of test that was executed. |
+| `output` | string? | Command output or connectivity response (absent when empty). |
+| `error` | string? | Error message when the test failed (absent on success). |
+| `detected_version` | string? | Detected version string (only for `version_detection` tests). |
+| `duration_ms` | integer | Test duration in milliseconds. |
+
+**Error responses**:
+
+- `400` -- invalid request (empty `plugin_type`, unknown `test_kind`, missing `host_id` for agent-side plugin).
+- `404` -- `plugin_config_id` not found, or `host_id` not found / not connected.
+- `408` -- agent did not respond within the timeout window.
+- `502` -- agent disconnected before returning a result.
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/ui/web-api/src/routes/plugin_configs.rs` | Route handler (`test_plugin_config`) |
+| `crates/ui/web-api/src/config_test_proxy.rs` | Request/response correlation proxy |
+| `crates/shared/web-api-types/src/plugin_config_test.rs` | Request/response types |
+| `crates/shared/wire/src/payloads.rs` | `TestPluginConfigPayload`, `TestPluginConfigResultPayload`, `ConfigTestKind` |
 
 ## Batch Action Endpoints
 

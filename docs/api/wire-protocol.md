@@ -45,12 +45,12 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 ### Agent-specific (service -> controller)
 
 `report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`, `discovery_results`,
-`batch_update_result`, `stdin_attention`
+`batch_update_result`, `stdin_attention`, `test_plugin_config_result`
 
 ### SSH agent-specific (service -> controller)
 
 `report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`, `discovery_results`,
-`stdin_attention`
+`stdin_attention`, `test_plugin_config_result`
 
 > **Note:** For the SSH agent, `report_hosts` is sent both at connect time and dynamically during a
 > session whenever the local `ssh_hosts` database changes (host added, removed, or updated). The
@@ -95,10 +95,10 @@ entirely (`LoopOutcome::Shutdown`), while `server_restarting` causes it to recon
 ### Agent-specific (controller -> service)
 
 `check_versions`, `execute_update`, `discover_software`, `execute_batch_update`,
-`set_update_freeze`, `update_stdin_data`, `reset_data`
+`set_update_freeze`, `update_stdin_data`, `reset_data`, `test_plugin_config`
 
 Both the regular agent and the SSH agent receive `check_versions`, `execute_update`, `discover_software`,
-`execute_batch_update`, `update_stdin_data`, and `reset_data` messages.
+`execute_batch_update`, `update_stdin_data`, `reset_data`, and `test_plugin_config` messages.
 The `host_machine_id` field in each payload determines which host the operation targets
 (see [`host_machine_id` Field](#host_machine_id-field)).
 
@@ -451,6 +451,72 @@ no output for 10 seconds while the process is still running).
 
 The controller broadcasts this as a `stdin_attention` SSE event and dispatches a
 notification (if rules are configured for the `StdinAttention` event type).
+
+#### `test_plugin_config` payload (controller -> agent)
+
+Requests that the agent test a plugin configuration without performing any real updates or
+side effects. This message is session-targeted and is **not** NATS-publishable -- it is only
+sent over the direct WebSocket connection between the controller and the agent.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 8,
+  "type": "test_plugin_config",
+  "request_id": "019...",
+  "host_machine_id": "abc-123",
+  "test_kind": "version_detection",
+  "plugin_type": "generic_shell",
+  "config": { "version_command": "nginx -v" },
+  "package_identifier": "nginx"
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `request_id` | string | Yes | Unique correlation ID (UUID v7) for matching the `test_plugin_config_result` response. |
+| `host_machine_id` | string | Yes | Target host's machine ID on the agent. |
+| `test_kind` | `ConfigTestKind` | Yes | What to test. See `ConfigTestKind` values below. |
+| `plugin_type` | string | Yes | Plugin type to test (e.g. `"generic_shell"`, `"package_manager_apt"`). |
+| `config` | object | Yes | Merged plugin configuration JSON. |
+| `package_identifier` | string | No | Package identifier for testing (required for version detection). |
+
+**`ConfigTestKind` values:**
+
+| Value | Description |
+| --- | --- |
+| `version_detection` | Execute `detect_installed_version()` and return output + detected version. |
+| `update_command_validation` | Validate update command syntax (e.g. `sh -n` check) without executing. |
+| `pre_update_hook` | Execute a pre-update hook with a mock context. |
+| `post_update_hook` | Execute a post-update hook with a mock context. |
+| `connectivity` | Test upstream API connectivity (controller-side only; not sent to agents). |
+
+#### `test_plugin_config_result` payload (agent -> controller)
+
+The agent's response to a `test_plugin_config` request. The `request_id` field correlates
+with the original request.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 9,
+  "type": "test_plugin_config_result",
+  "request_id": "019...",
+  "success": true,
+  "output": "nginx version: nginx/1.24.0",
+  "detected_version": "1.24.0",
+  "duration_ms": 150
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `request_id` | string | Yes | Correlation ID matching the original `test_plugin_config` request. |
+| `success` | boolean | Yes | Whether the test passed. |
+| `output` | string | No | Command output or connectivity response. |
+| `error` | string | No | Error message when the test failed. |
+| `detected_version` | string | No | Detected version string (only for `version_detection` tests). |
+| `duration_ms` | integer | Yes | Test duration in milliseconds. |
 
 ### Update-tracking service (controller -> service)
 

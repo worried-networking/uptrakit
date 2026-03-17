@@ -29,7 +29,7 @@ All foundation work is done. Summary of what was delivered:
 - **Core Data Models** — Host, SoftwareItem, Version (semver + custom), UpdateRecord, validation,
   repositories/DAOs.
 - **User Authentication & Authorization** — Argon2id passwords, JWT + session tokens, full RBAC
-  (32 granular permissions, 8 built-in roles, 5 access presets), OIDC, rate limiting, audit logging.
+  (33 granular permissions, 8 built-in roles, 5 access presets), OIDC, rate limiting, audit logging.
   Auth API (register, login, logout, me), user management API (users, roles, permissions, presets).
   OpenAPI/Swagger docs.
 - **Agent Authentication & Security** — mTLS with auto-issued client certificates, CA pinning,
@@ -990,7 +990,9 @@ Items to consider for future versions but not currently prioritized:
 - **Embedded agent** — Use `EmbeddedServiceHost::add()` to embed the agent for single-binary
   deployments. Infrastructure is ready.
 - **Agent clustering** — Multiple agents cooperating on a single host or agent pools.
-- **Update preview / dry-run mode** — Simulate an update without executing it.
+- **Update preview / dry-run mode** — Simulate an update without executing it. Note: plugin
+  config testing (dry-run validation of plugin configurations) is implemented via
+  `POST /api/v1/plugin-configs/test` — this item refers to full update simulation.
 - **Compliance reporting** — Export update audit trails for compliance frameworks.
 - **Terraform / Ansible provider integrations** — Infrastructure-as-code for Uptrakit config.
 - **GitOps integration** — Declarative configuration management via Git repositories.

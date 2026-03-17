@@ -406,7 +406,43 @@ uptrakit plugin-configs delete <PLUGIN_CONFIG_ID>
 # Trigger autodiscovery for a plugin config (discovery-capable plugins only)
 uptrakit plugin-configs discover <PLUGIN_CONFIG_ID>
 
+# Test a plugin config without saving (dry-run)
+uptrakit plugin-configs test \
+  --plugin-type releases_github \
+  --config '{"auth_token":"ghp_yourtoken"}'
+
+# Test an agent-side plugin against a specific host
+uptrakit plugin-configs test \
+  --plugin-type generic_shell \
+  --config '{"version_command":"nginx -v"}' \
+  --host-id <HOST_ID> \
+  --package-identifier nginx
+
+# Test with a specific test kind
+uptrakit plugin-configs test \
+  --plugin-type package_manager_apt \
+  --config '{}' \
+  --host-id <HOST_ID> \
+  --test-kind version_detection \
+  --package-identifier nginx
+
+# Test against an existing saved config (merges changes on top)
+uptrakit plugin-configs test \
+  --plugin-type releases_github \
+  --config '{"include_prereleases":true}' \
+  --plugin-config-id <PLUGIN_CONFIG_ID>
 ```
+
+### `plugin-configs test` flags
+
+| Flag | Required | Description |
+| --- | :---: | --- |
+| `--plugin-type <TYPE>` | Yes | Plugin type to test (e.g. `releases_github`, `generic_shell`, `package_manager_apt`). |
+| `--config <JSON>` | Yes | Plugin configuration JSON to test. |
+| `--host-id <UUID>` | No | Target host for agent-side tests. Required for plugins that run on the agent. |
+| `--test-kind <KIND>` | No | What to test. Auto-detected when omitted. Values: `version_detection`, `update_command_validation`, `pre_update_hook`, `post_update_hook`, `connectivity`. |
+| `--package-identifier <PKG>` | No | Package identifier (e.g. `nginx`, `owner/repo`). Required for version detection tests. |
+| `--plugin-config-id <UUID>` | No | Existing config to merge with. The saved config is loaded and `--config` is shallow-merged on top. |
 
 See also: [Plugin Configurations](plugin-configs.md), [Autodiscovery](autodiscovery.md).
 
