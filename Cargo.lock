@@ -6648,9 +6648,11 @@ name = "uptrakit-mqtt"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "clap",
  "futures-util",
  "hostname",
+ "rcgen",
  "rootcause",
  "rumqttc",
  "rustls",
@@ -6666,6 +6668,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uptrakit-build-info",
+ "uptrakit-crypto",
  "uptrakit-internal-wire",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",

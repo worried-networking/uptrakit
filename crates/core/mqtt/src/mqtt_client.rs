@@ -6,11 +6,11 @@ use rumqttc::{AsyncClient, EventLoop, LastWill, MqttOptions, Packet, QoS, Transp
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use uptrakit_internal_wire::MqttClientConnectionStatus;
-use uptrakit_internal_wire::MqttTransport;
 use uptrakit_internal_wire::SecretString;
 use uptrakit_service_sdk::Backoff;
 use uptrakit_shared_macros::impl_report_conversion;
+
+use crate::types::{MqttClientConnectionStatus, MqttTransport};
 
 /// Configuration for connecting to an MQTT broker.
 pub(crate) struct MqttConfig {
@@ -343,9 +343,6 @@ fn build_mqtt_options(config: &MqttConfig) -> MqttOptions {
                 client_auth: None,
             };
             opts.set_transport(Transport::Tls(tls_config));
-        }
-        _ => {
-            tracing::warn!("unknown MqttTransport variant; no TLS configuration applied");
         }
     }
 

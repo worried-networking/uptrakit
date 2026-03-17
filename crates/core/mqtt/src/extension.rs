@@ -8,8 +8,8 @@
 //!
 //! ## Action routing
 //!
-//! All actions use the default `ExtensionTargeting::Universal` — the
-//! controller picks any running MQTT service instance to handle the request.
+//! Actions use `ExtensionTargeting::Targeted` so the frontend can obtain the
+//! selected service instance's ECIES public key for sensitive fields.
 //!
 //! ## Permission
 //!
@@ -19,8 +19,8 @@ use uptrakit_internal_wire::{
     ServiceMessage,
     extension::{
         ActionDef, ActionUi, ExtensionManifest, ExtensionPlacement, ExtensionRegisterPayload,
-        ExtensionRequestPayload, ExtensionResponsePayload, ExtensionUi, FieldDef, FieldType,
-        FormDef, SelectOption, TableColumn,
+        ExtensionRequestPayload, ExtensionResponsePayload, ExtensionTargeting, ExtensionUi,
+        FieldDef, FieldType, FormDef, PanelPosition, SelectOption, TableColumn,
     },
 };
 use uptrakit_service_sdk::{ControllerConnection, LoopError, LoopResult};
@@ -30,17 +30,21 @@ pub(crate) const EXT_ID: &str = "mqtt.clients";
 pub(crate) const ACTION_LIST: &str = "mqtt.list-clients";
 pub(crate) const ACTION_CREATE: &str = "mqtt.create-client";
 pub(crate) const ACTION_EDIT: &str = "mqtt.edit-client";
+pub(crate) const ACTION_GET: &str = "mqtt.get-client";
 pub(crate) const ACTION_DELETE: &str = "mqtt.delete-client";
 
 /// Build the `ExtensionRegister` payload for the MQTT clients settings page.
-pub(crate) fn build_register_payload() -> ExtensionRegisterPayload {
+pub(crate) fn build_register_payload(
+    encryption_public_key: Option<String>,
+) -> ExtensionRegisterPayload {
     let manifest = ExtensionManifest::new(
         EXT_ID,
         "MQTT Clients",
         100,
-        ExtensionPlacement::Page {
-            nav_section: "system".to_string(),
-            icon: Some("wifi".to_string()),
+        ExtensionPlacement::Panel {
+            target_page: "settings".to_string(),
+            position: PanelPosition::Tab,
+            tab_group: None,
         },
         ExtensionUi::DataTable {
             columns: vec![
@@ -57,9 +61,14 @@ pub(crate) fn build_register_payload() -> ExtensionRegisterPayload {
             default_per_page: None,
         },
     )
-    .with_permission("update_system_services");
+    .with_permission("update_system_services")
+    .with_targeting(ExtensionTargeting::Targeted);
 
-    ExtensionRegisterPayload::new(vec![manifest])
+    let payload = ExtensionRegisterPayload::new(vec![manifest]);
+    match encryption_public_key {
+        Some(key) => payload.with_encryption_public_key(key),
+        None => payload,
+    }
 }
 
 /// Build the action library for `ExtensionActionsRegister`.
@@ -74,6 +83,7 @@ pub(crate) fn build_actions() -> Vec<ActionDef> {
         ActionDef::new(ACTION_EDIT, "Edit MQTT Client")
             .with_permission(perm)
             .with_ui(ActionUi::Form(client_form(true))),
+        ActionDef::new(ACTION_GET, "Get MQTT Client").with_permission(perm),
         ActionDef::new(ACTION_DELETE, "Delete MQTT Client")
             .with_permission(perm)
             .destructive()
@@ -83,7 +93,7 @@ pub(crate) fn build_actions() -> Vec<ActionDef> {
 
 /// Build the form definition for creating or editing an MQTT client.
 ///
-/// When `pre_load` is `true`, a `pre_load_action` pointing to `ACTION_EDIT`
+/// When `pre_load` is `true`, a `pre_load_action` pointing to `ACTION_GET`
 /// is set so the form opens pre-populated with the existing client data.
 fn client_form(pre_load: bool) -> FormDef {
     let fields = vec![
@@ -130,7 +140,7 @@ fn client_form(pre_load: bool) -> FormDef {
 
     let mut form = FormDef::new(fields);
     if pre_load {
-        form = form.with_pre_load_action(ACTION_EDIT);
+        form = form.with_pre_load_action(ACTION_GET);
     }
     form
 }
@@ -170,6 +180,41 @@ pub(crate) fn handle_list_action(
     })
 }
 
+/// Handle the edit-form preload action.
+///
+/// Returns the non-sensitive MQTT client config for the requested entry.
+pub(crate) fn handle_get_action(
+    request: &ExtensionRequestPayload,
+    configs: &[crate::client_manager::ParsedMqttClientConfig],
+) -> Option<ExtensionResponsePayload> {
+    if request.action_id != ACTION_GET {
+        return None;
+    }
+
+    let id = request.params.get("id")?.as_str()?;
+    let config = configs
+        .iter()
+        .find(|cfg| cfg.mqtt_client_id.to_string() == id)?;
+
+    Some(ExtensionResponsePayload {
+        request_id: request.request_id.clone(),
+        success: true,
+        data: serde_json::json!({
+            "id": config.mqtt_client_id.to_string(),
+            "client_id": config.client_id,
+            "host": config.host,
+            "port": config.port,
+            "transport": config.transport.as_str(),
+            "topic_prefix": config.topic_prefix,
+            "username": config.username.as_ref().map(|value| value.expose_secret()),
+            "ha_discovery": config.ha_discovery,
+            "ha_discovery_prefix": config.ha_discovery_prefix,
+            "enabled": config.enabled,
+        }),
+        error: None,
+    })
+}
+
 /// Send an error response back to the controller for an unhandled or failed action.
 pub(crate) async fn send_error_response(
     conn: &mut ControllerConnection,
@@ -190,4 +235,85 @@ pub(crate) async fn send_error_response(
                 "failed to send extension error response: {e}"
             )))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client_manager::ParsedMqttClientConfig;
+    use uptrakit_internal_wire::SecretString;
+    use uuid::Uuid;
+
+    #[test]
+    fn register_payload_places_extension_in_settings_tab() {
+        let payload = build_register_payload(Some("test-key".to_string()));
+        assert_eq!(payload.encryption_public_key.as_deref(), Some("test-key"));
+
+        let manifest = &payload.manifests[0];
+        assert_eq!(manifest.id, EXT_ID);
+        assert_eq!(manifest.targeting, ExtensionTargeting::Targeted);
+        match &manifest.placement {
+            ExtensionPlacement::Panel {
+                target_page,
+                position,
+                tab_group,
+            } => {
+                assert_eq!(target_page, "settings");
+                assert_eq!(position, &PanelPosition::Tab);
+                assert!(tab_group.is_none());
+            }
+            other => panic!("unexpected placement: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn edit_form_uses_dedicated_preload_action() {
+        let actions = build_actions();
+        let edit = actions
+            .into_iter()
+            .find(|action| action.action_id == ACTION_EDIT)
+            .expect("edit action");
+
+        let ActionUi::Form(form) = edit.ui.expect("edit UI") else {
+            panic!("expected form UI");
+        };
+        assert_eq!(form.pre_load_action.as_deref(), Some(ACTION_GET));
+    }
+
+    #[test]
+    fn get_action_omits_sensitive_fields() {
+        let request = ExtensionRequestPayload {
+            request_id: "req-1".to_string(),
+            extension_id: EXT_ID.to_string(),
+            action_id: ACTION_GET.to_string(),
+            tenant_id: Some(Uuid::now_v7()),
+            params: serde_json::json!({ "id": "019471a0-0000-7000-8000-000000000001" }),
+            sensitive_params: None,
+        };
+        let configs = vec![ParsedMqttClientConfig {
+            mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000001").unwrap(),
+            tenant_id: Uuid::now_v7(),
+            enabled: true,
+            transport: crate::types::MqttTransport::Tls,
+            host: "broker.example.com".to_string(),
+            port: 8883,
+            client_id: "mqtt-client".to_string(),
+            username: Some(SecretString::new("user")),
+            password: Some(SecretString::new("secret")),
+            ca_pem: Some(SecretString::new("pem")),
+            topic_prefix: "uptrakit".to_string(),
+            ha_discovery: true,
+            ha_discovery_prefix: "homeassistant".to_string(),
+        }];
+
+        let response = handle_get_action(&request, &configs).expect("response");
+        let data = response.data.as_object().expect("object response");
+        assert_eq!(
+            data.get("client_id"),
+            Some(&serde_json::json!("mqtt-client"))
+        );
+        assert_eq!(data.get("username"), Some(&serde_json::json!("user")));
+        assert!(!data.contains_key("password"));
+        assert!(!data.contains_key("ca_pem"));
+    }
 }

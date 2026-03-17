@@ -9,8 +9,8 @@ use crate::client_manager::{
 };
 use crate::mqtt_client::MqttServiceEvent;
 use crate::state_publisher::{compute_removed_host_ids, compute_removed_items};
+use crate::types::MqttClientConnectionStatus;
 use tokio::sync::mpsc;
-use uptrakit_internal_wire::MqttClientConnectionStatus;
 
 /// In-flight accumulator for multi-page `SoftwareStates` delivery.
 ///
@@ -535,7 +535,7 @@ mod tests {
     use crate::client_manager::build_config_from_parsed;
     use crate::client_manager::compute_config_hash;
     use crate::state_publisher::{compute_removed_host_ids, compute_removed_items};
-    use uptrakit_internal_wire::MqttTransport;
+    use crate::types::MqttTransport;
     use uptrakit_internal_wire::SecretString;
 
     #[test]
@@ -544,7 +544,7 @@ mod tests {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000001").unwrap(),
             tenant_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
             enabled: true,
-            transport: uptrakit_internal_wire::MqttTransport::Tls,
+            transport: MqttTransport::Tls,
             host: "broker.example.com".to_string(),
             port: 8883,
             client_id: "my-client".to_string(),
@@ -579,7 +579,7 @@ mod tests {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000002").unwrap(),
             tenant_id: Uuid::nil(),
             enabled: true,
-            transport: uptrakit_internal_wire::MqttTransport::Tls,
+            transport: MqttTransport::Tls,
             host: "broker.example.com".to_string(),
             port: 0,
             client_id: "client".to_string(),
@@ -601,7 +601,7 @@ mod tests {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000003").unwrap(),
             tenant_id: Uuid::nil(),
             enabled: true,
-            transport: uptrakit_internal_wire::MqttTransport::Tls,
+            transport: MqttTransport::Tls,
             host: "broker1.example.com".to_string(),
             port: 8883,
             client_id: "client".to_string(),
@@ -617,7 +617,7 @@ mod tests {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000003").unwrap(),
             tenant_id: Uuid::nil(),
             enabled: true,
-            transport: uptrakit_internal_wire::MqttTransport::Tls,
+            transport: MqttTransport::Tls,
             host: "broker2.example.com".to_string(), // Different host
             port: 8883,
             client_id: "client".to_string(),
@@ -742,7 +742,7 @@ mod tests {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000004").unwrap(),
             tenant_id: Uuid::nil(),
             enabled: true,
-            transport: uptrakit_internal_wire::MqttTransport::Tls,
+            transport: MqttTransport::Tls,
             host: "broker.example.com".to_string(),
             port: 8883,
             client_id: "client".to_string(),
@@ -758,7 +758,7 @@ mod tests {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000004").unwrap(),
             tenant_id: Uuid::nil(),
             enabled: true,
-            transport: uptrakit_internal_wire::MqttTransport::Tls,
+            transport: MqttTransport::Tls,
             host: "broker.example.com".to_string(),
             port: 8883,
             client_id: "client".to_string(),

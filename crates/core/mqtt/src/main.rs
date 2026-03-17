@@ -43,7 +43,9 @@ mod ha_discovery;
 mod mqtt_client;
 mod state_publisher;
 mod tenant_manager;
+mod types;
 
+use base64::Engine as _;
 use clap::Parser;
 use rootcause::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
@@ -89,6 +91,10 @@ struct MqttHandler {
     granted_keys: BTreeSet<String>,
     /// Correlates `StoreServiceConfig` / `DeleteServiceConfig` requests with ACKs.
     config_proxy: ServiceConfigProxy,
+    /// Private key used to decrypt ECIES-encrypted sensitive extension params.
+    private_key_der: Option<Vec<u8>>,
+    /// Base64-encoded uncompressed P-256 public key for extension param encryption.
+    encryption_public_key: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -102,8 +108,13 @@ impl ServiceHandler for MqttHandler {
     async fn on_connected(
         &mut self,
         conn: &mut ControllerConnection,
-        _identity: &ServiceIdentityState,
+        identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
+        self.private_key_der = identity.private_key_pkcs8_der();
+        self.encryption_public_key = identity
+            .public_key_raw()
+            .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes));
+
         // Declare capabilities immediately so the controller can set session
         // flags correctly even on first connect (before DB has stored caps).
         conn.send(ServiceMessage::Register(RegisterPayload::new(
@@ -128,7 +139,8 @@ impl ServiceHandler for MqttHandler {
             .agreed_capabilities()
             .contains(&Capability::UiExtensions)
         {
-            let register_payload = extension::build_register_payload();
+            let register_payload =
+                extension::build_register_payload(self.encryption_public_key.clone());
             if let Err(e) = conn
                 .send(ServiceMessage::ExtensionRegister(register_payload))
                 .await
@@ -244,6 +256,24 @@ impl ServiceHandler for MqttHandler {
                         "failed to send extension response: {e}"
                     )))
                 });
+        }
+        if request.action_id == extension::ACTION_GET {
+            if let Some(response) = extension::handle_get_action(&request, &self.configs) {
+                return conn
+                    .send(ServiceMessage::ExtensionResponse(response))
+                    .await
+                    .map_err(|e| {
+                        report!(LoopError::Other(format!(
+                            "failed to send extension response: {e}"
+                        )))
+                    });
+            }
+            return extension::send_error_response(
+                conn,
+                request_id,
+                "missing or invalid MQTT client id",
+            )
+            .await;
         }
 
         // Write actions — create, edit, delete.
@@ -439,6 +469,51 @@ impl MqttHandler {
         self.tenant_mgr.apply_configs(granted).await;
     }
 
+    fn parse_request_config(
+        &self,
+        request: &uptrakit_internal_wire::extension::ExtensionRequestPayload,
+        existing: Option<&ParsedMqttClientConfig>,
+    ) -> Result<ParsedMqttClientConfig, String> {
+        #[derive(serde::Deserialize)]
+        struct SensitiveConfigParams {
+            #[serde(default)]
+            password: Option<uptrakit_internal_wire::SecretString>,
+            #[serde(default)]
+            ca_pem: Option<uptrakit_internal_wire::SecretString>,
+        }
+
+        let mut value = request.params.clone();
+        let obj = value
+            .as_object_mut()
+            .ok_or_else(|| "extension params must be a JSON object".to_string())?;
+
+        let sensitive = uptrakit_service_sdk::decrypt_sensitive_params::<SensitiveConfigParams>(
+            request.sensitive_params.as_ref().map(|s| s.expose_secret()),
+            self.private_key_der.as_deref(),
+        )?;
+        if let Some(sensitive) = sensitive {
+            if let Some(password) = sensitive.password {
+                obj.insert("password".to_string(), serde_json::json!(password));
+            }
+            if let Some(ca_pem) = sensitive.ca_pem {
+                obj.insert("ca_pem".to_string(), serde_json::json!(ca_pem));
+            }
+        }
+
+        if let Some(existing) = existing {
+            if !obj.contains_key("password") && existing.password.is_some() {
+                obj.insert("password".to_string(), serde_json::json!(existing.password));
+            }
+            if !obj.contains_key("ca_pem") && existing.ca_pem.is_some() {
+                obj.insert("ca_pem".to_string(), serde_json::json!(existing.ca_pem));
+            }
+        }
+
+        obj.remove("id");
+
+        serde_json::from_value(value).map_err(|e| format!("invalid MQTT client configuration: {e}"))
+    }
+
     /// Handle `ACTION_CREATE`: store a new MQTT client config.
     async fn handle_create_client(
         &mut self,
@@ -446,13 +521,35 @@ impl MqttHandler {
         conn: &mut ControllerConnection,
     ) -> LoopResult<()> {
         let request_id = request.request_id.clone();
-        let tenant_id = request.tenant_id;
+        let Some(tenant_id) = request.tenant_id else {
+            return extension::send_error_response(
+                conn,
+                request_id,
+                "missing tenant scope for MQTT client config",
+            )
+            .await;
+        };
         let new_id = Uuid::now_v7();
         let key = format!("{CONFIG_KEY_PREFIX}{new_id}");
+        let config = match self.parse_request_config(&request, None) {
+            Ok(config) => config,
+            Err(message) => return extension::send_error_response(conn, request_id, message).await,
+        };
+        let config_value = match serde_json::to_value(&config) {
+            Ok(value) => value,
+            Err(e) => {
+                return extension::send_error_response(
+                    conn,
+                    request_id,
+                    format!("failed to serialize MQTT client config: {e}"),
+                )
+                .await;
+            }
+        };
 
         let pending = self
             .config_proxy
-            .store(tenant_id, key, request.params, false);
+            .store(Some(tenant_id), key, config_value, true);
         let msg = pending.message.clone();
         if let Err(e) = conn.send(msg).await {
             return extension::send_error_response(
@@ -493,7 +590,14 @@ impl MqttHandler {
         conn: &mut ControllerConnection,
     ) -> LoopResult<()> {
         let request_id = request.request_id.clone();
-        let tenant_id = request.tenant_id;
+        let Some(tenant_id) = request.tenant_id else {
+            return extension::send_error_response(
+                conn,
+                request_id,
+                "missing tenant scope for MQTT client config",
+            )
+            .await;
+        };
 
         let Some(id_str) = request.params.get("id").and_then(|v| v.as_str()) else {
             return extension::send_error_response(conn, request_id, "missing 'id' parameter")
@@ -504,10 +608,32 @@ impl MqttHandler {
                 .await;
         };
         let key = format!("{CONFIG_KEY_PREFIX}{mqtt_client_id}");
+        let Some(existing) = self
+            .configs
+            .iter()
+            .find(|config| config.mqtt_client_id == mqtt_client_id)
+        else {
+            return extension::send_error_response(conn, request_id, "MQTT client not found").await;
+        };
+        let config = match self.parse_request_config(&request, Some(existing)) {
+            Ok(config) => config,
+            Err(message) => return extension::send_error_response(conn, request_id, message).await,
+        };
+        let config_value = match serde_json::to_value(&config) {
+            Ok(value) => value,
+            Err(e) => {
+                return extension::send_error_response(
+                    conn,
+                    request_id,
+                    format!("failed to serialize MQTT client config: {e}"),
+                )
+                .await;
+            }
+        };
 
         let pending = self
             .config_proxy
-            .store(tenant_id, key, request.params, false);
+            .store(Some(tenant_id), key, config_value, true);
         let msg = pending.message.clone();
         if let Err(e) = conn.send(msg).await {
             return extension::send_error_response(
@@ -548,7 +674,14 @@ impl MqttHandler {
         conn: &mut ControllerConnection,
     ) -> LoopResult<()> {
         let request_id = request.request_id.clone();
-        let tenant_id = request.tenant_id;
+        let Some(tenant_id) = request.tenant_id else {
+            return extension::send_error_response(
+                conn,
+                request_id,
+                "missing tenant scope for MQTT client config",
+            )
+            .await;
+        };
 
         let Some(id_str) = request.params.get("id").and_then(|v| v.as_str()) else {
             return extension::send_error_response(conn, request_id, "missing 'id' parameter")
@@ -560,7 +693,7 @@ impl MqttHandler {
         };
         let key = format!("{CONFIG_KEY_PREFIX}{mqtt_client_id}");
 
-        let pending = self.config_proxy.delete(tenant_id, key);
+        let pending = self.config_proxy.delete(Some(tenant_id), key);
         let msg = pending.message.clone();
         if let Err(e) = conn.send(msg).await {
             return extension::send_error_response(
@@ -678,6 +811,8 @@ async fn main() {
         configs: Vec::new(),
         granted_keys: BTreeSet::new(),
         config_proxy: ServiceConfigProxy::new(),
+        private_key_der: None,
+        encryption_public_key: None,
     };
 
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
@@ -712,4 +847,135 @@ fn init_tracing(own_module: &str, verbosity: u8) {
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().with_filter(filter))
         .init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uptrakit_internal_wire::SecretString;
+
+    fn test_handler() -> MqttHandler {
+        let (_event_tx, event_rx) = tokio::sync::mpsc::channel(1);
+        MqttHandler {
+            tenant_mgr: TenantManager::new(None),
+            event_rx,
+            configs: Vec::new(),
+            granted_keys: BTreeSet::new(),
+            config_proxy: ServiceConfigProxy::new(),
+            private_key_der: None,
+            encryption_public_key: None,
+        }
+    }
+
+    fn base_request(
+        params: serde_json::Value,
+    ) -> uptrakit_internal_wire::extension::ExtensionRequestPayload {
+        uptrakit_internal_wire::extension::ExtensionRequestPayload {
+            request_id: "req-1".to_string(),
+            extension_id: extension::EXT_ID.to_string(),
+            action_id: extension::ACTION_EDIT.to_string(),
+            params,
+            sensitive_params: None,
+            tenant_id: Some(Uuid::now_v7()),
+        }
+    }
+
+    fn existing_config() -> ParsedMqttClientConfig {
+        ParsedMqttClientConfig {
+            mqtt_client_id: Uuid::now_v7(),
+            tenant_id: Uuid::now_v7(),
+            enabled: true,
+            transport: crate::types::MqttTransport::Tls,
+            host: "broker.example.com".to_string(),
+            port: 8883,
+            client_id: "existing-client".to_string(),
+            username: Some(SecretString::new("user")),
+            password: Some(SecretString::new("existing-password")),
+            ca_pem: Some(SecretString::new("existing-ca")),
+            topic_prefix: "uptrakit".to_string(),
+            ha_discovery: true,
+            ha_discovery_prefix: "homeassistant".to_string(),
+        }
+    }
+
+    #[test]
+    fn parse_request_config_preserves_existing_secret_fields() {
+        let handler = test_handler();
+        let existing = existing_config();
+        let request = base_request(serde_json::json!({
+            "id": existing.mqtt_client_id.to_string(),
+            "enabled": true,
+            "transport": "tls",
+            "host": "new-broker.example.com",
+            "port": 8883,
+            "client_id": "updated-client",
+            "username": "user",
+            "topic_prefix": "uptrakit",
+            "ha_discovery": true,
+            "ha_discovery_prefix": "homeassistant"
+        }));
+
+        let parsed = handler
+            .parse_request_config(&request, Some(&existing))
+            .expect("parsed config");
+
+        assert_eq!(parsed.host, "new-broker.example.com");
+        assert_eq!(parsed.client_id, "updated-client");
+        assert_eq!(
+            parsed
+                .password
+                .as_ref()
+                .map(|secret| secret.expose_secret()),
+            Some("existing-password")
+        );
+        assert_eq!(
+            parsed.ca_pem.as_ref().map(|secret| secret.expose_secret()),
+            Some("existing-ca")
+        );
+    }
+
+    #[test]
+    fn parse_request_config_decrypts_sensitive_params() {
+        let mut handler = test_handler();
+        let key_pair =
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+        let public_key_b64 =
+            base64::engine::general_purpose::STANDARD.encode(key_pair.public_key_raw());
+        let sealed = uptrakit_crypto::ecies::sealed_box_encrypt_base64(
+            r#"{"password":"new-password","ca_pem":"new-ca"}"#,
+            &public_key_b64,
+        )
+        .expect("encrypt");
+        handler.private_key_der = Some(key_pair.serialize_der());
+
+        let request = uptrakit_internal_wire::extension::ExtensionRequestPayload {
+            sensitive_params: Some(SecretString::new(sealed)),
+            ..base_request(serde_json::json!({
+                "enabled": true,
+                "transport": "tcp",
+                "host": "broker.example.com",
+                "port": 1883,
+                "client_id": "new-client",
+                "topic_prefix": "uptrakit",
+                "ha_discovery": false,
+                "ha_discovery_prefix": "homeassistant"
+            }))
+        };
+
+        let parsed = handler
+            .parse_request_config(&request, None)
+            .expect("parsed config");
+
+        assert_eq!(
+            parsed
+                .password
+                .as_ref()
+                .map(|secret| secret.expose_secret()),
+            Some("new-password")
+        );
+        assert_eq!(
+            parsed.ca_pem.as_ref().map(|secret| secret.expose_secret()),
+            Some("new-ca")
+        );
+    }
 }

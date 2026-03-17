@@ -1,21 +1,22 @@
-use serde::Deserialize;
-use uptrakit_internal_wire::{MqttTransport, SecretString};
+use serde::{Deserialize, Serialize};
+use uptrakit_internal_wire::SecretString;
 use uuid::Uuid;
 
 use crate::mqtt_client::{MqttConfig, MqttHandle};
+use crate::types::MqttTransport;
 
 /// Parsed MQTT client configuration as delivered by the service config store.
 ///
 /// Deserialized from the JSON value of a `"clients.{uuid}"` config entry.
 /// The `mqtt_client_id` and `tenant_id` fields are injected after deserialization
 /// (they come from the config key and `ServiceConfigEntry::tenant_id` respectively).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ParsedMqttClientConfig {
     /// Deserialized from the config key suffix — set by the caller after parsing.
-    #[serde(skip_deserializing)]
+    #[serde(skip_deserializing, skip_serializing)]
     pub mqtt_client_id: Uuid,
     /// From `ServiceConfigEntry::tenant_id` — set by the caller after parsing.
-    #[serde(skip_deserializing)]
+    #[serde(skip_deserializing, skip_serializing)]
     pub tenant_id: Uuid,
     /// Whether this connection is enabled.
     #[serde(default = "bool_true")]
