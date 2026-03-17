@@ -168,6 +168,21 @@ crates/core/controller/src/agent/
     mod.rs        -- (cfg: embedded-agent) Embedded agent using uptrakit-agent-core
 ```
 
+## API Response Fields
+
+Both `ServiceResponse` and `SystemServiceResponse` expose the embedded state:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `is_embedded` | `bool` | `true` for controller-embedded services. |
+| `yielded_to` | `Uuid[]?` | External service IDs causing this embedded service to yield. `null` when not yielded or not embedded. Refreshed from `embedded_service_runtime_states` on a 30-second interval. |
+
+### Constraints enforced by the API
+
+- `DELETE` (deactivation) returns `409 CONFLICT` for embedded services.
+- `POST .../merge` returns `409 CONFLICT` when either side is embedded.
+- Batch deactivate/delete includes embedded services in the `failed` array.
+
 ## Related Documentation
 
 - [Scheduler Architecture](scheduler.md) -- scheduler deployment modes and HA mechanism

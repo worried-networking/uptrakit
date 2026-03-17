@@ -100,6 +100,19 @@ uptrakit services update-freeze <SERVICE_ID> --enable --reason "Incident investi
 uptrakit services update-freeze <SERVICE_ID> --disable
 ```
 
+The `list` output appends status markers for embedded services:
+
+- **(embedded)** — the service runs inside the controller process.
+- **(yielded)** — the embedded service has yielded to an external service with the same role.
+
+The `show` output includes additional lines for embedded services:
+
+- **Embedded:** `Yes` when `is_embedded` is true.
+- **Yielded To:** comma-separated list of external service UUIDs that caused the yield
+  (shown only when yielded).
+
+Embedded services cannot be removed (`services remove` returns a 409 error).
+
 See also: [Service Operations](../api/services-operations.md),
 [HTTP Web API](../api/http-web-api.md).
 
@@ -146,6 +159,10 @@ service-profile default. The minimum positive value is `5`.
 
 `--cert-lifetime-hours` sets the certificate lifetime in hours. `0` clears the override and reverts
 to the global default. Valid positive range is `1`–`17520` (up to two years).
+
+System services also display **(embedded)** and **(yielded)** markers in list output and
+**Embedded** / **Yielded To** fields in show output, following the same conventions as
+tenant services.
 
 See also: [System Services Architecture](../architecture/system-services.md),
 [HTTP Web API](../api/http-web-api.md#system-services-endpoints).

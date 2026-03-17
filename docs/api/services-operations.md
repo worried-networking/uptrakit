@@ -136,6 +136,40 @@ does not exist. The two revocation reasons in `system_service_certificates` are
 | Merge | Supported | Not supported |
 | Typical members | Agents, SSH agents | MQTT bridge, external scheduler |
 
+## Embedded Services
+
+When the controller runs with the `embedded-agent` or `embedded-scheduler` feature, it
+auto-provisions in-process services that appear in the normal services/system-services listings.
+These rows carry `is_embedded: true` in the response.
+
+### Response fields
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `is_embedded` | `bool` | `true` when the service runs inside the controller process. |
+| `yielded_to` | `Uuid[]?` | List of external service IDs that caused this embedded service to yield its responsibilities. `null` or absent when not yielded. Refreshed on a 30-second interval. |
+
+### Constraints
+
+- **Deactivation blocked**: `DELETE /api/v1/services/{id}` and
+  `DELETE /api/v1/system-services/{id}` return `409 CONFLICT` for embedded services.
+  Embedded services are managed by the controller process and cannot be manually removed.
+- **Merge blocked**: `POST /api/v1/services/{target_id}/merge` returns `409 CONFLICT`
+  when either the target or source is an embedded service.
+- **Batch operations**: Batch deactivate/delete skip embedded services with a per-item
+  error in the `failed` array. Non-embedded services in the same batch are still processed.
+
+### Yield state
+
+An embedded service yields when an external service with the same `service_app_name`
+connects. While yielded, the embedded service stops processing commands and defers to
+the external service. The `yielded_to` field lists the IDs of the external services
+that triggered the yield.
+
+The yield state is stored in the `embedded_service_runtime_states` table and refreshed
+every 30 seconds by the controller. It is a runtime-only indicator — not a persistent
+configuration.
+
 ## Batch Actions
 
 The `POST /api/v1/services/batch` endpoint allows performing lifecycle operations (approve,

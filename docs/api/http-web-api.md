@@ -204,7 +204,7 @@ Types are defined in `crates/shared/web-api-types/src/services.rs`:
 | Type | Fields |
 | --- | --- |
 | `UpdateServiceRequest` | `ping_interval_seconds` (`Option<u32>`) |
-| `ServiceResponse` | `id`, `capabilities`, `service_label`, `hostname`, `friendly_name`, `ip_address`, `status`, `client_version`, `last_seen_at`, `created_at`, `updated_at`, `ping_interval_seconds` |
+| `ServiceResponse` | `id`, `capabilities`, `service_label`, `hostname`, `friendly_name`, `is_embedded`, `ip_address`, `status`, `client_version`, `last_seen_at`, `created_at`, `updated_at`, `ping_interval_seconds`, `cert_lifetime_hours`, `yielded_to` |
 
 ### Key files
 
@@ -680,6 +680,8 @@ See [Audit Logs API Reference](audit-logs.md) for the full specification.
 | `updated_at` | datetime | Last modification time |
 | `ping_interval_seconds` | `u32?` | Per-service ping interval override (omitted when using the default) |
 | `cert_lifetime_hours` | `u32?` | Per-service certificate lifetime override in hours (omitted when using the default) |
+| `is_embedded` | `bool` | `true` when the service runs inside the controller process |
+| `yielded_to` | `Uuid[]?` | External service IDs that caused this embedded service to yield. `null` when not applicable |
 
 ### Key files
 

@@ -1110,6 +1110,12 @@ standard 5-case priority. The in-memory cache is `ZeroconfSnapshot` (in `Setting
 `ServiceResponse` contains `capabilities: Vec<String>` and `service_label: String` instead of the former
 `service_type: ServiceType`. The list endpoint filter parameter is `?capability=` instead of `?type=`.
 
+Both `ServiceResponse` and `SystemServiceResponse` include `is_embedded: bool` and
+`yielded_to: Option<Vec<Uuid>>`. The `is_embedded` flag identifies controller-embedded services
+(auto-provisioned, cannot be deactivated or merged — returns 409 CONFLICT). The `yielded_to` field
+lists external service IDs that caused the embedded service to yield its responsibilities
+(refreshed every 30 seconds from `embedded_service_runtime_states`).
+
 ### Two-tier service model
 
 The controller manages two independent service tiers:
