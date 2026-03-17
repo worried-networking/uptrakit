@@ -998,6 +998,95 @@ fn error_results_for_discovery(
         .collect()
 }
 
+/// Spawn a `TestPluginConfig` operation as a background task for an SSH host.
+pub(crate) fn spawn_config_test_ssh(
+    payload: uptrakit_internal_wire::TestPluginConfigPayload,
+    db: &sea_orm::DatabaseConnection,
+    pool: &SshConnectionPool,
+    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+) {
+    let host_machine_id = payload.host_machine_id.clone();
+    tracing::debug!(
+        host_machine_id = %host_machine_id,
+        request_id = %payload.request_id,
+        "spawning background TestPluginConfig task for SSH host"
+    );
+    let db = db.clone();
+    let pool = pool.clone();
+    uptrakit_agent_core::spawn_background(bg_tx, async move {
+        run_config_test_ssh(payload, &db, &pool).await
+    });
+}
+
+/// Run a config test for an SSH host: resolve host, acquire SSH session,
+/// delegate to `uptrakit_agent_core::config_test::run_config_test`.
+async fn run_config_test_ssh(
+    payload: uptrakit_internal_wire::TestPluginConfigPayload,
+    db: &sea_orm::DatabaseConnection,
+    pool: &SshConnectionPool,
+) -> ServiceMessage {
+    let host = match find_host_by_machine_id(db, &payload.host_machine_id).await {
+        Ok(Some(h)) => h,
+        Ok(None) => {
+            tracing::warn!(
+                host_machine_id = %payload.host_machine_id,
+                "no SSH host found for TestPluginConfig; returning error"
+            );
+            let mut result = uptrakit_internal_wire::TestPluginConfigResultPayload::new(
+                payload.request_id.clone(),
+                false,
+                0,
+            );
+            result.error = Some(format!(
+                "SSH host with machine_id '{}' not found",
+                payload.host_machine_id
+            ));
+            return ServiceMessage::TestPluginConfigResult(result);
+        }
+        Err(e) => {
+            tracing::error!(
+                host_machine_id = %payload.host_machine_id,
+                error = %e,
+                "DB error looking up SSH host for TestPluginConfig"
+            );
+            let mut result = uptrakit_internal_wire::TestPluginConfigResultPayload::new(
+                payload.request_id.clone(),
+                false,
+                0,
+            );
+            result.error = Some(format!("DB error: {e}"));
+            return ServiceMessage::TestPluginConfigResult(result);
+        }
+    };
+
+    let session = match pool.acquire(&host).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(
+                host_name = %host.name,
+                error = %e,
+                "failed to acquire SSH session for TestPluginConfig"
+            );
+            pool.evict(host.id).await;
+            let mut result = uptrakit_internal_wire::TestPluginConfigResultPayload::new(
+                payload.request_id.clone(),
+                false,
+                0,
+            );
+            result.error = Some(format!("SSH connection failed: {e}"));
+            return ServiceMessage::TestPluginConfigResult(result);
+        }
+    };
+
+    let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
+    let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
+        raw,
+        host.resolved_sudo_context(),
+    ));
+
+    uptrakit_agent_core::config_test::run_config_test(payload, executor).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

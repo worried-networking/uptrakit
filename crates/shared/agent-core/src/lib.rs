@@ -6,6 +6,7 @@
 //! injected by the caller, keeping transport details outside this crate.
 
 pub mod client;
+pub mod config_test;
 pub mod connection_context;
 pub mod error;
 pub mod host_info;

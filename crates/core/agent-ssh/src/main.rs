@@ -272,6 +272,10 @@ impl ServiceHandler for SshAgentHandler {
                 handle_set_update_freeze(&self.freeze_file_path, payload).await;
                 Ok(None)
             }
+            ControllerMessage::TestPluginConfig(payload) => {
+                client::spawn_config_test_ssh(payload, db, &self.pool, &self.bg_tx);
+                Ok(None)
+            }
             #[cfg(feature = "interactive")]
             ControllerMessage::UpdateStdinData(payload) => {
                 client::handle_update_stdin_data_ssh(payload, &self.in_flight_updates);

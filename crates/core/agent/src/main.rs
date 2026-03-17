@@ -214,6 +214,21 @@ impl ServiceHandler for AgentHandler {
                 handle_set_update_freeze(&self.freeze_file_path, payload).await;
                 Ok(None)
             }
+            ControllerMessage::TestPluginConfig(payload) => {
+                if payload.host_machine_id != self.machine_id {
+                    tracing::warn!(
+                        expected = %self.machine_id,
+                        received = %payload.host_machine_id,
+                        "host_machine_id mismatch on TestPluginConfig; ignoring message"
+                    );
+                    return Ok(None);
+                }
+                let executor = self.executor.clone();
+                uptrakit_agent_core::spawn_background(&self.bg_tx, async move {
+                    uptrakit_agent_core::config_test::run_config_test(payload, executor).await
+                });
+                Ok(None)
+            }
             #[cfg(feature = "interactive")]
             ControllerMessage::UpdateStdinData(payload) => {
                 client::handle_update_stdin_data(payload, &self.in_flight_update);
