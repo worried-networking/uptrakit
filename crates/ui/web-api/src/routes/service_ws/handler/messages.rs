@@ -1024,6 +1024,8 @@ mod tests {
             enrollment_token_id: Set(None),
             cert_lifetime_hours: Set(None),
             service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
         }
         .insert(db)
         .await

@@ -91,10 +91,46 @@ pub(crate) async fn insert_service(
         enrollment_token_id: Set(None),
         cert_lifetime_hours: Set(None),
         service_app_name: Set(None),
+        is_embedded: Set(false),
+        embedded_owner_key: Set(None),
     }
     .insert(db)
     .await
     .expect("insert service")
+}
+
+/// Insert an embedded service entity directly in the database.
+pub(crate) async fn insert_embedded_service(
+    db: &DatabaseConnection,
+    tenant_id: uuid::Uuid,
+) -> service::Model {
+    let id = uuid::Uuid::now_v7();
+    let owner_key = uuid::Uuid::now_v7();
+    let now = time::OffsetDateTime::now_utc();
+    service::ActiveModel {
+        id: Set(id),
+        tenant_id: Set(tenant_id),
+        capabilities: Set("[]".to_string()),
+        hostname: Set(format!("embedded-{}", &id.to_string()[..8])),
+        friendly_name: Set(format!("Embedded Service {}", &id.to_string()[..8])),
+        ip_address: Set(None),
+        status: Set(service::ServiceStatus::Approved),
+        enrollment_secret_hash: Set(format!("embedded:{id}")),
+        client_version: Set(None),
+        last_seen_at: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deactivated_at: Set(None),
+        ping_interval_seconds: Set(None),
+        enrollment_token_id: Set(None),
+        cert_lifetime_hours: Set(None),
+        service_app_name: Set(Some("uptrakit-agent".to_string())),
+        is_embedded: Set(true),
+        embedded_owner_key: Set(Some(owner_key)),
+    }
+    .insert(db)
+    .await
+    .expect("insert embedded service")
 }
 
 /// Insert a host entity directly in the database.

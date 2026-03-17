@@ -239,6 +239,7 @@ pub(crate) async fn provision_embedded_tenant_service(
     Ok(service_id)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn refresh_embedded_system_service(
     db: &DatabaseConnection,
     existing: system_service::Model,
@@ -275,6 +276,7 @@ async fn refresh_embedded_system_service(
     Ok(service_id)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn refresh_embedded_tenant_service(
     db: &DatabaseConnection,
     existing: service::Model,

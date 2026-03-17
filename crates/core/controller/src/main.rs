@@ -654,6 +654,10 @@ async fn spawn_background_tasks(
         uptrakit_web_api::nats_transport::NatsTransport,
     >,
 ) {
+    // Used only when embedded-scheduler or embedded-agent features are enabled.
+    #[cfg(not(any(feature = "embedded-scheduler", feature = "embedded-agent")))]
+    let _ = controller_installation_id;
+
     // CRL manager: uses the child cancellation token for cooperative shutdown.
     // Must use track() (not track_abort()) so the manager finishes its current
     // cycle and writes the final TLS config before the process exits.

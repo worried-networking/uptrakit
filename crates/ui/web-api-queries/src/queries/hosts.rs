@@ -405,6 +405,8 @@ mod tests {
             enrollment_token_id: Set(None),
             cert_lifetime_hours: Set(None),
             service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
         };
         let service_a = service_a.insert(&db).await.unwrap();
 
@@ -426,6 +428,8 @@ mod tests {
             enrollment_token_id: Set(None),
             cert_lifetime_hours: Set(None),
             service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
         };
         let service_b = service_b.insert(&db).await.unwrap();
 
