@@ -81,7 +81,9 @@ import type {
 	NotificationRuleResponse,
 	NotificationLogEntry,
 	ResetDataRequest,
-	ResetDataResponse
+	ResetDataResponse,
+	TestPluginConfigRequest,
+	TestPluginConfigResponse
 } from './types';
 
 const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
@@ -867,6 +869,10 @@ export async function deletePluginConfig(id: string): Promise<void> {
 
 export async function triggerPluginConfigDiscovery(id: string): Promise<TriggerDiscoveryResponse> {
 	return request<TriggerDiscoveryResponse>(`/plugin-configs/${encodeURIComponent(id)}/discover`, { method: 'POST' });
+}
+
+export async function testPluginConfig(data: TestPluginConfigRequest): Promise<TestPluginConfigResponse> {
+	return request<TestPluginConfigResponse>('/plugin-configs/test', { method: 'POST', body: JSON.stringify(data) });
 }
 
 // API tokens

@@ -44,7 +44,9 @@ export enum Permission {
 	ViewSystemAuditLogs = 'view_system_audit_logs',
 	// Users & ignores
 	ManageUsers = 'manage_users',
-	ManageIgnores = 'manage_ignores'
+	ManageIgnores = 'manage_ignores',
+	// Plugin config testing
+	TestPluginConfigs = 'test_plugin_configs'
 }
 
 /** Returns true if the user holds at least one of the given permissions. */
@@ -382,7 +384,8 @@ export enum PluginCapability {
 	GuestExec = 'guest_exec',
 	ServiceMigrations = 'service_migrations',
 	ControllerMigrations = 'controller_migrations',
-	UpdateLifecycle = 'update_lifecycle'
+	UpdateLifecycle = 'update_lifecycle',
+	ConfigTest = 'config_test'
 }
 
 /** Static metadata for a plugin type, returned by `GET /api/v1/plugin-types`. */
@@ -633,6 +636,24 @@ export interface UpdatePluginConfigRequest {
 	name?: string;
 	config?: Record<string, unknown>;
 	enabled?: boolean;
+}
+
+export interface TestPluginConfigRequest {
+	plugin_type: string;
+	config: Record<string, unknown>;
+	plugin_config_id?: string;
+	host_id?: string;
+	test_kind?: string;
+	package_identifier?: string;
+}
+
+export interface TestPluginConfigResponse {
+	success: boolean;
+	test_kind: string;
+	output?: string;
+	error?: string;
+	detected_version?: string;
+	duration_ms: number;
 }
 
 // Discovery allowlist

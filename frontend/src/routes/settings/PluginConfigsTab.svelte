@@ -14,7 +14,8 @@
 		batchPluginConfigs,
 		listPluginTypeSettings,
 		upsertPluginTypeSettings,
-		deletePluginTypeSettings
+		deletePluginTypeSettings,
+		testPluginConfig
 	} from '$lib/api';
 	import { formatDate } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
@@ -31,13 +32,15 @@
 		PluginTypeSettingsResponse,
 		FieldDef,
 		SelectOption,
-		BatchActionResponse
+		BatchActionResponse,
+		TestPluginConfigResponse
 	} from '$lib/types';
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived(
 		hasAnyPermission(getUser(), Permission.CreateSoftware, Permission.UpdateSoftware, Permission.DeleteSoftware)
 	);
+	const canTest = $derived(getUser()?.permissions.includes(Permission.TestPluginConfigs) ?? false);
 
 	// Plugin types
 	let pluginTypes: PluginTypeInfo[] = $state([]);
@@ -54,6 +57,10 @@
 	let configDeleteConfirm: { id: string; name: string } | null = $state(null);
 	let discoveringId: string | null = $state(null);
 	let showJsonEditor: boolean = $state(false);
+
+	// Config test state
+	let configTesting: boolean = $state(false);
+	let configTestResult: TestPluginConfigResponse | null = $state(null);
 
 	// Discovery allowlist state
 	let allowlist: TenantDiscoveryAllowlistEntry[] = $state([]);
@@ -234,6 +241,7 @@
 		configForm = { name: '', plugin_type: firstType, config: sampleConfigJson(firstType), enabled: true };
 		formValues = flattenConfig({}, fields);
 		showJsonEditor = false;
+		configTestResult = null;
 		showConfigModal = true;
 	}
 
@@ -248,6 +256,7 @@
 		};
 		formValues = flattenConfig(config.config, fields);
 		showJsonEditor = false;
+		configTestResult = null;
 		showConfigModal = true;
 	}
 
@@ -315,6 +324,38 @@
 			showError(e instanceof Error ? e.message : 'Failed to trigger discovery');
 		} finally {
 			discoveringId = null;
+		}
+	}
+
+	async function testCurrentConfig() {
+		let parsedConfig: Record<string, unknown>;
+		if (hasFormFields && !showJsonEditor) {
+			parsedConfig = unflattenConfig(formValues, currentFormFields);
+		} else {
+			try {
+				parsedConfig = JSON.parse(configForm.config || '{}');
+			} catch {
+				showError('Config must be valid JSON');
+				return;
+			}
+		}
+		configTesting = true;
+		configTestResult = null;
+		try {
+			configTestResult = await testPluginConfig({
+				plugin_type: configForm.plugin_type,
+				config: parsedConfig,
+				plugin_config_id: editingConfig?.id
+			});
+			if (configTestResult.success) {
+				showSuccess('Config test passed.');
+			} else {
+				showError(configTestResult.error ?? 'Config test failed.');
+			}
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to test config');
+		} finally {
+			configTesting = false;
 		}
 	}
 
@@ -814,8 +855,38 @@
 			<span>Enabled</span>
 		</label>
 
+		{#if configTestResult}
+			<aside class="rounded-lg p-3 mt-3 {configTestResult.success ? 'preset-tonal-success' : 'preset-tonal-error'}">
+				<div class="flex items-center gap-2 mb-1">
+					<span class="font-medium">{configTestResult.success ? 'Test Passed' : 'Test Failed'}</span>
+					<span class="text-xs text-surface-500"
+						>{configTestResult.test_kind} &mdash; {configTestResult.duration_ms}ms</span
+					>
+				</div>
+				{#if configTestResult.detected_version}
+					<p class="text-sm">Detected version: <code>{configTestResult.detected_version}</code></p>
+				{/if}
+				{#if configTestResult.output}
+					<pre
+						class="mt-1 text-xs font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">{configTestResult.output}</pre>
+				{/if}
+				{#if configTestResult.error}
+					<p class="mt-1 text-sm text-error-500">{configTestResult.error}</p>
+				{/if}
+			</aside>
+		{/if}
+
 		{#snippet footer()}
 			<button class="btn preset-tonal-surface" onclick={closeConfigModal}>Cancel</button>
+			{#if canTest}
+				<button
+					class="btn preset-tonal"
+					disabled={configTesting || !configForm.plugin_type}
+					onclick={testCurrentConfig}
+				>
+					{configTesting ? 'Testing...' : 'Test'}
+				</button>
+			{/if}
 			<button class="btn preset-filled-primary-500" onclick={saveConfig}>
 				{editingConfig ? 'Update' : 'Create'}
 			</button>
