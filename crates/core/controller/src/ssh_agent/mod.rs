@@ -5,7 +5,8 @@
 //! `uptrakit-agent-ssh` binary when managing remote hosts over SSH.
 //!
 //! The embedded SSH agent:
-//! - Manages remote hosts defined in its own local SQLite database
+//! - Manages remote hosts in the controller's database (SSH agent tables are
+//!   created by the controller's migration system)
 //! - Yields to an external `uptrakit-agent-ssh` with the same app name
 //! - Uses in-process mpsc channels instead of WebSocket for transport
 //! - Reuses all business logic from `uptrakit-agent-ssh` library
@@ -18,7 +19,7 @@ use uptrakit_agent_ssh::client::{self, SshInFlightUpdate, UpdateEvent};
 use uptrakit_agent_ssh::extension::{self, ExtensionContext, InfraActionInvokerImpl};
 use uptrakit_agent_ssh::{
     ServiceExtensionProxy, diff_host_snapshots, handle_set_update_freeze, host_ops,
-    init_ssh_data_key_ring, reencrypt_ssh_to_v3, register_ssh_column_aad, ssh_pool,
+    reencrypt_ssh_to_v3, register_ssh_column_aad, ssh_pool,
 };
 use uptrakit_internal_wire::extension::ExtensionActionsPayload;
 use uptrakit_internal_wire::{
@@ -51,41 +52,33 @@ async fn is_frozen(freeze_file_path: &std::path::Path) -> bool {
 ///
 /// This is the main entry point called from `EmbeddedServiceHost::add()`. It
 /// mirrors the standalone SSH agent's event loop but uses `EmbeddedTransport`
-/// instead of a WebSocket connection.
+/// instead of a WebSocket connection and the controller's shared database
+/// instead of a separate SQLite file.
 pub(crate) async fn run_embedded_ssh_agent(
     mut transport: EmbeddedTransport,
     tokens: EmbeddedShutdownTokens,
     state_dir: PathBuf,
+    db: sea_orm::DatabaseConnection,
 ) {
-    // 1. Create state subdir.
+    // 1. Create state subdir (used for freeze file).
     let ssh_state_dir = state_dir.join("embedded-ssh-agent");
     if let Err(e) = tokio::fs::create_dir_all(&ssh_state_dir).await {
         tracing::error!(error = %e, "failed to create embedded SSH agent state directory");
         return;
     }
 
-    // 2. Register column AAD mapping.
+    // 2. Register column AAD mapping for ssh_hosts.private_key.
     register_ssh_column_aad();
 
-    // 3. Open and migrate local SQLite database.
-    let db = match uptrakit_agent_ssh::db::init_db(&ssh_state_dir).await {
-        Ok(db) => db,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to initialize embedded SSH agent database");
-            return;
-        }
-    };
-
-    // 4. Initialize the data key ring from the local DB.
-    init_ssh_data_key_ring(&db).await;
-
-    // 5. Re-encrypt any non-v3 encrypted values.
+    // 3. Re-encrypt any non-v3 encrypted values (no-op on fresh DB).
+    // The controller's data key ring is already initialized; SSH agent
+    // columns use the same ring for encryption.
     reencrypt_ssh_to_v3(&db).await;
 
-    // 6. Create SSH connection pool.
+    // 4. Create SSH connection pool.
     let pool = ssh_pool::SshConnectionPool::new();
 
-    // 7. Generate ephemeral ECIES P-256 key pair for extension param decryption.
+    // 5. Generate ephemeral ECIES P-256 key pair for extension param decryption.
     let (private_key_der, encryption_public_key) = match generate_ecies_keypair() {
         Ok(pair) => pair,
         Err(e) => {
@@ -94,12 +87,12 @@ pub(crate) async fn run_embedded_ssh_agent(
         }
     };
 
-    // 8. Create infrastructure plugins and extension proxy.
+    // 6. Create infrastructure plugins and extension proxy.
     let extension_proxy = Arc::new(ServiceExtensionProxy::new());
     let infra_plugins: Arc<Vec<Arc<dyn PluginBase>>> =
         Arc::new(uptrakit_plugin_infrastructure_registry::create_agent_infra_plugins());
 
-    // 9. Create aggregate and background channels.
+    // 7. Create aggregate and background channels.
     let (aggregate_tx, mut aggregate_rx) = tokio::sync::mpsc::channel::<(String, UpdateEvent)>(64);
     let (bg_tx, mut bg_rx) = tokio::sync::mpsc::channel::<ServiceMessage>(64);
 

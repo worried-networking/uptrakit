@@ -55,6 +55,7 @@ mod m20260326_000001_hsip_role_ordinal_index;
 mod m20260328_000001_mqtt_states_pagination_indexes;
 mod m20260329_000001_drop_mqtt_and_add_service_config;
 mod m20260330_000001_embedded_service_visibility;
+mod m20260331_000001_ssh_agent_tables;
 
 pub struct Migrator;
 
@@ -114,6 +115,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260328_000001_mqtt_states_pagination_indexes::Migration),
             Box::new(m20260329_000001_drop_mqtt_and_add_service_config::Migration),
             Box::new(m20260330_000001_embedded_service_visibility::Migration),
+            Box::new(m20260331_000001_ssh_agent_tables::Migration),
         ]
     }
 }

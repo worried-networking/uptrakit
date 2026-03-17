@@ -937,6 +937,7 @@ async fn spawn_background_tasks(
         let ssh_caps = ssh_agent::ssh_agent_capabilities();
         let default_tenant_id = app_state.default_tenant_id;
         let state_dir_for_ssh = state_dir.clone();
+        let db_for_ssh = app_state.db().clone();
 
         let add_result = embedded_host
             .add(
@@ -952,6 +953,7 @@ async fn spawn_background_tasks(
                         transport,
                         tokens,
                         state_dir_for_ssh,
+                        db_for_ssh,
                     ))
                 },
                 app_state,
