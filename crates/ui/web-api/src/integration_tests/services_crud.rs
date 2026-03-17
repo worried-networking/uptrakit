@@ -1,5 +1,7 @@
 use crate::test_harness::TestApp;
-use crate::test_harness::fixtures::{insert_service, register_and_get_token};
+use crate::test_harness::fixtures::{
+    insert_embedded_service, insert_service, register_and_get_token,
+};
 use uptrakit_shared_db::entity::service::ServiceStatus;
 
 #[tokio::test]
@@ -127,6 +129,45 @@ async fn get_nonexistent_service_returns_404() {
         .await;
 
     assert_eq!(status, http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn deactivate_embedded_service_returns_409() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let svc = insert_embedded_service(&app.db, app.tenant_id).await;
+
+    let (status, body): (_, serde_json::Value) = client
+        .delete(&format!("/api/v1/services/{}", svc.id))
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::CONFLICT);
+    assert!(
+        body["error"].as_str().unwrap_or("").contains("Embedded"),
+        "expected error about embedded services, got: {body}"
+    );
+}
+
+#[tokio::test]
+async fn get_embedded_service_shows_is_embedded() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let svc = insert_embedded_service(&app.db, app.tenant_id).await;
+
+    let (status, body): (_, serde_json::Value) = client
+        .get(&format!("/api/v1/services/{}", svc.id))
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    assert_eq!(body["is_embedded"], true);
 }
 
 #[tokio::test]
