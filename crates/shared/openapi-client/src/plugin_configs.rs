@@ -80,6 +80,19 @@ impl UptrakitClient {
         self.post_json(crate::paths::plugin_configs::BATCH, req)
             .await
     }
+
+    /// Test a plugin configuration without saving it.
+    ///
+    /// Validates the configuration and, depending on the plugin type, either
+    /// performs a controller-side connectivity check or routes the request to
+    /// an agent for host-side validation.
+    pub async fn test_plugin_config(
+        &self,
+        req: &uptrakit_web_api_types::plugin_config_test::TestPluginConfigRequest,
+    ) -> Result<uptrakit_web_api_types::plugin_config_test::TestPluginConfigResponse> {
+        self.post_json(crate::paths::plugin_configs::TEST, req)
+            .await
+    }
 }
 
 #[cfg(test)]

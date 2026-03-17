@@ -68,6 +68,27 @@ pub enum PluginConfigsCommands {
         /// Plugin config UUIDs (space-separated)
         ids: Vec<uptrakit_openapi_client::Uuid>,
     },
+    /// Test a plugin configuration (dry-run)
+    Test {
+        /// Plugin type (e.g. generic_shell, releases_github, homebrew)
+        #[arg(long)]
+        plugin_type: String,
+        /// Plugin-specific config as JSON string
+        #[arg(long)]
+        config: String,
+        /// Optional saved config ID to merge with
+        #[arg(long)]
+        plugin_config_id: Option<uptrakit_openapi_client::Uuid>,
+        /// Host ID to test against (required for agent-side plugins)
+        #[arg(long)]
+        host_id: Option<uptrakit_openapi_client::Uuid>,
+        /// What to test (version_detection, update_command_validation, pre_update_hook, post_update_hook, connectivity)
+        #[arg(long)]
+        test_kind: Option<String>,
+        /// Package identifier for testing
+        #[arg(long)]
+        package_identifier: Option<String>,
+    },
 }
 
 pub async fn dispatch(command: PluginConfigsCommands, ctx: &CliContext) -> Result<()> {
@@ -185,6 +206,31 @@ pub async fn dispatch(command: PluginConfigsCommands, ctx: &CliContext) -> Resul
             .await?;
             crate::output::print_output(ctx.format, &resp)?;
         }
+        PluginConfigsCommands::Test {
+            plugin_type,
+            config,
+            plugin_config_id,
+            host_id,
+            test_kind,
+            package_identifier,
+        } => {
+            let config_value: serde_json::Value = serde_json::from_str(&config)
+                .map_err(|e| report!(CliError::Other(format!("invalid JSON for --config: {e}"))))?;
+            let resp = test_config(TestConfigParams {
+                plugin_type,
+                config: config_value,
+                plugin_config_id,
+                host_id,
+                test_kind,
+                package_identifier,
+                server: ctx.server.as_deref(),
+                token: ctx.token.as_deref(),
+                insecure: ctx.insecure,
+                request_timeout: ctx.request_timeout,
+            })
+            .await?;
+            crate::output::print_output(ctx.format, &resp)?;
+        }
     }
     Ok(())
 }
@@ -194,6 +240,9 @@ use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::autodiscovery::TriggerDiscoveryResponse;
 use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_openapi_client::types::pagination::{PaginatedResponse, PaginationParams};
+use uptrakit_openapi_client::types::plugin_config_test::{
+    TestPluginConfigRequest, TestPluginConfigResponse,
+};
 use uptrakit_openapi_client::types::plugin_configs::{
     CreatePluginConfigRequest, PluginConfigResponse, UpdatePluginConfigRequest,
 };
@@ -235,6 +284,28 @@ impl HumanOutput for PluginConfigResponse {
                 .format(&Rfc3339)
                 .unwrap_or_else(|_| self.created_at.to_string())
         ));
+        out
+    }
+}
+
+impl HumanOutput for TestPluginConfigResponse {
+    fn to_human_string(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&format!(
+            "Result:       {}\n",
+            if self.success { "OK" } else { "FAILED" }
+        ));
+        out.push_str(&format!("Test kind:    {}\n", self.test_kind));
+        if let Some(v) = &self.detected_version {
+            out.push_str(&format!("Version:      {v}\n"));
+        }
+        if let Some(o) = &self.output {
+            out.push_str(&format!("Output:       {o}\n"));
+        }
+        if let Some(e) = &self.error {
+            out.push_str(&format!("Error:        {e}\n"));
+        }
+        out.push_str(&format!("Duration:     {}ms\n", self.duration_ms));
         out
     }
 }
@@ -290,6 +361,19 @@ pub struct DeleteParams<'a> {
 
 pub struct DiscoverParams<'a> {
     pub id: &'a Uuid,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+}
+
+pub struct TestConfigParams<'a> {
+    pub plugin_type: String,
+    pub config: Value,
+    pub plugin_config_id: Option<Uuid>,
+    pub host_id: Option<Uuid>,
+    pub test_kind: Option<String>,
+    pub package_identifier: Option<String>,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
     pub insecure: bool,
@@ -394,6 +478,21 @@ pub async fn batch(
         ids: ids.to_vec(),
     };
     client.batch_plugin_configs(&req).await.context_to()
+}
+
+pub async fn test_config(params: TestConfigParams<'_>) -> Result<TestPluginConfigResponse> {
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
+    let req = TestPluginConfigRequest::new(params.plugin_type, params.config)
+        .with_plugin_config_id(params.plugin_config_id)
+        .with_host_id(params.host_id)
+        .with_test_kind(params.test_kind)
+        .with_package_identifier(params.package_identifier);
+    client.test_plugin_config(&req).await.context_to()
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

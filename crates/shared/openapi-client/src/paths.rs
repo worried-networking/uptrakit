@@ -165,6 +165,8 @@ pub(crate) mod plugin_configs {
     pub(crate) fn discover(id: &Uuid) -> String {
         format!("/api/v1/plugin-configs/{id}/discover")
     }
+    /// `POST /api/v1/plugin-configs/test`
+    pub(crate) const TEST: &str = "/api/v1/plugin-configs/test";
 }
 
 pub(crate) mod plugin_type_settings {

@@ -38,6 +38,57 @@ pub struct TestPluginConfigRequest {
     pub package_identifier: Option<String>,
 }
 
+impl TestPluginConfigRequest {
+    /// Create a new test request with the required fields.
+    ///
+    /// Optional fields default to `None` and can be set with the builder
+    /// methods [`with_plugin_config_id`], [`with_host_id`], [`with_test_kind`],
+    /// and [`with_package_identifier`].
+    ///
+    /// [`with_plugin_config_id`]: Self::with_plugin_config_id
+    /// [`with_host_id`]: Self::with_host_id
+    /// [`with_test_kind`]: Self::with_test_kind
+    /// [`with_package_identifier`]: Self::with_package_identifier
+    pub fn new(plugin_type: String, config: serde_json::Value) -> Self {
+        Self {
+            plugin_type,
+            config,
+            plugin_config_id: None,
+            host_id: None,
+            test_kind: None,
+            package_identifier: None,
+        }
+    }
+
+    /// Set the saved config ID to merge with.
+    #[must_use]
+    pub fn with_plugin_config_id(mut self, id: Option<uuid::Uuid>) -> Self {
+        self.plugin_config_id = id;
+        self
+    }
+
+    /// Set the host ID for agent-side tests.
+    #[must_use]
+    pub fn with_host_id(mut self, id: Option<uuid::Uuid>) -> Self {
+        self.host_id = id;
+        self
+    }
+
+    /// Set the test kind.
+    #[must_use]
+    pub fn with_test_kind(mut self, kind: Option<String>) -> Self {
+        self.test_kind = kind;
+        self
+    }
+
+    /// Set the package identifier.
+    #[must_use]
+    pub fn with_package_identifier(mut self, identifier: Option<String>) -> Self {
+        self.package_identifier = identifier;
+        self
+    }
+}
+
 /// Response for plugin config test.
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
