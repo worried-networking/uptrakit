@@ -13,11 +13,19 @@ See also: [End-user Guide](../end-user/proxmox.md),
 
 ## Architecture
 
-The Proxmox VE plugin is a **primarily controller-side** infrastructure plugin.
-Most operations go through the Proxmox VE REST API.
+`ProxmoxPlugin` is a **unified plugin struct** used on both the controller and
+agent sides. On the controller (created via `ProxmoxPlugin::new(config, executor)`)
+it holds a `ProxmoxConfig` and communicates with the Proxmox VE REST API. On
+the agent (created via `ProxmoxPlugin::new_agent()`) it implements infrastructure
+subtraits (`HostLifecyclePlugin`, `HostReportPlugin`, `GuestExecPlugin`) behind
+the `agent-infra` feature gate.
 
-The plugin also provides agent-side modules (`pve_setup`, `guest_exec`) used by
-the SSH agent for PVE node detection and guest command execution during bootstrap.
+Feature-gated capabilities:
+
+- **No features**: empty capabilities
+- **`migrations`** (without `agent-infra`): `ControllerMigrations`
+- **`agent-infra`** (implies `migrations`): `HostLifecycle`, `HostReport`,
+  `GuestExec`, `ServiceMigrations`
 
 ```text
 Controller
@@ -43,7 +51,11 @@ Controller
 | `error.rs` | `ProxmoxError` enum with `impl_report_conversion!` |
 | `client.rs` | `ProxmoxClient` — HTTP client for Proxmox REST API |
 | `api_types.rs` | Serde structs for PVE API JSON responses |
-| `plugin.rs` | `ProxmoxPlugin` — `Plugin` trait impl (empty capabilities) |
+| `plugin.rs` | `ProxmoxPlugin` — unified `PluginBase` impl (controller + agent) |
+| `agent/plugin.rs` | Subtrait impls (`HostLifecyclePlugin`, `HostReportPlugin`, `GuestExecPlugin`) on `ProxmoxPlugin` |
+| `agent/extension_actions.rs` | Agent extension action handlers (`list-discovered-guests`, `bootstrap-proxmox-guest`) |
+| `agent/db_ops.rs` | Agent-local DB operations (PVE host state, pending matches) |
+| `agent/migration.rs` | Agent-local DB migrations (`proxmox_host_state`, `proxmox_pending_matches`) |
 | `discovery.rs` | `discover_guests()` — queries nodes for VMs/CTs |
 | `matching.rs` | `manual_match()` / `unmatch()` — manual-only host matching |
 | `extensions.rs` | Extension manifests + action handler dispatch |
