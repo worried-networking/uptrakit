@@ -258,6 +258,10 @@ impl PluginOps for PluginRegistry {
         uptrakit_extension_framework::ExtensionManifest,
         Vec<uptrakit_extension_framework::ActionDef>,
     )> {
+        // `mut` is required when any notifications-* feature is enabled (the push blocks below).
+        // With no notification features active the compiler sees it as unused.
+        // This suppression is approved per AGENTS.md §"Lint Suppressions for Feature-Gated Items".
+        #[allow(unused_mut)]
         let mut result = PluginRegistry::static_plugin_extension_manifests_and_actions();
 
         // Notification plugins: pair each plugin's manifests with that plugin's
