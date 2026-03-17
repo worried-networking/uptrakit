@@ -740,12 +740,21 @@ impl PluginRegistry {
         })
     }
 
-    /// Add a Dashboard Icons enhancement plugin backed by the given cache.
+    /// Add a Dashboard Icons enhancement plugin, constructing the cache and spawning the
+    /// background refresh loop internally.
     #[cfg(feature = "dashboard-icons")]
     pub fn with_dashboard_icons(
         mut self,
-        cache: std::sync::Arc<uptrakit_plugin_enhancement_dashboard_icons::DashboardIconCache>,
+        client: reqwest::Client,
+        cancel: tokio_util::sync::CancellationToken,
     ) -> Self {
+        let cache = std::sync::Arc::new(
+            uptrakit_plugin_enhancement_dashboard_icons::DashboardIconCache::new(client),
+        );
+        uptrakit_plugin_enhancement_dashboard_icons::DashboardIconCache::spawn_refresh_loop(
+            std::sync::Arc::clone(&cache),
+            cancel,
+        );
         let plugin = uptrakit_plugin_enhancement_dashboard_icons::DashboardIconsPlugin::new(cache);
         self.software_item_lifecycle_plugins
             .push(std::sync::Arc::new(plugin));

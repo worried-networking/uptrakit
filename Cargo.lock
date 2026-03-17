@@ -6527,7 +6527,6 @@ dependencies = [
  "uptrakit-crypto",
  "uptrakit-directories",
  "uptrakit-internal-wire",
- "uptrakit-plugin-enhancement-dashboard-icons",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-scheduler-engine",
@@ -6934,12 +6933,14 @@ name = "uptrakit-plugin-infrastructure-registry"
 version = "0.0.1"
 dependencies = [
  "futures-util",
+ "reqwest",
  "rootcause",
  "sea-orm",
  "sea-orm-migration",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
  "uptrakit-command",
  "uptrakit-extension-framework",

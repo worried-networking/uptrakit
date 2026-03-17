@@ -376,14 +376,7 @@ async fn run(args: cli::Args) -> Result<()> {
                 "dashboard-icons HTTP client: {e}"
             )))
         })?;
-
-        let cache =
-            Arc::new(uptrakit_plugin_enhancement_dashboard_icons::DashboardIconCache::new(client));
-        uptrakit_plugin_enhancement_dashboard_icons::DashboardIconCache::spawn_refresh_loop(
-            Arc::clone(&cache),
-            shutdown_token.child_token(),
-        );
-        registry.with_dashboard_icons(cache)
+        registry.with_dashboard_icons(client, shutdown_token.child_token())
     };
 
     let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =

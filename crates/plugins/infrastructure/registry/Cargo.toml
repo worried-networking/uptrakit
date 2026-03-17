@@ -20,7 +20,7 @@ agent-infra = [
     "uptrakit-plugin-infrastructure-core/agent-infra",
     "uptrakit-plugin-infrastructure-proxmox/agent-infra",
 ]
-dashboard-icons = ["dep:uptrakit-plugin-enhancement-dashboard-icons"]
+dashboard-icons = ["dep:uptrakit-plugin-enhancement-dashboard-icons", "dep:tokio-util", "dep:reqwest"]
 notifications = []
 notifications-webhook = ["notifications", "dep:uptrakit-notification-plugin-webhook"]
 notifications-telegram = ["notifications", "dep:uptrakit-notification-plugin-telegram"]
@@ -58,6 +58,8 @@ rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-notification-plugin-core = { workspace = true }
 uptrakit-plugin-enhancement-dashboard-icons = { workspace = true, optional = true }
+tokio-util = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
 uptrakit-notification-plugin-webhook = { workspace = true, optional = true }
 uptrakit-notification-plugin-telegram = { workspace = true, optional = true }
 uptrakit-notification-plugin-email = { workspace = true, optional = true }
