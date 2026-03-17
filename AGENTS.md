@@ -639,7 +639,7 @@ for user review. Key invariants:
    [Plugin Guidelines](docs/development/plugin-guidelines.md) and [Sudoers Management](docs/security/sudoers-management.md).
 
 8. **Plugin capabilities.** The `PluginCapability` enum is defined in
-   `crates/shared/types/src/plugin_capability.rs` and has 15 variants.
+   `crates/shared/types/src/plugin_capability.rs` and has 16 variants.
 
    **Role-assignment capabilities** (used by the UI `EditHostAssignmentModal` to filter plugin
    configs for each standard-role dropdown via `GET /api/v1/plugin-types`):

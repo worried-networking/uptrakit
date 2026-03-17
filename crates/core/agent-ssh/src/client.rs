@@ -999,7 +999,7 @@ fn error_results_for_discovery(
 }
 
 /// Spawn a `TestPluginConfig` operation as a background task for an SSH host.
-pub(crate) fn spawn_config_test_ssh(
+pub fn spawn_config_test_ssh(
     payload: uptrakit_internal_wire::TestPluginConfigPayload,
     db: &sea_orm::DatabaseConnection,
     pool: &SshConnectionPool,
