@@ -11,6 +11,7 @@ version.workspace = true
 default = ["db-sqlite", "oidc", "zeroconf", "interactive", "notifications-all", "embedded-scheduler", "embed-frontend", "reset-data", "dashboard-icons"]
 embedded-scheduler = ["dep:uptrakit-scheduler-engine"]
 embedded-agent = ["dep:uptrakit-agent-core", "dep:base64"]
+embedded-ssh-agent = ["dep:uptrakit-agent-ssh", "dep:sea-orm-migration", "dep:base64"]
 zeroconf = ["dep:mdns-sd"]
 oidc = ["uptrakit-web-api/oidc", "uptrakit-scheduler-engine?/oidc"]
 swagger-ui = ["uptrakit-web-api/swagger-ui"]
@@ -18,7 +19,7 @@ db-all = ["db-sqlite", "db-postgres", "db-mysql", "uptrakit-web-api/db-all"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite", "uptrakit-web-api/db-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres", "uptrakit-web-api/db-postgres"]
 db-mysql = ["sea-orm/sqlx-mysql", "uptrakit-shared-db/db-mysql", "uptrakit-web-api/db-mysql"]
-interactive = ["uptrakit-web-api/interactive", "uptrakit-agent-core?/interactive"]
+interactive = ["uptrakit-web-api/interactive", "uptrakit-agent-core?/interactive", "uptrakit-agent-ssh?/interactive"]
 nats = ["uptrakit-web-api/nats"]
 notifications-telegram = ["uptrakit-web-api/notifications-telegram", "uptrakit-plugin-infrastructure-registry/notifications-telegram"]
 notifications-email = ["uptrakit-web-api/notifications-email", "uptrakit-plugin-infrastructure-registry/notifications-email"]
@@ -26,7 +27,7 @@ notifications-all = ["notifications-telegram", "notifications-email", "uptrakit-
 embed-frontend = ["dep:rust-embed"]
 journald = ["uptrakit-audit-log/journald", "dep:tracing-journald"]
 dashboard-icons = ["uptrakit-web-api/dashboard-icons", "uptrakit-plugin-infrastructure-registry/dashboard-icons", "dep:uptrakit-plugin-enhancement-dashboard-icons"]
-reset-data = ["uptrakit-web-api/reset-data"]
+reset-data = ["uptrakit-web-api/reset-data", "uptrakit-agent-ssh?/reset-data"]
 
 [dependencies]
 uptrakit-internal-wire = { workspace = true }
@@ -70,7 +71,9 @@ uptrakit-build-info = { workspace = true }
 uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-scheduler-engine = { workspace = true, optional = true }
 uptrakit-agent-core = { workspace = true, optional = true }
+uptrakit-agent-ssh = { workspace = true, optional = true }
 base64 = { workspace = true, optional = true }
+sea-orm-migration = { workspace = true, optional = true, features = ["sqlx-sqlite"] }
 tracing-journald = { workspace = true, optional = true }
 uptrakit-plugin-enhancement-dashboard-icons = { workspace = true, optional = true }
 reqwest = { workspace = true }

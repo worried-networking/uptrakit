@@ -7,7 +7,11 @@ mod db;
 mod db_migrate;
 mod durations;
 #[cfg_attr(
-    not(any(feature = "embedded-scheduler", feature = "embedded-agent")),
+    not(any(
+        feature = "embedded-scheduler",
+        feature = "embedded-agent",
+        feature = "embedded-ssh-agent"
+    )),
     allow(dead_code) // Infrastructure types used by follow-up service embeddings.
 )]
 mod embedded;
@@ -21,6 +25,8 @@ mod reencrypt;
 #[cfg(feature = "embedded-scheduler")]
 mod scheduler;
 mod server;
+#[cfg(feature = "embedded-ssh-agent")]
+mod ssh_agent;
 mod startup;
 mod tasks;
 #[cfg(feature = "zeroconf")]
@@ -924,8 +930,60 @@ async fn spawn_background_tasks(
         }
     }
 
+    // Embedded SSH agent: manage remote hosts over SSH from within the controller.
+    // Only available in single-tenant deployments (uses default_tenant_id).
+    #[cfg(feature = "embedded-ssh-agent")]
+    {
+        let ssh_caps = ssh_agent::ssh_agent_capabilities();
+        let default_tenant_id = app_state.default_tenant_id;
+        let state_dir_for_ssh = state_dir.clone();
+
+        let add_result = embedded_host
+            .add(
+                "Embedded SSH Agent",
+                "uptrakit-agent-ssh",
+                ssh_caps.clone(),
+                false, // tenant service
+                Some(default_tenant_id),
+                controller_installation_id,
+                embedded::types::CoexistencePolicy::YieldOnSameAppName,
+                move |transport, tokens| {
+                    Box::pin(ssh_agent::run_embedded_ssh_agent(
+                        transport,
+                        tokens,
+                        state_dir_for_ssh,
+                    ))
+                },
+                app_state,
+                bg,
+            )
+            .await;
+
+        match add_result {
+            Ok(add_result) => {
+                let bridge_cancel = bg.child_token();
+                let bridge_handle = tokio::spawn(
+                    uptrakit_web_api::embedded_support::run_embedded_message_handler(
+                        Arc::clone(app_state),
+                        add_result.service_id,
+                        default_tenant_id,
+                        ssh_caps,
+                        "uptrakit-agent-ssh".to_string(),
+                        add_result.service_rx,
+                        bridge_cancel,
+                    ),
+                );
+                bg.track("Embedded SSH Agent (bridge)", bridge_handle);
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "failed to start embedded SSH agent");
+            }
+        }
+    }
+
     // Suppress unused-variable warnings when embedded features are disabled.
     let _ = controller_id;
+    let _ = controller_installation_id;
     let _ = &embedded_host;
     let _ = &state_dir;
 
