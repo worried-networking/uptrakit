@@ -61,8 +61,9 @@
 
 		// Pre-load action: invoke an extension action on form open to populate field values.
 		if (preLoadAction && extensionId) {
+			const preLoadParams = Object.fromEntries(Object.entries(extraParams).filter(([key]) => key !== '_row'));
 			preLoading = true;
-			invokeExtensionAction(extensionId, preLoadAction, {}, serviceId)
+			invokeExtensionAction(extensionId, preLoadAction, preLoadParams, serviceId)
 				.then((data) => {
 					const obj = data as Record<string, unknown>;
 					for (const f of fields) {
