@@ -22,6 +22,12 @@ providing software discovery, version checks, and updates without a separate `up
 provisioned as a tenant service under the default tenant and yields to an external agent with the same `machine_id`.
 See [Embedded Services](docs/architecture/embedded-services.md#embedded-agent).
 
+The controller can also embed the SSH-backed agent (`--features embedded-ssh-agent`) for managing remote hosts over SSH
+from within the controller process. The embedded SSH agent is provisioned as a tenant service and yields to an external
+`uptrakit-agent-ssh` when one connects. It uses a local SQLite database for SSH host credentials and an ephemeral ECIES
+P-256 key pair for extension parameter decryption.
+See [Embedded Services](docs/architecture/embedded-services.md#embedded-ssh-agent).
+
 ## Key references
 
 - Detailed entity documentation: [docs/architecture/](docs/architecture/) (multi-tenancy, hosts, software items,

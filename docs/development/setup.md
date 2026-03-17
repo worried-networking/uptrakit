@@ -178,3 +178,17 @@ cargo build -p uptrakit-controller --features embed-frontend
 
 The `--static-dir` flag is not available when this feature is enabled.
 See [Embedded Frontend](embedded-frontend.md) for details.
+
+### Embedded SSH agent
+
+To include the SSH-backed agent in the controller binary (for managing remote hosts over SSH
+without a separate `uptrakit-agent-ssh` process):
+
+```bash
+cargo build -p uptrakit-controller --features embedded-ssh-agent
+```
+
+This creates a local SQLite database at `<state_dir>/embedded-ssh-agent/agent-ssh.db` for
+SSH host credentials. The embedded SSH agent yields to an external `uptrakit-agent-ssh` if one
+connects. See [Embedded Services](../architecture/embedded-services.md#embedded-ssh-agent)
+for the full architecture.

@@ -303,7 +303,9 @@ injection prevention (`shell_escape()`), encrypted SSH key storage, UI extension
 parameters, dynamic CLI subcommands for extensions (manifest-driven argument parsing),
 per-command sudoers generation (`host bootstrap` / `host sync` grant only `NOPASSWD` access for
 specific commands declared by registered plugins via `required_sudo_commands()` — not blanket
-`ALL`).
+`ALL`), embedded mode (`embedded-ssh-agent` controller feature: runs inside the controller
+process via `EmbeddedServiceHost::add()`, `YieldOnSameAppName` coexistence, transport-generic
+`ServiceTransport` trait for dual WebSocket/in-process operation, lib+bin crate split).
 
 ### Pending
 

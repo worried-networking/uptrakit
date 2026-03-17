@@ -16,6 +16,11 @@ a week.
 - The optional embedded agent (`embedded-agent` feature) runs inside the controller process and
   inherits its privileges. Use sudo allowlists to constrain update commands, and prefer a separate
   agent binary in multi-tenant or hardened deployments.
+- The optional embedded SSH agent (`embedded-ssh-agent` feature) runs inside the controller
+  process and manages remote hosts over SSH. SSH private keys are stored encrypted in the
+  controller's shared database using the controller's master key and data key ring. An
+  ephemeral ECIES P-256 key pair is generated at startup for extension parameter decryption.
+  Prefer a separate `uptrakit-agent-ssh` binary in multi-tenant or hardened deployments.
 - The scheduler never runs automatic updates; all actions require user confirmation.
 - Secrets are encrypted at rest, never logged, and sensitive endpoints are rate limited.
 - Master key consistency is verified at startup to prevent silent decryption failures in HA deployments.

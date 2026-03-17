@@ -49,6 +49,24 @@ Host management (list, bootstrap, remove) is also available via the [UI extensio
 The SSH agent follows the same enrollment and connection lifecycle as the regular agent and MQTT service, using the shared `ServiceHandler` trait from
 `uptrakit-service-sdk`.
 
+### Deployment modes
+
+The SSH agent can run in two modes:
+
+- **Standalone** (`uptrakit-agent-ssh` binary) -- connects to the controller over WebSocket
+  (mTLS), uses `ServiceHandler` from the service-sdk, manages its own master key
+  independently. This is the default and recommended mode for production.
+- **Embedded** (`embedded-ssh-agent` controller feature) -- runs inside the controller
+  process via in-process mpsc channels (`EmbeddedTransport`). Uses the controller's shared
+  database (SSH tables created by the controller's migration system), master key, and data
+  key ring. Yields to an external `uptrakit-agent-ssh` if one connects
+  (`YieldOnSameAppName`). See [Embedded Services](embedded-services.md#embedded-ssh-agent)
+  for the full embedded architecture.
+
+Both modes use the same `uptrakit-agent-ssh` library crate for all business logic. The
+`ServiceTransport` trait abstracts the transport layer, so `client.rs` and `extension.rs`
+functions work identically over WebSocket or in-process channels.
+
 ## Self-Managed Encryption
 
 The SSH agent manages its own encryption key independently from the controller:
@@ -661,27 +679,31 @@ controller-side cleanup is a separate operator action.
 The SSH agent depends on `uptrakit-agent-core` (`crates/shared/agent-core/`) for shared version check and update
 execution logic. See the [agent-core shared crate](#shared-uptrakit-agent-core-crate) section below.
 
+The `agent-ssh` crate is a dual lib+bin crate. `lib.rs` contains all shared modules and
+public API; `main.rs` is a thin CLI wrapper that imports from the library. This enables the
+controller to depend on `uptrakit-agent-ssh` as a library crate for embedded mode.
+
 ```text
 crates/core/agent-ssh/
 ├── Cargo.toml
 ├── build.rs
 └── src/
-    ├── main.rs          # SshAgentHandler (ServiceHandler impl, in_flight_updates HashMap,
-    │                    # aggregate_rx/tx channel, bg_rx/bg_tx channel, reload_ticker,
-    │                    # host_snapshot), SshAgentEvent enum (Update, BackgroundResult,
-    │                    # HostConfigChanged), poll_updates(), diff_host_snapshots(),
-    │                    # entry point, master key init
+    ├── lib.rs           # Library entry point: public modules, constants, helper functions
+    │                    # (register_ssh_column_aad, init_ssh_data_key_ring, reencrypt_ssh_to_v3,
+    │                    # diff_host_snapshots, handle_set_update_freeze); re-exports
+    │                    # ServiceExtensionProxy from uptrakit_service_sdk
+    ├── main.rs          # Thin CLI wrapper: SshAgentHandler (ServiceHandler impl), SshAgentEvent,
+    │                    # rotate_ssh_master_key, entry point; imports all logic from lib.rs
     ├── cli.rs           # CLI args (Commands, HostCommands, CommonServiceArgs integration)
     ├── client.rs        # Authenticated loop; spawn_check_versions_ssh(), spawn_discover_software_ssh(),
     │                    # spawn_execute_batch_update_ssh() (background-spawned),
     │                    # handle_execute_update_ssh() (per-host guard + forwarder task),
     │                    # SshInFlightUpdate struct, build_reload_host_infos(),
-    │                    # report_hosts_after_config_change() — all wrap SshCommandExecutor with
-    │                    # SudoAwareCommandExecutor
+    │                    # report_hosts_after_config_change() — all accept &mut impl ServiceTransport
     ├── extension.rs     # UI extension: manifest builder, action dispatch (list-hosts, bootstrap,
     │                    # remove-host, list-discovered-guests, bootstrap-proxmox-guest),
     │                    # ECIES decryption of sensitive params,
-    │                    # ServiceExtensionProxy invocation helpers
+    │                    # ServiceExtensionProxy invocation helpers — accepts &mut impl ServiceTransport
     ├── error.rs         # Error types (rootcause + thiserror)
     ├── ssh_config.rs    # SSH config resolution (~/.ssh/config defaults for User, Port, HostName)
     ├── ssh_executor.rs  # SshCommandExecutor (CommandExecutor impl over SSH, StdioTunnel support)
@@ -890,6 +912,7 @@ uptrakit extensions ssh-agent.hosts --service-id <UUID> bootstrap --help
 
 ## Related Documentation
 
+- [Embedded Services](embedded-services.md#embedded-ssh-agent) — embedded SSH agent architecture (in-process mode)
 - [SSH Agent Host Management](../end-user/ssh-agent-host-management.md) — end-user guide for CLI host management, including dynamic reload behaviour
 - [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md) — detailed bootstrap workflow and troubleshooting
 - [Service Lifecycle](../development/service-lifecycle.md) — `ServiceHandler` trait

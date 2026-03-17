@@ -104,6 +104,7 @@ The method:
 | --- | --- | --- | --- |
 | Scheduler | `embedded-scheduler` | `YieldOnSameAppName` | Yields when an external `uptrakit-scheduler` connects; internal tasks always run regardless. |
 | Agent | `embedded-agent` | `Custom` | Yields when an external `uptrakit-agent` on the same host (matching `machine_id`) connects. Tenant service, not system. |
+| SSH Agent | `embedded-ssh-agent` | `YieldOnSameAppName` | Yields when an external `uptrakit-agent-ssh` connects. Tenant service. Manages remote hosts over SSH from within the controller process. |
 
 ## Embedded Agent
 
@@ -155,6 +156,91 @@ supports PTY-based interactive update sessions. The `interactive` feature propag
 The embedded agent module lives at `crates/core/controller/src/agent/mod.rs` and reuses all
 business logic from `uptrakit-agent-core` (the same crate used by the standalone agent binary).
 
+## Embedded SSH Agent
+
+When the `embedded-ssh-agent` feature is enabled, the controller runs the SSH-backed agent
+inside its own process. This eliminates the need for a separate `uptrakit-agent-ssh` binary
+in single-tenant deployments where remote host management over SSH is desired.
+
+### Provisioning
+
+Like the embedded agent, the embedded SSH agent is provisioned as a **tenant service** in the
+`services` table under `AppState.default_tenant_id`. SSH operations (host management, version
+checks, updates) are tenant-scoped. The feature requires single-tenant mode.
+
+### State directory
+
+The embedded SSH agent stores its freeze file under `<state_dir>/embedded-ssh-agent/`. This
+directory is created automatically on first start.
+
+- `embedded-ssh-agent/update-freeze` -- freeze file that blocks updates when present
+
+Unlike the standalone SSH agent (which uses its own SQLite database), the embedded SSH agent
+stores all data in the controller's shared database. The SSH agent tables (`ssh_hosts`,
+`proxmox_host_state`, `proxmox_pending_matches`) are created by the controller's migration
+system and work with any supported backend (SQLite, PostgreSQL, MySQL).
+
+### Transport and message flow
+
+The embedded SSH agent communicates through `EmbeddedTransport` (in-process mpsc channels),
+same as the embedded agent. Messages flow through the `MessageProcessor` pipeline. The
+`ServiceTransport` trait abstracts the transport layer, allowing `uptrakit-agent-ssh` library
+functions to operate identically over both WebSocket and in-process channels.
+
+### Yield behaviour
+
+The embedded SSH agent uses `CoexistencePolicy::YieldOnSameAppName`. It yields when an
+external `uptrakit-agent-ssh` connects. While yielded, the embedded SSH agent stops
+processing inbound commands and defers to the external service.
+
+### Initialization sequence
+
+1. Create state subdirectory `<state_dir>/embedded-ssh-agent/`
+2. Register SSH column AAD for encrypted fields
+3. Re-encrypt any legacy-format encrypted values to v3 (no-op on fresh DB)
+4. Create `SshConnectionPool`
+5. Generate an ephemeral ECIES P-256 key pair (for extension parameter decryption)
+6. Create `ServiceExtensionProxy` and infrastructure plugin instances
+
+The controller's database is passed directly to the embedded SSH agent -- no separate
+database initialization or migration is needed. SSH agent tables are created by the
+controller's shared migration system during startup.
+
+### ECIES key pair generation
+
+The SSH agent needs a P-256 key pair for decrypting sensitive extension parameters (e.g.
+passwords in the bootstrap workflow). In standalone mode, the service-sdk generates this
+during identity provisioning. In embedded mode, an ephemeral key pair is generated using
+`rcgen::KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)`. The `rcgen` crate is already a
+controller dependency.
+
+### Data key ring coexistence
+
+The controller initializes the global `DATA_KEY_RING` (`OnceLock`) during startup. The
+embedded SSH agent reuses this ring directly for all encryption operations -- SSH host
+private keys are encrypted with the controller's active DEK. No separate key ring
+initialization is needed.
+
+Migration from a standalone SSH agent deployment to embedded mode (merging existing encrypted
+host data from the standalone SQLite database) is not currently supported.
+
+### Update safety
+
+- **Freeze file**: `<state_dir>/embedded-ssh-agent/update-freeze` prevents updates when present.
+- **Rate limiting**: A 5-second cooldown between accepted `ExecuteUpdate` / `ExecuteBatchUpdate`
+  messages prevents runaway update loops.
+
+### Interactive updates
+
+When the controller is compiled with both `embedded-ssh-agent` and `interactive`, the embedded
+SSH agent supports PTY-based interactive update sessions over SSH. The `interactive` feature
+propagates to `uptrakit-agent-ssh` via `uptrakit-agent-ssh?/interactive`.
+
+### Module location
+
+The embedded SSH agent module lives at `crates/core/controller/src/ssh_agent/mod.rs` and
+reuses all business logic from the `uptrakit-agent-ssh` library crate.
+
 ## Module Structure
 
 ```text
@@ -166,6 +252,9 @@ crates/core/controller/src/embedded/
 
 crates/core/controller/src/agent/
     mod.rs        -- (cfg: embedded-agent) Embedded agent using uptrakit-agent-core
+
+crates/core/controller/src/ssh_agent/
+    mod.rs        -- (cfg: embedded-ssh-agent) Embedded SSH agent using uptrakit-agent-ssh
 ```
 
 ## API Response Fields
