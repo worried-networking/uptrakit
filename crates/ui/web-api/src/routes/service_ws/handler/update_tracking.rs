@@ -13,12 +13,12 @@ use uptrakit_web_api_types::events::AdminEvent;
 
 use super::shared_types::ProcessorResponse;
 use crate::AppState;
-use crate::queries::update_types::ActorType;
 
 /// Handle a `ServiceTriggerUpdate` message.
 #[tracing::instrument(skip_all)]
 pub(super) async fn handle_service_trigger_update(
     state: &Arc<AppState>,
+    service_app_name: &str,
     payload: &ServiceUpdateTriggerPayload,
 ) -> ProcessorResponse {
     match crate::queries::update_triggers::trigger_update_for_host(
@@ -29,7 +29,7 @@ pub(super) async fn handle_service_trigger_update(
             item_id: payload.software_item_id,
             host_id: payload.host_id,
             to_version: payload.to_version.clone(),
-            actor_type: ActorType::Mqtt,
+            actor_type: service_app_name,
             actor_id: &payload.actor_service_id.to_string(),
             release_info: None,
             interactive: false,
@@ -81,6 +81,7 @@ pub(super) async fn handle_service_trigger_update(
 #[tracing::instrument(skip_all)]
 pub(super) async fn handle_service_trigger_host_batch_update(
     state: &Arc<AppState>,
+    service_app_name: &str,
     payload: &ServiceHostBatchUpdateTriggerPayload,
 ) -> ProcessorResponse {
     let category_filter = if payload.security_only {
@@ -121,7 +122,7 @@ pub(super) async fn handle_service_trigger_host_batch_update(
     let params = crate::queries::update_batches::CreateBatchParams {
         tenant_id: payload.tenant_id,
         batch_type: crate::queries::update_types::BatchType::HostUpdate,
-        actor_type: ActorType::Mqtt,
+        actor_type: service_app_name,
         actor_id: &payload.actor_service_id.to_string(),
     };
     match crate::queries::update_batches::create_batch(

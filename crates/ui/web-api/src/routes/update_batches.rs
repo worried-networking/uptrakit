@@ -98,7 +98,7 @@ pub async fn trigger_host_batch_update(
         &batch_queries::CreateBatchParams {
             tenant_id: tenant_db.tenant_id,
             batch_type: BatchType::HostUpdate,
-            actor_type: ActorType::User,
+            actor_type: ActorType::User.as_str(),
             actor_id: &user.user_id.to_string(),
         },
         candidates,
@@ -194,7 +194,7 @@ pub async fn trigger_item_batch_update(
         &batch_queries::CreateBatchParams {
             tenant_id: tenant_db.tenant_id,
             batch_type: BatchType::ItemRollout,
-            actor_type: ActorType::User,
+            actor_type: ActorType::User.as_str(),
             actor_id: &user.user_id.to_string(),
         },
         candidates,

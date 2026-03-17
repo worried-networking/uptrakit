@@ -392,13 +392,23 @@ impl MessageProcessor {
 
     /// Dispatch update-tracking messages (ServiceTriggerUpdate, etc.).
     async fn dispatch_update_tracking(&self, msg: ServiceMessage) -> ProcessorResponse {
+        let service_app_name = self.service_app_name.as_deref().unwrap_or("unknown");
         match msg {
             ServiceMessage::ServiceTriggerUpdate(payload) => {
-                update_tracking::handle_service_trigger_update(&self.state, &payload).await
+                update_tracking::handle_service_trigger_update(
+                    &self.state,
+                    service_app_name,
+                    &payload,
+                )
+                .await
             }
             ServiceMessage::ServiceTriggerHostBatchUpdate(payload) => {
-                update_tracking::handle_service_trigger_host_batch_update(&self.state, &payload)
-                    .await
+                update_tracking::handle_service_trigger_host_batch_update(
+                    &self.state,
+                    service_app_name,
+                    &payload,
+                )
+                .await
             }
             _ => unreachable!("dispatch_update_tracking called with non-update-tracking message"),
         }

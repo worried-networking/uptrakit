@@ -1,4 +1,4 @@
-//! Shared update-trigger logic used by the REST handler and the MQTT WS handler.
+//! Shared update-trigger logic used by the REST handler and service WS handlers.
 //!
 //! The trigger pipeline is split into three composable layers defined in
 //! [`super::update_dispatch`]:
@@ -18,7 +18,6 @@ use uptrakit_shared_db::entity::update_history;
 use uuid::Uuid;
 
 use crate::notifier::ServiceNotifier;
-use crate::queries::update_types::ActorType;
 
 use super::update_dispatch::{
     CreateUpdateRecordParams, DispatchUpdateParams, TriggerUpdateError, build_plugin_assignment,
@@ -50,11 +49,11 @@ pub struct TriggerUpdateParams<'a> {
     pub host_id: Uuid,
     pub to_version: String,
     /// Who initiated the update.
-    pub actor_type: ActorType,
-    /// User UUID string, MQTT client UUID string, or empty string.
+    pub actor_type: &'a str,
+    /// User UUID string, service UUID string, or empty string.
     pub actor_id: &'a str,
     /// Optional release metadata supplied by the REST caller.
-    /// `None` when triggered from MQTT or a scheduler.
+    /// `None` when triggered from a service or a scheduler.
     pub release_info: Option<ReleaseInfo>,
     /// When true, the agent allocates a PTY and keeps stdin open for forwarding.
     pub interactive: bool,
@@ -77,7 +76,7 @@ fn is_unique_constraint_violation(e: &rootcause::Report<TriggerUpdateError>) -> 
     false
 }
 
-/// Core update-trigger logic shared by the REST handler and the MQTT WS handler.
+/// Core update-trigger logic shared by the REST handler and service WS handlers.
 ///
 /// Validates preconditions, then either inserts a `Pending` record and
 /// dispatches immediately (when the host is free), or inserts a `Queued`
@@ -199,6 +198,7 @@ pub async fn trigger_update_for_host(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::queries::update_types::ActorType;
     use sea_orm::{
         ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, ModelTrait,
         QueryFilter, Set,
@@ -584,7 +584,7 @@ mod tests {
                 item_id: f.item_id,
                 host_id: f.host_id,
                 to_version: "1.2.0".to_string(),
-                actor_type: ActorType::User,
+                actor_type: ActorType::User.as_str(),
                 actor_id: "user-1",
                 release_info: None,
                 interactive: false,
@@ -623,7 +623,7 @@ mod tests {
                 item_id: f.item_id,
                 host_id: f.host_id,
                 to_version: "1.1.0".to_string(),
-                actor_type: ActorType::User,
+                actor_type: ActorType::User.as_str(),
                 actor_id: "user-1",
                 release_info: None,
                 interactive: false,

@@ -585,7 +585,7 @@ pub async fn trigger_update(
             item_id,
             host_id,
             to_version: req.to_version,
-            actor_type: ActorType::User,
+            actor_type: ActorType::User.as_str(),
             actor_id: &user.user_id.to_string(),
             release_info,
             interactive: req.interactive,

@@ -25,7 +25,6 @@ use uuid::Uuid;
 
 use crate::notifier::ServiceNotifier;
 use crate::queries::software_items::find_active_item;
-use crate::queries::update_types::ActorType;
 use crate::token_utils::generate_uuid;
 
 // ---------------------------------------------------------------------------
@@ -119,7 +118,7 @@ pub struct CreateUpdateRecordParams<'a> {
     /// pending or in progress.
     pub from_version: Option<String>,
     /// Who initiated the update.
-    pub actor_type: ActorType,
+    pub actor_type: &'a str,
     pub actor_id: &'a str,
     pub update_category: &'a str,
     /// Set when the update belongs to a batch.
@@ -433,7 +432,7 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
         status: Set(params.initial_status),
         output: Set(String::new()),
         output_bytes: Set(0),
-        actor_type: Set(params.actor_type.as_str().to_string()),
+        actor_type: Set(params.actor_type.to_string()),
         actor_id: Set(params.actor_id.to_string()),
         started_at: Set(Some(now)),
         completed_at: Set(None),

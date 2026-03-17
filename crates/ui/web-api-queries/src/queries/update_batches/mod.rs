@@ -36,7 +36,7 @@ use crate::notifier::ServiceNotifier;
 use crate::queries::update_dispatch::{
     CreateUpdateRecordParams, DispatchUpdateParams, TriggerUpdateError, has_active_update_for_host,
 };
-use crate::queries::update_types::{ActorType, BatchType};
+use crate::queries::update_types::BatchType;
 use crate::token_utils::generate_uuid;
 
 type Result<T> = std::result::Result<T, rootcause::Report<TriggerUpdateError>>;
@@ -51,7 +51,7 @@ pub struct CreateBatchParams<'a> {
     /// The batch category.
     pub batch_type: BatchType,
     /// Who initiated the batch.
-    pub actor_type: ActorType,
+    pub actor_type: &'a str,
     pub actor_id: &'a str,
 }
 
@@ -155,7 +155,7 @@ pub async fn create_batch(
         batch_type: Set(params.batch_type.as_str().to_string()),
         status: Set(BatchStatus::InProgress),
         total_count: Set(validated.len() as i32),
-        actor_type: Set(params.actor_type.as_str().to_string()),
+        actor_type: Set(params.actor_type.to_string()),
         actor_id: Set(params.actor_id.to_string()),
         output: Set(String::new()),
         output_bytes: Set(0),
@@ -271,6 +271,7 @@ pub(crate) mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::queries::update_types::ActorType;
 
     /// A no-op notifier for tests -- always returns `true` (agent locally connected).
     pub(crate) struct NoopNotifier;
@@ -572,7 +573,7 @@ pub(crate) mod tests {
             &CreateBatchParams {
                 tenant_id: f.tenant_id,
                 batch_type: BatchType::HostUpdate,
-                actor_type: ActorType::User,
+                actor_type: ActorType::User.as_str(),
                 actor_id: "test-user",
             },
             candidates,

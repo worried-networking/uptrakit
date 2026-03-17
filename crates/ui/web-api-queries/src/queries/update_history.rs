@@ -369,7 +369,7 @@ mod tests {
             status: update_history::UpdateStatus::Pending,
             output: String::new(),
             output_bytes: 0,
-            actor_type: "mqtt".to_string(),
+            actor_type: "uptrakit-mqtt".to_string(),
             actor_id: "".to_string(),
             started_at: Some(now),
             completed_at: None,
@@ -389,7 +389,7 @@ mod tests {
 
         assert_eq!(resp.status, UpdateStatus::Pending);
         assert!(resp.completed_at.is_none());
-        assert_eq!(resp.actor_type, "mqtt");
+        assert_eq!(resp.actor_type, "uptrakit-mqtt");
     }
 
     #[test]
