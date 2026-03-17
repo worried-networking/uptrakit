@@ -20,6 +20,16 @@ use uptrakit_shared_db::entity::system_service::{self, SystemServiceStatus};
 use uptrakit_shared_types::ServiceStatus;
 use uuid::Uuid;
 
+/// Common parameters for refreshing an embedded service record.
+struct RefreshParams<'a> {
+    app_name: &'a str,
+    friendly_name: &'a str,
+    caps_str: &'a str,
+    hostname: &'a str,
+    embedded_owner_key: Uuid,
+    now: time::OffsetDateTime,
+}
+
 /// Find or create a system service record for an embedded service.
 ///
 /// Lookup key: `service_app_name`. If a matching record exists, its ID is
@@ -48,17 +58,15 @@ pub(crate) async fn provision_embedded_system_service(
         .await
         .context("query existing owned embedded system service")?
     {
-        return refresh_embedded_system_service(
-            db,
-            existing,
+        let params = RefreshParams {
             app_name,
             friendly_name,
-            &caps_str,
+            caps_str: &caps_str,
             hostname,
             embedded_owner_key,
             now,
-        )
-        .await;
+        };
+        return refresh_embedded_system_service(db, existing, &params).await;
     }
 
     if let Some(legacy) = system_service::Entity::find()
@@ -76,17 +84,15 @@ pub(crate) async fn provision_embedded_system_service(
             %embedded_owner_key,
             "claiming legacy embedded system service"
         );
-        return refresh_embedded_system_service(
-            db,
-            legacy,
+        let params = RefreshParams {
             app_name,
             friendly_name,
-            &caps_str,
+            caps_str: &caps_str,
             hostname,
             embedded_owner_key,
             now,
-        )
-        .await;
+        };
+        return refresh_embedded_system_service(db, legacy, &params).await;
     }
 
     let service_id = Uuid::now_v7();
@@ -157,17 +163,15 @@ pub(crate) async fn provision_embedded_tenant_service(
         .await
         .context("query existing owned embedded tenant service")?
     {
-        return refresh_embedded_tenant_service(
-            db,
-            existing,
+        let params = RefreshParams {
             app_name,
             friendly_name,
-            &caps_str,
+            caps_str: &caps_str,
             hostname,
             embedded_owner_key,
             now,
-        )
-        .await;
+        };
+        return refresh_embedded_tenant_service(db, existing, &params).await;
     }
 
     if let Some(legacy) = service::Entity::find()
@@ -187,17 +191,15 @@ pub(crate) async fn provision_embedded_tenant_service(
             %embedded_owner_key,
             "claiming legacy embedded tenant service"
         );
-        return refresh_embedded_tenant_service(
-            db,
-            legacy,
+        let params = RefreshParams {
             app_name,
             friendly_name,
-            &caps_str,
+            caps_str: &caps_str,
             hostname,
             embedded_owner_key,
             now,
-        )
-        .await;
+        };
+        return refresh_embedded_tenant_service(db, legacy, &params).await;
     }
 
     let service_id = Uuid::now_v7();
@@ -243,34 +245,29 @@ pub(crate) async fn provision_embedded_tenant_service(
 async fn refresh_embedded_system_service(
     db: &DatabaseConnection,
     existing: system_service::Model,
-    app_name: &str,
-    friendly_name: &str,
-    caps_str: &str,
-    hostname: &str,
-    embedded_owner_key: Uuid,
-    now: time::OffsetDateTime,
+    p: &RefreshParams<'_>,
 ) -> rootcause::Result<Uuid> {
     let service_id = existing.id;
     let synthetic_hash = format!("embedded:{service_id}");
     let mut active: system_service::ActiveModel = existing.into();
-    active.capabilities = ActiveValue::Set(caps_str.to_string());
-    active.hostname = ActiveValue::Set(hostname.to_string());
-    active.friendly_name = ActiveValue::Set(friendly_name.to_string());
+    active.capabilities = ActiveValue::Set(p.caps_str.to_string());
+    active.hostname = ActiveValue::Set(p.hostname.to_string());
+    active.friendly_name = ActiveValue::Set(p.friendly_name.to_string());
     active.status = ActiveValue::Set(SystemServiceStatus::Approved);
     active.enrollment_secret_hash = ActiveValue::Set(synthetic_hash);
-    active.last_seen_at = ActiveValue::Set(Some(now));
-    active.updated_at = ActiveValue::Set(now);
+    active.last_seen_at = ActiveValue::Set(Some(p.now));
+    active.updated_at = ActiveValue::Set(p.now);
     active.deactivated_at = ActiveValue::Set(None);
-    active.service_app_name = ActiveValue::Set(Some(app_name.to_string()));
+    active.service_app_name = ActiveValue::Set(Some(p.app_name.to_string()));
     active.is_embedded = ActiveValue::Set(true);
-    active.embedded_owner_key = ActiveValue::Set(Some(embedded_owner_key));
+    active.embedded_owner_key = ActiveValue::Set(Some(p.embedded_owner_key));
     active
         .update(db)
         .await
         .context("refresh embedded system service record")?;
     tracing::debug!(
         %service_id,
-        app_name,
+        app_name = p.app_name,
         "reused embedded system service record"
     );
     Ok(service_id)
@@ -280,34 +277,29 @@ async fn refresh_embedded_system_service(
 async fn refresh_embedded_tenant_service(
     db: &DatabaseConnection,
     existing: service::Model,
-    app_name: &str,
-    friendly_name: &str,
-    caps_str: &str,
-    hostname: &str,
-    embedded_owner_key: Uuid,
-    now: time::OffsetDateTime,
+    p: &RefreshParams<'_>,
 ) -> rootcause::Result<Uuid> {
     let service_id = existing.id;
     let synthetic_hash = format!("embedded:{service_id}");
     let mut active: service::ActiveModel = existing.into();
-    active.capabilities = ActiveValue::Set(caps_str.to_string());
-    active.hostname = ActiveValue::Set(hostname.to_string());
-    active.friendly_name = ActiveValue::Set(friendly_name.to_string());
+    active.capabilities = ActiveValue::Set(p.caps_str.to_string());
+    active.hostname = ActiveValue::Set(p.hostname.to_string());
+    active.friendly_name = ActiveValue::Set(p.friendly_name.to_string());
     active.status = ActiveValue::Set(ServiceStatus::Approved);
     active.enrollment_secret_hash = ActiveValue::Set(synthetic_hash);
-    active.last_seen_at = ActiveValue::Set(Some(now));
-    active.updated_at = ActiveValue::Set(now);
+    active.last_seen_at = ActiveValue::Set(Some(p.now));
+    active.updated_at = ActiveValue::Set(p.now);
     active.deactivated_at = ActiveValue::Set(None);
-    active.service_app_name = ActiveValue::Set(Some(app_name.to_string()));
+    active.service_app_name = ActiveValue::Set(Some(p.app_name.to_string()));
     active.is_embedded = ActiveValue::Set(true);
-    active.embedded_owner_key = ActiveValue::Set(Some(embedded_owner_key));
+    active.embedded_owner_key = ActiveValue::Set(Some(p.embedded_owner_key));
     active
         .update(db)
         .await
         .context("refresh embedded tenant service record")?;
     tracing::debug!(
         %service_id,
-        app_name,
+        app_name = p.app_name,
         "reused embedded tenant service record"
     );
     Ok(service_id)

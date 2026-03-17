@@ -665,6 +665,10 @@ async fn build_audit_logger(
 /// Spawn all background tasks: CRL manager, denylist cleanup, settings reload,
 /// CA reload/rotation, scheduler, server cert renewal, and NATS consumer.
 #[allow(clippy::too_many_arguments)]
+// `controller_installation_id` is only used behind `embedded-scheduler`
+// and `embedded-agent` feature flags; `has_external_tls_cert` is only used
+// behind the `nats` feature flag.
+#[allow(unused_variables)]
 async fn spawn_background_tasks(
     bg: &mut tasks::BackgroundTasks,
     app_state: &Arc<AppState>,
