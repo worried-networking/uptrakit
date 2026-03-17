@@ -15,6 +15,7 @@ pub struct SystemServiceResponse {
     pub capabilities: Vec<String>,
     pub hostname: String,
     pub friendly_name: String,
+    pub is_embedded: bool,
     pub ip_address: Option<String>,
     pub status: ServiceStatus,
     pub client_version: Option<String>,
@@ -44,6 +45,9 @@ pub struct SystemServiceResponse {
     /// global default is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cert_lifetime_hours: Option<u32>,
+    /// External service IDs currently causing this embedded service to yield.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yielded_to: Option<Vec<Uuid>>,
 }
 
 /// Query parameters for listing system services.
@@ -130,6 +134,7 @@ mod tests {
             capabilities: vec!["update_tracking".into(), "graceful_shutdown".into()],
             hostname: "mqtt-host.local".to_string(),
             friendly_name: "MQTT Bridge".to_string(),
+            is_embedded: false,
             ip_address: Some("10.0.0.2".to_string()),
             status: ServiceStatus::Approved,
             client_version: Some("2.0.0".to_string()),
@@ -138,6 +143,7 @@ mod tests {
             updated_at: datetime!(2025-06-01 12:00:00 UTC),
             ping_interval_seconds: Some(30),
             cert_lifetime_hours: None,
+            yielded_to: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: SystemServiceResponse =
@@ -149,6 +155,7 @@ mod tests {
         );
         assert_eq!(deserialized.hostname, "mqtt-host.local");
         assert_eq!(deserialized.friendly_name, "MQTT Bridge");
+        assert!(!deserialized.is_embedded);
         assert_eq!(deserialized.ip_address.as_deref(), Some("10.0.0.2"));
         assert_eq!(deserialized.status, ServiceStatus::Approved);
         assert_eq!(deserialized.client_version.as_deref(), Some("2.0.0"));
@@ -163,6 +170,7 @@ mod tests {
             capabilities: vec!["scheduler".into()],
             hostname: "scheduler-host".to_string(),
             friendly_name: "System Scheduler".to_string(),
+            is_embedded: false,
             ip_address: None,
             status: ServiceStatus::Pending,
             client_version: None,
@@ -171,6 +179,7 @@ mod tests {
             updated_at: datetime!(2025-01-01 0:00:00 UTC),
             ping_interval_seconds: None,
             cert_lifetime_hours: None,
+            yielded_to: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: SystemServiceResponse =
@@ -189,6 +198,7 @@ mod tests {
             capabilities: vec!["update_tracking".into()],
             hostname: "old-broker".to_string(),
             friendly_name: "Deactivated MQTT".to_string(),
+            is_embedded: false,
             ip_address: None,
             status: ServiceStatus::Deactivated,
             client_version: None,
@@ -197,6 +207,7 @@ mod tests {
             updated_at: datetime!(2025-01-01 0:00:00 UTC),
             ping_interval_seconds: None,
             cert_lifetime_hours: None,
+            yielded_to: None,
         };
         let json_value =
             serde_json::to_value(&resp).expect("serialization to Value should succeed");
@@ -368,6 +379,7 @@ mod tests {
             capabilities: vec!["update_tracking".into()],
             hostname: "host".to_string(),
             friendly_name: "H".to_string(),
+            is_embedded: true,
             ip_address: None,
             status: ServiceStatus::Approved,
             client_version: None,
@@ -376,12 +388,15 @@ mod tests {
             updated_at: datetime!(2025-01-01 0:00:00 UTC),
             ping_interval_seconds: None,
             cert_lifetime_hours: Some(48),
+            yielded_to: Some(vec![sample_uuid()]),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         assert!(json.contains(r#""cert_lifetime_hours":48"#));
         let de: SystemServiceResponse =
             serde_json::from_str(&json).expect("deserialization should succeed");
+        assert!(de.is_embedded);
         assert_eq!(de.cert_lifetime_hours, Some(48));
+        assert_eq!(de.yielded_to, Some(vec![sample_uuid()]));
     }
 
     #[test]
@@ -391,6 +406,7 @@ mod tests {
             capabilities: vec!["update_tracking".into()],
             hostname: "host".to_string(),
             friendly_name: "H".to_string(),
+            is_embedded: false,
             ip_address: None,
             status: ServiceStatus::Approved,
             client_version: None,
@@ -399,9 +415,11 @@ mod tests {
             updated_at: datetime!(2025-01-01 0:00:00 UTC),
             ping_interval_seconds: None,
             cert_lifetime_hours: None,
+            yielded_to: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         assert!(!json.contains("cert_lifetime_hours"));
+        assert!(!json.contains("yielded_to"));
     }
 
     #[test]

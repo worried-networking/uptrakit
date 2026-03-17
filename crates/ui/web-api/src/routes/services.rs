@@ -366,10 +366,16 @@ pub async fn deactivate_service(
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Service not found"),
-        Err(report) => {
-            tracing::error!("Failed to deactivate service: {}", report);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
+        Err(report) => match report.current_context() {
+            ServiceQueryError::EmbeddedService => error_response(
+                StatusCode::CONFLICT,
+                "Embedded services cannot be deactivated",
+            ),
+            _ => {
+                tracing::error!("Failed to deactivate service: {}", report);
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
+        },
     }
 }
 
@@ -523,6 +529,9 @@ pub async fn merge_service(
                 }
                 ServiceQueryError::NotPending => {
                     error_response(StatusCode::BAD_REQUEST, "Source service must be pending")
+                }
+                ServiceQueryError::EmbeddedService => {
+                    error_response(StatusCode::CONFLICT, "Embedded services cannot be merged")
                 }
                 ServiceQueryError::Db(_) => {
                     tracing::error!("Failed to merge services: {}", report);

@@ -66,6 +66,7 @@ fn sample_service() -> ServiceResponse {
         service_label: "Agent".to_string(),
         hostname: "agent-host.local".to_string(),
         friendly_name: "Test Agent".to_string(),
+        is_embedded: false,
         ip_address: None,
         status: "approved".parse().unwrap(),
         client_version: Some("1.0.0".to_string()),
@@ -74,6 +75,7 @@ fn sample_service() -> ServiceResponse {
         updated_at: datetime!(2025-01-01 00:00:00 UTC),
         ping_interval_seconds: None,
         cert_lifetime_hours: None,
+        yielded_to: None,
     }
 }
 

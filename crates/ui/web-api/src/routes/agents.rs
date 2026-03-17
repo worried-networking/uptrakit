@@ -230,6 +230,8 @@ pub(crate) async fn do_enroll(
         enrollment_token_id: Set(enrollment_token_id),
         cert_lifetime_hours: Set(None),
         service_app_name: Set(Some(service_app_name)),
+        is_embedded: Set(false),
+        embedded_owner_key: Set(None),
     };
 
     let inserted = model.insert(db).await.context_to::<AgentRouteError>()?;
@@ -581,6 +583,8 @@ pub(crate) async fn do_enroll_system_service(
         cert_lifetime_hours: Set(None),
         system_enrollment_token_id: Set(matched_token_id),
         service_app_name: Set(Some(service_app_name)),
+        is_embedded: Set(false),
+        embedded_owner_key: Set(None),
     };
 
     let inserted = model.insert(db).await.context_to::<AgentRouteError>()?;

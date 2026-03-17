@@ -6,6 +6,7 @@
 pub mod audit_logs;
 pub mod autodiscovery;
 pub mod discovery_allowlist;
+pub mod embedded_runtime_states;
 pub mod enrollment_tokens;
 pub mod host_tags;
 pub mod hosts;

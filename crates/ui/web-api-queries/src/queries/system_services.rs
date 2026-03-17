@@ -14,6 +14,8 @@ use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::system_services::{ListSystemServicesQuery, SystemServiceResponse};
 use uuid::Uuid;
 
+use crate::queries::embedded_runtime_states::load_fresh_yielded_to;
+
 /// Errors returned by system service mutation queries.
 #[derive(Debug, Error)]
 pub enum SystemServiceQueryError {
@@ -26,6 +28,9 @@ pub enum SystemServiceQueryError {
     /// The system service must be in `Approved` status for this operation.
     #[error("system service is not in approved status")]
     NotApproved,
+    /// Embedded system services cannot be deactivated through the API.
+    #[error("embedded system services cannot be deactivated")]
+    EmbeddedService,
     /// A database error occurred.
     #[error("database error: {0}")]
     Db(sea_orm::DbErr),
@@ -60,7 +65,10 @@ fn service_status_to_db_status(s: ServiceStatus) -> SystemServiceStatus {
     }
 }
 
-fn model_to_response(m: system_service::Model) -> SystemServiceResponse {
+fn model_to_response(
+    m: system_service::Model,
+    yielded_to: Option<Vec<Uuid>>,
+) -> SystemServiceResponse {
     let caps = parse_capabilities(&m.capabilities);
     let cap_strings: Vec<String> = caps.iter().map(|c| c.as_str().to_string()).collect();
     SystemServiceResponse {
@@ -68,6 +76,7 @@ fn model_to_response(m: system_service::Model) -> SystemServiceResponse {
         capabilities: cap_strings,
         hostname: m.hostname,
         friendly_name: m.friendly_name,
+        is_embedded: m.is_embedded,
         ip_address: m.ip_address,
         status: db_status_to_service_status(m.status),
         client_version: m.client_version,
@@ -76,7 +85,45 @@ fn model_to_response(m: system_service::Model) -> SystemServiceResponse {
         updated_at: m.updated_at,
         ping_interval_seconds: m.ping_interval_seconds.map(|v| v as u32),
         cert_lifetime_hours: m.cert_lifetime_hours.map(|v| v as u32),
+        yielded_to,
     }
+}
+
+async fn build_system_service_response(
+    db: &DatabaseConnection,
+    model: system_service::Model,
+) -> Result<SystemServiceResponse> {
+    let yielded = load_fresh_yielded_to(db, &[model.id]).await.context_to()?;
+    let yielded_to = if model.is_embedded {
+        yielded.get(&model.id).cloned()
+    } else {
+        None
+    };
+    Ok(model_to_response(model, yielded_to))
+}
+
+async fn build_system_service_responses(
+    db: &DatabaseConnection,
+    models: Vec<system_service::Model>,
+) -> Result<Vec<SystemServiceResponse>> {
+    let service_ids: Vec<Uuid> = models
+        .iter()
+        .filter(|model| model.is_embedded)
+        .map(|model| model.id)
+        .collect();
+    let yielded = load_fresh_yielded_to(db, &service_ids).await.context_to()?;
+
+    Ok(models
+        .into_iter()
+        .map(|model| {
+            let yielded_to = if model.is_embedded {
+                yielded.get(&model.id).cloned()
+            } else {
+                None
+            };
+            model_to_response(model, yielded_to)
+        })
+        .collect())
 }
 
 // --- Public query functions ---
@@ -111,7 +158,7 @@ pub async fn list_system_services(
         .await
         .context_to()?;
 
-    let items: Vec<SystemServiceResponse> = services.into_iter().map(model_to_response).collect();
+    let items = build_system_service_responses(db, services).await?;
     Ok(PaginatedResponse::new(items, total, pagination))
 }
 
@@ -126,7 +173,10 @@ pub async fn get_active_system_service(
         .one(db)
         .await
         .context_to()?;
-    Ok(svc.map(model_to_response))
+    match svc {
+        Some(model) => Ok(Some(build_system_service_response(db, model).await?)),
+        None => Ok(None),
+    }
 }
 
 /// Update configurable system service settings.
@@ -167,7 +217,7 @@ pub async fn update_system_service_settings(
     active.updated_at = Set(OffsetDateTime::now_utc());
 
     let updated = active.update(db).await.context_to()?;
-    Ok(Some(model_to_response(updated)))
+    Ok(Some(build_system_service_response(db, updated).await?))
 }
 
 /// Approve a pending system service.
@@ -194,7 +244,7 @@ pub async fn approve_system_service(
     active.updated_at = Set(now);
 
     let updated = active.update(db).await.context_to()?;
-    Ok(model_to_response(updated))
+    build_system_service_response(db, updated).await
 }
 
 /// Reject a pending system service.
@@ -222,7 +272,7 @@ pub async fn reject_system_service(
     active.updated_at = Set(now);
 
     let updated = active.update(db).await.context_to()?;
-    Ok(model_to_response(updated))
+    build_system_service_response(db, updated).await
 }
 
 /// Soft-delete a system service and revoke all its non-revoked certificates.
@@ -249,6 +299,10 @@ pub async fn deactivate_system_service(db: &DatabaseConnection, id: Uuid) -> Res
     else {
         return Ok(false);
     };
+
+    if svc.is_embedded {
+        bail!(SystemServiceQueryError::EmbeddedService);
+    }
 
     let now = OffsetDateTime::now_utc();
     let mut active: system_service::ActiveModel = svc.into();
@@ -396,6 +450,11 @@ pub async fn batch_deactivate_system_services(
     let now = OffsetDateTime::now_utc();
 
     for (id, svc) in &found {
+        if svc.is_embedded {
+            failed.push((*id, "embedded services cannot be deactivated".to_string()));
+            continue;
+        }
+
         let txn = db.begin().await.context_to()?;
 
         let mut active: system_service::ActiveModel = svc.clone().into();
@@ -491,6 +550,8 @@ mod tests {
             cert_lifetime_hours: Set(None),
             system_enrollment_token_id: Set(None),
             service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
         }
         .insert(db)
         .await
@@ -657,6 +718,8 @@ mod tests {
             cert_lifetime_hours: Set(Some(24)),
             system_enrollment_token_id: Set(None),
             service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
         }
         .insert(&db)
         .await

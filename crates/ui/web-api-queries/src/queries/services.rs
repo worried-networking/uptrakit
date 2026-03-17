@@ -14,6 +14,7 @@ use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::services::{ListServicesQuery, ServiceResponse};
 use uuid::Uuid;
 
+use crate::queries::embedded_runtime_states::load_fresh_yielded_to;
 use crate::tenant_db::TenantDb;
 use crate::token_utils;
 use uptrakit_internal_wire::service_profile::{ServiceProfile, parse_capabilities};
@@ -39,6 +40,9 @@ pub enum ServiceQueryError {
     /// The source service ID was not found.
     #[error("source service not found")]
     SourceNotFound,
+    /// Embedded services cannot be deactivated through the API.
+    #[error("embedded services cannot be deactivated")]
+    EmbeddedService,
     /// A database error occurred.
     #[error("database error: {0}")]
     Db(sea_orm::DbErr),
@@ -49,7 +53,7 @@ impl_report_conversion!(sea_orm::DbErr => ServiceQueryError::Db);
 
 // --- Private helpers ---
 
-fn model_to_response(m: service::Model) -> ServiceResponse {
+fn model_to_response(m: service::Model, yielded_to: Option<Vec<Uuid>>) -> ServiceResponse {
     let caps = parse_capabilities(&m.capabilities);
     let profile = ServiceProfile::from_capabilities(&caps);
     let has_ssh = caps.contains(&Capability::SshRemote);
@@ -60,6 +64,7 @@ fn model_to_response(m: service::Model) -> ServiceResponse {
         service_label: profile.service_label(has_ssh).to_string(),
         hostname: m.hostname,
         friendly_name: m.friendly_name,
+        is_embedded: m.is_embedded,
         ip_address: m.ip_address,
         status: m.status,
         client_version: m.client_version,
@@ -68,7 +73,49 @@ fn model_to_response(m: service::Model) -> ServiceResponse {
         updated_at: m.updated_at,
         ping_interval_seconds: m.ping_interval_seconds.map(|v| v as u32),
         cert_lifetime_hours: m.cert_lifetime_hours.map(|v| v as u32),
+        yielded_to,
     }
+}
+
+async fn build_service_response(
+    tenant_db: &TenantDb,
+    model: service::Model,
+) -> Result<ServiceResponse> {
+    let yielded = load_fresh_yielded_to(tenant_db.db(), &[model.id])
+        .await
+        .context_to()?;
+    let yielded_to = if model.is_embedded {
+        yielded.get(&model.id).cloned()
+    } else {
+        None
+    };
+    Ok(model_to_response(model, yielded_to))
+}
+
+async fn build_service_responses(
+    tenant_db: &TenantDb,
+    models: Vec<service::Model>,
+) -> Result<Vec<ServiceResponse>> {
+    let service_ids: Vec<Uuid> = models
+        .iter()
+        .filter(|model| model.is_embedded)
+        .map(|model| model.id)
+        .collect();
+    let yielded = load_fresh_yielded_to(tenant_db.db(), &service_ids)
+        .await
+        .context_to()?;
+
+    Ok(models
+        .into_iter()
+        .map(|model| {
+            let yielded_to = if model.is_embedded {
+                yielded.get(&model.id).cloned()
+            } else {
+                None
+            };
+            model_to_response(model, yielded_to)
+        })
+        .collect())
 }
 
 // --- Public query functions ---
@@ -107,7 +154,7 @@ pub async fn list_services(
         .await
         .context_to()?;
 
-    let items: Vec<ServiceResponse> = services.into_iter().map(model_to_response).collect();
+    let items = build_service_responses(tenant_db, services).await?;
     Ok(PaginatedResponse::new(items, total, pagination))
 }
 
@@ -120,7 +167,10 @@ pub async fn get_active_service(tenant_db: &TenantDb, id: Uuid) -> Result<Option
         .one(tenant_db.db())
         .await
         .context_to()?;
-    Ok(svc.map(model_to_response))
+    match svc {
+        Some(model) => Ok(Some(build_service_response(tenant_db, model).await?)),
+        None => Ok(None),
+    }
 }
 
 /// Update configurable service settings.
@@ -162,7 +212,7 @@ pub async fn update_service_settings(
     active.updated_at = Set(OffsetDateTime::now_utc());
 
     let updated = active.update(tenant_db.db()).await.context_to()?;
-    Ok(Some(model_to_response(updated)))
+    Ok(Some(build_service_response(tenant_db, updated).await?))
 }
 
 /// Approve a pending service.
@@ -187,7 +237,7 @@ pub async fn approve_service(tenant_db: &TenantDb, id: Uuid) -> Result<ServiceRe
     active.updated_at = Set(now);
 
     let updated = active.update(tenant_db.db()).await.context_to()?;
-    Ok(model_to_response(updated))
+    build_service_response(tenant_db, updated).await
 }
 
 /// Reject a pending service.
@@ -213,7 +263,7 @@ pub async fn reject_service(tenant_db: &TenantDb, id: Uuid) -> Result<ServiceRes
     active.updated_at = Set(now);
 
     let updated = active.update(tenant_db.db()).await.context_to()?;
-    Ok(model_to_response(updated))
+    build_service_response(tenant_db, updated).await
 }
 
 /// Soft-delete a service, revoke its certificates, and bump the revocation counter.
@@ -240,6 +290,10 @@ pub async fn deactivate_service(
     else {
         return Ok(false);
     };
+
+    if svc.is_embedded {
+        bail!(ServiceQueryError::EmbeddedService);
+    }
 
     let now = OffsetDateTime::now_utc();
     let mut active: service::ActiveModel = svc.into();
@@ -413,7 +467,7 @@ pub async fn merge_service(
 
     txn.commit().await.context_to()?;
 
-    Ok(model_to_response(updated_target))
+    build_service_response(tenant_db, updated_target).await
 }
 
 // ---------------------------------------------------------------------------
@@ -552,6 +606,11 @@ pub async fn batch_deactivate_services(
     // Deactivate each service in its own transaction so that individual
     // failures don't block the rest of the batch.
     for (id, svc) in &found {
+        if svc.is_embedded {
+            failed.push((*id, "embedded services cannot be deactivated".to_string()));
+            continue;
+        }
+
         let txn = tenant_db.db().begin().await.context_to()?;
 
         let mut active: service::ActiveModel = svc.clone().into();

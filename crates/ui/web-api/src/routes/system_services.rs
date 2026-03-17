@@ -336,10 +336,16 @@ pub async fn deactivate_system_service(
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(false) => error_response(StatusCode::NOT_FOUND, "System service not found"),
-        Err(report) => {
-            tracing::error!("Failed to deactivate system service: {}", report);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
+        Err(report) => match report.current_context() {
+            SystemServiceQueryError::EmbeddedService => error_response(
+                StatusCode::CONFLICT,
+                "Embedded services cannot be deactivated",
+            ),
+            _ => {
+                tracing::error!("Failed to deactivate system service: {}", report);
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
+        },
     }
 }
 
