@@ -22,6 +22,18 @@
 - Why it matters: status, reconnect, HA-online, and command events use `try_send()` and log on drop instead of retrying or reconciling later.
 - Failure scenario: broker reconnect storm, slow controller link, or bursty host updates fill the event channel. The service keeps running, but the controller can miss state transitions.
 
+### [MEDIUM] Incomplete multi-page `SoftwareStates` buffers are never garbage-collected
+
+- Dimension: fault tolerance, memory
+- Scope: `crates/core/mqtt/src/tenant_manager.rs`, `partial_states` buffer
+- Why it matters: multi-page `SoftwareStates` payloads are buffered per MQTT client. If page 0
+  arrives but the client disconnects before page 1, the incomplete entry lives in memory
+  indefinitely. No TTL or periodic cleanup pass removes it.
+- Failure scenario: repeated broker churn generates many orphaned partial-state entries that
+  accumulate and waste memory with no operator-visible signal.
+- Fix: add a TTL (e.g., 5 minutes) per `PartialSoftwareStates` entry and clean up expired entries
+  on each recv cycle.
+
 ### [LOW] One `too_many_arguments` suppression is still undocumented
 
 - Dimension: coding standards

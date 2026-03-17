@@ -23,31 +23,73 @@
 
 ## Summary
 
-The plugin subsystem is in much better shape than the older append-only reviews suggested. Config validation, SSRF defense, timeout discipline, and unit coverage are broadly strong. The active issues are now limited to one real panic surface and a few large umbrella-managed crates that are getting harder to change safely.
+The plugin subsystem is in good shape overall. Config validation, SSRF defense, timeout
+discipline, and unit coverage are broadly strong. This review cycle added extensibility findings
+around the `SoftwareItemPatch` builder contract and confirmed the existing email panic risk.
+The extension handler registration limitation (compile-time only) is an accepted architectural
+tradeoff and is now documented explicitly.
 
 ## Strengths
 
-- The small plugins remain easy to reason about and rely heavily on shared infrastructure instead of duplicating HTTP, command, or secret-handling code.
-- The older generic-shell test gap is resolved; the crate now has focused unit tests for placeholder replacement and failure propagation.
-- The notification plugins inherit consistent timeout and SSRF behavior from the shared client builder.
+- The small plugins remain easy to reason about and rely on shared infrastructure instead of
+  duplicating HTTP, command, or secret-handling code.
+- The generic-shell plugin now has focused unit tests for placeholder replacement and failure
+  propagation.
+- All notification plugins inherit consistent timeout and SSRF behavior from the shared client
+  builder.
+- Plugin HMAC signing (webhook) and HTML escaping (telegram) are correctly applied.
 
 ## Active Findings
 
 ### [MEDIUM] The email notification plugin still panics on malformed non-object config
 
 - Dimension: fault tolerance, coding standards
-- Scope: `crates/plugins/notifications/email/src/lib.rs:97`
-- Why it matters: `merge_smtp_into_config()` still does `config.as_object_mut().expect("config is always an object")`. A malformed row or unexpected caller can still take down the dispatch path instead of returning a typed error.
-- Failure scenario: settings-store corruption, manual DB edit, or a buggy caller passes a non-object JSON value into the plugin path during notification delivery.
+- Scope: `crates/plugins/notifications/email/src/lib.rs`
+- Why it matters: `merge_smtp_into_config()` calls `config.as_object_mut().expect("config is
+  always an object")`. A malformed row or unexpected caller can take down the dispatch path instead
+  of returning a typed error.
+- Failure scenario: settings-store corruption, manual DB edit, or a buggy caller passes a non-
+  object JSON value into the plugin path during notification delivery.
+
+### [MEDIUM] `SoftwareItemPatch` builder contract is fragile for external implementors
+
+- Dimension: extensibility, API stability
+- Scope: `crates/plugins/infrastructure/core/src/plugin_base.rs`, `SoftwareItemPatch` struct
+- Why it matters: `SoftwareItemPatch` uses a builder pattern with `#[non_exhaustive]`. All current
+  fields are `Option<T>`, which makes the builder safe for now. If a non-optional field is ever
+  added, every external `SoftwareItemLifecyclePlugin` implementation that constructs a patch via
+  the builder will fail to compile.
+- Fix: document explicitly that all future `SoftwareItemPatch` fields must remain optional, or
+  provide a separate `SoftwareItemPatchBuilder` type that clearly owns the construction contract.
 
 ### [MEDIUM] Several umbrella-managed plugins are now monolithic enough to raise change risk
 
 - Dimension: maintainability
-- Scope: `crates/plugins/infrastructure/proxmox`, `crates/plugins/package-managers/apk`, `crates/plugins/package-managers/dnf`, `crates/plugins/notifications/email`
-- Why it matters: the crates still compile and test cleanly, but they now concentrate multiple responsibilities in files that are hundreds to more than a thousand lines long.
-- Failure scenario: a future resilience fix for remote execution, package parsing, or notification behavior lands in one branch of a monolithic file and regresses an adjacent concern.
+- Scope: `crates/plugins/infrastructure/proxmox`, `crates/plugins/package-managers/apk`,
+  `crates/plugins/package-managers/dnf`, `crates/plugins/notifications/email`
+- Why it matters: the crates still compile and test cleanly, but they now concentrate multiple
+  responsibilities in files that are hundreds to more than a thousand lines long.
+- Failure scenario: a future resilience fix for remote execution, package parsing, or notification
+  behavior lands in one branch of a monolithic file and regresses an adjacent concern.
+
+### [LOW] `handle_service_extension_action()` fails silently when not overridden by infrastructure plugins
+
+- Dimension: extensibility, developer experience
+- Scope: `crates/plugins/infrastructure/core/src/plugin_base.rs:PluginBase::handle_service_extension_action`
+- Why it matters: the method has a default `None` implementation. An infrastructure plugin that
+  exposes `extension_manifests()` UI actions but forgets to override
+  `handle_service_extension_action()` will silently ignore all agent-side extension action
+  requests. The error message from the registry is generic and does not indicate which method is
+  missing.
+- Fix: add a documentation note on the method explaining that infrastructure plugins exposing
+  extension manifests must override this method to handle agent-side dispatches. Consider a
+  capability constant `ConfigurationExtensions` that the registry checks at registration time.
 
 ## Split/Merge Notes
 
 - No merge is recommended for the small hook and generic plugins.
-- `infrastructure/proxmox` is the clearest future split candidate inside the umbrella: API client, matching logic, agent actions, and extension UI can continue to evolve independently.
+- `infrastructure/proxmox` is the clearest future split candidate inside the umbrella: API client,
+  matching logic, agent actions, and extension UI can continue to evolve independently.
+- Extension handler registration is compile-time via the `register_plugins!` macro — this is an
+  accepted tradeoff for the current first-party-only plugin model. If third-party runtime plugins
+  are ever required, the registry will need a dynamic handler registration mechanism.
