@@ -28,7 +28,8 @@ pub use error::{PluginError, Result};
 pub use form_schema::ConfigFormSchema;
 pub use plugin_base::{
     DiscoveryPlugin, NotificationTransportPlugin, PackageIndexPlugin, PluginBase,
-    ReleaseFetcherPlugin, UpdateExecutorPlugin, UpdateLifecyclePlugin, VersionDetectorPlugin,
+    ReleaseFetcherPlugin, SoftwareItemCreatedEvent, SoftwareItemLifecyclePlugin, SoftwareItemPatch,
+    UpdateExecutorPlugin, UpdateLifecyclePlugin, VersionDetectorPlugin,
 };
 #[cfg(feature = "agent-infra")]
 pub use plugin_base::{GuestExecPlugin, HostLifecyclePlugin, HostReportPlugin};

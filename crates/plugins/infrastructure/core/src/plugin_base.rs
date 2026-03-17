@@ -244,6 +244,11 @@ pub trait PluginBase: Send + Sync {
         None
     }
 
+    /// Downcast to [`SoftwareItemLifecyclePlugin`], if implemented.
+    fn as_software_item_lifecycle(&self) -> Option<&dyn SoftwareItemLifecyclePlugin> {
+        None
+    }
+
     /// Downcast to [`HostLifecyclePlugin`], if implemented.
     #[cfg(feature = "agent-infra")]
     fn as_host_lifecycle(&self) -> Option<&dyn HostLifecyclePlugin> {
@@ -505,6 +510,86 @@ pub trait GuestExecPlugin: PluginBase {
     fn guest_exec_provider(&self) -> Option<Arc<dyn crate::agent_infra::GuestExecProvider>>;
 }
 
+// ── Software item lifecycle subtrait ─────────────────────────────────────────
+
+/// Snapshot of a just-created software item, decoupled from SeaORM.
+///
+/// Plugins receive this as an immutable reference so they can inspect the
+/// item without accessing the database.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct SoftwareItemCreatedEvent {
+    pub id: uuid::Uuid,
+    pub tenant_id: uuid::Uuid,
+    pub name: String,
+    pub featured: bool,
+    pub icon_url: Option<String>,
+}
+
+impl SoftwareItemCreatedEvent {
+    /// Create a new event snapshot.
+    pub fn new(
+        id: uuid::Uuid,
+        tenant_id: uuid::Uuid,
+        name: String,
+        featured: bool,
+        icon_url: Option<String>,
+    ) -> Self {
+        Self {
+            id,
+            tenant_id,
+            name,
+            featured,
+            icon_url,
+        }
+    }
+}
+
+/// Patch returned by a software item lifecycle plugin.
+///
+/// Only `Some` fields are applied to the database row. This uses the
+/// `Option<Option<T>>` pattern: `Some(Some(url))` = set, `Some(None)` = clear,
+/// `None` = no change.
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+pub struct SoftwareItemPatch {
+    pub icon_url: Option<Option<String>>,
+}
+
+impl SoftwareItemPatch {
+    /// Create an empty patch (no changes).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the `icon_url` field.
+    pub fn with_icon_url(mut self, icon_url: Option<String>) -> Self {
+        self.icon_url = Some(icon_url);
+        self
+    }
+
+    /// Returns `true` when no fields are set.
+    pub fn is_empty(&self) -> bool {
+        self.icon_url.is_none()
+    }
+}
+
+/// Plugins that react to software item lifecycle events.
+///
+/// Any plugin can subscribe to these events for enrichment, logging,
+/// validation, external sync, or any other purpose.
+#[async_trait]
+pub trait SoftwareItemLifecyclePlugin: PluginBase {
+    /// Called after a software item is created.
+    ///
+    /// Returns a patch with fields to update, or `None` to leave the item
+    /// unchanged.
+    async fn on_software_item_created(
+        &self,
+        event: &SoftwareItemCreatedEvent,
+    ) -> std::result::Result<Option<SoftwareItemPatch>, crate::error::PluginError>;
+}
+
 // ── Helper macro for config delegation ──────────────────────────────────────
 
 /// Generates `PluginBase` config delegation methods for a plugin + config pair.
@@ -653,6 +738,7 @@ mod tests {
         assert!(plugin.as_update_executor().is_none());
         assert!(plugin.as_update_lifecycle().is_none());
         assert!(plugin.as_notification_transport().is_none());
+        assert!(plugin.as_software_item_lifecycle().is_none());
     }
 
     #[test]

@@ -46,6 +46,8 @@ pub enum PluginType {
     HookSystemd,
     /// Update lifecycle hook: run arbitrary shell commands before/after updates.
     HookShell,
+    /// Enhancement: automatic icon assignment from Dashboard Icons.
+    EnhancementDashboardIcons,
     /// An unknown plugin type received from a newer peer.
     ///
     /// The inner string is the raw snake_case value as it appeared on the wire.
@@ -79,6 +81,7 @@ impl PluginType {
             Self::InfrastructureProxmox => "infrastructure_proxmox",
             Self::HookSystemd => "hook_systemd",
             Self::HookShell => "hook_shell",
+            Self::EnhancementDashboardIcons => "enhancement_dashboard_icons",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -128,6 +131,7 @@ impl PluginType {
             Self::InfrastructureProxmox => "Proxmox VE",
             Self::HookSystemd => "Systemd Hook",
             Self::HookShell => "Shell Hook",
+            Self::EnhancementDashboardIcons => "Dashboard Icons",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -172,6 +176,7 @@ impl FromStr for PluginType {
             "infrastructure_proxmox" => Ok(Self::InfrastructureProxmox),
             "hook_systemd" => Ok(Self::HookSystemd),
             "hook_shell" => Ok(Self::HookShell),
+            "enhancement_dashboard_icons" => Ok(Self::EnhancementDashboardIcons),
             _ => Err(ParsePluginTypeError::Invalid),
         }
     }
@@ -216,6 +221,7 @@ impl From<String> for PluginType {
             "infrastructure_proxmox" => Self::InfrastructureProxmox,
             "hook_systemd" => Self::HookSystemd,
             "hook_shell" => Self::HookShell,
+            "enhancement_dashboard_icons" => Self::EnhancementDashboardIcons,
             _ => Self::Other(s),
         }
     }
@@ -245,6 +251,7 @@ impl From<PluginType> for String {
             PluginType::InfrastructureProxmox => "infrastructure_proxmox".to_string(),
             PluginType::HookSystemd => "hook_systemd".to_string(),
             PluginType::HookShell => "hook_shell".to_string(),
+            PluginType::EnhancementDashboardIcons => "enhancement_dashboard_icons".to_string(),
             PluginType::Other(s) => s,
         }
     }
@@ -591,6 +598,10 @@ mod tests {
             PluginType::HookShell
         );
         assert_eq!(
+            PluginType::from("enhancement_dashboard_icons".to_string()),
+            PluginType::EnhancementDashboardIcons
+        );
+        assert_eq!(
             PluginType::from("winget".to_string()),
             PluginType::Other("winget".to_string())
         );
@@ -658,6 +669,10 @@ mod tests {
         );
         assert_eq!(PluginType::HookSystemd.to_string(), "hook_systemd");
         assert_eq!(PluginType::HookShell.to_string(), "hook_shell");
+        assert_eq!(
+            PluginType::EnhancementDashboardIcons.to_string(),
+            "enhancement_dashboard_icons"
+        );
         assert_eq!(
             PluginType::Other("custom_type".to_string()).to_string(),
             "custom_type"
@@ -740,6 +755,10 @@ mod tests {
             "hook_shell".parse::<PluginType>().ok(),
             Some(PluginType::HookShell)
         );
+        assert_eq!(
+            "enhancement_dashboard_icons".parse::<PluginType>().ok(),
+            Some(PluginType::EnhancementDashboardIcons)
+        );
         // Old wire strings must be rejected by FromStr
         assert!("docker_registry".parse::<PluginType>().is_err());
         assert!("github_releases".parse::<PluginType>().is_err());
@@ -802,6 +821,15 @@ mod tests {
     }
 
     #[test]
+    fn plugin_type_enhancement_dashboard_icons_serialization() {
+        let di = PluginType::EnhancementDashboardIcons;
+        let json = serde_json::to_string(&di).expect("serialize");
+        assert_eq!(json, r#""enhancement_dashboard_icons""#);
+        let deserialized: PluginType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, di);
+    }
+
+    #[test]
     fn display_name_other_returns_raw_string() {
         let pt = PluginType::Other("custom_plugin".to_string());
         assert_eq!(pt.display_name(), "custom_plugin");
@@ -860,6 +888,7 @@ mod tests {
             PluginType::InfrastructureProxmox,
             PluginType::HookSystemd,
             PluginType::HookShell,
+            PluginType::EnhancementDashboardIcons,
         ];
         for pt in &variants {
             let s = pt.to_string();
@@ -891,6 +920,7 @@ mod tests {
             PluginType::InfrastructureProxmox,
             PluginType::HookSystemd,
             PluginType::HookShell,
+            PluginType::EnhancementDashboardIcons,
             PluginType::Other("my_plugin".to_string()),
         ];
         for pt in &variants {

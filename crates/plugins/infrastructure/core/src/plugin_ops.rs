@@ -189,6 +189,21 @@ pub trait PluginOps: Send + Sync + 'static {
         Box::pin(async { Err("plugin-backed extension actions not supported".to_string()) })
     }
 
+    // ── Software item lifecycle operations ─────────────────────────────
+
+    /// Fire `on_software_item_created` across all software-item lifecycle plugins.
+    ///
+    /// Returns the merged patch from all responding plugins (last writer wins
+    /// per field), or `None` if no plugin produced a patch.
+    fn on_software_item_created<'a>(
+        &'a self,
+        _event: &'a crate::SoftwareItemCreatedEvent,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Option<crate::SoftwareItemPatch>> + Send + 'a>,
+    > {
+        Box::pin(async { None })
+    }
+
     // ── Notification channel operations ─────────────────────────────────
     //
     // Default implementations return no-op results. The `PluginRegistry`

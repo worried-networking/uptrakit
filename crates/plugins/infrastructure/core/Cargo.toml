@@ -9,10 +9,10 @@ publish = false
 
 [features]
 default = []
-agent-infra = ["dep:sea-orm", "dep:sea-orm-migration", "dep:uuid", "migrations"]
+agent-infra = ["dep:sea-orm", "dep:sea-orm-migration", "migrations"]
 http-client = ["dep:reqwest", "uptrakit-shared-types/http-ssrf"]
 migrations = ["dep:sea-orm-migration"]
-plugin-ops = ["dep:sea-orm", "dep:uuid"]
+plugin-ops = ["dep:sea-orm"]
 testing = []
 
 [dependencies]
@@ -33,7 +33,7 @@ uptrakit-shared-types = { workspace = true }
 reqwest = { workspace = true, optional = true }
 sea-orm = { workspace = true, optional = true }
 sea-orm-migration = { workspace = true, optional = true }
-uuid = { workspace = true, optional = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

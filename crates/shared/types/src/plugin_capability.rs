@@ -49,6 +49,8 @@ pub enum PluginCapability {
     ControllerMigrations,
     /// Plugin implements update lifecycle hooks (pre/post update).
     UpdateLifecycle,
+    /// Plugin reacts to software item lifecycle events (creation, etc.).
+    SoftwareItemLifecycle,
 }
 
 #[cfg(test)]
@@ -99,6 +101,10 @@ mod tests {
                 "controller_migrations",
             ),
             (PluginCapability::UpdateLifecycle, "update_lifecycle"),
+            (
+                PluginCapability::SoftwareItemLifecycle,
+                "software_item_lifecycle",
+            ),
         ];
         for (cap, expected) in cases {
             let json = serde_json::to_string(&cap).expect("serialize");
