@@ -6,6 +6,9 @@ pub use super::crl_cache::{Entity as CrlCache, Model as CrlCacheModel};
 pub use super::data_encryption_key::{
     Entity as DataEncryptionKey, Model as DataEncryptionKeyModel,
 };
+pub use super::embedded_service_runtime_state::{
+    Entity as EmbeddedServiceRuntimeState, Model as EmbeddedServiceRuntimeStateModel,
+};
 pub use super::enrollment_token::{Entity as EnrollmentToken, Model as EnrollmentTokenModel};
 pub use super::global_service_config::{
     Entity as GlobalServiceConfig, Model as GlobalServiceConfigModel,

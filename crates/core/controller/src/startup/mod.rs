@@ -8,6 +8,7 @@
 mod bootstrap;
 mod database;
 mod encryption;
+mod installation_id;
 mod jwt;
 mod key_rotation;
 mod master_key;
@@ -22,6 +23,7 @@ use std::sync::Arc;
 pub(crate) use bootstrap::{bootstrap_enrollment_tokens, bootstrap_oidc};
 pub(crate) use database::{init_audit_database, init_database};
 pub(crate) use encryption::{init_data_key_ring, verify_master_key};
+pub(crate) use installation_id::init_installation_id;
 pub(crate) use jwt::init_jwt;
 pub(crate) use key_rotation::rotate_master_key;
 pub(crate) use master_key::init_master_key;

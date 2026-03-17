@@ -22,8 +22,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ActiveValue, EntityTrait};
 use tokio_util::sync::CancellationToken;
 use uptrakit_internal_wire::Capability;
+use uptrakit_shared_db::entity::embedded_service_runtime_state;
 use uptrakit_web_api::embedded_support::EmbeddedServiceNotifier;
 use uuid::Uuid;
 
@@ -57,7 +60,7 @@ pub(crate) struct AddResult {
 
 /// Internal handle for a single embedded service tracked by the host.
 struct EmbeddedServiceHandle {
-    _service_id: Uuid,
+    service_id: Uuid,
     label: &'static str,
     /// The service's own `service_app_name`, used by `YieldOnSameAppName` to
     /// compare against the connecting external service's name.
@@ -68,6 +71,7 @@ struct EmbeddedServiceHandle {
     /// inserted and cleared when the last ID is removed, preventing false
     /// resumes when multiple yielder services are connected simultaneously.
     yielding_service_ids: Arc<parking_lot::Mutex<HashSet<Uuid>>>,
+    yield_state_changed: Arc<tokio::sync::Notify>,
     capabilities: BTreeSet<Capability>,
     coexistence_policy: CoexistencePolicy,
 }
@@ -112,6 +116,7 @@ impl EmbeddedServiceHost {
         capabilities: BTreeSet<Capability>,
         is_system_service: bool,
         tenant_id: Option<Uuid>,
+        embedded_owner_key: Uuid,
         coexistence_policy: CoexistencePolicy,
         run_fn: impl FnOnce(
             EmbeddedTransport,
@@ -135,6 +140,7 @@ impl EmbeddedServiceHost {
                 label,
                 &capabilities,
                 &hostname,
+                embedded_owner_key,
             )
             .await?
         } else {
@@ -146,6 +152,7 @@ impl EmbeddedServiceHost {
                 label,
                 &capabilities,
                 &hostname,
+                embedded_owner_key,
             )
             .await?
         };
@@ -182,6 +189,8 @@ impl EmbeddedServiceHost {
             tokio::sync::mpsc::channel::<uptrakit_internal_wire::ControllerMessage>(32);
 
         let yielded = Arc::new(AtomicBool::new(false));
+        let yielding_service_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
+        let yield_state_changed = Arc::new(tokio::sync::Notify::new());
 
         // 4. Spawn response forwarder (push_rx → ctrl_tx).
         let forwarder_cancel = bg.child_token();
@@ -210,15 +219,27 @@ impl EmbeddedServiceHost {
         bg.mark_embedded(service_id, drain_token);
         bg.track(label, service_handle);
 
+        let runtime_state_handle = tokio::spawn(run_yield_state_sync(
+            state.db().clone(),
+            service_id,
+            Arc::clone(&yielding_service_ids),
+            Arc::clone(&yield_state_changed),
+            bg.child_token(),
+        ));
+        let runtime_state_label: &'static str =
+            Box::leak(format!("{label} (yield-state)").into_boxed_str());
+        bg.track(runtime_state_label, runtime_state_handle);
+
         // 6. Track the handle.
         {
             let mut services = self.services.lock();
             services.push(EmbeddedServiceHandle {
-                _service_id: service_id,
+                service_id,
                 label,
                 app_name: app_name.to_string(),
                 yielded,
-                yielding_service_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+                yielding_service_ids,
+                yield_state_changed,
                 capabilities,
                 coexistence_policy,
             });
@@ -278,11 +299,13 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
                 if ids.insert(service_id) && ids.len() == 1 {
                     handle.yielded.store(true, Ordering::Release);
                     tracing::info!(
+                        embedded_service_id = %handle.service_id,
                         embedded_label = handle.label,
                         %service_id,
                         "embedded service yielding to external"
                     );
                 }
+                handle.yield_state_changed.notify_one();
             }
         }
     }
@@ -294,10 +317,14 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
             if ids.remove(service_id) && ids.is_empty() {
                 handle.yielded.store(false, Ordering::Release);
                 tracing::info!(
+                    embedded_service_id = %handle.service_id,
                     embedded_label = handle.label,
                     %service_id,
                     "embedded service resuming (no more active yielders)"
                 );
+            }
+            if !ids.is_empty() || !handle.yielded.load(Ordering::Relaxed) {
+                handle.yield_state_changed.notify_one();
             }
         }
     }
@@ -315,6 +342,96 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
     }
 }
 
+const YIELD_STATE_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(10);
+
+async fn run_yield_state_sync(
+    db: sea_orm::DatabaseConnection,
+    service_id: Uuid,
+    yielding_service_ids: Arc<parking_lot::Mutex<HashSet<Uuid>>>,
+    yield_state_changed: Arc<tokio::sync::Notify>,
+    cancel: CancellationToken,
+) {
+    let mut interval = tokio::time::interval(YIELD_STATE_HEARTBEAT);
+
+    sync_yield_state_once(&db, service_id, &yielding_service_ids).await;
+
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                if let Err(err) = clear_yield_state(&db, service_id).await {
+                    tracing::warn!(%service_id, error = %err, "failed to clear embedded yield state during shutdown");
+                }
+                break;
+            }
+            _ = yield_state_changed.notified() => {}
+            _ = interval.tick() => {}
+        }
+
+        sync_yield_state_once(&db, service_id, &yielding_service_ids).await;
+    }
+}
+
+async fn sync_yield_state_once(
+    db: &sea_orm::DatabaseConnection,
+    service_id: Uuid,
+    yielding_service_ids: &Arc<parking_lot::Mutex<HashSet<Uuid>>>,
+) {
+    let yielded_to = {
+        let ids = yielding_service_ids.lock();
+        if ids.is_empty() {
+            None
+        } else {
+            let mut sorted: Vec<Uuid> = ids.iter().copied().collect();
+            sorted.sort_unstable();
+            Some(sorted)
+        }
+    };
+
+    let result = match yielded_to {
+        Some(ids) => persist_yield_state(db, service_id, &ids).await,
+        None => clear_yield_state(db, service_id).await,
+    };
+    if let Err(err) = result {
+        tracing::warn!(%service_id, error = %err, "failed to sync embedded yield state");
+    }
+}
+
+async fn persist_yield_state(
+    db: &sea_orm::DatabaseConnection,
+    service_id: Uuid,
+    yielded_to: &[Uuid],
+) -> Result<(), sea_orm::DbErr> {
+    let json = serde_json::to_string(&yielded_to.iter().map(Uuid::to_string).collect::<Vec<_>>())
+        .map_err(|err| sea_orm::DbErr::Custom(err.to_string()))?;
+    let now = time::OffsetDateTime::now_utc();
+
+    embedded_service_runtime_state::Entity::insert(embedded_service_runtime_state::ActiveModel {
+        service_id: ActiveValue::Set(service_id),
+        yielded_to_json: ActiveValue::Set(Some(json)),
+        updated_at: ActiveValue::Set(now),
+    })
+    .on_conflict(
+        OnConflict::column(embedded_service_runtime_state::Column::ServiceId)
+            .update_column(embedded_service_runtime_state::Column::YieldedToJson)
+            .update_column(embedded_service_runtime_state::Column::UpdatedAt)
+            .to_owned(),
+    )
+    .exec(db)
+    .await?;
+
+    Ok(())
+}
+
+async fn clear_yield_state(
+    db: &sea_orm::DatabaseConnection,
+    service_id: Uuid,
+) -> Result<(), sea_orm::DbErr> {
+    embedded_service_runtime_state::Entity::delete_by_id(service_id)
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,11 +439,12 @@ mod tests {
 
     fn make_scheduler_handle() -> EmbeddedServiceHandle {
         EmbeddedServiceHandle {
-            _service_id: Uuid::nil(),
+            service_id: Uuid::nil(),
             label: "scheduler",
             app_name: "uptrakit-scheduler".to_string(),
             yielded: Arc::new(AtomicBool::new(false)),
             yielding_service_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+            yield_state_changed: Arc::new(tokio::sync::Notify::new()),
             capabilities: [Capability::Scheduler].into(),
             coexistence_policy: CoexistencePolicy::YieldOnSameAppName,
         }
@@ -382,11 +500,12 @@ mod tests {
     #[test]
     fn custom_policy_closure() {
         let handle = EmbeddedServiceHandle {
-            _service_id: Uuid::nil(),
+            service_id: Uuid::nil(),
             label: "test",
             app_name: "test-app".to_string(),
             yielded: Arc::new(AtomicBool::new(false)),
             yielding_service_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+            yield_state_changed: Arc::new(tokio::sync::Notify::new()),
             capabilities: [Capability::Scheduler].into(),
             coexistence_policy: CoexistencePolicy::Custom(Box::new(|_| true)),
         };
@@ -397,11 +516,12 @@ mod tests {
     #[test]
     fn never_yield_policy() {
         let handle = EmbeddedServiceHandle {
-            _service_id: Uuid::nil(),
+            service_id: Uuid::nil(),
             label: "test",
             app_name: "test-app".to_string(),
             yielded: Arc::new(AtomicBool::new(false)),
             yielding_service_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+            yield_state_changed: Arc::new(tokio::sync::Notify::new()),
             capabilities: [Capability::Scheduler].into(),
             coexistence_policy: CoexistencePolicy::NeverYield,
         };

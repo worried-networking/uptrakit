@@ -180,6 +180,7 @@ async fn run(args: cli::Args) -> Result<()> {
     })?;
     tracing::info!("config directory: {}", app_dirs.config_dir().display());
     tracing::info!("state directory: {}", app_dirs.state_dir().display());
+    let controller_installation_id = startup::init_installation_id(app_dirs.state_dir()).await?;
 
     // Phase 3: Database
     let db_init = startup::init_database(&args, app_dirs.state_dir()).await?;
@@ -464,6 +465,7 @@ async fn run(args: cli::Args) -> Result<()> {
         ca_tx,
         initial_ca_version,
         controller_id,
+        controller_installation_id,
         args.tls_cert.is_some(),
         &service_connections,
         &embedded_host,
@@ -643,6 +645,7 @@ async fn spawn_background_tasks(
     ca_tx: tokio::sync::watch::Sender<pki::CaSnapshot>,
     initial_ca_version: i64,
     controller_id: uuid::Uuid,
+    controller_installation_id: uuid::Uuid,
     has_external_tls_cert: bool,
     service_connections: &uptrakit_web_api::service_connections::ServiceConnectionRegistry,
     embedded_host: &Arc<embedded::EmbeddedServiceHost>,
@@ -714,6 +717,7 @@ async fn spawn_background_tasks(
                 scheduler_caps,
                 true, // is_system_service
                 None, // tenant_id (not needed for system services)
+                controller_installation_id,
                 // Yield only when an external service with the same
                 // `service_app_name` ("uptrakit-scheduler") connects.
                 // This avoids the old capability-intersection bug where
@@ -837,6 +841,7 @@ async fn spawn_background_tasks(
                 agent_caps.clone(),
                 false, // tenant service (not system)
                 Some(default_tenant_id),
+                controller_installation_id,
                 // Yield only when an external `uptrakit-agent` on the same host
                 // (matching machine_id) connects. The app_name check ensures we
                 // never yield to unrelated services; the machine_id check ensures

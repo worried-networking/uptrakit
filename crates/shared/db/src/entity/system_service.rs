@@ -56,6 +56,11 @@ pub struct Model {
     /// The binary/crate name of the service (e.g., `"uptrakit-mqtt"`).
     /// Null for services enrolled before this field was introduced.
     pub service_app_name: Option<String>,
+    /// Whether this row represents a controller-embedded service.
+    pub is_embedded: bool,
+    /// Stable controller installation identity that owns this embedded row.
+    /// Null for non-embedded services and legacy rows before ownership is claimed.
+    pub embedded_owner_key: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -36,6 +36,7 @@ pub(crate) const COPY_ORDER: &[&str] = &[
     "service_certificates",
     "system_services",
     "system_service_certificates",
+    "embedded_service_runtime_states",
     "hosts",
     "service_hosts",
     "host_tags",
@@ -102,6 +103,10 @@ pub(crate) async fn copy_all(
     copy!(ServiceCertificate, "service_certificates");
     copy!(SystemService, "system_services");
     copy!(SystemServiceCertificate, "system_service_certificates");
+    copy!(
+        EmbeddedServiceRuntimeState,
+        "embedded_service_runtime_states"
+    );
     copy!(Host, "hosts");
     copy!(ServiceHost, "service_hosts");
     copy!(HostTag, "host_tags");
@@ -175,6 +180,10 @@ pub(crate) async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
     clean!(ServiceHost, "service_hosts");
     clean!(Host, "hosts");
     clean!(SystemServiceCertificate, "system_service_certificates");
+    clean!(
+        EmbeddedServiceRuntimeState,
+        "embedded_service_runtime_states"
+    );
     clean!(SystemService, "system_services");
     clean!(ServiceCertificate, "service_certificates");
     clean!(Service, "services");
@@ -231,6 +240,10 @@ pub(crate) async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnectio
     verify!(ServiceCertificate, "service_certificates");
     verify!(SystemService, "system_services");
     verify!(SystemServiceCertificate, "system_service_certificates");
+    verify!(
+        EmbeddedServiceRuntimeState,
+        "embedded_service_runtime_states"
+    );
     verify!(Host, "hosts");
     verify!(ServiceHost, "service_hosts");
     verify!(HostTag, "host_tags");
