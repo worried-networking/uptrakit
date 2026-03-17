@@ -466,6 +466,16 @@ Ranked by potential audience coverage and likeliness of using uptrakit for updat
   - **Category**: Plugins | **Impact**: Medium | **Effort**: Medium
   - Windows package manager plugin using `choco list` / `choco upgrade`.
 
+#### Enhancement Plugins
+
+- [x] ~~Dashboard Icons plugin~~ — Implemented as
+  `uptrakit-plugin-enhancement-dashboard-icons`.
+  - **Category**: Plugins / Enhancement | **Impact**: Medium | **Effort**: Medium
+  - Automatic icon URL assignment for software items using the [Dashboard Icons](https://dashboardicons.com/)
+    community project. Pre-caches icon slugs via GitHub Trees API with 6-hour refresh.
+    Per-tenant setting (disabled by default). Hooks into both manual creation and
+    autodiscovery paths via `SoftwareItemLifecyclePlugin` subtrait.
+
 ### Plugin Framework
 
 - [ ] Plugin testing framework
