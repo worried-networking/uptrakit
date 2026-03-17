@@ -11,23 +11,36 @@
 - `uptrakit-directories`
 - `uptrakit-extension-framework`
 - `uptrakit-shared-macros`
-- `uptrakit-config-merge`
-- `uptrakit-agent-core` (allocation and idiomatic Rust patterns only; HA findings in
-  `crates/core/CODEREVIEW.md`)
+- `uptrakit-config-merge` (update-hooks)
 
 ## Summary
 
 The shared utility layer remains strong overall. Most of these crates are small, stable, and easy
-to reason about. This review cycle added allocation findings in `agent-core`'s hot update path and
-confirmed the existing maintainability concern in `extension-framework`. Coding-standards compliance
-across all shared crates is clean — no violations were found.
+to reason about. The existing maintainability concern in `extension-framework` (1970-line single
+file) is confirmed. All other crates are clean across coding standards, security, and correctness
+dimensions.
 
 ## Strengths
 
-- `backoff`, `build-info`, `macros`, and `config-merge` stay small and focused.
-- `directories` still provides good platform-aware permission handling and path validation.
-- The shared crates continue to enforce workspace conventions instead of weakening them.
-- `service-sdk` exports a minimal, stable surface: no internal types leaked, no `pub use *`.
+- `backoff` is small, focused, and correctly implements exponential doubling with jitter capped
+  at 25% of the delay. Zero base duration does not panic. Tests verify doubling, max cap, reset,
+  and zero-base edge cases.
+- `build-info` and `config-merge` stay small and focused.
+- `directories` provides good platform-aware permission handling (0o700 dirs, 0o600 files) with
+  atomic write-to-temp-then-rename for file creation. Path traversal validation (`validate_path_name`)
+  rejects `..`, `.`, path separators, absolute paths, and empty names. Tilde expansion is
+  component-based (no lossy string conversion). Intermediate directory permissions are hardened
+  after recursive creation.
+- `audit-log` uses an unbounded channel to guarantee no audit entries are dropped due to
+  backpressure, with clear documentation of the memory trade-off. `MultiplexBackend` fans out
+  concurrently and isolates backend failures. `AuditFilter` supports per-tenant override of the
+  global filter mode.
+- `shared-macros` provides `impl_report_conversion!` and `wire_safe_enum!` with correct macro
+  hygiene (fully qualified paths for `rootcause`, `serde`, `thiserror`, `tracing`).
+  `wire_safe_enum!` auto-appends `#[non_exhaustive]` and `Other(String)`, generates a strict
+  `FromStr` alongside infallible serde, and produces a named error type for parse failures.
+- `config-merge` implements shallow three-layer merge correctly with non-object layers silently
+  ignored.
 - All required `#[non_exhaustive]`, `Other(String)` catch-all, and `parking_lot` patterns are
   present and correct across shared types, wire, and web-api-types.
 
@@ -35,55 +48,36 @@ across all shared crates is clean — no violations were found.
 
 ### [MEDIUM] `uptrakit-extension-framework` is a monolithic single-file schema crate
 
-- Dimension: maintainability, crate structure
-- Scope: `crates/shared/extension-framework/src/lib.rs` (1970 lines)
-- Why it matters: two distinct domains live in one file: UI definitions (manifests, forms, fields,
-  actions) and wire payloads (register/request/response messages). Changes to either domain require
-  reasoning about the full 1970-line file. Adding a new extension-form feature risks unintentional
-  serialization regressions in the wire domain.
-- Recommendation: split into at minimum two internal modules (`ui.rs` and `wire.rs`), or two
-  separate crates (`extension-ui` and `extension-wire`). The crate split is trivial effort (no
-  circular dependencies) and is the highest-value structural improvement available.
+- **Dimension**: maintainability, crate structure
+- **Scope**: `crates/shared/extension-framework/src/lib.rs` (1970 lines)
+- **Description**: Two distinct domains live in one file: UI definitions (manifests, forms,
+  fields, actions, placements) and wire payloads (register/request/response messages). Changes
+  to either domain require reasoning about the full 1970-line file.
+- **Why it matters**: adding a new extension-form feature risks unintentional serialization
+  regressions in the wire domain. Code navigation is slower than necessary.
+- **Failure scenario**: a developer modifying the `ExtensionManifest` struct accidentally
+  changes a serde attribute on `ExtensionRequestPayload` 1500 lines away in the same file.
 
-### [MEDIUM] `agent-core` clones large update payloads unnecessarily in the dispatch hot path
+### [LOW] `PluginType::From<PluginType> for String` reimplements the `as_str()` match table
 
-- Dimension: allocation, performance
-- Scope: `crates/shared/agent-core/src/client.rs:start_update`,
-  `crates/shared/agent-core/src/client.rs:batch_update_inner`
-- Why it matters: `start_update` clones the entire `ExecuteUpdatePayload` (including nested
-  `serde_json::Value` plugin configs) to apply connection-context mutations. `batch_update_inner`
-  clones every `package_identifier` and `release_info` twice — once for the correlation HashMap
-  and once for `BatchUpdateItem`. For batches of 100 packages, this allocates O(N) large JSON
-  values on every dispatch.
-- Fix: apply connection-context mutations before constructing the payload, or use `&str` keys in
-  the correlation HashMap to avoid double-cloning.
+- **Dimension**: idiomatic Rust, maintainability
+- **Scope**: `crates/shared/types/src/plugin_types.rs:230-258`
+- **Description**: The `From<PluginType> for String` match arm duplicates the string values
+  already present in `as_str()` (lines 63-87), creating two sources of truth for the same
+  mapping. A future rename of a plugin type string requires updating both locations.
+- **Why it matters**: with 20+ variants, divergence between `as_str()` and
+  `From<PluginType> for String` is easy to introduce and hard to detect without explicit tests
+  for every variant.
+- **Failure scenario**: a new variant is added to `as_str()` but the corresponding
+  `From<PluginType> for String` arm is forgotten, causing DB writes to use the wrong string.
 
-### [MEDIUM] `HashSet` is cloned in full before the early-emptiness check in WS event handlers
+## Removed Findings
 
-- Dimension: allocation, performance
-- Scope:
-  `crates/ui/web-api/src/routes/service_ws/handler/messages.rs` and related handler files
-  (7+ call sites)
-- Why it matters: `linked_host_ids.lock().clone()` allocates a full `HashSet<Uuid>` clone before
-  checking `if current_ids.is_empty()`. For a typical host count of 5–20, the clone cost is small
-  but it fires on every incoming `ReportHosts` or connectivity message in the main WS loop.
-- Fix: check emptiness under the lock guard before cloning; only clone when the subsequent
-  iteration is actually needed.
-
-### [LOW] `PluginType::From<String>` reimplements the `as_str()` match table
-
-- Dimension: idiomatic Rust, maintainability
-- Scope: `crates/shared/types/src/plugin_types.rs`, `From<PluginType> for String` impl
-- Why it matters: the `From<PluginType> for String` match arm duplicates the string values already
-  present in `as_str()`, creating two sources of truth for the same mapping. A future rename of a
-  plugin type string requires updating both locations.
-- Fix: implement `From<PluginType> for String` as `pt.as_str().to_string()` to delegate to the
-  single source of truth.
-
-### [LOW] `uptrakit-directories` is drifting toward the same monolithic shape
-
-- Dimension: maintainability
-- Scope: `crates/shared/directories/src/lib.rs`
-- Why it matters: path expansion, permission hardening, validation, and I/O helpers are now packed
-  into one large file. Platform-specific path behavior is changed for one call site and
-  unintentionally affects another because the implementation surface is no longer small.
+- **[MEDIUM] `agent-core` clones large update payloads unnecessarily in the dispatch hot path**:
+  moved to the dedicated `crates/shared/agent-core/CODEREVIEW.md`.
+- **[MEDIUM] `HashSet` is cloned in full before the early-emptiness check in WS event handlers**:
+  this finding applies to `crates/ui/web-api/`, not to `crates/shared/`. It should be tracked
+  in the web-api code review, not in the shared umbrella.
+- **[LOW] `uptrakit-directories` is drifting toward the same monolithic shape**: removed. The
+  crate is 984 lines (490 of which are tests) and is well-organized with clear functional
+  separation. It does not currently exhibit monolithic symptoms.
