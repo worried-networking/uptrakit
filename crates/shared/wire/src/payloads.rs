@@ -77,6 +77,14 @@ pub struct HostInfo {
     /// reference `hosts.id` before the controller has generated its own UUID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_host_id: Option<Uuid>,
+    /// Agent-probed host features (e.g. `["posix_shell", "privilege_escalation", "systemd"]`).
+    ///
+    /// `None` for legacy agents that predate feature reporting. Uses `Vec<String>`
+    /// (not `BTreeSet<HostFeature>`) on the wire for forward-compatibility: if a
+    /// newer agent reports a feature the controller doesn't know, it is stored
+    /// losslessly and ignored by `HostCapabilities` parsing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub features: Option<Vec<String>>,
 }
 
 /// Payload for service enrollment request.

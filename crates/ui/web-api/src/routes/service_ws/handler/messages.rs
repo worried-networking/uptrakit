@@ -1190,6 +1190,7 @@ mod tests {
             os_version: Set(None),
             architecture: Set(None),
             ip_address: Set(None),
+            host_features: Set(None),
             last_seen_at: Set(None),
             created_at: Set(now),
             updated_at: Set(now),

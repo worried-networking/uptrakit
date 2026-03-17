@@ -286,6 +286,9 @@ pub(crate) async fn find_or_create_host_and_link(
         if let Some(ref architecture) = host_info.architecture {
             active.architecture = Set(Some(architecture.clone()));
         }
+        if let Some(ref features) = host_info.features {
+            active.host_features = Set(Some(serde_json::to_string(features).unwrap_or_default()));
+        }
         active.last_seen_at = Set(Some(now));
         active.updated_at = Set(now);
         active.update(db).await.context_to::<AgentRouteError>()?;
@@ -304,6 +307,10 @@ pub(crate) async fn find_or_create_host_and_link(
             os_version: Set(host_info.os_version.clone()),
             architecture: Set(host_info.architecture.clone()),
             ip_address: Set(ip_address.map(|s| s.to_string())),
+            host_features: Set(host_info
+                .features
+                .as_ref()
+                .and_then(|f| serde_json::to_string(f).ok())),
             last_seen_at: Set(Some(now)),
             created_at: Set(now),
             updated_at: Set(now),

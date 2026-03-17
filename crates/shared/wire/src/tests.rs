@@ -190,6 +190,7 @@ fn report_hosts_serialization_roundtrip() {
             hostname: None,
             ip_address: None,
             agent_host_id: None,
+            features: None,
         }],
         agent_version: "0.0.1".to_string(),
         capabilities: BTreeSet::new(),
@@ -214,6 +215,7 @@ fn report_hosts_multiple_hosts() {
                 hostname: None,
                 ip_address: None,
                 agent_host_id: None,
+                features: None,
             },
             HostInfo {
                 machine_id: "host-b".to_string(),
@@ -223,6 +225,7 @@ fn report_hosts_multiple_hosts() {
                 hostname: None,
                 ip_address: None,
                 agent_host_id: None,
+                features: None,
             },
         ],
         agent_version: "0.0.1".to_string(),
@@ -891,6 +894,7 @@ fn host_info_minimal_serialization_roundtrip() {
         hostname: None,
         ip_address: None,
         agent_host_id: None,
+        features: None,
     };
     let json = serde_json::to_string(&info).unwrap();
     assert_eq!(json, r#"{"machine_id":"unknown"}"#);
@@ -908,6 +912,7 @@ fn host_info_with_hostname_and_ip() {
         hostname: Some("web-01.example.com".to_string()),
         ip_address: Some("10.0.0.5".to_string()),
         agent_host_id: None,
+        features: None,
     };
     let json = serde_json::to_string(&info).unwrap();
     assert!(json.contains(r#""hostname":"web-01.example.com"#));
@@ -1659,6 +1664,7 @@ fn spec_conformance_report_hosts() {
             hostname: Some("web-01.example.com".to_string()),
             ip_address: Some("10.0.0.5".to_string()),
             agent_host_id: None,
+            features: None,
         }],
         agent_version: "0.0.1".to_string(),
         capabilities: [Capability::SoftwareDiscovery, Capability::GracefulShutdown]
@@ -2334,6 +2340,7 @@ fn report_hosts_empty_capabilities_omitted() {
             hostname: None,
             ip_address: None,
             agent_host_id: None,
+            features: None,
         }],
         agent_version: "0.0.1".to_string(),
         capabilities: BTreeSet::new(),

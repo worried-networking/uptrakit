@@ -28,6 +28,7 @@ pub(crate) async fn collect_remote_host_info(session: &SshSession) -> HostInfo {
         hostname,
         ip_address: None,    // Set by caller from the SSH host's address.
         agent_host_id: None, // Set by caller from the local host DB UUID.
+        features: None,
     }
 }
 

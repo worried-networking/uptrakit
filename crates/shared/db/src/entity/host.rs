@@ -14,6 +14,9 @@ pub struct Model {
     pub os_version: Option<String>,
     pub architecture: Option<String>,
     pub ip_address: Option<String>,
+    /// JSON-serialized `Vec<String>` of agent-reported host features.
+    /// `NULL` for legacy agents that predate feature reporting.
+    pub host_features: Option<String>,
     pub last_seen_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,

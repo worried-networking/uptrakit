@@ -434,6 +434,7 @@ mod tests {
             os_version: None,
             architecture: None,
             ip_address: ip.map(|s| s.to_string()),
+            host_features: None,
             last_seen_at: None,
             created_at: OffsetDateTime::UNIX_EPOCH,
             updated_at: OffsetDateTime::UNIX_EPOCH,

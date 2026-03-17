@@ -233,6 +233,7 @@ fn build_fast_path_host_info(host: &Model) -> HostInfo {
         hostname: None,
         ip_address: Some(host.hostname.clone()),
         agent_host_id: Some(host.id),
+        features: None,
     }
 }
 

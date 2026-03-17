@@ -111,6 +111,7 @@ pub(crate) async fn insert_host(db: &DatabaseConnection, tenant_id: uuid::Uuid) 
         os_version: Set(Some("Ubuntu 22.04".to_string())),
         architecture: Set(Some("x86_64".to_string())),
         ip_address: Set(Some("10.0.0.2".to_string())),
+        host_features: Set(None),
         last_seen_at: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
