@@ -1,0 +1,28 @@
+[package]
+name = "uptrakit-plugin-enhancement-dashboard-icons"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+async-trait = { workspace = true }
+parking_lot = { workspace = true }
+reqwest = { workspace = true }
+rootcause = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+uptrakit-plugin-infrastructure-core = { workspace = true }
+uuid = { workspace = true, features = ["serde"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true
