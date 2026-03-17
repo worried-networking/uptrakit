@@ -115,7 +115,7 @@ pub fn all_controller_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTr
 pub fn create_agent_infra_plugins()
 -> Vec<std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::PluginBase>> {
     vec![std::sync::Arc::new(
-        uptrakit_plugin_infrastructure_proxmox::agent::ProxmoxAgentPlugin::new(),
+        uptrakit_plugin_infrastructure_proxmox::ProxmoxPlugin::new_agent(),
     )]
 }
 
@@ -126,7 +126,7 @@ pub fn create_agent_infra_plugins()
 /// Naming follows the convention of [`create_agent_infra_plugins`].
 #[cfg(feature = "agent-infra")]
 pub fn agent_infra_extension_manifests() -> Vec<uptrakit_extension_framework::ExtensionManifest> {
-    uptrakit_plugin_infrastructure_proxmox::agent::ProxmoxAgentPlugin::extension_manifests()
+    uptrakit_plugin_infrastructure_proxmox::ProxmoxPlugin::extension_manifests()
 }
 
 /// Returns extension actions contributed by all compiled-in agent-infra plugins.
@@ -134,7 +134,7 @@ pub fn agent_infra_extension_manifests() -> Vec<uptrakit_extension_framework::Ex
 /// Naming follows the convention of [`create_agent_infra_plugins`].
 #[cfg(feature = "agent-infra")]
 pub fn agent_infra_extension_actions() -> Vec<uptrakit_extension_framework::ActionDef> {
-    uptrakit_plugin_infrastructure_proxmox::agent::ProxmoxAgentPlugin::extension_actions()
+    uptrakit_plugin_infrastructure_proxmox::ProxmoxPlugin::extension_actions()
 }
 
 // Re-export `PluginOps` trait and associated types from `infrastructure-core`.

@@ -12,4 +12,3 @@ pub mod migration;
 pub mod plugin;
 
 pub use guest_exec_adapter::ProxmoxGuestExecProvider;
-pub use plugin::ProxmoxAgentPlugin;

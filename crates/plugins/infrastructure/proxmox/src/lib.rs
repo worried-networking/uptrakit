@@ -1,16 +1,17 @@
 //! Proxmox VE infrastructure plugin for Uptrakit.
 //!
-//! This plugin communicates with the Proxmox VE REST API to discover VMs and
-//! containers, then matches them to Uptrakit-managed hosts by hostname or IP
-//! address. It operates on the controller side and exposes all functionality
-//! through the Extensions framework.
+//! [`ProxmoxPlugin`] is the unified plugin struct used on both the controller
+//! and agent sides. On the controller it communicates with the Proxmox VE REST
+//! API to discover VMs/CTs and match them to Uptrakit-managed hosts. On the
+//! agent (with `agent-infra` feature) it implements `HostLifecyclePlugin`,
+//! `HostReportPlugin`, and `GuestExecPlugin` subtraits.
 //!
 //! The `guest_exec` and `pve_setup` modules provide agent-side functionality
 //! for executing commands inside PVE guests and bootstrapping PVE API credentials.
 //!
-//! The `agent` module (behind the `agent-infra` feature) provides the
-//! [`PluginBase`](uptrakit_plugin_infrastructure_core::PluginBase) and subtrait
-//! implementations that hook into the SSH agent's lifecycle.
+//! The `agent` module (behind the `agent-infra` feature) provides the subtrait
+//! implementations and supporting DB/extension logic that hook into the SSH
+//! agent's lifecycle.
 
 #[cfg(feature = "agent-infra")]
 pub mod agent;

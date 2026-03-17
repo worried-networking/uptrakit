@@ -17,7 +17,7 @@ agent-infra = [
 ]
 
 [dependencies]
-uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
 uptrakit-shared-types = { workspace = true, features = ["http-ssrf"] }
 uptrakit-shared-db = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
