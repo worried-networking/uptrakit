@@ -331,6 +331,32 @@ impl MessageProcessor {
                 )
                 .await
             }
+
+            // -- Register: embedded services send this on startup to declare capabilities --
+            ServiceMessage::Register(payload) => {
+                upgrade_service_capabilities(
+                    self.state.db(),
+                    self.service_id,
+                    self.is_system,
+                    payload.capabilities,
+                    &mut self.has_ui_extensions,
+                )
+                .await;
+                ProcessorResponse::cont()
+            }
+
+            // -- Disconnecting: embedded services send this during shutdown --
+            ServiceMessage::Disconnecting(_) => {
+                tracing::debug!(
+                    service_id = %self.service_id,
+                    "embedded service sent Disconnecting"
+                );
+                ProcessorResponse {
+                    replies: Vec::new(),
+                    action: ProcessorAction::Break,
+                }
+            }
+
             _ => ProcessorResponse::reply_and_break(ControllerMessage::Error(ErrorPayload {
                 code: ErrorCode::BadRequest,
                 message: "message not supported for this service capability".to_string(),
@@ -755,6 +781,8 @@ pub(crate) async fn run_embedded_message_handler(
 ) {
     let has_software_discovery = capabilities.contains(&Capability::SoftwareDiscovery);
     let has_update_hooks = capabilities.contains(&Capability::UpdateHooks);
+    let has_ui_extensions = capabilities.contains(&Capability::UiExtensions);
+    let has_workload_claims = capabilities.contains(&Capability::WorkloadClaims);
 
     let linked_host_ids = load_session_host_ids(&state, service_id, has_software_discovery).await;
 
@@ -766,8 +794,8 @@ pub(crate) async fn run_embedded_message_handler(
         has_update_tracking: false,
         has_software_discovery,
         has_update_hooks,
-        has_ui_extensions: false,
-        has_workload_claims: false,
+        has_ui_extensions,
+        has_workload_claims,
         service_app_name: Some(app_name.to_string()),
         service_tenant_id: Some(tenant_id),
         linked_host_ids,
