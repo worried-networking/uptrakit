@@ -115,6 +115,7 @@ impl CargoPlugin {
         PluginCapability::VersionDetection,
         PluginCapability::ReleaseFetching,
         PluginCapability::UpdateExecution,
+        PluginCapability::ConfigTest,
     ];
 
     /// Create a new Cargo plugin with the given configuration and command executor.

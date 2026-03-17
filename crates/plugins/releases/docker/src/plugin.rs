@@ -101,6 +101,7 @@ impl DockerPlugin {
         PluginCapability::VersionDetection,
         PluginCapability::ReleaseFetching,
         PluginCapability::UpdateExecution,
+        PluginCapability::ConfigTest,
     ];
 
     /// Test constructor that injects a custom [`DockerClient`].

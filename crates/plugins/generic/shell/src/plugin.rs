@@ -31,6 +31,7 @@ impl ShellPlugin {
     pub const CAPABILITIES: &'static [uptrakit_plugin_infrastructure_core::PluginCapability] = &[
         uptrakit_plugin_infrastructure_core::PluginCapability::VersionDetection,
         uptrakit_plugin_infrastructure_core::PluginCapability::UpdateExecution,
+        uptrakit_plugin_infrastructure_core::PluginCapability::ConfigTest,
     ];
 
     /// Create a new `ShellPlugin` from the given configuration.

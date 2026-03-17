@@ -152,6 +152,7 @@ impl MasPlugin {
         PluginCapability::VersionDetection,
         PluginCapability::ReleaseFetching,
         PluginCapability::UpdateExecution,
+        PluginCapability::ConfigTest,
     ];
 
     /// Create a new `mas` plugin with the given configuration and command executor.

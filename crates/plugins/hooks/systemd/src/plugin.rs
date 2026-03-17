@@ -22,7 +22,10 @@ pub struct SystemdHookPlugin {
 
 impl SystemdHookPlugin {
     /// Compile-time capabilities declaration.
-    pub const CAPABILITIES: &[PluginCapability] = &[PluginCapability::UpdateLifecycle];
+    pub const CAPABILITIES: &[PluginCapability] = &[
+        PluginCapability::UpdateLifecycle,
+        PluginCapability::ConfigTest,
+    ];
 
     /// Create a new systemd hook plugin instance.
     pub async fn new(

@@ -89,6 +89,7 @@ impl GitHubPlugin {
         PluginCapability::ControllerSideFetchReleases,
         PluginCapability::ReleaseFetching,
         PluginCapability::UpdateExecution,
+        PluginCapability::ConfigTest,
     ];
 
     /// Create a new `GitHubPlugin` from the given configuration.

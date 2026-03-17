@@ -22,7 +22,10 @@ pub struct ShellHookPlugin {
 
 impl ShellHookPlugin {
     /// Compile-time capabilities declaration.
-    pub const CAPABILITIES: &[PluginCapability] = &[PluginCapability::UpdateLifecycle];
+    pub const CAPABILITIES: &[PluginCapability] = &[
+        PluginCapability::UpdateLifecycle,
+        PluginCapability::ConfigTest,
+    ];
 
     /// Create a new shell hook plugin instance.
     pub async fn new(

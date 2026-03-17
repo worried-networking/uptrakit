@@ -73,6 +73,7 @@ impl PkgPlugin {
         PluginCapability::VersionDetection,
         PluginCapability::ReleaseFetching,
         PluginCapability::UpdateExecution,
+        PluginCapability::ConfigTest,
     ];
 
     /// Create a new BSD pkg plugin with the given configuration.

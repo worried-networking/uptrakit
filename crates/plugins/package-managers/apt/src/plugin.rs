@@ -87,6 +87,7 @@ impl AptPlugin {
         PluginCapability::VersionDetection,
         PluginCapability::ReleaseFetching,
         PluginCapability::UpdateExecution,
+        PluginCapability::ConfigTest,
     ];
 
     /// Create a new APT plugin with the given configuration.

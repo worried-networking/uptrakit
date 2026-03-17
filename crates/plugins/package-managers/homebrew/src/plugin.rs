@@ -64,6 +64,7 @@ impl HomebrewPlugin {
         PluginCapability::VersionDetection,
         PluginCapability::ReleaseFetching,
         PluginCapability::UpdateExecution,
+        PluginCapability::ConfigTest,
     ];
 
     /// Create a new Homebrew plugin with the given configuration.

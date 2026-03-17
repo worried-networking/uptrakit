@@ -77,6 +77,7 @@ impl PacmanPlugin {
         PluginCapability::VersionDetection,
         PluginCapability::ReleaseFetching,
         PluginCapability::UpdateExecution,
+        PluginCapability::ConfigTest,
     ];
 
     /// Create a new Pacman plugin with the given configuration.

@@ -95,6 +95,7 @@ impl DnfPlugin {
         PluginCapability::DiscoverLocalSoftware,
         PluginCapability::RefreshPackageIndex,
         PluginCapability::DetectHostCompatibility,
+        PluginCapability::ConfigTest,
     ];
 
     /// Create a new DNF plugin with the given configuration.
