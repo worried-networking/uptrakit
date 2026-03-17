@@ -10,7 +10,7 @@ use crate::db::entity::ssh_host::SshKeyType;
 use crate::error::Error;
 
 /// Read a private key from a file path, or from stdin if `path` is `-`.
-pub(crate) fn read_private_key(path: &Path) -> crate::error::Result<String> {
+pub fn read_private_key(path: &Path) -> crate::error::Result<String> {
     if path.as_os_str() == "-" {
         let mut buf = String::new();
         std::io::stdin()
@@ -29,7 +29,7 @@ pub(crate) fn read_private_key(path: &Path) -> crate::error::Result<String> {
 /// - `BEGIN EC PRIVATE KEY` → ECDSA (SEC1)
 /// - `BEGIN OPENSSH PRIVATE KEY` → decode and inspect the key type string
 /// - `BEGIN PRIVATE KEY` → PKCS#8 (decode and inspect OID)
-pub(crate) fn detect_key_type(pem_content: &str) -> crate::error::Result<SshKeyType> {
+pub fn detect_key_type(pem_content: &str) -> crate::error::Result<SshKeyType> {
     let trimmed = pem_content.trim();
 
     if trimmed.contains("BEGIN RSA PRIVATE KEY") {

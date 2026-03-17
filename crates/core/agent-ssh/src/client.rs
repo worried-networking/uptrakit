@@ -10,10 +10,9 @@ use uptrakit_internal_wire::{
     BatchUpdateItemResult, BatchUpdateResultPayload, Capability, CheckVersionsPayload,
     DiscoverSoftwarePayload, DiscoveryPluginResult, DiscoveryResultsPayload,
     ExecuteBatchUpdatePayload, ExecuteUpdatePayload, HostInfo, ReportHostsPayload, ServiceMessage,
-    UpdateCategory, UpdateFinalStatus, UpdateResultPayload, VersionCheckResult,
+    ServiceTransport, UpdateCategory, UpdateFinalStatus, UpdateResultPayload, VersionCheckResult,
     VersionCheckResultsPayload,
 };
-use uptrakit_service_sdk::ControllerConnection;
 
 use crate::db::entity::ssh_host::Model;
 use crate::host_info::collect_remote_host_info;
@@ -22,7 +21,7 @@ use crate::ssh_executor::SshCommandExecutor;
 use crate::ssh_pool::SshConnectionPool;
 
 // Re-export shared update types for use in main.rs.
-pub(crate) use uptrakit_agent_core::UpdateEvent;
+pub use uptrakit_agent_core::UpdateEvent;
 
 // ── SSH in-flight update tracking ────────────────────────────────────────────
 
@@ -33,7 +32,7 @@ pub(crate) use uptrakit_agent_core::UpdateEvent;
 /// **forwarder task**, and interactive channels (when the `interactive`
 /// feature is enabled). The forwarder task owns the underlying output/handle
 /// and forwards all events to the shared aggregate channel.
-pub(crate) struct SshInFlightUpdate {
+pub struct SshInFlightUpdate {
     /// The update history ID used to correlate events with the controller.
     pub update_history_id: uuid::Uuid,
     /// JoinHandle for the forwarder task.
@@ -78,9 +77,9 @@ fn build_connection_context() -> ConnectionContext {
 /// serialising.  Errors for individual hosts are logged as warnings and
 /// skipped; the remaining hosts are still reported.
 #[tracing::instrument(skip_all)]
-pub(crate) async fn report_enrolled_hosts(
+pub async fn report_enrolled_hosts(
     local_db: &sea_orm::DatabaseConnection,
-    conn: &mut ControllerConnection,
+    conn: &mut impl ServiceTransport,
     pool: &SshConnectionPool,
 ) {
     let hosts = match list_hosts(local_db).await {
@@ -121,7 +120,7 @@ pub(crate) async fn report_enrolled_hosts(
         capabilities: ssh_agent_capabilities(),
     });
 
-    if let Err(e) = conn.send_auto_paginate(msg).await {
+    if let Err(e) = conn.transport_send_auto_paginate(msg).await {
         tracing::warn!(error = %e, "failed to send ReportHosts message");
     } else {
         tracing::info!(host_count = total, "reported enrolled hosts to controller");
@@ -250,7 +249,7 @@ fn build_fast_path_host_info(host: &Model) -> HostInfo {
 /// latency for one host does not delay the others.
 ///
 /// Hosts that fail to connect are skipped with a warning.
-pub(crate) async fn build_reload_host_infos(
+pub async fn build_reload_host_infos(
     db: &sea_orm::DatabaseConnection,
     current_hosts: &[Model],
     changed_ids: &HashSet<uuid::Uuid>,
@@ -344,9 +343,9 @@ async fn collect_one_host_for_reload(
 /// `SshAgentEvent::HostConfigChanged` event fires and the host snapshot has
 /// actually changed.
 #[tracing::instrument(skip_all, fields(host_count = current_hosts.len()))]
-pub(crate) async fn report_hosts_after_config_change(
+pub async fn report_hosts_after_config_change(
     db: &sea_orm::DatabaseConnection,
-    conn: &mut ControllerConnection,
+    conn: &mut impl ServiceTransport,
     current_hosts: &[Model],
     changed_ids: &HashSet<uuid::Uuid>,
     pool: &SshConnectionPool,
@@ -359,7 +358,7 @@ pub(crate) async fn report_hosts_after_config_change(
         capabilities: ssh_agent_capabilities(),
     });
 
-    if let Err(e) = conn.send_auto_paginate(msg).await {
+    if let Err(e) = conn.transport_send_auto_paginate(msg).await {
         tracing::warn!(
             error = %e,
             "failed to send ReportHosts after dynamic host config change"
@@ -373,7 +372,7 @@ pub(crate) async fn report_hosts_after_config_change(
 }
 
 /// Capabilities advertised by the SSH agent service.
-pub(crate) fn ssh_agent_capabilities() -> BTreeSet<Capability> {
+pub fn ssh_agent_capabilities() -> BTreeSet<Capability> {
     let mut caps: BTreeSet<Capability> = [
         Capability::SoftwareDiscovery,
         Capability::UpdateHooks,
@@ -409,12 +408,12 @@ pub(crate) fn ssh_agent_capabilities() -> BTreeSet<Capability> {
 /// `aggregate_tx` channel. The `SshAgentHandler` drains that channel in
 /// `poll_service_event`.
 #[tracing::instrument(skip_all, fields(host_machine_id = %payload.host_machine_id, update_id = %payload.update_history_id))]
-pub(crate) async fn handle_execute_update_ssh(
+pub async fn handle_execute_update_ssh(
     payload: ExecuteUpdatePayload,
     db: &sea_orm::DatabaseConnection,
     in_flight_updates: &mut HashMap<String, SshInFlightUpdate>,
     aggregate_tx: &tokio::sync::mpsc::Sender<(String, UpdateEvent)>,
-    conn: &mut ControllerConnection,
+    conn: &mut impl ServiceTransport,
     pool: &SshConnectionPool,
 ) {
     let host = match find_host_by_machine_id(db, &payload.host_machine_id).await {
@@ -425,7 +424,7 @@ pub(crate) async fn handle_execute_update_ssh(
                 update_id = %payload.update_history_id,
                 "no SSH host found for ExecuteUpdate host_machine_id"
             );
-            conn.send_best_effort(make_ssh_update_error_response(
+            conn.transport_send_best_effort(make_ssh_update_error_response(
                 payload.update_history_id,
                 format!(
                     "SSH host with machine_id '{}' not found",
@@ -442,7 +441,7 @@ pub(crate) async fn handle_execute_update_ssh(
                 error = %e,
                 "DB error looking up SSH host for ExecuteUpdate"
             );
-            conn.send_best_effort(make_ssh_update_error_response(
+            conn.transport_send_best_effort(make_ssh_update_error_response(
                 payload.update_history_id,
                 format!("DB error: {e}"),
             ))
@@ -461,7 +460,7 @@ pub(crate) async fn handle_execute_update_ssh(
                 "failed to acquire SSH session for ExecuteUpdate"
             );
             pool.evict(host.id).await;
-            conn.send_best_effort(make_ssh_update_error_response(
+            conn.transport_send_best_effort(make_ssh_update_error_response(
                 payload.update_history_id,
                 format!("SSH connection failed: {e}"),
             ))
@@ -477,7 +476,7 @@ pub(crate) async fn handle_execute_update_ssh(
             update_id = %payload.update_history_id,
             "rejecting update: another update is already in progress for this host"
         );
-        conn.send_best_effort(make_ssh_update_error_response(
+        conn.transport_send_best_effort(make_ssh_update_error_response(
             payload.update_history_id,
             format!(
                 "Another update is already in progress for host '{}'",
@@ -588,7 +587,7 @@ pub(crate) async fn handle_execute_update_ssh(
 // `bg_tx` for the event loop to forward to the controller.
 
 /// Spawn a `CheckVersions` operation as a background task.
-pub(crate) fn spawn_check_versions_ssh(
+pub fn spawn_check_versions_ssh(
     payload: CheckVersionsPayload,
     db: &sea_orm::DatabaseConnection,
     pool: &SshConnectionPool,
@@ -673,7 +672,7 @@ async fn run_check_versions_ssh(
 }
 
 /// Spawn a `DiscoverSoftware` operation as a background task.
-pub(crate) fn spawn_discover_software_ssh(
+pub fn spawn_discover_software_ssh(
     payload: DiscoverSoftwarePayload,
     db: &sea_orm::DatabaseConnection,
     pool: &SshConnectionPool,
@@ -768,7 +767,7 @@ async fn run_discover_software_ssh(
 }
 
 /// Spawn an `ExecuteBatchUpdate` operation as a background task.
-pub(crate) fn spawn_execute_batch_update_ssh(
+pub fn spawn_execute_batch_update_ssh(
     payload: ExecuteBatchUpdatePayload,
     db: &sea_orm::DatabaseConnection,
     pool: &SshConnectionPool,
@@ -898,12 +897,12 @@ async fn run_execute_batch_update_ssh(
 
 // ── Shared re-exports ─────────────────────────────────────────────────────────
 
-pub(crate) use uptrakit_agent_core::{send_update_output, send_update_result};
+pub use uptrakit_agent_core::{send_update_output, send_update_result};
 
 /// Forward stdin data or a signal from the controller to the correct SSH host's
 /// in-flight update.
 #[cfg(feature = "interactive")]
-pub(crate) fn handle_update_stdin_data_ssh(
+pub fn handle_update_stdin_data_ssh(
     payload: uptrakit_internal_wire::UpdateStdinDataPayload,
     in_flight_updates: &HashMap<String, SshInFlightUpdate>,
 ) {

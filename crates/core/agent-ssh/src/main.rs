@@ -1,25 +1,16 @@
 mod cli;
-mod client;
-pub mod db;
-mod error;
-mod extension;
 mod host_cli;
-mod host_info;
-mod host_ops;
-mod operations;
-mod remote_exec;
-mod ssh_executor;
-mod ssh_key;
-mod ssh_pool;
-mod ssh_stdio_tunnel;
-mod ssh_target;
-mod ssh_transport;
 
 use clap::Parser;
 use rootcause::prelude::*;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 
+pub(crate) use uptrakit_agent_ssh::{
+    HOST_RELOAD_INTERVAL, UPDATE_COOLDOWN, client, db, diff_host_snapshots, error, extension,
+    handle_set_update_freeze, host_ops, init_ssh_data_key_ring, operations, reencrypt_ssh_to_v3,
+    register_ssh_column_aad, ssh_key, ssh_pool,
+};
 use uptrakit_internal_wire::{Capability, ControllerMessage, RegisterPayload, ServiceMessage};
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
@@ -27,19 +18,6 @@ use uptrakit_service_sdk::{
 };
 
 use cli::{Args, Commands};
-
-/// AAD string for the `ssh_hosts.private_key` column.
-const AAD_SSH_PRIVATE_KEY: &str = "uptrakit:ssh_hosts:private_key";
-
-/// How often the daemon polls the local `ssh_hosts` table for changes.
-const HOST_RELOAD_INTERVAL: Duration = Duration::from_secs(10);
-
-/// Minimum interval between consecutive update executions per host.
-///
-/// Rapid-fire update messages from a compromised controller are rejected
-/// with a `security_audit:` warning. Legitimate orchestration always waits
-/// for the previous update to finish before sending the next one.
-const UPDATE_COOLDOWN: Duration = Duration::from_secs(5);
 
 // ---------------------------------------------------------------------------
 // Typed error for initialization helpers
@@ -890,308 +868,6 @@ impl SshAgentHandler {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Snapshot diff helper
-// ---------------------------------------------------------------------------
-
-/// Compute the difference between two host snapshots.
-///
-/// Returns `(deleted_ids, changed_ids)`:
-/// - `deleted_ids`: host IDs present in `prev` but absent from `curr`
-/// - `changed_ids`: host IDs that are new in `curr`, or present in both but
-///   with a different `updated_at`
-fn diff_host_snapshots(
-    prev: &[host_ops::HostSnapshot],
-    curr: &[host_ops::HostSnapshot],
-) -> (Vec<uuid::Uuid>, HashSet<uuid::Uuid>) {
-    let prev_map: std::collections::HashMap<uuid::Uuid, time::OffsetDateTime> =
-        prev.iter().map(|s| (s.id, s.updated_at)).collect();
-    let curr_ids: HashSet<uuid::Uuid> = curr.iter().map(|s| s.id).collect();
-
-    let deleted: Vec<uuid::Uuid> = prev
-        .iter()
-        .filter(|s| !curr_ids.contains(&s.id))
-        .map(|s| s.id)
-        .collect();
-
-    let mut changed: HashSet<uuid::Uuid> = HashSet::new();
-    for snap in curr {
-        match prev_map.get(&snap.id) {
-            Some(&prev_ts) if prev_ts != snap.updated_at => {
-                changed.insert(snap.id);
-            }
-            None => {
-                // New host — needs SSH to discover machine_id.
-                changed.insert(snap.id);
-            }
-            _ => {}
-        }
-    }
-
-    (deleted, changed)
-}
-
-// ---------------------------------------------------------------------------
-// Shutdown resolution
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// ENC:v2 support
-// ---------------------------------------------------------------------------
-
-/// Register the column AAD mapping for `ssh_hosts.private_key`.
-///
-/// Must be called after `init_master_key` and before any DB queries.
-fn register_ssh_column_aad() {
-    if !uptrakit_crypto::master_key_available() {
-        return;
-    }
-
-    use uptrakit_crypto::ColumnAadEntry;
-
-    let entries: &[ColumnAadEntry] = &[ColumnAadEntry {
-        table: "ssh_hosts",
-        column: "private_key",
-        aad: AAD_SSH_PRIVATE_KEY,
-    }];
-
-    if let Err(e) = uptrakit_crypto::register_column_aad(entries) {
-        tracing::warn!(error = %e, "column AAD registry already initialized (harmless)");
-    }
-}
-
-/// Handle a remote `SetUpdateFreeze` message by creating or removing the
-/// freeze file on the local filesystem.
-///
-/// This piggybacks on the existing freeze-file mechanism: local `touch` still
-/// works, and the freeze persists across agent restarts.
-async fn handle_set_update_freeze(
-    freeze_file_path: &std::path::Path,
-    payload: uptrakit_internal_wire::SetUpdateFreezePayload,
-) {
-    let reason = payload.reason.as_deref().unwrap_or("(no reason given)");
-    if payload.enabled {
-        match tokio::fs::write(freeze_file_path, "").await {
-            Ok(()) => {
-                tracing::warn!(
-                    freeze_file = %freeze_file_path.display(),
-                    reason = reason,
-                    "security_audit: update freeze enabled via remote command"
-                );
-            }
-            Err(e) => {
-                tracing::error!(
-                    freeze_file = %freeze_file_path.display(),
-                    error = %e,
-                    "failed to create freeze file"
-                );
-            }
-        }
-    } else {
-        match tokio::fs::remove_file(freeze_file_path).await {
-            Ok(()) => {
-                tracing::warn!(
-                    freeze_file = %freeze_file_path.display(),
-                    reason = reason,
-                    "security_audit: update freeze disabled via remote command"
-                );
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                tracing::debug!(
-                    freeze_file = %freeze_file_path.display(),
-                    "freeze file did not exist; no action taken"
-                );
-            }
-            Err(e) => {
-                tracing::error!(
-                    freeze_file = %freeze_file_path.display(),
-                    error = %e,
-                    "failed to remove freeze file"
-                );
-            }
-        }
-    }
-}
-
-/// Initialize the data key ring from the local DB (same pattern as controller).
-async fn init_ssh_data_key_ring(db: &sea_orm::DatabaseConnection) {
-    use sea_orm::{ActiveModelTrait, EntityTrait};
-
-    if !uptrakit_crypto::master_key_available() {
-        return;
-    }
-
-    let kek_fp = match uptrakit_crypto::master_key_fingerprint() {
-        Ok(fp) => fp,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to compute KEK fingerprint");
-            return;
-        }
-    };
-
-    let rows = match db::entity::data_encryption_key::Entity::find()
-        .all(db)
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to query data_encryption_keys");
-            return;
-        }
-    };
-
-    if rows.is_empty() {
-        // Generate the first DEK.
-        let dek = match uptrakit_crypto::generate_data_key() {
-            Ok(d) => d,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to generate initial DEK");
-                return;
-            }
-        };
-        let wrapped = match uptrakit_crypto::wrap_data_key(&dek) {
-            Ok(w) => w,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to wrap initial DEK");
-                return;
-            }
-        };
-
-        let am = db::entity::data_encryption_key::ActiveModel {
-            id: sea_orm::Set(uuid::Uuid::now_v7()),
-            key_id: sea_orm::Set(dek.key_id.clone()),
-            wrapped_key: sea_orm::Set(wrapped),
-            kek_fingerprint: sea_orm::Set(kek_fp.clone()),
-            status: sea_orm::Set("active".to_string()),
-            created_at: sea_orm::Set(time::OffsetDateTime::now_utc()),
-            retired_at: sea_orm::Set(None),
-        };
-
-        if let Err(e) = am.insert(db).await {
-            tracing::debug!(error = %e, "initial DEK insert failed (may be race), will load existing");
-        } else {
-            tracing::info!(key_id = %dek.key_id, "generated initial data encryption key");
-        }
-
-        // Re-read in case of race.
-        let rows = match db::entity::data_encryption_key::Entity::find()
-            .all(db)
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to re-read data_encryption_keys");
-                return;
-            }
-        };
-        build_and_init_ssh_ring(&rows, &kek_fp);
-        return;
-    }
-
-    build_and_init_ssh_ring(&rows, &kek_fp);
-}
-
-/// Build and init the data key ring from loaded DEK rows.
-fn build_and_init_ssh_ring(rows: &[db::entity::data_encryption_key::Model], kek_fp: &str) {
-    let mut keys = std::collections::HashMap::new();
-    let mut active_key_id: Option<String> = None;
-
-    for row in rows {
-        if row.kek_fingerprint != kek_fp {
-            tracing::error!(
-                key_id = %row.key_id,
-                stored_fp = %row.kek_fingerprint,
-                current_fp = %kek_fp,
-                "DEK was wrapped with a different KEK — master key mismatch"
-            );
-            return;
-        }
-
-        let dek = match uptrakit_crypto::unwrap_data_key(&row.wrapped_key, &row.key_id) {
-            Ok(d) => d,
-            Err(e) => {
-                tracing::error!(key_id = %row.key_id, error = %e, "failed to unwrap DEK");
-                return;
-            }
-        };
-        keys.insert(dek.key_id.clone(), dek.key);
-
-        if row.status == "active" {
-            active_key_id = Some(row.key_id.clone());
-        }
-    }
-
-    let active = match active_key_id {
-        Some(id) => id,
-        None => {
-            tracing::error!("no active DEK found in data_encryption_keys table");
-            return;
-        }
-    };
-
-    let ring = match uptrakit_crypto::DataKeyRing::new(keys, active.clone()) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to construct data key ring");
-            return;
-        }
-    };
-    if let Err(e) = uptrakit_crypto::init_data_key_ring(ring) {
-        tracing::warn!(error = %e, "data key ring already initialized (harmless)");
-    } else {
-        tracing::info!(active_key_id = %active, count = rows.len(), "data key ring initialized");
-    }
-}
-
-/// Re-encrypt all non-v3 `ssh_hosts.private_key` values to `ENC:v3:`.
-async fn reencrypt_ssh_to_v3(db: &sea_orm::DatabaseConnection) {
-    use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel};
-    use uptrakit_crypto::EncryptedString;
-
-    if !uptrakit_crypto::master_key_available() {
-        return;
-    }
-
-    let rows = match db::entity::ssh_host::Entity::find().all(db).await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to query ssh_hosts for v3 upgrade");
-            return;
-        }
-    };
-
-    let mut count = 0u64;
-    for row in rows {
-        if !row.private_key.needs_v3_upgrade() {
-            continue;
-        }
-        let plaintext = row.private_key.expose_secret().to_string();
-        let id = row.id;
-        match EncryptedString::new(plaintext, AAD_SSH_PRIVATE_KEY) {
-            Ok(encrypted) => {
-                let mut am = row.into_active_model();
-                am.private_key = sea_orm::Set(encrypted);
-                if let Err(e) = am.update(db).await {
-                    tracing::warn!(id = %id, error = %e, "v3 upgrade failed: ssh_hosts.private_key");
-                } else {
-                    count += 1;
-                }
-            }
-            Err(e) => {
-                tracing::warn!(id = %id, error = %e, "v3 encrypt failed: ssh_hosts.private_key");
-            }
-        }
-    }
-    if count > 0 {
-        tracing::info!(
-            table = "ssh_hosts",
-            column = "private_key",
-            count,
-            "upgraded to ENC:v3"
-        );
-    }
-}
-
 /// Rotate DEKs from the current KEK to a new KEK (same pattern as controller).
 async fn rotate_ssh_master_key(db: &sea_orm::DatabaseConnection, new_key_path: &std::path::Path) {
     use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, TransactionTrait};
@@ -1572,7 +1248,7 @@ fn init_tracing(own_module: &str, verbosity: u8) {
 
 #[cfg(test)]
 mod tests {
-    use super::{diff_host_snapshots, host_ops, parse_master_key_hex, read_master_key_hex};
+    use super::{parse_master_key_hex, read_master_key_hex};
     use std::io::Write;
 
     #[test]
@@ -1615,80 +1291,6 @@ mod tests {
         let key_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let result = parse_master_key_hex(key_hex);
         assert!(matches!(result, Ok(bytes) if bytes.len() == 32));
-    }
-
-    // ── snapshot diff tests ──────────────────────────────────────────────────
-
-    fn snap(id: uuid::Uuid, ts: i64) -> host_ops::HostSnapshot {
-        host_ops::HostSnapshot {
-            id,
-            updated_at: time::OffsetDateTime::from_unix_timestamp(ts)
-                .unwrap_or(time::OffsetDateTime::UNIX_EPOCH),
-        }
-    }
-
-    #[test]
-    fn snapshot_diff_no_change_is_noop() {
-        let id_a = uuid::Uuid::now_v7();
-        let id_b = uuid::Uuid::now_v7();
-        let prev = vec![snap(id_a, 100), snap(id_b, 200)];
-        let curr = prev.clone();
-        let (deleted, changed) = diff_host_snapshots(&prev, &curr);
-        assert!(
-            deleted.is_empty(),
-            "expected no deletions, got: {deleted:?}"
-        );
-        assert!(changed.is_empty(), "expected no changes, got: {changed:?}");
-    }
-
-    #[test]
-    fn snapshot_diff_detects_added_host() {
-        let id_a = uuid::Uuid::now_v7();
-        let id_b = uuid::Uuid::now_v7();
-        let prev = vec![snap(id_a, 100)];
-        let curr = vec![snap(id_a, 100), snap(id_b, 200)];
-        let (deleted, changed) = diff_host_snapshots(&prev, &curr);
-        assert!(deleted.is_empty(), "expected no deletions");
-        assert_eq!(changed.len(), 1, "expected one addition");
-        assert!(changed.contains(&id_b), "expected id_b in changed set");
-    }
-
-    #[test]
-    fn snapshot_diff_detects_removed_host() {
-        let id_a = uuid::Uuid::now_v7();
-        let id_b = uuid::Uuid::now_v7();
-        let prev = vec![snap(id_a, 100), snap(id_b, 200)];
-        let curr = vec![snap(id_a, 100)];
-        let (deleted, changed) = diff_host_snapshots(&prev, &curr);
-        assert_eq!(deleted.len(), 1, "expected one deletion");
-        assert!(deleted.contains(&id_b), "expected id_b in deleted set");
-        assert!(changed.is_empty(), "expected no additions or updates");
-    }
-
-    #[test]
-    fn snapshot_diff_detects_updated_host() {
-        let id_a = uuid::Uuid::now_v7();
-        let id_b = uuid::Uuid::now_v7();
-        let prev = vec![snap(id_a, 100), snap(id_b, 200)];
-        let curr = vec![snap(id_a, 100), snap(id_b, 999)];
-        let (deleted, changed) = diff_host_snapshots(&prev, &curr);
-        assert!(deleted.is_empty(), "expected no deletions");
-        assert_eq!(changed.len(), 1, "expected one update");
-        assert!(changed.contains(&id_b), "expected id_b in changed set");
-    }
-
-    #[test]
-    fn snapshot_diff_add_and_remove_simultaneously() {
-        let id_a = uuid::Uuid::now_v7();
-        let id_b = uuid::Uuid::now_v7();
-        let id_c = uuid::Uuid::now_v7();
-        let prev = vec![snap(id_a, 100), snap(id_b, 200)];
-        let curr = vec![snap(id_a, 100), snap(id_c, 300)];
-        let (deleted, changed) = diff_host_snapshots(&prev, &curr);
-        assert_eq!(deleted.len(), 1, "expected id_b deleted");
-        assert!(deleted.contains(&id_b));
-        assert_eq!(changed.len(), 1, "expected id_c added");
-        assert!(changed.contains(&id_c));
     }
 
     // ── poll_updates tests ───────────────────────────────────────────────────

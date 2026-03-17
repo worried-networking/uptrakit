@@ -65,17 +65,15 @@ struct PoolEntry {
 ///
 /// A single pool instance lives on `SshAgentHandler` for the lifetime of the
 /// controller connection.
-#[derive(Clone)]
-pub(crate) struct SshConnectionPool {
+#[derive(Clone, Default)]
+pub struct SshConnectionPool {
     sessions: Arc<Mutex<HashMap<Uuid, PoolEntry>>>,
 }
 
 impl SshConnectionPool {
     /// Create a new, empty pool.
-    pub(crate) fn new() -> Self {
-        Self {
-            sessions: Arc::new(Mutex::new(HashMap::new())),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Acquire a session for the given SSH host.
@@ -154,7 +152,7 @@ impl SshConnectionPool {
     /// defunct session.
     ///
     /// [`acquire`]: Self::acquire
-    pub(crate) async fn evict(&self, host_id: Uuid) {
+    pub async fn evict(&self, host_id: Uuid) {
         let removed = self.sessions.lock().remove(&host_id).is_some();
         if removed {
             tracing::debug!(host_id = %host_id, "evicted SSH session from pool");
@@ -165,7 +163,7 @@ impl SshConnectionPool {
     ///
     /// Should be called on service shutdown so remote hosts receive a clean
     /// SSH disconnect instead of a silent idle drop.
-    pub(crate) async fn disconnect_all(&self) {
+    pub async fn disconnect_all(&self) {
         let sessions: Vec<Arc<SshSession>> = {
             let mut pool = self.sessions.lock();
             pool.drain().map(|(_, e)| e.session).collect()

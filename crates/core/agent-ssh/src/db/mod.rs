@@ -9,9 +9,7 @@ use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 ///
 /// The database file is stored in `<state_dir>/agent-ssh.db`. Migrations are
 /// applied automatically on every startup.
-pub(crate) async fn init_db(
-    state_dir: &Path,
-) -> std::result::Result<DatabaseConnection, sea_orm::DbErr> {
+pub async fn init_db(state_dir: &Path) -> std::result::Result<DatabaseConnection, sea_orm::DbErr> {
     let db_path = state_dir.join("agent-ssh.db");
     let url = format!("sqlite:{}?mode=rwc", db_path.display());
 

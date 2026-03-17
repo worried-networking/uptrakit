@@ -75,7 +75,7 @@ pub(crate) struct ProxmoxBootstrapResult {
 ///
 /// Used in contexts where no bootstrap will actually be performed (e.g., in the
 /// `on_post_report_hosts` background task where guest execution is not needed).
-pub(crate) struct NoopGuestBootstrapExecutor;
+pub struct NoopGuestBootstrapExecutor;
 
 #[async_trait]
 impl GuestBootstrapExecutor for NoopGuestBootstrapExecutor {

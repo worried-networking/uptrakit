@@ -13,15 +13,14 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
-use uptrakit_internal_wire::ServiceMessage;
 use uptrakit_internal_wire::extension::{
     ActionDef, ActionUi, ExtensionManifest, ExtensionPlacement, ExtensionRegisterPayload,
     ExtensionRequestPayload, ExtensionResponsePayload, ExtensionTargeting, ExtensionUi, FieldDef,
     FieldType, FormDef, SelectOption, TableColumn, WizardStep,
 };
+use uptrakit_internal_wire::{ServiceMessage, ServiceTransport};
 use uptrakit_plugin_infrastructure_core::PluginBase;
 use uptrakit_plugin_infrastructure_core::agent_infra::{InfraActionInvoker, InfraPluginContext};
-use uptrakit_service_sdk::ControllerConnection;
 use uptrakit_shared_types::{Permission, SecretString};
 
 use crate::host_ops;
@@ -31,7 +30,7 @@ use crate::operations::sync;
 use crate::ssh_target::SshTarget;
 
 /// Extension ID for the SSH host management extension.
-pub(crate) const EXTENSION_ID: &str = "ssh-agent.hosts";
+pub const EXTENSION_ID: &str = "ssh-agent.hosts";
 
 // ── Manifest ─────────────────────────────────────────────────────────
 
@@ -41,7 +40,7 @@ pub(crate) const EXTENSION_ID: &str = "ssh-agent.hosts";
 /// that reference entries in the action library returned by [`build_actions`].
 /// `infra_primary_actions` are additional primary action IDs contributed by
 /// infrastructure plugins (via [`PluginBase::primary_action_ids`]).
-pub(crate) fn build_manifest(infra_primary_actions: &[String]) -> ExtensionManifest {
+pub fn build_manifest(infra_primary_actions: &[String]) -> ExtensionManifest {
     let mut primary_actions = vec!["bootstrap".to_string()];
     primary_actions.extend(infra_primary_actions.iter().cloned());
 
@@ -73,7 +72,7 @@ pub(crate) fn build_manifest(infra_primary_actions: &[String]) -> ExtensionManif
 }
 
 /// Build the register payload including the manifest and encryption key.
-pub(crate) fn build_register_payload(
+pub fn build_register_payload(
     encryption_public_key: Option<String>,
     infra_plugins: &[Arc<dyn PluginBase>],
 ) -> ExtensionRegisterPayload {
@@ -95,7 +94,7 @@ pub(crate) fn build_register_payload(
 }
 
 /// Build the action library for registration via `ExtensionActionsRegister`.
-pub(crate) fn build_actions() -> Vec<ActionDef> {
+pub fn build_actions() -> Vec<ActionDef> {
     let mut actions = vec![
         ActionDef::new("remove-host", "Remove Host")
             .with_permission(Permission::UpdateHosts)
@@ -260,7 +259,7 @@ fn bootstrap_action() -> ActionDef {
 ///
 /// Groups the handler-level state needed by action dispatch and background
 /// bootstrap tasks, avoiding parameter-count explosion on public APIs.
-pub(crate) struct ExtensionContext<'a> {
+pub struct ExtensionContext<'a> {
     pub db: &'a sea_orm::DatabaseConnection,
     pub state_dir: &'a Path,
     pub private_key_der: Option<&'a [u8]>,
@@ -277,13 +276,13 @@ pub(crate) struct ExtensionContext<'a> {
 ///
 /// Wraps `invoke_proxy_action` so that infrastructure plugins can invoke
 /// controller-side extension actions without depending on `uptrakit-service-sdk`.
-pub(crate) struct InfraActionInvokerImpl<'a> {
+pub struct InfraActionInvokerImpl<'a> {
     proxy: &'a uptrakit_service_sdk::ServiceExtensionProxy,
     bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
 }
 
 impl<'a> InfraActionInvokerImpl<'a> {
-    pub(crate) fn new(
+    pub fn new(
         proxy: &'a uptrakit_service_sdk::ServiceExtensionProxy,
         bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
     ) -> Self {
@@ -391,10 +390,10 @@ fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionCo
     extension_id = %request.extension_id,
     action_id = %request.action_id,
 ))]
-pub(crate) async fn handle_extension_request(
+pub async fn handle_extension_request(
     request: ExtensionRequestPayload,
     ctx: &ExtensionContext<'_>,
-    conn: &mut ControllerConnection,
+    conn: &mut impl ServiceTransport,
 ) {
     if request.extension_id != EXTENSION_ID {
         tracing::warn!(
@@ -1056,8 +1055,11 @@ fn make_error_response(request_id: &str, message: &str) -> ExtensionResponsePayl
     }
 }
 
-async fn send_response(conn: &mut ControllerConnection, response: ExtensionResponsePayload) {
-    if let Err(e) = conn.send(ServiceMessage::ExtensionResponse(response)).await {
+async fn send_response(conn: &mut impl ServiceTransport, response: ExtensionResponsePayload) {
+    if let Err(e) = conn
+        .transport_send(ServiceMessage::ExtensionResponse(response))
+        .await
+    {
         tracing::error!(error = %e, "failed to send extension response");
     }
 }

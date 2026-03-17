@@ -16,7 +16,7 @@ use crate::error::{Error, Result};
 /// [`HOST_RELOAD_INTERVAL`](crate::HOST_RELOAD_INTERVAL) seconds to detect
 /// additions, removals, and updates without loading full host credentials.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct HostSnapshot {
+pub struct HostSnapshot {
     pub id: uuid::Uuid,
     pub updated_at: time::OffsetDateTime,
 }
@@ -30,7 +30,7 @@ pub(crate) struct HostSnapshot {
 ///
 /// The SSH agent operates against a single-tenant local SQLite database — no
 /// tenant filter is required here by design.
-pub(crate) async fn list_host_snapshots(db: &DatabaseConnection) -> Result<Vec<HostSnapshot>> {
+pub async fn list_host_snapshots(db: &DatabaseConnection) -> Result<Vec<HostSnapshot>> {
     let models = Entity::find()
         .order_by_asc(Column::Id)
         .all(db)
@@ -46,7 +46,7 @@ pub(crate) async fn list_host_snapshots(db: &DatabaseConnection) -> Result<Vec<H
 }
 
 /// Parameters for adding a new SSH host.
-pub(crate) struct AddHostParams {
+pub struct AddHostParams {
     /// Pre-generated UUID for the new host entry.
     ///
     /// Callers must generate this before calling `add_host` so that the same
@@ -63,7 +63,7 @@ pub(crate) struct AddHostParams {
 }
 
 /// Fields that can be updated on an SSH host.
-pub(crate) struct HostUpdates {
+pub struct HostUpdates {
     pub name: Option<String>,
     pub hostname: Option<String>,
     pub port: Option<i32>,
@@ -77,7 +77,7 @@ pub(crate) struct HostUpdates {
 }
 
 /// Add a new SSH host to the database.
-pub(crate) async fn add_host(db: &DatabaseConnection, params: AddHostParams) -> Result<Model> {
+pub async fn add_host(db: &DatabaseConnection, params: AddHostParams) -> Result<Model> {
     // Check name uniqueness.
     let existing = Entity::find()
         .filter(Column::Name.eq(&params.name))
@@ -114,7 +114,7 @@ pub(crate) async fn add_host(db: &DatabaseConnection, params: AddHostParams) -> 
 }
 
 /// Find an SSH host by name or UUID.
-pub(crate) async fn find_host(db: &DatabaseConnection, name_or_id: &str) -> Result<Option<Model>> {
+pub async fn find_host(db: &DatabaseConnection, name_or_id: &str) -> Result<Option<Model>> {
     // Try UUID parse first.
     if let Ok(uuid) = uuid::Uuid::try_parse(name_or_id) {
         let by_id = Entity::find_by_id(uuid)
@@ -139,12 +139,12 @@ pub(crate) async fn find_host(db: &DatabaseConnection, name_or_id: &str) -> Resu
 /// # Tenant isolation
 ///
 /// Single-tenant local SQLite — no tenant filter required by design.
-pub(crate) async fn list_hosts(db: &DatabaseConnection) -> Result<Vec<Model>> {
+pub async fn list_hosts(db: &DatabaseConnection) -> Result<Vec<Model>> {
     Entity::find().all(db).await.context_to::<Error>()
 }
 
 /// List SSH hosts with pagination, ordered by name.
-pub(crate) async fn list_hosts_paginated(
+pub async fn list_hosts_paginated(
     db: &DatabaseConnection,
     page: u64,
     per_page: u64,
@@ -180,7 +180,7 @@ pub(crate) async fn list_hosts_paginated(
 }
 
 /// Paginated list result for SSH hosts.
-pub(crate) struct PaginatedHosts {
+pub struct PaginatedHosts {
     pub items: Vec<Model>,
     pub total: u64,
     pub page: u64,
@@ -189,7 +189,7 @@ pub(crate) struct PaginatedHosts {
 }
 
 /// Remove an SSH host by name or UUID. Returns `true` if a row was deleted.
-pub(crate) async fn remove_host(db: &DatabaseConnection, name_or_id: &str) -> Result<bool> {
+pub async fn remove_host(db: &DatabaseConnection, name_or_id: &str) -> Result<bool> {
     let host = find_host(db, name_or_id).await?;
     match host {
         Some(h) => {
@@ -202,7 +202,7 @@ pub(crate) async fn remove_host(db: &DatabaseConnection, name_or_id: &str) -> Re
 }
 
 /// Update an SSH host by name or UUID.
-pub(crate) async fn update_host(
+pub async fn update_host(
     db: &DatabaseConnection,
     name_or_id: &str,
     updates: HostUpdates,
