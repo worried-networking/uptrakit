@@ -185,12 +185,17 @@ impl HumanOutput for PaginatedResponse<SystemServiceResponse> {
                 .last_seen_at
                 .as_ref()
                 .map(|dt| dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string()));
+            let status = format_status_with_flags(
+                &s.status.to_string(),
+                s.is_embedded,
+                s.yielded_to.as_deref(),
+            );
             out.push_str(&format!(
                 "{:<38} {:<20} {:<25} {:<12} {}\n",
                 s.id,
                 s.hostname,
                 s.friendly_name,
-                s.status,
+                status,
                 last_seen.as_deref().unwrap_or("-")
             ));
         }
@@ -218,6 +223,13 @@ impl HumanOutput for SystemServiceResponse {
             out.push_str(&format!("IP Address:    {}\n", ip));
         }
         out.push_str(&format!("Status:        {}\n", self.status));
+        if self.is_embedded {
+            out.push_str("Embedded:      Yes\n");
+        }
+        if let Some(ids) = self.yielded_to.as_ref().filter(|v| !v.is_empty()) {
+            let id_list: Vec<String> = ids.iter().map(ToString::to_string).collect();
+            out.push_str(&format!("Yielded To:    {}\n", id_list.join(", ")));
+        }
         if let Some(ref ver) = self.client_version {
             out.push_str(&format!("Client Version: {}\n", ver));
         }
@@ -372,6 +384,20 @@ pub async fn batch(
     client.batch_system_services(&req).await.context_to()
 }
 
+/// Format a status string with embedded/yielded flags for list output.
+fn format_status_with_flags(
+    status: &str,
+    is_embedded: bool,
+    yielded_to: Option<&[Uuid]>,
+) -> String {
+    let has_yields = yielded_to.is_some_and(|ids| !ids.is_empty());
+    match (is_embedded, has_yields) {
+        (true, true) => format!("{status} (yielded)"),
+        (true, false) => format!("{status} (embedded)"),
+        _ => status.to_string(),
+    }
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -449,5 +475,60 @@ mod tests {
             resp.to_human_string()
                 .contains("System service deactivated")
         );
+    }
+
+    #[test]
+    fn embedded_system_service_show_output() {
+        let mut svc = sample_system_service();
+        svc.is_embedded = true;
+        let s = svc.to_human_string();
+        assert!(s.contains("Embedded:      Yes"), "embedded flag missing");
+        assert!(!s.contains("Yielded To:"), "yielded_to should be absent");
+    }
+
+    #[test]
+    fn yielded_system_service_show_output() {
+        let mut svc = sample_system_service();
+        svc.is_embedded = true;
+        let id1: Uuid = "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6".parse().unwrap();
+        svc.yielded_to = Some(vec![id1]);
+        let s = svc.to_human_string();
+        assert!(s.contains("Embedded:      Yes"), "embedded flag missing");
+        assert!(
+            s.contains("Yielded To:    a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"),
+            "yielded_to missing"
+        );
+    }
+
+    #[test]
+    fn embedded_system_service_list_status_marker() {
+        let mut svc = sample_system_service();
+        svc.is_embedded = true;
+        let resp = PaginatedResponse {
+            items: vec![svc],
+            total: 1,
+            page: 1,
+            per_page: 20,
+            total_pages: 1,
+        };
+        let s = resp.to_human_string();
+        assert!(s.contains("(embedded)"), "embedded marker missing in list");
+    }
+
+    #[test]
+    fn yielded_system_service_list_status_marker() {
+        let mut svc = sample_system_service();
+        svc.is_embedded = true;
+        let id1: Uuid = "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6".parse().unwrap();
+        svc.yielded_to = Some(vec![id1]);
+        let resp = PaginatedResponse {
+            items: vec![svc],
+            total: 1,
+            page: 1,
+            per_page: 20,
+            total_pages: 1,
+        };
+        let s = resp.to_human_string();
+        assert!(s.contains("(yielded)"), "yielded marker missing in list");
     }
 }
