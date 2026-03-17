@@ -56,6 +56,7 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::DeleteServiceConfig(p) => p.wire_validate(),
             ServiceMessage::WorkloadClaim(p) => p.wire_validate(),
             ServiceMessage::WorkloadRelease(p) => p.wire_validate(),
+            ServiceMessage::TestPluginConfigResult(p) => p.wire_validate(),
             // Forward-compatible: unknown variants from newer peers pass validation.
             _ => {
                 tracing::debug!(
@@ -104,6 +105,7 @@ impl WireValidate for ControllerMessage {
             ControllerMessage::WorkloadClaimAnnouncement(p) => p.wire_validate(),
             ControllerMessage::WorkloadClaimSyncRequest(_) => Ok(()),
             ControllerMessage::WorkloadClaimSyncResponse(p) => p.wire_validate(),
+            ControllerMessage::TestPluginConfig(p) => p.wire_validate(),
             // Forward-compatible: unknown variants from newer peers pass validation.
             _ => {
                 tracing::debug!(
@@ -1231,6 +1233,42 @@ impl WireValidate for WorkloadClaimSyncResponsePayload {
                 "claims[].claimed_at",
             )?;
         }
+        Ok(())
+    }
+}
+
+// ── Config test payload impls ────────────────────────────────────────────────
+
+impl WireValidate for TestPluginConfigPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.request_id, MAX_SHORT_STRING_LEN, "request_id")?;
+        check_string_len(
+            &self.host_machine_id,
+            MAX_SHORT_STRING_LEN,
+            "host_machine_id",
+        )?;
+        check_string_len(&self.plugin_type, MAX_SHORT_STRING_LEN, "plugin_type")?;
+        check_opt_string_len(
+            &self.package_identifier,
+            MAX_SHORT_STRING_LEN,
+            "package_identifier",
+        )?;
+        let config_str = self.config.to_string();
+        check_string_len(&config_str, MAX_PLUGIN_CONFIG_JSON_LEN, "config")?;
+        Ok(())
+    }
+}
+
+impl WireValidate for TestPluginConfigResultPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.request_id, MAX_SHORT_STRING_LEN, "request_id")?;
+        check_opt_string_len(&self.output, MAX_CONFIG_TEST_OUTPUT_LEN, "output")?;
+        check_opt_string_len(&self.error, MAX_MEDIUM_STRING_LEN, "error")?;
+        check_opt_string_len(
+            &self.detected_version,
+            MAX_SHORT_STRING_LEN,
+            "detected_version",
+        )?;
         Ok(())
     }
 }

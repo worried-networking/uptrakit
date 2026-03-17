@@ -175,6 +175,13 @@ permission_extractor! {
     // -- Ignores -----------------------------------------------------------
     /// Extractor that requires [`Permission::ManageIgnores`].
     CanManageIgnores => Permission::ManageIgnores,
+
+    // -- Plugin config testing --------------------------------------------
+    /// Extractor that requires [`Permission::TestPluginConfigs`].
+    ///
+    /// Grants ability to test plugin configurations against hosts
+    /// (dry-run validation without saving).
+    CanTestPluginConfigs => Permission::TestPluginConfigs,
 }
 
 // ---------------------------------------------------------------------------

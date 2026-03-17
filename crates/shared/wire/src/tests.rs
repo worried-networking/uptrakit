@@ -2856,3 +2856,129 @@ fn workload_claims_capability_roundtrip() {
     let deserialized: Capability = serde_json::from_value(json).unwrap();
     assert_eq!(deserialized, cap);
 }
+
+// =========================================================================
+// Config test payload tests
+// =========================================================================
+
+#[test]
+fn config_test_kind_serialization_roundtrip() {
+    let variants = [
+        (ConfigTestKind::VersionDetection, "\"version_detection\""),
+        (
+            ConfigTestKind::UpdateCommandValidation,
+            "\"update_command_validation\"",
+        ),
+        (ConfigTestKind::PreUpdateHook, "\"pre_update_hook\""),
+        (ConfigTestKind::PostUpdateHook, "\"post_update_hook\""),
+        (ConfigTestKind::Connectivity, "\"connectivity\""),
+    ];
+    for (variant, expected_json) in &variants {
+        let json = serde_json::to_string(variant).unwrap();
+        assert_eq!(
+            &json, expected_json,
+            "serialization mismatch for {variant:?}"
+        );
+        let deserialized: ConfigTestKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(&deserialized, variant, "roundtrip mismatch for {variant:?}");
+    }
+}
+
+#[test]
+fn test_plugin_config_payload_roundtrip() {
+    let payload = TestPluginConfigPayload {
+        request_id: "req-001".to_string(),
+        host_machine_id: "host-abc".to_string(),
+        test_kind: ConfigTestKind::VersionDetection,
+        plugin_type: "releases_github".to_string(),
+        config: serde_json::json!({"repo": "owner/repo"}),
+        package_identifier: Some("my-pkg".to_string()),
+    };
+    let msg = ControllerMessage::TestPluginConfig(payload.clone());
+    let json = serde_json::to_value(&msg).unwrap();
+    assert_eq!(json["type"], "test_plugin_config");
+    assert_eq!(json["test_kind"], "version_detection");
+    assert_eq!(json["package_identifier"], "my-pkg");
+    let roundtripped: ControllerMessage = serde_json::from_value(json).unwrap();
+    assert_eq!(roundtripped, msg);
+}
+
+#[test]
+fn test_plugin_config_payload_minimal() {
+    let payload = TestPluginConfigPayload::new(
+        "req-002".to_string(),
+        "host-xyz".to_string(),
+        ConfigTestKind::Connectivity,
+        "releases_docker".to_string(),
+        serde_json::json!({}),
+    );
+    let msg = ControllerMessage::TestPluginConfig(payload);
+    let json = serde_json::to_string(&msg).unwrap();
+    // package_identifier should be omitted when None
+    assert!(!json.contains("package_identifier"));
+    let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized, msg);
+}
+
+#[test]
+fn test_plugin_config_result_payload_roundtrip() {
+    let payload = TestPluginConfigResultPayload {
+        request_id: "req-001".to_string(),
+        success: true,
+        output: Some("v1.2.3 detected".to_string()),
+        error: None,
+        detected_version: Some("1.2.3".to_string()),
+        duration_ms: 150,
+    };
+    let msg = ServiceMessage::TestPluginConfigResult(payload.clone());
+    let json = serde_json::to_value(&msg).unwrap();
+    assert_eq!(json["type"], "test_plugin_config_result");
+    assert_eq!(json["success"], true);
+    assert_eq!(json["detected_version"], "1.2.3");
+    assert!(json.get("error").is_none());
+    let roundtripped: ServiceMessage = serde_json::from_value(json).unwrap();
+    assert_eq!(roundtripped, msg);
+}
+
+#[test]
+fn test_plugin_config_result_payload_failure() {
+    let payload = TestPluginConfigResultPayload {
+        request_id: "req-003".to_string(),
+        success: false,
+        output: None,
+        error: Some("command not found".to_string()),
+        detected_version: None,
+        duration_ms: 42,
+    };
+    let msg = ServiceMessage::TestPluginConfigResult(payload);
+    let json = serde_json::to_string(&msg).unwrap();
+    assert!(json.contains("command not found"));
+    assert!(!json.contains("detected_version"));
+    assert!(!json.contains("output"));
+    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized, msg);
+}
+
+#[test]
+fn test_plugin_config_result_payload_minimal() {
+    let payload = TestPluginConfigResultPayload::new("req-004".to_string(), true, 100);
+    let msg = ServiceMessage::TestPluginConfigResult(payload);
+    let json = serde_json::to_string(&msg).unwrap();
+    assert!(!json.contains("output"));
+    assert!(!json.contains("error"));
+    assert!(!json.contains("detected_version"));
+    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized, msg);
+}
+
+#[test]
+fn test_plugin_config_not_nats_publishable() {
+    let msg = ControllerMessage::TestPluginConfig(TestPluginConfigPayload::new(
+        "req-005".to_string(),
+        "host-1".to_string(),
+        ConfigTestKind::UpdateCommandValidation,
+        "shell".to_string(),
+        serde_json::json!({}),
+    ));
+    assert!(!msg.is_nats_publishable());
+}

@@ -28,6 +28,7 @@ pub mod oidc_auth;
 pub mod oidc_providers;
 pub mod pagination;
 pub mod permissions;
+pub mod plugin_config_test;
 pub mod plugin_configs;
 pub mod plugin_type_settings;
 pub mod prelude;
@@ -153,7 +154,7 @@ mod tests {
 
     #[test]
     fn permission_iter_covers_all_variants() {
-        assert_eq!(Permission::iter().count(), 32);
+        assert_eq!(Permission::iter().count(), 33);
     }
 
     #[test]

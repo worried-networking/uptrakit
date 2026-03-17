@@ -51,6 +51,13 @@ pub enum PluginCapability {
     UpdateLifecycle,
     /// Plugin reacts to software item lifecycle events (creation, etc.).
     SoftwareItemLifecycle,
+    /// Plugin supports configuration testing (dry-run validation).
+    ///
+    /// Plugins that declare this capability can validate their configuration
+    /// without triggering real version checks, updates, or side effects.
+    /// Controller-side plugins test API connectivity; agent-side plugins
+    /// test command execution or version detection against a specific host.
+    ConfigTest,
 }
 
 #[cfg(test)]
@@ -105,6 +112,7 @@ mod tests {
                 PluginCapability::SoftwareItemLifecycle,
                 "software_item_lifecycle",
             ),
+            (PluginCapability::ConfigTest, "config_test"),
         ];
         for (cap, expected) in cases {
             let json = serde_json::to_string(&cap).expect("serialize");

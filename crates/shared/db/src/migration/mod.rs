@@ -39,6 +39,7 @@ mod m20260312_000003_plugin_type_settings;
 mod m20260313_000001_per_host_update_locking;
 mod m20260316_000001_host_machine_id_partial_unique;
 mod m20260317_000001_fix_hosts_count_desync;
+mod m20260317_000002_test_plugin_configs_permission;
 mod m20260318_000001_host_software_item_qualifier;
 mod m20260318_000002_cron_to_interval;
 mod m20260319_000001_software_items_sort_index;
@@ -116,6 +117,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260329_000001_drop_mqtt_and_add_service_config::Migration),
             Box::new(m20260330_000001_embedded_service_visibility::Migration),
             Box::new(m20260331_000001_ssh_agent_tables::Migration),
+            Box::new(m20260317_000002_test_plugin_configs_permission::Migration),
         ]
     }
 }

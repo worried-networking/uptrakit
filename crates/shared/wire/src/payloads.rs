@@ -1583,3 +1583,96 @@ impl WorkloadClaimSyncEntry {
         }
     }
 }
+
+// ── Config test payloads ─────────────────────────────────────────────────────
+
+/// The kind of configuration test to perform on the agent.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigTestKind {
+    /// Execute `detect_installed_version()` and return output + detected version.
+    VersionDetection,
+    /// Validate update_command syntax (sh -n check, do NOT execute).
+    UpdateCommandValidation,
+    /// Execute pre-update hook with mock context.
+    PreUpdateHook,
+    /// Execute post-update hook with mock context.
+    PostUpdateHook,
+    /// Test connectivity for controller-side plugins (`fetch_releases`).
+    Connectivity,
+}
+
+/// Payload for a plugin configuration test request (controller -> agent).
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestPluginConfigPayload {
+    /// Unique request ID for correlation (UUID v7).
+    pub request_id: String,
+    /// Target host machine ID on the agent.
+    pub host_machine_id: String,
+    /// What to test.
+    pub test_kind: ConfigTestKind,
+    /// The plugin type to test.
+    pub plugin_type: String,
+    /// The plugin configuration JSON to test.
+    pub config: serde_json::Value,
+    /// Package identifier for testing (required for version detection).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_identifier: Option<String>,
+}
+
+impl TestPluginConfigPayload {
+    /// Creates a new test plugin config payload.
+    pub fn new(
+        request_id: String,
+        host_machine_id: String,
+        test_kind: ConfigTestKind,
+        plugin_type: String,
+        config: serde_json::Value,
+    ) -> Self {
+        Self {
+            request_id,
+            host_machine_id,
+            test_kind,
+            plugin_type,
+            config,
+            package_identifier: None,
+        }
+    }
+}
+
+/// Payload for a plugin configuration test result (agent -> controller).
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestPluginConfigResultPayload {
+    /// Correlation ID matching the original request.
+    pub request_id: String,
+    /// Whether the test passed.
+    pub success: bool,
+    /// Command output or connectivity response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    /// Error message if the test failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Detected version (for version detection tests).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_version: Option<String>,
+    /// Test duration in milliseconds.
+    pub duration_ms: u64,
+}
+
+impl TestPluginConfigResultPayload {
+    /// Creates a new test result payload.
+    pub fn new(request_id: String, success: bool, duration_ms: u64) -> Self {
+        Self {
+            request_id,
+            success,
+            output: None,
+            error: None,
+            detected_version: None,
+            duration_ms,
+        }
+    }
+}

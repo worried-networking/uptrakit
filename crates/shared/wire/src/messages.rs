@@ -13,8 +13,9 @@ use super::payloads::{
     ServiceConfigDeliveryPayload, ServiceConfigUpdatedPayload, ServiceCredentialsPayload,
     ServiceHostBatchUpdateTriggerPayload, ServiceSettingsPayload, ServiceUpdateTriggerPayload,
     SetUpdateFreezePayload, SoftwareStatesChangedPayload, SoftwareStatesPayload,
-    StdinAttentionPayload, StoreServiceConfigPayload, TokenRevokedPayload, UpdateOutputPayload,
-    UpdateResultPayload, UpdateStartedPayload, UpdateStdinDataPayload, VersionCheckResultsPayload,
+    StdinAttentionPayload, StoreServiceConfigPayload, TestPluginConfigPayload,
+    TestPluginConfigResultPayload, TokenRevokedPayload, UpdateOutputPayload, UpdateResultPayload,
+    UpdateStartedPayload, UpdateStdinDataPayload, VersionCheckResultsPayload,
     WorkloadClaimAnnouncementPayload, WorkloadClaimPayload, WorkloadClaimResultPayload,
     WorkloadClaimSyncRequestPayload, WorkloadClaimSyncResponsePayload, WorkloadReleasePayload,
 };
@@ -129,6 +130,11 @@ pub enum ServiceMessage {
     /// Sent when a service no longer wants to serve certain configs.
     /// Requires the `WorkloadClaims` capability.
     WorkloadRelease(WorkloadReleasePayload),
+    /// Agent -> Controller: result of a plugin configuration test.
+    ///
+    /// Sent after the agent completes a config test request. The controller
+    /// uses `request_id` to correlate with the pending REST API request.
+    TestPluginConfigResult(TestPluginConfigResultPayload),
     /// Unknown message type from a newer service build.
     ///
     /// Deserialized when the `type` tag does not match any known variant.
@@ -304,6 +310,14 @@ pub enum ControllerMessage {
     ///
     /// **NATS-only** (controller-to-controller).
     WorkloadClaimSyncResponse(WorkloadClaimSyncResponsePayload),
+    /// Controller -> Agent: test a plugin configuration on a specific host.
+    ///
+    /// Sent when a user invokes the config test API endpoint for an agent-side
+    /// plugin. The agent executes the test and responds with
+    /// `ServiceMessage::TestPluginConfigResult`.
+    ///
+    /// **Security**: session-targeted, NEVER published to NATS.
+    TestPluginConfig(TestPluginConfigPayload),
     /// Unknown message type from a newer controller build.
     ///
     /// Deserialized when the `type` tag does not match any known variant.
@@ -337,6 +351,7 @@ impl ControllerMessage {
                 | ControllerMessage::ServiceConfigAck(_)
                 | ControllerMessage::ServiceConfigUpdated(_)
                 | ControllerMessage::WorkloadClaimResult(_)
+                | ControllerMessage::TestPluginConfig(_)
                 | ControllerMessage::Unknown
         )
     }

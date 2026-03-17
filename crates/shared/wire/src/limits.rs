@@ -200,6 +200,9 @@ pub const MAX_LONG_STRING_LEN: usize = 65_536;
 /// in `agent-core/src/update.rs`.
 pub const MAX_OUTPUT_STRING_LEN: usize = 1_048_576;
 
+/// Maximum byte length of a config test output string.
+pub const MAX_CONFIG_TEST_OUTPUT_LEN: usize = 65_536;
+
 /// Maximum number of assets in a `ReleaseInfo` message.
 pub const MAX_RELEASE_ASSETS: usize = 500;
 

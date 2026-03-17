@@ -104,6 +104,10 @@ pub enum Permission {
     // ── Autodiscovery ────────────────────────────────────────────────────
     /// Manage autodiscovery ignore rules.
     ManageIgnores,
+
+    // ── Plugin config testing ─────────────────────────────────────────
+    /// Test plugin configurations against hosts (dry-run validation).
+    TestPluginConfigs,
 }
 
 impl Permission {
@@ -148,6 +152,7 @@ impl Permission {
             Permission::ViewSystemAuditLogs => "view_system_audit_logs",
             Permission::ManageUsers => "manage_users",
             Permission::ManageIgnores => "manage_ignores",
+            Permission::TestPluginConfigs => "test_plugin_configs",
         }
     }
 
@@ -192,6 +197,7 @@ impl Permission {
             Permission::ViewSystemAuditLogs => "View system-level audit log entries",
             Permission::ManageUsers => "Manage user roles and access",
             Permission::ManageIgnores => "Manage autodiscovery ignore rules",
+            Permission::TestPluginConfigs => "Test plugin configurations against hosts",
         }
     }
 }
@@ -250,6 +256,7 @@ impl FromStr for Permission {
             "view_system_audit_logs" => Ok(Self::ViewSystemAuditLogs),
             "manage_users" => Ok(Self::ManageUsers),
             "manage_ignores" => Ok(Self::ManageIgnores),
+            "test_plugin_configs" => Ok(Self::TestPluginConfigs),
             _ => Err(ParsePermissionError),
         }
     }
