@@ -10,6 +10,7 @@ publish = false
 [features]
 default = []
 agent-infra = ["dep:sea-orm", "dep:sea-orm-migration", "migrations"]
+catalog = ["dep:reqwest", "dep:tokio-util"]
 http-client = ["dep:reqwest", "uptrakit-shared-types/http-ssrf"]
 migrations = ["dep:sea-orm-migration"]
 plugin-ops = ["dep:sea-orm"]
@@ -33,6 +34,8 @@ uptrakit-shared-types = { workspace = true }
 reqwest = { workspace = true, optional = true }
 sea-orm = { workspace = true, optional = true }
 sea-orm-migration = { workspace = true, optional = true }
+tokio-util = { workspace = true, features = ["rt"], optional = true }
+uptrakit-internal-wire = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]

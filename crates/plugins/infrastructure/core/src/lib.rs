@@ -8,11 +8,16 @@ pub mod batch_detect;
 pub mod batch_fetch;
 pub mod batch_update;
 pub mod command;
+pub mod descriptor;
 pub mod error;
 pub mod form_schema;
+pub mod host_requirements;
+pub mod host_runtime;
 pub mod plugin_base;
+pub mod plugin_config;
 #[cfg(feature = "plugin-ops")]
 pub mod plugin_ops;
+pub mod roles;
 pub mod secrets;
 pub mod serde_helpers;
 #[cfg(feature = "testing")]
@@ -78,3 +83,31 @@ pub type UpdateOutputSender = mpsc::Sender<UpdateOutputLine>;
 ///
 /// Prefer this alias over `mpsc::Receiver<UpdateOutputLine>` directly.
 pub type UpdateOutputReceiver = mpsc::Receiver<UpdateOutputLine>;
+
+// ── New framework re-exports ────────────────────────────────────────────────
+
+#[cfg(feature = "catalog")]
+pub use descriptor::ControllerRuntime;
+pub use descriptor::{
+    CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps, CreateEnhancementFn, CreateRoleFn,
+    CreateTransportFn, ExtensionActionHandler, ExtensionOps, PluginDescriptor, PluginFamily,
+    RoleCreators, RoleSlot, TypeSettingsOps,
+};
+#[cfg(feature = "agent-infra")]
+pub use descriptor::{InfraBundle, InfraSlot};
+pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
+pub use host_runtime::{
+    HostRuntime, PosixHostRuntime, construct_host_runtime, require_posix_executor,
+};
+pub use plugin_config::{PluginConfig, TypeSettings};
+pub use roles::{
+    Discoverer, LifecycleHook, NotificationTransport, PackageIndexer, PluginMeta, ReleaseFetcher,
+    SoftwareItemLifecycle, UpdateExecutor, VersionDetector,
+};
+#[cfg(feature = "agent-infra")]
+pub use roles::{GuestExec, HostLifecycle, HostReport};
+
+// Re-export shared-types for convenience
+pub use uptrakit_shared_types::{
+    HostCapabilities, HostFeature, OsFamily, PluginTypeId, plugin_ids,
+};
