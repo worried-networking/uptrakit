@@ -53,12 +53,15 @@ const approvedAgent: ServiceResponse = {
 	capabilities: ['software_discovery', 'update_hooks', 'graceful_shutdown'],
 	service_label: 'Agent',
 	hostname: 'prod-host',
+	is_embedded: false,
 	ip_address: '10.0.0.1',
 	status: 'approved',
 	client_version: '1.2.0',
 	last_seen_at: '2024-06-01T12:00:00Z',
 	created_at: '2024-01-01T00:00:00Z',
-	updated_at: '2024-01-01T00:00:00Z'
+	updated_at: '2024-01-01T00:00:00Z',
+	cert_lifetime_hours: null,
+	yielded_to: null
 };
 
 // ---------------------------------------------------------------------------
@@ -131,5 +134,27 @@ describe('Services Page', () => {
 		vi.mocked(api.getServices).mockResolvedValue(makePage([approvedAgent]));
 		render(ServicesPage);
 		await waitFor(() => expect(screen.getByText('Approved')).toBeInTheDocument());
+	});
+
+	it('shows embedded badges and hides delete for embedded services', async () => {
+		vi.mocked(api.getServices).mockResolvedValue(
+			makePage([
+				{
+					...approvedAgent,
+					id: 'svc-embedded',
+					friendly_name: 'embedded-agent',
+					is_embedded: true,
+					yielded_to: ['00000000-0000-0000-0000-000000000123']
+				}
+			])
+		);
+		render(ServicesPage);
+
+		await waitFor(() => expect(screen.getByText('embedded-agent')).toBeInTheDocument());
+		expect(screen.getByText('Embedded')).toBeInTheDocument();
+		expect(screen.getByText('Yielded (1)')).toBeInTheDocument();
+
+		await fireEvent.click(screen.getByRole('button', { name: /actions for embedded-agent/i }));
+		expect(screen.queryByRole('menuitem', { name: /delete/i })).not.toBeInTheDocument();
 	});
 });

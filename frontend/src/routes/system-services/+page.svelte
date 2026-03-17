@@ -51,7 +51,22 @@
 	let batchResult: BatchActionResponse | null = $state(null);
 	let selectingAllPages = $state(false);
 
-	const allPageSelected = $derived(services.length > 0 && services.every((s) => selectedIds.has(s.id)));
+	function canSelect(service: SystemServiceResponse) {
+		return !service.is_embedded;
+	}
+
+	function hasActions(service: SystemServiceResponse) {
+		if (service.status === 'pending') return true;
+		if (service.status === 'deactivated') return false;
+		if (service.is_embedded) return service.status === 'approved';
+		return true;
+	}
+
+	const selectableServices = $derived(services.filter(canSelect));
+
+	const allPageSelected = $derived(
+		selectableServices.length > 0 && selectableServices.every((s) => selectedIds.has(s.id))
+	);
 
 	const selectAllPagesInfo = $derived(
 		allPageSelected && totalItems > services.length && selectedIds.size < totalItems
@@ -77,7 +92,7 @@
 			acts.push({ id: 'approve', label: 'Approve' });
 			acts.push({ id: 'reject', label: 'Reject', destructive: true });
 		}
-		if (selected.some((s) => s.status !== 'deactivated')) {
+		if (selected.some((s) => s.status !== 'deactivated' && !s.is_embedded)) {
 			acts.push({ id: 'deactivate', label: 'Deactivate', destructive: true });
 		}
 		return acts;
@@ -262,12 +277,12 @@
 
 	function toggleSelectAll() {
 		if (allPageSelected) {
-			for (const s of services) {
+			for (const s of selectableServices) {
 				selectedIds.delete(s.id);
 				selectedItemsMap.delete(s.id);
 			}
 		} else {
-			for (const s of services) {
+			for (const s of selectableServices) {
 				selectedIds.add(s.id);
 				selectedItemsMap.set(s.id, s);
 			}
@@ -275,13 +290,14 @@
 	}
 
 	function toggleSelect(id: string) {
+		const service = services.find((s) => s.id === id);
+		if (!service || !canSelect(service)) return;
 		if (selectedIds.has(id)) {
 			selectedIds.delete(id);
 			selectedItemsMap.delete(id);
 		} else {
 			selectedIds.add(id);
-			const service = services.find((s) => s.id === id);
-			if (service) selectedItemsMap.set(id, service);
+			selectedItemsMap.set(id, service);
 		}
 	}
 
@@ -300,6 +316,7 @@
 					perPage: 100
 				});
 				for (const service of result.items) {
+					if (!canSelect(service)) continue;
 					selectedIds.add(service.id);
 					selectedItemsMap.set(service.id, service);
 				}
@@ -406,6 +423,7 @@
 								class="checkbox"
 								checked={allPageSelected}
 								indeterminate={!allPageSelected && selectedIds.size > 0}
+								disabled={selectableServices.length === 0}
 								onchange={toggleSelectAll}
 								aria-label="Select all"
 							/>
@@ -426,13 +444,17 @@
 					<tr>
 						{#if canManage}
 							<td>
-								<input
-									type="checkbox"
-									class="checkbox"
-									checked={selectedIds.has(service.id)}
-									onchange={() => toggleSelect(service.id)}
-									aria-label="Select {service.friendly_name}"
-								/>
+								{#if canSelect(service)}
+									<input
+										type="checkbox"
+										class="checkbox"
+										checked={selectedIds.has(service.id)}
+										onchange={() => toggleSelect(service.id)}
+										aria-label="Select {service.friendly_name}"
+									/>
+								{:else}
+									<span class="text-surface-500">-</span>
+								{/if}
 							</td>
 						{/if}
 						<td>{service.friendly_name}</td>
@@ -448,22 +470,32 @@
 							{:else}
 								<span class="badge preset-filled-error-500">Rejected</span>
 							{/if}
+							{#if service.is_embedded}
+								<span class="badge preset-tonal ml-1">Embedded</span>
+							{/if}
+							{#if service.yielded_to && service.yielded_to.length > 0}
+								<span class="badge preset-filled-warning-500 ml-1">
+									Yielded ({service.yielded_to.length})
+								</span>
+							{/if}
 						</td>
 						<td>{formatDate(service.last_seen_at)}</td>
 						{#if canManage}
 							<td>
-								<div class="actions-menu">
-									<button
-										class="btn btn-sm preset-tonal"
-										aria-label="Actions for {service.friendly_name}"
-										onclick={(e) => {
-											e.stopPropagation();
-											toggleMenu(service.id, e.currentTarget);
-										}}
-									>
-										&#8943;
-									</button>
-								</div>
+								{#if hasActions(service)}
+									<div class="actions-menu">
+										<button
+											class="btn btn-sm preset-tonal"
+											aria-label="Actions for {service.friendly_name}"
+											onclick={(e) => {
+												e.stopPropagation();
+												toggleMenu(service.id, e.currentTarget);
+											}}
+										>
+											&#8943;
+										</button>
+									</div>
+								{/if}
 							</td>
 						{/if}
 					</tr>
@@ -555,27 +587,31 @@
 							Edit Ping Interval
 						</button>
 					</li>
-					<li>
-						<button
-							class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-							role="menuitem"
-							tabindex="-1"
-							onclick={() => requestConfirm(service.id, 'delete', service.friendly_name)}
-						>
-							Delete
-						</button>
-					</li>
+					{#if !service.is_embedded}
+						<li>
+							<button
+								class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+								role="menuitem"
+								tabindex="-1"
+								onclick={() => requestConfirm(service.id, 'delete', service.friendly_name)}
+							>
+								Delete
+							</button>
+						</li>
+					{/if}
 				{:else if service.status !== 'deactivated'}
-					<li>
-						<button
-							class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-							role="menuitem"
-							tabindex="-1"
-							onclick={() => requestConfirm(service.id, 'delete', service.friendly_name)}
-						>
-							Delete
-						</button>
-					</li>
+					{#if !service.is_embedded}
+						<li>
+							<button
+								class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+								role="menuitem"
+								tabindex="-1"
+								onclick={() => requestConfirm(service.id, 'delete', service.friendly_name)}
+							>
+								Delete
+							</button>
+						</li>
+					{/if}
 				{/if}
 			</ContextMenu>
 		{/if}

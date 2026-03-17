@@ -103,6 +103,7 @@ export interface ServiceResponse {
 	service_label: string;
 	hostname: string;
 	friendly_name: string;
+	is_embedded: boolean;
 	ip_address: string | null;
 	status: ServiceStatus;
 	client_version: string | null;
@@ -110,6 +111,8 @@ export interface ServiceResponse {
 	created_at: string;
 	updated_at: string;
 	ping_interval_seconds?: number | null;
+	cert_lifetime_hours?: number | null;
+	yielded_to?: string[] | null;
 }
 
 export interface UpdateServiceRequest {
@@ -686,6 +689,7 @@ export interface SystemServiceResponse {
 	capabilities: string[];
 	hostname: string;
 	friendly_name: string;
+	is_embedded: boolean;
 	ip_address: string | null;
 	status: SystemServiceStatus;
 	client_version: string | null;
@@ -694,6 +698,7 @@ export interface SystemServiceResponse {
 	updated_at: string;
 	ping_interval_seconds?: number | null;
 	cert_lifetime_hours?: number | null;
+	yielded_to?: string[] | null;
 }
 
 export interface UpdateSystemServiceRequest {
