@@ -310,6 +310,11 @@ impl MessageProcessor {
                     }))
                 }
             }
+            ServiceMessage::TestPluginConfigResult(payload) => {
+                let request_id = payload.request_id.clone();
+                self.state.config_test_proxy.complete(&request_id, payload);
+                ProcessorResponse::cont()
+            }
             ServiceMessage::ReportPluginConfig(payload) => {
                 messages::handle_report_plugin_config(&self.state, self.service_id, &payload).await
             }

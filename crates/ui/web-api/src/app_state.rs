@@ -12,6 +12,7 @@ use crate::auth::oidc_state::{
 };
 use crate::auth::rate_limit::RateLimitStore;
 use crate::ca_snapshot::{CaKeyStoreRef, CaSnapshotReceiver};
+use crate::config_test_proxy::ConfigTestProxy;
 use crate::embedded_support::EmbeddedServiceNotifier;
 use crate::extension_proxy::ExtensionProxy;
 use crate::extension_registry::ExtensionRegistry;
@@ -145,6 +146,8 @@ pub struct AppState {
     pub extension_registry: Arc<ExtensionRegistry>,
     /// Request/response proxy for extension action invocations.
     pub extension_proxy: Arc<ExtensionProxy>,
+    /// Request/response proxy for plugin configuration test invocations.
+    pub config_test_proxy: Arc<ConfigTestProxy>,
     /// Path to the PKI directory (for server cert renewal).
     pub pki_path: std::path::PathBuf,
     /// RustlsConfig handle for hot-reloading TLS.
@@ -226,6 +229,7 @@ pub struct AppStateBuilder {
     audit_log_dispatcher: Option<uptrakit_audit_log::AuditLogDispatcher>,
     extension_registry: Option<Arc<ExtensionRegistry>>,
     extension_proxy: Option<Arc<ExtensionProxy>>,
+    config_test_proxy: Option<Arc<ConfigTestProxy>>,
     workload_claim_registry: Option<Arc<crate::workload_claims::WorkloadClaimRegistry>>,
     reject_dangerous_commands: bool,
 }
@@ -272,6 +276,7 @@ impl AppStateBuilder {
             audit_log_dispatcher: None,
             extension_registry: None,
             extension_proxy: None,
+            config_test_proxy: None,
             workload_claim_registry: None,
             reject_dangerous_commands: false,
         }
@@ -495,6 +500,14 @@ impl AppStateBuilder {
         self
     }
 
+    /// Override the config test proxy.
+    ///
+    /// Optional — defaults to an empty proxy with no pending requests.
+    pub fn config_test_proxy(mut self, v: Arc<ConfigTestProxy>) -> Self {
+        self.config_test_proxy = Some(v);
+        self
+    }
+
     /// Set the workload claim registry for exclusive config-key ownership.
     pub fn workload_claim_registry(
         mut self,
@@ -601,6 +614,9 @@ impl AppStateBuilder {
             extension_proxy: self
                 .extension_proxy
                 .unwrap_or_else(|| Arc::new(ExtensionProxy::new())),
+            config_test_proxy: self
+                .config_test_proxy
+                .unwrap_or_else(|| Arc::new(ConfigTestProxy::new())),
             pki_path: self.pki_path.ok_or(AppStateBuildError("pki_path"))?,
             rustls_config: self
                 .rustls_config

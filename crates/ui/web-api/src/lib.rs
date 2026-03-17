@@ -4,6 +4,7 @@ pub use uptrakit_web_api_auth::auth;
 pub mod batch_progress_broadcaster;
 pub mod ca_snapshot;
 pub mod cert_signer;
+pub mod config_test_proxy;
 pub mod device_flow_broadcaster;
 pub mod error_response;
 pub mod event_broadcaster;
@@ -228,6 +229,7 @@ mod tests {
             )),
             extension_registry: Arc::new(crate::extension_registry::ExtensionRegistry::new(vec![])),
             extension_proxy: Arc::new(crate::extension_proxy::ExtensionProxy::new()),
+            config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
             workload_claim_registry: Arc::new(crate::workload_claims::WorkloadClaimRegistry::new()),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,

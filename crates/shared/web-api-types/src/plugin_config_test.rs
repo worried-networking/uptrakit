@@ -60,6 +60,20 @@ pub struct TestPluginConfigResponse {
     pub duration_ms: u64,
 }
 
+impl TestPluginConfigResponse {
+    /// Create a new response with the required fields.
+    pub fn new(success: bool, test_kind: String, duration_ms: u64) -> Self {
+        Self {
+            success,
+            test_kind,
+            output: None,
+            error: None,
+            detected_version: None,
+            duration_ms,
+        }
+    }
+}
+
 impl Validate for TestPluginConfigRequest {
     fn validate(&self) -> Result<(), ValidationError> {
         if self.plugin_type.trim().is_empty() {

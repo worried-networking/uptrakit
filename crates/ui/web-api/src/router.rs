@@ -91,6 +91,7 @@ use crate::AppState;
         crate::routes::plugin_configs::update_plugin_config,
         crate::routes::plugin_configs::delete_plugin_config,
         crate::routes::plugin_configs::batch_plugin_configs,
+        crate::routes::plugin_configs::test_plugin_config,
         crate::routes::software_items::create_software_item,
         crate::routes::software_items::list_software_items,
         crate::routes::software_items::get_software_item,
@@ -227,6 +228,8 @@ use crate::AppState;
             crate::routes::plugin_configs::CreatePluginConfigRequest,
             crate::routes::plugin_configs::UpdatePluginConfigRequest,
             crate::routes::plugin_configs::PluginConfigResponse,
+            uptrakit_web_api_types::plugin_config_test::TestPluginConfigRequest,
+            uptrakit_web_api_types::plugin_config_test::TestPluginConfigResponse,
             uptrakit_web_api_types::plugin_type_settings::PluginTypeSettingsResponse,
             uptrakit_web_api_types::plugin_type_settings::UpsertPluginTypeSettingsRequest,
             crate::routes::software_items::CreateSoftwareItemRequest,
@@ -550,6 +553,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::plugin_configs::update_plugin_config))
         .routes(routes!(crate::routes::plugin_configs::delete_plugin_config))
         .routes(routes!(crate::routes::plugin_configs::batch_plugin_configs))
+        .routes(routes!(crate::routes::plugin_configs::test_plugin_config))
         // Plugin type settings
         .routes(routes!(
             crate::routes::plugin_type_settings::list_plugin_type_settings

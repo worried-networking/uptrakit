@@ -1,7 +1,10 @@
 use crate::AppState;
+use crate::config_test_proxy::ConfigTestProxyError;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::permission::{CanManageCommands, CanTriggerChecks, CanViewSoftware};
+use crate::middleware::permission::{
+    CanManageCommands, CanTestPluginConfigs, CanTriggerChecks, CanViewSoftware,
+};
 use crate::queries::plugin_configs::{self as pc_queries, PluginConfigError};
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -15,7 +18,11 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use uptrakit_shared_db::entity::{host, plugin_config, prelude::*, service, service_host};
+use uptrakit_shared_types::PluginCapability;
 use uptrakit_web_api_types::autodiscovery::TriggerDiscoveryResponse;
+use uptrakit_web_api_types::plugin_config_test::{
+    TestPluginConfigRequest, TestPluginConfigResponse,
+};
 use uuid::Uuid;
 
 pub use uptrakit_web_api_types::batch_actions::{
@@ -744,6 +751,219 @@ pub async fn batch_plugin_configs(
     };
 
     (StatusCode::OK, Json(response)).into_response()
+}
+
+/// Test a plugin configuration without saving it.
+///
+/// Validates the plugin type, merges with an optional saved config, checks
+/// for dangerous command patterns, then routes to the appropriate test path:
+///
+/// - **Controller-side** (plugins with `ControllerSideFetchReleases`):
+///   validates config structure and returns success immediately.
+/// - **Agent-side** (all others): requires `host_id`, resolves the host to a
+///   connected service, sends a `TestPluginConfig` wire message, and waits for
+///   the result (30 s timeout).
+#[utoipa::path(
+    post,
+    path = "/api/v1/plugin-configs/test",
+    extensions(("x-required-permission" = json!("test_plugin_configs"))),
+    request_body = TestPluginConfigRequest,
+    responses(
+        (status = 200, description = "Test result", body = TestPluginConfigResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 404, description = "Host or plugin config not found"),
+        (status = 502, description = "Agent did not respond"),
+    ),
+    tag = "Plugin Configs",
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn test_plugin_config(
+    State(state): State<Arc<AppState>>,
+    tenant_db: TenantDb,
+    CanTestPluginConfigs(_user): CanTestPluginConfigs,
+    Validated(body): Validated<TestPluginConfigRequest>,
+) -> Response {
+    // 1. Validate plugin type is known.
+    let caps = state.plugin_ops.capabilities_for_str(&body.plugin_type);
+    if caps.is_empty()
+        && state
+            .plugin_ops
+            .validate_config_str(&body.plugin_type, &serde_json::json!({}))
+            .is_err()
+    {
+        return error_response(StatusCode::BAD_REQUEST, "Unknown plugin type");
+    }
+
+    // 2. Merge with saved config if plugin_config_id is provided.
+    let config = if let Some(config_id) = body.plugin_config_id {
+        let saved = match PluginConfig::find_by_id(config_id)
+            .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))
+            .filter(plugin_config::Column::DeactivatedAt.is_null())
+            .one(tenant_db.db())
+            .await
+        {
+            Ok(Some(c)) => c,
+            Ok(None) => {
+                return error_response(StatusCode::NOT_FOUND, "Plugin config not found");
+            }
+            Err(e) => {
+                tracing::error!("DB error loading plugin config: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+        // Shallow-merge incoming config on top of saved config.
+        let mut merged = saved.config.clone();
+        if let (Some(base), Some(overlay)) = (merged.as_object_mut(), body.config.as_object()) {
+            for (k, v) in overlay {
+                base.insert(k.clone(), v.clone());
+            }
+        }
+        merged
+    } else {
+        body.config.clone()
+    };
+
+    // 3. Validate merged config.
+    if let Err(e) = state
+        .plugin_ops
+        .validate_config_str(&body.plugin_type, &config)
+    {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            format!("Invalid plugin config: {e}"),
+        );
+    }
+
+    // 4. Reject dangerous commands if enabled.
+    if state.reject_dangerous_commands {
+        let matches = collect_dangerous_patterns(&config);
+        if !matches.is_empty() {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format_dangerous_pattern_rejection(&matches),
+            );
+        }
+    }
+
+    // 5. Determine test kind from capabilities.
+    let is_controller_side = caps.contains(&PluginCapability::ControllerSideFetchReleases);
+
+    if is_controller_side {
+        // Controller-side test: config validation is sufficient. The plugin
+        // fetches releases from external APIs on the controller, so a
+        // successful config validation means the config is structurally valid.
+        let mut resp = TestPluginConfigResponse::new(true, "connectivity".to_string(), 0);
+        resp.output = Some("Plugin configuration is valid".to_string());
+        return (StatusCode::OK, Json(resp)).into_response();
+    }
+
+    // Agent-side test: host_id is required.
+    let host_id = match body.host_id {
+        Some(id) => id,
+        None => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "host_id is required for agent-side plugin tests",
+            );
+        }
+    };
+
+    // 6. Resolve host → service.
+    let host_record = match Host::find_by_id(host_id)
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(Some(h)) => h,
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Host not found"),
+        Err(e) => {
+            tracing::error!("DB error: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let links = match tenant_db
+        .find_via_tenant_join::<service_host::Entity, service::Entity>(
+            service_host::Relation::Service.def(),
+        )
+        .filter(service_host::Column::HostId.eq(host_id))
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("Failed to query service-host links: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let service_id = match links.first() {
+        Some(link) => link.service_id,
+        None => {
+            return error_response(StatusCode::BAD_REQUEST, "No agent connected to this host");
+        }
+    };
+
+    // 7. Determine test kind.
+    let test_kind_str = body.test_kind.as_deref().unwrap_or("version_detection");
+    let test_kind = match test_kind_str {
+        "version_detection" => uptrakit_internal_wire::ConfigTestKind::VersionDetection,
+        "update_command_validation" => {
+            uptrakit_internal_wire::ConfigTestKind::UpdateCommandValidation
+        }
+        "pre_update_hook" => uptrakit_internal_wire::ConfigTestKind::PreUpdateHook,
+        "post_update_hook" => uptrakit_internal_wire::ConfigTestKind::PostUpdateHook,
+        "connectivity" => uptrakit_internal_wire::ConfigTestKind::Connectivity,
+        _ => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!("Unknown test_kind: {test_kind_str}"),
+            );
+        }
+    };
+
+    // 8. Build payload and invoke via proxy.
+    let request_id = Uuid::now_v7().to_string();
+    let mut payload = uptrakit_internal_wire::TestPluginConfigPayload::new(
+        request_id,
+        host_record.machine_id.clone(),
+        test_kind,
+        body.plugin_type.clone(),
+        config,
+    );
+    payload.package_identifier = body.package_identifier.clone();
+
+    let timeout = std::time::Duration::from_secs(30);
+    match state
+        .config_test_proxy
+        .invoke(&state.service_connections, &service_id, payload, timeout)
+        .await
+    {
+        Ok(result) => {
+            let mut resp = TestPluginConfigResponse::new(
+                result.success,
+                test_kind_str.to_string(),
+                result.duration_ms,
+            );
+            resp.output = result.output;
+            resp.error = result.error;
+            resp.detected_version = result.detected_version;
+            (StatusCode::OK, Json(resp)).into_response()
+        }
+        Err(ConfigTestProxyError::Timeout) => error_response(
+            StatusCode::GATEWAY_TIMEOUT,
+            "Agent did not respond within the timeout",
+        ),
+        Err(ConfigTestProxyError::ServiceDisconnected) => {
+            error_response(StatusCode::BAD_GATEWAY, "Agent disconnected during test")
+        }
+        Err(ConfigTestProxyError::SendFailed) => error_response(
+            StatusCode::BAD_GATEWAY,
+            "Failed to send test request to agent",
+        ),
+    }
 }
 
 #[cfg(test)]
