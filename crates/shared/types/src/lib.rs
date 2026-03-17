@@ -9,8 +9,6 @@ mod discovery_target;
 pub mod hex;
 mod hook_shell;
 mod masked_email;
-mod mqtt_connection_status;
-mod mqtt_transport;
 pub mod network;
 mod output_stream_type;
 pub mod permissions;
@@ -32,10 +30,6 @@ pub use discovered_software::DiscoveredSoftware;
 pub use discovery_target::DiscoveryTarget;
 pub use hook_shell::{HookShell, ParseHookShellError};
 pub use masked_email::{MaskedEmail, ParseMaskedEmailError};
-pub use mqtt_connection_status::{
-    MqttClientConnectionStatus, ParseMqttClientConnectionStatusError,
-};
-pub use mqtt_transport::{MqttTransport, ParseMqttTransportError};
 pub use output_stream_type::{OutputStreamType, ParseOutputStreamTypeError};
 pub use permissions::{ParsePermissionError, Permission};
 pub use plugin_capability::PluginCapability;

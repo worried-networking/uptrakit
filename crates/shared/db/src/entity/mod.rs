@@ -14,8 +14,6 @@ pub mod host_software_item;
 pub mod host_software_item_plugin;
 pub mod host_tag;
 pub mod host_tag_assignment;
-pub mod mqtt_client;
-pub mod mqtt_lease;
 pub mod notification_channel;
 pub mod notification_log;
 pub mod notification_rule;

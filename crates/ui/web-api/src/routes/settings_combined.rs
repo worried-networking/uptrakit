@@ -31,7 +31,7 @@ fn build_combined_settings_response(
     }
 }
 
-/// Get core settings for the settings page (OIDC and MQTT remain separate).
+/// Get core settings for the settings page (service-managed settings are provided separately via extensions).
 #[utoipa::path(
     get,
     path = "/api/v1/settings",

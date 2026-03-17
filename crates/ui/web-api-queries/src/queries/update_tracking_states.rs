@@ -1,4 +1,5 @@
-//! Query helpers that load software state data for MQTT push messages.
+//! Query helpers that load software and connectivity state for update-tracking
+//! services.
 
 use std::collections::HashMap;
 
@@ -7,7 +8,7 @@ use uuid::Uuid;
 
 use uptrakit_shared_db::entity::{service, service_host};
 
-// Re-export from the local software_states module for backward compatibility.
+// Re-export from the local software_states module for shared update-tracking use.
 pub use super::software_states::load_software_states_for_tenant;
 pub use super::software_states::load_software_states_page_for_tenant;
 
@@ -21,18 +22,13 @@ struct ServiceHostConnRow {
 }
 
 /// Per-service connectivity data used to synthesise `HostConnectivityUpdated` events.
-///
-/// One entry per approved, non-deactivated agent service that has the
-/// `software_discovery` capability.  The caller is responsible for filtering
-/// to currently-connected services before building the events.
 #[derive(Debug)]
 pub struct AgentConnectivityInfo {
     /// Service UUID.
     pub service_id: uuid::Uuid,
     /// All hosts linked to this service.
     pub host_ids: Vec<uuid::Uuid>,
-    /// Agent binary version (`services.client_version`).  `None` when never
-    /// reported.
+    /// Agent binary version (`services.client_version`). `None` when never reported.
     pub client_version: Option<String>,
     /// Timestamp of the last agent activity (`services.last_seen_at`).
     pub last_seen_at: Option<time::OffsetDateTime>,
@@ -41,14 +37,6 @@ pub struct AgentConnectivityInfo {
 /// Load all approved, non-deactivated agent services for `tenant_id` that
 /// carry the `software_discovery` capability, along with their linked hosts
 /// and last-activity metadata.
-///
-/// The result is intended to be filtered by the caller against the live
-/// `ServiceConnectionRegistry` before synthesising `HostConnectivityUpdated`
-/// events.  Only one bulk query is performed (no N+1).
-///
-/// # Errors
-///
-/// Returns a [`sea_orm::DbErr`] if the database query fails.
 #[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn load_agent_connectivity_for_tenant(
     db: &sea_orm::DatabaseConnection,
@@ -56,7 +44,6 @@ pub async fn load_agent_connectivity_for_tenant(
 ) -> Result<Vec<AgentConnectivityInfo>, sea_orm::DbErr> {
     use uptrakit_shared_db::entity::service::ServiceStatus;
 
-    // Tenant-scoped via join on service (service_host has no tenant_id column).
     let tenant_db_local = crate::TenantDb::new(db.clone(), tenant_id);
     let rows: Vec<ServiceHostConnRow> = tenant_db_local
         .find_via_tenant_join::<service_host::Entity, service::Entity>(
@@ -69,13 +56,11 @@ pub async fn load_agent_connectivity_for_tenant(
         .column_as(service::Column::LastSeenAt, "last_seen_at")
         .filter(service::Column::Status.eq(ServiceStatus::Approved))
         .filter(service::Column::DeactivatedAt.is_null())
-        // Only services with the software_discovery capability.
         .filter(service::Column::Capabilities.like("%\"software_discovery\"%"))
         .into_model::<ServiceHostConnRow>()
         .all(db)
         .await?;
 
-    // Group by service_id, preferring the most-recent last_seen_at.
     let mut map: HashMap<Uuid, AgentConnectivityInfo> = HashMap::new();
     for row in rows {
         let entry = map

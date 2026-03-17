@@ -129,8 +129,8 @@ impl NotificationService {
         &self.registry
     }
 
-    /// Load software states for a tenant and push to all locally connected MQTT
-    /// services (immediately) and to NATS for cross-controller delivery.
+    /// Load software states for a tenant and push to all locally connected
+    /// update-tracking services (immediately) and to NATS for cross-controller delivery.
     ///
     /// Loads both software-item states and host-package host states in two
     /// independent bulk queries, then delivers the merged payload.
@@ -141,20 +141,21 @@ impl NotificationService {
         tenant_id: uuid::Uuid,
     ) {
         let tenant_db = uptrakit_shared_db::TenantDb::new(db.clone(), tenant_id);
-        let payload =
-            match crate::queries::mqtt_software_states::load_software_states_for_tenant(&tenant_db)
-                .await
-            {
-                Ok(p) => p,
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        %tenant_id,
-                        "failed to load software states for push"
-                    );
-                    return;
-                }
-            };
+        let payload = match crate::queries::update_tracking_states::load_software_states_for_tenant(
+            &tenant_db,
+        )
+        .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    %tenant_id,
+                    "failed to load software states for push"
+                );
+                return;
+            }
+        };
 
         self.deliver_software_states(payload).await;
     }
@@ -175,7 +176,7 @@ impl NotificationService {
         let mut host_page: u64 = 0;
         loop {
             let payload =
-                match crate::queries::mqtt_software_states::load_software_states_page_for_tenant(
+                match crate::queries::update_tracking_states::load_software_states_page_for_tenant(
                     &tenant_db, host_page, page_size,
                 )
                 .await
@@ -268,7 +269,7 @@ impl NotificationService {
         tenant_id: uuid::Uuid,
     ) {
         let agent_services =
-            match crate::queries::mqtt_software_states::load_agent_connectivity_for_tenant(
+            match crate::queries::update_tracking_states::load_agent_connectivity_for_tenant(
                 db, tenant_id,
             )
             .await

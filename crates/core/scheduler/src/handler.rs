@@ -362,16 +362,6 @@ fn register_column_aad_mappings() {
             aad: "uptrakit:oidc_providers:client_secret",
         },
         ColumnAadEntry {
-            table: "mqtt_clients",
-            column: "password",
-            aad: "uptrakit:mqtt_clients:password",
-        },
-        ColumnAadEntry {
-            table: "mqtt_clients",
-            column: "ca_cert_pem",
-            aad: "uptrakit:mqtt_clients:ca_cert_pem",
-        },
-        ColumnAadEntry {
             table: "pending_oidc_flows",
             column: "pkce_verifier",
             aad: "uptrakit:pending_oidc_flows:pkce_verifier",

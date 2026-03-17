@@ -26,8 +26,6 @@ pub use super::host_tag::{Entity as HostTag, Model as HostTagModel};
 pub use super::host_tag_assignment::{
     Entity as HostTagAssignment, Model as HostTagAssignmentModel,
 };
-pub use super::mqtt_client::{Entity as MqttClient, Model as MqttClientModel};
-pub use super::mqtt_lease::{Entity as MqttLease, Model as MqttLeaseModel};
 pub use super::notification_channel::{
     Entity as NotificationChannel, Model as NotificationChannelModel,
 };

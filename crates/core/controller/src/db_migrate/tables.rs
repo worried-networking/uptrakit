@@ -36,6 +36,7 @@ pub(crate) const COPY_ORDER: &[&str] = &[
     "service_certificates",
     "system_services",
     "system_service_certificates",
+    "global_service_config",
     "embedded_service_runtime_states",
     "hosts",
     "service_hosts",
@@ -46,8 +47,7 @@ pub(crate) const COPY_ORDER: &[&str] = &[
     "host_software_items",
     "host_software_item_plugins",
     "software_ignores",
-    "mqtt_clients",
-    "mqtt_leases",
+    "tenant_service_config",
     "update_batches",
     "update_history",
     "update_output_lines",
@@ -103,6 +103,7 @@ pub(crate) async fn copy_all(
     copy!(ServiceCertificate, "service_certificates");
     copy!(SystemService, "system_services");
     copy!(SystemServiceCertificate, "system_service_certificates");
+    copy!(GlobalServiceConfig, "global_service_config");
     copy!(
         EmbeddedServiceRuntimeState,
         "embedded_service_runtime_states"
@@ -116,8 +117,7 @@ pub(crate) async fn copy_all(
     copy!(HostSoftwareItem, "host_software_items");
     copy!(HostSoftwareItemPlugin, "host_software_item_plugins");
     copy!(SoftwareIgnore, "software_ignores");
-    copy!(MqttClient, "mqtt_clients");
-    copy!(MqttLease, "mqtt_leases");
+    copy!(TenantServiceConfig, "tenant_service_config");
     copy!(UpdateBatch, "update_batches");
     copy!(UpdateHistory, "update_history");
     copy!(UpdateOutputLine, "update_output_lines");
@@ -168,8 +168,7 @@ pub(crate) async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
     clean!(UpdateOutputLine, "update_output_lines");
     clean!(UpdateHistory, "update_history");
     clean!(UpdateBatch, "update_batches");
-    clean!(MqttLease, "mqtt_leases");
-    clean!(MqttClient, "mqtt_clients");
+    clean!(TenantServiceConfig, "tenant_service_config");
     clean!(SoftwareIgnore, "software_ignores");
     clean!(HostSoftwareItemPlugin, "host_software_item_plugins");
     clean!(HostSoftwareItem, "host_software_items");
@@ -180,6 +179,7 @@ pub(crate) async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
     clean!(ServiceHost, "service_hosts");
     clean!(Host, "hosts");
     clean!(SystemServiceCertificate, "system_service_certificates");
+    clean!(GlobalServiceConfig, "global_service_config");
     clean!(
         EmbeddedServiceRuntimeState,
         "embedded_service_runtime_states"
@@ -240,6 +240,7 @@ pub(crate) async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnectio
     verify!(ServiceCertificate, "service_certificates");
     verify!(SystemService, "system_services");
     verify!(SystemServiceCertificate, "system_service_certificates");
+    verify!(GlobalServiceConfig, "global_service_config");
     verify!(
         EmbeddedServiceRuntimeState,
         "embedded_service_runtime_states"
@@ -253,8 +254,7 @@ pub(crate) async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnectio
     verify!(HostSoftwareItem, "host_software_items");
     verify!(HostSoftwareItemPlugin, "host_software_item_plugins");
     verify!(SoftwareIgnore, "software_ignores");
-    verify!(MqttClient, "mqtt_clients");
-    verify!(MqttLease, "mqtt_leases");
+    verify!(TenantServiceConfig, "tenant_service_config");
     verify!(UpdateBatch, "update_batches");
     verify!(UpdateHistory, "update_history");
     verify!(UpdateOutputLine, "update_output_lines");
@@ -404,8 +404,8 @@ mod tests {
     fn copy_order_has_all_tables() {
         assert_eq!(
             COPY_ORDER.len(),
-            48,
-            "COPY_ORDER must list all 48 app tables"
+            49,
+            "COPY_ORDER must list all 49 app tables"
         );
     }
 }

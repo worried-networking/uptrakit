@@ -30,9 +30,8 @@ pub use transport::{ServiceTransport, TransportError};
 
 // Re-export shared types used directly in wire protocol messages.
 pub use uptrakit_shared_types::{
-    AttestationStatus, DiscoveredSoftware, DiscoveryTarget, HookShell, MqttClientConnectionStatus,
-    MqttTransport, OutputStreamType, PluginRole, PluginType, ReleaseAsset, ReleaseInfo,
-    UpdateCategory,
+    AttestationStatus, DiscoveredSoftware, DiscoveryTarget, HookShell, OutputStreamType,
+    PluginRole, PluginType, ReleaseAsset, ReleaseInfo, UpdateCategory,
 };
 // Re-export `SecretString` for callers that need it for secret fields.
 pub use uptrakit_shared_types::SecretString;

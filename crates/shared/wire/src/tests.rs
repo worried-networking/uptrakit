@@ -1013,47 +1013,6 @@ fn hook_shell_rejects_invalid() {
 }
 
 #[test]
-fn mqtt_transport_serde_roundtrip() {
-    for (variant, expected_str) in [(MqttTransport::Tcp, "tcp"), (MqttTransport::Tls, "tls")] {
-        let json = serde_json::to_string(&variant).unwrap();
-        assert_eq!(json, format!(r#""{expected_str}""#));
-        let deserialized: MqttTransport = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized, variant);
-    }
-}
-
-#[test]
-fn mqtt_transport_rejects_invalid() {
-    let result: std::result::Result<MqttTransport, _> = serde_json::from_str(r#""udp""#);
-    assert!(result.is_err());
-}
-
-#[test]
-fn mqtt_transport_default_is_tcp() {
-    assert_eq!(MqttTransport::default(), MqttTransport::Tcp);
-}
-
-#[test]
-fn mqtt_client_status_serde_roundtrip() {
-    for (variant, expected_str) in [
-        (MqttClientConnectionStatus::Online, "online"),
-        (MqttClientConnectionStatus::Offline, "offline"),
-        (MqttClientConnectionStatus::Connecting, "connecting"),
-    ] {
-        let json = serde_json::to_string(&variant).unwrap();
-        assert_eq!(json, format!(r#""{expected_str}""#));
-        let deserialized: MqttClientConnectionStatus = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized, variant);
-    }
-}
-
-#[test]
-fn mqtt_transport_display() {
-    assert_eq!(MqttTransport::Tcp.to_string(), "tcp");
-    assert_eq!(MqttTransport::Tls.to_string(), "tls");
-}
-
-#[test]
 fn error_code_serde_roundtrip() {
     for (variant, expected_str) in [
         (ErrorCode::BadRequest, "bad_request"),

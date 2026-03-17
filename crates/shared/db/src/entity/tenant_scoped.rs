@@ -1,11 +1,10 @@
 use sea_orm::EntityTrait;
 
 use super::{
-    audit_log, enrollment_token, host, host_discovery_allowlist, host_tag, mqtt_client,
-    notification_channel, notification_log, notification_rule, oidc_provider, plugin_config,
-    plugin_type_setting, proxmox_host_mapping, scheduled_task, service, setting, settings_version,
-    software_ignore, software_item, tenant_discovery_allowlist, update_batch, update_history,
-    user_role,
+    audit_log, enrollment_token, host, host_discovery_allowlist, host_tag, notification_channel,
+    notification_log, notification_rule, oidc_provider, plugin_config, plugin_type_setting,
+    proxmox_host_mapping, scheduled_task, service, setting, settings_version, software_ignore,
+    software_item, tenant_discovery_allowlist, update_batch, update_history, user_role,
 };
 
 /// Marker trait for SeaORM entities that are scoped to a tenant via a `tenant_id` column.
@@ -56,12 +55,6 @@ impl TenantScoped for software_item::Entity {
 impl TenantScoped for plugin_config::Entity {
     fn tenant_id_column() -> Self::Column {
         plugin_config::Column::TenantId
-    }
-}
-
-impl TenantScoped for mqtt_client::Entity {
-    fn tenant_id_column() -> Self::Column {
-        mqtt_client::Column::TenantId
     }
 }
 

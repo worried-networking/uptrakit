@@ -52,7 +52,7 @@ struct ActiveUpdateRow {
 /// every version-check result or update completion event.
 ///
 /// The web-API tier re-exports this function from
-/// `uptrakit_web_api_queries::queries::mqtt_software_states`.
+/// `uptrakit_web_api_queries::queries::update_tracking_states`.
 ///
 /// # Errors
 ///

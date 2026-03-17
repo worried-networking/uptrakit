@@ -77,8 +77,8 @@ async fn test_all_core_entities_queryable(harness: &TestHarness) {
     assert_queryable!(host_tag_assignment::Entity);
     assert_queryable!(ca_certificate::Entity);
     assert_queryable!(system_service::Entity);
-    assert_queryable!(mqtt_client::Entity);
-    assert_queryable!(mqtt_lease::Entity);
+    assert_queryable!(global_service_config::Entity);
+    assert_queryable!(tenant_service_config::Entity);
 }
 
 db_test!(
