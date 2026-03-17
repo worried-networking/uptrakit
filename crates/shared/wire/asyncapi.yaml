@@ -229,6 +229,10 @@ channels:
         $ref: "#/components/messages/reportPluginConfig"
       reportPluginConfigResponse:
         $ref: "#/components/messages/reportPluginConfigResponse"
+      testPluginConfig:
+        $ref: "#/components/messages/testPluginConfig"
+      testPluginConfigResult:
+        $ref: "#/components/messages/testPluginConfigResult"
       workloadClaim:
         $ref: "#/components/messages/workloadClaim"
       workloadClaimResult:
@@ -929,6 +933,32 @@ operations:
       Sent by the controller in response to `ReportPluginConfig`. Contains a success
       flag, optional `plugin_config_id` on success, and optional `error` on failure.
 
+  receiveTestPluginConfig:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/testPluginConfig"
+    summary: Service receives a plugin config test request
+    description: |
+      Sent by the controller when a user requests a dry-run test of a plugin
+      configuration. The service executes the requested test kind (version
+      detection, update command validation, hook execution) and responds with
+      `TestPluginConfigResult`. NOT safe for NATS publication — session-targeted.
+
+  sendTestPluginConfigResult:
+    action: send
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/testPluginConfigResult"
+    summary: Service responds with plugin config test results
+    description: |
+      Sent by the service in response to `TestPluginConfig`. Contains the
+      `request_id` for correlation, a `success` flag, optional output/error,
+      detected version, and execution duration. NOT safe for NATS publication —
+      session-targeted.
+
   sendWorkloadClaim:
     action: send
     channel:
@@ -1488,6 +1518,33 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/ReportPluginConfigResponsePayload"
+
+    testPluginConfig:
+      name: test_plugin_config
+      title: Test Plugin Config
+      summary: Controller requests a plugin config dry-run test from a service
+      description: |
+        Sent by the controller when a REST client requests a config test for an
+        agent-side plugin (shell, package manager, hook). The `request_id`
+        (UUID v7) correlates the request with the response. The `test_kind`
+        determines what validation is performed on the host.
+        NOT safe for NATS publication — session-targeted.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/testPluginConfigPayload"
+
+    testPluginConfigResult:
+      name: test_plugin_config_result
+      title: Test Plugin Config Result
+      summary: Service responds with the result of a plugin config test
+      description: |
+        Sent by the service in response to `TestPluginConfig`. The `request_id`
+        must match. Contains execution success/failure, optional command output,
+        detected version, and duration in milliseconds.
+        NOT safe for NATS publication — session-targeted.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/testPluginConfigResultPayload"
 
     workloadClaim:
       name: workload_claim
@@ -4949,3 +5006,105 @@ components:
           $ref: "#/components/schemas/reportPagination"
           description: |
             Present only for paginated reports. Omitted for single-message reports.
+
+    testPluginConfigPayload:
+      type: object
+      description: |
+        Payload for the `test_plugin_config` controller-to-service message.
+        Requests an agent-side dry-run test of a plugin configuration.
+      required:
+        - protocol_version
+        - seq
+        - type
+        - request_id
+        - host_machine_id
+        - test_kind
+        - assignment
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Wire protocol version
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number
+        type:
+          type: string
+          const: test_plugin_config
+          description: Message type discriminator
+        request_id:
+          type: string
+          description: UUID v7 for request/response correlation
+        host_machine_id:
+          type: string
+          description: Machine ID of the target host
+        test_kind:
+          type: string
+          enum:
+            - version_detection
+            - update_command_validation
+            - pre_update_hook
+            - post_update_hook
+            - connectivity
+          description: What kind of test to execute
+        assignment:
+          type: object
+          description: |
+            Plugin assignment containing the plugin type and configuration to
+            test. Uses the same schema as `PluginAssignment` in the wire
+            protocol.
+        package_identifier:
+          type: string
+          description: Optional package identifier for version detection tests
+
+    testPluginConfigResultPayload:
+      type: object
+      description: |
+        Payload for the `test_plugin_config_result` service-to-controller message.
+        Contains the results of an agent-side plugin config test.
+      required:
+        - protocol_version
+        - seq
+        - type
+        - request_id
+        - success
+        - duration_ms
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Wire protocol version
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number
+        type:
+          type: string
+          const: test_plugin_config_result
+          description: Message type discriminator
+        request_id:
+          type: string
+          description: Must match the request_id from the TestPluginConfig
+        success:
+          type: boolean
+          description: Whether the test completed successfully
+        output:
+          type: string
+          description: Command output or connectivity check details
+          maxLength: 65536
+        error:
+          type: string
+          description: Error message when success is false
+        detected_version:
+          type: string
+          description: Version string detected during version detection tests
+        duration_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Test execution time in milliseconds
