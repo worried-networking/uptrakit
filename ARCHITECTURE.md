@@ -93,6 +93,17 @@ named profile use only type settings and per-assignment config). Plugins declari
 | `package_manager_npm` | `uptrakit-plugin-package-manager-npm` | Controller (npm registry) | Yes | Globally installed npm packages; upstream versions fetched from `registry.npmjs.org`; `ControllerSideFetchReleases` capability; detects host compatibility; requires `sudo` for updates |
 | `infrastructure_proxmox` | `uptrakit-plugin-infrastructure-proxmox` | Controller (PVE REST API) | No | Proxmox VE infrastructure plugin; discovers QEMU VMs and LXC containers; manual host matching; uses Extensions framework for all UI/CLI interaction; also provides agent-side modules (`pve_setup`, `guest_exec`) for PVE node detection and guest command execution during SSH agent bootstrap |
 
+### Enhancement plugins
+
+Enhancement plugins enrich software items after creation. They implement the `SoftwareItemLifecyclePlugin`
+subtrait and are registered separately on `PluginRegistry` (not via the `register_plugins!` macro).
+
+| Plugin type | Crate | Purpose | Feature flag |
+| --- | --- | --- | --- |
+| `enhancement_dashboard_icons` | `uptrakit-plugin-enhancement-dashboard-icons` | Assigns icon URLs from [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons) | `dashboard-icons` (default) |
+
+See [Dashboard Icons Development Guide](docs/development/dashboard-icons.md) for details.
+
 ### Two-tier config model
 
 Plugin configuration uses a two-tier model: **type settings** store tenant-level defaults per plugin type
