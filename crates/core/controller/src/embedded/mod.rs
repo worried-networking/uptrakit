@@ -27,8 +27,10 @@ use uptrakit_internal_wire::Capability;
 use uptrakit_web_api::embedded_support::EmbeddedServiceNotifier;
 use uuid::Uuid;
 
+use uptrakit_web_api::service_connections::ServiceConnectionRegistry;
+
 use crate::tasks::BackgroundTasks;
-use types::{EmbeddedTransport, ExternalServiceInfo};
+use types::{CoexistencePolicy, EmbeddedTransport, ExternalServiceInfo};
 
 /// Tokens passed to each embedded service's run closure to control its lifecycle.
 pub(crate) struct EmbeddedShutdownTokens {
@@ -37,9 +39,6 @@ pub(crate) struct EmbeddedShutdownTokens {
     /// Cancel to abort in-flight work immediately.
     pub abort: CancellationToken,
 }
-
-/// Custom yield predicate for embedded service coexistence decisions.
-pub(crate) type YieldCheckFn = Box<dyn Fn(&ExternalServiceInfo) -> bool + Send + Sync>;
 
 /// Result of registering an embedded service via [`EmbeddedServiceHost::add()`].
 #[allow(dead_code)] // Fields used by follow-up service embeddings (agent).
@@ -60,6 +59,9 @@ pub(crate) struct AddResult {
 struct EmbeddedServiceHandle {
     _service_id: Uuid,
     label: &'static str,
+    /// The service's own `service_app_name`, used by `YieldOnSameAppName` to
+    /// compare against the connecting external service's name.
+    app_name: String,
     yielded: Arc<AtomicBool>,
     /// Set of external service IDs that are currently causing this embedded
     /// service to yield. The `yielded` AtomicBool is set when the first ID is
@@ -67,7 +69,7 @@ struct EmbeddedServiceHandle {
     /// resumes when multiple yielder services are connected simultaneously.
     yielding_service_ids: Arc<parking_lot::Mutex<HashSet<Uuid>>>,
     capabilities: BTreeSet<Capability>,
-    yield_check: Option<YieldCheckFn>,
+    coexistence_policy: CoexistencePolicy,
 }
 
 // ---------------------------------------------------------------------------
@@ -77,12 +79,17 @@ struct EmbeddedServiceHandle {
 /// Orchestrator for embedded services running inside the controller process.
 pub(crate) struct EmbeddedServiceHost {
     services: parking_lot::Mutex<Vec<EmbeddedServiceHandle>>,
+    /// Cloned handle to the connection registry, used to look up
+    /// `service_app_name` in `on_external_connected` without threading
+    /// the value through the trait method signature.
+    registry: std::sync::OnceLock<ServiceConnectionRegistry>,
 }
 
 impl EmbeddedServiceHost {
     pub(crate) fn new() -> Self {
         Self {
             services: parking_lot::Mutex::new(Vec::new()),
+            registry: std::sync::OnceLock::new(),
         }
     }
 
@@ -105,7 +112,7 @@ impl EmbeddedServiceHost {
         capabilities: BTreeSet<Capability>,
         is_system_service: bool,
         tenant_id: Option<Uuid>,
-        yield_check: Option<YieldCheckFn>,
+        coexistence_policy: CoexistencePolicy,
         run_fn: impl FnOnce(
             EmbeddedTransport,
             EmbeddedShutdownTokens,
@@ -144,9 +151,20 @@ impl EmbeddedServiceHost {
         };
 
         // 2. Register in ServiceConnectionRegistry.
+        // Store the registry reference on first call so on_external_connected
+        // can look up service_app_name without a signature change to the trait.
+        self.registry
+            .get_or_init(|| state.service_connections.clone());
+
         let (push_rx, _cancel_token) = state
             .service_connections
-            .register(service_id, capabilities.clone(), None, None, None)
+            .register(
+                service_id,
+                capabilities.clone(),
+                None,
+                None,
+                Some(app_name.to_string()),
+            )
             .await;
 
         // 3. Create bidirectional channels.
@@ -198,10 +216,11 @@ impl EmbeddedServiceHost {
             services.push(EmbeddedServiceHandle {
                 _service_id: service_id,
                 label,
+                app_name: app_name.to_string(),
                 yielded,
                 yielding_service_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
                 capabilities,
-                yield_check,
+                coexistence_policy,
             });
         }
 
@@ -219,9 +238,15 @@ impl EmbeddedServiceHost {
     }
 
     /// Evaluate whether a specific embedded service should yield based on
-    /// its yield closure and the external service info.
+    /// its coexistence policy and the external service info.
     fn should_yield(handle: &EmbeddedServiceHandle, info: &ExternalServiceInfo) -> bool {
-        handle.yield_check.as_ref().is_some_and(|check| check(info))
+        match &handle.coexistence_policy {
+            CoexistencePolicy::YieldOnSameAppName => {
+                info.service_app_name.as_deref() == Some(handle.app_name.as_str())
+            }
+            CoexistencePolicy::Custom(check) => check(info),
+            CoexistencePolicy::NeverYield => false,
+        }
     }
 }
 
@@ -233,11 +258,16 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
         hostname: Option<&str>,
         is_system: bool,
     ) {
+        let service_app_name = self
+            .registry
+            .get()
+            .and_then(|r| r.get_app_name(&service_id));
         let info = ExternalServiceInfo {
             service_id,
             capabilities: capabilities.clone(),
             hostname: hostname.map(String::from),
             machine_id: None,
+            service_app_name,
             is_system,
         };
 
@@ -288,95 +318,144 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_web_api::service_connections::ServiceConnectionRegistry;
 
     fn make_scheduler_handle() -> EmbeddedServiceHandle {
         EmbeddedServiceHandle {
             _service_id: Uuid::nil(),
             label: "scheduler",
+            app_name: "uptrakit-scheduler".to_string(),
             yielded: Arc::new(AtomicBool::new(false)),
             yielding_service_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
             capabilities: [Capability::Scheduler].into(),
-            yield_check: Some(Box::new(|info: &ExternalServiceInfo| {
-                info.capabilities.contains(&Capability::Scheduler)
-            })),
+            coexistence_policy: CoexistencePolicy::YieldOnSameAppName,
         }
     }
 
-    fn ext_info(service_id: Uuid, caps: BTreeSet<Capability>) -> ExternalServiceInfo {
+    fn ext_info(
+        service_id: Uuid,
+        caps: BTreeSet<Capability>,
+        service_app_name: Option<&str>,
+    ) -> ExternalServiceInfo {
         ExternalServiceInfo {
             service_id,
             capabilities: caps,
             hostname: None,
             machine_id: None,
+            service_app_name: service_app_name.map(String::from),
             is_system: true,
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Policy unit tests — call should_yield directly, no registry needed.
+    // -----------------------------------------------------------------------
+
     #[test]
-    fn yield_check_matches_scheduler_capability() {
+    fn yield_on_same_app_name_matches() {
         let handle = make_scheduler_handle();
+        let info = ext_info(Uuid::nil(), BTreeSet::new(), Some("uptrakit-scheduler"));
+        assert!(EmbeddedServiceHost::should_yield(&handle, &info));
+    }
+
+    #[test]
+    fn yield_on_same_app_name_no_match_different_app() {
+        let handle = make_scheduler_handle();
+        // An agent connecting — different app name must NOT trigger a yield.
         let info = ext_info(
             Uuid::nil(),
-            [Capability::Scheduler, Capability::DatabaseAccess].into(),
+            [Capability::GracefulShutdown].into(),
+            Some("uptrakit-agent"),
         );
-        assert!(EmbeddedServiceHost::should_yield(&handle, &info));
+        assert!(!EmbeddedServiceHost::should_yield(&handle, &info));
     }
 
     #[test]
-    fn yield_check_does_not_match_non_scheduler_service() {
+    fn yield_on_same_app_name_no_match_none() {
         let handle = make_scheduler_handle();
-        // A service with GracefulShutdown only must NOT trigger a yield.
-        let info = ext_info(Uuid::nil(), [Capability::GracefulShutdown].into());
+        // External service with no app_name must NOT trigger a yield even when
+        // it carries the Scheduler capability.
+        let info = ext_info(Uuid::nil(), [Capability::Scheduler].into(), None);
         assert!(!EmbeddedServiceHost::should_yield(&handle, &info));
     }
 
     #[test]
-    fn no_yield_check_never_yields() {
+    fn custom_policy_closure() {
         let handle = EmbeddedServiceHandle {
             _service_id: Uuid::nil(),
             label: "test",
+            app_name: "test-app".to_string(),
             yielded: Arc::new(AtomicBool::new(false)),
             yielding_service_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
             capabilities: [Capability::Scheduler].into(),
-            yield_check: None,
+            coexistence_policy: CoexistencePolicy::Custom(Box::new(|_| true)),
         };
-        let info = ext_info(Uuid::nil(), [Capability::Scheduler].into());
-        assert!(!EmbeddedServiceHost::should_yield(&handle, &info));
-    }
-
-    #[test]
-    fn yield_check_closure_always_true() {
-        let handle = EmbeddedServiceHandle {
-            _service_id: Uuid::nil(),
-            label: "test",
-            yielded: Arc::new(AtomicBool::new(false)),
-            yielding_service_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
-            capabilities: [Capability::Scheduler].into(),
-            yield_check: Some(Box::new(|_| true)),
-        };
-        let info = ext_info(Uuid::nil(), BTreeSet::new());
+        let info = ext_info(Uuid::nil(), BTreeSet::new(), None);
         assert!(EmbeddedServiceHost::should_yield(&handle, &info));
     }
 
     #[test]
-    fn on_external_connected_sets_yielded_flag() {
+    fn never_yield_policy() {
+        let handle = EmbeddedServiceHandle {
+            _service_id: Uuid::nil(),
+            label: "test",
+            app_name: "test-app".to_string(),
+            yielded: Arc::new(AtomicBool::new(false)),
+            yielding_service_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+            capabilities: [Capability::Scheduler].into(),
+            coexistence_policy: CoexistencePolicy::NeverYield,
+        };
+        // Even with a matching app name, NeverYield must return false.
+        let info = ext_info(
+            Uuid::nil(),
+            [Capability::Scheduler].into(),
+            Some("test-app"),
+        );
+        assert!(!EmbeddedServiceHost::should_yield(&handle, &info));
+    }
+
+    // -----------------------------------------------------------------------
+    // Integration tests — call on_external_connected, registry required.
+    //
+    // The registry is pre-seeded so that on_external_connected can look up
+    // service_app_name for the connecting external service.
+    // -----------------------------------------------------------------------
+
+    async fn make_host_with_scheduler_registry(
+        ids_and_names: &[(Uuid, &str)],
+    ) -> EmbeddedServiceHost {
+        let registry = ServiceConnectionRegistry::new();
+        for (id, name) in ids_and_names {
+            registry
+                .register(*id, BTreeSet::new(), None, None, Some(name.to_string()))
+                .await;
+        }
         let host = EmbeddedServiceHost::new();
+        host.registry.set(registry).ok();
+        host
+    }
+
+    #[tokio::test]
+    async fn on_external_connected_sets_yielded_flag() {
+        let ext_id = Uuid::now_v7();
+        let host = make_host_with_scheduler_registry(&[(ext_id, "uptrakit-scheduler")]).await;
         host.services.lock().push(make_scheduler_handle());
 
         let ext_caps: BTreeSet<Capability> = [Capability::Scheduler].into();
-        host.on_external_connected(Uuid::now_v7(), &ext_caps, None, true);
+        host.on_external_connected(ext_id, &ext_caps, None, true);
 
         assert!(host.is_capability_yielded(&Capability::Scheduler));
     }
 
-    #[test]
-    fn non_scheduler_service_does_not_yield_embedded_scheduler() {
-        let host = EmbeddedServiceHost::new();
+    #[tokio::test]
+    async fn non_scheduler_service_does_not_yield_embedded_scheduler() {
+        let ext_id = Uuid::now_v7();
+        // Agent connects with a different app name — must NOT trigger yield.
+        let host = make_host_with_scheduler_registry(&[(ext_id, "uptrakit-agent")]).await;
         host.services.lock().push(make_scheduler_handle());
 
-        // Agent connects with GracefulShutdown only — must NOT trigger yield.
         let ext_caps: BTreeSet<Capability> = [Capability::GracefulShutdown].into();
-        host.on_external_connected(Uuid::now_v7(), &ext_caps, None, false);
+        host.on_external_connected(ext_id, &ext_caps, None, false);
 
         assert!(!host.is_capability_yielded(&Capability::Scheduler));
     }
@@ -397,15 +476,18 @@ mod tests {
         assert!(!host.is_capability_yielded(&Capability::Scheduler));
     }
 
-    #[test]
-    fn multiple_yielders_one_disconnect_yield_remains() {
-        let host = EmbeddedServiceHost::new();
-        host.services.lock().push(make_scheduler_handle());
-
+    #[tokio::test]
+    async fn multiple_yielders_one_disconnect_yield_remains() {
         let id_a = Uuid::now_v7();
         let id_b = Uuid::now_v7();
-        let caps: BTreeSet<Capability> = [Capability::Scheduler].into();
+        let host = make_host_with_scheduler_registry(&[
+            (id_a, "uptrakit-scheduler"),
+            (id_b, "uptrakit-scheduler"),
+        ])
+        .await;
+        host.services.lock().push(make_scheduler_handle());
 
+        let caps: BTreeSet<Capability> = [Capability::Scheduler].into();
         host.on_external_connected(id_a, &caps, None, true);
         host.on_external_connected(id_b, &caps, None, true);
         assert!(host.is_capability_yielded(&Capability::Scheduler));
@@ -419,12 +501,12 @@ mod tests {
         assert!(!host.is_capability_yielded(&Capability::Scheduler));
     }
 
-    #[test]
-    fn same_service_id_reconnect_does_not_double_count() {
-        let host = EmbeddedServiceHost::new();
+    #[tokio::test]
+    async fn same_service_id_reconnect_does_not_double_count() {
+        let id = Uuid::now_v7();
+        let host = make_host_with_scheduler_registry(&[(id, "uptrakit-scheduler")]).await;
         host.services.lock().push(make_scheduler_handle());
 
-        let id = Uuid::now_v7();
         let caps: BTreeSet<Capability> = [Capability::Scheduler].into();
 
         // Register twice with the same ID (e.g. reconnect without disconnect).

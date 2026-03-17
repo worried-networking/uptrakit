@@ -714,14 +714,11 @@ async fn spawn_background_tasks(
                 scheduler_caps,
                 true, // is_system_service
                 None, // tenant_id (not needed for system services)
-                // Only yield to services that explicitly carry the Scheduler
-                // capability. Agents, SSH agents, and MQTT services share
-                // GracefulShutdown with the embedded scheduler but must NOT
-                // cause a yield.
-                Some(Box::new(|info: &embedded::types::ExternalServiceInfo| {
-                    info.capabilities
-                        .contains(&uptrakit_internal_wire::Capability::Scheduler)
-                })),
+                // Yield only when an external service with the same
+                // `service_app_name` ("uptrakit-scheduler") connects.
+                // This avoids the old capability-intersection bug where
+                // agents carrying GracefulShutdown could trigger a yield.
+                embedded::types::CoexistencePolicy::YieldOnSameAppName,
                 move |transport, tokens| {
                     Box::pin(async move {
                         let notifier: std::sync::Arc<
@@ -832,15 +829,6 @@ async fn spawn_background_tasks(
         // Collect the local machine_id for same-host yield comparison.
         let local_machine_id = uptrakit_agent_core::host_info::read_machine_id();
 
-        // Custom yield check: yield only when an external agent on the same
-        // host (same machine_id) with SoftwareDiscovery capability connects.
-        let yield_check: embedded::YieldCheckFn = Box::new(move |info| {
-            info.machine_id.as_deref() == Some(local_machine_id.as_str())
-                && info
-                    .capabilities
-                    .contains(&uptrakit_internal_wire::Capability::SoftwareDiscovery)
-        });
-
         let state_dir_for_agent = state_dir.clone();
         let add_result = embedded_host
             .add(
@@ -849,7 +837,14 @@ async fn spawn_background_tasks(
                 agent_caps.clone(),
                 false, // tenant service (not system)
                 Some(default_tenant_id),
-                Some(yield_check),
+                // Yield only when an external `uptrakit-agent` on the same host
+                // (matching machine_id) connects. The app_name check ensures we
+                // never yield to unrelated services; the machine_id check ensures
+                // we only yield to an agent on the same physical host.
+                embedded::types::CoexistencePolicy::Custom(Box::new(move |info| {
+                    info.service_app_name.as_deref() == Some("uptrakit-agent")
+                        && info.machine_id.as_deref() == Some(local_machine_id.as_str())
+                })),
                 move |transport, tokens| {
                     Box::pin(agent::run_embedded_agent(
                         transport,

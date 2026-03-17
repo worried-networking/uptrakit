@@ -348,6 +348,18 @@ impl ServiceConnectionRegistry {
             .copied()
             .collect()
     }
+
+    /// Look up the `service_app_name` for a connected service.
+    ///
+    /// Returns `None` if the service is not connected or has no `service_app_name`.
+    /// Acquires a read lock; always uncontended for a single read.
+    pub fn get_app_name(&self, service_id: &Uuid) -> Option<String> {
+        self.inner
+            .read()
+            .connections
+            .get(service_id)
+            .and_then(|c| c.service_app_name.clone())
+    }
 }
 
 /// Timeout for individual send operations during parallel broadcast.

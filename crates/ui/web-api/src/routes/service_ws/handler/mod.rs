@@ -1425,29 +1425,35 @@ async fn setup_enrolled_session(
     service_id: uuid::Uuid,
     is_system: bool,
 ) -> EnrolledSessionState {
-    // Fetch service to derive capabilities for registration.
-    let capabilities: BTreeSet<Capability> = if is_system {
+    // Fetch service to derive capabilities and app name for registration.
+    let (capabilities, service_app_name): (BTreeSet<Capability>, Option<String>) = if is_system {
         match sys_svc_entity::Entity::find_by_id(service_id)
             .one(state.db())
             .await
         {
-            Ok(Some(svc)) => parse_capabilities(&svc.capabilities),
-            _ => BTreeSet::new(),
+            Ok(Some(svc)) => (parse_capabilities(&svc.capabilities), svc.service_app_name),
+            _ => (BTreeSet::new(), None),
         }
     } else {
         match service::Entity::find_by_id(service_id)
             .one(state.db())
             .await
         {
-            Ok(Some(svc)) => parse_capabilities(&svc.capabilities),
-            _ => BTreeSet::new(),
+            Ok(Some(svc)) => (parse_capabilities(&svc.capabilities), svc.service_app_name),
+            _ => (BTreeSet::new(), None),
         }
     };
 
     // Register in service_connections.
     let (push_rx, cancel_token) = state
         .service_connections
-        .register(service_id, capabilities.clone(), None, None, None)
+        .register(
+            service_id,
+            capabilities.clone(),
+            None,
+            None,
+            service_app_name,
+        )
         .await;
 
     // Notify embedded services about the new external connection.

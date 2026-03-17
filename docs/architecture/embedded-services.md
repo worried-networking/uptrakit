@@ -43,18 +43,20 @@ Each embedded service declares a `CoexistencePolicy`:
 
 | Policy | Behaviour |
 | --- | --- |
-| `YieldAlways` | Yield when an external service with overlapping capabilities connects. |
-| `NeverYield` | Never yield -- coexist with external services. |
+| `YieldOnSameAppName` (default) | Yield when an external service with the same `service_app_name` connects. Matches by binary identity, not capability set, so shared capabilities like `GracefulShutdown` never cause false yields. |
+| `Custom(f)` | Custom closure — use when additional context (e.g. `machine_id`) is needed beyond `service_app_name`. |
+| `NeverYield` | Never yield — always coexist with external services. |
 
-An optional custom `yield_check` closure can override the policy for fine-grained control
-(e.g., yield only when the external service runs on the same host).
+The `service_app_name` used for `YieldOnSameAppName` comparisons is read from
+`ServiceConnectionRegistry` when the external service connects. This ensures the value is
+set exactly once — in `register()` — for both embedded and external services.
 
 The `EmbeddedServiceNotifier` trait (defined in `web-api`) provides the callback interface:
 
 - `on_external_connected()` -- called when an external service completes WebSocket
   authentication. Sets the `yielded` flag on matching embedded services.
 - `on_external_disconnected()` -- called on disconnect. Clears the `yielded` flag.
-- `on_machine_id_reported()` -- reserved for future `YieldOnSameHost` policies.
+- `on_machine_id_reported()` -- reserved for custom policies that use `machine_id` matching.
 - `is_capability_yielded()` -- queried by embedded services to check their yield state.
 
 The controller stores the host as `Arc<dyn EmbeddedServiceNotifier>` in `AppState`, avoiding
@@ -75,13 +77,13 @@ The `add()` method takes decomposed parameters (no shared trait required):
 
 ```rust
 embedded_host.add(
-    "Embedded Scheduler",     // label
-    "uptrakit-scheduler",     // app_name (DB lookup key)
-    scheduler_caps,           // BTreeSet<Capability>
-    true,                     // is_system_service
-    CoexistencePolicy::YieldAlways,
-    None,                     // optional custom yield_check closure
-    move |transport, cancel| { /* async service closure */ },
+    "Embedded Scheduler",                    // label
+    "uptrakit-scheduler",                    // app_name (DB lookup key + yield comparison)
+    scheduler_caps,                          // BTreeSet<Capability>
+    true,                                    // is_system_service
+    None,                                    // tenant_id (None for system services)
+    CoexistencePolicy::YieldOnSameAppName,   // coexistence policy
+    move |transport, tokens| { /* async service closure */ },
     &app_state,
     &mut bg,
 ).await?;
@@ -100,8 +102,8 @@ The method:
 
 | Service | Feature flag | Coexistence | Notes |
 | --- | --- | --- | --- |
-| Scheduler | `embedded-scheduler` | `YieldAlways` | Defers external tasks when an external scheduler connects; internal tasks always run. |
-| Agent | `embedded-agent` | `YieldAlways` + custom `yield_check` | Yields only when an external agent with the same `machine_id` connects. Tenant service, not system. |
+| Scheduler | `embedded-scheduler` | `YieldOnSameAppName` | Yields when an external `uptrakit-scheduler` connects; internal tasks always run regardless. |
+| Agent | `embedded-agent` | `Custom` | Yields when an external `uptrakit-agent` on the same host (matching `machine_id`) connects. Tenant service, not system. |
 
 ## Embedded Agent
 
@@ -125,11 +127,11 @@ allowing `uptrakit-agent-core` to operate identically over both WebSocket and in
 
 ### Yield behaviour (same-host coexistence)
 
-The embedded agent uses `CoexistencePolicy::YieldAlways` with a custom `yield_check` closure.
-The closure compares the external service's `machine_id` (reported via
-`on_machine_id_reported()`) against the embedded agent's own `machine_id`. The embedded agent
-yields **only** when an external agent on the same physical host connects. This allows external
-agents on other hosts to coexist without affecting the embedded agent.
+The embedded agent uses `CoexistencePolicy::Custom` with a closure that checks both
+`service_app_name == "uptrakit-agent"` and `machine_id`. The embedded agent yields **only**
+when an external `uptrakit-agent` on the same physical host connects — requiring both the
+correct binary name and a matching machine ID. This allows external agents on other hosts to
+coexist without affecting the embedded agent.
 
 While yielded, the embedded agent stops processing inbound commands (discovery requests, update
 execution) and defers to the external agent.
@@ -158,7 +160,7 @@ business logic from `uptrakit-agent-core` (the same crate used by the standalone
 ```text
 crates/core/controller/src/embedded/
     mod.rs        -- EmbeddedServiceHost, EmbeddedServiceHandle, impl EmbeddedServiceNotifier
-    types.rs      -- CoexistencePolicy, EmbeddedTransport, ExternalServiceInfo
+    types.rs      -- CoexistencePolicy, YieldCheckFn, EmbeddedTransport, ExternalServiceInfo
     bridge.rs     -- run_response_forwarder() (push_rx -> ctrl_tx bridge)
     provision.rs  -- provision_embedded_system_service()
 

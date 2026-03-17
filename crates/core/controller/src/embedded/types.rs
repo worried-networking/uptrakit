@@ -98,5 +98,32 @@ pub(crate) struct ExternalServiceInfo {
     pub capabilities: BTreeSet<Capability>,
     pub hostname: Option<String>,
     pub machine_id: Option<String>,
+    /// `service_app_name` from the service record, read from
+    /// `ServiceConnectionRegistry` when the external service connects.
+    pub service_app_name: Option<String>,
     pub is_system: bool,
+}
+
+// ---------------------------------------------------------------------------
+// CoexistencePolicy
+// ---------------------------------------------------------------------------
+
+/// Custom yield predicate for [`CoexistencePolicy::Custom`].
+pub(crate) type YieldCheckFn = Box<dyn Fn(&ExternalServiceInfo) -> bool + Send + Sync>;
+
+/// Controls whether an embedded service yields to a connecting external service.
+#[derive(Default)]
+pub(crate) enum CoexistencePolicy {
+    /// Yield when an external service with the same `service_app_name` connects.
+    ///
+    /// This is the default — it matches by binary identity, not by capability
+    /// set, so shared capabilities like `GracefulShutdown` never cause false
+    /// yields.
+    #[default]
+    YieldOnSameAppName,
+    /// Custom yield predicate — use when additional context (e.g. `machine_id`)
+    /// is needed beyond `service_app_name`.
+    Custom(YieldCheckFn),
+    /// Never yield — always coexist with external services.
+    NeverYield,
 }
