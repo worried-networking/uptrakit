@@ -12,6 +12,9 @@
 - Reuses the shared service connection lifecycle instead of duplicating WebSocket logic.
 - Keeps most operational logic in `agent-core`, which limits binary-specific drift.
 - Uses explicit shutdown handling and bounded channels for in-flight work.
+- `machine_id` validation on all incoming messages prevents cross-agent message misdirection.
+- Freeze file provides an operator-controlled emergency halt without requiring a service restart.
+- UPDATE_COOLDOWN (5s) rate limiting prevents rapid-fire update attempts from overwhelming the host.
 
 ## Active Findings
 

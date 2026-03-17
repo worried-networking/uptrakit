@@ -8,17 +8,21 @@
 The runtime crates are operationally solid in the common path: they share the same lifecycle model
 via `service-sdk`, compile and test cleanly, and consistently use cancellation-aware async patterns.
 This review cycle confirmed the existing failure-recovery gaps and added new findings in the
-notification dispatcher's supervision model and MQTT's partial-state buffer lifetime.
+notification dispatcher's supervision model, MQTT's partial-state buffer lifetime, cross-crate code
+duplication, and a CRL numbering concern for multi-controller HA.
 
 ## Strengths
 
 - All runtime binaries use the same enrollment and reconnect machinery from `uptrakit-service-sdk`.
 - Cancellation and shutdown flow are broadly consistent across controller, agents, scheduler, and
   MQTT service.
-- The core crates remain free of `unsafe` in production paths.
-- MQTT reconnection uses exponential backoff (2 s–60 s) with reset on successful ConnAck.
+- The core crates remain free of `unsafe` in production paths (the single `unsafe` in
+  `master_key.rs` is documented as startup-only, single-threaded).
+- MQTT reconnection uses exponential backoff (2 s-60 s) with reset on successful ConnAck.
 - WS write path is guarded by a `SEND_TIMEOUT` (30 s) to prevent indefinite TCP send-buffer
   blocking.
+- SSH connection pooling uses TTL-based eviction, reconnects outside the lock, and respects
+  `parking_lot::Mutex` per workspace coding standards.
 
 ## Active Findings
 
@@ -72,6 +76,33 @@ notification dispatcher's supervision model and MQTT's partial-state buffer life
   time they accumulate and waste memory without any operator-visible signal.
 - Fix: add a TTL (e.g., 5 minutes) to each `PartialSoftwareStates` entry and run a periodic
   cleanup pass.
+
+### [MEDIUM] `init_tracing` is duplicated across 4 non-controller binaries
+
+- Dimension: maintainability, crate structure
+- Scope: `crates/core/agent/src/main.rs`, `crates/core/agent-ssh/src/main.rs`,
+  `crates/core/mqtt/src/main.rs`, `crates/core/scheduler/src/main.rs`
+- Why it matters: all four binaries contain a near-identical `init_tracing` function (same
+  verbosity mapping, same `EnvFilter` construction). Any change to the tracing setup needs to be
+  replicated four times.
+- Failure scenario: a tracing filter fix lands in one binary but not the others, causing
+  inconsistent log output or missing debug information during incident triage.
+- Fix: move `init_tracing` into `uptrakit-service-sdk` alongside the existing lifecycle helpers.
+
+### [MEDIUM] `register_column_aad_mappings` is duplicated between controller and scheduler
+
+- Dimension: maintainability, security
+- Scope: `crates/core/controller/src/main.rs`, `crates/core/controller/src/reencrypt.rs`,
+  `crates/core/controller/src/pki.rs`, `crates/core/scheduler/src/handler.rs`
+- Why it matters: the controller and scheduler each maintain their own copy of the AAD column
+  registration calls. If a new encrypted column is added and only one site is updated, decryption
+  or re-encryption will use the wrong AAD context, producing silent data corruption.
+- Failure scenario: a new encrypted column is added to a SeaORM entity. The controller registers
+  its AAD mapping but the scheduler copy is missed. The scheduler's `init_data_key_ring` then
+  uses a zero/default AAD for that column, and any re-encryption pass silently corrupts the
+  ciphertext.
+- Fix: extract a single shared `register_all_aad_mappings()` function into a common crate
+  (e.g., `uptrakit-crypto` or a new `uptrakit-db-crypto` crate).
 
 ### [INFO] Controller startup does not retry on transient database errors
 
