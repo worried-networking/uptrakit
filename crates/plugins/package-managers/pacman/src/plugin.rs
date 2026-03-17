@@ -503,7 +503,7 @@ mod tests {
         assert!(plugin.has_capability(PluginCapability::ReleaseFetching));
         assert!(plugin.has_capability(PluginCapability::UpdateExecution));
 
-        assert_eq!(plugin.capabilities().len(), 6);
+        assert_eq!(plugin.capabilities().len(), 7);
     }
 
     // ── empty identifier guards ──────────────────────────────────────────────

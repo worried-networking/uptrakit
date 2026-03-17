@@ -769,7 +769,7 @@ mod tests {
         assert!(plugin.has_capability(PluginCapability::ReleaseFetching));
         assert!(plugin.has_capability(PluginCapability::UpdateExecution));
         assert!(!plugin.has_capability(PluginCapability::RefreshPackageIndex));
-        assert_eq!(plugin.capabilities().len(), 6);
+        assert_eq!(plugin.capabilities().len(), 7);
     }
 
     // ── required_sudo_commands ────────────────────────────────────────────────

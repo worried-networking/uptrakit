@@ -165,7 +165,10 @@ mod tests {
             assert_eq!(plugin.plugin_type_id(), "hook_systemd");
             assert_eq!(
                 plugin.capabilities(),
-                vec![PluginCapability::UpdateLifecycle]
+                vec![
+                    PluginCapability::UpdateLifecycle,
+                    PluginCapability::ConfigTest
+                ]
             );
             assert!(plugin.as_update_lifecycle().is_some());
         });
