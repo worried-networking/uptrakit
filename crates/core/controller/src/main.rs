@@ -180,6 +180,10 @@ async fn run(args: cli::Args) -> Result<()> {
     })?;
     tracing::info!("config directory: {}", app_dirs.config_dir().display());
     tracing::info!("state directory: {}", app_dirs.state_dir().display());
+    #[cfg_attr(
+        not(any(feature = "embedded-scheduler", feature = "embedded-agent")),
+        allow(unused_variables)
+    )]
     let controller_installation_id = startup::init_installation_id(app_dirs.state_dir()).await?;
 
     // Phase 3: Database
@@ -337,18 +341,47 @@ async fn run(args: cli::Args) -> Result<()> {
         uptrakit_web_api::auth::token_denylist::TokenDenylist::new_with_db(db_conn.clone()),
     );
 
+    // Shared cancellation token: cancelled by BackgroundTasks::shutdown(), which
+    // also signals open SSE streams in the web API to terminate cleanly.
+    let shutdown_token = CancellationToken::new();
+
     // Build plugin_ops (with notification support). Must be created before the
     // notification dispatcher so it can serve as the notification channel registry.
-    let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(
-        uptrakit_plugin_infrastructure_registry::PluginRegistry::with_notifications(
-            uptrakit_plugin_infrastructure_registry::NotificationRegistryConfig {
-                allow_private_urls: args.allow_private_notification_urls,
+    let registry = uptrakit_plugin_infrastructure_registry::PluginRegistry::with_notifications(
+        uptrakit_plugin_infrastructure_registry::NotificationRegistryConfig {
+            allow_private_urls: args.allow_private_notification_urls,
+        },
+    )
+    .context_transform(|_| {
+        AppError::Config("failed to build plugin registry with notifications".to_string())
+    })?;
+
+    #[cfg(feature = "dashboard-icons")]
+    let registry = {
+        let client = uptrakit_plugin_infrastructure_core::build_plugin_http_client(
+            uptrakit_plugin_infrastructure_core::PluginHttpClientConfig {
+                user_agent: "uptrakit-dashboard-icons",
+                redirect_policy: reqwest::redirect::Policy::limited(5),
+                ..Default::default()
             },
         )
-        .context_transform(|_| {
-            AppError::Config("failed to build plugin registry with notifications".to_string())
-        })?,
-    );
+        .map_err(|e| {
+            report!(AppError::Config(format!(
+                "dashboard-icons HTTP client: {e}"
+            )))
+        })?;
+
+        let cache =
+            Arc::new(uptrakit_plugin_enhancement_dashboard_icons::DashboardIconCache::new(client));
+        uptrakit_plugin_enhancement_dashboard_icons::DashboardIconCache::spawn_refresh_loop(
+            Arc::clone(&cache),
+            shutdown_token.child_token(),
+        );
+        registry.with_dashboard_icons(cache)
+    };
+
+    let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
+        Arc::new(registry);
 
     let callback_base_url = format!("https://{}", reconciled.https_addr);
     let notification_dispatcher =
@@ -372,10 +405,6 @@ async fn run(args: cli::Args) -> Result<()> {
         }
         sources
     };
-
-    // Shared cancellation token: cancelled by BackgroundTasks::shutdown(), which
-    // also signals open SSE streams in the web API to terminate cleanly.
-    let shutdown_token = CancellationToken::new();
 
     // Audit log backend and filter wiring.
     let (audit_filter, audit_dispatcher) = build_audit_logger(&args, &db_conn).await?;
@@ -645,6 +674,10 @@ async fn spawn_background_tasks(
     ca_tx: tokio::sync::watch::Sender<pki::CaSnapshot>,
     initial_ca_version: i64,
     controller_id: uuid::Uuid,
+    #[cfg_attr(
+        not(any(feature = "embedded-scheduler", feature = "embedded-agent")),
+        allow(unused_variables)
+    )]
     controller_installation_id: uuid::Uuid,
     has_external_tls_cert: bool,
     service_connections: &uptrakit_web_api::service_connections::ServiceConnectionRegistry,

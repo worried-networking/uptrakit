@@ -590,6 +590,9 @@ pub struct PluginRegistry {
     #[cfg(feature = "notifications")]
     pub(crate) notification_plugins:
         std::collections::HashMap<&'static str, std::sync::Arc<dyn PluginBase>>,
+
+    /// Software item lifecycle plugins (e.g. Dashboard Icons enhancement).
+    pub(crate) software_item_lifecycle_plugins: Vec<std::sync::Arc<dyn PluginBase>>,
 }
 
 register_plugins! {
@@ -689,6 +692,7 @@ impl PluginRegistry {
         Self {
             #[cfg(feature = "notifications")]
             notification_plugins: std::collections::HashMap::new(),
+            software_item_lifecycle_plugins: Vec::new(),
         }
     }
 
@@ -732,7 +736,20 @@ impl PluginRegistry {
 
         Ok(Self {
             notification_plugins: plugins,
+            software_item_lifecycle_plugins: Vec::new(),
         })
+    }
+
+    /// Add a Dashboard Icons enhancement plugin backed by the given cache.
+    #[cfg(feature = "dashboard-icons")]
+    pub fn with_dashboard_icons(
+        mut self,
+        cache: std::sync::Arc<uptrakit_plugin_enhancement_dashboard_icons::DashboardIconCache>,
+    ) -> Self {
+        let plugin = uptrakit_plugin_enhancement_dashboard_icons::DashboardIconsPlugin::new(cache);
+        self.software_item_lifecycle_plugins
+            .push(std::sync::Arc::new(plugin));
+        self
     }
 
     /// Look up a notification plugin by channel type.

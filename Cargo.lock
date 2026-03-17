@@ -6501,6 +6501,7 @@ dependencies = [
  "nix 0.31.2",
  "parking_lot",
  "rcgen",
+ "reqwest",
  "rootcause",
  "rust-embed",
  "rustls",
@@ -6525,6 +6526,7 @@ dependencies = [
  "uptrakit-crypto",
  "uptrakit-directories",
  "uptrakit-internal-wire",
+ "uptrakit-plugin-enhancement-dashboard-icons",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-scheduler-engine",
@@ -6813,6 +6815,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-plugin-enhancement-dashboard-icons"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "parking_lot",
+ "reqwest",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uptrakit-plugin-infrastructure-core",
+ "uuid",
+]
+
+[[package]]
 name = "uptrakit-plugin-generic-shell"
 version = "0.0.1"
 dependencies = [
@@ -6927,6 +6947,7 @@ dependencies = [
  "uptrakit-notification-plugin-telegram",
  "uptrakit-notification-plugin-webhook",
  "uptrakit-plugin-discovery-proxmox-helper-scripts",
+ "uptrakit-plugin-enhancement-dashboard-icons",
  "uptrakit-plugin-generic-shell",
  "uptrakit-plugin-hook-shell",
  "uptrakit-plugin-hook-systemd",

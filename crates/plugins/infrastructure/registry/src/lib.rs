@@ -37,7 +37,8 @@ pub use registry::PluginRegistry;
 
 // Re-export commonly used types for plugin crate convenience
 pub use uptrakit_plugin_infrastructure_core::{
-    PluginBase, PluginCapability, SudoCommandEntry, SudoHelperScript,
+    PluginBase, PluginCapability, SoftwareItemCreatedEvent, SoftwareItemPatch, SudoCommandEntry,
+    SudoHelperScript,
 };
 pub use uptrakit_shared_types::PluginType;
 
@@ -294,6 +295,50 @@ impl PluginOps for PluginRegistry {
         }
 
         result
+    }
+
+    fn on_software_item_created<'a>(
+        &'a self,
+        event: &'a uptrakit_plugin_infrastructure_core::SoftwareItemCreatedEvent,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Option<uptrakit_plugin_infrastructure_core::SoftwareItemPatch>,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            let mut merged: Option<uptrakit_plugin_infrastructure_core::SoftwareItemPatch> = None;
+
+            for plugin in &self.software_item_lifecycle_plugins {
+                let Some(lifecycle) = plugin.as_software_item_lifecycle() else {
+                    continue;
+                };
+
+                match lifecycle.on_software_item_created(event).await {
+                    Ok(Some(patch)) => {
+                        // Last writer wins per field.
+                        let m = merged.get_or_insert_with(
+                            uptrakit_plugin_infrastructure_core::SoftwareItemPatch::new,
+                        );
+                        if patch.icon_url.is_some() {
+                            m.icon_url = patch.icon_url;
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        tracing::warn!(
+                            plugin = plugin.plugin_type_id(),
+                            error = %e,
+                            "software item lifecycle plugin error"
+                        );
+                    }
+                }
+            }
+
+            merged
+        })
     }
 
     fn handle_extension_action<'a>(
