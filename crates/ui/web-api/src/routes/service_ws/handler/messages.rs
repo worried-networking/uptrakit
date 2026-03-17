@@ -776,6 +776,10 @@ async fn process_discovery_page_for_host(
         return;
     }
 
+    // Fire software-item lifecycle plugins on newly discovered items that may
+    // benefit from enrichment (e.g. icon assignment from Dashboard Icons).
+    enrich_discovered_items(state, svc.tenant_id).await;
+
     match page_outcome {
         PageOutcome::Final {
             accumulated_discovered_count,
@@ -981,6 +985,55 @@ pub(super) async fn handle_report_plugin_config(
     };
 
     ProcessorResponse::reply(resp)
+}
+
+// ---------------------------------------------------------------------------
+// Software-item lifecycle enrichment (post-discovery)
+// ---------------------------------------------------------------------------
+
+/// After discovery results are processed, fire lifecycle plugins on featured
+/// items that have no icon yet. This is a best-effort operation — errors on
+/// individual items are logged but never propagate.
+async fn enrich_discovered_items(state: &AppState, tenant_id: uuid::Uuid) {
+    // Check the per-tenant setting (disabled by default).
+    if !matches!(
+        crate::settings_store::load_setting(
+            state.db(),
+            tenant_id,
+            crate::SettingKey::DashboardIconsEnabled,
+        )
+        .await,
+        Ok(Some(serde_json::Value::Bool(true)))
+    ) {
+        return;
+    }
+
+    let items =
+        crate::queries::software_items::load_items_needing_enrichment(state.db(), tenant_id).await;
+
+    for item in items {
+        let event = uptrakit_plugin_infrastructure_registry::SoftwareItemCreatedEvent::new(
+            item.id,
+            item.tenant_id,
+            item.name.clone(),
+            item.featured,
+            item.icon_url.clone(),
+        );
+        if let Some(patch) = state.plugin_ops.on_software_item_created(&event).await
+            && let Err(e) = crate::queries::software_items::apply_software_item_patch(
+                state.db(),
+                item.id,
+                &patch,
+            )
+            .await
+        {
+            tracing::warn!(
+                error = %e,
+                item_id = %item.id,
+                "failed to apply lifecycle patch to discovered item"
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -407,9 +407,9 @@ pub(super) async fn load_item_hosts(
 // ---------------------------------------------------------------------------
 
 pub use crud::{
-    batch_delete_software_items, batch_feature_software_items, create_software_item,
-    delete_software_item, find_active_item, get_software_item, list_software_items,
-    update_software_item,
+    apply_software_item_patch, batch_delete_software_items, batch_feature_software_items,
+    create_software_item, delete_software_item, find_active_item, get_software_item,
+    list_software_items, load_items_needing_enrichment, update_software_item,
 };
 
 pub use host_assignments::{

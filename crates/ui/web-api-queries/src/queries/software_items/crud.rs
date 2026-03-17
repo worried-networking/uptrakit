@@ -568,6 +568,57 @@ pub async fn update_software_item(
     ))
 }
 
+/// Apply a [`SoftwareItemPatch`] to a software item row.
+///
+/// Only fields present in the patch (`Some(…)`) are written; the rest are left
+/// unchanged. Sets `updated_at` when at least one field is modified. Does nothing
+/// when the patch is empty.
+#[tracing::instrument(skip_all, fields(%item_id))]
+pub async fn apply_software_item_patch(
+    db: &sea_orm::DatabaseConnection,
+    item_id: Uuid,
+    patch: &uptrakit_plugin_infrastructure_core::SoftwareItemPatch,
+) -> super::Result<()> {
+    if patch.is_empty() {
+        return Ok(());
+    }
+
+    let item = SoftwareItem::find_by_id(item_id)
+        .one(db)
+        .await
+        .context_to()?
+        .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
+
+    let mut model: software_item::ActiveModel = item.into();
+
+    if let Some(ref icon_url) = patch.icon_url {
+        model.icon_url = Set(icon_url.clone());
+    }
+
+    model.updated_at = Set(OffsetDateTime::now_utc());
+    model.update(db).await.context_to()?;
+    Ok(())
+}
+
+/// Load featured, active software items for a tenant that have no icon URL set.
+///
+/// Used after autodiscovery to fire lifecycle plugins on items that may benefit
+/// from enrichment (e.g. icon assignment).
+#[tracing::instrument(skip_all, fields(%tenant_id))]
+pub async fn load_items_needing_enrichment(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
+) -> Vec<software_item::Model> {
+    SoftwareItem::find()
+        .filter(software_item::Column::TenantId.eq(tenant_id))
+        .filter(software_item::Column::Featured.eq(true))
+        .filter(software_item::Column::IconUrl.is_null())
+        .filter(software_item::Column::DeactivatedAt.is_null())
+        .all(db)
+        .await
+        .unwrap_or_default()
+}
+
 /// Soft-delete a software item. Returns `true` if deleted, `false` if not found.
 #[tracing::instrument(skip_all, fields(%id))]
 pub async fn delete_software_item(tenant_db: &TenantDb, id: Uuid) -> super::Result<bool> {

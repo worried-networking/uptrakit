@@ -117,7 +117,18 @@ pub async fn create_software_item(
     Validated(req): Validated<CreateSoftwareItemRequest>,
 ) -> Response {
     match item_queries::create_software_item(&tenant_db, req).await {
-        Ok(resp) => {
+        Ok(mut resp) => {
+            // Fire software-item lifecycle plugins (e.g. Dashboard Icons enrichment).
+            // The handler is generic — it applies whatever patch the plugins return.
+            if let Some(patch) = fire_software_item_lifecycle(&state, &tenant_db, &resp).await
+                && item_queries::apply_software_item_patch(tenant_db.db(), resp.id, &patch)
+                    .await
+                    .is_ok()
+                && let Some(ref icon_url) = patch.icon_url
+            {
+                resp.icon_url = icon_url.clone();
+            }
+
             state
                 .broadcast
                 .event_broadcaster
@@ -1157,4 +1168,41 @@ pub async fn batch_software_items(
     };
 
     (StatusCode::OK, Json(response)).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Software-item lifecycle plugin dispatch
+// ---------------------------------------------------------------------------
+
+/// Check whether the Dashboard Icons enhancement is enabled for the given tenant
+/// and, if so, fire the `on_software_item_created` lifecycle hook. Returns the
+/// merged patch from all responding plugins, or `None` if the feature is disabled
+/// or no plugin returned a patch.
+async fn fire_software_item_lifecycle(
+    state: &AppState,
+    tenant_db: &TenantDb,
+    resp: &SoftwareItemResponse,
+) -> Option<uptrakit_plugin_infrastructure_registry::SoftwareItemPatch> {
+    // Check the per-tenant setting (disabled by default).
+    if !matches!(
+        crate::settings_store::load_setting(
+            tenant_db.db(),
+            tenant_db.tenant_id,
+            crate::SettingKey::DashboardIconsEnabled,
+        )
+        .await,
+        Ok(Some(serde_json::Value::Bool(true)))
+    ) {
+        return None;
+    }
+
+    let event = uptrakit_plugin_infrastructure_registry::SoftwareItemCreatedEvent::new(
+        resp.id,
+        tenant_db.tenant_id,
+        resp.name.clone(),
+        resp.featured,
+        resp.icon_url.clone(),
+    );
+
+    state.plugin_ops.on_software_item_created(&event).await
 }

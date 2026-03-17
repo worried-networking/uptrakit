@@ -51,6 +51,13 @@ pub enum SettingKey {
     ///
     /// DB key: `zeroconf.pki_addr`
     ZeroconfPkiAddr,
+    /// Per-tenant toggle for the Dashboard Icons enhancement plugin.
+    ///
+    /// When `true`, newly created software items are automatically enriched
+    /// with an icon URL from the Dashboard Icons project.
+    ///
+    /// DB key: `dashboard_icons.enabled`
+    DashboardIconsEnabled,
 }
 
 impl SettingKey {
@@ -81,6 +88,7 @@ impl SettingKey {
             Self::ZeroconfEnabled => "zeroconf.enabled",
             Self::ZeroconfUrl => "zeroconf.url",
             Self::ZeroconfPkiAddr => "zeroconf.pki_addr",
+            Self::DashboardIconsEnabled => "dashboard_icons.enabled",
         }
     }
 
@@ -113,6 +121,7 @@ impl SettingKey {
             "zeroconf.enabled" => Some(Self::ZeroconfEnabled),
             "zeroconf.url" => Some(Self::ZeroconfUrl),
             "zeroconf.pki_addr" => Some(Self::ZeroconfPkiAddr),
+            "dashboard_icons.enabled" => Some(Self::DashboardIconsEnabled),
             _ => None,
         }
     }
@@ -192,5 +201,6 @@ mod tests {
         assert!(!SettingKey::RegistrationMode.is_global());
         assert!(!SettingKey::AuditLogFilter.is_global());
         assert!(!SettingKey::AuditLogRetentionDays.is_global());
+        assert!(!SettingKey::DashboardIconsEnabled.is_global());
     }
 }
