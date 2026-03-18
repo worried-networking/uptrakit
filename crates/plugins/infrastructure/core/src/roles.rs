@@ -32,7 +32,6 @@ use crate::batch_detect::{BatchDetectItem, BatchDetectResult};
 use crate::batch_fetch::{BatchFetchItem, BatchFetchResult};
 use crate::batch_update::{BatchUpdateItem, BatchUpdateResult};
 use crate::error::Result;
-use crate::plugin_base::{SoftwareItemCreatedEvent, SoftwareItemPatch};
 use crate::traits::{HostCompatibility, PreUpdateHookResult, UpdateLifecycleContext};
 use crate::types::{DiscoveredSoftware, ReleaseInfo, UpstreamRelease};
 use crate::version::Version;
@@ -212,6 +211,70 @@ pub trait NotificationTransport: PluginMeta {
         settings: &serde_json::Value,
         message: &uptrakit_notification_plugin_core::DeliveryMessage,
     ) -> uptrakit_notification_plugin_core::Result<()>;
+}
+
+// ── Software item lifecycle types ────────────────────────────────────────
+
+/// Snapshot of a just-created software item, decoupled from SeaORM.
+///
+/// Plugins receive this as an immutable reference so they can inspect the
+/// item without accessing the database.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct SoftwareItemCreatedEvent {
+    pub id: uuid::Uuid,
+    pub tenant_id: uuid::Uuid,
+    pub name: String,
+    pub featured: bool,
+    pub icon_url: Option<String>,
+}
+
+impl SoftwareItemCreatedEvent {
+    /// Create a new event snapshot.
+    pub fn new(
+        id: uuid::Uuid,
+        tenant_id: uuid::Uuid,
+        name: String,
+        featured: bool,
+        icon_url: Option<String>,
+    ) -> Self {
+        Self {
+            id,
+            tenant_id,
+            name,
+            featured,
+            icon_url,
+        }
+    }
+}
+
+/// Patch returned by a software item lifecycle plugin.
+///
+/// Only `Some` fields are applied to the database row. This uses the
+/// `Option<Option<T>>` pattern: `Some(Some(url))` = set, `Some(None)` = clear,
+/// `None` = no change.
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+pub struct SoftwareItemPatch {
+    pub icon_url: Option<Option<String>>,
+}
+
+impl SoftwareItemPatch {
+    /// Create an empty patch (no changes).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the `icon_url` field.
+    pub fn with_icon_url(mut self, icon_url: Option<String>) -> Self {
+        self.icon_url = Some(icon_url);
+        self
+    }
+
+    /// Returns `true` when no fields are set.
+    pub fn is_empty(&self) -> bool {
+        self.icon_url.is_none()
+    }
 }
 
 /// Plugins that react to software item lifecycle events.

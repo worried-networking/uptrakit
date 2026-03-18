@@ -3,8 +3,8 @@
 //! [`ProxmoxPlugin`] is the unified plugin struct used on both the controller
 //! and agent sides. On the controller it communicates with the Proxmox VE REST
 //! API to discover VMs/CTs and match them to Uptrakit-managed hosts. On the
-//! agent (with `agent-infra` feature) it implements `HostLifecyclePlugin`,
-//! `HostReportPlugin`, and `GuestExecPlugin` subtraits.
+//! agent (with `agent-infra` feature) it implements `HostLifecycle`,
+//! `HostReport`, and `GuestExec` subtraits.
 //!
 //! The `guest_exec` and `pve_setup` modules provide agent-side functionality
 //! for executing commands inside PVE guests and bootstrapping PVE API credentials.

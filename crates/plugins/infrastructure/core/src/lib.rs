@@ -16,11 +16,9 @@ pub mod form_schema;
 pub mod host_requirements;
 pub mod host_runtime;
 pub mod macros;
-pub mod plugin_base;
 pub mod plugin_config;
 pub mod plugin_ops;
 pub mod roles;
-pub mod secrets;
 pub mod serde_helpers;
 #[cfg(feature = "testing")]
 pub mod testing;
@@ -32,15 +30,7 @@ pub use batch_detect::{BatchDetectItem, BatchDetectResult};
 pub use batch_fetch::{BatchFetchItem, BatchFetchResult};
 pub use batch_update::{BatchUpdateItem, BatchUpdateResult};
 pub use error::{PluginError, Result};
-pub use form_schema::ConfigFormSchema;
-pub use plugin_base::{
-    DiscoveryPlugin, NotificationTransportPlugin, PackageIndexPlugin, PluginBase,
-    ReleaseFetcherPlugin, SoftwareItemCreatedEvent, SoftwareItemLifecyclePlugin, SoftwareItemPatch,
-    UpdateExecutorPlugin, UpdateLifecyclePlugin, VersionDetectorPlugin,
-};
-#[cfg(feature = "agent-infra")]
-pub use plugin_base::{GuestExecPlugin, HostLifecyclePlugin, HostReportPlugin};
-pub use secrets::SecretMasking;
+pub use roles::{SoftwareItemCreatedEvent, SoftwareItemPatch};
 pub use traits::{
     HostCompatibility, PreUpdateHookResult, SudoCommandEntry, SudoHelperScript,
     UpdateLifecycleContext,

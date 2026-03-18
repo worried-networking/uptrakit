@@ -15,12 +15,13 @@ use crate::descriptor::{
     CatalogConfig, ExtensionActionContext, ExtensionActionHandler, PluginDescriptor,
 };
 use crate::error::PluginError;
-use crate::plugin_base::{SoftwareItemCreatedEvent, SoftwareItemPatch};
 use crate::plugin_ops::{
     NotificationOps, PluginConfigOps, PluginExtensionOps, PluginMetadataOps,
     SoftwareItemLifecycleOps,
 };
-use crate::roles::{NotificationTransport, SoftwareItemLifecycle};
+use crate::roles::{
+    NotificationTransport, SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemPatch,
+};
 
 /// Errors during catalog construction.
 #[derive(Debug, thiserror::Error)]

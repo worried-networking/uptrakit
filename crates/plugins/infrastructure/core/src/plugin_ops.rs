@@ -20,8 +20,9 @@ use uptrakit_shared_types::{PluginCapability, PluginTypeId};
 
 use crate::descriptor::{ConfigTestOps, ExtensionActionContext, PluginDescriptor, PluginFamily};
 use crate::host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
-use crate::plugin_base::{SoftwareItemCreatedEvent, SoftwareItemPatch};
-use crate::roles::{NotificationTransport, SoftwareItemLifecycle};
+use crate::roles::{
+    NotificationTransport, SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemPatch,
+};
 
 // ── Error type ──────────────────────────────────────────────────────────────
 

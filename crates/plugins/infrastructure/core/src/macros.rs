@@ -40,6 +40,11 @@ macro_rules! declare_plugin {
             $(, extra_capabilities: [ $( $extra_cap:expr ),+ $(,)? ] )?
             $(, notification_transport: $transport_fn:expr )?
             $(, software_item_lifecycle: $lifecycle_fn:expr )?
+            $(, infra: {
+                create: $infra_create_fn:expr,
+                host_requirements: $infra_hr:expr,
+                capabilities: $infra_caps:expr $(,)?
+            } )?
             $(, owned_extension_ids: $ext_ids:expr )?
             $(, raw_settings_keys: $raw_keys:expr )?
             $(, sudo: $sudo_fn:expr )?
@@ -194,6 +199,21 @@ macro_rules! declare_plugin {
                 )?
                 $(
                     rc.software_item_lifecycle = Some($lifecycle_fn);
+                )?
+                $(
+                    #[cfg(feature = "agent-infra")]
+                    {
+                        rc.infra = Some($crate::InfraSlot {
+                            create: $infra_create_fn,
+                            host_requirements: $infra_hr,
+                            capabilities: $infra_caps,
+                        });
+                    }
+                    // Silence unused variable warnings when agent-infra is disabled.
+                    #[cfg(not(feature = "agent-infra"))]
+                    {
+                        let _ = stringify!($infra_create_fn);
+                    }
                 )?
                 rc
             },

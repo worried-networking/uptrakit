@@ -1,7 +1,7 @@
 //! Proxmox VE agent infrastructure plugin — subtrait implementations.
 //!
-//! Implements infrastructure subtraits (`HostLifecyclePlugin`,
-//! `HostReportPlugin`, `GuestExecPlugin`) on [`ProxmoxPlugin`](crate::ProxmoxPlugin)
+//! Implements infrastructure subtraits (`HostLifecycle`,
+//! `HostReport`, `GuestExec`) on [`ProxmoxPlugin`](crate::ProxmoxPlugin)
 //! for PVE-specific agent logic: bootstrap detection, credential creation,
 //! host sync, extension actions, and deferred post-ReportHosts matching.
 
@@ -41,10 +41,10 @@ pub fn agent_extension_actions() -> Vec<ActionDef> {
 
 // ── Subtrait implementations on ProxmoxPlugin ────────────────────────────────
 
-use uptrakit_plugin_infrastructure_core::{GuestExecPlugin, HostLifecyclePlugin, HostReportPlugin};
+use uptrakit_plugin_infrastructure_core::{GuestExec, HostLifecycle, HostReport};
 
 #[async_trait]
-impl HostLifecyclePlugin for crate::ProxmoxPlugin {
+impl HostLifecycle for crate::ProxmoxPlugin {
     async fn on_host_bootstrapped(
         &self,
         ctx: &InfraPluginContext<'_>,
@@ -223,17 +223,6 @@ impl HostLifecyclePlugin for crate::ProxmoxPlugin {
         })
     }
 
-    async fn has_infra_state(&self, db: &DatabaseConnection, host_id: uuid::Uuid) -> bool {
-        db_ops::find_host_state(db, &host_id.to_string())
-            .await
-            .ok()
-            .flatten()
-            .is_some_and(|s| s.is_pve_node)
-    }
-}
-
-#[async_trait]
-impl HostReportPlugin for crate::ProxmoxPlugin {
     async fn on_post_report_hosts(&self, ctx: &InfraPluginContext<'_>) -> Result<()> {
         let pending = db_ops::drain_pending_matches(ctx.db)
             .await
@@ -324,11 +313,30 @@ impl HostReportPlugin for crate::ProxmoxPlugin {
 }
 
 #[async_trait]
-impl GuestExecPlugin for crate::ProxmoxPlugin {
+impl HostReport for crate::ProxmoxPlugin {
+    async fn has_infra_state(&self, db: &DatabaseConnection, host_id: uuid::Uuid) -> bool {
+        db_ops::find_host_state(db, &host_id.to_string())
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|s| s.is_pve_node)
+    }
+}
+
+#[async_trait]
+impl GuestExec for crate::ProxmoxPlugin {
     fn guest_exec_provider(&self) -> Option<Arc<dyn GuestExecProvider>> {
         Some(Arc::new(
             super::guest_exec_adapter::ProxmoxGuestExecProvider,
         ))
+    }
+
+    async fn handle_service_extension_action(
+        &self,
+        ctx: &uptrakit_plugin_infrastructure_core::agent_infra::InfraPluginContext<'_>,
+        request: &uptrakit_extension_framework::ExtensionRequestPayload,
+    ) -> Option<uptrakit_extension_framework::ExtensionResponsePayload> {
+        super::extension_actions::handle_action(ctx, request).await
     }
 }
 

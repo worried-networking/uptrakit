@@ -90,12 +90,44 @@ fn __proxmox_migrations() -> Vec<Box<dyn std::any::Any>> {
     vec![]
 }
 
+/// Create the agent-side `InfraBundle` for Proxmox.
+///
+/// Returns all three narrow trait objects (lifecycle, report, guest_exec) from a
+/// single `ProxmoxPlugin` instance, matching the old `PluginBase` downcasting
+/// pattern but via explicit bundle fields.
+#[cfg(feature = "agent-infra")]
+fn __proxmox_create_infra(
+    _config: &uptrakit_plugin_infrastructure_core::CatalogConfig,
+) -> uptrakit_plugin_infrastructure_core::error::Result<
+    uptrakit_plugin_infrastructure_core::InfraBundle,
+> {
+    let plugin = std::sync::Arc::new(ProxmoxPlugin::new_agent());
+    Ok(uptrakit_plugin_infrastructure_core::InfraBundle {
+        lifecycle: Some(plugin.clone()),
+        report: Some(plugin.clone()),
+        guest_exec: Some(plugin),
+    })
+}
+
 declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
     display_name: "Proxmox VE",
     family: PluginFamily::Infrastructure,
     config_model: ConfigModel::PluginConfig,
     host_requirements: HostRequirements::CONTROLLER_ONLY,
     roles: [ReleaseFetcher, UpdateExecutor],
+    infra: {
+        create: __proxmox_create_infra,
+        host_requirements: uptrakit_plugin_infrastructure_core::HostRequirements::new(
+            &[uptrakit_shared_types::OsFamily::Linux],
+            &[],
+            false,
+        ),
+        capabilities: &[
+            uptrakit_shared_types::PluginCapability::HostLifecycle,
+            uptrakit_shared_types::PluginCapability::HostReport,
+            uptrakit_shared_types::PluginCapability::GuestExec,
+        ],
+    },
     owned_extension_ids: &["proxmox."],
     extensions: {
         manifests: ProxmoxPlugin::extension_manifests_static,
@@ -104,127 +136,6 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
     },
     migrations: __proxmox_migrations,
 });
-
-// ── PluginBase implementation (legacy, for agent-infra traits) ────────────
-
-// The agent-infra traits (HostLifecyclePlugin, HostReportPlugin, GuestExecPlugin)
-// still use the old PluginBase trait. They will be migrated in Phase 4.
-// For now, keep the manual PluginBase impl for agent-side functionality only.
-
-#[cfg(feature = "agent-infra")]
-#[async_trait::async_trait]
-impl uptrakit_plugin_infrastructure_core::PluginBase for ProxmoxPlugin {
-    fn plugin_type_id(&self) -> &str {
-        "infrastructure_proxmox"
-    }
-
-    fn capabilities(&self) -> Vec<uptrakit_shared_types::PluginCapability> {
-        use uptrakit_shared_types::PluginCapability;
-        vec![
-            PluginCapability::HostLifecycle,
-            PluginCapability::HostReport,
-            PluginCapability::GuestExec,
-            PluginCapability::ServiceMigrations,
-        ]
-    }
-
-    fn validate_config(&self, config: &serde_json::Value) -> std::result::Result<(), String> {
-        let typed: ProxmoxConfig = serde_json::from_value(config.clone())
-            .map_err(|e| format!("failed to parse config: {e}"))?;
-        uptrakit_plugin_infrastructure_core::PluginConfig::validate(&typed)
-    }
-
-    fn mask_config_secrets(&self, config: &serde_json::Value) -> serde_json::Value {
-        let Ok(cfg) = serde_json::from_value::<ProxmoxConfig>(config.clone()) else {
-            return config.clone();
-        };
-        let masked = uptrakit_plugin_infrastructure_core::PluginConfig::with_secrets_masked(cfg);
-        serde_json::to_value(masked).unwrap_or_else(|e| {
-            tracing::error!(error = %e, "failed to serialize masked plugin config");
-            config.clone()
-        })
-    }
-
-    fn restore_config_secrets(
-        &self,
-        incoming: &serde_json::Value,
-        stored: &serde_json::Value,
-    ) -> serde_json::Value {
-        let (Ok(mut inc), Ok(ex)) = (
-            serde_json::from_value::<ProxmoxConfig>(incoming.clone()),
-            serde_json::from_value::<ProxmoxConfig>(stored.clone()),
-        ) else {
-            return incoming.clone();
-        };
-        uptrakit_plugin_infrastructure_core::PluginConfig::restore_secrets_from(&mut inc, &ex);
-        serde_json::to_value(&inc).unwrap_or_else(|_| incoming.clone())
-    }
-
-    fn form_schema(&self) -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        <ProxmoxConfig as uptrakit_plugin_infrastructure_core::PluginConfig>::form_schema()
-    }
-
-    fn sample_config(&self) -> serde_json::Value {
-        serde_json::to_value(ProxmoxConfig::default()).unwrap_or_else(|_| serde_json::json!({}))
-    }
-
-    fn validate_package_identifier(&self, value: &str) -> std::result::Result<(), String> {
-        ProxmoxConfig::validate_identifier(value)
-    }
-
-    fn extension_manifests() -> Vec<uptrakit_extension_framework::ExtensionManifest>
-    where
-        Self: Sized,
-    {
-        // Agent mode: no top-level manifests — the Proxmox plugin contributes
-        // actions to the SSH agent's existing `ssh-agent.hosts` manifest.
-        vec![]
-    }
-
-    fn extension_actions() -> Vec<uptrakit_extension_framework::ActionDef>
-    where
-        Self: Sized,
-    {
-        crate::agent::plugin::agent_extension_actions()
-    }
-
-    fn primary_action_ids(&self) -> Vec<String> {
-        vec!["bootstrap-proxmox-guest".to_string()]
-    }
-
-    async fn handle_service_extension_action(
-        &self,
-        ctx: &uptrakit_plugin_infrastructure_core::agent_infra::InfraPluginContext<'_>,
-        request: &uptrakit_extension_framework::ExtensionRequestPayload,
-    ) -> Option<uptrakit_extension_framework::ExtensionResponsePayload> {
-        crate::agent::extension_actions::handle_action(ctx, request).await
-    }
-
-    fn controller_migrations(&self) -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
-        crate::controller_migration::migrations()
-    }
-
-    fn service_migrations(&self) -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
-        vec![
-            Box::new(crate::agent::migration::CreateProxmoxHostState),
-            Box::new(crate::agent::migration::CreateProxmoxPendingMatches),
-        ]
-    }
-
-    fn as_host_lifecycle(
-        &self,
-    ) -> Option<&dyn uptrakit_plugin_infrastructure_core::HostLifecyclePlugin> {
-        Some(self)
-    }
-
-    fn as_host_report(&self) -> Option<&dyn uptrakit_plugin_infrastructure_core::HostReportPlugin> {
-        Some(self)
-    }
-
-    fn as_guest_exec(&self) -> Option<&dyn uptrakit_plugin_infrastructure_core::GuestExecPlugin> {
-        Some(self)
-    }
-}
 
 // ── Stub trait implementations for declare_plugin! roles ─────────────────
 
