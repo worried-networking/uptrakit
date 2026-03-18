@@ -88,3 +88,31 @@ pub fn build_plugin_http_client(
         .build()
         .map_err(|e| format!("failed to build HTTP client: {e}"))
 }
+
+/// Build a shared base [`reqwest::Client`] with SSRF protection for controller-side use.
+///
+/// This creates a reusable HTTP client intended to be stored in [`CatalogConfig`] and
+/// cloned by controller-side singletons (transports, enhancements) and
+/// [`ControllerRuntime`]. It provides:
+///
+/// - WebPKI certificate verification.
+/// - SSRF-safe DNS resolution (strict or permissive based on `allow_private_urls`).
+/// - 10-second connection timeout and 60-second per-request timeout.
+/// - Redirect following up to 10 hops (individual plugins can override per-request).
+/// - No default authentication headers — auth is applied per-request by each plugin.
+///
+/// [`CatalogConfig`]: crate::descriptor::CatalogConfig
+/// [`ControllerRuntime`]: crate::descriptor::ControllerRuntime
+#[cfg(feature = "catalog")]
+pub fn build_base_http_client(allow_private_urls: bool) -> Result<reqwest::Client, String> {
+    build_plugin_http_client(PluginHttpClientConfig {
+        user_agent: "uptrakit",
+        ssrf_mode: if allow_private_urls {
+            SsrfMode::Permissive
+        } else {
+            SsrfMode::Strict
+        },
+        redirect_policy: reqwest::redirect::Policy::limited(10),
+        ..PluginHttpClientConfig::default()
+    })
+}
