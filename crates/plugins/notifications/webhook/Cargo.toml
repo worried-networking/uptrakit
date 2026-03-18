@@ -13,6 +13,8 @@ async-trait = { workspace = true }
 hmac = { workspace = true }
 reqwest = { workspace = true }
 rootcause = { workspace = true }
+sea-orm = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 tracing = { workspace = true }
@@ -22,7 +24,6 @@ uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-op
 uptrakit-shared-db = { workspace = true }
 uptrakit-shared-types = { workspace = true, features = ["http-ssrf"] }
 uuid = { workspace = true }
-url = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

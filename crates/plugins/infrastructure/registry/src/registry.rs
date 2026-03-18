@@ -72,6 +72,86 @@ fn restore_secrets_for<T: SecretMasking>(
     }
 }
 
+// ── Notification transport adapter (bridging new framework to legacy PluginBase) ─
+
+/// Adapter bridging a migrated notification plugin (with `PluginDescriptor` +
+/// `NotificationTransport`) to the legacy `PluginBase` interface.
+///
+/// During the migration, the registry still stores notification plugins as
+/// `Arc<dyn PluginBase>`. Migrated plugins (starting with webhook) produce a
+/// `PluginDescriptor` and an `Arc<dyn NotificationTransport>` but no longer
+/// implement `PluginBase` directly. This adapter wraps both and delegates:
+///
+/// - Config ops (`validate_config`, `mask_config_secrets`, `restore_config_secrets`)
+///   go through `descriptor.config.*` function pointers.
+/// - `as_notification_transport()` returns a thin inner wrapper that adapts the
+///   new `NotificationTransport` to the old `NotificationTransportPlugin`.
+///
+/// Once all notification plugins are migrated and the registry is refactored to
+/// use `PluginDescriptor` directly, this adapter can be removed.
+#[cfg(feature = "notifications")]
+struct NotificationPluginAdapter {
+    descriptor: &'static uptrakit_plugin_infrastructure_core::PluginDescriptor,
+    transport: Arc<dyn uptrakit_plugin_infrastructure_core::NotificationTransport>,
+}
+
+#[cfg(feature = "notifications")]
+#[async_trait::async_trait]
+impl PluginBase for NotificationPluginAdapter {
+    fn plugin_type_id(&self) -> &str {
+        self.descriptor.type_id
+    }
+
+    fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+        self.descriptor.capabilities.to_vec()
+    }
+
+    fn validate_config(&self, config: &serde_json::Value) -> std::result::Result<(), String> {
+        (self.descriptor.config.validate)(config)
+    }
+
+    fn mask_config_secrets(&self, config: &serde_json::Value) -> serde_json::Value {
+        (self.descriptor.config.mask_secrets)(config)
+    }
+
+    fn restore_config_secrets(
+        &self,
+        incoming: &serde_json::Value,
+        stored: &serde_json::Value,
+    ) -> serde_json::Value {
+        let mut val = incoming.clone();
+        (self.descriptor.config.restore_secrets)(&mut val, stored);
+        val
+    }
+
+    fn as_notification_transport(
+        &self,
+    ) -> Option<&dyn uptrakit_plugin_infrastructure_core::NotificationTransportPlugin> {
+        Some(self)
+    }
+}
+
+/// Implement the old `NotificationTransportPlugin` on the adapter by
+/// delegating to the wrapped `Arc<dyn NotificationTransport>`.
+#[cfg(feature = "notifications")]
+#[async_trait::async_trait]
+impl uptrakit_plugin_infrastructure_core::NotificationTransportPlugin
+    for NotificationPluginAdapter
+{
+    fn channel_type(&self) -> &'static str {
+        self.descriptor.type_id
+    }
+
+    async fn deliver(
+        &self,
+        config: &serde_json::Value,
+        settings: &serde_json::Value,
+        message: &uptrakit_notification_plugin_core::DeliveryMessage,
+    ) -> uptrakit_notification_plugin_core::Result<()> {
+        self.transport.deliver(config, settings, message).await
+    }
+}
+
 /// Probe whether a plugin instance is compatible with the target host.
 ///
 /// Returns `true` when the plugin is compatible or when the compatibility
@@ -714,10 +794,28 @@ impl PluginRegistry {
 
         #[cfg(feature = "notifications-webhook")]
         {
-            let plugin = uptrakit_notification_plugin_webhook::WebhookPlugin::new(
-                config.allow_private_urls,
-            )?;
-            plugins.insert("webhook", std::sync::Arc::new(plugin));
+            let catalog_config = uptrakit_plugin_infrastructure_core::CatalogConfig {
+                allow_private_urls: config.allow_private_urls,
+                ..Default::default()
+            };
+            let transport_fn = uptrakit_notification_plugin_webhook::DESCRIPTOR
+                .roles
+                .notification_transport
+                .expect("webhook descriptor has notification_transport");
+            let transport = transport_fn(&catalog_config).map_err(|e| {
+                rootcause::report!(
+                    uptrakit_notification_plugin_core::NotificationPluginError::HttpClientBuild(
+                        e.to_string()
+                    )
+                )
+            })?;
+            plugins.insert(
+                "webhook",
+                std::sync::Arc::new(NotificationPluginAdapter {
+                    descriptor: &uptrakit_notification_plugin_webhook::DESCRIPTOR,
+                    transport,
+                }),
+            );
         }
 
         #[cfg(feature = "notifications-telegram")]

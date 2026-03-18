@@ -231,11 +231,19 @@ impl PluginOps for PluginRegistry {
         #[allow(unused_mut)]
         let mut manifests = PluginRegistry::static_plugin_extension_manifests();
         #[cfg(feature = "notifications-webhook")]
-        manifests
-            .extend(uptrakit_notification_plugin_webhook::WebhookPlugin::extension_manifests());
+        {
+            let ext = uptrakit_notification_plugin_webhook::DESCRIPTOR
+                .extensions
+                .expect("webhook plugin has extensions");
+            manifests.extend((ext.manifests)());
+        }
         #[cfg(feature = "notifications-telegram")]
-        manifests
-            .extend(uptrakit_notification_plugin_telegram::TelegramPlugin::extension_manifests());
+        {
+            let ext = uptrakit_notification_plugin_telegram::DESCRIPTOR
+                .extensions
+                .expect("telegram plugin has extensions");
+            manifests.extend((ext.manifests)());
+        }
         #[cfg(feature = "notifications-email")]
         manifests.extend(uptrakit_notification_plugin_email::EmailPlugin::extension_manifests());
         manifests
@@ -245,9 +253,19 @@ impl PluginOps for PluginRegistry {
         #[allow(unused_mut)]
         let mut actions = PluginRegistry::static_plugin_extension_actions();
         #[cfg(feature = "notifications-webhook")]
-        actions.extend(uptrakit_notification_plugin_webhook::WebhookPlugin::extension_actions());
+        {
+            let ext = uptrakit_notification_plugin_webhook::DESCRIPTOR
+                .extensions
+                .expect("webhook plugin has extensions");
+            actions.extend((ext.actions)());
+        }
         #[cfg(feature = "notifications-telegram")]
-        actions.extend(uptrakit_notification_plugin_telegram::TelegramPlugin::extension_actions());
+        {
+            let ext = uptrakit_notification_plugin_telegram::DESCRIPTOR
+                .extensions
+                .expect("telegram plugin has extensions");
+            actions.extend((ext.actions)());
+        }
         #[cfg(feature = "notifications-email")]
         actions.extend(uptrakit_notification_plugin_email::EmailPlugin::extension_actions());
         actions
@@ -271,16 +289,22 @@ impl PluginOps for PluginRegistry {
         // (e.g. webhook's "Add Webhook").
         #[cfg(feature = "notifications-webhook")]
         {
-            let m = uptrakit_notification_plugin_webhook::WebhookPlugin::extension_manifests();
-            let a = uptrakit_notification_plugin_webhook::WebhookPlugin::extension_actions();
+            let ext = uptrakit_notification_plugin_webhook::DESCRIPTOR
+                .extensions
+                .expect("webhook plugin has extensions");
+            let m = (ext.manifests)();
+            let a = (ext.actions)();
             for manifest in m {
                 result.push((manifest, a.clone()));
             }
         }
         #[cfg(feature = "notifications-telegram")]
         {
-            let m = uptrakit_notification_plugin_telegram::TelegramPlugin::extension_manifests();
-            let a = uptrakit_notification_plugin_telegram::TelegramPlugin::extension_actions();
+            let ext = uptrakit_notification_plugin_telegram::DESCRIPTOR
+                .extensions
+                .expect("telegram plugin has extensions");
+            let m = (ext.manifests)();
+            let a = (ext.actions)();
             for manifest in m {
                 result.push((manifest, a.clone()));
             }

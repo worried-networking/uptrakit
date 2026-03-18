@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use sea_orm::EntityTrait;
 use uptrakit_crypto::{decrypt_str, encrypt_str, is_encrypted};
 use uptrakit_notification_plugin_core::DeliveryMessage;
-use uptrakit_plugin_infrastructure_core::{ExtensionActionContext, PluginBase as _};
+use uptrakit_plugin_infrastructure_core::ExtensionActionContext;
 use uptrakit_shared_db::entity::prelude::User;
 use uptrakit_shared_db::raw_settings::{
     load_global_settings_by_prefix, load_settings_by_prefix, upsert_global_setting_raw,
@@ -512,10 +512,9 @@ async fn handle_test_global_smtp_email(
         "sending test email with global SMTP settings"
     );
 
+    use uptrakit_plugin_infrastructure_core::NotificationTransport as _;
+
     let plugin = EmailPlugin;
-    let transport = plugin
-        .as_notification_transport()
-        .ok_or_else(|| "Email plugin does not support delivery".to_string())?;
 
     let test_msg = DeliveryMessage::new(
         "Test Email from Uptrakit",
@@ -526,10 +525,10 @@ async fn handle_test_global_smtp_email(
     );
 
     // The config is already merged with SMTP settings above, so pass an
-    // empty settings bag — deliver() will see smtp_host in the config and
+    // empty settings bag -- deliver() will see smtp_host in the config and
     // skip re-merging.
     let empty_settings = serde_json::json!({});
-    transport
+    plugin
         .deliver(&config, &empty_settings, &test_msg)
         .await
         .map_err(|e| {
