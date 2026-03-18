@@ -320,6 +320,16 @@
 		if (host) confirmUnassign = host;
 	}
 
+	function openDockerExtensionModal(extensionId: string, action: ActionDef) {
+		const host = resolveMenuHost();
+		closeMenu();
+		if (!host) {
+			showError('Host assignment is no longer available');
+			return;
+		}
+		dockerExtModal = { extensionId, action, hostId: host.host_id };
+	}
+
 	function menuCheckHostVersions() {
 		const host = resolveMenuHost();
 		closeMenu();
@@ -788,10 +798,7 @@
 										class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
 										role="menuitem"
 										tabindex="-1"
-										onclick={() => {
-											closeMenu();
-											dockerExtModal = { extensionId: ext.id, action, hostId: host.host_id };
-										}}
+										onclick={() => openDockerExtensionModal(ext.id, action)}
 									>
 										{action.label}
 									</button>
