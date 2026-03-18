@@ -64,12 +64,9 @@ impl SoftwareItemLifecyclePlugin for DashboardIconsPlugin {
 mod tests {
     use super::*;
     use crate::cache::DashboardIconCache;
-    use std::collections::HashSet;
 
-    fn make_plugin(slugs: &[&str]) -> DashboardIconsPlugin {
-        let client = reqwest::Client::new();
-        let set: HashSet<String> = slugs.iter().map(|s| s.to_string()).collect();
-        let cache = DashboardIconCache::new_with_slugs(client, set);
+    fn make_plugin(paths: &[&str]) -> DashboardIconsPlugin {
+        let cache = DashboardIconCache::new_with_paths(reqwest::Client::new(), paths);
         DashboardIconsPlugin::new(Arc::new(cache))
     }
 
@@ -85,7 +82,7 @@ mod tests {
 
     #[tokio::test]
     async fn sets_icon_when_match_found() {
-        let plugin = make_plugin(&["nginx"]);
+        let plugin = make_plugin(&["svg/nginx.svg"]);
         let ev = event("Nginx", None);
         let patch = plugin.on_software_item_created(&ev).await.unwrap();
         assert!(patch.is_some());
@@ -95,7 +92,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_patch_when_icon_already_set() {
-        let plugin = make_plugin(&["nginx"]);
+        let plugin = make_plugin(&["svg/nginx.svg"]);
         let ev = event("Nginx", Some("https://example.com/icon.png"));
         let patch = plugin.on_software_item_created(&ev).await.unwrap();
         assert!(patch.is_none());
@@ -103,7 +100,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_patch_when_no_match() {
-        let plugin = make_plugin(&["nginx"]);
+        let plugin = make_plugin(&["svg/nginx.svg"]);
         let ev = event("SomeUnknownApp", None);
         let patch = plugin.on_software_item_created(&ev).await.unwrap();
         assert!(patch.is_none());
@@ -111,7 +108,7 @@ mod tests {
 
     #[tokio::test]
     async fn actual_budget_maps_to_actual_budget_slug() {
-        let plugin = make_plugin(&["actual-budget"]);
+        let plugin = make_plugin(&["svg/actual-budget-light.svg"]);
         let ev = event("Actual Budget", None);
         let patch = plugin.on_software_item_created(&ev).await.unwrap();
         assert!(patch.is_some());
@@ -121,7 +118,7 @@ mod tests {
                 .icon_url
                 .unwrap()
                 .unwrap()
-                .contains("actual-budget.svg")
+                .contains("actual-budget-light.svg")
         );
     }
 }
