@@ -7,6 +7,8 @@ pub use http_client::{PluginHttpClientConfig, SsrfMode, build_plugin_http_client
 pub mod batch_detect;
 pub mod batch_fetch;
 pub mod batch_update;
+#[cfg(feature = "catalog")]
+pub mod catalog;
 pub mod command;
 pub mod descriptor;
 pub mod error;
@@ -16,7 +18,6 @@ pub mod host_runtime;
 pub mod macros;
 pub mod plugin_base;
 pub mod plugin_config;
-#[cfg(feature = "plugin-ops")]
 pub mod plugin_ops;
 pub mod roles;
 pub mod secrets;
@@ -50,8 +51,15 @@ pub use types::{
 };
 pub use version::Version;
 
-#[cfg(feature = "plugin-ops")]
-pub use plugin_ops::{ExtensionActionContext, PluginOps, PluginOpsError};
+// New plugin_ops: always available (no feature gate)
+pub use plugin_ops::{
+    NotificationOps, PluginConfigOps, PluginExtensionOps, PluginMetadataOps, PluginOps,
+    PluginOpsError, SoftwareItemLifecycleOps,
+};
+
+// Catalog (feature-gated)
+#[cfg(feature = "catalog")]
+pub use catalog::PluginCatalog;
 
 // Re-export the shared command-capture helper so plugin crates access it through this crate
 pub use command::execute_and_capture;
@@ -75,14 +83,9 @@ pub use uptrakit_shared_types::SecretString;
 pub use tokio::sync::mpsc;
 
 /// Typed sender for streaming update output lines to the executor.
-///
-/// Prefer this alias over `mpsc::Sender<UpdateOutputLine>` directly so that
-/// plugin code remains decoupled from the concrete channel implementation.
 pub type UpdateOutputSender = mpsc::Sender<UpdateOutputLine>;
 
 /// Typed receiver for consuming update output lines produced by the executor.
-///
-/// Prefer this alias over `mpsc::Receiver<UpdateOutputLine>` directly.
 pub type UpdateOutputReceiver = mpsc::Receiver<UpdateOutputLine>;
 
 // ── New framework re-exports ────────────────────────────────────────────────
@@ -91,17 +94,9 @@ pub type UpdateOutputReceiver = mpsc::Receiver<UpdateOutputLine>;
 pub use descriptor::ControllerRuntime;
 pub use descriptor::{
     CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps, CreateEnhancementFn, CreateRoleFn,
-    CreateTransportFn, ExtensionActionHandler, ExtensionOps, PluginDescriptor, PluginFamily,
-    RoleCreators, RoleSlot, TypeSettingsOps,
+    CreateTransportFn, ExtensionActionContext, ExtensionActionHandler, ExtensionOps,
+    PluginDescriptor, PluginFamily, RoleCreators, RoleSlot, TypeSettingsOps,
 };
-// During migration: `plugin_ops` (gated on `plugin-ops`) exports its own
-// `ExtensionActionContext` with a concrete `&DatabaseConnection` field.
-// The `descriptor` module defines a new version using `&dyn Any`.
-// Re-export the descriptor version only when `plugin-ops` is NOT enabled,
-// to avoid a naming conflict. Once the old `plugin_ops` is removed (Phase 3),
-// this conditional disappears and the descriptor version is always exported.
-#[cfg(not(feature = "plugin-ops"))]
-pub use descriptor::ExtensionActionContext;
 pub use descriptor::{InfraBundle, InfraSlot, MigrationsFn};
 pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
 

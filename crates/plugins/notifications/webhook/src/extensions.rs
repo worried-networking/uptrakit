@@ -1,5 +1,6 @@
 //! Extension action handlers for the Webhook notification plugin.
 
+use sea_orm::DatabaseConnection;
 use uptrakit_plugin_infrastructure_core::ExtensionActionContext;
 
 /// Handle an extension action for the webhook notification plugin.
@@ -13,6 +14,11 @@ pub async fn handle_action(
     action_id: &str,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
+    let db = ctx
+        .db
+        .downcast_ref::<DatabaseConnection>()
+        .ok_or_else(|| "expected DatabaseConnection".to_string())?;
+
     match action_id {
         "list" => {
             let tenant_id = ctx
@@ -20,7 +26,7 @@ pub async fn handle_action(
                 .ok_or_else(|| "tenant_id is required for listing channels".to_string())?;
 
             uptrakit_notification_plugin_core::list_channels::list_channels(
-                ctx.db,
+                db,
                 tenant_id,
                 "webhook",
                 &params,

@@ -1,5 +1,6 @@
 //! Extension action handlers for the Telegram notification plugin.
 
+use sea_orm::DatabaseConnection;
 use uptrakit_plugin_infrastructure_core::ExtensionActionContext;
 
 // ── Raw settings key constants ────────────────────────────────────────────────
@@ -33,6 +34,11 @@ pub async fn handle_action(
     action_id: &str,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
+    let db = ctx
+        .db
+        .downcast_ref::<DatabaseConnection>()
+        .ok_or_else(|| "expected DatabaseConnection".to_string())?;
+
     match action_id {
         "list" => {
             let tenant_id = ctx
@@ -40,7 +46,7 @@ pub async fn handle_action(
                 .ok_or_else(|| "tenant_id is required for listing channels".to_string())?;
 
             uptrakit_notification_plugin_core::list_channels::list_channels(
-                ctx.db,
+                db,
                 tenant_id,
                 "telegram",
                 &params,
@@ -63,9 +69,9 @@ pub async fn handle_action(
             )
             .await
         }
-        "get_global_telegram" => handle_get_global_telegram(ctx.db).await,
-        "save_global_telegram" => handle_save_global_telegram(ctx.db, &params).await,
-        "handle_callback" => handle_callback(ctx, &params).await,
+        "get_global_telegram" => handle_get_global_telegram(db).await,
+        "save_global_telegram" => handle_save_global_telegram(db, &params).await,
+        "handle_callback" => handle_callback(db, &params).await,
         _ => Err(format!(
             "unknown action '{action_id}' for extension '{extension_id}'"
         )),
@@ -125,7 +131,7 @@ async fn handle_save_global_telegram(
 /// Verifies the secret token, extracts the action token from the callback
 /// query data, and updates the notification log.
 async fn handle_callback(
-    ctx: &ExtensionActionContext<'_>,
+    db: &DatabaseConnection,
     params: &serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
@@ -187,7 +193,7 @@ async fn handle_callback(
     // Look up notification log by action token
     let log_entry = notification_log::Entity::find()
         .filter(notification_log::Column::ActionToken.eq(action_token))
-        .one(ctx.db)
+        .one(db)
         .await
         .map_err(|e| {
             tracing::error!(error = ?e, %action_token, "failed to look up action token");
@@ -208,7 +214,7 @@ async fn handle_callback(
     let mut active: notification_log::ActiveModel = log_entry.into();
     active.action_taken = Set(Some("triggered".to_string()));
 
-    active.update(ctx.db).await.map_err(|e| {
+    active.update(db).await.map_err(|e| {
         tracing::error!(error = ?e, "failed to update notification log action_taken");
         "Internal server error".to_string()
     })?;

@@ -1,5 +1,3 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_core::{
@@ -80,35 +78,6 @@ impl Default for ProxmoxPlugin {
     }
 }
 
-/// Extension action handler wrapper for the `declare_plugin!` macro.
-///
-/// This function matches the `ExtensionActionHandler` type signature, which
-/// receives `descriptor::ExtensionActionContext` (with `db: &dyn Any`).
-/// It downcasts the database connection and delegates to the existing
-/// `crate::extensions::handle_action` handler.
-fn proxmox_handle_extension_action<'a>(
-    ctx: &'a uptrakit_plugin_infrastructure_core::descriptor::ExtensionActionContext<'a>,
-    extension_id: &'a str,
-    action_id: &'a str,
-    params: serde_json::Value,
-) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send + 'a>> {
-    Box::pin(async move {
-        let db = ctx
-            .db
-            .downcast_ref::<sea_orm::DatabaseConnection>()
-            .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
-
-        // Build the plugin_ops::ExtensionActionContext that the existing handler expects.
-        let inner_ctx = uptrakit_plugin_infrastructure_core::ExtensionActionContext {
-            db,
-            tenant_id: ctx.tenant_id,
-            caller_user_id: ctx.caller_user_id,
-        };
-
-        crate::extensions::handle_action(&inner_ctx, extension_id, action_id, params).await
-    })
-}
-
 // ── declare_plugin! ──────────────────────────────────────────────────────
 
 // Migrations function wrapper — adapts to whatever MigrationsFn type alias is active.
@@ -131,7 +100,7 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
     extensions: {
         manifests: ProxmoxPlugin::extension_manifests_static,
         actions: ProxmoxPlugin::extension_actions_static,
-        handle_action: proxmox_handle_extension_action,
+        handle_action: crate::extensions::handle_action,
     },
     migrations: __proxmox_migrations,
 });

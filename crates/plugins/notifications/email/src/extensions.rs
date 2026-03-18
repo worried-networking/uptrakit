@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use sea_orm::EntityTrait;
+use sea_orm::{DatabaseConnection, EntityTrait};
 use uptrakit_crypto::{decrypt_str, encrypt_str, is_encrypted};
 use uptrakit_notification_plugin_core::DeliveryMessage;
 use uptrakit_plugin_infrastructure_core::ExtensionActionContext;
@@ -85,13 +85,18 @@ pub async fn handle_action(
     action_id: &str,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
+    let db = ctx
+        .db
+        .downcast_ref::<DatabaseConnection>()
+        .ok_or_else(|| "expected DatabaseConnection".to_string())?;
+
     match action_id {
-        "list" => handle_list(ctx, &params).await,
-        "get_smtp" => handle_get_smtp(ctx).await,
-        "save_smtp" => handle_save_smtp(ctx, &params).await,
-        "get_global_smtp" => handle_get_global_smtp(ctx).await,
-        "save_global_smtp" => handle_save_global_smtp(ctx, &params).await,
-        "test_global_smtp_email" => handle_test_global_smtp_email(ctx).await,
+        "list" => handle_list(db, ctx, &params).await,
+        "get_smtp" => handle_get_smtp(db, ctx).await,
+        "save_smtp" => handle_save_smtp(db, ctx, &params).await,
+        "get_global_smtp" => handle_get_global_smtp(db).await,
+        "save_global_smtp" => handle_save_global_smtp(db, &params).await,
+        "test_global_smtp_email" => handle_test_global_smtp_email(db, ctx).await,
         _ => Err(format!(
             "unknown action '{action_id}' for extension '{extension_id}'"
         )),
@@ -101,6 +106,7 @@ pub async fn handle_action(
 // ── List channels ────────────────────────────────────────────────────────────
 
 async fn handle_list(
+    db: &DatabaseConnection,
     ctx: &ExtensionActionContext<'_>,
     params: &serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
@@ -110,7 +116,7 @@ async fn handle_list(
 
     // Email per-channel config has no secrets, return config unchanged.
     uptrakit_notification_plugin_core::list_channels::list_channels(
-        ctx.db,
+        db,
         tenant_id,
         "email",
         params,
@@ -122,20 +128,21 @@ async fn handle_list(
 // ── Per-tenant SMTP settings ─────────────────────────────────────────────────
 
 async fn handle_get_smtp(
+    db: &DatabaseConnection,
     ctx: &ExtensionActionContext<'_>,
 ) -> std::result::Result<serde_json::Value, String> {
     let tenant_id = ctx
         .tenant_id
         .ok_or_else(|| "tenant_id is required for get_smtp".to_string())?;
 
-    let tenant_map = load_settings_by_prefix(ctx.db, tenant_id, SMTP_PREFIX)
+    let tenant_map = load_settings_by_prefix(db, tenant_id, SMTP_PREFIX)
         .await
         .map_err(|e| {
             tracing::error!(error = ?e, "failed to load tenant SMTP settings");
             "Internal server error".to_string()
         })?;
 
-    let global_map = load_global_settings_by_prefix(ctx.db, GLOBAL_SMTP_PREFIX)
+    let global_map = load_global_settings_by_prefix(db, GLOBAL_SMTP_PREFIX)
         .await
         .map_err(|e| {
             tracing::error!(error = ?e, "failed to load global SMTP settings");
@@ -160,6 +167,7 @@ async fn handle_get_smtp(
 }
 
 async fn handle_save_smtp(
+    db: &DatabaseConnection,
     ctx: &ExtensionActionContext<'_>,
     params: &serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
@@ -168,7 +176,7 @@ async fn handle_save_smtp(
         .ok_or_else(|| "tenant_id is required for save_smtp".to_string())?;
 
     if let Some(host) = params.get("host").and_then(|v| v.as_str()) {
-        upsert_setting_raw(ctx.db, tenant_id, KEY_SMTP_HOST, serde_json::json!(host))
+        upsert_setting_raw(db, tenant_id, KEY_SMTP_HOST, serde_json::json!(host))
             .await
             .map_err(|e| {
                 tracing::error!(error = ?e, key = KEY_SMTP_HOST, "failed to save setting");
@@ -181,7 +189,7 @@ async fn handle_save_smtp(
             .map(|n| n as u16)
             .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
     }) {
-        upsert_setting_raw(ctx.db, tenant_id, KEY_SMTP_PORT, serde_json::json!(port))
+        upsert_setting_raw(db, tenant_id, KEY_SMTP_PORT, serde_json::json!(port))
             .await
             .map_err(|e| {
                 tracing::error!(error = ?e, key = KEY_SMTP_PORT, "failed to save setting");
@@ -191,7 +199,7 @@ async fn handle_save_smtp(
 
     if let Some(username) = params.get("username").and_then(|v| v.as_str()) {
         upsert_setting_raw(
-            ctx.db,
+            db,
             tenant_id,
             KEY_SMTP_USERNAME,
             serde_json::json!(username),
@@ -213,7 +221,7 @@ async fn handle_save_smtp(
             "Internal server error".to_string()
         })?;
         upsert_setting_raw(
-            ctx.db,
+            db,
             tenant_id,
             KEY_SMTP_PASSWORD,
             serde_json::json!(encrypted),
@@ -227,7 +235,7 @@ async fn handle_save_smtp(
 
     if let Some(from_address) = params.get("from_address").and_then(|v| v.as_str()) {
         upsert_setting_raw(
-            ctx.db,
+            db,
             tenant_id,
             KEY_SMTP_FROM_ADDRESS,
             serde_json::json!(from_address),
@@ -241,7 +249,7 @@ async fn handle_save_smtp(
 
     if let Some(from_name) = params.get("from_name").and_then(|v| v.as_str()) {
         upsert_setting_raw(
-            ctx.db,
+            db,
             tenant_id,
             KEY_SMTP_FROM_NAME,
             serde_json::json!(from_name),
@@ -255,7 +263,7 @@ async fn handle_save_smtp(
 
     if let Some(tls_mode) = params.get("tls_mode").and_then(|v| v.as_str()) {
         upsert_setting_raw(
-            ctx.db,
+            db,
             tenant_id,
             KEY_SMTP_TLS_MODE,
             serde_json::json!(tls_mode),
@@ -268,7 +276,7 @@ async fn handle_save_smtp(
     }
 
     // Re-read saved settings to return the current state.
-    let tenant_map = load_settings_by_prefix(ctx.db, tenant_id, SMTP_PREFIX)
+    let tenant_map = load_settings_by_prefix(db, tenant_id, SMTP_PREFIX)
         .await
         .map_err(|e| {
             tracing::error!(error = ?e, "failed to reload tenant SMTP settings");
@@ -290,9 +298,9 @@ async fn handle_save_smtp(
 // ── Global SMTP settings ─────────────────────────────────────────────────────
 
 async fn handle_get_global_smtp(
-    ctx: &ExtensionActionContext<'_>,
+    db: &DatabaseConnection,
 ) -> std::result::Result<serde_json::Value, String> {
-    let global_map = load_global_settings_by_prefix(ctx.db, GLOBAL_SMTP_PREFIX)
+    let global_map = load_global_settings_by_prefix(db, GLOBAL_SMTP_PREFIX)
         .await
         .map_err(|e| {
             tracing::error!(error = ?e, "failed to load global SMTP settings");
@@ -314,11 +322,11 @@ async fn handle_get_global_smtp(
 }
 
 async fn handle_save_global_smtp(
-    ctx: &ExtensionActionContext<'_>,
+    db: &DatabaseConnection,
     params: &serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
     if let Some(host) = params.get("host").and_then(|v| v.as_str()) {
-        upsert_global_setting_raw(ctx.db, KEY_GLOBAL_SMTP_HOST, serde_json::json!(host))
+        upsert_global_setting_raw(db, KEY_GLOBAL_SMTP_HOST, serde_json::json!(host))
             .await
             .map_err(|e| {
                 tracing::error!(error = ?e, key = KEY_GLOBAL_SMTP_HOST, "failed to save setting");
@@ -331,7 +339,7 @@ async fn handle_save_global_smtp(
             .map(|n| n as u16)
             .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
     }) {
-        upsert_global_setting_raw(ctx.db, KEY_GLOBAL_SMTP_PORT, serde_json::json!(port))
+        upsert_global_setting_raw(db, KEY_GLOBAL_SMTP_PORT, serde_json::json!(port))
             .await
             .map_err(|e| {
                 tracing::error!(error = ?e, key = KEY_GLOBAL_SMTP_PORT, "failed to save setting");
@@ -341,7 +349,7 @@ async fn handle_save_global_smtp(
 
     if let Some(username) = params.get("username").and_then(|v| v.as_str()) {
         upsert_global_setting_raw(
-            ctx.db,
+            db,
             KEY_GLOBAL_SMTP_USERNAME,
             serde_json::json!(username),
         )
@@ -362,7 +370,7 @@ async fn handle_save_global_smtp(
             "Internal server error".to_string()
         })?;
         upsert_global_setting_raw(
-            ctx.db,
+            db,
             KEY_GLOBAL_SMTP_PASSWORD,
             serde_json::json!(encrypted),
         )
@@ -375,7 +383,7 @@ async fn handle_save_global_smtp(
 
     if let Some(from_address) = params.get("from_address").and_then(|v| v.as_str()) {
         upsert_global_setting_raw(
-            ctx.db,
+            db,
             KEY_GLOBAL_SMTP_FROM_ADDRESS,
             serde_json::json!(from_address),
         )
@@ -388,7 +396,7 @@ async fn handle_save_global_smtp(
 
     if let Some(from_name) = params.get("from_name").and_then(|v| v.as_str()) {
         upsert_global_setting_raw(
-            ctx.db,
+            db,
             KEY_GLOBAL_SMTP_FROM_NAME,
             serde_json::json!(from_name),
         )
@@ -401,7 +409,7 @@ async fn handle_save_global_smtp(
 
     if let Some(tls_mode) = params.get("tls_mode").and_then(|v| v.as_str()) {
         upsert_global_setting_raw(
-            ctx.db,
+            db,
             KEY_GLOBAL_SMTP_TLS_MODE,
             serde_json::json!(tls_mode),
         )
@@ -414,7 +422,7 @@ async fn handle_save_global_smtp(
 
     if let Some(helo_host) = params.get("helo_host").and_then(|v| v.as_str()) {
         upsert_global_setting_raw(
-            ctx.db,
+            db,
             KEY_GLOBAL_SMTP_HELO_HOST,
             serde_json::json!(helo_host),
         )
@@ -426,7 +434,7 @@ async fn handle_save_global_smtp(
     }
 
     // Re-read saved settings to return the current state.
-    let global_map = load_global_settings_by_prefix(ctx.db, GLOBAL_SMTP_PREFIX)
+    let global_map = load_global_settings_by_prefix(db, GLOBAL_SMTP_PREFIX)
         .await
         .map_err(|e| {
             tracing::error!(error = ?e, "failed to reload global SMTP settings");
@@ -449,6 +457,7 @@ async fn handle_save_global_smtp(
 // ── Test global SMTP email ───────────────────────────────────────────────────
 
 async fn handle_test_global_smtp_email(
+    db: &DatabaseConnection,
     ctx: &ExtensionActionContext<'_>,
 ) -> std::result::Result<serde_json::Value, String> {
     let caller_user_id = ctx
@@ -457,7 +466,7 @@ async fn handle_test_global_smtp_email(
 
     // Load caller's email address from the database.
     let user = User::find_by_id(caller_user_id)
-        .one(ctx.db)
+        .one(db)
         .await
         .map_err(|e| {
             tracing::error!(error = ?e, "failed to load user for test email");
@@ -468,7 +477,7 @@ async fn handle_test_global_smtp_email(
     let to_address = user.email.expose_email().to_string();
 
     // Load global SMTP settings from the database.
-    let global_map = load_global_settings_by_prefix(ctx.db, GLOBAL_SMTP_PREFIX)
+    let global_map = load_global_settings_by_prefix(db, GLOBAL_SMTP_PREFIX)
         .await
         .map_err(|e| {
             tracing::error!(error = ?e, "failed to load global SMTP settings for test email");

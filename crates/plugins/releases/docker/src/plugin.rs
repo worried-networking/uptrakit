@@ -222,6 +222,7 @@ impl DockerPlugin {
     /// The executor is `None` when the plugin is instantiated on the
     /// controller (where only `ReleaseFetcher` runs). Agent-side roles
     /// that need the executor call this helper.
+    #[cfg(feature = "daemon")]
     pub(crate) fn require_executor(
         &self,
     ) -> std::result::Result<&Arc<dyn CommandExecutor>, crate::error::DockerError> {
@@ -247,28 +248,20 @@ impl DockerPlugin {
 ///
 /// This function matches the `ExtensionActionHandler` type signature, which
 /// receives `descriptor::ExtensionActionContext` (with `db: &dyn Any`).
-/// It downcasts the database connection and delegates to the existing
-/// `crate::extensions::handle_action` handler.
+/// The downcast to `&DatabaseConnection` happens inside
+/// `crate::extensions::handle_action`.
 fn docker_handle_extension_action<'a>(
     ctx: &'a uptrakit_plugin_infrastructure_core::descriptor::ExtensionActionContext<'a>,
     extension_id: &'a str,
     action_id: &'a str,
     params: serde_json::Value,
 ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>> {
-    Box::pin(async move {
-        let db = ctx
-            .db
-            .downcast_ref::<sea_orm::DatabaseConnection>()
-            .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
-
-        let inner_ctx = uptrakit_plugin_infrastructure_core::ExtensionActionContext {
-            db,
-            tenant_id: ctx.tenant_id,
-            caller_user_id: ctx.caller_user_id,
-        };
-
-        crate::extensions::handle_action(&inner_ctx, extension_id, action_id, params).await
-    })
+    Box::pin(crate::extensions::handle_action(
+        ctx,
+        extension_id,
+        action_id,
+        params,
+    ))
 }
 
 // ── declare_plugin! ──────────────────────────────────────────────────────

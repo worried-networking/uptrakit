@@ -101,20 +101,26 @@ fn get_current_tag_action() -> ActionDef {
 /// Dispatch an extension action for the Docker plugin.
 ///
 /// Routes based on `(extension_id, action_id)` to the appropriate handler.
+///
+/// The `ctx.db` field is `&dyn Any`; we downcast to `&DatabaseConnection`
+/// once at the top so individual handlers keep a concrete typed reference.
 #[tracing::instrument(skip_all, fields(extension_id, action_id))]
 pub async fn handle_action(
-    ctx: &uptrakit_plugin_infrastructure_core::ExtensionActionContext<'_>,
+    ctx: &uptrakit_plugin_infrastructure_core::descriptor::ExtensionActionContext<'_>,
     extension_id: &str,
     action_id: &str,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
     tracing::debug!("dispatching Docker extension action");
 
+    let db = ctx
+        .db
+        .downcast_ref::<DatabaseConnection>()
+        .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
+
     let result = match (extension_id, action_id) {
-        ("docker.item-host-actions", "switch-tag") => handle_switch_tag(ctx.db, params).await,
-        ("docker.item-host-actions", "get-current-tag") => {
-            handle_get_current_tag(ctx.db, params).await
-        }
+        ("docker.item-host-actions", "switch-tag") => handle_switch_tag(db, params).await,
+        ("docker.item-host-actions", "get-current-tag") => handle_get_current_tag(db, params).await,
         _ => Err(format!(
             "unknown action '{action_id}' for extension '{extension_id}'"
         )),

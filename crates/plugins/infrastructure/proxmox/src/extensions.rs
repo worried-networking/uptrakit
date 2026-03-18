@@ -1,5 +1,8 @@
 //! Extension manifests and action handler dispatch for the Proxmox VE plugin.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect,
@@ -210,8 +213,22 @@ fn host_info_panel_manifest() -> ExtensionManifest {
 /// Handle an extension action for the Proxmox plugin.
 ///
 /// Dispatches based on `(extension_id, action_id)` to the appropriate handler.
+///
+/// The `ctx.db` field is `&dyn Any` and is downcast to `&DatabaseConnection`
+/// at the start of this function. The return type matches
+/// `ExtensionActionHandler` so it can be used directly as a function pointer
+/// in `declare_plugin!`.
+pub fn handle_action<'a>(
+    ctx: &'a uptrakit_plugin_infrastructure_core::ExtensionActionContext<'a>,
+    extension_id: &'a str,
+    action_id: &'a str,
+    params: serde_json::Value,
+) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>> {
+    Box::pin(handle_action_inner(ctx, extension_id, action_id, params))
+}
+
 #[tracing::instrument(skip_all, fields(extension_id, action_id))]
-pub async fn handle_action(
+async fn handle_action_inner(
     ctx: &uptrakit_plugin_infrastructure_core::ExtensionActionContext<'_>,
     extension_id: &str,
     action_id: &str,
@@ -219,7 +236,10 @@ pub async fn handle_action(
 ) -> std::result::Result<serde_json::Value, String> {
     tracing::debug!("dispatching Proxmox extension action");
 
-    let db = ctx.db;
+    let db: &DatabaseConnection = ctx
+        .db
+        .downcast_ref::<DatabaseConnection>()
+        .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
     let tenant_id = ctx.tenant_id;
 
     let result = match (extension_id, action_id) {

@@ -1,13 +1,31 @@
-//! Abstraction over plugin registry operations needed by the web API.
+//! Plugin operations traits — the public API for consuming plugins.
 //!
-//! This module defines the [`PluginOps`] trait and its associated error type,
-//! enabling crates like `web-api-queries` to depend on `infrastructure-core`
-//! (lightweight) rather than the full `infrastructure-registry` (which pulls
-//! all plugin crate implementations).
+//! Five focused traits replace the old monolithic `PluginOps` god trait.
+//! `PluginCatalog` (in the registry crate) implements all five.
+//! A blanket `PluginOps` alias exists for the few places that need everything.
+//!
+//! # Trait hierarchy
+//!
+//! - [`PluginMetadataOps`] — descriptor lookup, registry queries
+//! - [`PluginConfigOps`]: [`PluginMetadataOps`] — config validation, masking, schemas
+//! - [`PluginExtensionOps`] — extension manifests and action routing
+//! - [`NotificationOps`] — transport lookup
+//! - [`SoftwareItemLifecycleOps`] — enhancement plugin hooks
 
-use crate::types::{PluginCapability, PluginType};
+use std::future::Future;
+use std::pin::Pin;
 
-/// Errors that can occur in [`PluginOps`] trait method implementations.
+use uptrakit_extension_framework::{ActionDef, ExtensionManifest, FieldDef};
+use uptrakit_shared_types::{PluginCapability, PluginTypeId};
+
+use crate::descriptor::{ConfigTestOps, ExtensionActionContext, PluginDescriptor, PluginFamily};
+use crate::host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
+use crate::plugin_base::{SoftwareItemCreatedEvent, SoftwareItemPatch};
+use crate::roles::{NotificationTransport, SoftwareItemLifecycle};
+
+// ── Error type ──────────────────────────────────────────────────────────────
+
+/// Errors that can occur in plugin operations.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PluginOpsError {
@@ -24,250 +42,276 @@ pub enum PluginOpsError {
     ConfigValidation(String),
 }
 
-/// Result type for [`PluginOps`] trait methods.
+/// Result type for plugin operations.
 pub type Result<T> = std::result::Result<T, rootcause::Report<PluginOpsError>>;
 
-/// Abstraction over the plugin registry operations needed by the web API.
+// ── Trait 1: PluginMetadataOps ──────────────────────────────────────────────
+
+/// Descriptor lookup and registry-level queries.
 ///
-/// Defines operations used when persisting and returning plugin
-/// configurations over the REST API: config validation, secret masking for
-/// API responses, and secret restoration on update. Implemented by
-/// `PluginRegistry` in the `infrastructure-registry` crate.
-///
-/// Storing this trait in `AppState` as `Arc<dyn PluginOps>` rather than
-/// referencing `PluginRegistry` directly decouples route handlers and query
-/// helpers from the concrete registry, making them testable in isolation.
-pub trait PluginOps: Send + Sync + 'static {
-    /// Validate plugin configuration JSON for the given string plugin type.
-    fn validate_config_str(&self, plugin_type: &str, config: &serde_json::Value) -> Result<()>;
+/// Used by: plugin_configs.rs (list_plugin_types), discovery.rs,
+///          discovery_allowlist.rs, controller startup.
+pub trait PluginMetadataOps: Send + Sync + 'static {
+    /// Look up a descriptor by plugin type ID.
+    fn get(&self, id: &PluginTypeId) -> Option<&PluginDescriptor>;
 
-    /// Mask secrets in plugin configuration JSON for an API response.
-    ///
-    /// Returns the config with all secret fields replaced by `"***"`.
-    /// Unknown plugin types are returned unchanged.
-    fn mask_config_secrets_str(
-        &self,
-        plugin_type: &str,
-        config: &serde_json::Value,
-    ) -> serde_json::Value;
+    /// All registered descriptors.
+    fn all(&self) -> Vec<&PluginDescriptor>;
 
-    /// Restore masked secrets from an existing configuration.
-    ///
-    /// Fields in `incoming` that equal `"***"` are replaced with the
-    /// corresponding values from `existing`. Non-masked fields are left
-    /// untouched.
-    fn restore_config_secrets_str(
-        &self,
-        plugin_type: &str,
-        incoming: &mut serde_json::Value,
-        existing: &serde_json::Value,
-    );
-
-    /// Returns all plugin types registered in the registry.
-    ///
-    /// This is the authoritative list — no hardcoded lists should exist outside
-    /// the registry. Use this to populate plugin-type selectors dynamically.
-    fn known_plugin_types(&self) -> Vec<PluginType>;
-
-    /// Returns all plugin types that have the `DiscoverLocalSoftware` capability.
-    fn discovery_plugins(&self) -> Vec<PluginType>;
-
-    /// Validate a package identifier for the given string plugin type.
-    ///
-    /// Returns `Ok(())` for unknown plugin types (no constraints apply) and for
-    /// plugin types that impose no identifier constraints. Returns `Err(message)`
-    /// when the identifier violates plugin-specific rules.
-    fn validate_package_identifier_str(
-        &self,
-        plugin_type: &str,
-        value: &str,
-    ) -> std::result::Result<(), String>;
-
-    /// Returns the capabilities declared by the given plugin type.
-    ///
-    /// Returns an empty vec for unknown plugin types.
-    fn capabilities_for_str(&self, plugin_type: &str) -> Vec<PluginCapability>;
-
-    /// Returns a sample/default configuration JSON for the given plugin type string.
-    ///
-    /// Serializes the `Default` implementation of the plugin's config type.
-    /// Returns an empty JSON object `{}` for unknown plugin types.
-    fn sample_config_for_str(&self, plugin_type: &str) -> serde_json::Value;
-
-    /// Returns form field definitions for the given plugin type.
-    ///
-    /// Returns `None` for unknown plugin types, empty `Vec` for plugins
-    /// with no configurable fields.
-    fn config_form_schema_str(
-        &self,
-        plugin_type: &str,
-    ) -> Option<Vec<uptrakit_extension_framework::FieldDef>>;
-
-    /// Returns type-settings form field definitions for the given plugin type.
-    ///
-    /// Returns `None` for unknown plugin types, empty `Vec` for plugins
-    /// with no type-level settings.
-    fn type_settings_form_schema_str(
-        &self,
-        plugin_type: &str,
-    ) -> Option<Vec<uptrakit_extension_framework::FieldDef>> {
-        let _ = plugin_type;
-        None
-    }
-
-    /// Returns a sample/default JSON for type settings of the given plugin type.
-    fn type_settings_sample_for_str(&self, plugin_type: &str) -> serde_json::Value {
-        let _ = plugin_type;
-        serde_json::Value::Object(serde_json::Map::new())
-    }
-
-    /// Returns UI extension manifests provided by all registered plugins.
-    ///
-    /// Default returns empty — no plugin provides extensions yet. Override
-    /// when a plugin declares compile-time UI extensions.
-    fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
-        vec![]
-    }
-
-    /// Returns the action library for all registered plugins.
-    ///
-    /// Actions are referenced by `action_id` from the extension manifests.
-    /// Default returns empty.
-    fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
-        vec![]
-    }
-
-    /// Returns extension manifests paired with their associated action catalogues.
-    ///
-    /// The default implementation pairs every manifest with the full
-    /// [`extension_actions`](Self::extension_actions) list. Override (as
-    /// `PluginRegistry` does) to provide per-manifest action scoping when
-    /// multiple independent plugins contribute to the same registry.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // A registry with two plugins: proxmox (infra) and webhook (notification).
-    /// // Each gets its own action list so `resolveAction("create")` on the
-    /// // webhook extension does not accidentally return a proxmox action.
-    /// let pairs = plugin_ops.extension_manifests_and_actions();
-    /// ```
-    fn extension_manifests_and_actions(
-        &self,
-    ) -> Vec<(
-        uptrakit_extension_framework::ExtensionManifest,
-        Vec<uptrakit_extension_framework::ActionDef>,
-    )> {
-        let actions = self.extension_actions();
-        self.extension_manifests()
-            .into_iter()
-            .map(|m| (m, actions.clone()))
+    /// All registered plugin type IDs (deterministic order).
+    fn known_type_ids(&self) -> Vec<PluginTypeId> {
+        self.all()
+            .iter()
+            .map(|d| PluginTypeId::from_static(d.type_id))
             .collect()
     }
 
-    /// Handle an extension action invocation for a plugin-backed extension.
-    ///
-    /// The controller calls this when an action is invoked on an extension
-    /// owned by `ExtensionOwner::Plugin`. The plugin registry dispatches to
-    /// the appropriate plugin based on the extension ID prefix.
-    ///
-    /// Returns `Ok(json)` on success or `Err(message)` on failure.
-    /// The route handler maps these to HTTP 200/422 respectively.
-    fn handle_extension_action<'a>(
-        &'a self,
-        _ctx: &'a ExtensionActionContext<'a>,
-        _extension_id: &'a str,
-        _action_id: &'a str,
-        _params: serde_json::Value,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<serde_json::Value, String>>
-                + Send
-                + 'a,
-        >,
-    > {
-        Box::pin(async { Err("plugin-backed extension actions not supported".to_string()) })
+    /// Plugin types with `DiscoverLocalSoftware` capability.
+    fn discovery_plugins(&self) -> Vec<PluginTypeId> {
+        self.all()
+            .iter()
+            .filter(|d| {
+                d.capabilities
+                    .contains(&PluginCapability::DiscoverLocalSoftware)
+            })
+            .map(|d| PluginTypeId::from_static(d.type_id))
+            .collect()
     }
 
-    // ── Software item lifecycle operations ─────────────────────────────
-
-    /// Fire `on_software_item_created` across all software-item lifecycle plugins.
-    ///
-    /// Returns the merged patch from all responding plugins (last writer wins
-    /// per field), or `None` if no plugin produced a patch.
-    fn on_software_item_created<'a>(
-        &'a self,
-        _event: &'a crate::SoftwareItemCreatedEvent,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Option<crate::SoftwareItemPatch>> + Send + 'a>,
-    > {
-        Box::pin(async { None })
+    /// Capabilities for a given plugin type. Empty if unknown.
+    fn capabilities(&self, id: &PluginTypeId) -> Vec<PluginCapability> {
+        self.get(id)
+            .map(|d| d.capabilities.to_vec())
+            .unwrap_or_default()
     }
 
-    // ── Notification channel operations ─────────────────────────────────
-    //
-    // Default implementations return no-op results. The `PluginRegistry`
-    // overrides these when the `notifications` feature is enabled.
+    /// Config test metadata for a given plugin type.
+    fn config_test_info(&self, id: &PluginTypeId) -> Option<&'static ConfigTestOps> {
+        self.get(id)?.config_test
+    }
 
-    /// Look up a notification plugin by channel type name (e.g. `"webhook"`).
-    ///
-    /// Returns an `Arc<dyn PluginBase>` so callers can clone into spawned tasks
-    /// and use `as_notification_transport()` to access delivery methods.
-    ///
-    /// Returns `None` when the channel type is unknown or notifications are
-    /// not enabled.
-    fn notification_transport(
+    /// All raw settings keys from all descriptors.
+    fn all_raw_settings_keys(&self) -> Vec<&'static str> {
+        self.all()
+            .iter()
+            .flat_map(|d| d.raw_settings_keys.iter().copied())
+            .collect()
+    }
+
+    /// Display name for a plugin type. Returns the type ID string if unknown.
+    fn display_name(&self, id: &PluginTypeId) -> String {
+        self.get(id)
+            .map(|d| d.display_name.to_string())
+            .unwrap_or_else(|| id.to_string())
+    }
+
+    /// Check whether a plugin type has tenant-level type settings
+    /// (i.e., is a "package manager" in old terminology).
+    fn has_type_settings(&self, id: &PluginTypeId) -> bool {
+        self.get(id).is_some_and(|d| d.type_settings.is_some())
+    }
+
+    /// Check whether a plugin type is a software plugin.
+    fn is_software_plugin(&self, id: &PluginTypeId) -> bool {
+        self.get(id)
+            .is_some_and(|d| d.family == PluginFamily::Software)
+    }
+
+    /// Look up host requirements for a specific role of a plugin.
+    fn host_requirements_for_role(
         &self,
-        _channel_type: &str,
-    ) -> Option<std::sync::Arc<dyn crate::PluginBase>> {
-        None
+        id: &PluginTypeId,
+        role: RoleKey,
+    ) -> Option<&HostRequirements> {
+        let desc = self.get(id)?;
+        match role {
+            RoleKey::Discoverer => desc.roles.discoverer.as_ref().map(|s| &s.host_requirements),
+            RoleKey::VersionDetector => desc
+                .roles
+                .version_detector
+                .as_ref()
+                .map(|s| &s.host_requirements),
+            RoleKey::ReleaseFetcher => desc
+                .roles
+                .release_fetcher
+                .as_ref()
+                .map(|s| &s.host_requirements),
+            RoleKey::PackageIndexer => desc
+                .roles
+                .package_indexer
+                .as_ref()
+                .map(|s| &s.host_requirements),
+            RoleKey::UpdateExecutor => desc
+                .roles
+                .update_executor
+                .as_ref()
+                .map(|s| &s.host_requirements),
+            RoleKey::LifecycleHook => desc
+                .roles
+                .lifecycle_hook
+                .as_ref()
+                .map(|s| &s.host_requirements),
+        }
     }
 
-    /// Return the list of supported notification channel type names.
-    fn notification_supported_types(&self) -> Vec<&'static str> {
-        vec![]
-    }
-
-    /// Validate notification channel configuration JSON.
-    ///
-    /// Returns `Err(message)` when validation fails.
-    fn notification_validate_config(
+    /// Validate host compatibility for a specific role assignment.
+    fn validate_role_compatibility(
         &self,
-        _channel_type: &str,
-        _config: &serde_json::Value,
-    ) -> std::result::Result<(), String> {
-        Ok(())
-    }
-
-    /// Return a copy of the notification channel config with secrets masked.
-    fn notification_mask_config_secrets(
-        &self,
-        _channel_type: &str,
-        config: &serde_json::Value,
-    ) -> serde_json::Value {
-        config.clone()
-    }
-
-    /// Restore masked secrets in notification channel config from stored values.
-    fn notification_restore_config_secrets(
-        &self,
-        _channel_type: &str,
-        incoming: &serde_json::Value,
-        _stored: &serde_json::Value,
-    ) -> serde_json::Value {
-        incoming.clone()
+        id: &PluginTypeId,
+        role: RoleKey,
+        host_caps: &uptrakit_shared_types::HostCapabilities,
+    ) -> std::result::Result<(), rootcause::Report<HostCompatibilityError>> {
+        let reqs = self.host_requirements_for_role(id, role).ok_or_else(|| {
+            rootcause::report!(HostCompatibilityError::UnsupportedRole {
+                plugin_type: id.to_string(),
+                role,
+            })
+        })?;
+        reqs.is_compatible_with(host_caps)
     }
 }
 
-/// Context passed to plugin extension action handlers.
+// ── Trait 2: PluginConfigOps ────────────────────────────────────────────────
+
+/// Config validation, secret masking, form schemas, and package identifier validation.
+/// Unified for BOTH software plugin configs AND notification channel configs.
+pub trait PluginConfigOps: PluginMetadataOps {
+    /// Validate plugin configuration JSON.
+    fn validate_config(
+        &self,
+        id: &PluginTypeId,
+        config: &serde_json::Value,
+    ) -> std::result::Result<(), String> {
+        let desc = self
+            .get(id)
+            .ok_or_else(|| format!("unknown plugin: {id}"))?;
+        (desc.config.validate)(config)
+    }
+
+    /// Mask secrets in plugin configuration JSON for API responses.
+    fn mask_config_secrets(
+        &self,
+        id: &PluginTypeId,
+        config: &serde_json::Value,
+    ) -> serde_json::Value {
+        self.get(id)
+            .map(|d| (d.config.mask_secrets)(config))
+            .unwrap_or_else(|| config.clone())
+    }
+
+    /// Restore masked secrets from existing configuration.
+    fn restore_config_secrets(
+        &self,
+        id: &PluginTypeId,
+        incoming: &mut serde_json::Value,
+        existing: &serde_json::Value,
+    ) {
+        if let Some(d) = self.get(id) {
+            (d.config.restore_secrets)(incoming, existing);
+        }
+    }
+
+    /// Sample/default configuration JSON.
+    fn sample_config(&self, id: &PluginTypeId) -> serde_json::Value {
+        self.get(id)
+            .map(|d| (d.config.sample)())
+            .unwrap_or_default()
+    }
+
+    /// Form field definitions for the plugin config.
+    fn config_form_schema(&self, id: &PluginTypeId) -> Option<Vec<FieldDef>> {
+        self.get(id).map(|d| (d.config.form_schema)())
+    }
+
+    /// Validate a package identifier.
+    fn validate_package_identifier(
+        &self,
+        id: &PluginTypeId,
+        value: &str,
+    ) -> std::result::Result<(), String> {
+        let desc = self
+            .get(id)
+            .ok_or_else(|| format!("unknown plugin: {id}"))?;
+        (desc.config.validate_identifier)(value)
+    }
+
+    /// Type-settings form field definitions.
+    fn type_settings_form_schema(&self, id: &PluginTypeId) -> Option<Vec<FieldDef>> {
+        self.get(id)?.type_settings.map(|ts| (ts.form_schema)())
+    }
+
+    /// Sample type settings JSON.
+    fn type_settings_sample(&self, id: &PluginTypeId) -> serde_json::Value {
+        self.get(id)
+            .and_then(|d| d.type_settings.map(|ts| (ts.sample)()))
+            .unwrap_or_default()
+    }
+}
+
+// ── Trait 3: PluginExtensionOps ─────────────────────────────────────────────
+
+/// Extension manifest collection and action routing.
+pub trait PluginExtensionOps: Send + Sync + 'static {
+    /// Returns extension manifests paired with their associated action catalogues.
+    fn extension_manifests_and_actions(&self) -> Vec<(ExtensionManifest, Vec<ActionDef>)>;
+
+    /// Handle an extension action invocation.
+    fn handle_extension_action<'a>(
+        &'a self,
+        ctx: &'a ExtensionActionContext<'a>,
+        ext_id: &'a str,
+        action_id: &'a str,
+        params: serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>>;
+}
+
+// ── Trait 4: NotificationOps ────────────────────────────────────────────────
+
+/// Notification transport lookup.
+pub trait NotificationOps: Send + Sync + 'static {
+    /// Look up a notification transport by plugin type ID.
+    fn transport(&self, id: &PluginTypeId) -> Option<std::sync::Arc<dyn NotificationTransport>>;
+
+    /// All supported notification transport type IDs.
+    fn notification_supported_types(&self) -> Vec<PluginTypeId>;
+}
+
+// ── Trait 5: SoftwareItemLifecycleOps ───────────────────────────────────────
+
+/// Software item lifecycle enhancement hooks.
+pub trait SoftwareItemLifecycleOps: Send + Sync + 'static {
+    /// Fire `on_software_item_created` across all lifecycle plugins.
+    fn on_software_item_created<'a>(
+        &'a self,
+        event: &'a SoftwareItemCreatedEvent,
+    ) -> Pin<Box<dyn Future<Output = Option<SoftwareItemPatch>> + Send + 'a>>;
+
+    /// All registered software-item lifecycle enhancement plugins.
+    fn software_item_lifecycle_plugins(&self) -> &[std::sync::Arc<dyn SoftwareItemLifecycle>];
+}
+
+// ── Convenience alias: PluginOps ────────────────────────────────────────────
+
+/// Combined trait for callers that need the full catalog surface.
 ///
-/// Provides access to the database connection and tenant/user context
-/// from the authenticated HTTP request.
-pub struct ExtensionActionContext<'a> {
-    /// Database connection for queries.
-    pub db: &'a sea_orm::DatabaseConnection,
-    /// Tenant ID from the authenticated request (if available).
-    pub tenant_id: Option<uuid::Uuid>,
-    /// User ID of the caller, for actions that need it (e.g. sending test emails).
-    pub caller_user_id: Option<uuid::Uuid>,
+/// Most code should depend on the narrower trait it actually uses.
+/// This alias exists for the few places that genuinely need everything
+/// (e.g., `AppState`).
+pub trait PluginOps:
+    PluginMetadataOps
+    + PluginConfigOps
+    + PluginExtensionOps
+    + NotificationOps
+    + SoftwareItemLifecycleOps
+{
+}
+
+/// Blanket impl: anything implementing all five traits is automatically PluginOps.
+impl<T> PluginOps for T where
+    T: PluginMetadataOps
+        + PluginConfigOps
+        + PluginExtensionOps
+        + NotificationOps
+        + SoftwareItemLifecycleOps
+{
 }

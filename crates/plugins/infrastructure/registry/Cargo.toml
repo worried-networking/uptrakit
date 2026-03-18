@@ -29,7 +29,7 @@ notifications-email = ["notifications", "dep:uptrakit-notification-plugin-email"
 [dependencies]
 uptrakit-shared-types = { workspace = true }
 uptrakit-command = { workspace = true }
-uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["catalog"] }
 uptrakit-plugin-releases-github = { workspace = true }
 uptrakit-plugin-releases-gitlab = { workspace = true }
 uptrakit-plugin-releases-forgejo = { workspace = true }
