@@ -71,6 +71,9 @@ pub enum SoftwareItemQueryError {
     /// A plugin assignment (role, ordinal) does not exist.
     #[error("plugin assignment not found")]
     PluginAssignmentNotFound,
+    /// The target host is incompatible with the assigned plugin role.
+    #[error("host incompatible with role: {0}")]
+    IncompatibleHost(String),
     /// A database error occurred.
     #[error("database error: {0}")]
     Db(sea_orm::DbErr),

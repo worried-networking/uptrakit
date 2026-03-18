@@ -9,7 +9,7 @@
 //! `validate_role_compatibility()` on `PluginMetadataOps`.
 
 use rootcause::prelude::*;
-use uptrakit_shared_types::{HostCapabilities, HostFeature, OsFamily, host_features};
+use uptrakit_shared_types::{HostCapabilities, HostFeature, OsFamily, PluginRole, host_features};
 
 use crate::error::PluginError;
 
@@ -31,6 +31,27 @@ pub enum RoleKey {
     PackageIndexer,
     UpdateExecutor,
     LifecycleHook,
+}
+
+impl RoleKey {
+    /// Convert a [`PluginRole`] to its corresponding [`RoleKey`].
+    ///
+    /// Returns `None` for [`PluginRole::Other`] and any future unknown variants,
+    /// since those have no mapping to a typed role key.
+    pub fn from_plugin_role(role: &PluginRole) -> Option<Self> {
+        match role {
+            PluginRole::DetectVersion => Some(Self::VersionDetector),
+            PluginRole::FetchReleases => Some(Self::ReleaseFetcher),
+            PluginRole::ExecuteUpdate => Some(Self::UpdateExecutor),
+            PluginRole::PreUpdateHook | PluginRole::PostUpdateHook => Some(Self::LifecycleHook),
+            PluginRole::Other(_) => None,
+            // Future unknown variants per #[non_exhaustive]
+            _ => {
+                tracing::warn!("unknown PluginRole variant encountered in from_plugin_role");
+                None
+            }
+        }
+    }
 }
 
 impl std::fmt::Display for RoleKey {
@@ -275,5 +296,37 @@ mod tests {
     fn role_key_display() {
         assert_eq!(RoleKey::Discoverer.to_string(), "discoverer");
         assert_eq!(RoleKey::UpdateExecutor.to_string(), "update_executor");
+    }
+
+    #[test]
+    fn from_plugin_role_known_variants() {
+        assert_eq!(
+            RoleKey::from_plugin_role(&PluginRole::DetectVersion),
+            Some(RoleKey::VersionDetector),
+        );
+        assert_eq!(
+            RoleKey::from_plugin_role(&PluginRole::FetchReleases),
+            Some(RoleKey::ReleaseFetcher),
+        );
+        assert_eq!(
+            RoleKey::from_plugin_role(&PluginRole::ExecuteUpdate),
+            Some(RoleKey::UpdateExecutor),
+        );
+        assert_eq!(
+            RoleKey::from_plugin_role(&PluginRole::PreUpdateHook),
+            Some(RoleKey::LifecycleHook),
+        );
+        assert_eq!(
+            RoleKey::from_plugin_role(&PluginRole::PostUpdateHook),
+            Some(RoleKey::LifecycleHook),
+        );
+    }
+
+    #[test]
+    fn from_plugin_role_other_returns_none() {
+        assert_eq!(
+            RoleKey::from_plugin_role(&PluginRole::Other("custom_role".to_string())),
+            None,
+        );
     }
 }

@@ -6,9 +6,11 @@ use sea_orm::{
 };
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_core::PluginConfigOps;
+use uptrakit_plugin_infrastructure_core::host_requirements::RoleKey;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
 };
+use uptrakit_shared_types::HostCapabilities;
 use uptrakit_web_api_types::software_items::{
     AssignHostsRequest, HostPluginRoleAssignment, SoftwareItemDetailResponse,
     UpdateHostAssignmentRequest,
@@ -213,13 +215,45 @@ async fn ensure_host_link(
     Ok(new_hsi_id)
 }
 
+/// Validate host compatibility for a role assignment.
+///
+/// Skips validation when:
+/// - `execution_site` is `"controller"` (controller-only roles don't run on hosts)
+/// - `RoleKey::from_plugin_role()` returns `None` (unknown/future roles)
+fn validate_host_compatibility(
+    ops: &dyn PluginConfigOps,
+    host_model: &host::Model,
+    plugin_type: &str,
+    role: &uptrakit_web_api_types::PluginRole,
+    execution_site: &str,
+) -> super::Result<()> {
+    if execution_site == "controller" {
+        return Ok(());
+    }
+
+    let Some(role_key) = RoleKey::from_plugin_role(role) else {
+        return Ok(());
+    };
+
+    let caps = HostCapabilities::from_json_features(
+        host_model.os_type.as_deref(),
+        host_model.os_version.as_deref(),
+        host_model.architecture.as_deref(),
+        host_model.host_features.as_deref(),
+    );
+
+    let plugin_type_id = uptrakit_shared_types::PluginTypeId::new(plugin_type);
+    ops.validate_role_compatibility(&plugin_type_id, role_key, &caps)
+        .map_err(|e| report!(SoftwareItemQueryError::IncompatibleHost(e.to_string())))
+}
+
 /// Validate, resolve, and upsert a single role assignment for a host-software-item pair.
 #[allow(clippy::too_many_arguments)]
 async fn upsert_role_assignment(
     ops: &dyn PluginConfigOps,
     txn: &sea_orm::DatabaseTransaction,
     tenant_id: Uuid,
-    host_id: Uuid,
+    host_model: &host::Model,
     item_id: Uuid,
     hsi_id: Uuid,
     role_assignment: &HostPluginRoleAssignment,
@@ -233,6 +267,8 @@ async fn upsert_role_assignment(
     let (plugin_config_id, config) =
         resolve_plugin_config_txn(ops, txn, tenant_id, role_assignment).await?;
 
+    validate_host_compatibility(ops, host_model, &config.plugin_type, role, execution_site)?;
+
     validate_assignment(
         ops,
         &config.plugin_type,
@@ -240,6 +276,8 @@ async fn upsert_role_assignment(
         &role_assignment.package_identifier,
         role_assignment.config_override.as_ref(),
     )?;
+
+    let host_id = host_model.id;
 
     let existing_plugin = HostSoftwareItemPlugin::find()
         .filter(host_software_item_plugin::Column::HostId.eq(host_id))
@@ -319,15 +357,12 @@ pub async fn assign_hosts(
     for assignment in &req.host_assignments {
         let host_id = assignment.host_id;
 
-        let host_exists = Host::find_by_id(host_id)
+        let host_model = Host::find_by_id(host_id)
             .filter(host::Column::DeactivatedAt.is_null())
             .one(&txn)
             .await
-            .context_to()?;
-
-        if host_exists.is_none() {
-            bail!(SoftwareItemQueryError::HostNotFound(host_id));
-        }
+            .context_to()?
+            .ok_or_else(|| report!(SoftwareItemQueryError::HostNotFound(host_id)))?;
 
         let hsi_id = ensure_host_link(&txn, host_id, id, now).await?;
 
@@ -336,7 +371,7 @@ pub async fn assign_hosts(
                 ops,
                 &txn,
                 tenant_db.tenant_id,
-                host_id,
+                &host_model,
                 id,
                 hsi_id,
                 role_assignment,
@@ -424,6 +459,14 @@ pub async fn update_host_assignment(
 
     validate_execution_site(&effective_exec_site, &req.role)?;
 
+    // Load host model for compatibility validation.
+    let host_model = Host::find_by_id(host_id)
+        .filter(host::Column::DeactivatedAt.is_null())
+        .one(tenant_db.db())
+        .await
+        .context_to()?
+        .ok_or_else(|| report!(SoftwareItemQueryError::HostNotFound(host_id)))?;
+
     let txn = tenant_db.db().begin().await.context_to()?;
     let now = OffsetDateTime::now_utc();
 
@@ -435,6 +478,14 @@ pub async fn update_host_assignment(
             None,
             &effective_pkg,
             req.config_override.as_ref(),
+        )?;
+
+        validate_host_compatibility(
+            ops,
+            &host_model,
+            pt.as_str(),
+            &req.role,
+            &effective_exec_site,
         )?;
 
         match existing_plugin {
@@ -490,6 +541,14 @@ pub async fn update_host_assignment(
             Some(&config.config),
             &synthetic.package_identifier,
             synthetic.config_override.as_ref(),
+        )?;
+
+        validate_host_compatibility(
+            ops,
+            &host_model,
+            &config.plugin_type,
+            &req.role,
+            &effective_exec_site,
         )?;
 
         match existing_plugin {

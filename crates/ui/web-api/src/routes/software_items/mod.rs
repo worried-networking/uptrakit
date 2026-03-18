@@ -78,6 +78,10 @@ fn query_error_to_response(report: rootcause::Report<SoftwareItemQueryError>) ->
             StatusCode::BAD_REQUEST,
             format!("Host {id} not found or deactivated"),
         ),
+        SoftwareItemQueryError::IncompatibleHost(msg) => error_response(
+            StatusCode::BAD_REQUEST,
+            format!("host incompatible with role: {msg}"),
+        ),
         SoftwareItemQueryError::InvalidPackageIdentifier(msg)
         | SoftwareItemQueryError::InvalidConfigOverride(msg)
         | SoftwareItemQueryError::InvalidInlinePluginConfig(msg)
