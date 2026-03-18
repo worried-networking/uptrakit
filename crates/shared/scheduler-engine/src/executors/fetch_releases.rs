@@ -15,8 +15,11 @@ use uptrakit_command::{CommandExecutor, NoopCommandExecutor};
 use uptrakit_internal_wire::{
     CheckVersionsPayload, ControllerMessage, PluginAssignment, VersionCheckAssignment,
 };
-use uptrakit_plugin_infrastructure_core::{BatchFetchItem, PluginCapability};
-use uptrakit_plugin_infrastructure_registry::PluginRegistry;
+use uptrakit_plugin_infrastructure_core::{
+    BatchFetchItem, HostCapabilities, PluginCapability, construct_host_runtime,
+    roles::ReleaseFetcher,
+};
+use uptrakit_plugin_infrastructure_registry::get_descriptor;
 use uptrakit_shared_db::entity::{
     host_software_item, host_software_item_plugin, plugin_config, scheduled_task, software_item,
 };
@@ -105,7 +108,7 @@ struct PhaseAGroup {
 /// One independent controller-side fetch job, ready to be spawned into a `JoinSet`.
 struct FetchJob {
     packages: HashMap<String, Vec<(Uuid, Uuid)>>,
-    plugin: Box<dyn uptrakit_plugin_infrastructure_core::PluginBase>,
+    fetcher: Box<dyn ReleaseFetcher>,
 }
 
 /// Compute the Phase A group key for a controller-side fetch row.
@@ -253,10 +256,17 @@ impl FetchReleasesExecutor {
                 )))
             })?;
 
+            let desc = get_descriptor(plugin_type.as_str()).ok_or_else(|| {
+                report!(SchedulerError::Execution(format!(
+                    "unknown plugin type: {plugin_type}"
+                )))
+            })?;
+
             let should_run_controller_side = match group.execution_site.as_str() {
                 "controller" => true,
                 "agent" => false,
-                _ => PluginRegistry::capabilities_for(plugin_type.clone())
+                _ => desc
+                    .capabilities
                     .contains(&PluginCapability::ControllerSideFetchReleases),
             };
 
@@ -264,13 +274,15 @@ impl FetchReleasesExecutor {
                 continue;
             }
 
-            let plugin = PluginRegistry::create_plugin(
-                plugin_type.clone(),
-                &group.merged_config,
-                noop_executor.clone(),
-            )
-            .await
-            .map_err(|e| {
+            let slot = desc.roles.release_fetcher.as_ref().ok_or_else(|| {
+                report!(SchedulerError::Execution(format!(
+                    "{plugin_type} does not support release_fetcher role"
+                )))
+            })?;
+
+            let runtime =
+                construct_host_runtime(noop_executor.clone(), HostCapabilities::default());
+            let fetcher = (slot.create)(&group.merged_config, runtime).map_err(|e| {
                 report!(SchedulerError::Execution(format!(
                     "failed to create plugin {plugin_type}: {e}"
                 )))
@@ -278,7 +290,7 @@ impl FetchReleasesExecutor {
 
             jobs.push(FetchJob {
                 packages: group.packages,
-                plugin,
+                fetcher,
             });
         }
 
@@ -326,11 +338,7 @@ impl FetchReleasesExecutor {
                     .keys()
                     .map(|pkg| BatchFetchItem::new(pkg.clone()))
                     .collect();
-                let fetcher = job
-                    .plugin
-                    .as_release_fetcher()
-                    .expect("FetchJob plugin should implement ReleaseFetcherPlugin");
-                let results = fetcher.batch_fetch_releases(&fetch_items).await;
+                let results = job.fetcher.batch_fetch(&fetch_items).await;
                 Ok((job.packages, results))
             });
         }
@@ -597,9 +605,11 @@ impl FetchReleasesExecutor {
                 "agent" => true,
                 "controller" => false,
                 _ => {
-                    // "auto" — check static capability (no instantiation)
-                    !PluginRegistry::capabilities_for(plugin_type)
-                        .contains(&PluginCapability::ControllerSideFetchReleases)
+                    // "auto" — check static capability from descriptor (no instantiation)
+                    !get_descriptor(plugin_type.as_str()).is_some_and(|d| {
+                        d.capabilities
+                            .contains(&PluginCapability::ControllerSideFetchReleases)
+                    })
                 }
             };
             if !should_agent_handle {

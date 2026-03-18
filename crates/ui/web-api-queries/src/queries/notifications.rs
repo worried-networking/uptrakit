@@ -24,18 +24,18 @@ pub async fn create_channel(
     req: &uptrakit_web_api_types::notifications::CreateNotificationChannelRequest,
     plugin_ops: &dyn uptrakit_plugin_infrastructure_core::PluginOps,
 ) -> ChannelResult<NotificationChannelResponse> {
+    use uptrakit_shared_types::PluginTypeId;
+    let channel_type_id = PluginTypeId::new(&req.channel_type);
+
     // Validate config with channel implementation
-    if plugin_ops
-        .notification_transport(&req.channel_type)
-        .is_none()
-    {
+    if plugin_ops.transport(&channel_type_id).is_none() {
         return Err(report!(ChannelQueryError::UnsupportedType(
             req.channel_type.clone()
         )));
     }
 
     plugin_ops
-        .notification_validate_config(&req.channel_type, &req.config)
+        .validate_config(&channel_type_id, &req.config)
         .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
 
     let config_str = serde_json::to_string(&req.config)
@@ -62,7 +62,7 @@ pub async fn create_channel(
     let result = model.insert(tenant_db.db()).await.context_to()?;
 
     // Return with masked config
-    let masked_config = plugin_ops.notification_mask_config_secrets(&req.channel_type, &req.config);
+    let masked_config = plugin_ops.mask_config_secrets(&channel_type_id, &req.config);
     Ok(channel_to_response(result, masked_config))
 }
 
@@ -142,8 +142,9 @@ pub async fn update_channel(
     }
     if let Some(config) = &req.config {
         // Validate with channel impl
+        let channel_type_id = uptrakit_shared_types::PluginTypeId::new(&existing.channel_type);
         plugin_ops
-            .notification_validate_config(&existing.channel_type, config)
+            .validate_config(&channel_type_id, config)
             .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
         let config_str = serde_json::to_string(config)
             .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
@@ -439,11 +440,9 @@ fn mask_channel_config(
     let config: serde_json::Value =
         serde_json::from_str(channel.config.expose_secret()).unwrap_or_default();
 
-    if plugin_ops
-        .notification_transport(&channel.channel_type)
-        .is_some()
-    {
-        plugin_ops.notification_mask_config_secrets(&channel.channel_type, &config)
+    let channel_type_id = uptrakit_shared_types::PluginTypeId::new(&channel.channel_type);
+    if plugin_ops.transport(&channel_type_id).is_some() {
+        plugin_ops.mask_config_secrets(&channel_type_id, &config)
     } else {
         // Unknown channel type -- mask all values
         serde_json::json!({})

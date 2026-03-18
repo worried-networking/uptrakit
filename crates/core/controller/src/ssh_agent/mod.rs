@@ -26,7 +26,7 @@ use uptrakit_internal_wire::{
     ControllerMessage, DisconnectReason, DisconnectingPayload, RegisterPayload, ServiceMessage,
     ServiceTransport, UpdateFinalStatus, UpdateResultPayload,
 };
-use uptrakit_plugin_infrastructure_core::PluginBase;
+use uptrakit_plugin_infrastructure_core::InfraBundle;
 
 use crate::embedded::EmbeddedShutdownTokens;
 use crate::embedded::types::EmbeddedTransport;
@@ -87,10 +87,15 @@ pub(crate) async fn run_embedded_ssh_agent(
         }
     };
 
-    // 6. Create infrastructure plugins and extension proxy.
+    // 6. Create infrastructure plugin bundles and extension proxy.
     let extension_proxy = Arc::new(ServiceExtensionProxy::new());
-    let infra_plugins: Arc<Vec<Arc<dyn PluginBase>>> =
-        Arc::new(uptrakit_plugin_infrastructure_registry::create_agent_infra_plugins());
+    let (catalog, infra_bundles) = {
+        let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();
+        let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
+            .expect("plugin catalog must build successfully");
+        let bundles = catalog.create_infra_bundles(&catalog_config);
+        (catalog, Arc::new(bundles))
+    };
 
     // 7. Create aggregate and background channels.
     let (aggregate_tx, mut aggregate_rx) = tokio::sync::mpsc::channel::<(String, UpdateEvent)>(64);
@@ -117,7 +122,7 @@ pub(crate) async fn run_embedded_ssh_agent(
     // Register UI extensions.
     if caps.contains(&uptrakit_internal_wire::Capability::UiExtensions) {
         let register_payload =
-            extension::build_register_payload(Some(encryption_public_key.clone()), &infra_plugins);
+            extension::build_register_payload(Some(encryption_public_key.clone()), &catalog);
         if let Err(e) = transport
             .transport_send(ServiceMessage::ExtensionRegister(register_payload))
             .await
@@ -153,7 +158,7 @@ pub(crate) async fn run_embedded_ssh_agent(
         &db,
         &extension_proxy,
         &bg_tx,
-        &infra_plugins,
+        &infra_bundles,
         &ssh_state_dir,
         None,
         private_key_der.as_deref(),
@@ -217,7 +222,7 @@ pub(crate) async fn run_embedded_ssh_agent(
                         &pool,
                         &extension_proxy,
                         &bg_tx,
-                        &infra_plugins,
+                        &infra_bundles,
                         &ssh_state_dir,
                         private_key_der.as_deref(),
                     )
@@ -248,7 +253,7 @@ pub(crate) async fn run_embedded_ssh_agent(
                     &pool,
                     &freeze_file_path,
                     &extension_proxy,
-                    &infra_plugins,
+                    &infra_bundles,
                     &ssh_state_dir,
                     private_key_der.as_deref(),
                     &bg_tx,
@@ -343,7 +348,7 @@ async fn handle_controller_message(
     pool: &ssh_pool::SshConnectionPool,
     freeze_file_path: &std::path::Path,
     extension_proxy: &Arc<ServiceExtensionProxy>,
-    infra_plugins: &Arc<Vec<Arc<dyn PluginBase>>>,
+    infra_bundles: &Arc<Vec<InfraBundle>>,
     state_dir: &std::path::Path,
     private_key_der: Option<&[u8]>,
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
@@ -404,7 +409,7 @@ async fn handle_controller_message(
         }
 
         ControllerMessage::ReportPluginConfigResponse(payload) => {
-            handle_report_plugin_config_response(payload, db, infra_plugins).await;
+            handle_report_plugin_config_response(payload, db, infra_bundles).await;
         }
 
         ControllerMessage::ResetData => {
@@ -420,7 +425,7 @@ async fn handle_controller_message(
                 tenant_id: None,
                 bg_tx,
                 extension_proxy,
-                infra_plugins: Arc::clone(infra_plugins),
+                infra_bundles: Arc::clone(infra_bundles),
             };
             extension::handle_extension_request(request, &ctx, transport).await;
         }
@@ -465,22 +470,21 @@ async fn is_update_allowed(
 async fn handle_report_plugin_config_response(
     payload: uptrakit_internal_wire::ReportPluginConfigResponsePayload,
     db: &sea_orm::DatabaseConnection,
-    infra_plugins: &Arc<Vec<Arc<dyn PluginBase>>>,
+    infra_bundles: &Arc<Vec<InfraBundle>>,
 ) {
     if payload.success {
         if let Some(config_id_str) = &payload.plugin_config_id {
             let config_id = *config_id_str;
             let request_id = payload.request_id.clone();
-            for plugin in infra_plugins.iter() {
-                if let Some(report) = plugin.as_host_report()
-                    && let Err(e) = report
+            for bundle in infra_bundles.iter() {
+                if let Some(lifecycle) = bundle.lifecycle.as_ref()
+                    && let Err(e) = lifecycle
                         .on_plugin_config_reported(db, config_id, &request_id)
                         .await
                 {
                     tracing::warn!(
                         error = %e,
-                        plugin_type = %plugin.plugin_type_id(),
-                        "plugin on_plugin_config_reported failed"
+                        "infra plugin on_plugin_config_reported failed"
                     );
                 }
             }
@@ -562,7 +566,7 @@ async fn handle_host_config_changed(
     pool: &ssh_pool::SshConnectionPool,
     extension_proxy: &Arc<ServiceExtensionProxy>,
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
-    infra_plugins: &Arc<Vec<Arc<dyn PluginBase>>>,
+    infra_bundles: &Arc<Vec<InfraBundle>>,
     state_dir: &std::path::Path,
     private_key_der: Option<&[u8]>,
 ) {
@@ -611,7 +615,7 @@ async fn handle_host_config_changed(
         db,
         extension_proxy,
         bg_tx,
-        infra_plugins,
+        infra_bundles,
         state_dir,
         None,
         private_key_der,
@@ -623,14 +627,14 @@ fn spawn_post_report_hooks(
     db: &sea_orm::DatabaseConnection,
     extension_proxy: &Arc<ServiceExtensionProxy>,
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
-    infra_plugins: &Arc<Vec<Arc<dyn PluginBase>>>,
+    infra_bundles: &Arc<Vec<InfraBundle>>,
     state_dir: &std::path::Path,
     private_key_der_override: Option<Option<&[u8]>>,
     default_private_key_der: Option<&[u8]>,
 ) {
     let proxy = Arc::clone(extension_proxy);
     let bg_tx = bg_tx.clone();
-    let infra_plugins = Arc::clone(infra_plugins);
+    let infra_bundles = Arc::clone(infra_bundles);
     let state_dir = state_dir.to_path_buf();
     let private_key_der = private_key_der_override
         .unwrap_or(Some(default_private_key_der.unwrap_or(&[])))
@@ -649,14 +653,13 @@ fn spawn_post_report_hooks(
             guest_bootstrap:
                 &uptrakit_agent_ssh::operations::bootstrap_proxmox::NoopGuestBootstrapExecutor,
         };
-        for plugin in infra_plugins.iter() {
-            if let Some(report) = plugin.as_host_report()
-                && let Err(e) = report.on_post_report_hosts(&ctx).await
+        for bundle in infra_bundles.iter() {
+            if let Some(lifecycle) = bundle.lifecycle.as_ref()
+                && let Err(e) = lifecycle.on_post_report_hosts(&ctx).await
             {
                 tracing::warn!(
                     error = %e,
-                    plugin_type = %plugin.plugin_type_id(),
-                    "plugin on_post_report_hosts failed"
+                    "infra plugin on_post_report_hosts failed"
                 );
             }
         }

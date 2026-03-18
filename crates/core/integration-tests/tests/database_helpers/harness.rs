@@ -160,10 +160,10 @@ async fn build_test_state(
     );
 
     let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(
-        uptrakit_plugin_infrastructure_registry::PluginRegistry::with_notifications(
-            uptrakit_plugin_infrastructure_registry::NotificationRegistryConfig::default(),
+        uptrakit_plugin_infrastructure_registry::build_catalog(
+            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
         )
-        .expect("notification registry should build in tests"),
+        .expect("plugin catalog should build in tests"),
     );
 
     let notification_dispatcher =

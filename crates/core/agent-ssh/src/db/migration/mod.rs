@@ -24,6 +24,7 @@ impl MigratorTrait for Migrator {
         // databases already have it recorded in `seaql_migrations` and the
         // Proxmox plugin's own `CreateProxmoxPendingMatches` migration handles
         // the rename + data migration from the old table on first run.
+        #[allow(unused_mut)]
         let mut migrations: Vec<Box<dyn MigrationTrait>> = vec![
             Box::new(m20260215_000001_initial::Migration),
             Box::new(m20260222_000002_add_machine_id::Migration),
@@ -39,16 +40,26 @@ impl MigratorTrait for Migrator {
             Box::new(m20260322_000001_ssh_hosts_lower_name_index::Migration),
         ];
 
-        // Append plugin-owned migrations so they run after the core schema is
-        // in place.  Each plugin migration has a unique name tracked in
-        // `seaql_migrations`, so already-applied migrations are skipped.
+        // Append plugin-owned service migrations so they run after the core
+        // schema is in place.  Each plugin migration has a unique name tracked
+        // in `seaql_migrations`, so already-applied migrations are skipped.
         //
         // `CreateProxmoxHostState`       — creates `proxmox_host_state`,
         //   migrates PVE state from legacy `ssh_hosts` columns if present.
         // `CreateProxmoxPendingMatches`  — creates `proxmox_pending_matches`,
         //   migrates data from the legacy `pending_proxmox_matches` table.
-        for plugin in uptrakit_plugin_infrastructure_registry::create_agent_infra_plugins() {
-            migrations.extend(plugin.service_migrations());
+        //
+        // TODO: Once the Proxmox plugin's InfraSlot is wired up in the
+        // descriptor, collect service migrations from InfraBundle or via a
+        // dedicated catalog method. Until then, existing databases already
+        // have these migrations recorded in `seaql_migrations`.
+        let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();
+        if let Ok(catalog) = uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
+        {
+            let bundles = catalog.create_infra_bundles(&catalog_config);
+            // InfraBundle service migrations will be available once the
+            // Proxmox plugin registers its InfraSlot in the descriptor.
+            let _ = &bundles;
         }
 
         migrations

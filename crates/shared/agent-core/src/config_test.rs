@@ -10,8 +10,8 @@ use uptrakit_command::{CommandExecutor, CommandSpec};
 use uptrakit_internal_wire::{
     ConfigTestKind, ServiceMessage, TestPluginConfigPayload, TestPluginConfigResultPayload,
 };
-use uptrakit_plugin_infrastructure_core::PluginType;
-use uptrakit_plugin_infrastructure_registry::PluginRegistry;
+use uptrakit_plugin_infrastructure_core::{HostCapabilities, construct_host_runtime};
+use uptrakit_plugin_infrastructure_registry::get_descriptor;
 
 /// Build a result payload with the common fields populated.
 ///
@@ -94,24 +94,35 @@ async fn handle_version_detection(
     executor: Arc<dyn CommandExecutor>,
     start: Instant,
 ) -> TestPluginConfigResultPayload {
-    let plugin_type = PluginType::from(plugin_type_str.to_string());
+    let runtime = construct_host_runtime(executor, HostCapabilities::default());
 
-    let plugin = match PluginRegistry::create_plugin(plugin_type, config, executor).await {
-        Ok(p) => p,
-        Err(e) => {
+    let desc = match get_descriptor(plugin_type_str) {
+        Some(d) => d,
+        None => {
             let mut result = make_result(request_id, false, start);
-            result.error = Some(format!("failed to create plugin: {e}"));
+            result.error = Some(format!(
+                "failed to create plugin: unknown plugin type '{plugin_type_str}'"
+            ));
             return result;
         }
     };
 
-    let detector = match plugin.as_version_detector() {
-        Some(d) => d,
+    let slot = match desc.roles.version_detector.as_ref() {
+        Some(s) => s,
         None => {
             let mut result = make_result(request_id, false, start);
             result.error = Some(format!(
                 "plugin '{plugin_type_str}' does not support version detection"
             ));
+            return result;
+        }
+    };
+
+    let detector = match (slot.create)(config, runtime) {
+        Ok(d) => d,
+        Err(e) => {
+            let mut result = make_result(request_id, false, start);
+            result.error = Some(format!("failed to create plugin: {e}"));
             return result;
         }
     };

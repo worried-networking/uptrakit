@@ -18,7 +18,7 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use uptrakit_shared_db::entity::{host, plugin_config, prelude::*, service, service_host};
-use uptrakit_shared_types::PluginCapability;
+use uptrakit_shared_types::{PluginCapability, PluginType, PluginTypeId};
 use uptrakit_web_api_types::autodiscovery::TriggerDiscoveryResponse;
 use uptrakit_web_api_types::plugin_config_test::{
     TestPluginConfigRequest, TestPluginConfigResponse,
@@ -55,23 +55,22 @@ pub async fn list_plugin_types(
 ) -> Response {
     let types: Vec<PluginTypeInfo> = state
         .plugin_ops
-        .known_plugin_types()
+        .known_type_ids()
         .into_iter()
-        .map(|pt| {
-            let capabilities = state.plugin_ops.capabilities_for_str(pt.as_str());
-            let sample_config = state.plugin_ops.sample_config_for_str(pt.as_str());
-            let config_form_fields = state
-                .plugin_ops
-                .config_form_schema_str(pt.as_str())
-                .unwrap_or_default();
+        .map(|id| {
+            let capabilities = state.plugin_ops.capabilities(&id);
+            let sample_config = state.plugin_ops.sample_config(&id);
+            let config_form_fields = state.plugin_ops.config_form_schema(&id).unwrap_or_default();
             let type_settings_form_fields = state
                 .plugin_ops
-                .type_settings_form_schema_str(pt.as_str())
+                .type_settings_form_schema(&id)
                 .unwrap_or_default();
-            let type_settings_sample = state.plugin_ops.type_settings_sample_for_str(pt.as_str());
+            let type_settings_sample = state.plugin_ops.type_settings_sample(&id);
+            let display_name = state.plugin_ops.display_name(&id);
+            let plugin_type = PluginType::from(id.as_str().to_string());
             PluginTypeInfo {
-                display_name: pt.display_name().to_owned(),
-                plugin_type: pt,
+                display_name,
+                plugin_type,
                 capabilities,
                 sample_config,
                 config_form_fields,
@@ -114,9 +113,10 @@ pub async fn create_plugin_config(
     let config_for_audit = req.config.clone();
 
     // Validate plugin-specific config (matches the update path).
+    let plugin_type_id = PluginTypeId::new(&plugin_type_str);
     if let Err(e) = state
         .plugin_ops
-        .validate_config_str(&plugin_type_str, &req.config)
+        .validate_config(&plugin_type_id, &req.config)
     {
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
@@ -425,14 +425,13 @@ pub async fn discover_plugin_config(
     };
 
     // Validate plugin supports discovery.
-    let plugin_type: uptrakit_internal_wire::PluginType = match cfg.plugin_type.parse() {
-        Ok(pt) => pt,
-        Err(_) => {
-            return error_response(StatusCode::BAD_REQUEST, "Unknown plugin type");
-        }
-    };
+    let plugin_type_id = PluginTypeId::new(&cfg.plugin_type);
 
-    if !state.plugin_ops.discovery_plugins().contains(&plugin_type) {
+    if !state
+        .plugin_ops
+        .discovery_plugins()
+        .contains(&plugin_type_id)
+    {
         return error_response(
             StatusCode::BAD_REQUEST,
             format!(
@@ -492,7 +491,7 @@ pub async fn discover_plugin_config(
                     host_machine_id: machine_id.clone(),
                     plugins: vec![uptrakit_internal_wire::DiscoveryPluginAssignment {
                         plugin_config_id: Some(cfg.id),
-                        plugin_type: plugin_type.clone(),
+                        plugin_type: PluginType::from(cfg.plugin_type.clone()),
                         config: cfg.config.clone(),
                     }],
                 },
@@ -785,11 +784,12 @@ pub async fn test_plugin_config(
     Validated(body): Validated<TestPluginConfigRequest>,
 ) -> Response {
     // 1. Validate plugin type is known.
-    let caps = state.plugin_ops.capabilities_for_str(&body.plugin_type);
+    let plugin_type_id = PluginTypeId::new(&body.plugin_type);
+    let caps = state.plugin_ops.capabilities(&plugin_type_id);
     if caps.is_empty()
         && state
             .plugin_ops
-            .validate_config_str(&body.plugin_type, &serde_json::json!({}))
+            .validate_config(&plugin_type_id, &serde_json::json!({}))
             .is_err()
     {
         return error_response(StatusCode::BAD_REQUEST, "Unknown plugin type");
@@ -825,10 +825,7 @@ pub async fn test_plugin_config(
     };
 
     // 3. Validate merged config.
-    if let Err(e) = state
-        .plugin_ops
-        .validate_config_str(&body.plugin_type, &config)
-    {
+    if let Err(e) = state.plugin_ops.validate_config(&plugin_type_id, &config) {
         return error_response(
             StatusCode::BAD_REQUEST,
             format!("Invalid plugin config: {e}"),
@@ -968,7 +965,12 @@ pub async fn test_plugin_config(
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_plugin_infrastructure_registry::PluginRegistry;
+    use uptrakit_plugin_infrastructure_registry::{CatalogConfig, PluginConfigOps, build_catalog};
+    use uptrakit_shared_types::PluginTypeId;
+
+    fn catalog() -> impl PluginConfigOps {
+        build_catalog(&CatalogConfig::default()).expect("default catalog should build")
+    }
 
     /// Sentinel value used to indicate a masked secret in API responses.
     const SECRET_MASK: &str = "***";
@@ -978,7 +980,8 @@ mod tests {
         let config = serde_json::json!({
             "auth_token": "ghp_secret123"
         });
-        let masked = PluginRegistry::mask_config_secrets_str("releases_github", &config);
+        let masked =
+            catalog().mask_config_secrets(&PluginTypeId::from_static("releases_github"), &config);
         assert_eq!(masked["auth_token"], SECRET_MASK);
     }
 
@@ -987,7 +990,8 @@ mod tests {
         let config = serde_json::json!({
             "auth_token": null
         });
-        let masked = PluginRegistry::mask_config_secrets_str("releases_github", &config);
+        let masked =
+            catalog().mask_config_secrets(&PluginTypeId::from_static("releases_github"), &config);
         // with_secrets_masked always sets auth_token to "***"
         assert_eq!(masked["auth_token"], SECRET_MASK);
     }
@@ -995,7 +999,8 @@ mod tests {
     #[test]
     fn mask_without_token_field_adds_masked() {
         let config = serde_json::json!({});
-        let masked = PluginRegistry::mask_config_secrets_str("releases_github", &config);
+        let masked =
+            catalog().mask_config_secrets(&PluginTypeId::from_static("releases_github"), &config);
         // with_secrets_masked always adds auth_token as "***"
         assert_eq!(masked["auth_token"], SECRET_MASK);
     }
@@ -1003,7 +1008,8 @@ mod tests {
     #[test]
     fn mask_unknown_plugin_type() {
         let config = serde_json::json!({"key": "value"});
-        let masked = PluginRegistry::mask_config_secrets_str("unknown_type", &config);
+        let masked =
+            catalog().mask_config_secrets(&PluginTypeId::from_static("unknown_type"), &config);
         assert_eq!(masked, config);
     }
 
@@ -1011,7 +1017,11 @@ mod tests {
     fn restore_masked_token() {
         let mut incoming = serde_json::json!({"auth_token": "***"});
         let existing = serde_json::json!({"auth_token": "ghp_real_token"});
-        PluginRegistry::restore_config_secrets_str("releases_github", &mut incoming, &existing);
+        catalog().restore_config_secrets(
+            &PluginTypeId::from_static("releases_github"),
+            &mut incoming,
+            &existing,
+        );
         assert_eq!(incoming["auth_token"], "ghp_real_token");
     }
 
@@ -1019,55 +1029,94 @@ mod tests {
     fn restore_new_token_not_masked() {
         let mut incoming = serde_json::json!({"auth_token": "ghp_new_token"});
         let existing = serde_json::json!({"auth_token": "ghp_old_token"});
-        PluginRegistry::restore_config_secrets_str("releases_github", &mut incoming, &existing);
+        catalog().restore_config_secrets(
+            &PluginTypeId::from_static("releases_github"),
+            &mut incoming,
+            &existing,
+        );
         assert_eq!(incoming["auth_token"], "ghp_new_token");
     }
 
     #[test]
     fn validate_valid_github_config() {
         let config = serde_json::json!({});
-        assert!(PluginRegistry::validate_config_str("releases_github", &config).is_ok());
+        assert!(
+            catalog()
+                .validate_config(&PluginTypeId::from_static("releases_github"), &config)
+                .is_ok()
+        );
     }
 
     #[test]
     fn validate_invalid_github_config() {
         // Non-https api_base_url fails validation.
         let config = serde_json::json!({"api_base_url": "http://api.github.com"});
-        assert!(PluginRegistry::validate_config_str("releases_github", &config).is_err());
+        assert!(
+            catalog()
+                .validate_config(&PluginTypeId::from_static("releases_github"), &config)
+                .is_err()
+        );
     }
 
     #[test]
     fn validate_unknown_plugin_type() {
         let config = serde_json::json!({});
-        assert!(PluginRegistry::validate_config_str("nonexistent", &config).is_err());
+        assert!(
+            catalog()
+                .validate_config(&PluginTypeId::from_static("nonexistent"), &config)
+                .is_err()
+        );
     }
 
     #[test]
     fn parse_known_plugin_types() {
         let github_config = serde_json::json!({});
-        assert!(PluginRegistry::validate_config_str("releases_github", &github_config).is_ok());
+        assert!(
+            catalog()
+                .validate_config(
+                    &PluginTypeId::from_static("releases_github"),
+                    &github_config
+                )
+                .is_ok()
+        );
 
         let proxmox_config = serde_json::json!({
             "script_url": "https://example.com/update.sh"
         });
         assert!(
-            PluginRegistry::validate_config_str(
-                "discovery_proxmox_helper_scripts",
-                &proxmox_config
-            )
-            .is_ok()
-        );
-
-        let docker_config = serde_json::json!({});
-        assert!(PluginRegistry::validate_config_str("releases_docker", &docker_config).is_ok());
-
-        let homebrew_config = serde_json::json!({});
-        assert!(
-            PluginRegistry::validate_config_str("package_manager_homebrew", &homebrew_config)
+            catalog()
+                .validate_config(
+                    &PluginTypeId::from_static("discovery_proxmox_helper_scripts"),
+                    &proxmox_config
+                )
                 .is_ok()
         );
 
-        assert!(PluginRegistry::validate_config_str("unknown", &homebrew_config).is_err());
+        let docker_config = serde_json::json!({});
+        assert!(
+            catalog()
+                .validate_config(
+                    &PluginTypeId::from_static("releases_docker"),
+                    &docker_config
+                )
+                .is_ok()
+        );
+
+        let homebrew_config = serde_json::json!({});
+        assert!(
+            catalog()
+                .validate_config(
+                    &PluginTypeId::from_static("package_manager_homebrew"),
+                    &homebrew_config
+                )
+                .is_ok()
+        );
+
+        assert!(
+            catalog()
+                .validate_config(&PluginTypeId::from_static("unknown"), &homebrew_config)
+                .is_err()
+        );
     }
 
     // --- Homebrew plugin tests ---
@@ -1075,19 +1124,36 @@ mod tests {
     #[test]
     fn validate_valid_homebrew_config() {
         let config = serde_json::json!({});
-        assert!(PluginRegistry::validate_config_str("package_manager_homebrew", &config).is_ok());
+        assert!(
+            catalog()
+                .validate_config(
+                    &PluginTypeId::from_static("package_manager_homebrew"),
+                    &config
+                )
+                .is_ok()
+        );
     }
 
     #[test]
     fn validate_homebrew_config_with_cask() {
         let config = serde_json::json!({"package_type": "cask"});
-        assert!(PluginRegistry::validate_config_str("package_manager_homebrew", &config).is_ok());
+        assert!(
+            catalog()
+                .validate_config(
+                    &PluginTypeId::from_static("package_manager_homebrew"),
+                    &config
+                )
+                .is_ok()
+        );
     }
 
     #[test]
     fn mask_homebrew_config_unchanged() {
         let config = serde_json::json!({"package_type": "formula"});
-        let masked = PluginRegistry::mask_config_secrets_str("package_manager_homebrew", &config);
+        let masked = catalog().mask_config_secrets(
+            &PluginTypeId::from_static("package_manager_homebrew"),
+            &config,
+        );
         // No secrets to mask — config returned unchanged
         assert_eq!(masked, config);
     }
@@ -1103,7 +1169,8 @@ mod tests {
                 "password": "secret123"
             }
         });
-        let masked = PluginRegistry::mask_config_secrets_str("releases_docker", &config);
+        let masked =
+            catalog().mask_config_secrets(&PluginTypeId::from_static("releases_docker"), &config);
         assert_eq!(masked["auth"]["password"], SECRET_MASK);
         assert_eq!(masked["auth"]["username"], "user");
     }
@@ -1116,14 +1183,16 @@ mod tests {
                 "token": "ghcr_token_secret"
             }
         });
-        let masked = PluginRegistry::mask_config_secrets_str("releases_docker", &config);
+        let masked =
+            catalog().mask_config_secrets(&PluginTypeId::from_static("releases_docker"), &config);
         assert_eq!(masked["auth"]["token"], SECRET_MASK);
     }
 
     #[test]
     fn mask_docker_no_auth() {
         let config = serde_json::json!({});
-        let masked = PluginRegistry::mask_config_secrets_str("releases_docker", &config);
+        let masked =
+            catalog().mask_config_secrets(&PluginTypeId::from_static("releases_docker"), &config);
         // None auth stays absent (serialized with skip_serializing_if)
         assert!(masked.get("auth").is_none());
     }
@@ -1131,7 +1200,8 @@ mod tests {
     #[test]
     fn mask_docker_null_auth() {
         let config = serde_json::json!({ "auth": null });
-        let masked = PluginRegistry::mask_config_secrets_str("releases_docker", &config);
+        let masked =
+            catalog().mask_config_secrets(&PluginTypeId::from_static("releases_docker"), &config);
         // JSON null deserializes to None, which stays absent after masking
         assert!(masked.get("auth").is_none());
     }
@@ -1152,7 +1222,11 @@ mod tests {
                 "password": "real_password"
             }
         });
-        PluginRegistry::restore_config_secrets_str("releases_docker", &mut incoming, &existing);
+        catalog().restore_config_secrets(
+            &PluginTypeId::from_static("releases_docker"),
+            &mut incoming,
+            &existing,
+        );
         assert_eq!(incoming["auth"]["password"], "real_password");
     }
 
@@ -1170,7 +1244,11 @@ mod tests {
                 "token": "real_token"
             }
         });
-        PluginRegistry::restore_config_secrets_str("releases_docker", &mut incoming, &existing);
+        catalog().restore_config_secrets(
+            &PluginTypeId::from_static("releases_docker"),
+            &mut incoming,
+            &existing,
+        );
         assert_eq!(incoming["auth"]["token"], "real_token");
     }
 
@@ -1190,7 +1268,11 @@ mod tests {
                 "password": "old_password"
             }
         });
-        PluginRegistry::restore_config_secrets_str("releases_docker", &mut incoming, &existing);
+        catalog().restore_config_secrets(
+            &PluginTypeId::from_static("releases_docker"),
+            &mut incoming,
+            &existing,
+        );
         assert_eq!(incoming["auth"]["password"], "new_password");
     }
 
@@ -1198,7 +1280,11 @@ mod tests {
     fn validate_valid_docker_config() {
         // Empty config is valid — no required fields
         let config = serde_json::json!({});
-        assert!(PluginRegistry::validate_config_str("releases_docker", &config).is_ok());
+        assert!(
+            catalog()
+                .validate_config(&PluginTypeId::from_static("releases_docker"), &config)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -1210,7 +1296,11 @@ mod tests {
                 "token": "ghcr_token"
             }
         });
-        assert!(PluginRegistry::validate_config_str("releases_docker", &config).is_ok());
+        assert!(
+            catalog()
+                .validate_config(&PluginTypeId::from_static("releases_docker"), &config)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -1223,7 +1313,9 @@ mod tests {
             "page_size": 500
         });
         assert!(
-            PluginRegistry::validate_config_str("releases_docker", &config).is_ok(),
+            catalog()
+                .validate_config(&PluginTypeId::from_static("releases_docker"), &config)
+                .is_ok(),
             "old semver fields should be silently ignored"
         );
     }

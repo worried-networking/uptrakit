@@ -140,9 +140,8 @@ struct SshAgentHandler {
     /// Enables the SSH agent to invoke controller-side plugin actions (e.g.,
     /// Proxmox plugin's `list-all-unmatched` for discovered guest bootstrap).
     extension_proxy: std::sync::Arc<uptrakit_service_sdk::ServiceExtensionProxy>,
-    /// Registry of agent-side infrastructure plugins.
-    infra_plugins:
-        std::sync::Arc<Vec<std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::PluginBase>>>,
+    /// Registry of agent-side infrastructure plugin bundles.
+    infra_bundles: std::sync::Arc<Vec<uptrakit_plugin_infrastructure_core::InfraBundle>>,
     /// Ensures the initial `ReportHosts` runs only after the first
     /// `ServiceSettings` so pagination honors controller-provided limits.
     pending_initial_host_report: bool,
@@ -467,10 +466,12 @@ impl ServiceHandler for SshAgentHandler {
             .agreed_capabilities()
             .contains(&Capability::UiExtensions)
         {
-            let register_payload = extension::build_register_payload(
-                self.encryption_public_key.clone(),
-                &self.infra_plugins,
-            );
+            let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            )
+            .expect("plugin catalog must build successfully");
+            let register_payload =
+                extension::build_register_payload(self.encryption_public_key.clone(), &catalog);
             if let Err(e) = conn
                 .send(uptrakit_internal_wire::ServiceMessage::ExtensionRegister(
                     register_payload,
@@ -525,7 +526,7 @@ impl ServiceHandler for SshAgentHandler {
             tenant_id: self.tenant_id,
             bg_tx: &self.bg_tx,
             extension_proxy: &self.extension_proxy,
-            infra_plugins: std::sync::Arc::clone(&self.infra_plugins),
+            infra_bundles: std::sync::Arc::clone(&self.infra_bundles),
         };
         extension::handle_extension_request(request, &ctx, conn).await;
 
@@ -678,15 +679,15 @@ impl SshAgentHandler {
                 {
                     let config_id = *config_id_str;
                     let request_id = payload.request_id.clone();
-                    for plugin in self.infra_plugins.iter() {
-                        if let Some(report) = plugin.as_host_report()
-                            && let Err(e) = report
+                    for bundle in self.infra_bundles.iter() {
+                        if let Some(lifecycle) = bundle.lifecycle.as_ref()
+                            && let Err(e) = lifecycle
                                 .on_plugin_config_reported(db, config_id, &request_id)
                                 .await
                         {
                             tracing::warn!(
                                 error = %e,
-                                plugin_type = %plugin.plugin_type_id(),
+                                plugin_type = %lifecycle.plugin_type_id(),
                                 "plugin on_plugin_config_reported failed"
                             );
                         }
@@ -756,7 +757,7 @@ impl SshAgentHandler {
     fn spawn_post_report_hooks(&self, db: sea_orm::DatabaseConnection) {
         let proxy = std::sync::Arc::clone(&self.extension_proxy);
         let bg_tx = self.bg_tx.clone();
-        let infra_plugins = std::sync::Arc::clone(&self.infra_plugins);
+        let infra_bundles = std::sync::Arc::clone(&self.infra_bundles);
         let state_dir = self.state_dir.clone();
         let tenant_id = self.tenant_id;
         let service_id = self.service_id;
@@ -773,13 +774,13 @@ impl SshAgentHandler {
                 action_invoker: &action_invoker,
                 guest_bootstrap: &crate::operations::bootstrap_proxmox::NoopGuestBootstrapExecutor,
             };
-            for plugin in infra_plugins.iter() {
-                if let Some(report) = plugin.as_host_report()
-                    && let Err(e) = report.on_post_report_hosts(&ctx).await
+            for bundle in infra_bundles.iter() {
+                if let Some(lifecycle) = bundle.lifecycle.as_ref()
+                    && let Err(e) = lifecycle.on_post_report_hosts(&ctx).await
                 {
                     tracing::warn!(
                         error = %e,
-                        plugin_type = %plugin.plugin_type_id(),
+                        plugin_type = %lifecycle.plugin_type_id(),
                         "plugin on_post_report_hosts failed"
                     );
                 }
@@ -1093,8 +1094,12 @@ async fn main() {
 
     let freeze_file_path = state_dir.join("update-freeze");
 
-    let infra_plugins =
-        std::sync::Arc::new(uptrakit_plugin_infrastructure_registry::create_agent_infra_plugins());
+    let infra_bundles = {
+        let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();
+        let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
+            .expect("plugin catalog must build successfully");
+        std::sync::Arc::new(catalog.create_infra_bundles(&catalog_config))
+    };
 
     let mut handler = SshAgentHandler {
         local_db: Some(local_db),
@@ -1114,7 +1119,7 @@ async fn main() {
         bg_rx,
         bg_tx,
         extension_proxy: std::sync::Arc::new(uptrakit_service_sdk::ServiceExtensionProxy::new()),
-        infra_plugins,
+        infra_bundles,
         pending_initial_host_report: false,
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(

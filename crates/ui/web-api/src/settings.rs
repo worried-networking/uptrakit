@@ -46,7 +46,10 @@ fn warn_unrecognised_keys(raw: &RawSettings) {
     // must not trigger the unrecognised-key warning. The registry aggregates
     // the exact set of keys from each compiled-in notification plugin so that
     // only truly unexpected keys produce a warning.
-    let plugin_keys = uptrakit_plugin_infrastructure_registry::all_plugin_raw_settings_keys();
+    let plugin_keys: Vec<&str> = uptrakit_plugin_infrastructure_registry::all_descriptors()
+        .iter()
+        .flat_map(|d| d.raw_settings_keys.iter().copied())
+        .collect();
 
     for key in raw.keys() {
         if SettingKey::from_db_key(key).is_some() || plugin_keys.contains(&key.as_str()) {

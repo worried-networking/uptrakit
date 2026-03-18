@@ -15,7 +15,7 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{
     BootstrapInfraResult, GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult,
     InfraActionInvoker, InfraPluginContext,
 };
-use uptrakit_plugin_infrastructure_registry::{PluginRegistry, create_agent_infra_plugins};
+use uptrakit_plugin_infrastructure_registry::{CatalogConfig, build_catalog, compatible_sudo_commands_for_host};
 
 use crate::commands::sudoers::{
     ResolvedSudoCommand, SudoersContent, detect_is_root, ensure_docker_group_membership,
@@ -528,7 +528,7 @@ async fn setup_sudoers_and_plugins(
     tracing::info!("configuring sudoers");
     let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(session)))
         as Arc<dyn uptrakit_command::CommandExecutor>;
-    let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
+    let plugin_sudo_cmds = compatible_sudo_commands_for_host(ssh_executor).await;
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
     for (_plugin_type, entries) in &plugin_sudo_cmds {
@@ -585,7 +585,10 @@ async fn setup_sudoers_and_plugins(
     }
 
     // Run infra plugin detection.
-    let infra_plugins = create_agent_infra_plugins();
+    let catalog_config = CatalogConfig::default();
+    let infra_bundles = build_catalog(&catalog_config)
+        .map(|catalog| catalog.create_infra_bundles(&catalog_config))
+        .unwrap_or_default();
     let noop_invoker = NoopInfraActionInvoker;
     let noop_bootstrap = NoopGuestBootstrap;
     let tenant_id_str = params.tenant_id.map(|t| t.to_string());
@@ -599,8 +602,8 @@ async fn setup_sudoers_and_plugins(
         guest_bootstrap: &noop_bootstrap,
     };
     let mut infra_results: Vec<BootstrapInfraResult> = Vec::new();
-    for plugin in &infra_plugins {
-        let Some(lifecycle) = plugin.as_host_lifecycle() else {
+    for bundle in &infra_bundles {
+        let Some(lifecycle) = bundle.lifecycle.as_ref() else {
             continue;
         };
         match lifecycle
@@ -609,14 +612,14 @@ async fn setup_sudoers_and_plugins(
         {
             Ok(result) => {
                 if result.detected {
-                    tracing::info!(plugin = %plugin.plugin_type_id(), "detected infrastructure");
+                    tracing::info!(plugin = %lifecycle.plugin_type_id(), "detected infrastructure");
                 }
                 infra_results.push(result);
             }
             Err(e) => {
                 tracing::debug!(
                     error = %e,
-                    plugin = %plugin.plugin_type_id(),
+                    plugin = %lifecycle.plugin_type_id(),
                     "infrastructure detection failed, skipping"
                 );
             }

@@ -902,9 +902,10 @@ pub(super) async fn handle_report_plugin_config(
     let request_id = payload.request_id.clone();
 
     // Validate the plugin type is known
+    let plugin_type_id = uptrakit_shared_types::PluginTypeId::new(&payload.plugin_type);
     if let Err(e) = state
         .plugin_ops
-        .validate_config_str(&payload.plugin_type, &payload.config)
+        .validate_config(&plugin_type_id, &payload.config)
     {
         tracing::warn!(
             %service_id,

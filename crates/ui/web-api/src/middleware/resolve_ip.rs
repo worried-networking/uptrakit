@@ -214,8 +214,12 @@ mod tests {
             uuid::Uuid::nil(),
         );
 
-        let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
-            Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry::new());
+        let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(
+            uptrakit_plugin_infrastructure_registry::build_catalog(
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            )
+            .expect("default catalog should build"),
+        );
 
         let notification_dispatcher = crate::notifications::dispatcher::NotificationDispatcher::new(
             db.clone(),

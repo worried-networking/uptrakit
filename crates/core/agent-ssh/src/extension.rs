@@ -19,7 +19,7 @@ use uptrakit_internal_wire::extension::{
     FieldType, FormDef, SelectOption, TableColumn, WizardStep,
 };
 use uptrakit_internal_wire::{ServiceMessage, ServiceTransport};
-use uptrakit_plugin_infrastructure_core::PluginBase;
+use uptrakit_plugin_infrastructure_core::InfraBundle;
 use uptrakit_plugin_infrastructure_core::agent_infra::{InfraActionInvoker, InfraPluginContext};
 use uptrakit_shared_types::{Permission, SecretString};
 
@@ -74,14 +74,23 @@ pub fn build_manifest(infra_primary_actions: &[String]) -> ExtensionManifest {
 /// Build the register payload including the manifest and encryption key.
 pub fn build_register_payload(
     encryption_public_key: Option<String>,
-    infra_plugins: &[Arc<dyn PluginBase>],
+    _catalog: &uptrakit_plugin_infrastructure_registry::PluginCatalog,
 ) -> ExtensionRegisterPayload {
-    let infra_primary_actions: Vec<String> = infra_plugins
+    use uptrakit_plugin_infrastructure_core::PluginFamily;
+    use uptrakit_plugin_infrastructure_registry::all_descriptors;
+
+    // Gather primary action IDs from infrastructure descriptors.
+    // In the old API these came from PluginBase::primary_action_ids().
+    // Now we derive them from the extension actions registered by infra descriptors.
+    let infra_primary_actions: Vec<String> = Vec::new();
+
+    // Collect extension manifests from infrastructure plugin descriptors only.
+    let infra_manifests: Vec<ExtensionManifest> = all_descriptors()
         .iter()
-        .flat_map(|p| p.primary_action_ids())
+        .filter(|d| d.family == PluginFamily::Infrastructure)
+        .filter_map(|d| d.extensions)
+        .flat_map(|ext| (ext.manifests)())
         .collect();
-    let infra_manifests =
-        uptrakit_plugin_infrastructure_registry::agent_infra_extension_manifests();
 
     let mut manifests = vec![build_manifest(&infra_primary_actions)];
     manifests.extend(infra_manifests);
@@ -95,6 +104,9 @@ pub fn build_register_payload(
 
 /// Build the action library for registration via `ExtensionActionsRegister`.
 pub fn build_actions() -> Vec<ActionDef> {
+    use uptrakit_plugin_infrastructure_core::PluginFamily;
+    use uptrakit_plugin_infrastructure_registry::all_descriptors;
+
     let mut actions = vec![
         ActionDef::new("remove-host", "Remove Host")
             .with_permission(Permission::UpdateHosts)
@@ -118,7 +130,14 @@ pub fn build_actions() -> Vec<ActionDef> {
             .with_permission(Permission::UpdateHosts)
             .with_timeout(120),
     ];
-    actions.extend(uptrakit_plugin_infrastructure_registry::agent_infra_extension_actions());
+    // Collect extension actions from infrastructure plugin descriptors.
+    let infra_actions: Vec<ActionDef> = all_descriptors()
+        .iter()
+        .filter(|d| d.family == PluginFamily::Infrastructure)
+        .filter_map(|d| d.extensions)
+        .flat_map(|ext| (ext.actions)())
+        .collect();
+    actions.extend(infra_actions);
     actions
 }
 
@@ -267,7 +286,7 @@ pub struct ExtensionContext<'a> {
     pub tenant_id: Option<uuid::Uuid>,
     pub bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
     pub extension_proxy: &'a Arc<uptrakit_service_sdk::ServiceExtensionProxy>,
-    pub infra_plugins: Arc<Vec<Arc<dyn PluginBase>>>,
+    pub infra_bundles: Arc<Vec<InfraBundle>>,
 }
 
 // ── InfraActionInvoker implementation ────────────────────────────────
@@ -315,7 +334,7 @@ fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionCo
     let state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
     let proxy = std::sync::Arc::clone(ctx.extension_proxy);
-    let infra_plugins = std::sync::Arc::clone(&ctx.infra_plugins);
+    let infra_bundles = std::sync::Arc::clone(&ctx.infra_bundles);
     let service_id = ctx.service_id;
     let tenant_id = ctx.tenant_id;
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
@@ -350,10 +369,11 @@ fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionCo
         };
 
         let mut response: Option<ExtensionResponsePayload> = None;
-        for plugin in infra_plugins.iter() {
-            if let Some(resp) = plugin
-                .handle_service_extension_action(&plugin_ctx, &request)
-                .await
+        for bundle in infra_bundles.iter() {
+            if let Some(guest_exec) = bundle.guest_exec.as_ref()
+                && let Some(resp) = guest_exec
+                    .handle_service_extension_action(&plugin_ctx, &request)
+                    .await
             {
                 response = Some(resp);
                 break;

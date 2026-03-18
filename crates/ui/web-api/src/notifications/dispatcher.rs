@@ -177,17 +177,18 @@ async fn dispatch_loop(
             };
 
             // Look up channel implementation
-            let channel_plugin =
-                match notification_ops.notification_transport(&channel_model.channel_type) {
-                    Some(c) => c,
-                    None => {
-                        tracing::warn!(
-                            channel_type = %channel_model.channel_type,
-                            "no channel implementation for type"
-                        );
-                        continue;
-                    }
-                };
+            let channel_type_id =
+                uptrakit_shared_types::PluginTypeId::new(&channel_model.channel_type);
+            let channel_transport = match notification_ops.transport(&channel_type_id) {
+                Some(c) => c,
+                None => {
+                    tracing::warn!(
+                        channel_type = %channel_model.channel_type,
+                        "no channel implementation for type"
+                    );
+                    continue;
+                }
+            };
 
             // Parse config JSON
             let config_json: serde_json::Value =
@@ -251,16 +252,9 @@ async fn dispatch_loop(
 
             // Spawn delivery task
             let db_clone = db.clone();
-            let channel_plugin = channel_plugin.clone();
+            let channel_transport = channel_transport.clone();
             tokio::spawn(async move {
-                let Some(transport) = channel_plugin.as_notification_transport() else {
-                    tracing::error!(
-                        log_id = %log_id,
-                        "plugin does not implement NotificationTransportPlugin"
-                    );
-                    return;
-                };
-                match transport
+                match channel_transport
                     .deliver(&config_json, &settings_bag, &message)
                     .await
                 {

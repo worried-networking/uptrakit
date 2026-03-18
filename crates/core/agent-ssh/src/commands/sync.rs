@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
-use uptrakit_plugin_infrastructure_registry::{PluginRegistry, create_agent_infra_plugins};
+use uptrakit_plugin_infrastructure_registry::{CatalogConfig, build_catalog, compatible_sudo_commands_for_host};
 
 use crate::commands::sudoers::{
     self, ResolvedSudoCommand, SudoersContent, detect_is_root, detect_sudo_available,
@@ -235,7 +235,7 @@ async fn collect_plugin_sudo_commands(
 ) -> Result<Vec<ResolvedSudoCommand>> {
     let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(session)))
         as Arc<dyn uptrakit_command::CommandExecutor>;
-    let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
+    let plugin_sudo_cmds = compatible_sudo_commands_for_host(ssh_executor).await;
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
     for (_plugin_type, entries) in &plugin_sudo_cmds {
@@ -288,7 +288,11 @@ async fn run_infra_sync(
     tenant_id: Option<uuid::Uuid>,
     resolved: &mut Vec<ResolvedSudoCommand>,
 ) -> Result<()> {
-    let infra_plugins = create_agent_infra_plugins();
+    let catalog_config = CatalogConfig::default();
+    let Ok(catalog) = build_catalog(&catalog_config) else {
+        return Ok(());
+    };
+    let infra_bundles = catalog.create_infra_bundles(&catalog_config);
     let noop_invoker = NoopInfraActionInvoker;
     let noop_bootstrap = NoopGuestBootstrap;
     let tenant_id_str = tenant_id.map(|t| t.to_string());
@@ -302,11 +306,13 @@ async fn run_infra_sync(
         guest_bootstrap: &noop_bootstrap,
     };
 
-    for plugin in &infra_plugins {
-        let Some(lifecycle) = plugin.as_host_lifecycle() else {
+    for bundle in &infra_bundles {
+        let (Some(report), Some(lifecycle)) =
+            (bundle.report.as_ref(), bundle.lifecycle.as_ref())
+        else {
             continue;
         };
-        if lifecycle.has_infra_state(db, host.id).await {
+        if report.has_infra_state(db, host.id).await {
             match lifecycle.on_host_synced(&infra_ctx, executor, host.id).await {
                 Ok(sync_result) => {
                     for cmd in sync_result.sudo_commands {
@@ -321,7 +327,7 @@ async fn run_infra_sync(
                     }
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, plugin = %plugin.plugin_type_id(), "infra plugin sync failed");
+                    tracing::warn!(error = %e, plugin = %lifecycle.plugin_type_id(), "infra plugin sync failed");
                 }
             }
         }

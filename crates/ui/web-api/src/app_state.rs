@@ -121,7 +121,7 @@ pub struct AppState {
     /// Plugin operations abstraction used by plugin-config route handlers.
     ///
     /// Injected via `Arc<dyn PluginOps>` so that route handlers and query
-    /// helpers are decoupled from the concrete [`uptrakit_plugin_infrastructure_registry::PluginRegistry`]
+    /// helpers are decoupled from the concrete [`uptrakit_plugin_infrastructure_registry::PluginCatalog`]
     /// and can be tested with a mock implementation.
     pub plugin_ops: Arc<dyn PluginOps>,
     /// Credential sources for services with credential capabilities.
@@ -407,7 +407,7 @@ impl AppStateBuilder {
 
     /// Override the plugin operations implementation.
     ///
-    /// Defaults to [`uptrakit_plugin_infrastructure_registry::PluginRegistry`] when not set.
+    /// Defaults to [`uptrakit_plugin_infrastructure_registry::PluginCatalog`] when not set.
     /// Use this in tests to inject a mock implementation.
     pub fn plugin_ops(mut self, v: Arc<dyn PluginOps>) -> Self {
         self.plugin_ops = Some(v);
@@ -597,7 +597,12 @@ impl AppStateBuilder {
                 .notification_dispatcher
                 .ok_or(AppStateBuildError("notification_dispatcher"))?,
             plugin_ops: self.plugin_ops.unwrap_or_else(|| {
-                Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry::new())
+                Arc::new(
+                    uptrakit_plugin_infrastructure_registry::build_catalog(
+                        &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+                    )
+                    .expect("default catalog should build"),
+                )
             }),
             credential_sources: self.credential_sources.unwrap_or_default(),
             shutdown_token: self.shutdown_token.unwrap_or_default(),

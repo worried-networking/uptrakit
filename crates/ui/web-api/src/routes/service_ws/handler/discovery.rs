@@ -67,7 +67,10 @@ pub(crate) async fn trigger_discovery_for_agent_host(
             continue;
         }
 
-        if plugin_type.is_package_manager() {
+        let wire_plugin_type =
+            uptrakit_shared_types::PluginType::from(plugin_type.as_str().to_string());
+
+        if state.plugin_ops.has_type_settings(&plugin_type) {
             // Package manager types read config from plugin_type_settings.
             let type_str = plugin_type.to_string();
             let config = match plugin_type_setting::Entity::find()
@@ -90,7 +93,7 @@ pub(crate) async fn trigger_discovery_for_agent_host(
 
             plugins.push(DiscoveryPluginAssignment {
                 plugin_config_id: None,
-                plugin_type: plugin_type.clone(),
+                plugin_type: wire_plugin_type.clone(),
                 config,
             });
         } else {
@@ -120,14 +123,14 @@ pub(crate) async fn trigger_discovery_for_agent_host(
                 // No configs for this type -- send a default assignment.
                 plugins.push(DiscoveryPluginAssignment {
                     plugin_config_id: None,
-                    plugin_type: plugin_type.clone(),
+                    plugin_type: wire_plugin_type.clone(),
                     config: serde_json::Value::Object(Default::default()),
                 });
             } else {
                 for cfg in configs {
                     plugins.push(DiscoveryPluginAssignment {
                         plugin_config_id: Some(cfg.id),
-                        plugin_type: plugin_type.clone(),
+                        plugin_type: wire_plugin_type.clone(),
                         config: cfg.config,
                     });
                 }

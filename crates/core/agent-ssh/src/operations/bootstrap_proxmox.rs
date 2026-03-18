@@ -9,7 +9,9 @@ use rootcause::prelude::*;
 use uptrakit_command::RemoteExecutor;
 use uptrakit_crypto::EncryptedString;
 use uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapExecutor;
-use uptrakit_plugin_infrastructure_registry::PluginRegistry;
+use uptrakit_plugin_infrastructure_registry::{
+    CatalogConfig, build_catalog, compatible_sudo_commands_for_host,
+};
 
 use crate::db::entity::ssh_host::SshKeyType;
 use crate::error::{Error, Result};
@@ -237,12 +239,17 @@ async fn connect_and_create_executors(
     let pve_executor: Arc<dyn RemoteExecutor> =
         Arc::new(SshRemoteExecutor::new(Arc::clone(&session)));
 
-    let infra_plugins = uptrakit_plugin_infrastructure_registry::create_agent_infra_plugins();
-    let guest_exec_provider = infra_plugins
+    let catalog_config = CatalogConfig::default();
+    let catalog = build_catalog(&catalog_config).map_err(|e| {
+        report!(Error::InvalidInput(format!(
+            "failed to build plugin catalog: {e}"
+        )))
+    })?;
+    let infra_bundles = catalog.create_infra_bundles(&catalog_config);
+    let guest_exec_provider = infra_bundles
         .iter()
-        .find(|p| p.plugin_type_id() == "infrastructure_proxmox")
-        .and_then(|p| p.as_guest_exec())
-        .and_then(|g| g.guest_exec_provider())
+        .filter_map(|b| b.guest_exec.as_ref())
+        .find_map(|g| g.guest_exec_provider())
         .ok_or_else(|| {
             report!(Error::InvalidInput(
                 "no GuestExecProvider found for infrastructure_proxmox".to_string()
@@ -585,8 +592,7 @@ pub(crate) async fn proxmox_bootstrap_execute(
     if !skip_actions.contains("configure_sudoers") {
         // Use the guest command executor so compatibility probes (e.g. `which apt`,
         // `which brew`) run against the *guest* rather than the PVE host.
-        let plugin_sudo_cmds =
-            PluginRegistry::compatible_sudo_commands_for_host(guest_cmd_executor).await;
+        let plugin_sudo_cmds = compatible_sudo_commands_for_host(guest_cmd_executor).await;
         let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
         for (_plugin_type, entries) in &plugin_sudo_cmds {
@@ -672,12 +678,17 @@ pub(crate) async fn proxmox_bootstrap_execute(
         .map(String::from);
 
     // 5. GET GUEST IP
-    let infra_plugins = uptrakit_plugin_infrastructure_registry::create_agent_infra_plugins();
-    let guest_exec_provider = infra_plugins
+    let catalog_config = CatalogConfig::default();
+    let catalog = build_catalog(&catalog_config).map_err(|e| {
+        report!(Error::InvalidInput(format!(
+            "failed to build plugin catalog: {e}"
+        )))
+    })?;
+    let infra_bundles = catalog.create_infra_bundles(&catalog_config);
+    let guest_exec_provider = infra_bundles
         .iter()
-        .find(|p| p.plugin_type_id() == "infrastructure_proxmox")
-        .and_then(|p| p.as_guest_exec())
-        .and_then(|g| g.guest_exec_provider())
+        .filter_map(|b| b.guest_exec.as_ref())
+        .find_map(|g| g.guest_exec_provider())
         .ok_or_else(|| {
             report!(Error::InvalidInput(
                 "no GuestExecProvider found for infrastructure_proxmox".to_string()

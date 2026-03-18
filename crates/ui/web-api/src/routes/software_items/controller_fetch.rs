@@ -10,9 +10,8 @@ use std::sync::Arc;
 
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, prelude::Expr};
 use time::OffsetDateTime;
-use uptrakit_command::NoopCommandExecutor;
 use uptrakit_plugin_infrastructure_registry::{
-    CommandExecutor, PluginCapability, PluginRegistry, PluginType,
+    ControllerRuntime, PluginCapability, PluginType, get_descriptor,
 };
 use uptrakit_shared_db::entity::{host_software_item, software_item};
 use uptrakit_web_api_types::events::AdminEvent;
@@ -29,9 +28,9 @@ pub(super) struct ControllerFetchJob {
 
 /// Returns `true` if a `fetch_releases` assignment should run on the controller.
 ///
-/// - `execution_site == "controller"` → always controller.
-/// - `execution_site == "agent"` → always agent.
-/// - `execution_site == "auto"` → controller when the plugin declares
+/// - `execution_site == "controller"` -> always controller.
+/// - `execution_site == "agent"` -> always agent.
+/// - `execution_site == "auto"` -> controller when the plugin declares
 ///   [`PluginCapability::ControllerSideFetchReleases`].
 pub(super) fn is_controller_fetch_site(
     execution_site: &str,
@@ -42,9 +41,13 @@ pub(super) fn is_controller_fetch_site(
         "controller" => true,
         "agent" => false,
         _ => {
-            // "auto" — check static capability (no instantiation needed)
-            PluginRegistry::capabilities_for(plugin_type.clone())
-                .contains(&PluginCapability::ControllerSideFetchReleases)
+            // "auto" -- check static capability via descriptor (no instantiation needed)
+            get_descriptor(plugin_type.as_str())
+                .map(|desc| {
+                    desc.capabilities
+                        .contains(&PluginCapability::ControllerSideFetchReleases)
+                })
+                .unwrap_or(false)
         }
     }
 }
@@ -52,7 +55,7 @@ pub(super) fn is_controller_fetch_site(
 /// Execute controller-side `fetch_releases` for a batch of jobs.
 ///
 /// Groups by `(plugin_type, package_identifier, config)` deduplication has
-/// already been applied by the caller — each job represents one distinct API
+/// already been applied by the caller -- each job represents one distinct API
 /// call. Updates `host_software_item.latest_version`,
 /// `latest_version_fetched_at`, and `software_item.last_checked_at` for all
 /// successful fetches. Pushes MQTT software states after updating.
@@ -69,44 +72,59 @@ pub(super) async fn run_controller_fetch_jobs(
         return 0;
     }
 
-    let noop_executor: Arc<dyn CommandExecutor> = Arc::new(NoopCommandExecutor);
+    let controller_runtime: Arc<dyn uptrakit_plugin_infrastructure_registry::HostRuntime> =
+        Arc::new(ControllerRuntime::new(
+            uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+        ));
     let now = OffsetDateTime::now_utc();
     let mut succeeded = 0u32;
     let mut updated_item_ids: HashSet<Uuid> = HashSet::new();
     let mut completed_pairs: Vec<(Uuid, Uuid)> = Vec::new();
 
     for job in &jobs {
-        let plugin = match PluginRegistry::create_plugin(
-            job.plugin_type.clone(),
-            &job.merged_config,
-            noop_executor.clone(),
-        )
-        .await
-        {
-            Ok(p) => p,
-            Err(e) => {
+        let type_str = job.plugin_type.as_str();
+
+        let desc = match get_descriptor(type_str) {
+            Some(d) => d,
+            None => {
                 tracing::warn!(
-                    plugin_type = ?job.plugin_type,
+                    plugin_type = type_str,
                     package = %job.package_identifier,
-                    error = %e,
-                    "controller-side fetch: failed to create plugin"
+                    "controller-side fetch: unknown plugin type"
                 );
                 continue;
             }
         };
 
-        let Some(fetcher) = plugin.as_release_fetcher() else {
-            tracing::warn!(
-                plugin_type = ?job.plugin_type,
-                "plugin does not implement ReleaseFetcherPlugin; skipping"
-            );
-            continue;
+        let slot = match desc.roles.release_fetcher.as_ref() {
+            Some(s) => s,
+            None => {
+                tracing::warn!(
+                    plugin_type = type_str,
+                    "plugin does not support release_fetcher role; skipping"
+                );
+                continue;
+            }
         };
+
+        let fetcher = match (slot.create)(&job.merged_config, controller_runtime.clone()) {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!(
+                    plugin_type = type_str,
+                    package = %job.package_identifier,
+                    error = %e,
+                    "controller-side fetch: failed to create release fetcher"
+                );
+                continue;
+            }
+        };
+
         let releases = match fetcher.fetch_releases(&job.package_identifier).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(
-                    plugin_type = ?job.plugin_type,
+                    plugin_type = type_str,
                     package = %job.package_identifier,
                     error = %e,
                     "controller-side fetch: fetch_releases failed"
@@ -121,7 +139,7 @@ pub(super) async fn run_controller_fetch_jobs(
             .or(releases.first());
         let Some(latest) = latest else {
             tracing::debug!(
-                plugin_type = ?job.plugin_type,
+                plugin_type = type_str,
                 package = %job.package_identifier,
                 "controller-side fetch: no releases returned"
             );
@@ -132,7 +150,7 @@ pub(super) async fn run_controller_fetch_jobs(
         let release_metadata = serde_json::to_value(latest).unwrap_or(serde_json::Value::Null);
 
         tracing::debug!(
-            plugin_type = ?job.plugin_type,
+            plugin_type = type_str,
             package = %job.package_identifier,
             latest_version = %latest_version_str,
             host_count = job.targets.len(),

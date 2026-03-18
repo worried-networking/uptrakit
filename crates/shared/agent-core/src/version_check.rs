@@ -8,8 +8,10 @@ use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::{
     PluginAssignment, PluginType, UpdateCategory, VersionCheckAssignment, VersionCheckResult,
 };
-use uptrakit_plugin_infrastructure_core::{BatchDetectItem, BatchFetchItem};
-use uptrakit_plugin_infrastructure_registry::{PluginCapability, PluginRegistry};
+use uptrakit_plugin_infrastructure_core::{
+    BatchDetectItem, BatchFetchItem, HostCapabilities, construct_host_runtime,
+};
+use uptrakit_plugin_infrastructure_registry::{PluginCapability, get_descriptor};
 
 use crate::connection_context::ConnectionContext;
 
@@ -182,24 +184,20 @@ async fn run_detect_group(
         .map(|(_, pkg)| BatchDetectItem::new(pkg.clone()))
         .collect();
 
-    let plugin = match PluginRegistry::create_plugin(
-        group.plugin_type.clone(),
-        &group.effective_config,
-        executor,
-    )
-    .await
-    {
-        Ok(p) => p,
-        Err(e) => {
+    let runtime = construct_host_runtime(executor, HostCapabilities::default());
+
+    let desc = match get_descriptor(group.plugin_type.as_str()) {
+        Some(d) => d,
+        None => {
             return error_for_all_detect_items(
                 &group.items,
-                format!("failed to create plugin: {e}"),
+                format!("unknown plugin type: {}", group.plugin_type),
             );
         }
     };
 
-    let detector = match plugin.as_version_detector() {
-        Some(d) => d,
+    let slot = match desc.roles.version_detector.as_ref() {
+        Some(s) => s,
         None => {
             return error_for_all_detect_items(
                 &group.items,
@@ -211,14 +209,24 @@ async fn run_detect_group(
         }
     };
 
-    let results = match detector.batch_detect_installed_version(&batch_items).await {
+    let detector = match (slot.create)(&group.effective_config, runtime) {
+        Ok(d) => d,
+        Err(e) => {
+            return error_for_all_detect_items(
+                &group.items,
+                format!("failed to create plugin: {e}"),
+            );
+        }
+    };
+
+    let results = match detector.batch_detect(&batch_items).await {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!(
                 plugin_type = %group.plugin_type,
                 item_count = group.items.len(),
                 error = %e,
-                "batch detect_installed_version failed"
+                "batch detect failed"
             );
             return error_for_all_detect_items(&group.items, format!("detection failed: {e}"));
         }
@@ -262,24 +270,20 @@ async fn run_fetch_group(
         .map(|(_, pkg)| BatchFetchItem::new(pkg.clone()))
         .collect();
 
-    let plugin = match PluginRegistry::create_plugin(
-        group.plugin_type.clone(),
-        &group.effective_config,
-        executor,
-    )
-    .await
-    {
-        Ok(p) => p,
-        Err(e) => {
+    let runtime = construct_host_runtime(executor, HostCapabilities::default());
+
+    let desc = match get_descriptor(group.plugin_type.as_str()) {
+        Some(d) => d,
+        None => {
             return error_for_all_fetch_items(
                 &group.items,
-                format!("failed to create plugin: {e}"),
+                format!("unknown plugin type: {}", group.plugin_type),
             );
         }
     };
 
-    let fetcher = match plugin.as_release_fetcher() {
-        Some(f) => f,
+    let slot = match desc.roles.release_fetcher.as_ref() {
+        Some(s) => s,
         None => {
             return error_for_all_fetch_items(
                 &group.items,
@@ -291,14 +295,24 @@ async fn run_fetch_group(
         }
     };
 
-    let results = match fetcher.batch_fetch_releases(&batch_items).await {
+    let fetcher = match (slot.create)(&group.effective_config, runtime) {
+        Ok(f) => f,
+        Err(e) => {
+            return error_for_all_fetch_items(
+                &group.items,
+                format!("failed to create plugin: {e}"),
+            );
+        }
+    };
+
+    let results = match fetcher.batch_fetch(&batch_items).await {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!(
                 plugin_type = %group.plugin_type,
                 item_count = group.items.len(),
                 error = %e,
-                "batch fetch_releases failed"
+                "batch fetch failed"
             );
             return error_for_all_fetch_items(&group.items, format!("fetch_releases failed: {e}"));
         }
@@ -342,29 +356,37 @@ async fn refresh_package_indexes(
     executor: &Arc<dyn CommandExecutor>,
 ) {
     for group in fetch_groups.values() {
-        match PluginRegistry::create_plugin(
-            group.plugin_type.clone(),
-            &group.effective_config,
-            Arc::clone(executor),
-        )
-        .await
+        let Some(desc) = get_descriptor(group.plugin_type.as_str()) else {
+            continue;
+        };
+
+        if !desc
+            .capabilities
+            .contains(&PluginCapability::RefreshPackageIndex)
         {
-            Ok(plugin) if plugin.has_capability(PluginCapability::RefreshPackageIndex) => {
-                if let Some(pkg_index) = plugin.as_package_index() {
-                    tracing::info!(
+            continue;
+        }
+
+        let Some(slot) = desc.roles.package_indexer.as_ref() else {
+            continue;
+        };
+
+        let runtime = construct_host_runtime(Arc::clone(executor), HostCapabilities::default());
+
+        match (slot.create)(&group.effective_config, runtime) {
+            Ok(pkg_index) => {
+                tracing::info!(
+                    plugin_type = %group.plugin_type,
+                    "refreshing package index"
+                );
+                if let Err(e) = pkg_index.refresh_package_index().await {
+                    tracing::warn!(
                         plugin_type = %group.plugin_type,
-                        "refreshing package index"
+                        error = %e,
+                        "failed to refresh package index"
                     );
-                    if let Err(e) = pkg_index.refresh_package_index().await {
-                        tracing::warn!(
-                            plugin_type = %group.plugin_type,
-                            error = %e,
-                            "failed to refresh package index"
-                        );
-                    }
                 }
             }
-            Ok(_) => {}
             Err(e) => {
                 tracing::warn!(
                     plugin_type = %group.plugin_type,
@@ -550,17 +572,19 @@ async fn detect_installed(
     ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
 
     // Plugin creation is not retried — config/instantiation errors aren't transient.
-    let plugin =
-        PluginRegistry::create_plugin(assignment.plugin_type.clone(), &effective_config, executor)
-            .await
-            .map_err(|e| e.to_string())?;
+    let runtime = construct_host_runtime(executor, HostCapabilities::default());
 
-    let detector = plugin.as_version_detector().ok_or_else(|| {
+    let desc = get_descriptor(assignment.plugin_type.as_str())
+        .ok_or_else(|| format!("unknown plugin type: {}", assignment.plugin_type))?;
+
+    let slot = desc.roles.version_detector.as_ref().ok_or_else(|| {
         format!(
             "plugin {} does not implement VersionDetectorPlugin",
             assignment.plugin_type
         )
     })?;
+
+    let detector = (slot.create)(&effective_config, runtime).map_err(|e| e.to_string())?;
 
     let pkg = &assignment.package_identifier;
     match run_with_retry("detect_installed_version", MAX_RETRIES, || {
@@ -600,17 +624,19 @@ async fn fetch_latest(
     ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
 
     // Plugin creation is not retried — config/instantiation errors aren't transient.
-    let plugin =
-        PluginRegistry::create_plugin(assignment.plugin_type.clone(), &effective_config, executor)
-            .await
-            .map_err(|e| e.to_string())?;
+    let runtime = construct_host_runtime(executor, HostCapabilities::default());
 
-    let fetcher = plugin.as_release_fetcher().ok_or_else(|| {
+    let desc = get_descriptor(assignment.plugin_type.as_str())
+        .ok_or_else(|| format!("unknown plugin type: {}", assignment.plugin_type))?;
+
+    let slot = desc.roles.release_fetcher.as_ref().ok_or_else(|| {
         format!(
             "plugin {} does not implement ReleaseFetcherPlugin",
             assignment.plugin_type
         )
     })?;
+
+    let fetcher = (slot.create)(&effective_config, runtime).map_err(|e| e.to_string())?;
 
     let pkg = &assignment.package_identifier;
     let releases = match run_with_retry("fetch_releases", MAX_RETRIES, || {
@@ -713,7 +739,8 @@ mod tests {
 
     #[tokio::test]
     async fn check_version_github_invalid_config() {
-        // A non-https api_base_url fails GitHub config validation.
+        // GitHub is a release-only plugin — it does not implement VersionDetector.
+        // Assigning it to the detect role should produce an error.
         let assignment = PluginAssignment {
             plugin_type: PluginType::ReleasesGithub,
             package_identifier: "octocat/hello-world".to_string(),
@@ -722,7 +749,11 @@ mod tests {
         let outcome = check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.error.is_some());
-        assert!(outcome.error.unwrap().contains("https"));
+        assert!(
+            outcome.error.as_ref().unwrap().contains("VersionDetector"),
+            "expected error about missing VersionDetector role, got: {}",
+            outcome.error.unwrap()
+        );
     }
 
     #[tokio::test]

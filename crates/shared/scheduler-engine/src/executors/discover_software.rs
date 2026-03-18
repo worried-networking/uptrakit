@@ -6,6 +6,7 @@
 //! autodiscovery result processor in `process_plugin_result`.
 
 use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
 use std::sync::Arc;
 
 use rootcause::prelude::*;
@@ -15,7 +16,7 @@ use sea_orm::{
 use uptrakit_internal_wire::{
     ControllerMessage, DiscoverSoftwarePayload, DiscoveryPluginAssignment,
 };
-use uptrakit_plugin_infrastructure_registry::PluginRegistry;
+use uptrakit_plugin_infrastructure_registry::all_descriptors;
 use uptrakit_shared_db::entity::{
     host, host_discovery_allowlist, plugin_config, scheduled_task, service, service_host,
     tenant_discovery_allowlist,
@@ -69,8 +70,12 @@ impl TaskExecutor for DiscoverSoftwareExecutor {
             return Ok(());
         }
 
-        // Static registry call — no I/O.
-        let discovery_types = PluginRegistry::discovery_plugins();
+        // Collect plugin types that have a discoverer role from the descriptor registry.
+        let discovery_types: Vec<PluginType> = all_descriptors()
+            .into_iter()
+            .filter(|d| d.roles.discoverer.is_some())
+            .filter_map(|d| PluginType::from_str(d.type_id).ok())
+            .collect();
 
         // Load allowlists in parallel with plugin config query.
         let host_ids: Vec<Uuid> = host_rows.iter().map(|r| r.host_id).collect();

@@ -5,7 +5,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set, TransactionTrait,
 };
 use time::OffsetDateTime;
-use uptrakit_plugin_infrastructure_core::PluginOps;
+use uptrakit_plugin_infrastructure_core::PluginConfigOps;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
 };
@@ -40,7 +40,7 @@ pub(super) enum ConfigOverrideError {
 /// Validate `config_override` by merging it with the base plugin config and running
 /// plugin-specific validation. The merged document must satisfy the plugin's schema.
 pub(super) fn validate_config_override(
-    ops: &dyn PluginOps,
+    ops: &dyn PluginConfigOps,
     plugin_type: &str,
     base_config: &serde_json::Value,
     override_config: &serde_json::Value,
@@ -55,7 +55,8 @@ pub(super) fn validate_config_override(
         return Err(ConfigOverrideError::NotAnObject);
     }
 
-    ops.validate_config_str(plugin_type, &merged)
+    let id = uptrakit_shared_types::PluginTypeId::new(plugin_type);
+    ops.validate_config(&id, &merged)
         .map_err(|e| ConfigOverrideError::PluginValidation(e.to_string()))
 }
 
@@ -89,13 +90,14 @@ pub(super) fn validate_execution_site(
 
 /// Validate plugin type, package identifier, and config/config_override for a host assignment.
 fn validate_assignment(
-    ops: &dyn PluginOps,
+    ops: &dyn PluginConfigOps,
     plugin_type: &str,
     base_config: Option<&serde_json::Value>,
     package_identifier: &str,
     config_override: Option<&serde_json::Value>,
 ) -> super::Result<()> {
-    if let Err(e) = ops.validate_package_identifier_str(plugin_type, package_identifier) {
+    let id = uptrakit_shared_types::PluginTypeId::new(plugin_type);
+    if let Err(e) = ops.validate_package_identifier(&id, package_identifier) {
         bail!(SoftwareItemQueryError::InvalidPackageIdentifier(e));
     }
 
@@ -104,7 +106,7 @@ fn validate_assignment(
             if let Err(e) = validate_config_override(ops, plugin_type, base, override_val) {
                 bail!(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
             }
-        } else if let Err(e) = ops.validate_config_str(plugin_type, override_val) {
+        } else if let Err(e) = ops.validate_config(&id, override_val) {
             bail!(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
         }
     }
@@ -115,7 +117,7 @@ fn validate_assignment(
 /// Resolve plugin config from either an existing ID or an inline create request,
 /// within a transaction. Returns `(plugin_config_id, plugin_config::Model)`.
 async fn resolve_plugin_config_txn(
-    ops: &dyn PluginOps,
+    ops: &dyn PluginConfigOps,
     txn: &sea_orm::DatabaseTransaction,
     tenant_id: Uuid,
     assignment: &HostPluginRoleAssignment,
@@ -139,7 +141,8 @@ async fn resolve_plugin_config_txn(
                     "name must not be empty".to_string(),
                 ));
             }
-            if let Err(e) = ops.validate_config_str(inline.plugin_type.as_str(), &inline.config) {
+            let id = uptrakit_shared_types::PluginTypeId::new(inline.plugin_type.as_str());
+            if let Err(e) = ops.validate_config(&id, &inline.config) {
                 bail!(SoftwareItemQueryError::InvalidInlinePluginConfig(
                     e.to_string()
                 ));
@@ -213,7 +216,7 @@ async fn ensure_host_link(
 /// Validate, resolve, and upsert a single role assignment for a host-software-item pair.
 #[allow(clippy::too_many_arguments)]
 async fn upsert_role_assignment(
-    ops: &dyn PluginOps,
+    ops: &dyn PluginConfigOps,
     txn: &sea_orm::DatabaseTransaction,
     tenant_id: Uuid,
     host_id: Uuid,
@@ -301,7 +304,7 @@ async fn upsert_role_assignment(
 /// or a host is not found.
 #[tracing::instrument(skip_all, fields(%id))]
 pub async fn assign_hosts(
-    ops: &dyn PluginOps,
+    ops: &dyn PluginConfigOps,
     tenant_db: &TenantDb,
     id: Uuid,
     req: AssignHostsRequest,
@@ -368,7 +371,7 @@ pub async fn assign_hosts(
 /// Update a single role assignment for an existing host-software-item pair.
 #[tracing::instrument(skip_all, fields(%id, %host_id))]
 pub async fn update_host_assignment(
-    ops: &dyn PluginOps,
+    ops: &dyn PluginConfigOps,
     tenant_db: &TenantDb,
     id: Uuid,
     host_id: Uuid,

@@ -15,7 +15,9 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{
     BootstrapInfraResult, GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult,
     InfraActionInvoker, InfraPluginContext,
 };
-use uptrakit_plugin_infrastructure_registry::{PluginRegistry, create_agent_infra_plugins};
+use uptrakit_plugin_infrastructure_registry::{
+    CatalogConfig, build_catalog, compatible_sudo_commands_for_host,
+};
 use uptrakit_shared_types::SecretString;
 
 use crate::error::{Error, Result};
@@ -168,7 +170,7 @@ pub(crate) async fn bootstrap_connect(
     // Collect plugin sudo commands to build a preview for the review step.
     let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
         as Arc<dyn uptrakit_command::CommandExecutor>;
-    let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
+    let plugin_sudo_cmds = compatible_sudo_commands_for_host(ssh_executor).await;
     let sudo_command_previews: Vec<String> = plugin_sudo_cmds
         .iter()
         .flat_map(|(_, entries)| entries.iter())
@@ -280,7 +282,11 @@ async fn detect_infra_plugins(
     state_dir: &Path,
     db: &DatabaseConnection,
 ) -> bool {
-    let infra_plugins = create_agent_infra_plugins();
+    let catalog_config = CatalogConfig::default();
+    let Ok(catalog) = build_catalog(&catalog_config) else {
+        return false;
+    };
+    let infra_bundles = catalog.create_infra_bundles(&catalog_config);
     let noop_invoker = NoopInfraActionInvoker;
     let noop_bootstrap = NoopGuestBootstrap;
     let tenant_id_str = params.tenant_id.map(|t| t.to_string());
@@ -294,8 +300,8 @@ async fn detect_infra_plugins(
         guest_bootstrap: &noop_bootstrap,
     };
     let mut detected = false;
-    for plugin in &infra_plugins {
-        let Some(lifecycle) = plugin.as_host_lifecycle() else {
+    for bundle in &infra_bundles {
+        let Some(lifecycle) = bundle.lifecycle.as_ref() else {
             continue;
         };
         match lifecycle
@@ -310,7 +316,7 @@ async fn detect_infra_plugins(
             Err(e) => {
                 tracing::debug!(
                     error = %e,
-                    plugin = %plugin.plugin_type_id(),
+                    plugin = %lifecycle.plugin_type_id(),
                     "infrastructure detection probe failed, skipping"
                 );
             }
@@ -875,7 +881,7 @@ async fn deploy_authorized_keys(
 async fn resolve_plugin_sudo_commands(
     executor: &SshRemoteExecutor,
     plugin_sudo_cmds: &[(
-        uptrakit_plugin_infrastructure_core::PluginType,
+        uptrakit_shared_types::PluginTypeId,
         Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry>,
     )],
     use_sudo: bool,
@@ -926,7 +932,11 @@ async fn collect_infra_results(
     db: &sea_orm::DatabaseConnection,
     state_dir: &std::path::Path,
 ) -> Vec<BootstrapInfraResult> {
-    let infra_plugins = create_agent_infra_plugins();
+    let catalog_config = CatalogConfig::default();
+    let Ok(catalog) = build_catalog(&catalog_config) else {
+        return Vec::new();
+    };
+    let infra_bundles = catalog.create_infra_bundles(&catalog_config);
     let noop_invoker = NoopInfraActionInvoker;
     let noop_bootstrap = NoopGuestBootstrap;
     let tenant_id_str = params.tenant_id.map(|t| t.to_string());
@@ -940,8 +950,8 @@ async fn collect_infra_results(
         guest_bootstrap: &noop_bootstrap,
     };
     let mut infra_results = Vec::new();
-    for plugin in &infra_plugins {
-        let Some(lifecycle) = plugin.as_host_lifecycle() else {
+    for bundle in &infra_bundles {
+        let Some(lifecycle) = bundle.lifecycle.as_ref() else {
             continue;
         };
         match lifecycle
@@ -950,14 +960,14 @@ async fn collect_infra_results(
         {
             Ok(result) => {
                 if result.detected {
-                    tracing::info!(plugin = %plugin.plugin_type_id(), "detected infrastructure");
+                    tracing::info!(plugin = %lifecycle.plugin_type_id(), "detected infrastructure");
                 }
                 infra_results.push(result);
             }
             Err(e) => {
                 tracing::debug!(
                     error = %e,
-                    plugin = %plugin.plugin_type_id(),
+                    plugin = %lifecycle.plugin_type_id(),
                     "infrastructure detection failed, skipping"
                 );
             }
@@ -1018,7 +1028,7 @@ async fn setup_sudoers_and_plugins(
     tracing::info!("configuring sudoers");
     let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(session)))
         as Arc<dyn uptrakit_command::CommandExecutor>;
-    let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
+    let plugin_sudo_cmds = compatible_sudo_commands_for_host(ssh_executor).await;
 
     let resolved = resolve_plugin_sudo_commands(executor, &plugin_sudo_cmds, use_sudo).await?;
 

@@ -24,7 +24,9 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{
     GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult, InfraActionInvoker,
     InfraPluginContext,
 };
-use uptrakit_plugin_infrastructure_registry::{PluginRegistry, create_agent_infra_plugins};
+use uptrakit_plugin_infrastructure_registry::{
+    CatalogConfig, build_catalog, compatible_sudo_commands_for_host,
+};
 
 use crate::db::entity::ssh_host::Model as SshHostModel;
 use crate::host_ops::{self, update_host_sudo_state};
@@ -235,12 +237,15 @@ async fn detect_and_persist_sudo_state(
 
 /// Check whether any infra plugin has state for the given host.
 async fn any_infra_state(db: &DatabaseConnection, host_id: uuid::Uuid) -> bool {
-    let infra_plugins = create_agent_infra_plugins();
-    for plugin in &infra_plugins {
-        let Some(lifecycle) = plugin.as_host_lifecycle() else {
-            continue;
-        };
-        if lifecycle.has_infra_state(db, host_id).await {
+    let catalog_config = CatalogConfig::default();
+    let Ok(catalog) = build_catalog(&catalog_config) else {
+        return false;
+    };
+    let infra_bundles = catalog.create_infra_bundles(&catalog_config);
+    for bundle in &infra_bundles {
+        if let Some(report) = bundle.report.as_ref()
+            && report.has_infra_state(db, host_id).await
+        {
             return true;
         }
     }
@@ -288,7 +293,7 @@ pub(crate) async fn sync_connect(
     // Collect plugin sudo commands to determine whether sudoers would change.
     let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
         as Arc<dyn uptrakit_command::CommandExecutor>;
-    let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
+    let plugin_sudo_cmds = compatible_sudo_commands_for_host(ssh_executor).await;
     let has_sudo_commands = plugin_sudo_cmds.iter().any(|(_, v)| !v.is_empty());
 
     // Build a human-readable preview of every command that would appear in sudoers.
@@ -424,8 +429,7 @@ pub(crate) async fn sync_execute(
     if !skip_actions.contains(ACTION_UPDATE_SUDOERS) {
         let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
             as Arc<dyn uptrakit_command::CommandExecutor>;
-        let plugin_sudo_cmds =
-            PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
+        let plugin_sudo_cmds = compatible_sudo_commands_for_host(ssh_executor).await;
         let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
         for (_plugin_type, entries) in &plugin_sudo_cmds {
@@ -497,40 +501,46 @@ pub(crate) async fn sync_execute(
 
     // ── Infra plugins ────────────────────────────────────────────────
     if !skip_actions.contains(ACTION_INFRA_SYNC) {
-        let infra_plugins = create_agent_infra_plugins();
-        let noop_invoker = NoopInfraActionInvoker;
-        let noop_bootstrap = NoopGuestBootstrap;
-        let tenant_id_str = tenant_id.map(|t| t.to_string());
-        let infra_ctx = InfraPluginContext {
-            db,
-            tenant_id: tenant_id_str.as_deref(),
-            service_id: None,
-            state_dir: std::path::Path::new("."),
-            private_key_der: None,
-            action_invoker: &noop_invoker,
-            guest_bootstrap: &noop_bootstrap,
-        };
-
-        // We need to collect infra sudo commands into the sudoers set that
-        // was already written above. For now the infra sync step only adds
-        // summary lines; infra sudo commands were already resolved in the
-        // sudoers block via `compatible_sudo_commands_for_host`.
-        for plugin in &infra_plugins {
-            let Some(lifecycle) = plugin.as_host_lifecycle() else {
-                continue;
+        let catalog_config = CatalogConfig::default();
+        if let Ok(catalog) = build_catalog(&catalog_config) {
+            let infra_bundles = catalog.create_infra_bundles(&catalog_config);
+            let noop_invoker = NoopInfraActionInvoker;
+            let noop_bootstrap = NoopGuestBootstrap;
+            let tenant_id_str = tenant_id.map(|t| t.to_string());
+            let infra_ctx = InfraPluginContext {
+                db,
+                tenant_id: tenant_id_str.as_deref(),
+                service_id: None,
+                state_dir: std::path::Path::new("."),
+                private_key_der: None,
+                action_invoker: &noop_invoker,
+                guest_bootstrap: &noop_bootstrap,
             };
-            if lifecycle.has_infra_state(db, host.id).await {
-                match lifecycle
-                    .on_host_synced(&infra_ctx, &executor, host.id)
-                    .await
-                {
-                    Ok(sync_result) => {
-                        for line in sync_result.summary_lines {
-                            summary.push(format!("{}: {line}", plugin.plugin_type_id()));
+
+            // We need to collect infra sudo commands into the sudoers set that
+            // was already written above. For now the infra sync step only adds
+            // summary lines; infra sudo commands were already resolved in the
+            // sudoers block via `compatible_sudo_commands_for_host`.
+            for bundle in &infra_bundles {
+                let (Some(report), Some(lifecycle)) =
+                    (bundle.report.as_ref(), bundle.lifecycle.as_ref())
+                else {
+                    continue;
+                };
+                if report.has_infra_state(db, host.id).await {
+                    match lifecycle
+                        .on_host_synced(&infra_ctx, &executor, host.id)
+                        .await
+                    {
+                        Ok(sync_result) => {
+                            for line in sync_result.summary_lines {
+                                summary.push(format!("{}: {line}", lifecycle.plugin_type_id()));
+                            }
                         }
-                    }
-                    Err(e) => {
-                        summary.push(format!("{}: sync failed ({e})", plugin.plugin_type_id()));
+                        Err(e) => {
+                            summary
+                                .push(format!("{}: sync failed ({e})", lifecycle.plugin_type_id()));
+                        }
                     }
                 }
             }

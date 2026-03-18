@@ -5,10 +5,11 @@ use sea_orm::{
 };
 use thiserror::Error;
 use time::OffsetDateTime;
-use uptrakit_plugin_infrastructure_core::PluginOps;
+use uptrakit_plugin_infrastructure_core::PluginConfigOps;
 use uptrakit_shared_db::entity::plugin_config;
 use uptrakit_shared_db::is_unique_constraint_violation;
 use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_shared_types::PluginTypeId;
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::plugin_configs::{
     CreatePluginConfigRequest, PluginConfigResponse, UpdatePluginConfigRequest,
@@ -47,7 +48,7 @@ impl_report_conversion!(sea_orm::DbErr => PluginConfigError::Db);
 // --- Private helpers ---
 
 fn plugin_config_to_response(
-    ops: &dyn PluginOps,
+    ops: &dyn PluginConfigOps,
     m: plugin_config::Model,
 ) -> Option<PluginConfigResponse> {
     let plugin_type: uptrakit_plugin_infrastructure_core::PluginType = match m.plugin_type.parse() {
@@ -61,9 +62,10 @@ fn plugin_config_to_response(
             return None;
         }
     };
-    let config = ops.mask_config_secrets_str(plugin_type.as_str(), &m.config);
+    let id = PluginTypeId::new(plugin_type.as_str());
+    let config = ops.mask_config_secrets(&id, &m.config);
     let capabilities: Vec<String> = ops
-        .capabilities_for_str(plugin_type.as_str())
+        .capabilities(&id)
         .into_iter()
         .filter_map(|c| {
             serde_json::to_value(c)
@@ -123,7 +125,7 @@ pub(crate) async fn find_raw_active_config_txn(
 /// Validation (name, plugin-specific config, hooks) is the caller's responsibility.
 #[tracing::instrument(skip_all)]
 pub async fn create_plugin_config(
-    ops: &dyn PluginOps,
+    ops: &dyn PluginConfigOps,
     tenant_db: &TenantDb,
     req: CreatePluginConfigRequest,
 ) -> Result<PluginConfigResponse> {
@@ -156,7 +158,7 @@ pub async fn create_plugin_config(
 
 #[tracing::instrument(skip_all)]
 pub async fn list_plugin_configs(
-    ops: &dyn PluginOps,
+    ops: &dyn PluginConfigOps,
     tenant_db: &TenantDb,
     params: &PaginationParams,
 ) -> Result<PaginatedResponse<PluginConfigResponse>> {
@@ -191,7 +193,7 @@ pub async fn list_plugin_configs(
 /// Returns `None` if the config is not found or is deactivated.
 #[tracing::instrument(skip_all)]
 pub async fn get_plugin_config(
-    ops: &dyn PluginOps,
+    ops: &dyn PluginConfigOps,
     tenant_db: &TenantDb,
     id: Uuid,
 ) -> Result<Option<PluginConfigResponse>> {
@@ -206,7 +208,7 @@ pub async fn get_plugin_config(
 /// Returns the updated response, or an error describing what went wrong.
 #[tracing::instrument(skip_all)]
 pub async fn update_plugin_config(
-    ops: &dyn PluginOps,
+    ops: &dyn PluginConfigOps,
     tenant_db: &TenantDb,
     id: Uuid,
     req: UpdatePluginConfigRequest,
@@ -225,10 +227,11 @@ pub async fn update_plugin_config(
     }
 
     // Validate new config if provided; restore masked secrets from the existing value.
+    let type_id = PluginTypeId::new(&plugin_type);
     if let Some(ref mut new_config) = req.config.clone() {
-        ops.restore_config_secrets_str(&plugin_type, new_config, &existing.config);
+        ops.restore_config_secrets(&type_id, new_config, &existing.config);
 
-        if let Err(e) = ops.validate_config_str(&plugin_type, new_config) {
+        if let Err(e) = ops.validate_config(&type_id, new_config) {
             bail!(PluginConfigError::ConfigValidation(e.to_string()));
         }
     }
@@ -241,7 +244,7 @@ pub async fn update_plugin_config(
     }
     if let Some(mut config) = req.config {
         // Re-apply secret restoration on the actual value being persisted.
-        ops.restore_config_secrets_str(&plugin_type, &mut config, model.config.as_ref());
+        ops.restore_config_secrets(&type_id, &mut config, model.config.as_ref());
         model.config = Set(config);
     }
     if let Some(enabled) = req.enabled {

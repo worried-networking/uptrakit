@@ -467,20 +467,37 @@ async fn batch_update_inner(
     // Execute with timeout
     let timeout_duration = payload.timeout;
     let batch_results = tokio::time::timeout(timeout_duration, async {
-        // Create plugin
-        let plugin = match uptrakit_plugin_infrastructure_registry::PluginRegistry::create_plugin(
-            payload.plugin_type.clone(),
-            &effective_config,
+        // Create plugin via descriptor
+        let runtime = uptrakit_plugin_infrastructure_core::construct_host_runtime(
             Arc::clone(&executor),
-        )
-        .await
-        {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to create plugin for batch update");
-                return Err(format!("Failed to create plugin: {e}"));
-            }
-        };
+            uptrakit_plugin_infrastructure_core::HostCapabilities::default(),
+        );
+
+        let desc =
+            uptrakit_plugin_infrastructure_registry::get_descriptor(payload.plugin_type.as_str())
+                .ok_or_else(|| {
+                let msg = format!(
+                    "Failed to create plugin: unknown plugin type '{}'",
+                    payload.plugin_type
+                );
+                tracing::error!(msg);
+                msg
+            })?;
+
+        let slot = desc.roles.update_executor.as_ref().ok_or_else(|| {
+            let msg = format!(
+                "plugin {} does not implement UpdateExecutorPlugin",
+                payload.plugin_type
+            );
+            tracing::error!(msg);
+            msg
+        })?;
+
+        let updater = (slot.create)(&effective_config, runtime).map_err(|e| {
+            let msg = format!("Failed to create plugin: {e}");
+            tracing::error!(error = %e, "failed to create plugin for batch update");
+            msg
+        })?;
 
         // Run pre-update hook plugins
         let pre_ctx = uptrakit_plugin_infrastructure_core::UpdateLifecycleContext::for_pre_hook(
@@ -495,13 +512,6 @@ async fn batch_update_inner(
         )
         .await
         .map_err(|e| format!("Pre-update hook failed: {e}"))?;
-
-        // Execute batch update via UpdateExecutorPlugin subtrait
-        let updater = plugin.as_update_executor().ok_or_else(|| {
-            let msg = "plugin does not implement UpdateExecutorPlugin";
-            tracing::error!(msg);
-            msg.to_string()
-        })?;
         let results = match updater.execute_batch_update(&items, &output_tx).await {
             Ok(r) => r,
             Err(e) => {
@@ -640,117 +650,134 @@ async fn discover_software_inner(
         let mut effective_config = assignment.config.clone();
         ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
 
-        let result =
-            match uptrakit_plugin_infrastructure_registry::PluginRegistry::create_plugin_for_discovery(
-                assignment.plugin_type.clone(),
-                &effective_config,
-                Arc::clone(&executor),
-            ).await {
-                Err(e) => {
+        let runtime = uptrakit_plugin_infrastructure_core::construct_host_runtime(
+            Arc::clone(&executor),
+            uptrakit_plugin_infrastructure_core::HostCapabilities::default(),
+        );
+
+        let result = match uptrakit_plugin_infrastructure_registry::get_descriptor(
+            assignment.plugin_type.as_str(),
+        ) {
+            None => {
+                tracing::warn!(
+                    plugin_type = %assignment.plugin_type,
+                    "unknown plugin type for discovery"
+                );
+                DiscoveryPluginResult {
+                    plugin_config_id: assignment.plugin_config_id,
+                    plugin_type: assignment.plugin_type.clone(),
+                    discoveries: vec![],
+                    error: Some(format!("unknown plugin type: {}", assignment.plugin_type)),
+                }
+            }
+            Some(desc) => {
+                let slot = desc.roles.discoverer.as_ref();
+                if let Some(slot) = slot {
+                    match (slot.create)(&effective_config, runtime) {
+                        Err(e) => {
+                            tracing::warn!(
+                                plugin_type = %assignment.plugin_type,
+                                error = %e,
+                                "failed to create plugin for discovery"
+                            );
+                            DiscoveryPluginResult {
+                                plugin_config_id: assignment.plugin_config_id,
+                                plugin_type: assignment.plugin_type.clone(),
+                                discoveries: vec![],
+                                error: Some(e.to_string()),
+                            }
+                        }
+                        Ok(discovery) => {
+                            // Run a host-compatibility check before discovery.
+                            //
+                            // Plugins that declare `DetectHostCompatibility` are asked
+                            // whether they make sense on this host (e.g. Docker plugin
+                            // checks if `docker` is present, PHS checks for
+                            // `/usr/bin/update`).  Incompatible plugins return an empty,
+                            // non-error result — it is not a failure for a host to not
+                            // have a particular piece of software installed.
+                            //
+                            // If the check itself errors, we proceed with discovery
+                            // (fail-open) and log a warning.
+                            let is_compatible = if desc.capabilities.contains(
+                                &uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility,
+                            ) {
+                                match discovery.detect_host_compatibility().await {
+                                    Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Incompatible(reason)) => {
+                                        tracing::debug!(
+                                            plugin_type = %assignment.plugin_type,
+                                            reason = %reason,
+                                            "plugin not compatible with host; skipping discovery"
+                                        );
+                                        false
+                                    }
+                                    Ok(_) => true,
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            plugin_type = %assignment.plugin_type,
+                                            error = %e,
+                                            "host compatibility check failed; proceeding with discovery"
+                                        );
+                                        true
+                                    }
+                                }
+                            } else {
+                                true
+                            };
+
+                            if !is_compatible {
+                                DiscoveryPluginResult {
+                                    plugin_config_id: assignment.plugin_config_id,
+                                    plugin_type: assignment.plugin_type.clone(),
+                                    discoveries: vec![],
+                                    error: None,
+                                }
+                            } else {
+                                match discovery.discover_software().await {
+                                    Ok(discoveries) => {
+                                        tracing::info!(
+                                            plugin_type = %assignment.plugin_type,
+                                            count = discoveries.len(),
+                                            "discovery completed"
+                                        );
+                                        DiscoveryPluginResult {
+                                            plugin_config_id: assignment.plugin_config_id,
+                                            plugin_type: assignment.plugin_type.clone(),
+                                            discoveries,
+                                            error: None,
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            plugin_type = %assignment.plugin_type,
+                                            error = %e,
+                                            "discovery failed"
+                                        );
+                                        DiscoveryPluginResult {
+                                            plugin_config_id: assignment.plugin_config_id,
+                                            plugin_type: assignment.plugin_type.clone(),
+                                            discoveries: vec![],
+                                            error: Some(e.to_string()),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
                     tracing::warn!(
                         plugin_type = %assignment.plugin_type,
-                        error = %e,
-                        "failed to create plugin for discovery"
+                        "plugin does not implement DiscoveryPlugin; skipping"
                     );
                     DiscoveryPluginResult {
                         plugin_config_id: assignment.plugin_config_id,
                         plugin_type: assignment.plugin_type.clone(),
                         discoveries: vec![],
-                        error: Some(e.to_string()),
+                        error: Some("plugin does not support software discovery".to_string()),
                     }
                 }
-                Ok(plugin) => {
-                    // Use the subtrait accessor — if None, the plugin doesn't
-                    // implement DiscoveryPlugin and we skip it with an error.
-                    if let Some(discovery) = plugin.as_discovery() {
-                        // Run a host-compatibility check before discovery.
-                        //
-                        // Plugins that declare `DetectHostCompatibility` are asked
-                        // whether they make sense on this host (e.g. Docker plugin
-                        // checks if `docker` is present, PHS checks for
-                        // `/usr/bin/update`).  Incompatible plugins return an empty,
-                        // non-error result — it is not a failure for a host to not
-                        // have a particular piece of software installed.
-                        //
-                        // If the check itself errors, we proceed with discovery
-                        // (fail-open) and log a warning.
-                        let is_compatible = if plugin
-                            .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility)
-                        {
-                            match discovery.detect_host_compatibility().await {
-                                Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Incompatible(reason)) => {
-                                    tracing::debug!(
-                                        plugin_type = %assignment.plugin_type,
-                                        reason = %reason,
-                                        "plugin not compatible with host; skipping discovery"
-                                    );
-                                    false
-                                }
-                                Ok(_) => true,
-                                Err(e) => {
-                                    tracing::warn!(
-                                        plugin_type = %assignment.plugin_type,
-                                        error = %e,
-                                        "host compatibility check failed; proceeding with discovery"
-                                    );
-                                    true
-                                }
-                            }
-                        } else {
-                            true
-                        };
-
-                        if !is_compatible {
-                            DiscoveryPluginResult {
-                                plugin_config_id: assignment.plugin_config_id,
-                                plugin_type: assignment.plugin_type.clone(),
-                                discoveries: vec![],
-                                error: None,
-                            }
-                        } else {
-                            match discovery.discover_software().await {
-                                Ok(discoveries) => {
-                                    tracing::info!(
-                                        plugin_type = %assignment.plugin_type,
-                                        count = discoveries.len(),
-                                        "discovery completed"
-                                    );
-                                    DiscoveryPluginResult {
-                                        plugin_config_id: assignment.plugin_config_id,
-                                        plugin_type: assignment.plugin_type.clone(),
-                                        discoveries,
-                                        error: None,
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        plugin_type = %assignment.plugin_type,
-                                        error = %e,
-                                        "discovery failed"
-                                    );
-                                    DiscoveryPluginResult {
-                                        plugin_config_id: assignment.plugin_config_id,
-                                        plugin_type: assignment.plugin_type.clone(),
-                                        discoveries: vec![],
-                                        error: Some(e.to_string()),
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        tracing::warn!(
-                            plugin_type = %assignment.plugin_type,
-                            "plugin does not implement DiscoveryPlugin; skipping"
-                        );
-                        DiscoveryPluginResult {
-                            plugin_config_id: assignment.plugin_config_id,
-                            plugin_type: assignment.plugin_type.clone(),
-                            discoveries: vec![],
-                            error: Some("plugin does not support software discovery".to_string()),
-                        }
-                    }
-                }
-            };
+            }
+        };
         results.push(result);
     }
 

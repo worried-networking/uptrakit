@@ -181,10 +181,10 @@ pub(crate) async fn build_test_state_with_plugin_ops(
     let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
         plugin_ops_override.unwrap_or_else(|| {
             Arc::new(
-                uptrakit_plugin_infrastructure_registry::PluginRegistry::with_notifications(
-                    uptrakit_plugin_infrastructure_registry::NotificationRegistryConfig::default(),
+                uptrakit_plugin_infrastructure_registry::build_catalog(
+                    &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
                 )
-                .expect("notification registry should build in tests"),
+                .expect("catalog should build in tests"),
             )
         });
 

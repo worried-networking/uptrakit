@@ -15,10 +15,10 @@ use std::collections::HashSet;
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
-use uptrakit_plugin_infrastructure_core::{PluginCapability, PluginOps};
+use uptrakit_plugin_infrastructure_core::{PluginCapability, PluginMetadataOps};
 use uptrakit_shared_db::entity::{host_discovery_allowlist, tenant_discovery_allowlist};
 use uptrakit_shared_macros::impl_report_conversion;
-use uptrakit_shared_types::PluginType;
+use uptrakit_shared_types::{PluginType, PluginTypeId};
 use uptrakit_web_api_types::discovery_allowlist::{
     HostDiscoveryAllowlistEntry, TenantDiscoveryAllowlistEntry,
 };
@@ -43,12 +43,13 @@ impl_report_conversion!(sea_orm::DbErr => AllowlistError::Db);
 // ── Internal validation ───────────────────────────────────────────────────────
 
 /// Returns `true` if `plugin_type` is a known type with `DiscoverLocalSoftware`.
-fn is_valid_discovery_plugin(ops: &dyn PluginOps, plugin_type: &PluginType) -> bool {
+fn is_valid_discovery_plugin(ops: &dyn PluginMetadataOps, plugin_type: &PluginType) -> bool {
     // Reject `Other(...)` variants — unknown types cannot be validated.
     if matches!(plugin_type, PluginType::Other(_)) {
         return false;
     }
-    ops.capabilities_for_str(plugin_type.as_str())
+    let id = PluginTypeId::new(plugin_type.as_str());
+    ops.capabilities(&id)
         .contains(&PluginCapability::DiscoverLocalSoftware)
 }
 
@@ -92,7 +93,7 @@ pub async fn list_tenant_allowlist(
 /// Rejects `Other`/unknown plugin types and types without `DiscoverLocalSoftware`.
 #[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn add_tenant_allowlist_entry(
-    ops: &dyn PluginOps,
+    ops: &dyn PluginMetadataOps,
     db: &DatabaseConnection,
     tenant_id: Uuid,
     plugin_type: PluginType,
@@ -238,7 +239,7 @@ pub async fn list_host_allowlist(
 /// Rejects `Other`/unknown plugin types and types without `DiscoverLocalSoftware`.
 #[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
 pub async fn add_host_allowlist_entry(
-    ops: &dyn PluginOps,
+    ops: &dyn PluginMetadataOps,
     db: &DatabaseConnection,
     tenant_id: Uuid,
     host_id: Uuid,
@@ -357,92 +358,40 @@ pub async fn load_host_allowlist_set(db: &DatabaseConnection, host_id: Uuid) -> 
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_plugin_infrastructure_core::{PluginCapability, PluginOps};
-    use uptrakit_shared_types::PluginType;
+    use uptrakit_plugin_infrastructure_core::descriptor::PluginDescriptor;
 
     use super::*;
 
-    // ── Mock PluginOps ────────────────────────────────────────────────────────
+    // ── Mock PluginMetadataOps ────────────────────────────────────────────────
 
-    struct MockOps {
-        discovery_types: Vec<PluginType>,
-    }
+    struct MockOps;
 
     impl MockOps {
         fn new_with_homebrew_apt() -> Self {
-            Self {
-                discovery_types: vec![
-                    PluginType::PackageManagerHomebrew,
-                    PluginType::PackageManagerApt,
-                    PluginType::DiscoveryProxmoxHelperScripts,
-                ],
-            }
+            Self
         }
     }
 
-    impl PluginOps for MockOps {
-        fn validate_config_str(
-            &self,
-            _plugin_type: &str,
-            _config: &serde_json::Value,
-        ) -> uptrakit_plugin_infrastructure_core::plugin_ops::Result<()> {
-            Ok(())
+    impl PluginMetadataOps for MockOps {
+        fn get(&self, _id: &PluginTypeId) -> Option<&PluginDescriptor> {
+            None
         }
 
-        fn mask_config_secrets_str(
-            &self,
-            _plugin_type: &str,
-            config: &serde_json::Value,
-        ) -> serde_json::Value {
-            config.clone()
+        fn all(&self) -> Vec<&PluginDescriptor> {
+            vec![]
         }
 
-        fn restore_config_secrets_str(
-            &self,
-            _plugin_type: &str,
-            _incoming: &mut serde_json::Value,
-            _existing: &serde_json::Value,
-        ) {
-        }
-
-        fn known_plugin_types(&self) -> Vec<PluginType> {
-            self.discovery_types.clone()
-        }
-
-        fn discovery_plugins(&self) -> Vec<PluginType> {
-            self.discovery_types.clone()
-        }
-
-        fn validate_package_identifier_str(
-            &self,
-            _plugin_type: &str,
-            _value: &str,
-        ) -> std::result::Result<(), String> {
-            Ok(())
-        }
-
-        fn capabilities_for_str(&self, plugin_type: &str) -> Vec<PluginCapability> {
+        fn capabilities(&self, id: &PluginTypeId) -> Vec<PluginCapability> {
             let discovery = [
                 "package_manager_homebrew",
                 "package_manager_apt",
                 "discovery_proxmox_helper_scripts",
             ];
-            if discovery.contains(&plugin_type) {
+            if discovery.contains(&id.as_ref()) {
                 vec![PluginCapability::DiscoverLocalSoftware]
             } else {
                 vec![]
             }
-        }
-
-        fn sample_config_for_str(&self, _plugin_type: &str) -> serde_json::Value {
-            serde_json::Value::Object(serde_json::Map::new())
-        }
-
-        fn config_form_schema_str(
-            &self,
-            _plugin_type: &str,
-        ) -> Option<Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>> {
-            None
         }
     }
 

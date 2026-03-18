@@ -19,8 +19,10 @@ use uptrakit_internal_wire::{
     AttestationStatus, ExecuteUpdatePayload, OutputStreamType, PluginAssignment, ReleaseInfo,
     UpdateFinalStatus, UpdateResultPayload,
 };
-use uptrakit_plugin_infrastructure_core::UpdateLifecycleContext;
-use uptrakit_plugin_infrastructure_registry::PluginRegistry;
+use uptrakit_plugin_infrastructure_core::{
+    HostCapabilities, UpdateLifecycleContext, construct_host_runtime,
+};
+use uptrakit_plugin_infrastructure_registry::get_descriptor;
 
 use crate::error::AgentCoreError;
 
@@ -290,8 +292,8 @@ async fn detect_current_version(
 
 /// Execute the plugin-specific update logic.
 ///
-/// The plugin is obtained via `PluginRegistry::create_plugin()` which returns `Box<dyn PluginBase>`.
-/// The `UpdateExecutorPlugin` subtrait accessor is used to run the actual update.
+/// The plugin is obtained via descriptor-based creation from `get_descriptor()`.
+/// The `UpdateExecutor` role slot is used to create the update executor directly.
 #[tracing::instrument(skip_all, fields(plugin_type = %payload.execute_update_plugin.plugin_type))]
 async fn execute_plugin_update(
     payload: &ExecuteUpdatePayload,
@@ -299,16 +301,24 @@ async fn execute_plugin_update(
     executor: Arc<dyn CommandExecutor>,
 ) -> UpdateResult<String> {
     let eu = &payload.execute_update_plugin;
-    let plugin = PluginRegistry::create_plugin(eu.plugin_type.clone(), &eu.config, executor)
-        .await
-        .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
+    let runtime = construct_host_runtime(executor, HostCapabilities::default());
 
-    let update_executor = plugin.as_update_executor().ok_or_else(|| {
+    let desc = get_descriptor(eu.plugin_type.as_str()).ok_or_else(|| {
+        report!(UpdateError::InstallFailed(format!(
+            "unknown plugin type: {}",
+            eu.plugin_type
+        )))
+    })?;
+
+    let slot = desc.roles.update_executor.as_ref().ok_or_else(|| {
         report!(UpdateError::InstallFailed(format!(
             "plugin {} does not implement UpdateExecutorPlugin",
             eu.plugin_type
         )))
     })?;
+
+    let update_executor = (slot.create)(&eu.config, runtime)
+        .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
 
     let (plugin_tx, bridge_handle) = make_output_bridge(output_tx);
     let update_result = update_executor
@@ -391,22 +401,25 @@ async fn run_pre_hook_plugins(
         )
         .await;
 
-        let plugin = PluginRegistry::create_plugin(
-            assignment.plugin_type.clone(),
-            &assignment.config,
-            Arc::clone(&executor),
-        )
-        .await
-        .map_err(|e| {
+        let runtime = construct_host_runtime(Arc::clone(&executor), HostCapabilities::default());
+
+        let desc = get_descriptor(assignment.plugin_type.as_str()).ok_or_else(|| {
             AgentCoreError::PreUpdateHookFailed(format!(
-                "failed to create hook plugin {}: {e}",
+                "unknown plugin type: {}",
                 assignment.plugin_type
             ))
         })?;
 
-        let lifecycle = plugin.as_update_lifecycle().ok_or_else(|| {
+        let slot = desc.roles.lifecycle_hook.as_ref().ok_or_else(|| {
             AgentCoreError::PreUpdateHookFailed(format!(
                 "plugin {} does not implement UpdateLifecyclePlugin",
+                assignment.plugin_type
+            ))
+        })?;
+
+        let lifecycle = (slot.create)(&assignment.config, runtime).map_err(|e| {
+            AgentCoreError::PreUpdateHookFailed(format!(
+                "failed to create hook plugin {}: {e}",
                 assignment.plugin_type
             ))
         })?;
@@ -494,14 +507,31 @@ async fn run_post_hook_plugins(
         )
         .await;
 
-        let plugin = match PluginRegistry::create_plugin(
-            assignment.plugin_type.clone(),
-            &assignment.config,
-            Arc::clone(&executor),
-        )
-        .await
-        {
-            Ok(p) => p,
+        let runtime = construct_host_runtime(Arc::clone(&executor), HostCapabilities::default());
+
+        let Some(desc) = get_descriptor(assignment.plugin_type.as_str()) else {
+            let msg = format!("unknown plugin type: {}", assignment.plugin_type);
+            tracing::warn!(msg, "skipping post-update hook plugin");
+            send_output(
+                output_tx,
+                &format!("[post-hook] Skipped (failed to create): {msg}"),
+                OutputStreamType::PostHook,
+            )
+            .await;
+            append_bounded(accumulated_output, &format!("{msg}\n"), MAX_OUTPUT_BYTES);
+            continue;
+        };
+
+        let Some(slot) = desc.roles.lifecycle_hook.as_ref() else {
+            tracing::warn!(
+                plugin_type = %assignment.plugin_type,
+                "plugin does not implement UpdateLifecyclePlugin; skipping"
+            );
+            continue;
+        };
+
+        let lifecycle = match (slot.create)(&assignment.config, runtime) {
+            Ok(lc) => lc,
             Err(e) => {
                 let msg = format!(
                     "failed to create post-hook plugin {}: {e}",
@@ -517,14 +547,6 @@ async fn run_post_hook_plugins(
                 append_bounded(accumulated_output, &format!("{msg}\n"), MAX_OUTPUT_BYTES);
                 continue;
             }
-        };
-
-        let Some(lifecycle) = plugin.as_update_lifecycle() else {
-            tracing::warn!(
-                plugin_type = %assignment.plugin_type,
-                "plugin does not implement UpdateLifecyclePlugin; skipping"
-            );
-            continue;
         };
 
         let (plugin_tx, bridge_handle) = make_output_bridge(output_tx);
@@ -569,22 +591,25 @@ pub(crate) async fn run_batch_pre_hook_plugins(
     executor: Arc<dyn CommandExecutor>,
 ) -> UpdateResult<()> {
     for assignment in plugins {
-        let plugin = PluginRegistry::create_plugin(
-            assignment.plugin_type.clone(),
-            &assignment.config,
-            Arc::clone(&executor),
-        )
-        .await
-        .map_err(|e| {
+        let runtime = construct_host_runtime(Arc::clone(&executor), HostCapabilities::default());
+
+        let desc = get_descriptor(assignment.plugin_type.as_str()).ok_or_else(|| {
             report!(UpdateError::HookFailed(format!(
-                "failed to create hook plugin {}: {e}",
+                "unknown plugin type: {}",
                 assignment.plugin_type
             )))
         })?;
 
-        let lifecycle = plugin.as_update_lifecycle().ok_or_else(|| {
+        let slot = desc.roles.lifecycle_hook.as_ref().ok_or_else(|| {
             report!(UpdateError::HookFailed(format!(
                 "plugin {} does not implement UpdateLifecyclePlugin",
+                assignment.plugin_type
+            )))
+        })?;
+
+        let lifecycle = (slot.create)(&assignment.config, runtime).map_err(|e| {
+            report!(UpdateError::HookFailed(format!(
+                "failed to create hook plugin {}: {e}",
                 assignment.plugin_type
             )))
         })?;
@@ -625,14 +650,22 @@ pub(crate) async fn run_batch_post_hook_plugins(
     executor: Arc<dyn CommandExecutor>,
 ) {
     for assignment in plugins {
-        let plugin = match PluginRegistry::create_plugin(
-            assignment.plugin_type.clone(),
-            &assignment.config,
-            Arc::clone(&executor),
-        )
-        .await
-        {
-            Ok(p) => p,
+        let runtime = construct_host_runtime(Arc::clone(&executor), HostCapabilities::default());
+
+        let Some(desc) = get_descriptor(assignment.plugin_type.as_str()) else {
+            tracing::warn!(
+                plugin_type = %assignment.plugin_type,
+                "unknown plugin type for post-hook; skipping"
+            );
+            continue;
+        };
+
+        let Some(slot) = desc.roles.lifecycle_hook.as_ref() else {
+            continue;
+        };
+
+        let lifecycle = match (slot.create)(&assignment.config, runtime) {
+            Ok(lc) => lc,
             Err(e) => {
                 tracing::warn!(
                     plugin_type = %assignment.plugin_type,
@@ -641,10 +674,6 @@ pub(crate) async fn run_batch_post_hook_plugins(
                 );
                 continue;
             }
-        };
-
-        let Some(lifecycle) = plugin.as_update_lifecycle() else {
-            continue;
         };
 
         let (plugin_tx, mut plugin_rx) = mpsc::channel::<UpdateOutputLine>(100);

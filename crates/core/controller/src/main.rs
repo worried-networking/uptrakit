@@ -351,36 +351,26 @@ async fn run(args: cli::Args) -> Result<()> {
     // also signals open SSE streams in the web API to terminate cleanly.
     let shutdown_token = CancellationToken::new();
 
-    // Build plugin_ops (with notification support). Must be created before the
-    // notification dispatcher so it can serve as the notification channel registry.
-    let registry = uptrakit_plugin_infrastructure_registry::PluginRegistry::with_notifications(
-        uptrakit_plugin_infrastructure_registry::NotificationRegistryConfig {
-            allow_private_urls: args.allow_private_notification_urls,
-        },
-    )
-    .context_transform(|_| {
-        AppError::Config("failed to build plugin registry with notifications".to_string())
-    })?;
-
-    #[cfg(feature = "dashboard-icons")]
-    let registry = {
-        let client = uptrakit_plugin_infrastructure_core::build_plugin_http_client(
-            uptrakit_plugin_infrastructure_core::PluginHttpClientConfig {
-                user_agent: "uptrakit-dashboard-icons",
-                redirect_policy: reqwest::redirect::Policy::limited(5),
-                ..Default::default()
-            },
-        )
-        .map_err(|e| {
-            report!(AppError::Config(format!(
-                "dashboard-icons HTTP client: {e}"
-            )))
-        })?;
-        registry.with_dashboard_icons(client, shutdown_token.child_token())
+    // Build the plugin catalog from all compiled-in descriptors.
+    // The catalog replaces the old PluginRegistry and provides PluginOps.
+    let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig {
+        allow_private_urls: args.allow_private_notification_urls,
+        http_client: Some(
+            uptrakit_plugin_infrastructure_core::build_plugin_http_client(
+                uptrakit_plugin_infrastructure_core::PluginHttpClientConfig {
+                    user_agent: "uptrakit-controller",
+                    redirect_policy: reqwest::redirect::Policy::limited(5),
+                    ..Default::default()
+                },
+            )
+            .map_err(|e| report!(AppError::Config(format!("plugin catalog HTTP client: {e}"))))?,
+        ),
+        cancellation_token: Some(shutdown_token.clone()),
     };
+    let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
+        .context_transform(|_| AppError::Config("failed to build plugin catalog".to_string()))?;
 
-    let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
-        Arc::new(registry);
+    let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(catalog);
 
     let callback_base_url = format!("https://{}", reconciled.https_addr);
     let notification_dispatcher =

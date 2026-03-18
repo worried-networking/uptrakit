@@ -914,75 +914,58 @@ mod tests {
         assert!(!resp.update_available);
     }
 
-    /// Mock [`PluginOps`] for config-override tests.
+    /// Mock [`PluginConfigOps`] for config-override tests.
     struct MockPluginOps;
 
-    impl uptrakit_plugin_infrastructure_core::PluginOps for MockPluginOps {
-        fn validate_config_str(
+    impl uptrakit_plugin_infrastructure_core::PluginMetadataOps for MockPluginOps {
+        fn get(
             &self,
-            _plugin_type: &str,
+            _id: &uptrakit_shared_types::PluginTypeId,
+        ) -> Option<&uptrakit_plugin_infrastructure_core::descriptor::PluginDescriptor> {
+            None
+        }
+
+        fn all(&self) -> Vec<&uptrakit_plugin_infrastructure_core::descriptor::PluginDescriptor> {
+            vec![]
+        }
+    }
+
+    impl uptrakit_plugin_infrastructure_core::PluginConfigOps for MockPluginOps {
+        fn validate_config(
+            &self,
+            _id: &uptrakit_shared_types::PluginTypeId,
             config: &serde_json::Value,
-        ) -> uptrakit_plugin_infrastructure_core::plugin_ops::Result<()> {
+        ) -> std::result::Result<(), String> {
             if let Some(url) = config.get("api_base_url").and_then(|v| v.as_str())
                 && url.starts_with("http://")
             {
-                return Err(rootcause::report!(
-                    uptrakit_plugin_infrastructure_core::PluginOpsError::ConfigValidation(
-                        "api_base_url must use HTTPS".to_string()
-                    )
-                ));
+                return Err("api_base_url must use HTTPS".to_string());
             }
             Ok(())
         }
 
-        fn mask_config_secrets_str(
+        fn mask_config_secrets(
             &self,
-            _plugin_type: &str,
+            _id: &uptrakit_shared_types::PluginTypeId,
             config: &serde_json::Value,
         ) -> serde_json::Value {
             config.clone()
         }
 
-        fn restore_config_secrets_str(
+        fn restore_config_secrets(
             &self,
-            _plugin_type: &str,
+            _id: &uptrakit_shared_types::PluginTypeId,
             _incoming: &mut serde_json::Value,
             _existing: &serde_json::Value,
         ) {
         }
 
-        fn known_plugin_types(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginType> {
-            vec![]
-        }
-
-        fn discovery_plugins(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginType> {
-            vec![]
-        }
-
-        fn validate_package_identifier_str(
+        fn validate_package_identifier(
             &self,
-            _plugin_type: &str,
+            _id: &uptrakit_shared_types::PluginTypeId,
             _value: &str,
         ) -> std::result::Result<(), String> {
             Ok(())
-        }
-
-        fn capabilities_for_str(
-            &self,
-            _plugin_type: &str,
-        ) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
-            vec![]
-        }
-
-        fn sample_config_for_str(&self, _plugin_type: &str) -> serde_json::Value {
-            serde_json::Value::Object(serde_json::Map::new())
-        }
-
-        fn config_form_schema_str(
-            &self,
-            _plugin_type: &str,
-        ) -> Option<Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>> {
-            None
         }
     }
 
