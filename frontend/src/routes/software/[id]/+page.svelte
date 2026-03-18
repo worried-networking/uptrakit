@@ -91,7 +91,7 @@
 	let dockerExtModal: {
 		extensionId: string;
 		action: ActionDef;
-		host: SoftwareItemHostSummary;
+		hostId: string;
 	} | null = $state(null);
 	let dockerExtSubmitting: boolean = $state(false);
 
@@ -790,7 +790,7 @@
 										tabindex="-1"
 										onclick={() => {
 											closeMenu();
-											dockerExtModal = { extensionId: ext.id, action, host };
+											dockerExtModal = { extensionId: ext.id, action, hostId: host.host_id };
 										}}
 									>
 										{action.label}
@@ -1056,7 +1056,7 @@
 					try {
 						await invokeExtensionAction(modal.extensionId, modal.action.action_id, {
 							software_item_id: item.id,
-							host_id: modal.host.host_id,
+							host_id: modal.hostId,
 							...values
 						});
 						showSuccess(`${modal.action.label} completed`);
@@ -1070,7 +1070,7 @@
 				}}
 				loading={dockerExtSubmitting}
 				extensionId={dockerExtModal.extensionId}
-				extraParams={{ software_item_id: item.id, host_id: dockerExtModal.host.host_id }}
+				extraParams={{ software_item_id: item.id, host_id: dockerExtModal.hostId }}
 				preLoadAction={dockerExtModal.action.ui.pre_load_action}
 			/>
 		{/if}
