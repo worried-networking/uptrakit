@@ -46,7 +46,7 @@ impl ConnectionContext {
     /// transport-level config injection needs.
     pub fn apply_to_config(
         &self,
-        _plugin_type: &uptrakit_plugin_infrastructure_registry::PluginType,
+        _plugin_type: &uptrakit_plugin_infrastructure_registry::PluginTypeId,
         _config: &mut serde_json::Value,
     ) {
     }
@@ -55,7 +55,7 @@ impl ConnectionContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_registry::PluginType;
+    use uptrakit_plugin_infrastructure_registry::plugin_ids;
 
     #[test]
     fn default_context_is_empty() {
@@ -69,7 +69,7 @@ mod tests {
         let original = serde_json::json!({ "tracked_tag": "stable" });
         let mut config = original.clone();
 
-        ctx.apply_to_config(&PluginType::ReleasesDocker, &mut config);
+        ctx.apply_to_config(&plugin_ids::RELEASES_DOCKER, &mut config);
 
         assert_eq!(config, original);
     }

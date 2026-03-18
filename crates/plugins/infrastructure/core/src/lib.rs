@@ -37,7 +37,7 @@ pub use traits::{
 };
 pub use types::{
     AttestationStatus, DiscoveredSoftware, DiscoveryTarget, PluginCapability, PluginRole,
-    PluginType, ReleaseAsset, ReleaseInfo, UpdateCategory, UpstreamRelease,
+    ReleaseAsset, ReleaseInfo, UpdateCategory, UpstreamRelease,
 };
 pub use version::Version;
 

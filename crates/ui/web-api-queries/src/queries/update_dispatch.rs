@@ -236,9 +236,7 @@ pub(crate) fn build_plugin_assignment(
     assignment: &host_software_item_plugin::Model,
     config: Option<&plugin_config::Model>,
 ) -> Result<PluginAssignment> {
-    let plugin_type: uptrakit_internal_wire::PluginType =
-        serde_json::from_value(serde_json::Value::String(assignment.plugin_type.clone()))
-            .map_err(|_| TriggerUpdateError::UnknownPluginType(assignment.plugin_type.clone()))?;
+    let plugin_type = uptrakit_internal_wire::PluginTypeId::new(&assignment.plugin_type);
 
     let merged_config = uptrakit_config_merge::resolve_effective_config(
         None,
@@ -460,16 +458,14 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
 /// any plugin type that stores `"prefer_interactive": true` in its JSON config
 /// will trigger interactive dispatch.
 pub(crate) fn config_prefers_interactive(
-    plugin_type: &uptrakit_internal_wire::PluginType,
+    plugin_type: &uptrakit_internal_wire::PluginTypeId,
     config: &serde_json::Value,
 ) -> bool {
-    matches!(
-        plugin_type,
-        uptrakit_internal_wire::PluginType::GenericShell
-    ) && config
-        .get("prefer_interactive")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
+    plugin_type == uptrakit_shared_types::plugin_ids::GENERIC_SHELL.as_str()
+        && config
+            .get("prefer_interactive")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
 }
 
 /// Builds the `ExecuteUpdate` payload from the validated target and sends it

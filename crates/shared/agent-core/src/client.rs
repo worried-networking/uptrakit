@@ -793,7 +793,7 @@ mod tests {
         BatchUpdateItem, CheckVersionsPayload, ExecuteBatchUpdatePayload, ServiceMessage,
         UpdateFinalStatus,
     };
-    use uptrakit_plugin_infrastructure_registry::PluginType;
+    use uptrakit_plugin_infrastructure_registry::PluginTypeId;
     use uuid::Uuid;
 
     use crate::connection_context::ConnectionContext;
@@ -807,7 +807,7 @@ mod tests {
     }
 
     fn make_batch_payload(
-        plugin_type: PluginType,
+        plugin_type: PluginTypeId,
         timeout: std::time::Duration,
     ) -> ExecuteBatchUpdatePayload {
         let host_software_item_id = Uuid::now_v7();
@@ -834,7 +834,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_plugin_type_causes_all_packages_to_fail() {
         let payload = make_batch_payload(
-            PluginType::Other("unknown-plugin-xyz".to_string()),
+            PluginTypeId::new("unknown-plugin-xyz"),
             std::time::Duration::from_secs(30),
         );
         let results = super::batch_update_inner(&payload, noop_executor(), &ctx()).await;
@@ -869,7 +869,7 @@ mod tests {
         // Use a known-bad plugin type so the "work" inside the timeout block
         // never completes before the 0-second deadline.
         let payload = make_batch_payload(
-            PluginType::Other("unknown-plugin-xyz".to_string()),
+            PluginTypeId::new("unknown-plugin-xyz"),
             std::time::Duration::ZERO,
         );
         let results = super::batch_update_inner(&payload, noop_executor(), &ctx()).await;

@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::command::CommandSpec;
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, PluginRole, PluginType, Result,
-    execute_and_capture,
+    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, PluginRole, Result,
+    execute_and_capture, plugin_ids,
 };
 
 use crate::config::PacmanDiscoveryFilter;
@@ -33,7 +33,7 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for PacmanPlugin {
             .into_iter()
             .map(|(name, version)| {
                 let targets = vec![DiscoveryTarget {
-                    plugin_type: PluginType::PackageManagerPacman,
+                    plugin_type: plugin_ids::PACKAGE_MANAGER_PACMAN.clone(),
                     plugin_config: serde_json::json!({}),
                     plugin_config_name: "Pacman".to_string(),
                     roles: vec![
@@ -84,7 +84,7 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::RoutedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{
-        Discoverer, HostCapabilities, HostRuntime, PluginRole, PluginType, PosixHostRuntime,
+        Discoverer, HostCapabilities, HostRuntime, PluginRole, PosixHostRuntime, plugin_ids,
     };
 
     use crate::config::{PacmanConfig, PacmanDiscoveryFilter};
@@ -112,7 +112,10 @@ mod tests {
         assert_eq!(discoveries[0].targets.len(), 1);
 
         let target = &discoveries[0].targets[0];
-        assert_eq!(target.plugin_type, PluginType::PackageManagerPacman);
+        assert_eq!(
+            target.plugin_type,
+            plugin_ids::PACKAGE_MANAGER_PACMAN.clone()
+        );
         assert_eq!(target.plugin_config_name, "Pacman");
         assert_eq!(target.plugin_config, serde_json::json!({}));
         assert!(target.roles.contains(&PluginRole::DetectVersion));

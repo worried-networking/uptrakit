@@ -122,12 +122,7 @@ pub async fn dispatch(command: PluginConfigsCommands, ctx: &CliContext) -> Resul
             config,
             enabled,
         } => {
-            let plugin_type: uptrakit_shared_types::PluginType =
-                plugin_type.parse().map_err(|_| {
-                    report!(CliError::Other(format!(
-                        "unknown plugin type: {plugin_type}"
-                    )))
-                })?;
+            let plugin_type = uptrakit_shared_types::PluginTypeId::new(plugin_type);
             let config_value: serde_json::Value = match config {
                 Some(s) => serde_json::from_str(&s).map_err(|e| {
                     report!(CliError::Other(format!("invalid JSON for --config: {e}")))
@@ -246,7 +241,7 @@ use uptrakit_openapi_client::types::plugin_config_test::{
 use uptrakit_openapi_client::types::plugin_configs::{
     CreatePluginConfigRequest, PluginConfigResponse, UpdatePluginConfigRequest,
 };
-use uptrakit_shared_types::PluginType;
+use uptrakit_shared_types::PluginTypeId;
 
 // ── Human output ────────────────────────────────────────────────────────────
 
@@ -331,7 +326,7 @@ pub struct ShowParams<'a> {
 
 pub struct CreateParams<'a> {
     pub name: String,
-    pub plugin_type: PluginType,
+    pub plugin_type: PluginTypeId,
     pub config: Value,
     pub enabled: Option<bool>,
     pub server: Option<&'a str>,
@@ -501,6 +496,7 @@ pub async fn test_config(params: TestConfigParams<'_>) -> Result<TestPluginConfi
 mod tests {
     use super::*;
     use time::macros::datetime;
+    use uptrakit_shared_types::plugin_ids;
 
     fn sample_config() -> PluginConfigResponse {
         PluginConfigResponse {
@@ -508,7 +504,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             name: "GitHub Releases".to_string(),
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             config: serde_json::json!({"tag_strip_prefix": "v"}),
             enabled: true,
             capabilities: vec!["controller_side_fetch_releases".to_string()],

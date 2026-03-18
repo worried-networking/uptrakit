@@ -292,7 +292,7 @@ mod tests {
     use super::*;
     use crate::limits::MAX_DISCOVERIES_PER_PLUGIN;
     use crate::payloads::{DiscoveryPluginResult, VersionCheckResult};
-    use uptrakit_shared_types::{DiscoveredSoftware, PluginType};
+    use uptrakit_shared_types::{DiscoveredSoftware, plugin_ids};
 
     fn make_discovered_software(name: &str) -> DiscoveredSoftware {
         DiscoveredSoftware {
@@ -311,7 +311,7 @@ mod tests {
     fn make_discovery_result(name: &str) -> DiscoveryPluginResult {
         DiscoveryPluginResult {
             plugin_config_id: Some(Uuid::new_v4()),
-            plugin_type: PluginType::PackageManagerApt,
+            plugin_type: plugin_ids::PACKAGE_MANAGER_APT.clone(),
             discoveries: vec![make_discovered_software(name)],
             error: None,
         }
@@ -320,7 +320,7 @@ mod tests {
     fn make_discovery_result_with_count(count: usize) -> DiscoveryPluginResult {
         DiscoveryPluginResult {
             plugin_config_id: Some(Uuid::new_v4()),
-            plugin_type: PluginType::PackageManagerApt,
+            plugin_type: plugin_ids::PACKAGE_MANAGER_APT.clone(),
             discoveries: (0..count)
                 .map(|i| make_discovered_software(&format!("pkg-{i}")))
                 .collect(),
@@ -478,7 +478,7 @@ mod tests {
         // Metadata preserved on every chunk.
         for chunk in &normalized.results {
             assert_eq!(chunk.plugin_config_id, config_id);
-            assert_eq!(chunk.plugin_type, PluginType::PackageManagerApt);
+            assert_eq!(chunk.plugin_type, plugin_ids::PACKAGE_MANAGER_APT.clone());
             assert!(chunk.error.is_none());
         }
 

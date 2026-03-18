@@ -10,11 +10,11 @@ use std::sync::Arc;
 use axum::http::StatusCode;
 use axum::response::Response;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, RelationTrait};
-use uptrakit_plugin_infrastructure_registry::PluginType;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
     service_host,
 };
+use uptrakit_shared_types::PluginTypeId;
 use uuid::Uuid;
 
 use crate::AppState;
@@ -47,8 +47,7 @@ impl VersionCheckContext {
         let plugin_type_str = config_model
             .map(|c| c.plugin_type.clone())
             .unwrap_or_else(|| plugin.plugin_type.clone());
-        let plugin_type: uptrakit_internal_wire::PluginType =
-            serde_json::from_value(serde_json::Value::String(plugin_type_str)).ok()?;
+        let plugin_type = PluginTypeId::new(plugin_type_str);
         let merged = uptrakit_config_merge::resolve_effective_config(
             None,
             config_model.map(|c| &c.config),
@@ -194,11 +193,7 @@ pub(super) async fn collect_and_run_controller_fetches(
         let plugin_type_str = config_model
             .map(|c| c.plugin_type.clone())
             .unwrap_or_else(|| pa.plugin_type.clone());
-        let Ok(plugin_type) =
-            serde_json::from_value::<PluginType>(serde_json::Value::String(plugin_type_str))
-        else {
-            continue;
-        };
+        let plugin_type = PluginTypeId::new(plugin_type_str);
         let merged = uptrakit_config_merge::resolve_effective_config(
             None,
             config_model.map(|c| &c.config),
@@ -266,8 +261,7 @@ pub(super) async fn dispatch_agent_version_checks(
                 let plugin_type_str = config_model
                     .map(|c| c.plugin_type.clone())
                     .unwrap_or_else(|| p.plugin_type.clone());
-                let plugin_type: PluginType =
-                    serde_json::from_value(serde_json::Value::String(plugin_type_str)).ok()?;
+                let plugin_type = PluginTypeId::new(plugin_type_str);
                 let merged = uptrakit_config_merge::resolve_effective_config(
                     None,
                     config_model.map(|c| &c.config),

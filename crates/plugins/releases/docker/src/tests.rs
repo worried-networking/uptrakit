@@ -643,7 +643,7 @@ async fn discover_software_skips_images_without_repo_digests() {
 
 #[tokio::test]
 async fn discover_software_emits_targets_when_default_config() {
-    use uptrakit_plugin_infrastructure_core::{PluginRole, PluginType};
+    use uptrakit_plugin_infrastructure_core::{PluginRole, plugin_ids};
 
     let mock = Arc::new(MockDockerClient {
         inspect_result: Some("sha256:abc123".to_string()),
@@ -662,7 +662,7 @@ async fn discover_software_emits_targets_when_default_config() {
     assert_eq!(discoveries.len(), 1);
     assert_eq!(discoveries[0].targets.len(), 1);
     let target = &discoveries[0].targets[0];
-    assert_eq!(target.plugin_type, PluginType::ReleasesDocker);
+    assert_eq!(target.plugin_type, plugin_ids::RELEASES_DOCKER.clone());
     assert_eq!(target.plugin_config_name, "Docker");
     assert_eq!(target.plugin_config, serde_json::json!({}));
     assert!(target.roles.contains(&PluginRole::DetectVersion));

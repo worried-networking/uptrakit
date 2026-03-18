@@ -67,8 +67,7 @@ pub(crate) async fn trigger_discovery_for_agent_host(
             continue;
         }
 
-        let wire_plugin_type =
-            uptrakit_shared_types::PluginType::from(plugin_type.as_str().to_string());
+        let wire_plugin_type = plugin_type.clone();
 
         if state.plugin_ops.has_type_settings(&plugin_type) {
             // Package manager types read config from plugin_type_settings.

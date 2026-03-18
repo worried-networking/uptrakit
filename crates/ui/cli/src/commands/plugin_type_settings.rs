@@ -226,11 +226,11 @@ pub async fn reset(params: ResetParams<'_>) -> Result<DeletedOutput> {
 mod tests {
     use super::*;
     use time::macros::datetime;
-    use uptrakit_shared_types::PluginType;
+    use uptrakit_shared_types::plugin_ids;
 
     fn sample_entry() -> PluginTypeSettingsResponse {
         PluginTypeSettingsResponse {
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             config: serde_json::json!({"poll_interval_secs": 300}),
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-06-01 00:00:00 UTC),

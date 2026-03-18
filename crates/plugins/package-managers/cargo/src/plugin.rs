@@ -7,7 +7,7 @@ use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec}
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
     HostRequirements, HostRuntime, PluginCapability, PluginConfig, PluginError, PluginFamily,
-    PluginRole, PluginType, Result, declare_plugin, require_posix_executor,
+    PluginRole, Result, declare_plugin, plugin_ids, require_posix_executor,
 };
 use uptrakit_plugin_infrastructure_core::{
     PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
@@ -189,7 +189,7 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for CargoPlugin {
             .into_iter()
             .map(|(name, version)| {
                 let targets = vec![DiscoveryTarget {
-                    plugin_type: PluginType::PackageManagerCargo,
+                    plugin_type: plugin_ids::PACKAGE_MANAGER_CARGO.clone(),
                     plugin_config: serde_json::json!({}),
                     plugin_config_name: "cargo".to_string(),
                     roles: vec![
@@ -517,7 +517,10 @@ mod tests {
         assert_eq!(discovered.len(), 2);
         for item in &discovered {
             assert_eq!(item.targets.len(), 1);
-            assert_eq!(item.targets[0].plugin_type, PluginType::PackageManagerCargo);
+            assert_eq!(
+                item.targets[0].plugin_type,
+                plugin_ids::PACKAGE_MANAGER_CARGO.clone()
+            );
             assert_eq!(item.targets[0].plugin_config_name, "cargo");
         }
     }

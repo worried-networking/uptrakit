@@ -9,7 +9,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use uptrakit_shared_types::PluginType;
+use uptrakit_shared_types::PluginTypeId;
 use uptrakit_web_api_types::plugin_type_settings::{
     PluginTypeSettingsResponse, UpsertPluginTypeSettingsRequest,
 };
@@ -19,7 +19,7 @@ fn model_to_response(
     model: uptrakit_shared_db::entity::plugin_type_setting::Model,
 ) -> PluginTypeSettingsResponse {
     PluginTypeSettingsResponse {
-        plugin_type: PluginType::from(model.plugin_type),
+        plugin_type: PluginTypeId::new(model.plugin_type),
         config: model.config,
         created_at: model.created_at,
         updated_at: model.updated_at,

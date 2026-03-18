@@ -8,7 +8,7 @@ use super::capabilities::{Capability, EnrollmentStatus};
 use super::shared_types::{DisconnectReason, UpdateFinalStatus};
 use crate::serde_helpers::{duration_seconds, option_duration_seconds, utc_datetime_millis};
 use uptrakit_shared_types::{
-    DiscoveredSoftware, OutputStreamType, PluginType, ReleaseInfo, SecretString, UpdateCategory,
+    DiscoveredSoftware, OutputStreamType, PluginTypeId, ReleaseInfo, SecretString, UpdateCategory,
 };
 
 /// Payload for ping messages.
@@ -294,7 +294,7 @@ pub struct CheckVersionsPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginAssignment {
     /// The plugin type (e.g. github_releases, apt, homebrew).
-    pub plugin_type: PluginType,
+    pub plugin_type: PluginTypeId,
     /// Package identifier for this role's plugin.
     pub package_identifier: String,
     /// Merged plugin config (base + override).
@@ -468,7 +468,7 @@ pub struct ExecuteBatchUpdatePayload {
     /// Unique identifier for this batch operation.
     pub batch_id: Uuid,
     /// Plugin type for all items in this batch.
-    pub plugin_type: PluginType,
+    pub plugin_type: PluginTypeId,
     /// Merged plugin configuration.
     pub plugin_config: serde_json::Value,
     /// Individual items to update.
@@ -1243,7 +1243,7 @@ pub struct DiscoveryPluginAssignment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_config_id: Option<Uuid>,
     /// Plugin type to use for discovery.
-    pub plugin_type: PluginType,
+    pub plugin_type: PluginTypeId,
     /// Plugin-specific configuration (`{}` for default assignments).
     pub config: serde_json::Value,
 }
@@ -1265,7 +1265,7 @@ pub struct DiscoveryPluginResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_config_id: Option<Uuid>,
     /// Plugin type that produced these results.
-    pub plugin_type: PluginType,
+    pub plugin_type: PluginTypeId,
     /// Discovered software items (empty on error).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub discoveries: Vec<DiscoveredSoftware>,

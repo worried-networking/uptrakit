@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use uptrakit_shared_types::{PluginRole, PluginType};
+use uptrakit_shared_types::{PluginRole, PluginTypeId};
 use uuid::Uuid;
 
 use crate::pagination::PaginationParams;
@@ -104,7 +104,7 @@ pub struct UpdateHostAssignmentRequest {
     /// (mutually exclusive with `plugin_config_id` and `plugin_config`).
     /// The full plugin config is supplied via `config_override`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plugin_type: Option<PluginType>,
+    pub plugin_type: Option<PluginTypeId>,
     pub package_identifier: Option<String>,
     /// Send `null` to clear the override, an object to set it.
     pub config_override: Option<serde_json::Value>,
@@ -422,6 +422,7 @@ impl Validate for UpdateSoftwareItemRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_shared_types::plugin_ids;
 
     fn sample_uuid() -> Uuid {
         Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6")
@@ -560,7 +561,6 @@ mod tests {
 
     #[test]
     fn assign_hosts_request_round_trip() {
-        use uptrakit_shared_types::PluginType;
         let req = AssignHostsRequest {
             host_assignments: vec![
                 HostSoftwareAssignment {
@@ -594,7 +594,7 @@ mod tests {
                         plugin_config_id: None,
                         plugin_config: Some(crate::plugin_configs::CreatePluginConfigRequest {
                             name: "Homebrew Casks".to_string(),
-                            plugin_type: PluginType::PackageManagerHomebrew,
+                            plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
                             config: serde_json::json!({"package_type": "cask"}),
                             enabled: true,
                         }),

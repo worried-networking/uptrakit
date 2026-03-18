@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use uptrakit_shared_types::PluginType;
+use uptrakit_shared_types::PluginTypeId;
 use uuid::Uuid;
 
 /// A tenant-wide discovery allowlist entry.
@@ -39,5 +39,5 @@ pub struct CreateDiscoveryAllowlistEntryRequest {
     ///
     /// Must be a known plugin type that has the `DiscoverLocalSoftware` capability.
     /// `Other`/unknown plugin types are rejected.
-    pub plugin_type: PluginType,
+    pub plugin_type: PluginTypeId,
 }

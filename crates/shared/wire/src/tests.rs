@@ -699,7 +699,7 @@ fn check_versions_serialization_roundtrip() {
             software_item_id: TEST_UUID_1,
             name: "Test Software".to_string(),
             detect_version: Some(PluginAssignment {
-                plugin_type: PluginType::ReleasesGithub,
+                plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
                 package_identifier: "octocat/hello-world".to_string(),
                 config: serde_json::json!({}),
             }),
@@ -724,22 +724,22 @@ fn execute_update_serialization_roundtrip() {
         software_item_name: "Node.js".to_string(),
         to_version: "20.10.0".to_string(),
         detect_version_plugin: Some(PluginAssignment {
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             package_identifier: "nodejs/node".to_string(),
             config: serde_json::json!({}),
         }),
         execute_update_plugin: PluginAssignment {
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             package_identifier: "nodejs/node".to_string(),
             config: serde_json::json!({}),
         },
         pre_update_hook_plugins: vec![PluginAssignment {
-            plugin_type: PluginType::HookSystemd,
+            plugin_type: plugin_ids::HOOK_SYSTEMD.clone(),
             package_identifier: String::new(),
             config: serde_json::json!({"service_name": "myapp"}),
         }],
         post_update_hook_plugins: vec![PluginAssignment {
-            plugin_type: PluginType::HookSystemd,
+            plugin_type: plugin_ids::HOOK_SYSTEMD.clone(),
             package_identifier: String::new(),
             config: serde_json::json!({"service_name": "myapp"}),
         }],
@@ -777,7 +777,7 @@ fn execute_update_minimal_serialization() {
         to_version: "7.2.0".to_string(),
         detect_version_plugin: None,
         execute_update_plugin: PluginAssignment {
-            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
+            plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
             package_identifier: "redis-server".to_string(),
             config: serde_json::json!({}),
         },
@@ -833,12 +833,12 @@ fn execute_update_with_shell_hook_plugin() {
         to_version: "1.0.0".to_string(),
         detect_version_plugin: None,
         execute_update_plugin: PluginAssignment {
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             package_identifier: "test".to_string(),
             config: serde_json::json!({}),
         },
         pre_update_hook_plugins: vec![PluginAssignment {
-            plugin_type: PluginType::HookShell,
+            plugin_type: plugin_ids::HOOK_SHELL.clone(),
             package_identifier: String::new(),
             config: serde_json::json!({"pre_command": "echo hello", "shell": "sh"}),
         }],
@@ -1089,7 +1089,7 @@ fn version_check_assignment_serialization() {
         software_item_id: TEST_UUID_1,
         name: "Docker Image".to_string(),
         detect_version: Some(PluginAssignment {
-            plugin_type: PluginType::ReleasesDocker,
+            plugin_type: plugin_ids::RELEASES_DOCKER.clone(),
             package_identifier: "nginx:latest".to_string(),
             config: serde_json::json!({}),
         }),
@@ -1105,16 +1105,16 @@ fn version_check_assignment_serialization() {
 #[test]
 fn plugin_type_all_variants() {
     for (plugin, expected) in [
-        (PluginType::ReleasesGithub, "releases_github"),
+        (plugin_ids::RELEASES_GITHUB.clone(), "releases_github"),
         (
-            PluginType::DiscoveryProxmoxHelperScripts,
+            plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
             "discovery_proxmox_helper_scripts",
         ),
-        (PluginType::ReleasesDocker, "releases_docker"),
+        (plugin_ids::RELEASES_DOCKER.clone(), "releases_docker"),
     ] {
         let json = serde_json::to_string(&plugin).unwrap();
         assert_eq!(json, format!(r#""{expected}""#));
-        let deserialized: PluginType = serde_json::from_str(&json).unwrap();
+        let deserialized: PluginTypeId = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, plugin);
     }
 }
@@ -1137,7 +1137,7 @@ fn version_check_assignment_with_unknown_plugin_type_deserializes() {
         serde_json::from_value(json).expect("should deserialize");
     assert_eq!(
         assignment.detect_version.as_ref().unwrap().plugin_type,
-        PluginType::Other("winget".to_string())
+        PluginTypeId::new("winget")
     );
 }
 
@@ -1157,7 +1157,7 @@ fn version_check_assignment_apt_plugin_type_deserializes() {
         serde_json::from_value(json).expect("should deserialize");
     assert_eq!(
         assignment.detect_version.as_ref().unwrap().plugin_type,
-        PluginType::PackageManagerApt
+        plugin_ids::PACKAGE_MANAGER_APT.clone()
     );
 }
 
@@ -1865,7 +1865,7 @@ fn spec_conformance_check_versions() {
             software_item_id: TEST_UUID_1,
             name: "Test Software".to_string(),
             detect_version: Some(PluginAssignment {
-                plugin_type: PluginType::ReleasesGithub,
+                plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
                 package_identifier: "octocat/hello-world".to_string(),
                 config: serde_json::json!({}),
             }),
@@ -1888,7 +1888,7 @@ fn spec_conformance_execute_update() {
             to_version: "20.10.0".to_string(),
             detect_version_plugin: None,
             execute_update_plugin: PluginAssignment {
-                plugin_type: PluginType::ReleasesGithub,
+                plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
                 package_identifier: "nodejs/node".to_string(),
                 config: serde_json::json!({}),
             },
@@ -1913,12 +1913,12 @@ fn discover_software_payload_roundtrip() {
         plugins: vec![
             DiscoveryPluginAssignment {
                 plugin_config_id: Some(TEST_UUID_1),
-                plugin_type: PluginType::PackageManagerHomebrew,
+                plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
                 config: serde_json::json!({"package_type": "formula"}),
             },
             DiscoveryPluginAssignment {
                 plugin_config_id: None,
-                plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
+                plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
                 config: serde_json::Value::Object(Default::default()),
             },
         ],
@@ -1945,7 +1945,7 @@ fn discovery_results_payload_roundtrip() {
         results: vec![
             DiscoveryPluginResult {
                 plugin_config_id: Some(TEST_UUID_1),
-                plugin_type: PluginType::PackageManagerHomebrew,
+                plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
                 discoveries: vec![DiscoveredSoftware {
                     package_identifier: "wget".to_string(),
                     name: "Wget".to_string(),
@@ -1961,7 +1961,7 @@ fn discovery_results_payload_roundtrip() {
             },
             DiscoveryPluginResult {
                 plugin_config_id: None,
-                plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
+                plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
                 discoveries: vec![],
                 error: Some("no update script found".to_string()),
             },
@@ -1986,7 +1986,7 @@ fn discovery_results_payload_type_tag() {
 fn discovery_plugin_assignment_none_config_id_omitted() {
     let assignment = DiscoveryPluginAssignment {
         plugin_config_id: None,
-        plugin_type: PluginType::PackageManagerHomebrew,
+        plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
         config: serde_json::Value::Object(Default::default()),
     };
     let json = serde_json::to_value(&assignment).unwrap();
@@ -2001,7 +2001,7 @@ fn spec_conformance_discover_software() {
             host_machine_id: "machine-abc".to_string(),
             plugins: vec![DiscoveryPluginAssignment {
                 plugin_config_id: Some(TEST_UUID_1),
-                plugin_type: PluginType::PackageManagerHomebrew,
+                plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
                 config: serde_json::json!({"package_type": "formula"}),
             }],
         },
@@ -2016,7 +2016,7 @@ fn spec_conformance_discovery_results() {
         host_machine_id: "machine-abc".to_string(),
         results: vec![DiscoveryPluginResult {
             plugin_config_id: Some(TEST_UUID_1),
-            plugin_type: PluginType::PackageManagerHomebrew,
+            plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
             discoveries: vec![DiscoveredSoftware {
                 package_identifier: "wget".to_string(),
                 name: "Wget".to_string(),
@@ -2039,7 +2039,7 @@ fn execute_batch_update_serialization_roundtrip() {
     let msg = ControllerMessage::ExecuteBatchUpdate(Box::new(ExecuteBatchUpdatePayload {
         host_machine_id: "test-machine-id".to_string(),
         batch_id: TEST_UUID_1,
-        plugin_type: PluginType::PackageManagerApt,
+        plugin_type: plugin_ids::PACKAGE_MANAGER_APT.clone(),
         plugin_config: serde_json::json!({}),
         updates: vec![BatchUpdateItem {
             host_software_item_id: TEST_UUID_1,
@@ -2112,7 +2112,7 @@ fn spec_conformance_execute_batch_update() {
         ExecuteBatchUpdatePayload {
             host_machine_id: "test-machine-id".to_string(),
             batch_id: TEST_UUID_1,
-            plugin_type: PluginType::PackageManagerApt,
+            plugin_type: plugin_ids::PACKAGE_MANAGER_APT.clone(),
             plugin_config: serde_json::json!({}),
             updates: vec![BatchUpdateItem {
                 host_software_item_id: TEST_UUID_1,

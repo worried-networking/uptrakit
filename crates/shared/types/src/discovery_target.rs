@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::plugin_role::PluginRole;
-use crate::plugin_types::PluginType;
+use crate::plugin_type_id::PluginTypeId;
 
 /// A structured target that tells the autodiscovery controller exactly which
 /// plugin config (and role assignments) to create for a discovered software item.
@@ -16,9 +16,9 @@ use crate::plugin_types::PluginType;
 /// `owner/repo` is expressed as the `package_identifier` override):
 ///
 /// ```
-/// # use uptrakit_shared_types::{DiscoveryTarget, PluginType, PluginRole};
+/// # use uptrakit_shared_types::{DiscoveryTarget, PluginTypeId, PluginRole, plugin_ids};
 /// let target = DiscoveryTarget {
-///     plugin_type: PluginType::ReleasesGithub,
+///     plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
 ///     plugin_config: serde_json::json!({
 ///         "tag_strip_prefix": "v",
 ///         "include_prereleases": false,
@@ -36,8 +36,8 @@ pub struct DiscoveryTarget {
     /// Target plugin type (may differ from the discovering plugin).
     ///
     /// For example, the PHS plugin discovers software but targets
-    /// `GithubReleases` or `Apt` for tracking.
-    pub plugin_type: PluginType,
+    /// `releases_github` or `package_manager_apt` for tracking.
+    pub plugin_type: PluginTypeId,
 
     /// Config JSON for find-or-create of the target plugin config.
     ///
@@ -72,6 +72,7 @@ pub struct DiscoveryTarget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugin_ids;
 
     fn all_roles() -> Vec<PluginRole> {
         vec![
@@ -84,7 +85,7 @@ mod tests {
     #[test]
     fn serialization_roundtrip() {
         let target = DiscoveryTarget {
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             plugin_config: serde_json::json!({"tag_strip_prefix": "v"}),
             plugin_config_name: "GitHub Releases".to_string(),
             roles: vec![PluginRole::FetchReleases],
@@ -100,7 +101,7 @@ mod tests {
     #[test]
     fn optional_fields_omitted_when_none() {
         let target = DiscoveryTarget {
-            plugin_type: PluginType::PackageManagerApt,
+            plugin_type: plugin_ids::PACKAGE_MANAGER_APT.clone(),
             plugin_config: serde_json::json!({}),
             plugin_config_name: "APT".to_string(),
             roles: all_roles(),
@@ -117,7 +118,7 @@ mod tests {
     #[test]
     fn optional_fields_present_when_set() {
         let target = DiscoveryTarget {
-            plugin_type: PluginType::PackageManagerApt,
+            plugin_type: plugin_ids::PACKAGE_MANAGER_APT.clone(),
             plugin_config: serde_json::json!({}),
             plugin_config_name: "APT".to_string(),
             roles: vec![PluginRole::DetectVersion],
@@ -136,10 +137,8 @@ mod tests {
 
     #[test]
     fn cross_plugin_target() {
-        // Represents a PHS-discovered GitHub-managed item: the GitHub plugin
-        // covers FetchReleases only; `owner/repo` is the package_identifier override.
         let target = DiscoveryTarget {
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             plugin_config: serde_json::json!({"tag_strip_prefix": "v"}),
             plugin_config_name: "GitHub Releases".to_string(),
             roles: vec![PluginRole::FetchReleases],
@@ -149,7 +148,7 @@ mod tests {
         };
         let json = serde_json::to_string(&target).expect("serialize");
         let deserialized: DiscoveryTarget = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(deserialized.plugin_type, PluginType::ReleasesGithub);
+        assert_eq!(deserialized.plugin_type, plugin_ids::RELEASES_GITHUB);
         assert_eq!(
             deserialized.package_identifier,
             Some("BookLore/BookLore".to_string())
@@ -165,7 +164,7 @@ mod tests {
             "roles": ["detect_version", "fetch_releases", "execute_update"]
         }"#;
         let target: DiscoveryTarget = serde_json::from_str(json).expect("deserialize");
-        assert_eq!(target.plugin_type, PluginType::PackageManagerApt);
+        assert_eq!(target.plugin_type, plugin_ids::PACKAGE_MANAGER_APT);
         assert_eq!(target.package_identifier, None);
         assert_eq!(target.config_override, None);
         assert_eq!(target.execution_site, None);

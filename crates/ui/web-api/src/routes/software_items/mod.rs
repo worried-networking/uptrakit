@@ -28,10 +28,10 @@ use axum::{
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, RelationTrait as _, Set};
 use std::sync::Arc;
 use time::OffsetDateTime;
-use uptrakit_plugin_infrastructure_registry::PluginType;
 use uptrakit_shared_db::entity::{
     host, host_software_item_plugin, prelude::*, service, service_host, software_item,
 };
+use uptrakit_shared_types::PluginTypeId;
 use uptrakit_web_api_types::events::AdminEvent;
 use uuid::Uuid;
 
@@ -925,12 +925,7 @@ async fn classify_role_assignments(
             .as_ref()
             .map(|c| c.plugin_type.clone())
             .unwrap_or_else(|| plugin.plugin_type.clone());
-        let Ok(plugin_type) =
-            serde_json::from_value::<PluginType>(serde_json::Value::String(plugin_type_str))
-        else {
-            tracing::error!("Unknown plugin type: {}", plugin.plugin_type);
-            continue;
-        };
+        let plugin_type = PluginTypeId::new(plugin_type_str);
         let merged = uptrakit_config_merge::resolve_effective_config(
             None,
             config.as_ref().map(|c| &c.config),

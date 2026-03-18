@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 /// This replaces `PluginType` enum. Instead of matching on variants, code looks up
 /// the `PluginTypeId` in the `PluginCatalog` to get a `PluginDescriptor`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(transparent)]
 pub struct PluginTypeId(Cow<'static, str>);
 
@@ -27,6 +28,50 @@ impl PluginTypeId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Returns `true` if this plugin type is a package manager.
+    ///
+    /// Package managers are plugins that use tenant-scoped type settings and have
+    /// `type_id` values starting with `package_manager_`.
+    ///
+    /// Once the `PluginCatalog` is fully wired, this will be replaced by
+    /// `catalog.get(id)?.type_settings.is_some()`.
+    pub fn is_package_manager(&self) -> bool {
+        self.0.starts_with("package_manager_")
+    }
+
+    /// Returns a human-readable display name for well-known plugin types.
+    ///
+    /// Once the `PluginCatalog` is fully wired, this will be replaced by
+    /// `catalog.get(id)?.display_name`.
+    pub fn display_name(&self) -> &str {
+        match self.0.as_ref() {
+            "releases_github" => "GitHub Releases",
+            "releases_gitlab" => "GitLab Releases",
+            "releases_forgejo" => "Forgejo Releases",
+            "releases_docker" => "Docker",
+            "discovery_proxmox_helper_scripts" => "Proxmox Helper Scripts",
+            "package_manager_homebrew" => "Homebrew",
+            "package_manager_apt" => "APT",
+            "package_manager_dnf" => "DNF",
+            "package_manager_npm" => "npm",
+            "package_manager_mas" => "Mac App Store",
+            "package_manager_pacman" => "Pacman",
+            "package_manager_pkg" => "FreeBSD pkg",
+            "package_manager_apk" => "Alpine APK",
+            "package_manager_snap" => "Snap",
+            "package_manager_cargo" => "Cargo",
+            "generic_shell" => "Shell",
+            "hook_shell" => "Shell Hook",
+            "hook_systemd" => "Systemd Hook",
+            "infrastructure_proxmox" => "Proxmox VE",
+            "webhook" => "Webhook",
+            "telegram" => "Telegram",
+            "email" => "Email",
+            "enhancement_dashboard_icons" => "Dashboard Icons",
+            other => other,
+        }
     }
 }
 
@@ -63,6 +108,14 @@ impl PartialEq<str> for PluginTypeId {
 impl PartialEq<&str> for PluginTypeId {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
+    }
+}
+
+impl std::str::FromStr for PluginTypeId {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(Self::new(s))
     }
 }
 

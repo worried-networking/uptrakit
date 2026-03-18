@@ -9,8 +9,8 @@ use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
     HostCompatibility, HostRequirements, HostRuntime, OutputStreamType, PluginError, PluginFamily,
-    PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry, UpdateCategory,
-    UpdateOutputLine, UpstreamRelease, Version, declare_plugin, execute_and_capture,
+    PluginRole, ReleaseInfo, Result, SudoCommandEntry, UpdateCategory, UpdateOutputLine,
+    UpstreamRelease, Version, declare_plugin, execute_and_capture, plugin_ids,
     require_posix_executor,
 };
 
@@ -556,7 +556,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for PkgPlugin {
 /// Build a [`DiscoveredSoftware`] entry for a package.
 fn build_discovered(name: String, version: String) -> DiscoveredSoftware {
     let targets = vec![DiscoveryTarget {
-        plugin_type: PluginType::PackageManagerPkg,
+        plugin_type: plugin_ids::PACKAGE_MANAGER_PKG.clone(),
         plugin_config: serde_json::json!({}),
         plugin_config_name: "BSD pkg".to_string(),
         roles: vec![

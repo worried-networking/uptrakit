@@ -18,7 +18,7 @@ pub mod permissions;
 mod plugin_capability;
 mod plugin_role;
 mod plugin_type_id;
-mod plugin_types;
+mod release_types;
 mod secret_string;
 mod service_status;
 mod session_token_type;
@@ -42,9 +42,7 @@ pub use permissions::{ParsePermissionError, Permission};
 pub use plugin_capability::PluginCapability;
 pub use plugin_role::{ParsePluginRoleError, PluginRole};
 pub use plugin_type_id::{PluginTypeId, plugin_ids};
-pub use plugin_types::{
-    AttestationStatus, ParsePluginTypeError, PluginType, ReleaseAsset, ReleaseInfo,
-};
+pub use release_types::{AttestationStatus, ReleaseAsset, ReleaseInfo};
 pub use secret_string::SecretString;
 pub use service_status::{ParseServiceStatusError, ServiceStatus};
 pub use session_token_type::{ParseSessionTokenTypeError, SessionTokenType};

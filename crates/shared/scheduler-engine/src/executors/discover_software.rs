@@ -6,7 +6,6 @@
 //! autodiscovery result processor in `process_plugin_result`.
 
 use std::collections::{HashMap, HashSet};
-use std::str::FromStr;
 use std::sync::Arc;
 
 use rootcause::prelude::*;
@@ -21,7 +20,7 @@ use uptrakit_shared_db::entity::{
     host, host_discovery_allowlist, plugin_config, scheduled_task, service, service_host,
     tenant_discovery_allowlist,
 };
-use uptrakit_shared_types::PluginType;
+use uptrakit_shared_types::PluginTypeId;
 use uuid::Uuid;
 
 use crate::error::SchedulerError;
@@ -71,10 +70,10 @@ impl TaskExecutor for DiscoverSoftwareExecutor {
         }
 
         // Collect plugin types that have a discoverer role from the descriptor registry.
-        let discovery_types: Vec<PluginType> = all_descriptors()
+        let discovery_types: Vec<PluginTypeId> = all_descriptors()
             .into_iter()
             .filter(|d| d.roles.discoverer.is_some())
-            .filter_map(|d| PluginType::from_str(d.type_id).ok())
+            .map(|d| PluginTypeId::from_static(d.type_id))
             .collect();
 
         // Load allowlists in parallel with plugin config query.
@@ -236,7 +235,7 @@ impl DiscoverSoftwareExecutor {
 /// If no configs exist for a type, one empty-config default assignment is emitted
 /// so the agent still attempts discovery with its built-in defaults.
 fn build_assignments(
-    discovery_types: &[PluginType],
+    discovery_types: &[PluginTypeId],
     host_allowlist: &HashSet<String>,
     tenant_allowlist: &HashSet<String>,
     configs_by_type: &HashMap<String, Vec<plugin_config::Model>>,
@@ -294,6 +293,7 @@ mod tests {
     use sea_orm::{ConnectOptions, Database};
     use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
     use uptrakit_shared_db::migration::run_migrations;
+    use uptrakit_shared_types::plugin_ids;
 
     fn make_task(tenant_id: Uuid) -> scheduled_task::Model {
         scheduled_task::Model {
@@ -329,8 +329,8 @@ mod tests {
 
     #[test]
     fn build_assignments_host_allowlist_filters_types() {
-        let type_homebrew = PluginType::PackageManagerHomebrew;
-        let type_apt = PluginType::PackageManagerApt;
+        let type_homebrew = plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone();
+        let type_apt = plugin_ids::PACKAGE_MANAGER_APT.clone();
 
         let host_allowlist: HashSet<String> =
             [type_homebrew.as_str().to_string()].into_iter().collect();
@@ -357,8 +357,8 @@ mod tests {
         let configs_by_type: HashMap<String, Vec<plugin_config::Model>> = HashMap::new();
 
         let discovery_types = vec![
-            PluginType::PackageManagerHomebrew,
-            PluginType::PackageManagerApt,
+            plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
+            plugin_ids::PACKAGE_MANAGER_APT.clone(),
         ];
         let assignments = build_assignments(
             &discovery_types,
@@ -376,14 +376,17 @@ mod tests {
 
     #[test]
     fn build_assignments_tenant_allowlist_used_as_fallback() {
-        let type_apt = PluginType::PackageManagerApt;
+        let type_apt = plugin_ids::PACKAGE_MANAGER_APT.clone();
 
         let host_allowlist: HashSet<String> = HashSet::new();
         let tenant_allowlist: HashSet<String> =
             [type_apt.as_str().to_string()].into_iter().collect();
         let configs_by_type: HashMap<String, Vec<plugin_config::Model>> = HashMap::new();
 
-        let discovery_types = vec![PluginType::PackageManagerHomebrew, type_apt.clone()];
+        let discovery_types = vec![
+            plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
+            type_apt.clone(),
+        ];
         let assignments = build_assignments(
             &discovery_types,
             &host_allowlist,

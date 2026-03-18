@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::command::CommandSpec;
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, Discoverer, DiscoveryTarget, HostCompatibility, PluginRole, PluginType,
-    Result, execute_and_capture,
+    DiscoveredSoftware, Discoverer, DiscoveryTarget, HostCompatibility, PluginRole, Result,
+    execute_and_capture, plugin_ids,
 };
 
 use crate::config::AptDiscoveryFilter;
@@ -82,7 +82,7 @@ impl Discoverer for AptPlugin {
             })
             .map(|(name, version)| {
                 let targets = vec![DiscoveryTarget {
-                    plugin_type: PluginType::PackageManagerApt,
+                    plugin_type: plugin_ids::PACKAGE_MANAGER_APT.clone(),
                     plugin_config: serde_json::json!({}),
                     plugin_config_name: "APT".to_string(),
                     roles: vec![
@@ -135,7 +135,7 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::testing::{FixedOutputExecutor, RoutedOutputExecutor};
     use uptrakit_plugin_infrastructure_core::{
         Discoverer, HostCapabilities, HostCompatibility, HostRuntime, LocalCommandExecutor,
-        PluginRole, PluginType, PosixHostRuntime, ReleaseFetcher, VersionDetector,
+        PluginRole, PosixHostRuntime, ReleaseFetcher, VersionDetector, plugin_ids,
     };
 
     use crate::config::{AptConfig, AptDiscoveryFilter};
@@ -195,7 +195,7 @@ mod tests {
         assert_eq!(discoveries[0].targets.len(), 1);
 
         let target = &discoveries[0].targets[0];
-        assert_eq!(target.plugin_type, PluginType::PackageManagerApt);
+        assert_eq!(target.plugin_type, plugin_ids::PACKAGE_MANAGER_APT.clone());
         assert_eq!(target.plugin_config_name, "APT");
         assert_eq!(target.plugin_config, serde_json::json!({}));
         assert!(target.roles.contains(&PluginRole::DetectVersion));

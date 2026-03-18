@@ -97,7 +97,7 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_shared_types::PluginType;
+    use uptrakit_shared_types::plugin_ids;
     use uptrakit_web_api_types::pagination::PaginationParams;
     use uptrakit_web_api_types::plugin_configs::{
         CreatePluginConfigRequest, UpdatePluginConfigRequest,
@@ -107,7 +107,7 @@ mod tests {
     fn create_plugin_config_request_serialization() {
         let req = CreatePluginConfigRequest {
             name: "GitHub Releases".to_string(),
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             config: serde_json::json!({"tag_strip_prefix": "v", "include_prereleases": false}),
             enabled: true,
         };

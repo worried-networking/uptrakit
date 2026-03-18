@@ -8,8 +8,8 @@ use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, ConfigModel,
     ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, HostRequirements,
-    HostRuntime, OutputStreamType, PluginError, PluginFamily, PluginRole, PluginType, ReleaseInfo,
-    Result, UpdateOutputLine, UpstreamRelease, Version, declare_plugin, execute_and_capture,
+    HostRuntime, OutputStreamType, PluginError, PluginFamily, PluginRole, ReleaseInfo, Result,
+    UpdateOutputLine, UpstreamRelease, Version, declare_plugin, execute_and_capture, plugin_ids,
     require_posix_executor,
 };
 
@@ -222,7 +222,7 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for MasPlugin {
             .filter_map(parse_mas_list_line)
             .map(|(id, name, installed_version)| {
                 let target = DiscoveryTarget {
-                    plugin_type: PluginType::PackageManagerMas,
+                    plugin_type: plugin_ids::PACKAGE_MANAGER_MAS.clone(),
                     plugin_config: serde_json::json!({}),
                     plugin_config_name: "Mac App Store".to_string(),
                     roles: vec![
@@ -668,7 +668,10 @@ mod tests {
         assert_eq!(xcode.name, "Xcode");
         assert_eq!(xcode.installed_version, "15.4");
         assert_eq!(xcode.targets.len(), 1);
-        assert_eq!(xcode.targets[0].plugin_type, PluginType::PackageManagerMas);
+        assert_eq!(
+            xcode.targets[0].plugin_type,
+            plugin_ids::PACKAGE_MANAGER_MAS.clone()
+        );
         assert_eq!(xcode.targets[0].plugin_config_name, "Mac App Store");
         assert_eq!(xcode.targets[0].plugin_config, serde_json::json!({}));
         assert!(xcode.targets[0].roles.contains(&PluginRole::DetectVersion));

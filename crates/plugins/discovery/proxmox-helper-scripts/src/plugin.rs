@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
-    HostRequirements, HostRuntime, PluginFamily, PluginRole, PluginType, SudoCommandEntry,
-    SudoHelperScript, declare_plugin, require_posix_executor,
+    HostRequirements, HostRuntime, PluginFamily, PluginRole, SudoCommandEntry, SudoHelperScript,
+    declare_plugin, plugin_ids, require_posix_executor,
 };
 use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
@@ -194,7 +194,7 @@ impl ProxmoxHelperScriptsPlugin {
     /// a single plugin config instance across all tracked GitHub repos.
     fn github_fetch_target(owner: &str, repo: &str) -> DiscoveryTarget {
         DiscoveryTarget {
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             plugin_config: serde_json::json!({
                 "tag_strip_prefix": "v",
                 "include_prereleases": false,
@@ -212,7 +212,7 @@ impl ProxmoxHelperScriptsPlugin {
     ///
     /// PHS scripts use `check_for_codeberg_release` / `CODEBERG_REPO=` to track
     /// releases on [Codeberg](https://codeberg.org), which runs the Forgejo
-    /// platform. The underlying plugin type is [`PluginType::ReleasesForgejo`]
+    /// platform. The underlying plugin type is `RELEASES_FORGEJO`
     /// with `api_base_url` hardcoded to `https://codeberg.org`.
     ///
     /// The `owner/repo` pair is expressed as the `package_identifier` override
@@ -220,7 +220,7 @@ impl ProxmoxHelperScriptsPlugin {
     /// a single plugin config instance across all tracked Codeberg repositories.
     fn codeberg_fetch_target(owner: &str, repo: &str) -> DiscoveryTarget {
         DiscoveryTarget {
-            plugin_type: PluginType::ReleasesForgejo,
+            plugin_type: plugin_ids::RELEASES_FORGEJO.clone(),
             plugin_config: serde_json::json!({
                 "api_base_url": "https://codeberg.org",
                 "tag_strip_prefix": "v",
@@ -256,7 +256,7 @@ impl ProxmoxHelperScriptsPlugin {
     /// common case where key == slug.
     fn phs_shell_target(version_file_basename: Option<&str>) -> DiscoveryTarget {
         DiscoveryTarget {
-            plugin_type: PluginType::GenericShell,
+            plugin_type: plugin_ids::GENERIC_SHELL.clone(),
             plugin_config: serde_json::json!({
                 "version_command": PHS_DETECT_VERSION_CMD,
                 "update_command": PHS_INSTALL_CMD,
@@ -277,7 +277,7 @@ impl ProxmoxHelperScriptsPlugin {
     /// [`phs_update_only_target`](Self::phs_update_only_target)).
     fn npm_target(package: &str) -> DiscoveryTarget {
         DiscoveryTarget {
-            plugin_type: PluginType::PackageManagerNpm,
+            plugin_type: plugin_ids::PACKAGE_MANAGER_NPM.clone(),
             plugin_config: serde_json::json!({}),
             plugin_config_name: "NPM (auto)".to_string(),
             roles: vec![PluginRole::DetectVersion, PluginRole::FetchReleases],
@@ -334,7 +334,7 @@ impl ProxmoxHelperScriptsPlugin {
     /// [`phs_update_only_target`](Self::phs_update_only_target)).
     fn apt_target() -> DiscoveryTarget {
         DiscoveryTarget {
-            plugin_type: PluginType::PackageManagerApt,
+            plugin_type: plugin_ids::PACKAGE_MANAGER_APT.clone(),
             plugin_config: serde_json::json!({}),
             plugin_config_name: "APT (auto)".to_string(),
             roles: vec![PluginRole::DetectVersion, PluginRole::FetchReleases],
@@ -358,7 +358,7 @@ impl ProxmoxHelperScriptsPlugin {
     /// package manager.
     fn phs_update_only_target() -> DiscoveryTarget {
         DiscoveryTarget {
-            plugin_type: PluginType::GenericShell,
+            plugin_type: plugin_ids::GENERIC_SHELL.clone(),
             plugin_config: serde_json::json!({
                 "version_command": PHS_DETECT_VERSION_CMD,
                 "update_command": PHS_INSTALL_CMD,
@@ -869,7 +869,7 @@ mod tests {
     #[test]
     fn github_fetch_target_structure() {
         let target = ProxmoxHelperScriptsPlugin::github_fetch_target("BookLore", "BookLore");
-        assert_eq!(target.plugin_type, PluginType::ReleasesGithub);
+        assert_eq!(target.plugin_type, plugin_ids::RELEASES_GITHUB.clone());
         assert_eq!(target.plugin_config_name, "GitHub Releases");
         // FetchReleases only — no agent-side roles.
         assert_eq!(target.roles.len(), 1);
@@ -887,7 +887,7 @@ mod tests {
     #[test]
     fn codeberg_fetch_target_structure() {
         let target = ProxmoxHelperScriptsPlugin::codeberg_fetch_target("readeck", "readeck");
-        assert_eq!(target.plugin_type, PluginType::ReleasesForgejo);
+        assert_eq!(target.plugin_type, plugin_ids::RELEASES_FORGEJO.clone());
         assert_eq!(target.plugin_config_name, "Codeberg Releases");
         // FetchReleases only — no agent-side roles.
         assert_eq!(target.roles.len(), 1);
@@ -913,7 +913,7 @@ mod tests {
     #[test]
     fn phs_shell_target_structure() {
         let target = ProxmoxHelperScriptsPlugin::phs_shell_target(None);
-        assert_eq!(target.plugin_type, PluginType::GenericShell);
+        assert_eq!(target.plugin_type, plugin_ids::GENERIC_SHELL.clone());
         assert_eq!(target.plugin_config_name, "PHS Shell");
         assert_eq!(target.roles.len(), 2);
         assert!(target.roles.contains(&PluginRole::DetectVersion));
@@ -977,7 +977,7 @@ mod tests {
         // plugin calls `uptrakit-phs-version paperless` instead of
         // `uptrakit-phs-version paperless-ngx`.
         let target = ProxmoxHelperScriptsPlugin::phs_shell_target(Some("paperless"));
-        assert_eq!(target.plugin_type, PluginType::GenericShell);
+        assert_eq!(target.plugin_type, plugin_ids::GENERIC_SHELL.clone());
         assert_eq!(
             target.plugin_config["version_command"],
             PHS_DETECT_VERSION_CMD
@@ -1001,7 +1001,7 @@ mod tests {
     #[test]
     fn apt_target_structure() {
         let target = ProxmoxHelperScriptsPlugin::apt_target();
-        assert_eq!(target.plugin_type, PluginType::PackageManagerApt);
+        assert_eq!(target.plugin_type, plugin_ids::PACKAGE_MANAGER_APT.clone());
         assert_eq!(target.plugin_config_name, "APT (auto)");
         // DetectVersion + FetchReleases only — ExecuteUpdate is handled by phs_update_only_target.
         assert_eq!(target.roles.len(), 2);
@@ -1015,7 +1015,7 @@ mod tests {
     #[test]
     fn npm_target_structure() {
         let target = ProxmoxHelperScriptsPlugin::npm_target("n8n");
-        assert_eq!(target.plugin_type, PluginType::PackageManagerNpm);
+        assert_eq!(target.plugin_type, plugin_ids::PACKAGE_MANAGER_NPM.clone());
         assert_eq!(target.plugin_config_name, "NPM (auto)");
         // DetectVersion + FetchReleases only — ExecuteUpdate is handled by phs_update_only_target.
         assert_eq!(target.roles.len(), 2);
@@ -1030,7 +1030,7 @@ mod tests {
     #[test]
     fn phs_update_only_target_structure() {
         let target = ProxmoxHelperScriptsPlugin::phs_update_only_target();
-        assert_eq!(target.plugin_type, PluginType::GenericShell);
+        assert_eq!(target.plugin_type, plugin_ids::GENERIC_SHELL.clone());
         assert_eq!(target.plugin_config_name, "PHS Shell");
         // ExecuteUpdate only — version detection and release fetching are handled
         // by the npm/APT target.
@@ -1058,7 +1058,7 @@ mod tests {
     #[test]
     fn npm_target_scoped_package() {
         let target = ProxmoxHelperScriptsPlugin::npm_target("@angular/cli");
-        assert_eq!(target.plugin_type, PluginType::PackageManagerNpm);
+        assert_eq!(target.plugin_type, plugin_ids::PACKAGE_MANAGER_NPM.clone());
         assert_eq!(target.package_identifier.as_deref(), Some("@angular/cli"));
     }
 }

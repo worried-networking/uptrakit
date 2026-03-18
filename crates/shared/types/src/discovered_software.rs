@@ -87,7 +87,7 @@ pub struct DiscoveredSoftware {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{PluginRole, PluginType};
+    use crate::{PluginRole, plugin_ids};
 
     #[test]
     fn serialization_roundtrip() {
@@ -151,7 +151,7 @@ mod tests {
             name: "BookLore".to_string(),
             installed_version: "1.18.5".to_string(),
             targets: vec![DiscoveryTarget {
-                plugin_type: PluginType::ReleasesGithub,
+                plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
                 plugin_config: serde_json::json!({"tag_strip_prefix": "v"}),
                 plugin_config_name: "GitHub Releases".to_string(),
                 roles: vec![PluginRole::FetchReleases],

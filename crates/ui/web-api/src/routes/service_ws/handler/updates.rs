@@ -1582,8 +1582,7 @@ fn build_plugin_assignment_nullable(
     let plugin_type_str = config
         .map(|c| c.plugin_type.clone())
         .unwrap_or_else(|| assignment.plugin_type.clone());
-    let plugin_type: uptrakit_internal_wire::PluginType =
-        serde_json::from_value(serde_json::Value::String(plugin_type_str)).ok()?;
+    let plugin_type = uptrakit_shared_types::PluginTypeId::new(plugin_type_str);
 
     let merged_config = uptrakit_config_merge::resolve_effective_config(
         None,

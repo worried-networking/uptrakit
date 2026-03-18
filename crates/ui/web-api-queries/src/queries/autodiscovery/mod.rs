@@ -98,7 +98,7 @@ pub(crate) mod tests_common {
     };
     use uptrakit_internal_wire::{
         DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, DiscoveryTarget,
-        PluginRole, PluginType,
+        PluginRole, plugin_ids,
     };
     use uptrakit_shared_db::entity::{
         host, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
@@ -275,7 +275,7 @@ pub(crate) mod tests_common {
         repo: &str,
     ) -> DiscoveryPluginResult {
         DiscoveryPluginResult {
-            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
+            plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
             plugin_config_id: None,
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
@@ -283,7 +283,7 @@ pub(crate) mod tests_common {
                 name: name.to_string(),
                 installed_version: version.to_string(),
                 targets: vec![DiscoveryTarget {
-                    plugin_type: PluginType::ReleasesGithub,
+                    plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
                     plugin_config: serde_json::json!({
                         "owner": owner,
                         "repo": repo,
@@ -315,7 +315,7 @@ pub(crate) mod tests_common {
         version: &str,
     ) -> DiscoveryPluginResult {
         DiscoveryPluginResult {
-            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
+            plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
             plugin_config_id: None,
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
@@ -323,7 +323,7 @@ pub(crate) mod tests_common {
                 name: name.to_string(),
                 installed_version: version.to_string(),
                 targets: vec![DiscoveryTarget {
-                    plugin_type: PluginType::PackageManagerApt,
+                    plugin_type: plugin_ids::PACKAGE_MANAGER_APT.clone(),
                     plugin_config: serde_json::json!({}),
                     plugin_config_name: "APT (auto)".to_string(),
                     roles: all_roles(),
@@ -342,7 +342,7 @@ pub(crate) mod tests_common {
 
     pub fn phs_result_no_targets(pkg_id: &str) -> DiscoveryPluginResult {
         DiscoveryPluginResult {
-            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
+            plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
             plugin_config_id: None,
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
@@ -372,7 +372,7 @@ pub(crate) mod tests_common {
         repo: &str,
     ) -> DiscoveryPluginResult {
         DiscoveryPluginResult {
-            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
+            plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
             plugin_config_id: None,
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
@@ -381,7 +381,7 @@ pub(crate) mod tests_common {
                 installed_version: version.to_string(),
                 targets: vec![
                     DiscoveryTarget {
-                        plugin_type: PluginType::ReleasesGithub,
+                        plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
                         plugin_config: serde_json::json!({
                             "tag_strip_prefix": "v",
                             "include_prereleases": false,
@@ -394,7 +394,7 @@ pub(crate) mod tests_common {
                         execution_site: None,
                     },
                     DiscoveryTarget {
-                        plugin_type: PluginType::GenericShell,
+                        plugin_type: plugin_ids::GENERIC_SHELL.clone(),
                         plugin_config: serde_json::json!({
                             "version_command": "phs-app --version",
                             "update_command": "phs-update",
@@ -420,7 +420,7 @@ pub(crate) mod tests_common {
 mod tests {
     use super::*;
     use tests_common::*;
-    use uptrakit_internal_wire::PluginType;
+    use uptrakit_internal_wire::plugin_ids;
     use uptrakit_shared_db::entity::{host_software_item, plugin_config, prelude::*};
 
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
@@ -443,7 +443,7 @@ mod tests {
         let payload = uptrakit_internal_wire::DiscoveryResultsPayload {
             host_machine_id: "test-machine".to_string(),
             results: vec![uptrakit_internal_wire::DiscoveryPluginResult {
-                plugin_type: PluginType::PackageManagerHomebrew,
+                plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
                 plugin_config_id: None,
                 error: None,
                 discoveries: vec![uptrakit_internal_wire::DiscoveredSoftware {
@@ -451,7 +451,7 @@ mod tests {
                     name: "wget".to_string(),
                     installed_version: "1.24.4".to_string(),
                     targets: vec![uptrakit_internal_wire::DiscoveryTarget {
-                        plugin_type: PluginType::PackageManagerHomebrew,
+                        plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
                         plugin_config: serde_json::json!({"package_type": "formula"}),
                         plugin_config_name: "Homebrew (Formulae)".to_string(),
                         roles: all_roles(),
@@ -518,7 +518,7 @@ mod tests {
             uptrakit_internal_wire::DiscoveryResultsPayload {
                 host_machine_id: "test-machine".to_string(),
                 results: vec![uptrakit_internal_wire::DiscoveryPluginResult {
-                    plugin_type: PluginType::PackageManagerHomebrew,
+                    plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
                     plugin_config_id: None,
                     error: None,
                     discoveries: vec![uptrakit_internal_wire::DiscoveredSoftware {
@@ -526,7 +526,7 @@ mod tests {
                         name: "wget".to_string(),
                         installed_version: version,
                         targets: vec![uptrakit_internal_wire::DiscoveryTarget {
-                            plugin_type: PluginType::PackageManagerHomebrew,
+                            plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
                             plugin_config: serde_json::json!({"package_type": "formula"}),
                             plugin_config_name: "Homebrew (Formulae)".to_string(),
                             roles: all_roles(),

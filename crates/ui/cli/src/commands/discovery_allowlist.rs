@@ -5,7 +5,7 @@ use crate::error::Result;
 use crate::output::HumanOutput;
 use clap::Subcommand;
 use rootcause::prelude::*;
-use uptrakit_shared_types::PluginType;
+use uptrakit_shared_types::PluginTypeId;
 
 #[derive(Debug, Subcommand)]
 pub enum DiscoveryAllowlistCommands {
@@ -16,7 +16,7 @@ pub enum DiscoveryAllowlistCommands {
     /// Add a plugin type to the tenant-wide discovery allowlist
     Add {
         /// Plugin type (e.g. package_manager_homebrew)
-        plugin_type: PluginType,
+        plugin_type: PluginTypeId,
     },
     /// Remove a tenant-wide discovery allowlist entry
     Remove {
@@ -137,7 +137,7 @@ pub struct ListTenantParams<'a> {
 }
 
 pub struct AddTenantParams<'a> {
-    pub plugin_type: PluginType,
+    pub plugin_type: PluginTypeId,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
     pub insecure: bool,
@@ -162,7 +162,7 @@ pub struct ListHostParams<'a> {
 
 pub struct AddHostParams<'a> {
     pub host_id: &'a Uuid,
-    pub plugin_type: PluginType,
+    pub plugin_type: PluginTypeId,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
     pub insecure: bool,

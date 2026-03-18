@@ -945,10 +945,10 @@ mod tests {
     #[test]
     fn create_plugin_config_valid() {
         use crate::validation::Validate;
-        use uptrakit_shared_types::PluginType;
+        use uptrakit_shared_types::plugin_ids;
         let req = CreatePluginConfigRequest {
             name: "GitHub Releases".to_string(),
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             config: serde_json::json!({}),
             enabled: true,
         };
@@ -958,10 +958,10 @@ mod tests {
     #[test]
     fn create_plugin_config_empty_name() {
         use crate::validation::Validate;
-        use uptrakit_shared_types::PluginType;
+        use uptrakit_shared_types::plugin_ids;
         let req = CreatePluginConfigRequest {
             name: "".to_string(),
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             config: serde_json::json!({}),
             enabled: true,
         };

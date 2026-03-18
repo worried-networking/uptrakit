@@ -1074,7 +1074,7 @@ pub async fn execute_update_interactive(
 mod tests {
     use super::*;
     use uptrakit_command::LocalCommandExecutor;
-    use uptrakit_internal_wire::PluginType;
+    use uptrakit_internal_wire::plugin_ids;
 
     fn test_payload() -> ExecuteUpdatePayload {
         ExecuteUpdatePayload {
@@ -1085,7 +1085,7 @@ mod tests {
             to_version: "2.0.0".to_string(),
             detect_version_plugin: None,
             execute_update_plugin: uptrakit_internal_wire::PluginAssignment {
-                plugin_type: PluginType::ReleasesGithub,
+                plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
                 package_identifier: "test-app".to_string(),
                 config: serde_json::json!({}),
             },
@@ -1142,7 +1142,7 @@ mod tests {
 
         let mut payload = test_payload();
         payload.pre_update_hook_plugins = vec![uptrakit_internal_wire::PluginAssignment {
-            plugin_type: PluginType::HookShell,
+            plugin_type: plugin_ids::HOOK_SHELL.clone(),
             package_identifier: String::new(),
             config: serde_json::json!({"pre_command": "echo 'pre-hook executed'"}),
         }];
@@ -1167,7 +1167,7 @@ mod tests {
 
         let mut payload = test_payload();
         payload.pre_update_hook_plugins = vec![uptrakit_internal_wire::PluginAssignment {
-            plugin_type: PluginType::HookShell,
+            plugin_type: plugin_ids::HOOK_SHELL.clone(),
             package_identifier: String::new(),
             config: serde_json::json!({"pre_command": "exit 1"}),
         }];

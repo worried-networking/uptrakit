@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::CommandSpec;
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, PluginError, PluginRole, PluginType,
-    Result, execute_and_capture,
+    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, PluginError, PluginRole, Result,
+    execute_and_capture, plugin_ids,
 };
 
 use crate::config::HomebrewPackageType;
@@ -46,7 +46,7 @@ impl HomebrewPlugin {
                 }
 
                 let targets = vec![DiscoveryTarget {
-                    plugin_type: PluginType::PackageManagerHomebrew,
+                    plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
                     plugin_config: serde_json::json!({"package_type": "formula"}),
                     plugin_config_name: "Homebrew (Formulae)".to_string(),
                     roles: vec![
@@ -126,7 +126,7 @@ impl HomebrewPlugin {
                 }
 
                 let targets = vec![DiscoveryTarget {
-                    plugin_type: PluginType::PackageManagerHomebrew,
+                    plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
                     plugin_config: serde_json::json!({"package_type": "cask"}),
                     plugin_config_name: "Homebrew (Casks)".to_string(),
                     roles: vec![
@@ -225,7 +225,7 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{
-        Discoverer, HostCapabilities, HostRuntime, PluginType, PosixHostRuntime,
+        Discoverer, HostCapabilities, HostRuntime, PosixHostRuntime, plugin_ids,
     };
 
     use crate::config::HomebrewConfig;
@@ -293,7 +293,7 @@ mod tests {
         assert_eq!(packages[0].targets.len(), 1);
         assert_eq!(
             packages[0].targets[0].plugin_type,
-            PluginType::PackageManagerHomebrew
+            plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone()
         );
         assert_eq!(
             packages[0].targets[0].plugin_config,
@@ -319,7 +319,7 @@ mod tests {
         assert_eq!(packages[0].targets.len(), 1);
         assert_eq!(
             packages[0].targets[0].plugin_type,
-            PluginType::PackageManagerHomebrew
+            plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone()
         );
         assert_eq!(
             packages[0].targets[0].plugin_config,

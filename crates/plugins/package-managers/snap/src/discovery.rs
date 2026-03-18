@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::command::CommandSpec;
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, PluginRole, PluginType, Result,
-    execute_and_capture,
+    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, PluginRole, Result,
+    execute_and_capture, plugin_ids,
 };
 
 use crate::plugin::{SYSTEM_SNAPS, SnapPlugin, parse_snap_list_line};
@@ -33,7 +33,7 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for SnapPlugin {
             .filter(|(name, _)| !SYSTEM_SNAPS.contains(&name.as_str()))
             .map(|(name, version)| {
                 let targets = vec![DiscoveryTarget {
-                    plugin_type: PluginType::PackageManagerSnap,
+                    plugin_type: plugin_ids::PACKAGE_MANAGER_SNAP.clone(),
                     plugin_config: serde_json::json!({}),
                     plugin_config_name: "Snap".to_string(),
                     roles: vec![
@@ -88,7 +88,7 @@ mod tests {
     };
     use uptrakit_plugin_infrastructure_core::mpsc;
     use uptrakit_plugin_infrastructure_core::{
-        Discoverer, HostCapabilities, HostRuntime, PluginType, PosixHostRuntime, UpdateOutputLine,
+        Discoverer, HostCapabilities, HostRuntime, PosixHostRuntime, UpdateOutputLine, plugin_ids,
     };
 
     use crate::config::SnapConfig;
@@ -173,7 +173,7 @@ mod tests {
         assert!(!discovered[0].targets.is_empty());
         assert_eq!(
             discovered[0].targets[0].plugin_type,
-            PluginType::PackageManagerSnap
+            plugin_ids::PACKAGE_MANAGER_SNAP.clone()
         );
     }
 

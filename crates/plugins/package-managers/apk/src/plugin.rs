@@ -9,8 +9,8 @@ use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
     HostCompatibility, HostRequirements, HostRuntime, OutputStreamType, PluginError, PluginFamily,
-    PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry, UpdateOutputLine,
-    UpstreamRelease, Version, declare_plugin, execute_and_capture, require_posix_executor,
+    PluginRole, ReleaseInfo, Result, SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
+    declare_plugin, execute_and_capture, plugin_ids, require_posix_executor,
 };
 
 use uptrakit_shared_types::PackageIdentifierRules;
@@ -284,7 +284,7 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for ApkPlugin {
                     .filter_map(parse_apk_list_line)
                     .map(|(name, version)| {
                         let targets = vec![DiscoveryTarget {
-                            plugin_type: PluginType::PackageManagerApk,
+                            plugin_type: plugin_ids::PACKAGE_MANAGER_APK.clone(),
                             plugin_config: serde_json::json!({}),
                             plugin_config_name: "APK".to_string(),
                             roles: vec![
@@ -354,7 +354,7 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for ApkPlugin {
                     .filter_map(|name| {
                         let version = version_map.get(name)?.clone();
                         let targets = vec![DiscoveryTarget {
-                            plugin_type: PluginType::PackageManagerApk,
+                            plugin_type: plugin_ids::PACKAGE_MANAGER_APK.clone(),
                             plugin_config: serde_json::json!({}),
                             plugin_config_name: "APK".to_string(),
                             roles: vec![
@@ -1121,7 +1121,10 @@ openssl>=3.0
         assert!(!discovered.is_empty());
         for item in &discovered {
             assert_eq!(item.targets.len(), 1, "item '{}' missing target", item.name);
-            assert_eq!(item.targets[0].plugin_type, PluginType::PackageManagerApk);
+            assert_eq!(
+                item.targets[0].plugin_type,
+                plugin_ids::PACKAGE_MANAGER_APK.clone()
+            );
             assert_eq!(item.targets[0].plugin_config_name, "APK");
         }
     }

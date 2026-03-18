@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::CommandSpec;
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, PluginError, PluginRole, PluginType,
-    Result,
+    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, PluginError, PluginRole, Result,
+    plugin_ids,
 };
 
 use crate::plugin::{NpmPlugin, SYSTEM_NPM_PACKAGES};
@@ -43,7 +43,7 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for NpmPlugin {
             .filter(|(name, _)| !SYSTEM_NPM_PACKAGES.contains(&name.as_str()))
             .map(|(name, version)| {
                 let targets = vec![DiscoveryTarget {
-                    plugin_type: PluginType::PackageManagerNpm,
+                    plugin_type: plugin_ids::PACKAGE_MANAGER_NPM.clone(),
                     plugin_config: serde_json::json!({}),
                     plugin_config_name: "npm".to_string(),
                     roles: vec![
@@ -93,7 +93,7 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{
-        Discoverer, HostCapabilities, HostRuntime, PluginType, PosixHostRuntime,
+        Discoverer, HostCapabilities, HostRuntime, PosixHostRuntime, plugin_ids,
     };
 
     use crate::config::NpmConfig;
@@ -119,7 +119,7 @@ mod tests {
         assert_eq!(discovered[0].targets.len(), 1);
         assert_eq!(
             discovered[0].targets[0].plugin_type,
-            PluginType::PackageManagerNpm
+            plugin_ids::PACKAGE_MANAGER_NPM.clone()
         );
         assert_eq!(discovered[0].targets[0].plugin_config_name, "npm");
         assert_eq!(discovered[0].targets[0].roles.len(), 3);

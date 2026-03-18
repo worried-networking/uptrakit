@@ -83,7 +83,7 @@ pub(super) async fn process_plugin_result(
                 tenant_id,
                 host_id,
                 existing_pc_id,
-                &result.plugin_type.to_string(),
+                result.plugin_type.as_str(),
                 item_info,
                 now,
             )
@@ -536,7 +536,7 @@ mod tests {
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
     use uptrakit_internal_wire::{
         DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, DiscoveryTarget,
-        PluginType,
+        plugin_ids,
     };
     use uptrakit_shared_db::entity::plugin_config;
 
@@ -893,7 +893,7 @@ mod tests {
         insert_host(&db, host_id, tenant_id).await;
 
         let result = DiscoveryPluginResult {
-            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
+            plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
             plugin_config_id: None,
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
@@ -901,7 +901,7 @@ mod tests {
                 name: "BookLore".to_string(),
                 installed_version: "1.18.5".to_string(),
                 targets: vec![DiscoveryTarget {
-                    plugin_type: PluginType::ReleasesGithub,
+                    plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
                     plugin_config: serde_json::json!({
                         "owner": "BookLore",
                         "repo": "BookLore",
@@ -1103,7 +1103,7 @@ mod tests {
         insert_plugin_config(&db, pc_id, tenant_id).await;
 
         let result = DiscoveryPluginResult {
-            plugin_type: PluginType::PackageManagerHomebrew,
+            plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
             plugin_config_id: Some(pc_id),
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
@@ -1153,7 +1153,7 @@ mod tests {
         insert_plugin_config(&db, pc_id, tenant_id).await;
 
         let result = DiscoveryPluginResult {
-            plugin_type: PluginType::PackageManagerHomebrew,
+            plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
             plugin_config_id: Some(pc_id),
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
@@ -1218,7 +1218,7 @@ mod tests {
         insert_host_link(&db, host_id, item_id, pc_id, "cargo").await;
 
         let result = DiscoveryPluginResult {
-            plugin_type: PluginType::PackageManagerHomebrew,
+            plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
             plugin_config_id: Some(pc_id),
             error: None,
             discoveries: vec![WireDiscoveredSoftware {

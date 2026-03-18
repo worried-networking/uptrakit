@@ -51,18 +51,7 @@ fn plugin_config_to_response(
     ops: &dyn PluginConfigOps,
     m: plugin_config::Model,
 ) -> Option<PluginConfigResponse> {
-    let plugin_type: uptrakit_plugin_infrastructure_core::PluginType = match m.plugin_type.parse() {
-        Ok(pt) => pt,
-        Err(_) => {
-            tracing::error!(
-                id = %m.id,
-                plugin_type = %m.plugin_type,
-                "plugin config has invalid plugin_type in database, skipping"
-            );
-            return None;
-        }
-    };
-    let id = PluginTypeId::new(plugin_type.as_str());
+    let id = PluginTypeId::new(&m.plugin_type);
     let config = ops.mask_config_secrets(&id, &m.config);
     let capabilities: Vec<String> = ops
         .capabilities(&id)
@@ -76,7 +65,7 @@ fn plugin_config_to_response(
     Some(PluginConfigResponse {
         id: m.id,
         name: m.name,
-        plugin_type,
+        plugin_type: id,
         config,
         enabled: m.enabled,
         capabilities,

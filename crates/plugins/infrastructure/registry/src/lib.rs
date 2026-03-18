@@ -20,7 +20,7 @@ pub use uptrakit_plugin_infrastructure_core::{
     PluginCatalog, PluginDescriptor, PluginMeta, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
     SoftwareItemPatch, SudoCommandEntry, SudoHelperScript,
 };
-pub use uptrakit_shared_types::{PluginType, PluginTypeId, plugin_ids};
+pub use uptrakit_shared_types::{PluginTypeId, plugin_ids};
 
 // Re-export PluginOps traits
 pub use uptrakit_plugin_infrastructure_core::{

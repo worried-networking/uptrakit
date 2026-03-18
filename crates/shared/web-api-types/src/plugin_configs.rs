@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uptrakit_internal_wire::extension::FieldDef;
-use uptrakit_shared_types::{PluginCapability, PluginType};
+use uptrakit_shared_types::{PluginCapability, PluginTypeId};
 use uuid::Uuid;
 
 use crate::validation::{Validate, ValidationError};
@@ -11,7 +11,7 @@ use crate::validation::{Validate, ValidationError};
 pub struct CreatePluginConfigRequest {
     pub name: String,
     /// Plugin type identifier (e.g. `github_releases`, `proxmox_helper_scripts`).
-    pub plugin_type: PluginType,
+    pub plugin_type: PluginTypeId,
     /// Plugin-specific configuration blob.
     pub config: serde_json::Value,
     /// Whether the config is enabled. Defaults to true.
@@ -32,7 +32,7 @@ pub struct UpdatePluginConfigRequest {
 pub struct PluginConfigResponse {
     pub id: Uuid,
     pub name: String,
-    pub plugin_type: PluginType,
+    pub plugin_type: PluginTypeId,
     /// Plugin-specific configuration with secrets masked.
     pub config: serde_json::Value,
     pub enabled: bool,
@@ -51,7 +51,7 @@ pub struct PluginConfigResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PluginTypeInfo {
     /// Wire identifier for the plugin type (e.g. `"releases_github"`).
-    pub plugin_type: PluginType,
+    pub plugin_type: PluginTypeId,
     /// Human-readable display name (e.g. `"GitHub Releases"`).
     pub display_name: String,
     /// Capabilities declared by this plugin type.
@@ -102,7 +102,7 @@ impl Validate for CreatePluginConfigRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_shared_types::PluginCapability;
+    use uptrakit_shared_types::{PluginCapability, plugin_ids};
 
     fn sample_uuid() -> Uuid {
         Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6")
@@ -115,7 +115,7 @@ mod tests {
     fn create_request_round_trip() {
         let req = CreatePluginConfigRequest {
             name: "my-github".to_string(),
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             config: serde_json::json!({"tag_strip_prefix": "v"}),
             enabled: true,
         };
@@ -123,7 +123,7 @@ mod tests {
         let de: CreatePluginConfigRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(de.name, "my-github");
-        assert_eq!(de.plugin_type, PluginType::ReleasesGithub);
+        assert_eq!(de.plugin_type, plugin_ids::RELEASES_GITHUB.clone());
         assert!(de.enabled);
     }
 
@@ -139,7 +139,7 @@ mod tests {
     fn create_request_validate_rejects_empty_name() {
         let req = CreatePluginConfigRequest {
             name: "   ".to_string(),
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             config: serde_json::json!({}),
             enabled: true,
         };
@@ -153,7 +153,7 @@ mod tests {
     fn create_request_validate_accepts_valid() {
         let req = CreatePluginConfigRequest {
             name: "my-plugin".to_string(),
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             config: serde_json::json!({}),
             enabled: true,
         };
@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn plugin_type_info_round_trip() {
         let info = PluginTypeInfo {
-            plugin_type: PluginType::ReleasesDocker,
+            plugin_type: plugin_ids::RELEASES_DOCKER.clone(),
             display_name: "Docker".to_string(),
             capabilities: vec![
                 PluginCapability::DiscoverLocalSoftware,
@@ -210,7 +210,7 @@ mod tests {
         let json = serde_json::to_string(&info).expect("serialization should succeed");
         let de: PluginTypeInfo =
             serde_json::from_str(&json).expect("deserialization should succeed");
-        assert_eq!(de.plugin_type, PluginType::ReleasesDocker);
+        assert_eq!(de.plugin_type, plugin_ids::RELEASES_DOCKER.clone());
         assert_eq!(de.display_name, "Docker");
         assert_eq!(
             de.capabilities,
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn plugin_type_info_capabilities_serialize_snake_case() {
         let info = PluginTypeInfo {
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             display_name: "GitHub Releases".to_string(),
             capabilities: vec![PluginCapability::ControllerSideFetchReleases],
             sample_config: serde_json::json!({}),
@@ -248,7 +248,7 @@ mod tests {
         let resp = PluginConfigResponse {
             id: sample_uuid(),
             name: "docker-hub".to_string(),
-            plugin_type: PluginType::ReleasesDocker,
+            plugin_type: plugin_ids::RELEASES_DOCKER.clone(),
             config: serde_json::json!({}),
             enabled: true,
             capabilities: vec!["discover_local_software".to_string()],
@@ -260,7 +260,7 @@ mod tests {
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(de.id, sample_uuid());
         assert_eq!(de.name, "docker-hub");
-        assert_eq!(de.plugin_type, PluginType::ReleasesDocker);
+        assert_eq!(de.plugin_type, plugin_ids::RELEASES_DOCKER.clone());
         assert!(de.enabled);
     }
 }

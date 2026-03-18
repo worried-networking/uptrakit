@@ -21,7 +21,7 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for DockerPlugin {
         &self,
     ) -> uptrakit_plugin_infrastructure_core::Result<Vec<DiscoveredSoftware>> {
         use std::collections::HashMap;
-        use uptrakit_plugin_infrastructure_core::{DiscoveryTarget, PluginRole, PluginType};
+        use uptrakit_plugin_infrastructure_core::{DiscoveryTarget, PluginRole, plugin_ids};
 
         let client = Arc::clone(&*self.docker_client.lock());
         let containers = client.list_containers(true).await.map_err(|e| {
@@ -203,7 +203,7 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for DockerPlugin {
             };
 
             let targets = vec![DiscoveryTarget {
-                plugin_type: PluginType::ReleasesDocker,
+                plugin_type: plugin_ids::RELEASES_DOCKER.clone(),
                 plugin_config: json!({}),
                 plugin_config_name: "Docker".to_string(),
                 roles: vec![

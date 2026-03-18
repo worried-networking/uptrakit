@@ -3,7 +3,7 @@ use time::OffsetDateTime;
 
 pub use uptrakit_shared_types::{
     AttestationStatus, DiscoveredSoftware, DiscoveryTarget, PluginCapability, PluginRole,
-    PluginType, ReleaseAsset, ReleaseInfo, UpdateCategory,
+    PluginTypeId, ReleaseAsset, ReleaseInfo, UpdateCategory,
 };
 
 use crate::version::Version;

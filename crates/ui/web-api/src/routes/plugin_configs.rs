@@ -18,7 +18,7 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use uptrakit_shared_db::entity::{host, plugin_config, prelude::*, service, service_host};
-use uptrakit_shared_types::{PluginCapability, PluginType, PluginTypeId};
+use uptrakit_shared_types::{PluginCapability, PluginTypeId};
 use uptrakit_web_api_types::autodiscovery::TriggerDiscoveryResponse;
 use uptrakit_web_api_types::plugin_config_test::{
     TestPluginConfigRequest, TestPluginConfigResponse,
@@ -67,7 +67,7 @@ pub async fn list_plugin_types(
                 .unwrap_or_default();
             let type_settings_sample = state.plugin_ops.type_settings_sample(&id);
             let display_name = state.plugin_ops.display_name(&id);
-            let plugin_type = PluginType::from(id.as_str().to_string());
+            let plugin_type = id.clone();
             PluginTypeInfo {
                 display_name,
                 plugin_type,
@@ -491,7 +491,7 @@ pub async fn discover_plugin_config(
                     host_machine_id: machine_id.clone(),
                     plugins: vec![uptrakit_internal_wire::DiscoveryPluginAssignment {
                         plugin_config_id: Some(cfg.id),
-                        plugin_type: PluginType::from(cfg.plugin_type.clone()),
+                        plugin_type: PluginTypeId::new(cfg.plugin_type.clone()),
                         config: cfg.config.clone(),
                     }],
                 },

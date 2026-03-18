@@ -9,8 +9,8 @@ use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
     HostCompatibility, HostRequirements, HostRuntime, OutputStreamType, PluginError, PluginFamily,
-    PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry, UpdateCategory,
-    UpdateOutputSender, UpstreamRelease, Version, declare_plugin, execute_and_capture,
+    PluginRole, ReleaseInfo, Result, SudoCommandEntry, UpdateCategory, UpdateOutputSender,
+    UpstreamRelease, Version, declare_plugin, execute_and_capture, plugin_ids,
     require_posix_executor,
 };
 // Subtrait imports -- needed so `use super::*` in tests brings these methods into scope.
@@ -298,7 +298,7 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for DnfPlugin {
             })
             .map(|(name, version)| {
                 let targets = vec![DiscoveryTarget {
-                    plugin_type: PluginType::PackageManagerDnf,
+                    plugin_type: plugin_ids::PACKAGE_MANAGER_DNF.clone(),
                     plugin_config: serde_json::json!({}),
                     plugin_config_name: "DNF".to_string(),
                     roles: vec![
@@ -1023,7 +1023,10 @@ mod tests {
         assert_eq!(result.len(), 2);
         for item in &result {
             assert_eq!(item.targets.len(), 1);
-            assert_eq!(item.targets[0].plugin_type, PluginType::PackageManagerDnf);
+            assert_eq!(
+                item.targets[0].plugin_type,
+                plugin_ids::PACKAGE_MANAGER_DNF.clone()
+            );
         }
     }
 

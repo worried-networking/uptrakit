@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use uptrakit_shared_types::PluginType;
+use uptrakit_shared_types::PluginTypeId;
 
 use crate::validation::{Validate, ValidationError};
 
@@ -8,7 +8,7 @@ use crate::validation::{Validate, ValidationError};
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PluginTypeSettingsResponse {
-    pub plugin_type: PluginType,
+    pub plugin_type: PluginTypeId,
     /// Plugin-type-level settings blob (always a JSON object).
     pub config: serde_json::Value,
     #[serde(with = "time::serde::rfc3339")]
@@ -43,6 +43,7 @@ impl Validate for UpsertPluginTypeSettingsRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_shared_types::plugin_ids;
 
     // ── UpsertPluginTypeSettingsRequest ────────────────────────────
 
@@ -106,7 +107,7 @@ mod tests {
     fn response_round_trip() {
         use time::macros::datetime;
         let resp = PluginTypeSettingsResponse {
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             config: serde_json::json!({"poll_interval_secs": 300}),
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-06-01 00:00:00 UTC),
@@ -114,7 +115,7 @@ mod tests {
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let de: PluginTypeSettingsResponse =
             serde_json::from_str(&json).expect("deserialization should succeed");
-        assert_eq!(de.plugin_type, PluginType::ReleasesGithub);
+        assert_eq!(de.plugin_type, plugin_ids::RELEASES_GITHUB.clone());
         assert_eq!(de.config["poll_interval_secs"], 300);
         assert_eq!(de.created_at, datetime!(2025-01-01 00:00:00 UTC));
         assert_eq!(de.updated_at, datetime!(2025-06-01 00:00:00 UTC));
@@ -124,7 +125,7 @@ mod tests {
     fn response_timestamps_serialize_as_rfc3339() {
         use time::macros::datetime;
         let resp = PluginTypeSettingsResponse {
-            plugin_type: PluginType::ReleasesDocker,
+            plugin_type: plugin_ids::RELEASES_DOCKER.clone(),
             config: serde_json::json!({}),
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-06-01 12:30:00 UTC),

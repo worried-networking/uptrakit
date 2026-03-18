@@ -1,18 +1,15 @@
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::Arc;
 
-use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
 use uptrakit_internal_wire::{
     CheckVersionsPayload, ControllerMessage, PluginAssignment, VersionCheckAssignment,
 };
 use uptrakit_shared_db::entity::scheduled_task;
-use uptrakit_shared_types::PluginType;
+use uptrakit_shared_types::PluginTypeId;
 use uuid::Uuid;
 
 use super::queries::query_agent_assignment_rows;
-use crate::error::SchedulerError;
 use crate::executor::TaskExecutor;
 use crate::notifier::SchedulerNotifier;
 
@@ -67,12 +64,7 @@ impl DetectVersionExecutor {
             HashMap::new();
 
         for row in rows {
-            let plugin_type = PluginType::from_str(&row.plugin_type).map_err(|_| {
-                report!(SchedulerError::Execution(format!(
-                    "unknown plugin type: {}",
-                    row.plugin_type
-                )))
-            })?;
+            let plugin_type = PluginTypeId::new(&row.plugin_type);
 
             let config = uptrakit_config_merge::resolve_effective_config(
                 None, // type_settings not loaded in scheduler query yet

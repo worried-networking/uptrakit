@@ -184,7 +184,7 @@ fn decrypt_config(config: &Value) -> Value {
 mod tests {
     use super::*;
     use serde_json::json;
-    use uptrakit_internal_wire::*;
+    use uptrakit_internal_wire::{plugin_ids, *};
 
     /// Initialize crypto with a test key (idempotent).
     fn init_test_crypto() {
@@ -202,12 +202,12 @@ mod tests {
                 software_item_id: uuid::Uuid::nil(),
                 name: "test".to_string(),
                 detect_version: Some(PluginAssignment {
-                    plugin_type: PluginType::ReleasesGithub,
+                    plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
                     package_identifier: "pkg".to_string(),
                     config: original_config.clone(),
                 }),
                 fetch_releases: Some(PluginAssignment {
-                    plugin_type: PluginType::ReleasesGithub,
+                    plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
                     package_identifier: "pkg".to_string(),
                     config: original_config.clone(),
                 }),
@@ -262,12 +262,12 @@ mod tests {
             software_item_name: "test".to_string(),
             to_version: "1.0.0".to_string(),
             detect_version_plugin: Some(PluginAssignment {
-                plugin_type: PluginType::GenericShell,
+                plugin_type: plugin_ids::GENERIC_SHELL.clone(),
                 package_identifier: "pkg".to_string(),
                 config: original_config.clone(),
             }),
             execute_update_plugin: PluginAssignment {
-                plugin_type: PluginType::GenericShell,
+                plugin_type: plugin_ids::GENERIC_SHELL.clone(),
                 package_identifier: "pkg".to_string(),
                 config: original_config.clone(),
             },
@@ -306,7 +306,7 @@ mod tests {
         let msg = ControllerMessage::ExecuteBatchUpdate(Box::new(ExecuteBatchUpdatePayload {
             host_machine_id: "host-1".to_string(),
             batch_id: uuid::Uuid::nil(),
-            plugin_type: PluginType::PackageManagerApt,
+            plugin_type: plugin_ids::PACKAGE_MANAGER_APT.clone(),
             plugin_config: original_config.clone(),
             updates: vec![],
             pre_update_hook_plugins: vec![],
@@ -339,7 +339,7 @@ mod tests {
             host_machine_id: "host-1".to_string(),
             plugins: vec![DiscoveryPluginAssignment {
                 plugin_config_id: Some(uuid::Uuid::nil()),
-                plugin_type: PluginType::ReleasesDocker,
+                plugin_type: plugin_ids::RELEASES_DOCKER.clone(),
                 config: original_config.clone(),
             }],
         });
@@ -382,7 +382,7 @@ mod tests {
                 software_item_id: uuid::Uuid::nil(),
                 name: "test".to_string(),
                 detect_version: Some(PluginAssignment {
-                    plugin_type: PluginType::ReleasesGithub,
+                    plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
                     package_identifier: "pkg".to_string(),
                     config: plain_config.clone(),
                 }),

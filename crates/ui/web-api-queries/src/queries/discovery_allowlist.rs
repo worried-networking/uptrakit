@@ -18,7 +18,7 @@ use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_core::{PluginCapability, PluginMetadataOps};
 use uptrakit_shared_db::entity::{host_discovery_allowlist, tenant_discovery_allowlist};
 use uptrakit_shared_macros::impl_report_conversion;
-use uptrakit_shared_types::{PluginType, PluginTypeId};
+use uptrakit_shared_types::PluginTypeId;
 use uptrakit_web_api_types::discovery_allowlist::{
     HostDiscoveryAllowlistEntry, TenantDiscoveryAllowlistEntry,
 };
@@ -43,13 +43,8 @@ impl_report_conversion!(sea_orm::DbErr => AllowlistError::Db);
 // ── Internal validation ───────────────────────────────────────────────────────
 
 /// Returns `true` if `plugin_type` is a known type with `DiscoverLocalSoftware`.
-fn is_valid_discovery_plugin(ops: &dyn PluginMetadataOps, plugin_type: &PluginType) -> bool {
-    // Reject `Other(...)` variants — unknown types cannot be validated.
-    if matches!(plugin_type, PluginType::Other(_)) {
-        return false;
-    }
-    let id = PluginTypeId::new(plugin_type.as_str());
-    ops.capabilities(&id)
+fn is_valid_discovery_plugin(ops: &dyn PluginMetadataOps, plugin_type: &PluginTypeId) -> bool {
+    ops.capabilities(plugin_type)
         .contains(&PluginCapability::DiscoverLocalSoftware)
 }
 
@@ -96,7 +91,7 @@ pub async fn add_tenant_allowlist_entry(
     ops: &dyn PluginMetadataOps,
     db: &DatabaseConnection,
     tenant_id: Uuid,
-    plugin_type: PluginType,
+    plugin_type: PluginTypeId,
 ) -> Result<TenantDiscoveryAllowlistEntry> {
     if !is_valid_discovery_plugin(ops, &plugin_type) {
         bail!(AllowlistError::InvalidPluginType);
@@ -243,7 +238,7 @@ pub async fn add_host_allowlist_entry(
     db: &DatabaseConnection,
     tenant_id: Uuid,
     host_id: Uuid,
-    plugin_type: PluginType,
+    plugin_type: PluginTypeId,
 ) -> Result<HostDiscoveryAllowlistEntry> {
     if !is_valid_discovery_plugin(ops, &plugin_type) {
         bail!(AllowlistError::InvalidPluginType);
@@ -359,6 +354,7 @@ pub async fn load_host_allowlist_set(db: &DatabaseConnection, host_id: Uuid) -> 
 #[cfg(test)]
 mod tests {
     use uptrakit_plugin_infrastructure_core::descriptor::PluginDescriptor;
+    use uptrakit_shared_types::plugin_ids;
 
     use super::*;
 
@@ -402,7 +398,7 @@ mod tests {
         let ops = MockOps::new_with_homebrew_apt();
         assert!(is_valid_discovery_plugin(
             &ops,
-            &PluginType::PackageManagerHomebrew
+            &plugin_ids::PACKAGE_MANAGER_HOMEBREW
         ));
     }
 
@@ -411,7 +407,7 @@ mod tests {
         let ops = MockOps::new_with_homebrew_apt();
         assert!(is_valid_discovery_plugin(
             &ops,
-            &PluginType::PackageManagerApt
+            &plugin_ids::PACKAGE_MANAGER_APT
         ));
     }
 
@@ -421,17 +417,15 @@ mod tests {
         // ReleasesGithub does not have DiscoverLocalSoftware
         assert!(!is_valid_discovery_plugin(
             &ops,
-            &PluginType::ReleasesGithub
+            &plugin_ids::RELEASES_GITHUB
         ));
     }
 
     #[test]
-    fn invalid_discovery_plugin_other() {
+    fn invalid_discovery_plugin_unknown() {
         let ops = MockOps::new_with_homebrew_apt();
-        assert!(!is_valid_discovery_plugin(
-            &ops,
-            &PluginType::Other("unknown_plugin".to_string())
-        ));
+        let unknown = PluginTypeId::new("unknown_plugin");
+        assert!(!is_valid_discovery_plugin(&ops, &unknown));
     }
 
     #[test]
@@ -439,7 +433,7 @@ mod tests {
         let ops = MockOps::new_with_homebrew_apt();
         assert!(!is_valid_discovery_plugin(
             &ops,
-            &PluginType::ReleasesDocker
+            &plugin_ids::RELEASES_DOCKER
         ));
     }
 }

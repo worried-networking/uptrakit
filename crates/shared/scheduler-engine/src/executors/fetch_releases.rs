@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use tokio::task::JoinSet;
@@ -23,7 +22,7 @@ use uptrakit_plugin_infrastructure_registry::get_descriptor;
 use uptrakit_shared_db::entity::{
     host_software_item, host_software_item_plugin, plugin_config, scheduled_task, software_item,
 };
-use uptrakit_shared_types::PluginType;
+use uptrakit_shared_types::PluginTypeId;
 use uuid::Uuid;
 
 use super::queries::query_agent_assignment_rows;
@@ -249,12 +248,7 @@ impl FetchReleasesExecutor {
         let mut jobs: Vec<FetchJob> = Vec::new();
 
         for (_plugin_config_id, group) in groups {
-            let plugin_type = PluginType::from_str(&group.plugin_type).map_err(|_| {
-                report!(SchedulerError::Execution(format!(
-                    "unknown plugin type: {}",
-                    group.plugin_type
-                )))
-            })?;
+            let plugin_type = PluginTypeId::new(&group.plugin_type);
 
             let desc = get_descriptor(plugin_type.as_str()).ok_or_else(|| {
                 report!(SchedulerError::Execution(format!(
@@ -581,12 +575,7 @@ impl FetchReleasesExecutor {
 
         // Targeted software items (fetch_releases role).
         for row in rows {
-            let plugin_type = PluginType::from_str(&row.plugin_type).map_err(|_| {
-                report!(SchedulerError::Execution(format!(
-                    "unknown plugin type: {}",
-                    row.plugin_type
-                )))
-            })?;
+            let plugin_type = PluginTypeId::new(&row.plugin_type);
 
             let config = uptrakit_config_merge::resolve_effective_config(
                 None, // type_settings not loaded in scheduler query yet

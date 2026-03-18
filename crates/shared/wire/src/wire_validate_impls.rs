@@ -1447,7 +1447,7 @@ mod tests {
             to_version: "1.0".to_string(),
             detect_version_plugin: None,
             execute_update_plugin: PluginAssignment {
-                plugin_type: PluginType::ReleasesGithub,
+                plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
                 package_identifier: "test".to_string(),
                 config: serde_json::json!({}),
             },
@@ -1470,7 +1470,7 @@ mod tests {
     fn execute_update_too_many_hook_plugins() {
         let plugins: Vec<PluginAssignment> = (0..MAX_UPDATE_HOOKS + 1)
             .map(|_| PluginAssignment {
-                plugin_type: PluginType::HookShell,
+                plugin_type: plugin_ids::HOOK_SHELL.clone(),
                 package_identifier: String::new(),
                 config: serde_json::json!({}),
             })
@@ -1483,7 +1483,7 @@ mod tests {
             to_version: "1.0".to_string(),
             detect_version_plugin: None,
             execute_update_plugin: PluginAssignment {
-                plugin_type: PluginType::ReleasesGithub,
+                plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
                 package_identifier: "test".to_string(),
                 config: serde_json::json!({}),
             },

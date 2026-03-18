@@ -11,7 +11,7 @@ use std::sync::Arc;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, prelude::Expr};
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::{
-    ControllerRuntime, PluginCapability, PluginType, get_descriptor,
+    ControllerRuntime, PluginCapability, PluginTypeId, get_descriptor,
 };
 use uptrakit_shared_db::entity::{host_software_item, software_item};
 use uptrakit_web_api_types::events::AdminEvent;
@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 /// Describes a single controller-side `fetch_releases` job.
 pub(super) struct ControllerFetchJob {
-    pub(super) plugin_type: PluginType,
+    pub(super) plugin_type: PluginTypeId,
     pub(super) package_identifier: String,
     pub(super) merged_config: serde_json::Value,
     /// All `(host_id, software_item_id)` pairs that share this plugin+package.
@@ -34,7 +34,7 @@ pub(super) struct ControllerFetchJob {
 ///   [`PluginCapability::ControllerSideFetchReleases`].
 pub(super) fn is_controller_fetch_site(
     execution_site: &str,
-    plugin_type: &PluginType,
+    plugin_type: &PluginTypeId,
     _config: &serde_json::Value,
 ) -> bool {
     match execution_site {

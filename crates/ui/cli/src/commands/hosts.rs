@@ -10,7 +10,7 @@ use uptrakit_openapi_client::types::autodiscovery::TriggerDiscoveryResponse;
 use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchActionResponse};
 use uptrakit_openapi_client::types::hosts::{HostMessageResponse, HostResponse, UpdateHostRequest};
 use uptrakit_openapi_client::types::pagination::{PaginatedResponse, PaginationParams};
-use uptrakit_shared_types::PluginType;
+use uptrakit_shared_types::PluginTypeId;
 
 #[derive(Debug, Subcommand)]
 pub enum HostsCommands {
@@ -71,7 +71,7 @@ pub enum HostDiscoveryAllowlistCommands {
     /// Add a plugin type to the host's discovery allowlist
     Add {
         /// Plugin type (e.g. package_manager_apt)
-        plugin_type: PluginType,
+        plugin_type: PluginTypeId,
     },
     /// Remove a host-specific discovery allowlist entry
     Remove {

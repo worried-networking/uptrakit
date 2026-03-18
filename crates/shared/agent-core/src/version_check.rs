@@ -6,7 +6,7 @@ use futures_util::future::join_all;
 use uptrakit_backoff::Backoff;
 use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::{
-    PluginAssignment, PluginType, UpdateCategory, VersionCheckAssignment, VersionCheckResult,
+    PluginAssignment, PluginTypeId, UpdateCategory, VersionCheckAssignment, VersionCheckResult,
 };
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchFetchItem, HostCapabilities, construct_host_runtime,
@@ -100,17 +100,17 @@ type FetchItemResult = (Option<String>, UpdateCategory, Option<String>);
 /// A group of assignments sharing the same plugin type and effective config,
 /// ready for a single batch plugin invocation.
 struct BatchGroup {
-    plugin_type: PluginType,
+    plugin_type: PluginTypeId,
     effective_config: serde_json::Value,
     /// Each entry is `(assignment_index, package_identifier)`.
     items: Vec<(usize, String)>,
 }
 
 /// Group key: `(plugin_type, serialised effective config)`.
-type GroupKey = (PluginType, String);
+type GroupKey = (PluginTypeId, String);
 
 /// Build detect and fetch groups from assignments, keyed by
-/// `(PluginType, effective_config_json)`.
+/// `(PluginTypeId, effective_config_json)`.
 fn build_batch_groups(
     assignments: &[VersionCheckAssignment],
     ctx: &ConnectionContext,
@@ -411,7 +411,7 @@ fn merge_errors(detect_error: Option<String>, fetch_error: Option<String>) -> Op
 /// Check installed versions and latest versions for a batch of software items,
 /// using native batch operations when the plugin supports them.
 ///
-/// Groups assignments by `(PluginType, effective_config_json)` so that all
+/// Groups assignments by `(PluginTypeId, effective_config_json)` so that all
 /// items sharing the same plugin configuration are checked in a single plugin
 /// invocation. Plugins that override `batch_detect_installed_version` or
 /// `batch_fetch_releases` (e.g. APT, Homebrew, npm) benefit from a single
@@ -662,7 +662,7 @@ async fn fetch_latest(
 mod tests {
     use super::*;
     use uptrakit_command::LocalCommandExecutor;
-    use uptrakit_internal_wire::PluginType;
+    use uptrakit_internal_wire::plugin_ids;
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)
@@ -674,7 +674,7 @@ mod tests {
 
     fn gh_assignment() -> PluginAssignment {
         PluginAssignment {
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             package_identifier: "octocat/hello-world".to_string(),
             // GitHub plugin config no longer contains owner/repo — those are
             // expressed via package_identifier at the software item level.
@@ -705,7 +705,7 @@ mod tests {
         //
         // Only the invariants that hold across all cases are asserted here.
         let assignment = PluginAssignment {
-            plugin_type: PluginType::ReleasesDocker,
+            plugin_type: plugin_ids::RELEASES_DOCKER.clone(),
             package_identifier: "nginx".to_string(),
             config: serde_json::json!({}),
         };
@@ -726,7 +726,7 @@ mod tests {
     async fn check_version_proxmox_is_discovery_only() {
         // PHS is discovery-only; `detect_installed_version` is not supported.
         let assignment = PluginAssignment {
-            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
+            plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
             package_identifier: "booklore".to_string(),
             config: serde_json::json!({}),
         };
@@ -742,7 +742,7 @@ mod tests {
         // GitHub is a release-only plugin — it does not implement VersionDetector.
         // Assigning it to the detect role should produce an error.
         let assignment = PluginAssignment {
-            plugin_type: PluginType::ReleasesGithub,
+            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             package_identifier: "octocat/hello-world".to_string(),
             config: serde_json::json!({"api_base_url": "http://api.github.com"}),
         };
@@ -759,7 +759,7 @@ mod tests {
     #[tokio::test]
     async fn check_version_homebrew_default_returns_none() {
         let assignment = PluginAssignment {
-            plugin_type: PluginType::PackageManagerHomebrew,
+            plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
             package_identifier: String::new(),
             config: serde_json::json!({}),
         };
@@ -772,7 +772,7 @@ mod tests {
     #[tokio::test]
     async fn check_version_docker_default_context_does_not_panic() {
         let assignment = PluginAssignment {
-            plugin_type: PluginType::ReleasesDocker,
+            plugin_type: plugin_ids::RELEASES_DOCKER.clone(),
             package_identifier: "nginx".to_string(),
             config: serde_json::json!({}),
         };
