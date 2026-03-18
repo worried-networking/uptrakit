@@ -104,7 +104,7 @@ pub fn construct_host_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_shared_types::{HostFeature, OsFamily};
+    use uptrakit_shared_types::{OsFamily, host_features};
 
     #[test]
     fn posix_runtime_downcast() {
@@ -142,7 +142,11 @@ mod tests {
         let runtime = construct_host_runtime(executor, caps);
 
         assert_eq!(runtime.capabilities().os_family, Some(OsFamily::Linux));
-        assert!(runtime.capabilities().has_feature(HostFeature::PosixShell));
-        assert!(runtime.capabilities().has_feature(HostFeature::Systemd));
+        assert!(
+            runtime
+                .capabilities()
+                .has_feature(host_features::POSIX_SHELL)
+        );
+        assert!(runtime.capabilities().has_feature(host_features::SYSTEMD));
     }
 }

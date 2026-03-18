@@ -105,5 +105,5 @@ pub use uptrakit_internal_wire::ConfigTestKind;
 
 // Re-export shared-types for convenience
 pub use uptrakit_shared_types::{
-    HostCapabilities, HostFeature, OsFamily, PluginTypeId, plugin_ids,
+    HostCapabilities, HostFeature, OsFamily, PluginTypeId, host_features, plugin_ids,
 };

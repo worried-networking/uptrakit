@@ -32,10 +32,10 @@ impl HostCapabilities {
     /// 2. **Agent side** — agent probes features locally / over SSH, yielding
     ///    `Vec<String>`, and passes them alongside `host_info` fields.
     ///
-    /// Unknown feature strings are silently dropped — they cannot match any
-    /// `HostRequirements::required_features` entry, so they don't affect validation.
-    /// This is intentional for forward-compatibility: a newer agent can report
-    /// features the controller doesn't know about yet.
+    /// All feature strings are accepted — unknown features from newer agents
+    /// are stored losslessly. They won't match any well-known constant in
+    /// `HostRequirements::required_features`, so they don't affect validation
+    /// but are preserved for forward-compatibility.
     pub fn new(
         os_type: Option<&str>,
         os_version: Option<&str>,
@@ -48,9 +48,8 @@ impl HostCapabilities {
             architecture: architecture.map(String::from),
             features: feature_strings
                 .iter()
-                .filter_map(|s| {
-                    serde_json::from_value::<HostFeature>(serde_json::Value::String(s.clone())).ok()
-                })
+                .filter(|s| !s.is_empty())
+                .map(|s| HostFeature::new(s.clone()))
                 .collect(),
         }
     }
@@ -72,8 +71,8 @@ impl HostCapabilities {
         Self::new(os_type, os_version, architecture, &strings)
     }
 
-    pub fn has_feature(&self, feature: HostFeature) -> bool {
-        self.features.contains(&feature)
+    pub fn has_feature(&self, feature: impl std::borrow::Borrow<HostFeature>) -> bool {
+        self.features.contains(feature.borrow())
     }
 }
 
@@ -83,6 +82,7 @@ mod tests {
 
     #[test]
     fn new_parses_known_features() {
+        use crate::host_features;
         let caps = HostCapabilities::new(
             Some("linux"),
             Some("Ubuntu 24.04"),
@@ -96,22 +96,25 @@ mod tests {
         assert_eq!(caps.os_family, Some(OsFamily::Linux));
         assert_eq!(caps.os_version.as_deref(), Some("Ubuntu 24.04"));
         assert_eq!(caps.architecture.as_deref(), Some("x86_64"));
-        assert!(caps.has_feature(HostFeature::PosixShell));
-        assert!(caps.has_feature(HostFeature::PrivilegeEscalation));
-        assert!(caps.has_feature(HostFeature::Systemd));
-        assert!(!caps.has_feature(HostFeature::RouterOsCli));
+        assert!(caps.has_feature(host_features::POSIX_SHELL));
+        assert!(caps.has_feature(host_features::PRIVILEGE_ESCALATION));
+        assert!(caps.has_feature(host_features::SYSTEMD));
+        assert!(!caps.has_feature(host_features::ROUTER_OS_CLI));
     }
 
     #[test]
-    fn unknown_features_silently_dropped() {
+    fn unknown_features_are_preserved() {
+        use crate::host_features;
         let caps = HostCapabilities::new(
             Some("linux"),
             None,
             None,
             &["posix_shell".to_string(), "unknown_feature".to_string()],
         );
-        assert_eq!(caps.features.len(), 1);
-        assert!(caps.has_feature(HostFeature::PosixShell));
+        // Both known and unknown features are preserved.
+        assert_eq!(caps.features.len(), 2);
+        assert!(caps.has_feature(host_features::POSIX_SHELL));
+        assert!(caps.has_feature(HostFeature::new("unknown_feature")));
     }
 
     #[test]

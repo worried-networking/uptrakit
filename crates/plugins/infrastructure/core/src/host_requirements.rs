@@ -9,7 +9,7 @@
 //! `validate_role_compatibility()` on `PluginMetadataOps`.
 
 use rootcause::prelude::*;
-use uptrakit_shared_types::{HostCapabilities, HostFeature, OsFamily};
+use uptrakit_shared_types::{HostCapabilities, HostFeature, OsFamily, host_features};
 
 use crate::error::PluginError;
 
@@ -91,6 +91,21 @@ pub struct HostRequirements {
     pub controller_only: bool,
 }
 
+/// Feature arrays for `HostRequirements` constants.
+///
+/// Extracted as `static` items because `HostFeature` contains `Cow<'static, str>`
+/// whose destructor cannot be evaluated at compile-time, preventing inline
+/// `&[HostFeature]` temporaries in `const` contexts.
+mod feature_arrays {
+    use super::*;
+
+    pub(super) static POSIX_SHELL: [HostFeature; 1] = [host_features::POSIX_SHELL];
+    pub(super) static POSIX_SHELL_AND_SUDO: [HostFeature; 2] = [
+        host_features::POSIX_SHELL,
+        host_features::PRIVILEGE_ESCALATION,
+    ];
+}
+
 impl HostRequirements {
     /// Construct custom host requirements. Usable in `const` / `static` contexts.
     pub const fn new(
@@ -114,14 +129,14 @@ impl HostRequirements {
     /// Standard POSIX host (Linux, macOS, FreeBSD) with shell access.
     pub const POSIX: Self = Self::new(
         &[OsFamily::Linux, OsFamily::MacOs, OsFamily::FreeBsd],
-        &[HostFeature::PosixShell],
+        &feature_arrays::POSIX_SHELL,
         false,
     );
 
     /// POSIX host with privilege escalation (sudo).
     pub const POSIX_PRIVILEGED: Self = Self::new(
         &[OsFamily::Linux, OsFamily::MacOs, OsFamily::FreeBsd],
-        &[HostFeature::PosixShell, HostFeature::PrivilegeEscalation],
+        &feature_arrays::POSIX_SHELL_AND_SUDO,
         false,
     );
 
@@ -152,8 +167,10 @@ impl HostRequirements {
         // Legacy agents have empty features; skipping avoids rejecting existing assignments.
         if !caps.features.is_empty() {
             for feature in self.required_features {
-                if !caps.has_feature(*feature) {
-                    return Err(report!(HostCompatibilityError::MissingFeature(*feature)));
+                if !caps.has_feature(feature) {
+                    return Err(report!(HostCompatibilityError::MissingFeature(
+                        feature.clone()
+                    )));
                 }
             }
         }
@@ -172,7 +189,7 @@ mod tests {
             os_family: Some(OsFamily::Linux),
             os_version: None,
             architecture: None,
-            features: features.iter().copied().collect(),
+            features: features.iter().cloned().collect(),
         }
     }
 
@@ -188,7 +205,7 @@ mod tests {
 
     #[test]
     fn posix_compatible_with_linux_shell() {
-        let caps = linux_caps_with_features(&[HostFeature::PosixShell]);
+        let caps = linux_caps_with_features(&[host_features::POSIX_SHELL]);
         assert!(HostRequirements::POSIX.is_compatible_with(&caps).is_ok());
     }
 
@@ -204,15 +221,17 @@ mod tests {
 
     #[test]
     fn posix_privileged_requires_sudo() {
-        let caps = linux_caps_with_features(&[HostFeature::PosixShell]);
+        let caps = linux_caps_with_features(&[host_features::POSIX_SHELL]);
         assert!(
             HostRequirements::POSIX_PRIVILEGED
                 .is_compatible_with(&caps)
                 .is_err()
         );
 
-        let caps_with_sudo =
-            linux_caps_with_features(&[HostFeature::PosixShell, HostFeature::PrivilegeEscalation]);
+        let caps_with_sudo = linux_caps_with_features(&[
+            host_features::POSIX_SHELL,
+            host_features::PRIVILEGE_ESCALATION,
+        ]);
         assert!(
             HostRequirements::POSIX_PRIVILEGED
                 .is_compatible_with(&caps_with_sudo)
@@ -243,15 +262,12 @@ mod tests {
 
     #[test]
     fn custom_requirements() {
-        let reqs = HostRequirements::new(
-            &[OsFamily::Linux],
-            &[HostFeature::PosixShell, HostFeature::Systemd],
-            false,
-        );
-        let caps = linux_caps_with_features(&[HostFeature::PosixShell, HostFeature::Systemd]);
+        static REQUIRED: [HostFeature; 2] = [host_features::POSIX_SHELL, host_features::SYSTEMD];
+        let reqs = HostRequirements::new(&[OsFamily::Linux], &REQUIRED, false);
+        let caps = linux_caps_with_features(&[host_features::POSIX_SHELL, host_features::SYSTEMD]);
         assert!(reqs.is_compatible_with(&caps).is_ok());
 
-        let caps_no_systemd = linux_caps_with_features(&[HostFeature::PosixShell]);
+        let caps_no_systemd = linux_caps_with_features(&[host_features::POSIX_SHELL]);
         assert!(reqs.is_compatible_with(&caps_no_systemd).is_err());
     }
 

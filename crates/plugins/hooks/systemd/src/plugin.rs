@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, ConfigTestKind, HostFeature, HostRequirements, HostRuntime, LifecycleHook,
-    OsFamily, PluginFamily, PreUpdateHookResult, Result, SudoCommandEntry, UpdateLifecycleContext,
-    UpdateOutputSender, declare_plugin, require_posix_executor,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, LifecycleHook, OsFamily,
+    PluginFamily, PreUpdateHookResult, Result, SudoCommandEntry, UpdateLifecycleContext,
+    UpdateOutputSender, declare_plugin, host_features, require_posix_executor,
 };
 
 use crate::config::SystemdHookConfig;
@@ -71,13 +71,18 @@ impl SystemdHookPlugin {
     }
 }
 
+/// Required features for systemd hook plugin. Static to avoid const-eval
+/// destructor limitation with `Cow<'static, str>` inside `HostFeature`.
+static REQUIRED_FEATURES: [uptrakit_plugin_infrastructure_core::HostFeature; 2] =
+    [host_features::POSIX_SHELL, host_features::SYSTEMD];
+
 declare_plugin!(SystemdHookPlugin, SystemdHookConfig, "hook_systemd", {
     display_name: "Systemd Hook",
     family: PluginFamily::Hook,
     config_model: ConfigModel::PluginConfig,
     host_requirements: HostRequirements::new(
         &[OsFamily::Linux],
-        &[HostFeature::PosixShell, HostFeature::Systemd],
+        &REQUIRED_FEATURES,
         false,
     ),
     config_test: [ConfigTestKind::PreUpdateHook, ConfigTestKind::PostUpdateHook],
