@@ -16,9 +16,9 @@ pub use registry::{
 
 // Re-export commonly used types for convenience
 pub use uptrakit_plugin_infrastructure_core::{
-    CatalogConfig, ControllerRuntime, HostRuntime, PluginCapability, PluginCatalog,
-    PluginDescriptor, PluginMeta, SoftwareItemCreatedEvent, SoftwareItemPatch, SudoCommandEntry,
-    SudoHelperScript,
+    CatalogConfig, ControllerRuntime, HostRuntime, NotificationTransport, PluginCapability,
+    PluginCatalog, PluginDescriptor, PluginMeta, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
+    SoftwareItemPatch, SudoCommandEntry, SudoHelperScript,
 };
 pub use uptrakit_shared_types::{PluginType, PluginTypeId, plugin_ids};
 

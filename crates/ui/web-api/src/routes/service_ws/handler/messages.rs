@@ -1052,7 +1052,9 @@ mod tests {
     use std::sync::Arc;
     use uptrakit_internal_wire::{VersionCheckResult, VersionCheckResultsPayload};
     use uptrakit_plugin_infrastructure_registry::{
-        PluginOps, PluginOpsError, PluginType, SoftwareItemCreatedEvent, SoftwareItemPatch,
+        NotificationOps, NotificationTransport, PluginConfigOps, PluginDescriptor,
+        PluginExtensionOps, PluginMetadataOps, PluginOps, PluginTypeId, SoftwareItemCreatedEvent,
+        SoftwareItemLifecycle, SoftwareItemLifecycleOps, SoftwareItemPatch,
     };
     use uptrakit_shared_db::entity::{
         host, host_software_item, service, service_host, software_item,
@@ -1065,65 +1067,57 @@ mod tests {
 
     struct TestPluginOps;
 
-    impl PluginOps for TestPluginOps {
-        fn validate_config_str(
-            &self,
-            _plugin_type: &str,
-            _config: &serde_json::Value,
-        ) -> std::result::Result<(), rootcause::Report<PluginOpsError>> {
-            Ok(())
+    impl PluginMetadataOps for TestPluginOps {
+        fn get(&self, _id: &PluginTypeId) -> Option<&PluginDescriptor> {
+            None
         }
-
-        fn mask_config_secrets_str(
-            &self,
-            _plugin_type: &str,
-            config: &serde_json::Value,
-        ) -> serde_json::Value {
-            config.clone()
+        fn all(&self) -> Vec<&PluginDescriptor> {
+            vec![]
         }
+    }
 
-        fn restore_config_secrets_str(
+    impl PluginConfigOps for TestPluginOps {}
+
+    impl PluginExtensionOps for TestPluginOps {
+        fn extension_manifests_and_actions(
             &self,
-            _plugin_type: &str,
-            _incoming: &mut serde_json::Value,
-            _existing: &serde_json::Value,
-        ) {
-        }
-
-        fn known_plugin_types(&self) -> Vec<PluginType> {
+        ) -> Vec<(
+            uptrakit_extension_framework::ExtensionManifest,
+            Vec<uptrakit_extension_framework::ActionDef>,
+        )> {
             vec![]
         }
 
-        fn discovery_plugins(&self) -> Vec<PluginType> {
+        fn handle_extension_action<'a>(
+            &'a self,
+            _ctx: &'a uptrakit_plugin_infrastructure_registry::ExtensionActionContext<'a>,
+            _ext_id: &'a str,
+            _action_id: &'a str,
+            _params: serde_json::Value,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = std::result::Result<serde_json::Value, String>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            Box::pin(async { Err("not implemented".to_string()) })
+        }
+    }
+
+    impl NotificationOps for TestPluginOps {
+        fn transport(
+            &self,
+            _id: &PluginTypeId,
+        ) -> Option<std::sync::Arc<dyn NotificationTransport>> {
+            None
+        }
+        fn notification_supported_types(&self) -> Vec<PluginTypeId> {
             vec![]
         }
+    }
 
-        fn validate_package_identifier_str(
-            &self,
-            _plugin_type: &str,
-            _value: &str,
-        ) -> std::result::Result<(), String> {
-            Ok(())
-        }
-
-        fn capabilities_for_str(
-            &self,
-            _plugin_type: &str,
-        ) -> Vec<uptrakit_plugin_infrastructure_registry::PluginCapability> {
-            vec![]
-        }
-
-        fn sample_config_for_str(&self, _plugin_type: &str) -> serde_json::Value {
-            serde_json::json!({})
-        }
-
-        fn config_form_schema_str(
-            &self,
-            _plugin_type: &str,
-        ) -> Option<Vec<uptrakit_extension_framework::FieldDef>> {
-            Some(vec![])
-        }
-
+    impl SoftwareItemLifecycleOps for TestPluginOps {
         fn on_software_item_created<'a>(
             &'a self,
             event: &'a SoftwareItemCreatedEvent,
@@ -1141,6 +1135,10 @@ mod tests {
                     None
                 }
             })
+        }
+
+        fn software_item_lifecycle_plugins(&self) -> &[std::sync::Arc<dyn SoftwareItemLifecycle>] {
+            &[]
         }
     }
 
