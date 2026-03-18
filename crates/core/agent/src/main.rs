@@ -79,7 +79,7 @@ impl ServiceHandler for AgentHandler {
         .await
         .context_to::<LoopError>()?;
 
-        let host_info = crate::host_info::collect_host_info();
+        let host_info = crate::host_info::collect_host_info(self.executor.as_ref()).await;
         // Capture and store the machine_id for use in on_message() validation.
         self.machine_id = host_info.machine_id.clone();
         self.pending_initial_report = Some(ReportHostsPayload {

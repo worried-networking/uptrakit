@@ -20,6 +20,11 @@ fn host_to_response(
     agents: Vec<HostAgentSummary>,
     tags: Vec<HostTagSummary>,
 ) -> HostResponse {
+    let features: Vec<String> = h
+        .host_features
+        .as_deref()
+        .and_then(|json| serde_json::from_str(json).ok())
+        .unwrap_or_default();
     HostResponse {
         id: h.id,
         machine_id: h.machine_id,
@@ -34,6 +39,7 @@ fn host_to_response(
         updated_at: h.updated_at,
         agents,
         tags,
+        features,
     }
 }
 

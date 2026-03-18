@@ -432,6 +432,7 @@ mod tests {
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
             agents: vec![],
             tags: vec![],
+            features: vec![],
         }
     }
 

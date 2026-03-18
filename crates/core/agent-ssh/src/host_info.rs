@@ -5,6 +5,7 @@
 //! independently — failures for individual fields produce `None` (or
 //! `"unknown"` for `machine_id`) without aborting the entire collection.
 
+use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::HostInfo;
 
 use crate::ssh_transport::SshSession;
@@ -12,13 +13,22 @@ use crate::ssh_transport::SshSession;
 /// Collect host information from a remote machine via SSH.
 ///
 /// Runs lightweight commands (`cat /etc/machine-id`, `uname`, `hostname`)
-/// over the given session. No sudo is required.
-pub(crate) async fn collect_remote_host_info(session: &SshSession) -> HostInfo {
+/// over the given session. Feature probing is delegated to
+/// [`uptrakit_agent_core::host_info::probe_host_features`] via the
+/// provided `executor` (typically an `SshCommandExecutor` wrapping the
+/// same session).
+pub(crate) async fn collect_remote_host_info(
+    session: &SshSession,
+    executor: &dyn CommandExecutor,
+) -> HostInfo {
     let machine_id = read_remote_machine_id(session).await;
     let os_type = read_remote_os_type(session).await;
     let os_version = read_remote_os_version(session).await;
     let architecture = read_remote_architecture(session).await;
     let hostname = read_remote_hostname(session).await;
+
+    // Probe features via the CommandExecutor abstraction (shared with agent-core).
+    let features = uptrakit_agent_core::host_info::probe_host_features(executor).await;
 
     HostInfo {
         machine_id,
@@ -28,7 +38,7 @@ pub(crate) async fn collect_remote_host_info(session: &SshSession) -> HostInfo {
         hostname,
         ip_address: None,    // Set by caller from the SSH host's address.
         agent_host_id: None, // Set by caller from the local host DB UUID.
-        features: None,
+        features: Some(features),
     }
 }
 

@@ -3,10 +3,17 @@
 //! Provides functions to gather machine identity and OS metadata. Used by
 //! both the standalone agent binary and the embedded agent in the controller.
 
+use uptrakit_command::{CommandExecutor, CommandSpec};
 use uptrakit_internal_wire::HostInfo;
+use uptrakit_shared_types::PROBEABLE_FEATURES;
 
 /// Collect host information for the current machine.
-pub fn collect_host_info() -> HostInfo {
+///
+/// Gathers OS metadata and probes host features via the provided executor.
+/// The executor abstracts the command execution — `LocalCommandExecutor` for
+/// the standalone agent, `SshCommandExecutor` for the SSH agent.
+pub async fn collect_host_info(executor: &dyn CommandExecutor) -> HostInfo {
+    let features = probe_host_features(executor).await;
     HostInfo {
         machine_id: read_machine_id(),
         os_type: Some(std::env::consts::OS.to_string()),
@@ -15,8 +22,27 @@ pub fn collect_host_info() -> HostInfo {
         hostname: read_hostname(),
         ip_address: None, // Controller knows the connection IP from the service record.
         agent_host_id: None, // Regular agent has no persistent host UUID.
-        features: None,
+        features: Some(features),
     }
+}
+
+/// Probe host features via the provided [`CommandExecutor`].
+///
+/// Iterates over [`PROBEABLE_FEATURES`] — each entry defines a
+/// [`HostFeature`] variant, the command program, and its arguments.
+/// A feature is reported if the command exits with code 0.
+///
+/// Returns feature strings matching [`uptrakit_shared_types::HostFeature`]
+/// serde names (e.g. `"posix_shell"`, `"privilege_escalation"`, `"systemd"`).
+pub async fn probe_host_features(executor: &dyn CommandExecutor) -> Vec<String> {
+    let mut features = Vec::new();
+    for (feature, program, args) in PROBEABLE_FEATURES {
+        let spec = CommandSpec::exec(*program, args.iter().map(|a| a.to_string()));
+        if executor.execute_quiet(&spec).await.is_ok() {
+            features.push(feature.as_str().to_string());
+        }
+    }
+    features
 }
 
 /// Read the system hostname.
@@ -149,9 +175,10 @@ pub fn read_os_version() -> Option<String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn collect_host_info_returns_valid_data() {
-        let info = collect_host_info();
+    #[tokio::test]
+    async fn collect_host_info_returns_valid_data() {
+        let executor = uptrakit_command::LocalCommandExecutor;
+        let info = collect_host_info(&executor).await;
         // machine_id should never be empty
         assert!(!info.machine_id.is_empty());
         // os_type should match the current OS
@@ -162,6 +189,33 @@ mod tests {
         assert!(info.hostname.is_some(), "hostname should be detected");
         // ip_address is intentionally None for the regular agent
         assert_eq!(info.ip_address, None);
+        // features should be probed (Some, not None)
+        assert!(info.features.is_some(), "features should be probed");
+    }
+
+    #[tokio::test]
+    async fn probe_host_features_returns_known_features() {
+        let executor = uptrakit_command::LocalCommandExecutor;
+        let features = probe_host_features(&executor).await;
+        // On any CI/dev machine, at least posix_shell should be detected.
+        // We don't assert specific features since they depend on the host.
+        for f in &features {
+            assert!(
+                ["posix_shell", "privilege_escalation", "systemd"].contains(&f.as_str()),
+                "unexpected feature string: {f}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_host_features_detects_posix_shell() {
+        // Any system running this test suite has a POSIX shell.
+        let executor = uptrakit_command::LocalCommandExecutor;
+        let features = probe_host_features(&executor).await;
+        assert!(
+            features.contains(&"posix_shell".to_string()),
+            "posix_shell should be detected on any dev/CI host"
+        );
     }
 
     /// `read_machine_id` must never return an empty string, even on platforms

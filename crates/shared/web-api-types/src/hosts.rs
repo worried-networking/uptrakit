@@ -39,6 +39,9 @@ pub struct HostResponse {
     /// Tags assigned to this host.
     #[serde(default)]
     pub tags: Vec<HostTagSummary>,
+    /// Agent-reported host features. Empty if not reported (legacy agent).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -124,6 +127,7 @@ mod tests {
                 status: ServiceStatus::Approved,
             }],
             tags: vec![],
+            features: vec![],
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: HostResponse =
@@ -157,6 +161,7 @@ mod tests {
             updated_at: datetime!(2025-01-01 0:00:00 UTC),
             agents: vec![],
             tags: vec![],
+            features: vec![],
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: HostResponse =
@@ -185,6 +190,7 @@ mod tests {
             updated_at: datetime!(2025-01-01 0:00:00 UTC),
             agents: vec![],
             tags: vec![],
+            features: vec![],
         };
         let json_value =
             serde_json::to_value(&resp).expect("serialization to Value should succeed");
@@ -232,6 +238,7 @@ mod tests {
                 },
             ],
             tags: vec![],
+            features: vec![],
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: HostResponse =

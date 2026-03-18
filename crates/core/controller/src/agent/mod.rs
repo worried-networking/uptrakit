@@ -226,7 +226,7 @@ pub(crate) async fn run_embedded_agent(
     let caps = agent_capabilities();
 
     // Collect host info for ReportHosts.
-    let host_info = uptrakit_agent_core::host_info::collect_host_info();
+    let host_info = uptrakit_agent_core::host_info::collect_host_info(executor.as_ref()).await;
     let machine_id = host_info.machine_id.clone();
 
     // Resolve freeze file path.

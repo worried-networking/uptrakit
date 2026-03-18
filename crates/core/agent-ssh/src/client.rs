@@ -158,14 +158,12 @@ async fn collect_one_host_for_report(
 
     // Verify that command execution is available via the CommandExecutor
     // interface before proceeding with host information collection.
-    let executor_ok = {
-        let executor = SshCommandExecutor::new(Arc::clone(&session));
-        executor
-            .execute_quiet(&CommandSpec::exec("true", Vec::<String>::new()))
-            .await
-            .is_ok()
-    };
-    if !executor_ok {
+    let executor = SshCommandExecutor::new(Arc::clone(&session));
+    if executor
+        .execute_quiet(&CommandSpec::exec("true", Vec::<String>::new()))
+        .await
+        .is_err()
+    {
         tracing::warn!(
             host_name = %host.name,
             hostname = %host.hostname,
@@ -175,7 +173,7 @@ async fn collect_one_host_for_report(
         return None;
     }
 
-    let mut info = collect_remote_host_info(&session).await;
+    let mut info = collect_remote_host_info(&session, &executor).await;
     // Set the SSH target address as the host's ip_address.
     info.ip_address = Some(host.hostname.clone());
     // Provide the agent-local UUID so the controller can use it as hosts.id.
@@ -316,7 +314,8 @@ async fn collect_one_host_for_reload(
         }
     };
 
-    let mut info = collect_remote_host_info(&session).await;
+    let executor = SshCommandExecutor::new(Arc::clone(&session));
+    let mut info = collect_remote_host_info(&session, &executor).await;
     info.ip_address = Some(host.hostname.clone());
     info.agent_host_id = Some(host.id);
 
