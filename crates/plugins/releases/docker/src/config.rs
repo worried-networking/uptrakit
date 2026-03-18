@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::{SecretMasking, SecretString};
+use uptrakit_plugin_infrastructure_core::{PluginConfig, SecretString};
 
 use crate::error::{DockerError, Result};
 
@@ -204,21 +204,11 @@ pub(crate) fn form_platform_string(
 }
 
 impl DockerConfig {
-    /// Validate a Docker image reference (package identifier) string.
-    ///
-    /// Delegates to [`crate::image_ref::validate_identifier`]. A valid reference
-    /// must be non-empty and must not contain whitespace or control characters.
-    ///
-    /// Called by the plugin registry's `validate_package_identifier` dispatch.
-    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
-    }
-
-    /// Validate the configuration.
+    /// Validate the configuration (internal, returns crate error type).
     ///
     /// An empty (all-defaults) config is valid — discovery can proceed
     /// without any fields set.
-    pub fn validate(&self) -> Result<()> {
+    pub(crate) fn validate_inner(&self) -> Result<()> {
         if let Some(ref cmd) = self.post_pull_command
             && let Err(e) = uptrakit_shared_types::command_validation::validate_command_length(
                 cmd,
@@ -331,7 +321,15 @@ impl DockerConfig {
     }
 }
 
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for DockerConfig {
+impl PluginConfig for DockerConfig {
+    fn validate(&self) -> std::result::Result<(), String> {
+        self.validate_inner().map_err(|e| e.to_string())
+    }
+
+    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
+    }
+
     fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
         use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
         vec![
@@ -391,10 +389,7 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for DockerConfig {
                 .with_visible_when("compose_restart._enabled", vec!["true".to_string()]),
         ]
     }
-}
 
-impl SecretMasking for DockerConfig {
-    /// Return a copy with secret fields masked for API responses.
     fn with_secrets_masked(mut self) -> Self {
         self.auth = self.auth.map(|a| match a {
             DockerAuth::Basic { username, .. } => DockerAuth::Basic {
@@ -408,7 +403,6 @@ impl SecretMasking for DockerConfig {
         self
     }
 
-    /// Restore masked secrets from an existing config (for PUT updates).
     fn restore_secrets_from(&mut self, existing: &Self) {
         let Some(existing_auth) = &existing.auth else {
             return;
@@ -457,7 +451,7 @@ mod tests {
     #[test]
     fn empty_config_validates_ok() {
         let config = DockerConfig::default();
-        assert!(config.validate().is_ok());
+        assert!(config.validate_inner().is_ok());
     }
 
     #[test]
@@ -466,7 +460,7 @@ mod tests {
             post_pull_command: Some(String::new()),
             ..Default::default()
         };
-        let err = config.validate().unwrap_err();
+        let err = config.validate_inner().unwrap_err();
         assert!(err.to_string().contains("post_pull_command"));
     }
 
@@ -477,7 +471,7 @@ mod tests {
             post_pull_command: Some(cmd),
             ..Default::default()
         };
-        let err = config.validate().unwrap_err();
+        let err = config.validate_inner().unwrap_err();
         assert!(err.to_string().contains("post_pull_command"));
         assert!(err.to_string().contains("exceeds maximum length"));
     }
@@ -489,7 +483,7 @@ mod tests {
             post_pull_command: Some(cmd),
             ..Default::default()
         };
-        assert!(config.validate().is_ok());
+        assert!(config.validate_inner().is_ok());
     }
 
     #[test]
@@ -498,7 +492,7 @@ mod tests {
             post_pull_command: Some("docker compose up -d".to_string()),
             ..Default::default()
         };
-        assert!(config.validate().is_ok());
+        assert!(config.validate_inner().is_ok());
     }
 
     #[test]
@@ -511,7 +505,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let err = config.validate().unwrap_err();
+        let err = config.validate_inner().unwrap_err();
         assert!(err.to_string().contains("compose_file"));
     }
 
@@ -525,7 +519,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let err = config.validate().unwrap_err();
+        let err = config.validate_inner().unwrap_err();
         assert!(err.to_string().contains("working_dir"));
     }
 
@@ -539,7 +533,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        assert!(config.validate().is_ok());
+        assert!(config.validate_inner().is_ok());
     }
 
     #[test]
@@ -552,7 +546,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        assert!(config.validate().is_ok());
+        assert!(config.validate_inner().is_ok());
     }
 
     // ── resolved_tracked_tag ─────────────────────────────────────────────────
@@ -768,7 +762,13 @@ mod tests {
         config
             .include_labels
             .insert("x".repeat(254), "val".to_string());
-        assert!(config.validate().unwrap_err().to_string().contains("253"));
+        assert!(
+            config
+                .validate_inner()
+                .unwrap_err()
+                .to_string()
+                .contains("253")
+        );
     }
 
     #[test]
@@ -777,7 +777,13 @@ mod tests {
         config
             .include_labels
             .insert("key".to_string(), "v".repeat(4097));
-        assert!(config.validate().unwrap_err().to_string().contains("4096"));
+        assert!(
+            config
+                .validate_inner()
+                .unwrap_err()
+                .to_string()
+                .contains("4096")
+        );
     }
 
     #[test]
@@ -786,7 +792,7 @@ mod tests {
         config
             .include_labels
             .insert("com.example.managed".to_string(), "true".to_string());
-        assert!(config.validate().is_ok());
+        assert!(config.validate_inner().is_ok());
     }
 
     // ── DockerTlsConfig validation ───────────────────────────────────────────
@@ -802,7 +808,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let err = config.validate().unwrap_err();
+        let err = config.validate_inner().unwrap_err();
         assert!(err.to_string().contains("ca_cert_path"));
     }
 
@@ -816,7 +822,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let err = config.validate().unwrap_err();
+        let err = config.validate_inner().unwrap_err();
         assert!(err.to_string().contains("ca_cert_path"));
     }
 
@@ -831,7 +837,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        assert!(config.validate().is_ok());
+        assert!(config.validate_inner().is_ok());
     }
 
     // ── ContainerRuntime ──────────────────────────────────────────────────────
@@ -879,7 +885,7 @@ mod tests {
             platform: Some("linux/amd64".to_string()),
             ..Default::default()
         };
-        assert!(config.validate().is_ok());
+        assert!(config.validate_inner().is_ok());
     }
 
     #[test]
@@ -888,7 +894,7 @@ mod tests {
             platform: Some("linux/arm/v7".to_string()),
             ..Default::default()
         };
-        assert!(config.validate().is_ok());
+        assert!(config.validate_inner().is_ok());
     }
 
     #[test]

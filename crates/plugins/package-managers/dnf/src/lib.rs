@@ -4,4 +4,4 @@ pub mod plugin;
 
 pub use config::{DnfConfig, DnfDiscoveryFilter};
 pub use error::{DnfError, Result};
-pub use plugin::{DnfPlugin, validate_identifier, validate_version};
+pub use plugin::{DESCRIPTOR, DnfPlugin, validate_identifier, validate_version};

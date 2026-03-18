@@ -8,4 +8,4 @@ pub mod update;
 
 pub use config::SnapConfig;
 pub use error::{Result, SnapError};
-pub use plugin::{SnapPlugin, validate_identifier};
+pub use plugin::{DESCRIPTOR, SnapPlugin, validate_identifier};

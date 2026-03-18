@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::SecretMasking;
+use uptrakit_plugin_infrastructure_core::{PluginConfig, TypeSettings};
 
 /// Homebrew package type: formula (CLI tools, libraries), cask (GUI applications), or both.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,13 +36,13 @@ pub struct HomebrewConfig {
     pub package_type: HomebrewPackageType,
 }
 
-impl SecretMasking for HomebrewConfig {}
-
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for HomebrewConfig {
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        vec![]
+impl PluginConfig for HomebrewConfig {
+    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
     }
+}
 
+impl TypeSettings for HomebrewConfig {
     fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
     {
         use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
@@ -62,26 +62,6 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for HomebrewConfig {
         serde_json::json!({
             "package_type": "formula"
         })
-    }
-}
-
-impl HomebrewConfig {
-    /// Validate a Homebrew package identifier string.
-    ///
-    /// Delegates to the crate-level [`validate_identifier`](crate::validate_identifier)
-    /// function. A valid identifier is a non-empty formula or cask name.
-    ///
-    /// Called by the plugin registry's `validate_package_identifier` dispatch.
-    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
-    }
-
-    /// Validate the configuration.
-    ///
-    /// Currently accepts all valid deserialized configs since there are no
-    /// required fields beyond `package_type` which has a default.
-    pub fn validate(&self) -> crate::error::Result<()> {
-        Ok(())
     }
 }
 

@@ -96,7 +96,7 @@ pub struct ConfigTestOps {
 /// at the type level — handler implementations downcast to `DatabaseConnection`.
 pub struct ExtensionActionContext<'a> {
     /// Database connection (downcast to `sea_orm::DatabaseConnection`).
-    pub db: &'a dyn std::any::Any,
+    pub db: &'a (dyn std::any::Any + Send + Sync),
     /// Tenant ID from the authenticated request (if available).
     pub tenant_id: Option<uuid::Uuid>,
     /// User ID of the caller, for actions that need it (e.g. sending test emails).
@@ -144,6 +144,18 @@ pub type ExtensionActionHandler =
         serde_json::Value, // params
     ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send + 'a>>;
 
+/// Migrations function pointer type.
+///
+/// When `migrations` feature is active, this is a function that returns real
+/// migration trait objects. When the feature is off, it's a simple function
+/// returning an empty `Vec<Box<dyn Any>>` — the field exists but is meaningless.
+#[cfg(feature = "migrations")]
+pub type MigrationsFn = fn() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>>;
+
+/// Placeholder type when `migrations` feature is not enabled.
+#[cfg(not(feature = "migrations"))]
+pub type MigrationsFn = fn() -> Vec<Box<dyn std::any::Any>>;
+
 // ── Role slots ──────────────────────────────────────────────────────────────
 
 /// A role creation function paired with its host requirements.
@@ -153,11 +165,24 @@ pub struct RoleSlot<R: ?Sized> {
 }
 
 /// Infrastructure role slot — creation + requirements + capabilities.
+///
+/// Only meaningful when the `agent-infra` feature is active. When the feature
+/// is off, `InfraSlot` is a zero-size placeholder so that `RoleCreators` and
+/// `PluginDescriptor` have a stable layout regardless of feature flags. This
+/// avoids struct-field mismatch when the `declare_plugin!` macro expands in
+/// plugin crates that don't have `agent-infra` themselves but depend on
+/// `plugin-infrastructure-core` which may be compiled with it.
 #[cfg(feature = "agent-infra")]
 pub struct InfraSlot {
     pub create: fn(&CatalogConfig) -> crate::error::Result<InfraBundle>,
     pub host_requirements: HostRequirements,
     pub capabilities: &'static [PluginCapability],
+}
+
+/// Placeholder when `agent-infra` is not enabled.
+#[cfg(not(feature = "agent-infra"))]
+pub struct InfraSlot {
+    _private: (),
 }
 
 /// Bundle of narrow infrastructure trait objects returned by `InfraSlot::create`.
@@ -169,6 +194,12 @@ pub struct InfraBundle {
     pub report: Option<Arc<dyn roles::HostReport>>,
     /// Guest execution.
     pub guest_exec: Option<Arc<dyn roles::GuestExec>>,
+}
+
+/// Placeholder when `agent-infra` is not enabled.
+#[cfg(not(feature = "agent-infra"))]
+pub struct InfraBundle {
+    _private: (),
 }
 
 // ── Role creators ───────────────────────────────────────────────────────────
@@ -186,8 +217,9 @@ pub struct RoleCreators {
     pub notification_transport: Option<CreateTransportFn>,
     // Singleton enhancement (catalog config → Arc, created once at startup)
     pub software_item_lifecycle: Option<CreateEnhancementFn>,
-    // Singleton infra (catalog config → InfraBundle, created once per agent)
-    #[cfg(feature = "agent-infra")]
+    // Singleton infra (catalog config → InfraBundle, created once per agent).
+    // Always present (not cfg-gated) so that `declare_plugin!` macro expansions
+    // in consuming crates always see the field, regardless of feature flags.
     pub infra: Option<InfraSlot>,
 }
 
@@ -220,10 +252,11 @@ pub struct PluginDescriptor {
     pub sudo: Option<fn(&serde_json::Value) -> Vec<SudoCommandEntry>>,
     pub raw_settings_keys: &'static [&'static str],
 
-    // ── Migrations (feature-gated, controller-only) ──
-    #[cfg(feature = "migrations")]
+    // ── Migrations (controller-only) ──
+    // Always present so `declare_plugin!` macro expansions always see the field.
+    // The actual type is only meaningful when `migrations` feature is active.
     #[allow(clippy::type_complexity)]
-    pub migrations: Option<fn() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>>>,
+    pub migrations: Option<MigrationsFn>,
 }
 
 impl PluginDescriptor {

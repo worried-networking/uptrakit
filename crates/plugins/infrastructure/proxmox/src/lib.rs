@@ -30,4 +30,4 @@ pub mod pve_setup;
 
 pub use config::ProxmoxConfig;
 pub use error::{ProxmoxError, Result};
-pub use plugin::ProxmoxPlugin;
+pub use plugin::{DESCRIPTOR, ProxmoxPlugin};

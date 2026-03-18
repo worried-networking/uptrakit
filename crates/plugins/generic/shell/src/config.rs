@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::{PluginError, SecretMasking};
+use uptrakit_plugin_infrastructure_core::PluginConfig;
 
 /// Configuration for the Shell plugin.
 ///
@@ -50,28 +50,12 @@ pub struct ShellConfig {
     pub prefer_interactive: bool,
 }
 
-impl ShellConfig {
-    /// Validate a Shell plugin package identifier string.
-    ///
-    /// Always succeeds — the Shell plugin does not impose constraints on the
-    /// identifier value; the value is shell-escaped before substitution into
-    /// `version_command` and `update_command` at runtime.
-    ///
-    /// Called by the plugin registry's `validate_package_identifier` dispatch.
-    pub fn validate_identifier(_value: &str) -> std::result::Result<(), String> {
-        Ok(())
-    }
-
-    /// Validate the configuration.
-    ///
-    /// Fails when **both** `version_command` and `update_command` are `None`
-    /// — a no-op config is invalid. Either field set alone is valid.
-    /// Also validates that command strings do not exceed the maximum length.
-    pub fn validate(&self) -> uptrakit_plugin_infrastructure_core::Result<()> {
+impl PluginConfig for ShellConfig {
+    fn validate(&self) -> Result<(), String> {
         if self.version_command.is_none() && self.update_command.is_none() {
-            rootcause::bail!(PluginError::Configuration(
-                "at least one of version_command or update_command must be set".to_string()
-            ));
+            return Err(
+                "at least one of version_command or update_command must be set".to_string(),
+            );
         }
         if let Some(ref cmd) = self.version_command
             && let Err(e) = uptrakit_shared_types::command_validation::validate_command_length(
@@ -79,7 +63,7 @@ impl ShellConfig {
                 "version_command",
             )
         {
-            rootcause::bail!(PluginError::Configuration(e));
+            return Err(e);
         }
         if let Some(ref cmd) = self.update_command
             && let Err(e) = uptrakit_shared_types::command_validation::validate_command_length(
@@ -87,13 +71,11 @@ impl ShellConfig {
                 "update_command",
             )
         {
-            rootcause::bail!(PluginError::Configuration(e));
+            return Err(e);
         }
         Ok(())
     }
-}
 
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ShellConfig {
     fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
         use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
         vec![
@@ -110,15 +92,6 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ShellConfig {
     }
 }
 
-/// Shell plugin has no secret fields — masking is a no-op.
-impl SecretMasking for ShellConfig {
-    fn with_secrets_masked(self) -> Self {
-        self
-    }
-
-    fn restore_secrets_from(&mut self, _existing: &Self) {}
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,14 +99,8 @@ mod tests {
     #[test]
     fn validate_both_none_fails() {
         let config = ShellConfig::default();
-        assert!(config.validate().is_err());
-        assert!(
-            config
-                .validate()
-                .unwrap_err()
-                .to_string()
-                .contains("at least one")
-        );
+        let err = config.validate().unwrap_err();
+        assert!(err.contains("at least one"));
     }
 
     #[test]
@@ -231,8 +198,8 @@ mod tests {
             prefer_interactive: false,
         };
         let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("version_command"));
-        assert!(err.to_string().contains("exceeds maximum length"));
+        assert!(err.contains("version_command"));
+        assert!(err.contains("exceeds maximum length"));
     }
 
     #[test]
@@ -244,7 +211,7 @@ mod tests {
             prefer_interactive: false,
         };
         let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("update_command"));
+        assert!(err.contains("update_command"));
     }
 
     #[test]

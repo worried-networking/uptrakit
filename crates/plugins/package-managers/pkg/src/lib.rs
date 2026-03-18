@@ -4,4 +4,4 @@ pub mod plugin;
 
 pub use config::{PkgConfig, PkgDiscoveryFilter};
 pub use error::{PkgError, Result};
-pub use plugin::{PkgPlugin, validate_identifier};
+pub use plugin::{DESCRIPTOR, PkgPlugin, validate_identifier};

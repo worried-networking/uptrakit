@@ -9,4 +9,4 @@ pub mod update;
 
 pub use config::{PacmanConfig, PacmanDiscoveryFilter};
 pub use error::{PacmanError, Result};
-pub use plugin::{PacmanPlugin, validate_identifier, validate_version};
+pub use plugin::{DESCRIPTOR, PacmanPlugin, validate_identifier, validate_version};

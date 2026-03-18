@@ -7,4 +7,4 @@ pub mod update;
 
 pub use config::CargoConfig;
 pub use error::{CargoError, Result};
-pub use plugin::{CargoPlugin, validate_identifier};
+pub use plugin::{CargoPlugin, DESCRIPTOR, validate_identifier};

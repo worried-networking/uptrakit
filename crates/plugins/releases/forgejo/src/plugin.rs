@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use regex::Regex;
 use rootcause::prelude::*;
@@ -5,8 +7,9 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use uptrakit_plugin_infrastructure_core::{
-    PluginCapability, PluginError, PluginHttpClientConfig, ReleaseAsset, UpstreamRelease, Version,
-    build_plugin_http_client,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginCapability, PluginError,
+    PluginFamily, PluginHttpClientConfig, ReleaseAsset, UpstreamRelease, Version,
+    build_plugin_http_client, declare_plugin,
 };
 
 use crate::api_types::{ForgejoApiError, ForgejoRelease};
@@ -66,32 +69,46 @@ pub fn parse_owner_repo(package_identifier: &str) -> Result<(&str, &str)> {
 /// at call time (format: `"owner/repo"`), not stored in the plugin config.
 /// A single plugin instance can therefore serve any number of tracked repositories.
 pub struct ForgejoPlugin {
-    client: reqwest::Client,
+    client: parking_lot::Mutex<Option<reqwest::Client>>,
     config: ForgejoConfig,
     asset_filters: Vec<Regex>,
 }
 
 impl ForgejoPlugin {
-    /// Compile-time capabilities for the Forgejo plugin.
-    pub const CAPABILITIES: &'static [PluginCapability] = &[
-        PluginCapability::ControllerSideFetchReleases,
-        PluginCapability::ReleaseFetching,
-        PluginCapability::ConfigTest,
-    ];
-
     /// Create a new `ForgejoPlugin` from the given configuration.
     ///
-    /// Validates the configuration and pre-compiles asset filter regexes.
-    /// The `_executor` parameter is accepted for registry compatibility but unused
-    /// (this plugin is controller-side only).
-    pub async fn new(
+    /// Pre-compiles asset filter regexes. The HTTP client is built lazily on
+    /// first use because the constructor must be synchronous.
+    pub fn new(
         config: ForgejoConfig,
-        _executor: std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::CommandExecutor>,
-    ) -> Result<Self> {
-        config
-            .validate()
-            .map_err(|e| report!(ForgejoError::Configuration(e.to_string())))?;
+        _runtime: Arc<dyn HostRuntime>,
+    ) -> std::result::Result<Self, String> {
+        let asset_filters: Vec<Regex> = config
+            .asset_patterns
+            .iter()
+            .map(|p| Regex::new(p).map_err(|e| format!("invalid regex '{p}': {e}")))
+            .collect::<std::result::Result<_, _>>()?;
 
+        Ok(Self {
+            client: parking_lot::Mutex::new(None),
+            config,
+            asset_filters,
+        })
+    }
+
+    /// Get or lazily build the HTTP client.
+    fn client(&self) -> Result<reqwest::Client> {
+        let mut guard = self.client.lock();
+        if let Some(ref c) = *guard {
+            return Ok(c.clone());
+        }
+        let c = Self::build_client(&self.config)?;
+        *guard = Some(c.clone());
+        Ok(c)
+    }
+
+    /// Build the HTTP client with appropriate headers.
+    fn build_client(config: &ForgejoConfig) -> Result<reqwest::Client> {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::ACCEPT,
@@ -109,7 +126,7 @@ impl ForgejoPlugin {
             headers.insert(reqwest::header::AUTHORIZATION, header_value);
         }
 
-        let client = build_plugin_http_client(PluginHttpClientConfig {
+        build_plugin_http_client(PluginHttpClientConfig {
             user_agent: concat!(
                 "uptrakit-plugin-releases-forgejo/",
                 env!("CARGO_PKG_VERSION")
@@ -117,25 +134,7 @@ impl ForgejoPlugin {
             default_headers: Some(headers),
             ..Default::default()
         })
-        .map_err(|e| report!(ForgejoError::Request(e)))?;
-
-        let asset_filters: Vec<Regex> = config
-            .asset_patterns
-            .iter()
-            .map(|p| {
-                Regex::new(p).map_err(|e| {
-                    report!(ForgejoError::InvalidPattern(format!(
-                        "invalid regex '{p}': {e}"
-                    )))
-                })
-            })
-            .collect::<Result<_>>()?;
-
-        Ok(Self {
-            client,
-            config,
-            asset_filters,
-        })
+        .map_err(|e| report!(ForgejoError::Request(e)))
     }
 
     /// Build the releases API URL for the given owner/repo pair.
@@ -245,27 +244,20 @@ fn parse_link_next(headers: &reqwest::header::HeaderMap) -> Option<String> {
     })
 }
 
-// ── PluginBase + subtrait implementations ────────────────────────────────
+// ── declare_plugin! ──────────────────────────────────────────────────────
 
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    ForgejoPlugin,
-    ForgejoConfig,
-    "releases_forgejo",
-    {
-        fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-
-        fn as_release_fetcher(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
-            Some(self)
-        }
-    }
-);
+declare_plugin!(ForgejoPlugin, ForgejoConfig, "releases_forgejo", {
+    display_name: "Forgejo Releases",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::CONTROLLER_ONLY,
+    config_test: [ConfigTestKind::Connectivity],
+    roles: [ReleaseFetcher],
+    extra_capabilities: [PluginCapability::ControllerSideFetchReleases],
+});
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for ForgejoPlugin {
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for ForgejoPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(
         &self,
@@ -289,11 +281,17 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for ForgejoPlugin
         let mut url = initial_url;
 
         'pages: for _ in 0..MAX_PAGES {
-            let response = self.client.get(&url).send().await.map_err(|e| {
-                report!(PluginError::Configuration(format!(
-                    "HTTP request failed: {e}"
-                )))
-            })?;
+            let response = self
+                .client()
+                .context_to()?
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| {
+                    report!(PluginError::Configuration(format!(
+                        "HTTP request failed: {e}"
+                    )))
+                })?;
 
             let status = response.status();
             self.check_rate_limit(response.headers(), package_identifier);
@@ -351,7 +349,9 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for ForgejoPlugin
 mod tests {
     use super::*;
     use crate::api_types::{ForgejoAsset, ForgejoRelease};
-    use uptrakit_plugin_infrastructure_core::LocalCommandExecutor;
+    use uptrakit_plugin_infrastructure_core::{
+        HostCapabilities, PluginCapability, PluginMeta, PosixHostRuntime,
+    };
 
     fn test_config() -> ForgejoConfig {
         ForgejoConfig {
@@ -360,14 +360,15 @@ mod tests {
         }
     }
 
-    fn test_executor() -> std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::CommandExecutor> {
-        std::sync::Arc::new(LocalCommandExecutor)
+    fn test_runtime() -> Arc<dyn HostRuntime> {
+        let executor = Arc::new(uptrakit_plugin_infrastructure_core::LocalCommandExecutor)
+            as Arc<dyn uptrakit_plugin_infrastructure_core::command::CommandExecutor>;
+        let caps = HostCapabilities::default();
+        Arc::new(PosixHostRuntime::new(executor, caps))
     }
 
-    async fn test_plugin() -> ForgejoPlugin {
-        ForgejoPlugin::new(test_config(), test_executor())
-            .await
-            .expect("valid config")
+    fn test_plugin() -> ForgejoPlugin {
+        ForgejoPlugin::new(test_config(), test_runtime()).expect("valid config")
     }
 
     fn make_release(tag: &str, draft: bool, prerelease: bool) -> ForgejoRelease {
@@ -424,9 +425,9 @@ mod tests {
 
     // ── URL construction tests ────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn url_construction() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn url_construction() {
+        let plugin = test_plugin();
         let url = plugin.releases_url("owner", "repo").expect("valid config");
         assert_eq!(
             url,
@@ -434,15 +435,13 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn url_construction_custom_base() {
+    #[test]
+    fn url_construction_custom_base() {
         let config = ForgejoConfig {
             api_base_url: Some("https://myforgejo.example.com".to_string()),
             ..ForgejoConfig::default()
         };
-        let plugin = ForgejoPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = ForgejoPlugin::new(config, test_runtime()).expect("valid config");
         let url = plugin.releases_url("owner", "repo").expect("valid config");
         assert_eq!(
             url,
@@ -452,9 +451,9 @@ mod tests {
 
     // ── convert_release tests ─────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn convert_normal_release() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn convert_normal_release() {
+        let plugin = test_plugin();
         let release = make_release("v1.0.0", false, false);
         let upstream = plugin.convert_release(&release).expect("should convert");
         assert_eq!(upstream.version.as_str(), "1.0.0");
@@ -463,74 +462,68 @@ mod tests {
         assert!(upstream.published_at.is_some());
     }
 
-    #[tokio::test]
-    async fn skip_draft_release() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn skip_draft_release() {
+        let plugin = test_plugin();
         let release = make_release("v1.0.0", true, false);
         assert!(plugin.convert_release(&release).is_none());
     }
 
-    #[tokio::test]
-    async fn skip_prerelease_by_default() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn skip_prerelease_by_default() {
+        let plugin = test_plugin();
         let release = make_release("v1.0.0-beta.1", false, true);
         assert!(plugin.convert_release(&release).is_none());
     }
 
-    #[tokio::test]
-    async fn include_prerelease_when_configured() {
+    #[test]
+    fn include_prerelease_when_configured() {
         let config = ForgejoConfig {
             include_prereleases: true,
             ..test_config()
         };
-        let plugin = ForgejoPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = ForgejoPlugin::new(config, test_runtime()).expect("valid config");
         let release = make_release("v1.0.0-beta.1", false, true);
         let upstream = plugin.convert_release(&release).expect("should convert");
         assert!(upstream.is_prerelease);
         assert_eq!(upstream.version.as_str(), "1.0.0-beta.1");
     }
 
-    #[tokio::test]
-    async fn tag_stripping() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn tag_stripping() {
+        let plugin = test_plugin();
         let release = make_release("v2.3.4", false, false);
         let upstream = plugin.convert_release(&release).expect("should convert");
         assert_eq!(upstream.version.as_str(), "2.3.4");
     }
 
-    #[tokio::test]
-    async fn tag_without_prefix() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn tag_without_prefix() {
+        let plugin = test_plugin();
         let release = make_release("1.0.0", false, false);
         let upstream = plugin.convert_release(&release).expect("should convert");
         assert_eq!(upstream.version.as_str(), "1.0.0");
     }
 
-    #[tokio::test]
-    async fn custom_tag_prefix() {
+    #[test]
+    fn custom_tag_prefix() {
         let config = ForgejoConfig {
             tag_strip_prefix: "release-".to_string(),
             ..test_config()
         };
-        let plugin = ForgejoPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = ForgejoPlugin::new(config, test_runtime()).expect("valid config");
         let release = make_release("release-3.0.0", false, false);
         let upstream = plugin.convert_release(&release).expect("should convert");
         assert_eq!(upstream.version.as_str(), "3.0.0");
     }
 
-    #[tokio::test]
-    async fn asset_filtering() {
+    #[test]
+    fn asset_filtering() {
         let config = ForgejoConfig {
             asset_patterns: vec![r".*\.tar\.gz$".to_string()],
             ..test_config()
         };
-        let plugin = ForgejoPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = ForgejoPlugin::new(config, test_runtime()).expect("valid config");
 
         let release = ForgejoRelease {
             tag_name: "v1.0.0".to_string(),
@@ -563,9 +556,9 @@ mod tests {
         assert_eq!(upstream.assets[0].name, "app-linux-amd64.tar.gz");
     }
 
-    #[tokio::test]
-    async fn no_asset_filter_includes_all() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn no_asset_filter_includes_all() {
+        let plugin = test_plugin();
         let release = ForgejoRelease {
             tag_name: "v1.0.0".to_string(),
             name: None,
@@ -594,9 +587,9 @@ mod tests {
         assert_eq!(upstream.assets.len(), 2);
     }
 
-    #[tokio::test]
-    async fn date_parsing() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn date_parsing() {
+        let plugin = test_plugin();
         let release = make_release("v1.0.0", false, false);
         let upstream = plugin.convert_release(&release).expect("should convert");
         let published = upstream.published_at.expect("should have published_at");
@@ -605,9 +598,9 @@ mod tests {
         assert_eq!(published.day(), 28);
     }
 
-    #[tokio::test]
-    async fn invalid_date_does_not_fail() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn invalid_date_does_not_fail() {
+        let plugin = test_plugin();
         let release = ForgejoRelease {
             tag_name: "v1.0.0".to_string(),
             name: None,
@@ -622,19 +615,50 @@ mod tests {
         assert!(upstream.published_at.is_none());
     }
 
-    #[tokio::test]
-    async fn plugin_creation_fails_without_api_base_url() {
-        let config = ForgejoConfig::default();
-        assert!(ForgejoPlugin::new(config, test_executor()).await.is_err());
+    // ── plugin_type_id ──────────────────────────────────────────────────
+
+    #[test]
+    fn plugin_type_id() {
+        let plugin = test_plugin();
+        assert_eq!(plugin.plugin_type_id().as_str(), "releases_forgejo");
     }
 
-    #[tokio::test]
-    async fn plugin_creation_succeeds_with_api_base_url() {
+    // ── descriptor capabilities ─────────────────────────────────────────
+
+    #[test]
+    fn descriptor_capabilities() {
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ReleaseFetching)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ControllerSideFetchReleases)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ConfigTest)
+        );
+    }
+
+    #[test]
+    fn descriptor_has_release_fetcher_role() {
+        assert!(DESCRIPTOR.roles.release_fetcher.is_some());
+        assert!(DESCRIPTOR.roles.discoverer.is_none());
+        assert!(DESCRIPTOR.roles.version_detector.is_none());
+        assert!(DESCRIPTOR.roles.update_executor.is_none());
+    }
+
+    #[test]
+    fn plugin_creation_succeeds_with_api_base_url() {
         let config = ForgejoConfig {
             api_base_url: Some("https://codeberg.org".to_string()),
             ..ForgejoConfig::default()
         };
-        assert!(ForgejoPlugin::new(config, test_executor()).await.is_ok());
+        assert!(ForgejoPlugin::new(config, test_runtime()).is_ok());
     }
 
     // ── parse_link_next tests ─────────────────────────────────────────────────

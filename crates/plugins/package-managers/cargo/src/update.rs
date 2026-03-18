@@ -9,7 +9,7 @@ use uptrakit_plugin_infrastructure_core::{
 use crate::plugin::CargoPlugin;
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for CargoPlugin {
+impl uptrakit_plugin_infrastructure_core::UpdateExecutor for CargoPlugin {
     /// Execute a `cargo install` update for a single crate.
     #[tracing::instrument(skip_all)]
     async fn execute_update(

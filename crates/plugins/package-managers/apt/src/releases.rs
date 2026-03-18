@@ -91,7 +91,7 @@ impl AptPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for AptPlugin {
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for AptPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
@@ -142,10 +142,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for AptPlugin {
     /// Output lines are grouped by package name; only the first (highest-priority)
     /// entry per package is used. Packages absent from the output have empty releases.
     #[tracing::instrument(skip_all)]
-    async fn batch_fetch_releases(
-        &self,
-        items: &[BatchFetchItem],
-    ) -> Result<Vec<BatchFetchResult>> {
+    async fn batch_fetch(&self, items: &[BatchFetchItem]) -> Result<Vec<BatchFetchResult>> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -215,13 +212,20 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::RoutedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{
-        BatchFetchItem, LocalCommandExecutor, ReleaseFetcherPlugin, UpdateCategory,
+        BatchFetchItem, HostCapabilities, HostRuntime, LocalCommandExecutor, PosixHostRuntime,
+        ReleaseFetcher, UpdateCategory,
     };
 
     use crate::config::AptConfig;
 
-    fn test_executor() -> Arc<dyn CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
+    /// Helper to create an `AptPlugin` from a mock executor for testing.
+    fn test_plugin_with_executor(
+        config: AptConfig,
+        executor: Arc<dyn CommandExecutor>,
+    ) -> AptPlugin {
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        AptPlugin::new(config, runtime).unwrap()
     }
 
     // ── parse_madison_output ────────────────────────────────────────────
@@ -347,10 +351,10 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // ── batch_fetch_releases ─────────────────────────────────────────────
+    // ── batch_fetch ─────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn batch_fetch_releases_mixed_packages() {
+    async fn batch_fetch_mixed_packages() {
         let executor = RoutedOutputExecutor::success([(
             "apt-cache",
             concat!(
@@ -358,16 +362,14 @@ mod tests {
                 "   openssl | 3.0.2-0ubuntu1.16 | http://security.ubuntu.com/ubuntu noble-security/main amd64 Packages\n",
             ),
         )]);
-        let plugin = AptPlugin::new(AptConfig::default(), executor)
-            .await
-            .expect("create");
+        let plugin = test_plugin_with_executor(AptConfig::default(), executor);
 
         let items = vec![
             BatchFetchItem::new("nginx".to_string()),
             BatchFetchItem::new("openssl".to_string()),
             BatchFetchItem::new("curl".to_string()),
         ];
-        let results = plugin.batch_fetch_releases(&items).await.expect("ok");
+        let results = plugin.batch_fetch(&items).await.expect("ok");
 
         assert_eq!(results.len(), 3);
 
@@ -397,21 +399,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn batch_fetch_releases_empty_items_returns_empty() {
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
-            .await
-            .expect("create");
-        let results = plugin.batch_fetch_releases(&[]).await.expect("ok");
+    async fn batch_fetch_empty_items_returns_empty() {
+        let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+        let plugin = test_plugin_with_executor(AptConfig::default(), executor);
+        let results = plugin.batch_fetch(&[]).await.expect("ok");
         assert!(results.is_empty());
     }
 
     #[tokio::test]
-    async fn batch_fetch_releases_invalid_identifier_fails() {
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
-            .await
-            .expect("create");
+    async fn batch_fetch_invalid_identifier_fails() {
+        let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+        let plugin = test_plugin_with_executor(AptConfig::default(), executor);
         let items = vec![BatchFetchItem::new("INVALID".to_string())];
-        let result = plugin.batch_fetch_releases(&items).await;
+        let result = plugin.batch_fetch(&items).await;
         assert!(result.is_err());
     }
 }

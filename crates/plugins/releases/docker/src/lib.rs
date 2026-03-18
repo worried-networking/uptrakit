@@ -21,4 +21,4 @@ mod version_detect;
 pub use config::DockerConfig;
 pub use error::{DockerError, Result};
 pub use image_ref::{ImageRef, ParseImageRefError, validate_identifier};
-pub use plugin::DockerPlugin;
+pub use plugin::{DESCRIPTOR, DockerPlugin};

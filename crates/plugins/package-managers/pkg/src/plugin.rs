@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -8,14 +7,12 @@ use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec,
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
-    BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType,
-    PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry,
-    UpdateCategory, UpdateOutputLine, UpstreamRelease, Version, execute_and_capture,
+    BatchUpdateResult, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
+    HostCompatibility, HostRequirements, HostRuntime, OutputStreamType, PluginError, PluginFamily,
+    PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry, UpdateCategory,
+    UpdateOutputLine, UpstreamRelease, Version, declare_plugin, execute_and_capture,
+    require_posix_executor,
 };
-
-// Subtrait imports needed by tests (via `use super::*`) to resolve method calls.
-#[cfg(test)]
-use uptrakit_plugin_infrastructure_core::PluginBase;
 
 use uptrakit_shared_types::PackageIdentifierRules;
 
@@ -65,23 +62,23 @@ pub struct PkgPlugin {
 }
 
 impl PkgPlugin {
-    /// Compile-time capabilities for the BSD pkg plugin.
-    pub const CAPABILITIES: &'static [PluginCapability] = &[
-        PluginCapability::DiscoverLocalSoftware,
-        PluginCapability::RefreshPackageIndex,
-        PluginCapability::DetectHostCompatibility,
-        PluginCapability::VersionDetection,
-        PluginCapability::ReleaseFetching,
-        PluginCapability::UpdateExecution,
-        PluginCapability::ConfigTest,
-    ];
-
-    /// Create a new BSD pkg plugin with the given configuration.
-    pub async fn new(config: PkgConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
-        config
-            .validate()
-            .map_err(|e| report!(PluginError::Configuration(e.to_string())))?;
+    /// Create a new BSD pkg plugin with the given configuration and host runtime.
+    pub fn new(
+        config: PkgConfig,
+        runtime: Arc<dyn HostRuntime>,
+    ) -> std::result::Result<Self, String> {
+        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
         Ok(Self { config, executor })
+    }
+
+    /// Sudo commands required by this plugin.
+    fn required_sudo_commands(_config: &serde_json::Value) -> Vec<SudoCommandEntry> {
+        vec![
+            SudoCommandEntry::new("pkg", "Refresh the pkg package index")
+                .with_args_suffix("update *"),
+            SudoCommandEntry::new("pkg", "Install or upgrade a pkg package")
+                .with_args_suffix("install -y *"),
+        ]
     }
 
     /// Parse `pkg query -a "%n\t%v"` output.
@@ -134,52 +131,23 @@ impl PkgPlugin {
     }
 }
 
-// ── PluginBase + subtrait implementations ────────────────────────────────
+// ── Plugin descriptor ─────────────────────────────────────────────────────
 
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    PkgPlugin,
-    PkgConfig,
-    "package_manager_pkg",
-    {
-        fn capabilities(&self) -> Vec<PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-        fn required_sudo_commands(
-            &self,
-        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-            vec![
-                SudoCommandEntry::new("pkg", "Refresh the pkg package index")
-                    .with_args_suffix(Cow::Borrowed("update *")),
-                SudoCommandEntry::new("pkg", "Install or upgrade a pkg package")
-                    .with_args_suffix(Cow::Borrowed("install -y *")),
-            ]
-        }
-
-        fn as_discovery(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
-            Some(self)
-        }
-        fn as_version_detector(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
-            Some(self)
-        }
-        fn as_release_fetcher(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
-            Some(self)
-        }
-        fn as_update_executor(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
-            Some(self)
-        }
-    }
-);
+declare_plugin!(PkgPlugin, PkgConfig, "package_manager_pkg", {
+    display_name: "BSD pkg",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::POSIX,
+    config_test: [ConfigTestKind::VersionDetection, ConfigTestKind::UpdateCommandValidation],
+    type_settings: true,
+    roles: [Discoverer, VersionDetector, ReleaseFetcher,
+            PackageIndexer { host_requirements: HostRequirements::POSIX_PRIVILEGED },
+            UpdateExecutor { host_requirements: HostRequirements::POSIX_PRIVILEGED }],
+    sudo: PkgPlugin::required_sudo_commands,
+});
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for PkgPlugin {
+impl uptrakit_plugin_infrastructure_core::Discoverer for PkgPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::info!("discovering BSD pkg-managed software");
@@ -245,7 +213,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for PkgPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for PkgPlugin {
+impl uptrakit_plugin_infrastructure_core::VersionDetector for PkgPlugin {
     #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
@@ -291,10 +259,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for PkgPlugin {
 
     /// Detect installed versions for multiple packages using a single `pkg query` call.
     #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
+    async fn batch_detect(&self, items: &[BatchDetectItem]) -> Result<Vec<BatchDetectResult>> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -349,7 +314,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for PkgPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for PkgPlugin {
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for PkgPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
@@ -392,10 +357,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for PkgPlugin {
 
     /// Fetch available releases for multiple packages using a single `pkg rquery` call.
     #[tracing::instrument(skip_all)]
-    async fn batch_fetch_releases(
-        &self,
-        items: &[BatchFetchItem],
-    ) -> Result<Vec<BatchFetchResult>> {
+    async fn batch_fetch(&self, items: &[BatchFetchItem]) -> Result<Vec<BatchFetchResult>> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -454,7 +416,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for PkgPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for PkgPlugin {
+impl uptrakit_plugin_infrastructure_core::PackageIndexer for PkgPlugin {
     #[tracing::instrument(skip_all)]
     async fn refresh_package_index(&self) -> Result<()> {
         tracing::info!("refreshing BSD pkg package index");
@@ -471,7 +433,7 @@ impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for PkgPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for PkgPlugin {
+impl uptrakit_plugin_infrastructure_core::UpdateExecutor for PkgPlugin {
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
@@ -621,11 +583,28 @@ fn build_discovered(name: String, version: String) -> DiscoveredSoftware {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use uptrakit_plugin_infrastructure_core::LocalCommandExecutor;
+    use std::sync::Arc;
 
-    fn test_executor() -> Arc<dyn CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
+    use super::*;
+    use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
+    use uptrakit_plugin_infrastructure_core::{
+        HostCapabilities, LocalCommandExecutor, PosixHostRuntime,
+    };
+
+    fn test_plugin(config: PkgConfig) -> PkgPlugin {
+        let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        PkgPlugin::new(config, runtime).unwrap()
+    }
+
+    fn test_plugin_with_executor(
+        config: PkgConfig,
+        executor: Arc<dyn CommandExecutor>,
+    ) -> PkgPlugin {
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        PkgPlugin::new(config, runtime).unwrap()
     }
 
     // ── validate_identifier ───────────────────────────────────────────────────
@@ -804,16 +783,101 @@ mod tests {
 
     // ── required_sudo_commands ────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn pkg_plugin_required_sudo_commands() {
-        let plugin = PkgPlugin::new(PkgConfig::default(), test_executor())
-            .await
-            .expect("create plugin");
-        let entries = plugin.required_sudo_commands();
+    #[test]
+    fn pkg_plugin_required_sudo_commands() {
+        assert!(DESCRIPTOR.sudo.is_some());
+        let entries = (DESCRIPTOR.sudo.unwrap())(&serde_json::json!({}));
         assert_eq!(entries.len(), 2);
         assert!(entries.iter().all(|e| e.command == "pkg"));
         assert!(entries.iter().all(|e| !e.needs_setenv));
         assert_eq!(entries[0].args_suffix.as_deref(), Some("update *"));
         assert_eq!(entries[1].args_suffix.as_deref(), Some("install -y *"));
+    }
+
+    // ── capabilities ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn pkg_plugin_capabilities() {
+        use uptrakit_plugin_infrastructure_core::PluginCapability;
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::DiscoverLocalSoftware)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::RefreshPackageIndex)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::DetectHostCompatibility)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::VersionDetection)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ReleaseFetching)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::UpdateExecution)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ConfigTest)
+        );
+        assert_eq!(DESCRIPTOR.capabilities.len(), 7);
+    }
+
+    // ── empty identifier guards ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn detect_installed_version_empty_identifier_fails() {
+        use uptrakit_plugin_infrastructure_core::VersionDetector;
+        let plugin = test_plugin(PkgConfig::default());
+        let result = plugin.detect_installed_version("").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn fetch_releases_empty_identifier_fails() {
+        use uptrakit_plugin_infrastructure_core::ReleaseFetcher;
+        let plugin = test_plugin(PkgConfig::default());
+        let result = plugin.fetch_releases("").await;
+        assert!(result.is_err());
+    }
+
+    // ── detect_host_compatibility ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn detect_host_compatibility_compatible_when_which_exits_zero() {
+        use uptrakit_plugin_infrastructure_core::Discoverer;
+        let plugin =
+            test_plugin_with_executor(PkgConfig::default(), FixedOutputExecutor::failure(0));
+        let result = plugin.detect_host_compatibility().await.expect("ok");
+        assert_eq!(result, HostCompatibility::Compatible);
+    }
+
+    #[tokio::test]
+    async fn detect_host_compatibility_incompatible_when_which_exits_nonzero() {
+        use uptrakit_plugin_infrastructure_core::Discoverer;
+        let plugin =
+            test_plugin_with_executor(PkgConfig::default(), FixedOutputExecutor::failure(1));
+        let result = plugin.detect_host_compatibility().await.expect("ok");
+        match result {
+            HostCompatibility::Incompatible(msg) => {
+                assert_eq!(msg, "pkg not found");
+            }
+            HostCompatibility::Compatible => panic!("expected Incompatible"),
+            _ => panic!("unexpected HostCompatibility variant"),
+        }
     }
 }

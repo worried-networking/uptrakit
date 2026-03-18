@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::SecretMasking;
+use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
+use uptrakit_plugin_infrastructure_core::{PluginConfig, TypeSettings};
 
 /// Discovery filter: which packages to surface during autodiscovery.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,16 +31,22 @@ pub struct AptConfig {
     pub discovery_filter: AptDiscoveryFilter,
 }
 
-impl SecretMasking for AptConfig {}
-
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for AptConfig {
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        vec![]
+impl PluginConfig for AptConfig {
+    fn validate(&self) -> Result<(), String> {
+        Ok(())
     }
 
-    fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
-    {
-        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
+    fn validate_identifier(value: &str) -> Result<(), String> {
+        crate::validate_identifier(value)
+    }
+
+    fn form_schema() -> Vec<FieldDef> {
+        vec![]
+    }
+}
+
+impl TypeSettings for AptConfig {
+    fn type_settings_form_schema() -> Vec<FieldDef> {
         vec![
             FieldDef::new("discovery_filter", "Discovery Filter")
                 .with_type(FieldType::Select)
@@ -59,23 +66,6 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for AptConfig {
 }
 
 impl AptConfig {
-    /// Validate an APT package identifier string.
-    ///
-    /// Delegates to the crate-level [`validate_identifier`](crate::validate_identifier)
-    /// function. A valid identifier is a non-empty, lowercase Debian package name.
-    ///
-    /// Called by the plugin registry's `validate_package_identifier` dispatch.
-    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
-    }
-
-    /// Validate the configuration.
-    ///
-    /// Currently accepts all valid deserialized configs.
-    pub fn validate(&self) -> crate::error::Result<()> {
-        Ok(())
-    }
-
     /// Returns the discovery filter to apply.
     pub(crate) fn effective_filter(&self) -> AptDiscoveryFilter {
         self.discovery_filter

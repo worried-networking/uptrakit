@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::SecretMasking;
+use uptrakit_plugin_infrastructure_core::{PluginConfig, TypeSettings};
 
 /// Discovery filter: which packages to surface during autodiscovery.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,13 +30,13 @@ pub struct PkgConfig {
     pub discovery_filter: PkgDiscoveryFilter,
 }
 
-impl SecretMasking for PkgConfig {}
-
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for PkgConfig {
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        vec![]
+impl PluginConfig for PkgConfig {
+    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
     }
+}
 
+impl TypeSettings for PkgConfig {
     fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
     {
         use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
@@ -59,23 +59,6 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for PkgConfig {
 }
 
 impl PkgConfig {
-    /// Validate a BSD pkg package identifier string.
-    ///
-    /// Delegates to the crate-level [`validate_identifier`](crate::validate_identifier)
-    /// function.
-    ///
-    /// Called by the plugin registry's `validate_package_identifier` dispatch.
-    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
-    }
-
-    /// Validate the configuration.
-    ///
-    /// Currently accepts all valid deserialized configs.
-    pub fn validate(&self) -> crate::error::Result<()> {
-        Ok(())
-    }
-
     /// Returns the discovery filter to apply.
     pub(crate) fn effective_filter(&self) -> PkgDiscoveryFilter {
         self.discovery_filter

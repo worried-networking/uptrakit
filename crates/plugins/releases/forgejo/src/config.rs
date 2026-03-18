@@ -1,6 +1,6 @@
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::{SecretMasking, SecretString};
+use uptrakit_plugin_infrastructure_core::{PluginConfig, SecretString};
 use uptrakit_shared_types::network::is_private_host;
 use url::Url;
 
@@ -58,20 +58,10 @@ impl Default for ForgejoConfig {
 }
 
 impl ForgejoConfig {
-    /// Validate a Forgejo/Gitea package identifier string.
-    ///
-    /// A valid identifier has exactly one `/`, with non-empty `owner` and `repo`
-    /// parts, and neither part may contain `..`.
-    ///
-    /// Called by the plugin registry's `validate_package_identifier` dispatch.
-    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
-    }
-
     /// Validate the configuration, returning an error if any fields are invalid.
     ///
     /// `api_base_url` is required; all other fields are optional.
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate_inner(&self) -> Result<()> {
         let url = self.api_base_url.as_deref().ok_or_else(|| {
             report!(ForgejoError::Configuration(
                 "api_base_url is required".to_string()
@@ -110,14 +100,22 @@ impl ForgejoConfig {
     /// Returns the API base URL, or `None` if not configured.
     ///
     /// Use this in code paths where the config may not have been validated yet.
-    /// After a successful [`validate()`] call (or after [`ForgejoPlugin::new()`])
-    /// this is guaranteed to be `Some`.
+    /// After a successful [`validate()`](PluginConfig::validate) call (or after
+    /// [`ForgejoPlugin::new()`]) this is guaranteed to be `Some`.
     pub fn api_base_url(&self) -> Option<&str> {
         self.api_base_url.as_deref()
     }
 }
 
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ForgejoConfig {
+impl PluginConfig for ForgejoConfig {
+    fn validate(&self) -> std::result::Result<(), String> {
+        self.validate_inner().map_err(|e| e.to_string())
+    }
+
+    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
+    }
+
     fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
         use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
         vec![
@@ -143,20 +141,12 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ForgejoConfig {
                 .with_help_text("Regex patterns to filter release assets (one per line)"),
         ]
     }
-}
 
-impl SecretMasking for ForgejoConfig {
-    /// Return a copy with secret fields masked for API responses.
-    ///
-    /// Unset secrets become `Some("***")` so the field always appears in JSON.
     fn with_secrets_masked(mut self) -> Self {
         self.auth_token = Some(SecretString::new(SECRET_MASK));
         self
     }
 
-    /// Restore masked secrets from an existing config (for PUT updates).
-    ///
-    /// If `auth_token` is the mask sentinel, take the value from `existing`.
     fn restore_secrets_from(&mut self, existing: &Self) {
         if let Some(ref token) = self.auth_token
             && token.expose_secret() == SECRET_MASK

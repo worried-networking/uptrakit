@@ -8,7 +8,7 @@ pub mod tag;
 pub use config::ForgejoConfig;
 pub use error::{ForgejoError, Result};
 
-pub use plugin::{ForgejoPlugin, parse_owner_repo};
+pub use plugin::{DESCRIPTOR, ForgejoPlugin, parse_owner_repo};
 
 /// Validate a Forgejo/Gitea package identifier string.
 ///

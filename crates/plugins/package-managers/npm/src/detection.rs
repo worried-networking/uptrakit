@@ -7,7 +7,7 @@ use uptrakit_plugin_infrastructure_core::{BatchDetectItem, BatchDetectResult, Re
 use crate::plugin::NpmPlugin;
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for NpmPlugin {
+impl uptrakit_plugin_infrastructure_core::VersionDetector for NpmPlugin {
     #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
@@ -59,10 +59,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for NpmPlugin {
     /// as not installed rather than erroring — consistent with the single-item
     /// `detect_installed_version` behaviour.
     #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
+    async fn batch_detect(&self, items: &[BatchDetectItem]) -> Result<Vec<BatchDetectResult>> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -124,16 +121,25 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for NpmPlugin {
 mod tests {
     use std::sync::Arc;
 
+    use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{
-        BatchDetectItem, LocalCommandExecutor, Version, VersionDetectorPlugin,
+        BatchDetectItem, HostCapabilities, HostRuntime, LocalCommandExecutor, PosixHostRuntime,
+        Version, VersionDetector,
     };
 
     use crate::config::NpmConfig;
     use crate::plugin::NpmPlugin;
 
-    fn test_executor() -> Arc<dyn uptrakit_plugin_infrastructure_core::command::CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
+    fn test_runtime() -> Arc<dyn HostRuntime> {
+        let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+        let caps = HostCapabilities::default();
+        Arc::new(PosixHostRuntime::new(executor, caps))
+    }
+
+    fn test_runtime_with_executor(executor: Arc<dyn CommandExecutor>) -> Arc<dyn HostRuntime> {
+        let caps = HostCapabilities::default();
+        Arc::new(PosixHostRuntime::new(executor, caps))
     }
 
     // ── detect_installed_version ──────────────────────────────────────────────
@@ -141,59 +147,55 @@ mod tests {
     #[tokio::test]
     async fn detect_installed_version_found() {
         let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"}}}"#;
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new(json, 0))
-            .await
-            .expect("create");
+        let plugin = NpmPlugin::new(
+            NpmConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::new(json, 0)),
+        )
+        .expect("create");
         let result = plugin.detect_installed_version("n8n").await.expect("ok");
         assert_eq!(result, Some(Version::new("1.18.0")));
     }
 
     #[tokio::test]
     async fn detect_installed_version_not_installed() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new("", 1))
-            .await
-            .expect("create");
+        let plugin = NpmPlugin::new(
+            NpmConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::new("", 1)),
+        )
+        .expect("create");
         let result = plugin.detect_installed_version("n8n").await.expect("ok");
         assert_eq!(result, None);
     }
 
     #[tokio::test]
     async fn detect_installed_version_empty_identifier_fails() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
-            .await
-            .expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_runtime()).expect("create");
         let result = plugin.detect_installed_version("").await;
         assert!(result.is_err());
     }
 
-    // ── batch_detect_installed_version ────────────────────────────────────────
+    // ── batch_detect ─────────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn batch_detect_installed_version_empty_returns_empty() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
-            .await
-            .expect("create");
-        let result = plugin
-            .batch_detect_installed_version(&[])
-            .await
-            .expect("ok");
+    async fn batch_detect_empty_returns_empty() {
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_runtime()).expect("create");
+        let result = plugin.batch_detect(&[]).await.expect("ok");
         assert!(result.is_empty());
     }
 
     #[tokio::test]
-    async fn batch_detect_installed_version_found() {
+    async fn batch_detect_found() {
         let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"},"pm2":{"version":"5.3.0"}}}"#;
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new(json, 0))
-            .await
-            .expect("create");
+        let plugin = NpmPlugin::new(
+            NpmConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::new(json, 0)),
+        )
+        .expect("create");
         let items = vec![
             BatchDetectItem::new("n8n".to_string()),
             BatchDetectItem::new("pm2".to_string()),
         ];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("ok");
+        let results = plugin.batch_detect(&items).await.expect("ok");
         assert_eq!(results.len(), 2);
         let n8n = results
             .iter()
@@ -210,20 +212,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn batch_detect_installed_version_not_installed_package() {
+    async fn batch_detect_not_installed_package() {
         // The package "missing" is not in the npm list output.
         let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"}}}"#;
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new(json, 0))
-            .await
-            .expect("create");
+        let plugin = NpmPlugin::new(
+            NpmConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::new(json, 0)),
+        )
+        .expect("create");
         let items = vec![
             BatchDetectItem::new("n8n".to_string()),
             BatchDetectItem::new("missing".to_string()),
         ];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("ok");
+        let results = plugin.batch_detect(&items).await.expect("ok");
         assert_eq!(results.len(), 2);
         let found = results
             .iter()
@@ -240,19 +241,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn batch_detect_installed_version_command_fails_all_not_installed() {
+    async fn batch_detect_command_fails_all_not_installed() {
         // When npm list -g exits non-zero, all items are treated as not installed.
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new("", 1))
-            .await
-            .expect("create");
+        let plugin = NpmPlugin::new(
+            NpmConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::new("", 1)),
+        )
+        .expect("create");
         let items = vec![
             BatchDetectItem::new("n8n".to_string()),
             BatchDetectItem::new("pm2".to_string()),
         ];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("ok");
+        let results = plugin.batch_detect(&items).await.expect("ok");
         assert_eq!(results.len(), 2);
         for r in &results {
             assert_eq!(r.installed_version, None);
@@ -261,15 +261,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn batch_detect_installed_version_invalid_identifier_fails() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
-            .await
-            .expect("create");
+    async fn batch_detect_invalid_identifier_fails() {
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_runtime()).expect("create");
         let items = vec![
             BatchDetectItem::new("valid".to_string()),
             BatchDetectItem::new("Invalid Package!".to_string()),
         ];
-        let result = plugin.batch_detect_installed_version(&items).await;
+        let result = plugin.batch_detect(&items).await;
         assert!(result.is_err());
     }
 }

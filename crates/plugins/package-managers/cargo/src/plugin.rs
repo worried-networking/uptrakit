@@ -5,8 +5,9 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, PluginCapability, PluginError,
-    PluginRole, PluginType, Result,
+    ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
+    HostRequirements, HostRuntime, PluginCapability, PluginConfig, PluginError, PluginFamily,
+    PluginRole, PluginType, Result, declare_plugin, require_posix_executor,
 };
 use uptrakit_plugin_infrastructure_core::{
     PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
@@ -107,22 +108,13 @@ pub struct CargoPlugin {
 }
 
 impl CargoPlugin {
-    /// Compile-time capabilities for the Cargo install plugin.
-    pub const CAPABILITIES: &'static [PluginCapability] = &[
-        PluginCapability::DiscoverLocalSoftware,
-        PluginCapability::DetectHostCompatibility,
-        PluginCapability::ControllerSideFetchReleases,
-        PluginCapability::VersionDetection,
-        PluginCapability::ReleaseFetching,
-        PluginCapability::UpdateExecution,
-        PluginCapability::ConfigTest,
-    ];
-
-    /// Create a new Cargo plugin with the given configuration and command executor.
-    pub async fn new(config: CargoConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
-        config
-            .validate()
-            .map_err(|e| report!(PluginError::Configuration(e.to_string())))?;
+    /// Create a new Cargo plugin with the given configuration and host runtime.
+    pub fn new(
+        config: CargoConfig,
+        runtime: Arc<dyn HostRuntime>,
+    ) -> std::result::Result<Self, String> {
+        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
+        config.validate().map_err(|e| e.to_string())?;
 
         // Use a permissive SSRF resolver for custom (potentially private/LAN)
         // registries and a strict resolver for the default crates.io index.
@@ -140,8 +132,7 @@ impl CargoPlugin {
             ssrf_mode,
             redirect_policy: reqwest::redirect::Policy::limited(10),
             ..Default::default()
-        })
-        .map_err(|e| report!(PluginError::PluginInternal(e)))?;
+        })?;
 
         Ok(Self {
             config,
@@ -155,42 +146,21 @@ impl CargoPlugin {
     }
 }
 
-// ── PluginBase + subtrait implementations ────────────────────────────────
+// ── Plugin descriptor ─────────────────────────────────────────────────────
 
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    CargoPlugin,
-    CargoConfig,
-    "package_manager_cargo",
-    {
-        fn capabilities(&self) -> Vec<PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-
-        fn as_discovery(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
-            Some(self)
-        }
-        fn as_version_detector(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
-            Some(self)
-        }
-        fn as_release_fetcher(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
-            Some(self)
-        }
-        fn as_update_executor(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
-            Some(self)
-        }
-    }
-);
+declare_plugin!(CargoPlugin, CargoConfig, "package_manager_cargo", {
+    display_name: "Cargo Install",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::POSIX,
+    config_test: [ConfigTestKind::VersionDetection, ConfigTestKind::UpdateCommandValidation],
+    type_settings: true,
+    roles: [Discoverer, VersionDetector, ReleaseFetcher, UpdateExecutor],
+    extra_capabilities: [PluginCapability::ControllerSideFetchReleases],
+});
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for CargoPlugin {
+impl uptrakit_plugin_infrastructure_core::Discoverer for CargoPlugin {
     /// Discover crates installed via `cargo install` on the local system.
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
@@ -267,7 +237,57 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for CargoPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use uptrakit_plugin_infrastructure_core::PluginCapability;
+    use uptrakit_plugin_infrastructure_core::command::{
+        CommandExecutor, CommandOutput, CommandSpec,
+    };
+    use uptrakit_plugin_infrastructure_core::mpsc;
+    use uptrakit_plugin_infrastructure_core::{
+        Discoverer, HostCapabilities, HostRuntime, PosixHostRuntime, UpdateOutputLine,
+    };
+
+    /// Mock executor that always returns Ok (even for non-zero exit codes).
+    struct FixedOutputExecutor {
+        output: String,
+        exit_code: i32,
+    }
+
+    #[async_trait]
+    impl CommandExecutor for FixedOutputExecutor {
+        async fn execute(
+            &self,
+            _spec: &CommandSpec,
+            _output_tx: &mpsc::Sender<UpdateOutputLine>,
+        ) -> uptrakit_command::Result<CommandOutput> {
+            Ok(CommandOutput {
+                output: self.output.clone(),
+                exit_code: self.exit_code,
+            })
+        }
+
+        async fn execute_quiet(
+            &self,
+            _spec: &CommandSpec,
+        ) -> uptrakit_command::Result<CommandOutput> {
+            Ok(CommandOutput {
+                output: self.output.clone(),
+                exit_code: self.exit_code,
+            })
+        }
+    }
+
+    fn make_plugin(config: CargoConfig, stdout: &str, exit_code: i32) -> CargoPlugin {
+        let executor = Arc::new(FixedOutputExecutor {
+            output: stdout.to_string(),
+            exit_code,
+        }) as Arc<dyn CommandExecutor>;
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        CargoPlugin::new(config, runtime).unwrap()
+    }
 
     // ── validate_identifier ───────────────────────────────────────────────────
 
@@ -418,57 +438,80 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_compatible_when_cargo_found() {
-        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
-        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(""))
-            .await
-            .unwrap();
+        let plugin = make_plugin(CargoConfig::default(), "", 0);
         let result = plugin.detect_host_compatibility().await.unwrap();
         assert_eq!(result, HostCompatibility::Compatible);
     }
 
     #[tokio::test]
     async fn detect_host_compatibility_incompatible_when_cargo_missing() {
-        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         // Exit code != 0 from `which cargo` -> incompatible.
-        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::failure(1))
-            .await
-            .unwrap();
+        let plugin = make_plugin(CargoConfig::default(), "", 1);
         let result = plugin.detect_host_compatibility().await.unwrap();
         assert!(matches!(result, HostCompatibility::Incompatible(_)));
-    }
-
-    // ── required_sudo_commands ────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn required_sudo_commands_empty() {
-        use uptrakit_plugin_infrastructure_core::PluginBase;
-        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(""))
-            .await
-            .unwrap();
-        assert!(plugin.required_sudo_commands().is_empty());
     }
 
     // ── capabilities ─────────────────────────────────────────────────────────
 
     #[test]
-    fn cargo_capabilities_declared() {
-        assert!(CargoPlugin::CAPABILITIES.contains(&PluginCapability::DiscoverLocalSoftware));
-        assert!(CargoPlugin::CAPABILITIES.contains(&PluginCapability::DetectHostCompatibility));
-        assert!(CargoPlugin::CAPABILITIES.contains(&PluginCapability::ControllerSideFetchReleases));
-        assert!(CargoPlugin::CAPABILITIES.contains(&PluginCapability::VersionDetection));
-        assert!(CargoPlugin::CAPABILITIES.contains(&PluginCapability::ReleaseFetching));
-        assert!(CargoPlugin::CAPABILITIES.contains(&PluginCapability::UpdateExecution));
+    fn cargo_plugin_capabilities() {
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::DiscoverLocalSoftware)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::DetectHostCompatibility)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ControllerSideFetchReleases)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::VersionDetection)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ReleaseFetching)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::UpdateExecution)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ConfigTest)
+        );
+        // Cargo does not need RefreshPackageIndex.
+        assert!(
+            !DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::RefreshPackageIndex)
+        );
+        assert_eq!(DESCRIPTOR.capabilities.len(), 7);
+    }
+
+    // ── sudo ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn cargo_plugin_no_sudo() {
+        assert!(DESCRIPTOR.sudo.is_none());
     }
 
     // ── discover_software ─────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn discover_software_always_emits_targets() {
-        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         let output = "bat v0.24.0:\n    bat\nripgrep v14.1.1:\n    rg\n";
-        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(output))
-            .await
-            .unwrap();
+        let plugin = make_plugin(CargoConfig::default(), output, 0);
 
         let discovered = plugin.discover_software().await.unwrap();
         assert_eq!(discovered.len(), 2);
@@ -481,18 +524,16 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_emits_targets_with_explicit_config() {
-        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
         let output = "bat v0.24.0:\n    bat\n";
-        let plugin = CargoPlugin::new(
+        let plugin = make_plugin(
             CargoConfig {
                 include_prereleases: true,
                 registry_url: None,
                 use_locked: true,
             },
-            FixedOutputExecutor::success(output),
-        )
-        .await
-        .unwrap();
+            output,
+            0,
+        );
 
         let discovered = plugin.discover_software().await.unwrap();
         assert_eq!(discovered.len(), 1);
@@ -501,10 +542,7 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_empty_install_list() {
-        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
-        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(""))
-            .await
-            .unwrap();
+        let plugin = make_plugin(CargoConfig::default(), "", 0);
 
         let discovered = plugin.discover_software().await.unwrap();
         assert!(discovered.is_empty());

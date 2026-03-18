@@ -1,6 +1,10 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
-use uptrakit_plugin_infrastructure_core::{PluginCapability, command::CommandExecutor};
+use uptrakit_plugin_infrastructure_core::{
+    ConfigModel, HostRequirements, HostRuntime, PluginFamily, declare_plugin,
+};
 
 use crate::config::ProxmoxConfig;
 
@@ -14,39 +18,19 @@ use crate::config::ProxmoxConfig;
 ///
 /// All user interaction goes through the Extensions framework (pages and panels).
 pub struct ProxmoxPlugin {
-    _config: Option<ProxmoxConfig>,
+    pub(crate) _config: Option<ProxmoxConfig>,
 }
 
 impl ProxmoxPlugin {
-    /// Compile-time capabilities for the Proxmox VE plugin.
-    ///
-    /// When the `migrations` feature is enabled the plugin declares
-    /// `ControllerMigrations` so the controller runs its DB schema.
-    /// Without the feature the capability list is empty.
-    ///
-    /// NOTE: the `#[cfg(not)]` here is intentional — both branches define the
-    /// same constant name for different feature combinations, which is the only
-    /// supported way to provide divergent const values in Rust without a
-    /// runtime conditional.
-    #[cfg(all(feature = "migrations", not(feature = "agent-infra")))]
-    pub const CAPABILITIES: &'static [PluginCapability] = &[PluginCapability::ControllerMigrations];
-
-    #[cfg(feature = "agent-infra")]
-    pub const CAPABILITIES: &'static [PluginCapability] = &[
-        PluginCapability::HostLifecycle,
-        PluginCapability::HostReport,
-        PluginCapability::GuestExec,
-        PluginCapability::ServiceMigrations,
-    ];
-
-    #[cfg(not(feature = "migrations"))]
-    pub const CAPABILITIES: &'static [PluginCapability] = &[];
-
     /// Create a new controller-side Proxmox VE plugin instance (with config).
-    pub async fn new(
+    ///
+    /// The constructor is synchronous — no I/O is performed. HTTP clients
+    /// for the Proxmox VE API are created on-demand by the extension action
+    /// handlers.
+    pub fn new(
         config: ProxmoxConfig,
-        _executor: Arc<dyn CommandExecutor>,
-    ) -> uptrakit_plugin_infrastructure_core::Result<Self> {
+        _runtime: Arc<dyn HostRuntime>,
+    ) -> std::result::Result<Self, String> {
         Ok(Self {
             _config: Some(config),
         })
@@ -56,6 +40,38 @@ impl ProxmoxPlugin {
     pub fn new_agent() -> Self {
         Self { _config: None }
     }
+
+    /// Return extension manifests for the Proxmox VE plugin.
+    ///
+    /// Separate function used as a function pointer in `declare_plugin!`.
+    pub fn extension_manifests_static() -> Vec<uptrakit_extension_framework::ExtensionManifest> {
+        // Controller-side manifests are only relevant when not in agent mode.
+        if cfg!(feature = "agent-infra") {
+            return vec![];
+        }
+        crate::extensions::extension_manifests()
+    }
+
+    /// Return extension action definitions for the Proxmox VE plugin.
+    ///
+    /// Separate function used as a function pointer in `declare_plugin!`.
+    pub fn extension_actions_static() -> Vec<uptrakit_extension_framework::ActionDef> {
+        let mut actions = Vec::new();
+        // Controller-side actions (included when not in agent mode).
+        if !cfg!(feature = "agent-infra") {
+            actions.extend(crate::extensions::extension_actions());
+        }
+        // Agent-side actions (module only exists with the feature).
+        #[cfg(feature = "agent-infra")]
+        actions.extend(crate::agent::plugin::agent_extension_actions());
+        actions
+    }
+
+    /// Return controller-side migrations for the Proxmox VE plugin.
+    #[cfg(feature = "migrations")]
+    pub fn controller_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
+        crate::controller_migration::migrations()
+    }
 }
 
 impl Default for ProxmoxPlugin {
@@ -64,39 +80,100 @@ impl Default for ProxmoxPlugin {
     }
 }
 
-// ── PluginBase implementation ────────────────────────────────────────────
+/// Extension action handler wrapper for the `declare_plugin!` macro.
+///
+/// This function matches the `ExtensionActionHandler` type signature, which
+/// receives `descriptor::ExtensionActionContext` (with `db: &dyn Any`).
+/// It downcasts the database connection and delegates to the existing
+/// `crate::extensions::handle_action` handler.
+fn proxmox_handle_extension_action<'a>(
+    ctx: &'a uptrakit_plugin_infrastructure_core::descriptor::ExtensionActionContext<'a>,
+    extension_id: &'a str,
+    action_id: &'a str,
+    params: serde_json::Value,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send + 'a>> {
+    Box::pin(async move {
+        let db = ctx
+            .db
+            .downcast_ref::<sea_orm::DatabaseConnection>()
+            .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
 
+        // Build the plugin_ops::ExtensionActionContext that the existing handler expects.
+        let inner_ctx = uptrakit_plugin_infrastructure_core::ExtensionActionContext {
+            db,
+            tenant_id: ctx.tenant_id,
+            caller_user_id: ctx.caller_user_id,
+        };
+
+        crate::extensions::handle_action(&inner_ctx, extension_id, action_id, params).await
+    })
+}
+
+// ── declare_plugin! ──────────────────────────────────────────────────────
+
+// Migrations function wrapper — adapts to whatever MigrationsFn type alias is active.
+#[cfg(feature = "migrations")]
+fn __proxmox_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
+    ProxmoxPlugin::controller_migrations()
+}
+#[cfg(not(feature = "migrations"))]
+fn __proxmox_migrations() -> Vec<Box<dyn std::any::Any>> {
+    vec![]
+}
+
+declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
+    display_name: "Proxmox VE",
+    family: PluginFamily::Infrastructure,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::CONTROLLER_ONLY,
+    roles: [ReleaseFetcher, UpdateExecutor],
+    owned_extension_ids: &["proxmox."],
+    extensions: {
+        manifests: ProxmoxPlugin::extension_manifests_static,
+        actions: ProxmoxPlugin::extension_actions_static,
+        handle_action: proxmox_handle_extension_action,
+    },
+    migrations: __proxmox_migrations,
+});
+
+// ── PluginBase implementation (legacy, for agent-infra traits) ────────────
+
+// The agent-infra traits (HostLifecyclePlugin, HostReportPlugin, GuestExecPlugin)
+// still use the old PluginBase trait. They will be migrated in Phase 4.
+// For now, keep the manual PluginBase impl for agent-side functionality only.
+
+#[cfg(feature = "agent-infra")]
 #[async_trait::async_trait]
 impl uptrakit_plugin_infrastructure_core::PluginBase for ProxmoxPlugin {
     fn plugin_type_id(&self) -> &str {
         "infrastructure_proxmox"
     }
 
-    fn capabilities(&self) -> Vec<PluginCapability> {
-        Self::CAPABILITIES.to_vec()
+    fn capabilities(&self) -> Vec<uptrakit_shared_types::PluginCapability> {
+        use uptrakit_shared_types::PluginCapability;
+        vec![
+            PluginCapability::HostLifecycle,
+            PluginCapability::HostReport,
+            PluginCapability::GuestExec,
+            PluginCapability::ServiceMigrations,
+        ]
     }
 
     fn validate_config(&self, config: &serde_json::Value) -> std::result::Result<(), String> {
         let typed: ProxmoxConfig = serde_json::from_value(config.clone())
             .map_err(|e| format!("failed to parse config: {e}"))?;
-        typed.validate().map_err(|e| e.to_string())
+        uptrakit_plugin_infrastructure_core::PluginConfig::validate(&typed)
     }
 
     fn mask_config_secrets(&self, config: &serde_json::Value) -> serde_json::Value {
         let Ok(cfg) = serde_json::from_value::<ProxmoxConfig>(config.clone()) else {
             return config.clone();
         };
-        use uptrakit_plugin_infrastructure_core::SecretMasking;
-        match serde_json::to_value(cfg.with_secrets_masked()) {
-            Ok(masked) => masked,
-            Err(e) => {
-                tracing::error!(
-                    error = %e,
-                    "failed to serialize masked plugin config"
-                );
-                config.clone()
-            }
-        }
+        let masked = uptrakit_plugin_infrastructure_core::PluginConfig::with_secrets_masked(cfg);
+        serde_json::to_value(masked).unwrap_or_else(|e| {
+            tracing::error!(error = %e, "failed to serialize masked plugin config");
+            config.clone()
+        })
     }
 
     fn restore_config_secrets(
@@ -110,23 +187,12 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for ProxmoxPlugin {
         ) else {
             return incoming.clone();
         };
-        use uptrakit_plugin_infrastructure_core::SecretMasking;
-        inc.restore_secrets_from(&ex);
+        uptrakit_plugin_infrastructure_core::PluginConfig::restore_secrets_from(&mut inc, &ex);
         serde_json::to_value(&inc).unwrap_or_else(|_| incoming.clone())
     }
 
     fn form_schema(&self) -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        <ProxmoxConfig as uptrakit_plugin_infrastructure_core::ConfigFormSchema>::form_schema()
-    }
-
-    fn type_settings_form_schema(
-        &self,
-    ) -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        <ProxmoxConfig as uptrakit_plugin_infrastructure_core::ConfigFormSchema>::type_settings_form_schema()
-    }
-
-    fn type_settings_sample(&self) -> serde_json::Value {
-        <ProxmoxConfig as uptrakit_plugin_infrastructure_core::ConfigFormSchema>::type_settings_sample()
+        <ProxmoxConfig as uptrakit_plugin_infrastructure_core::PluginConfig>::form_schema()
     }
 
     fn sample_config(&self) -> serde_json::Value {
@@ -141,36 +207,22 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for ProxmoxPlugin {
     where
         Self: Sized,
     {
-        // Controller-side manifests are only relevant when not in agent mode.
-        if cfg!(feature = "agent-infra") {
-            // Agent mode: no top-level manifests — the Proxmox plugin contributes
-            // actions to the SSH agent's existing `ssh-agent.hosts` manifest.
-            return vec![];
-        }
-        crate::extensions::extension_manifests()
+        // Agent mode: no top-level manifests — the Proxmox plugin contributes
+        // actions to the SSH agent's existing `ssh-agent.hosts` manifest.
+        vec![]
     }
 
     fn extension_actions() -> Vec<uptrakit_extension_framework::ActionDef>
     where
         Self: Sized,
     {
-        let mut actions = Vec::new();
-        // Controller-side actions (included when not in agent mode).
-        if !cfg!(feature = "agent-infra") {
-            actions.extend(crate::extensions::extension_actions());
-        }
-        // Agent-side actions (module only exists with the feature).
-        #[cfg(feature = "agent-infra")]
-        actions.extend(crate::agent::plugin::agent_extension_actions());
-        actions
+        crate::agent::plugin::agent_extension_actions()
     }
 
-    #[cfg(feature = "agent-infra")]
     fn primary_action_ids(&self) -> Vec<String> {
         vec!["bootstrap-proxmox-guest".to_string()]
     }
 
-    #[cfg(feature = "agent-infra")]
     async fn handle_service_extension_action(
         &self,
         ctx: &uptrakit_plugin_infrastructure_core::agent_infra::InfraPluginContext<'_>,
@@ -179,91 +231,153 @@ impl uptrakit_plugin_infrastructure_core::PluginBase for ProxmoxPlugin {
         crate::agent::extension_actions::handle_action(ctx, request).await
     }
 
-    #[cfg(feature = "migrations")]
     fn controller_migrations(&self) -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
         crate::controller_migration::migrations()
     }
 
-    #[cfg(feature = "migrations")]
     fn service_migrations(&self) -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
-        #[cfg(feature = "agent-infra")]
-        {
-            vec![
-                Box::new(crate::agent::migration::CreateProxmoxHostState),
-                Box::new(crate::agent::migration::CreateProxmoxPendingMatches),
-            ]
-        }
-        #[cfg(not(feature = "agent-infra"))]
-        {
-            vec![]
-        }
+        vec![
+            Box::new(crate::agent::migration::CreateProxmoxHostState),
+            Box::new(crate::agent::migration::CreateProxmoxPendingMatches),
+        ]
     }
 
-    #[cfg(feature = "agent-infra")]
     fn as_host_lifecycle(
         &self,
     ) -> Option<&dyn uptrakit_plugin_infrastructure_core::HostLifecyclePlugin> {
         Some(self)
     }
 
-    #[cfg(feature = "agent-infra")]
     fn as_host_report(&self) -> Option<&dyn uptrakit_plugin_infrastructure_core::HostReportPlugin> {
         Some(self)
     }
 
-    #[cfg(feature = "agent-infra")]
     fn as_guest_exec(&self) -> Option<&dyn uptrakit_plugin_infrastructure_core::GuestExecPlugin> {
         Some(self)
+    }
+}
+
+// ── Stub trait implementations for declare_plugin! roles ─────────────────
+
+// The `declare_plugin!` macro asserts that `ProxmoxPlugin` implements
+// `ReleaseFetcher` and `UpdateExecutor`. These are controller-side stubs
+// that the Proxmox plugin does not actually use for software updates
+// (it uses extensions instead). They satisfy the compile-time assertions.
+
+#[async_trait::async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for ProxmoxPlugin {
+    async fn fetch_releases(
+        &self,
+        _package_identifier: &str,
+    ) -> uptrakit_plugin_infrastructure_core::Result<
+        Vec<uptrakit_plugin_infrastructure_core::UpstreamRelease>,
+    > {
+        Ok(vec![])
+    }
+}
+
+#[async_trait::async_trait]
+impl uptrakit_plugin_infrastructure_core::UpdateExecutor for ProxmoxPlugin {
+    async fn execute_update(
+        &self,
+        _package_identifier: &str,
+        _to_version: &str,
+        _release_info: Option<&uptrakit_plugin_infrastructure_core::ReleaseInfo>,
+        _output_tx: &uptrakit_plugin_infrastructure_core::UpdateOutputSender,
+    ) -> uptrakit_plugin_infrastructure_core::Result<String> {
+        Err(rootcause::report!(
+            uptrakit_plugin_infrastructure_core::PluginError::UnsupportedOperation(
+                "Proxmox VE plugin does not execute software updates directly".to_string()
+            )
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::{LocalCommandExecutor, PluginBase, SecretString};
+    use uptrakit_plugin_infrastructure_core::{PluginCapability, PluginMeta, SecretString};
 
-    fn test_executor() -> Arc<dyn CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
-    }
-
-    #[tokio::test]
-    async fn plugin_type_is_infrastructure_proxmox() {
+    #[test]
+    fn plugin_type_is_infrastructure_proxmox() {
         let config = ProxmoxConfig {
             api_url: "https://pve.local:8006".to_string(),
             api_token: SecretString::new("root@pam!tok=secret"),
             ..ProxmoxConfig::default()
         };
-        let plugin = ProxmoxPlugin::new(config, test_executor())
-            .await
-            .expect("create");
-        assert_eq!(plugin.plugin_type_id(), "infrastructure_proxmox");
-    }
-
-    #[tokio::test]
-    async fn capabilities_match_expected() {
-        let config = ProxmoxConfig::default();
-        let plugin = ProxmoxPlugin::new(config, test_executor())
-            .await
-            .expect("create");
-        assert_eq!(plugin.capabilities(), ProxmoxPlugin::CAPABILITIES);
+        let plugin = ProxmoxPlugin::new(config, test_runtime()).expect("create");
+        assert_eq!(plugin.plugin_type_id().as_str(), "infrastructure_proxmox");
     }
 
     #[test]
     fn agent_plugin_type_is_infrastructure_proxmox() {
         let plugin = ProxmoxPlugin::new_agent();
-        assert_eq!(plugin.plugin_type_id(), "infrastructure_proxmox");
-    }
-
-    #[test]
-    fn agent_capabilities_match_expected() {
-        let plugin = ProxmoxPlugin::new_agent();
-        assert_eq!(plugin.capabilities(), ProxmoxPlugin::CAPABILITIES);
+        assert_eq!(plugin.plugin_type_id().as_str(), "infrastructure_proxmox");
     }
 
     #[test]
     fn default_creates_agent_variant() {
         let plugin = ProxmoxPlugin::default();
-        assert_eq!(plugin.plugin_type_id(), "infrastructure_proxmox");
+        assert_eq!(plugin.plugin_type_id().as_str(), "infrastructure_proxmox");
         assert!(plugin._config.is_none());
+    }
+
+    // ── descriptor capabilities ─────────────────────────────────────────
+
+    #[test]
+    fn descriptor_capabilities() {
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ReleaseFetching)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::UpdateExecution)
+        );
+    }
+
+    // ── descriptor roles ────────────────────────────────────────────────
+
+    #[test]
+    fn descriptor_has_expected_roles() {
+        assert!(DESCRIPTOR.roles.release_fetcher.is_some());
+        assert!(DESCRIPTOR.roles.update_executor.is_some());
+        assert!(DESCRIPTOR.roles.discoverer.is_none());
+        assert!(DESCRIPTOR.roles.version_detector.is_none());
+        assert!(DESCRIPTOR.roles.package_indexer.is_none());
+        assert!(DESCRIPTOR.roles.lifecycle_hook.is_none());
+    }
+
+    // ── descriptor extensions ───────────────────────────────────────────
+
+    #[test]
+    fn descriptor_has_extensions() {
+        assert!(DESCRIPTOR.extensions.is_some());
+        let ext = DESCRIPTOR.extensions.unwrap();
+        assert!(!ext.owned_ids.is_empty());
+        assert_eq!(ext.owned_ids[0], "proxmox.");
+    }
+
+    // ── descriptor migrations ───────────────────────────────────────────
+
+    #[cfg(feature = "migrations")]
+    #[test]
+    fn descriptor_has_migrations() {
+        assert!(DESCRIPTOR.migrations.is_some());
+        let migrations = (DESCRIPTOR.migrations.unwrap())();
+        assert!(!migrations.is_empty());
+    }
+
+    /// Helper to create a test runtime.
+    fn test_runtime() -> Arc<dyn HostRuntime> {
+        use uptrakit_plugin_infrastructure_core::{
+            HostCapabilities, LocalCommandExecutor, PosixHostRuntime,
+        };
+        let executor = Arc::new(LocalCommandExecutor)
+            as Arc<dyn uptrakit_plugin_infrastructure_core::command::CommandExecutor>;
+        let caps = HostCapabilities::default();
+        Arc::new(PosixHostRuntime::new(executor, caps))
     }
 }

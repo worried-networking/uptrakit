@@ -1,6 +1,6 @@
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::{SecretMasking, SecretString};
+use uptrakit_plugin_infrastructure_core::{PluginConfig, SecretString};
 use uptrakit_shared_types::network::is_private_host;
 use url::Url;
 
@@ -59,21 +59,10 @@ impl Default for GitLabConfig {
 }
 
 impl GitLabConfig {
-    /// Validate a GitLab package identifier string.
-    ///
-    /// A valid identifier has at least one `/`, all path components are non-empty,
-    /// and no component may contain `..`. GitLab supports nested namespaces such
-    /// as `group/subgroup/project`.
-    ///
-    /// Called by the plugin registry's `validate_package_identifier` dispatch.
-    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
-    }
-
     /// Validate the configuration, returning an error if any fields are invalid.
     ///
     /// An entirely empty `{}` config is valid — all fields are optional.
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate_inner(&self) -> Result<()> {
         if let Some(ref url) = self.api_base_url {
             let parsed = Url::parse(url).map_err(|e| {
                 report!(GitLabError::Configuration(format!(
@@ -112,7 +101,15 @@ impl GitLabConfig {
     }
 }
 
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for GitLabConfig {
+impl PluginConfig for GitLabConfig {
+    fn validate(&self) -> std::result::Result<(), String> {
+        self.validate_inner().map_err(|e| e.to_string())
+    }
+
+    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
+    }
+
     fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
         use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
         vec![
@@ -137,9 +134,7 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for GitLabConfig {
                 .with_help_text("Regex patterns to filter release asset links (one per line)"),
         ]
     }
-}
 
-impl SecretMasking for GitLabConfig {
     /// Return a copy with secret fields masked for API responses.
     ///
     /// Unset secrets become `Some("***")` so the field always appears in JSON.

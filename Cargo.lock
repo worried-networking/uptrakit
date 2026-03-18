@@ -6885,6 +6885,7 @@ name = "uptrakit-plugin-infrastructure-core"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "paste",
  "reqwest",
  "rootcause",
  "sea-orm",
@@ -7186,6 +7187,7 @@ name = "uptrakit-plugin-releases-forgejo"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "parking_lot",
  "regex",
  "reqwest",
  "rootcause",
@@ -7206,6 +7208,7 @@ name = "uptrakit-plugin-releases-github"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "parking_lot",
  "regex",
  "reqwest",
  "rootcause",
@@ -7227,6 +7230,7 @@ name = "uptrakit-plugin-releases-gitlab"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "parking_lot",
  "regex",
  "reqwest",
  "rootcause",

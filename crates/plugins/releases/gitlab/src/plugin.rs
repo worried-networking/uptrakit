@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use regex::Regex;
 use rootcause::prelude::*;
@@ -5,8 +7,9 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use uptrakit_plugin_infrastructure_core::{
-    PluginCapability, PluginError, PluginHttpClientConfig, ReleaseAsset, UpstreamRelease, Version,
-    build_plugin_http_client,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginCapability, PluginError,
+    PluginFamily, PluginHttpClientConfig, ReleaseAsset, UpstreamRelease, Version,
+    build_plugin_http_client, declare_plugin,
 };
 
 use crate::api_types::{GitLabApiError, GitLabRelease};
@@ -64,32 +67,46 @@ pub fn parse_project_path(package_identifier: &str) -> Result<String> {
 /// publicly visible (similar to GitHub's draft status). When
 /// `include_prereleases` is `false`, such releases are skipped.
 pub struct GitLabPlugin {
-    client: reqwest::Client,
+    client: parking_lot::Mutex<Option<reqwest::Client>>,
     config: GitLabConfig,
     asset_filters: Vec<Regex>,
 }
 
 impl GitLabPlugin {
-    /// Compile-time capabilities for the GitLab plugin.
-    pub const CAPABILITIES: &'static [PluginCapability] = &[
-        PluginCapability::ControllerSideFetchReleases,
-        PluginCapability::ReleaseFetching,
-        PluginCapability::ConfigTest,
-    ];
-
     /// Create a new `GitLabPlugin` from the given configuration.
     ///
-    /// Validates the configuration and pre-compiles asset filter regexes.
-    /// The `_executor` parameter is accepted for registry compatibility but unused
-    /// (this plugin is controller-side only).
-    pub async fn new(
+    /// Pre-compiles asset filter regexes. The HTTP client is built lazily on
+    /// first use because the constructor must be synchronous.
+    pub fn new(
         config: GitLabConfig,
-        _executor: std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::CommandExecutor>,
-    ) -> Result<Self> {
-        config
-            .validate()
-            .map_err(|e| report!(GitLabError::Configuration(e.to_string())))?;
+        _runtime: Arc<dyn HostRuntime>,
+    ) -> std::result::Result<Self, String> {
+        let asset_filters: Vec<Regex> = config
+            .asset_patterns
+            .iter()
+            .map(|p| Regex::new(p).map_err(|e| format!("invalid regex '{p}': {e}")))
+            .collect::<std::result::Result<_, _>>()?;
 
+        Ok(Self {
+            client: parking_lot::Mutex::new(None),
+            config,
+            asset_filters,
+        })
+    }
+
+    /// Get or lazily build the HTTP client.
+    fn client(&self) -> Result<reqwest::Client> {
+        let mut guard = self.client.lock();
+        if let Some(ref c) = *guard {
+            return Ok(c.clone());
+        }
+        let c = Self::build_client(&self.config)?;
+        *guard = Some(c.clone());
+        Ok(c)
+    }
+
+    /// Build the HTTP client with appropriate headers.
+    fn build_client(config: &GitLabConfig) -> Result<reqwest::Client> {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::ACCEPT,
@@ -107,7 +124,7 @@ impl GitLabPlugin {
             headers.insert("PRIVATE-TOKEN", header_value);
         }
 
-        let client = build_plugin_http_client(PluginHttpClientConfig {
+        build_plugin_http_client(PluginHttpClientConfig {
             user_agent: concat!(
                 "uptrakit-plugin-releases-gitlab/",
                 env!("CARGO_PKG_VERSION")
@@ -115,25 +132,7 @@ impl GitLabPlugin {
             default_headers: Some(headers),
             ..Default::default()
         })
-        .map_err(|e| report!(GitLabError::Request(e)))?;
-
-        let asset_filters: Vec<Regex> = config
-            .asset_patterns
-            .iter()
-            .map(|p| {
-                Regex::new(p).map_err(|e| {
-                    report!(GitLabError::InvalidPattern(format!(
-                        "invalid regex '{p}': {e}"
-                    )))
-                })
-            })
-            .collect::<Result<_>>()?;
-
-        Ok(Self {
-            client,
-            config,
-            asset_filters,
-        })
+        .map_err(|e| report!(GitLabError::Request(e)))
     }
 
     /// Build the releases API URL for the given percent-encoded project path.
@@ -245,27 +244,20 @@ fn parse_link_next(headers: &reqwest::header::HeaderMap) -> Option<String> {
     })
 }
 
-// ── PluginBase + subtrait implementations ────────────────────────────────
+// ── declare_plugin! ──────────────────────────────────────────────────────
 
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    GitLabPlugin,
-    GitLabConfig,
-    "releases_gitlab",
-    {
-        fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-
-        fn as_release_fetcher(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
-            Some(self)
-        }
-    }
-);
+declare_plugin!(GitLabPlugin, GitLabConfig, "releases_gitlab", {
+    display_name: "GitLab Releases",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::CONTROLLER_ONLY,
+    config_test: [ConfigTestKind::Connectivity],
+    roles: [ReleaseFetcher],
+    extra_capabilities: [PluginCapability::ControllerSideFetchReleases],
+});
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for GitLabPlugin {
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for GitLabPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(
         &self,
@@ -285,11 +277,17 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for GitLabPlugin 
         let mut url = initial_url;
 
         'pages: for _ in 0..MAX_PAGES {
-            let response = self.client.get(&url).send().await.map_err(|e| {
-                report!(PluginError::Configuration(format!(
-                    "HTTP request failed: {e}"
-                )))
-            })?;
+            let response = self
+                .client()
+                .context_to()?
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| {
+                    report!(PluginError::Configuration(format!(
+                        "HTTP request failed: {e}"
+                    )))
+                })?;
 
             let status = response.status();
             self.check_rate_limit(response.headers(), package_identifier);
@@ -358,20 +356,23 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for GitLabPlugin 
 mod tests {
     use super::*;
     use crate::api_types::{GitLabRelease, GitLabReleaseAssets, GitLabReleaseLink};
-    use uptrakit_plugin_infrastructure_core::LocalCommandExecutor;
+    use uptrakit_plugin_infrastructure_core::{
+        HostCapabilities, PluginCapability, PluginMeta, PosixHostRuntime,
+    };
 
     fn test_config() -> GitLabConfig {
         GitLabConfig::default()
     }
 
-    fn test_executor() -> std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::CommandExecutor> {
-        std::sync::Arc::new(LocalCommandExecutor)
+    fn test_runtime() -> Arc<dyn HostRuntime> {
+        let executor = Arc::new(uptrakit_plugin_infrastructure_core::LocalCommandExecutor)
+            as Arc<dyn uptrakit_plugin_infrastructure_core::command::CommandExecutor>;
+        let caps = HostCapabilities::default();
+        Arc::new(PosixHostRuntime::new(executor, caps))
     }
 
-    async fn test_plugin() -> GitLabPlugin {
-        GitLabPlugin::new(test_config(), test_executor())
-            .await
-            .expect("valid config")
+    fn test_plugin() -> GitLabPlugin {
+        GitLabPlugin::new(test_config(), test_runtime()).expect("valid config")
     }
 
     fn make_release(tag: &str, upcoming: bool) -> GitLabRelease {
@@ -420,9 +421,9 @@ mod tests {
 
     // ── URL construction tests ────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn url_construction() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn url_construction() {
+        let plugin = test_plugin();
         let url = plugin.releases_url("owner%2Fproject");
         assert_eq!(
             url,
@@ -430,9 +431,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn url_construction_nested_namespace() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn url_construction_nested_namespace() {
+        let plugin = test_plugin();
         let url = plugin.releases_url("group%2Fsubgroup%2Fproject");
         assert_eq!(
             url,
@@ -440,15 +441,13 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn url_construction_custom_base() {
+    #[test]
+    fn url_construction_custom_base() {
         let config = GitLabConfig {
             api_base_url: Some("https://gitlab.corp.com".to_string()),
             ..GitLabConfig::default()
         };
-        let plugin = GitLabPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = GitLabPlugin::new(config, test_runtime()).expect("valid config");
         let url = plugin.releases_url("owner%2Fproject");
         assert_eq!(
             url,
@@ -458,9 +457,9 @@ mod tests {
 
     // ── convert_release tests ─────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn convert_normal_release() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn convert_normal_release() {
+        let plugin = test_plugin();
         let gl = make_release("v1.0.0", false);
         let upstream = plugin.convert_release(&gl).expect("should convert");
         assert_eq!(upstream.version.as_str(), "1.0.0");
@@ -469,67 +468,61 @@ mod tests {
         assert!(upstream.published_at.is_some());
     }
 
-    #[tokio::test]
-    async fn skip_upcoming_release_by_default() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn skip_upcoming_release_by_default() {
+        let plugin = test_plugin();
         let gl = make_release("v1.0.0-upcoming", true);
         assert!(plugin.convert_release(&gl).is_none());
     }
 
-    #[tokio::test]
-    async fn include_upcoming_when_configured() {
+    #[test]
+    fn include_upcoming_when_configured() {
         let config = GitLabConfig {
             include_prereleases: true,
             ..GitLabConfig::default()
         };
-        let plugin = GitLabPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = GitLabPlugin::new(config, test_runtime()).expect("valid config");
         let gl = make_release("v1.0.0-rc1", true);
         let upstream = plugin.convert_release(&gl).expect("should convert");
         assert!(upstream.is_prerelease);
         assert_eq!(upstream.version.as_str(), "1.0.0-rc1");
     }
 
-    #[tokio::test]
-    async fn tag_stripping() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn tag_stripping() {
+        let plugin = test_plugin();
         let gl = make_release("v2.3.4", false);
         let upstream = plugin.convert_release(&gl).expect("should convert");
         assert_eq!(upstream.version.as_str(), "2.3.4");
     }
 
-    #[tokio::test]
-    async fn tag_without_prefix() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn tag_without_prefix() {
+        let plugin = test_plugin();
         let gl = make_release("1.0.0", false);
         let upstream = plugin.convert_release(&gl).expect("should convert");
         assert_eq!(upstream.version.as_str(), "1.0.0");
     }
 
-    #[tokio::test]
-    async fn custom_tag_prefix() {
+    #[test]
+    fn custom_tag_prefix() {
         let config = GitLabConfig {
             tag_strip_prefix: "release-".to_string(),
             ..GitLabConfig::default()
         };
-        let plugin = GitLabPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = GitLabPlugin::new(config, test_runtime()).expect("valid config");
         let gl = make_release("release-3.0.0", false);
         let upstream = plugin.convert_release(&gl).expect("should convert");
         assert_eq!(upstream.version.as_str(), "3.0.0");
     }
 
-    #[tokio::test]
-    async fn asset_link_filtering() {
+    #[test]
+    fn asset_link_filtering() {
         let config = GitLabConfig {
             asset_patterns: vec![r".*\.tar\.gz$".to_string()],
             ..GitLabConfig::default()
         };
-        let plugin = GitLabPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = GitLabPlugin::new(config, test_runtime()).expect("valid config");
 
         let gl = GitLabRelease {
             tag_name: "v1.0.0".to_string(),
@@ -556,9 +549,9 @@ mod tests {
         assert_eq!(upstream.assets[0].name, "app-linux-amd64.tar.gz");
     }
 
-    #[tokio::test]
-    async fn no_asset_filter_includes_all_links() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn no_asset_filter_includes_all_links() {
+        let plugin = test_plugin();
         let gl = GitLabRelease {
             tag_name: "v1.0.0".to_string(),
             name: None,
@@ -585,9 +578,9 @@ mod tests {
         assert_eq!(upstream.assets.len(), 2);
     }
 
-    #[tokio::test]
-    async fn date_parsing() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn date_parsing() {
+        let plugin = test_plugin();
         let gl = make_release("v1.0.0", false);
         let upstream = plugin.convert_release(&gl).expect("should convert");
         let published = upstream.published_at.expect("should have published_at");
@@ -596,9 +589,9 @@ mod tests {
         assert_eq!(published.day(), 28);
     }
 
-    #[tokio::test]
-    async fn invalid_date_does_not_fail() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn invalid_date_does_not_fail() {
+        let plugin = test_plugin();
         let gl = GitLabRelease {
             tag_name: "v1.0.0".to_string(),
             name: None,
@@ -611,10 +604,49 @@ mod tests {
         assert!(upstream.published_at.is_none());
     }
 
-    #[tokio::test]
-    async fn plugin_creation_succeeds_with_empty_config() {
+    // ── plugin_type_id ──────────────────────────────────────────────────
+
+    #[test]
+    fn plugin_type_id() {
+        let plugin = test_plugin();
+        assert_eq!(plugin.plugin_type_id().as_str(), "releases_gitlab");
+    }
+
+    // ── descriptor capabilities ─────────────────────────────────────────
+
+    #[test]
+    fn descriptor_capabilities() {
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ReleaseFetching)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ControllerSideFetchReleases)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ConfigTest)
+        );
+    }
+
+    // ── descriptor roles ────────────────────────────────────────────────
+
+    #[test]
+    fn descriptor_has_release_fetcher_role() {
+        assert!(DESCRIPTOR.roles.release_fetcher.is_some());
+        assert!(DESCRIPTOR.roles.discoverer.is_none());
+        assert!(DESCRIPTOR.roles.version_detector.is_none());
+        assert!(DESCRIPTOR.roles.update_executor.is_none());
+    }
+
+    #[test]
+    fn plugin_creation_succeeds_with_empty_config() {
         let config = GitLabConfig::default();
-        assert!(GitLabPlugin::new(config, test_executor()).await.is_ok());
+        assert!(GitLabPlugin::new(config, test_runtime()).is_ok());
     }
 
     // ── parse_link_next tests ─────────────────────────────────────────────────

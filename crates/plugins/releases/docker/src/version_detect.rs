@@ -155,7 +155,7 @@ impl DockerPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin {
+impl uptrakit_plugin_infrastructure_core::VersionDetector for DockerPlugin {
     #[tracing::instrument(skip_all)]
     async fn detect_installed_version(
         &self,
@@ -185,7 +185,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for DockerPlugin
     /// resolution) are inspected only once, avoiding redundant Docker daemon
     /// calls for the common case where several items use e.g. `nginx:latest`.
     #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
+    async fn batch_detect(
         &self,
         items: &[BatchDetectItem],
     ) -> uptrakit_plugin_infrastructure_core::Result<Vec<BatchDetectResult>> {

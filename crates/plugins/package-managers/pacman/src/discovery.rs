@@ -9,7 +9,7 @@ use crate::config::PacmanDiscoveryFilter;
 use crate::plugin::PacmanPlugin;
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for PacmanPlugin {
+impl uptrakit_plugin_infrastructure_core::Discoverer for PacmanPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::info!("discovering Pacman-managed software");
@@ -80,11 +80,24 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for PacmanPlugin {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::RoutedOutputExecutor;
-    use uptrakit_plugin_infrastructure_core::{DiscoveryPlugin, PluginRole, PluginType};
+    use uptrakit_plugin_infrastructure_core::{
+        Discoverer, HostCapabilities, HostRuntime, PluginRole, PluginType, PosixHostRuntime,
+    };
 
     use crate::config::{PacmanConfig, PacmanDiscoveryFilter};
     use crate::plugin::PacmanPlugin;
+
+    fn test_plugin_with_executor(
+        config: PacmanConfig,
+        executor: Arc<dyn CommandExecutor>,
+    ) -> PacmanPlugin {
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        PacmanPlugin::new(config, runtime).unwrap()
+    }
 
     // ── discover_software target emission ────────────────────────────────────
 
@@ -92,9 +105,7 @@ mod tests {
     async fn discover_software_emits_targets() {
         // Targets are always emitted regardless of filter.
         let executor = RoutedOutputExecutor::success([("pacman", "nginx 1.26.3-1\n")]);
-        let plugin = PacmanPlugin::new(PacmanConfig::default(), executor)
-            .await
-            .expect("create plugin");
+        let plugin = test_plugin_with_executor(PacmanConfig::default(), executor);
 
         let discoveries = plugin.discover_software().await.expect("discover");
         assert_eq!(discoveries.len(), 1);
@@ -113,9 +124,7 @@ mod tests {
     async fn discover_software_default_config_discovers_all_packages() {
         let executor =
             RoutedOutputExecutor::success([("pacman", "nginx 1.26.3-1\npython 3.12.4-1\n")]);
-        let plugin = PacmanPlugin::new(PacmanConfig::default(), executor)
-            .await
-            .expect("create plugin");
+        let plugin = test_plugin_with_executor(PacmanConfig::default(), executor);
 
         let discoveries = plugin.discover_software().await.expect("discover");
         assert_eq!(discoveries.len(), 2, "all packages must be discovered");
@@ -124,14 +133,12 @@ mod tests {
     #[tokio::test]
     async fn discover_software_emits_targets_with_explicit_all_filter() {
         let executor = RoutedOutputExecutor::success([("pacman", "nginx 1.26.3-1\n")]);
-        let plugin = PacmanPlugin::new(
+        let plugin = test_plugin_with_executor(
             PacmanConfig {
                 discovery_filter: PacmanDiscoveryFilter::All,
             },
             executor,
-        )
-        .await
-        .expect("create plugin");
+        );
 
         let discoveries = plugin.discover_software().await.expect("discover");
         assert_eq!(discoveries.len(), 1);
@@ -145,14 +152,12 @@ mod tests {
     #[tokio::test]
     async fn discover_software_emits_targets_with_explicit_filter() {
         let executor = RoutedOutputExecutor::success([("pacman", "nginx 1.26.3-1\n")]);
-        let plugin = PacmanPlugin::new(
+        let plugin = test_plugin_with_executor(
             PacmanConfig {
                 discovery_filter: PacmanDiscoveryFilter::Explicit,
             },
             executor,
-        )
-        .await
-        .expect("create plugin");
+        );
 
         let discoveries = plugin.discover_software().await.expect("discover");
         assert_eq!(discoveries.len(), 1);

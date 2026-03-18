@@ -10,7 +10,7 @@ use uptrakit_plugin_infrastructure_core::{
 use crate::plugin::{SnapPlugin, validate_identifier};
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for SnapPlugin {
+impl uptrakit_plugin_infrastructure_core::UpdateExecutor for SnapPlugin {
     /// Execute a single Snap package update via `snap refresh`.
     ///
     /// Runs `snap refresh <name>` with an optional `--channel=<channel>` argument

@@ -93,7 +93,11 @@ impl DockerPlugin {
         }
 
         // Determine whether we're accessing a remote host.
-        let is_remote = self.executor.supports_stdio_tunnel();
+        let executor = match self.require_executor() {
+            Ok(e) => e,
+            Err(_) => return None,
+        };
+        let is_remote = executor.supports_stdio_tunnel();
 
         // Parse registry from the image reference.
         let registry = image
@@ -103,7 +107,7 @@ impl DockerPlugin {
 
         crate::credentials::resolve_system_credentials(
             &registry,
-            &self.executor,
+            executor,
             is_remote,
             &self.credential_cache,
         )
@@ -120,9 +124,11 @@ impl DockerPlugin {
     ) -> crate::error::Result<Option<ContainerRuntime>> {
         const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
+        let executor = self.require_executor().map_err(|e| rootcause::report!(e))?;
+
         // Helper: run a shell command via the executor and return true if exit 0.
         let probe = |cmd: &'static str| {
-            let executor = Arc::clone(&self.executor);
+            let executor = Arc::clone(executor);
             async move {
                 tokio::time::timeout(
                     PROBE_TIMEOUT,
@@ -150,7 +156,7 @@ impl DockerPlugin {
         // is configured, restart the proxy with the detected runtime's command
         // so all subsequent bollard calls use the correct binary.
         #[cfg(unix)]
-        if self.executor.supports_stdio_tunnel() && self.config.docker_host.is_none() {
+        if executor.supports_stdio_tunnel() && self.config.docker_host.is_none() {
             let dial_cmd = match runtime {
                 ContainerRuntime::Docker => "docker system dial-stdio",
                 ContainerRuntime::Podman => "podman system dial-stdio",
@@ -164,7 +170,7 @@ impl DockerPlugin {
             );
 
             let proxy =
-                crate::docker_proxy::DockerSocketProxy::start(Arc::clone(&self.executor), dial_cmd)
+                crate::docker_proxy::DockerSocketProxy::start(Arc::clone(executor), dial_cmd)
                     .await
                     .map_err(|e| {
                         rootcause::report!(crate::error::DockerError::DaemonConnection(

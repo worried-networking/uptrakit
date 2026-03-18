@@ -10,7 +10,7 @@ use uptrakit_plugin_infrastructure_core::{
 use crate::plugin::{SnapPlugin, parse_snap_list_line, validate_identifier};
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for SnapPlugin {
+impl uptrakit_plugin_infrastructure_core::VersionDetector for SnapPlugin {
     #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
@@ -63,10 +63,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for SnapPlugin {
     /// each requested package in the resulting map. The exit code is treated
     /// non-fatally — partial output is still useful even if `snapd` reports a warning.
     #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
+    async fn batch_detect(&self, items: &[BatchDetectItem]) -> Result<Vec<BatchDetectResult>> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -124,7 +121,8 @@ mod tests {
     };
     use uptrakit_plugin_infrastructure_core::mpsc;
     use uptrakit_plugin_infrastructure_core::{
-        BatchDetectItem, UpdateOutputLine, Version, VersionDetectorPlugin,
+        BatchDetectItem, HostCapabilities, HostRuntime, PosixHostRuntime, UpdateOutputLine,
+        Version, VersionDetector,
     };
 
     use crate::config::SnapConfig;
@@ -160,11 +158,14 @@ mod tests {
         }
     }
 
-    fn make_executor(stdout: &str, exit_code: i32) -> Arc<dyn CommandExecutor> {
-        Arc::new(FixedOutputExecutor {
+    fn make_plugin(config: SnapConfig, stdout: &str, exit_code: i32) -> SnapPlugin {
+        let executor = Arc::new(FixedOutputExecutor {
             output: stdout.to_string(),
             exit_code,
-        })
+        }) as Arc<dyn CommandExecutor>;
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        SnapPlugin::new(config, runtime).unwrap()
     }
 
     // ── detect_installed_version ──────────────────────────────────────────────
@@ -173,10 +174,7 @@ mod tests {
     async fn detect_installed_version_found() {
         let output = "Name  Version  Rev   Tracking        Publisher  Notes\n\
                       vlc   3.0.20   2359  latest/stable   videolan   -\n";
-        let executor = make_executor(output, 0);
-        let plugin = SnapPlugin::new(SnapConfig::default(), executor)
-            .await
-            .unwrap();
+        let plugin = make_plugin(SnapConfig::default(), output, 0);
 
         let result = plugin.detect_installed_version("vlc").await.unwrap();
         assert_eq!(result, Some(Version::new("3.0.20")));
@@ -184,10 +182,11 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_not_found() {
-        let executor = make_executor("error: snap \"vlc\" is not installed\n", 1);
-        let plugin = SnapPlugin::new(SnapConfig::default(), executor)
-            .await
-            .unwrap();
+        let plugin = make_plugin(
+            SnapConfig::default(),
+            "error: snap \"vlc\" is not installed\n",
+            1,
+        );
 
         let result = plugin.detect_installed_version("vlc").await.unwrap();
         assert!(result.is_none());
@@ -195,27 +194,21 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_invalid_identifier_fails() {
-        let executor = make_executor("", 0);
-        let plugin = SnapPlugin::new(SnapConfig::default(), executor)
-            .await
-            .unwrap();
+        let plugin = make_plugin(SnapConfig::default(), "", 0);
 
         assert!(plugin.detect_installed_version("VLC").await.is_err());
         assert!(plugin.detect_installed_version("-invalid").await.is_err());
     }
 
-    // ── batch_detect_installed_version ────────────────────────────────────────
+    // ── batch_detect ─────────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn batch_detect_installed_version_basic() {
+    async fn batch_detect_basic() {
         let output = "Name    Version   Rev    Tracking         Publisher  Notes\n\
                       vlc     3.0.20    2359   latest/stable    videolan   -\n\
                       code    1.85.2    163351 latest/stable    vscode     -\n";
 
-        let executor = make_executor(output, 0);
-        let plugin = SnapPlugin::new(SnapConfig::default(), executor)
-            .await
-            .unwrap();
+        let plugin = make_plugin(SnapConfig::default(), output, 0);
 
         let items = vec![
             BatchDetectItem::new("vlc".to_string()),
@@ -223,7 +216,7 @@ mod tests {
             BatchDetectItem::new("notinstalled".to_string()),
         ];
 
-        let results = plugin.batch_detect_installed_version(&items).await.unwrap();
+        let results = plugin.batch_detect(&items).await.unwrap();
         assert_eq!(results.len(), 3);
 
         let vlc = results
@@ -246,13 +239,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn batch_detect_installed_version_empty_returns_empty() {
-        let executor = make_executor("", 0);
-        let plugin = SnapPlugin::new(SnapConfig::default(), executor)
-            .await
-            .unwrap();
+    async fn batch_detect_empty_returns_empty() {
+        let plugin = make_plugin(SnapConfig::default(), "", 0);
 
-        let results = plugin.batch_detect_installed_version(&[]).await.unwrap();
+        let results = plugin.batch_detect(&[]).await.unwrap();
         assert!(results.is_empty());
     }
 }

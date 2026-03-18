@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::SecretMasking;
+use uptrakit_plugin_infrastructure_core::PluginConfig;
 
 /// Configuration for the npm package manager plugin.
 ///
@@ -23,9 +23,11 @@ pub struct NpmConfig {
     pub registry_url: Option<String>,
 }
 
-impl SecretMasking for NpmConfig {}
+impl PluginConfig for NpmConfig {
+    fn validate_identifier(value: &str) -> Result<(), String> {
+        crate::validate_identifier(value)
+    }
 
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for NpmConfig {
     fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
         use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
         vec![
@@ -33,26 +35,6 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for NpmConfig {
                 .with_type(FieldType::Toggle)
                 .with_help_text("Include pre-release dist-tags (next, beta, alpha, rc, canary)"),
         ]
-    }
-}
-
-impl NpmConfig {
-    /// Validate an npm package identifier string.
-    ///
-    /// Delegates to the crate-level [`validate_identifier`](crate::validate_identifier)
-    /// function. A valid identifier is a non-empty, valid npm package name
-    /// (plain or scoped: `lodash`, `@angular/cli`).
-    ///
-    /// Called by the plugin registry's `validate_package_identifier` dispatch.
-    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
-    }
-
-    /// Validate the configuration.
-    ///
-    /// Currently accepts all valid deserialized configs.
-    pub fn validate(&self) -> Result<(), String> {
-        Ok(())
     }
 }
 
@@ -108,12 +90,13 @@ mod tests {
 
     #[test]
     fn validate_accepts_default_config() {
+        use uptrakit_plugin_infrastructure_core::PluginConfig;
         assert!(NpmConfig::default().validate().is_ok());
     }
 
     #[test]
     fn secret_masking_is_noop() {
-        use uptrakit_plugin_infrastructure_core::SecretMasking;
+        use uptrakit_plugin_infrastructure_core::PluginConfig;
         let config = NpmConfig {
             include_prereleases: true,
             registry_url: None,

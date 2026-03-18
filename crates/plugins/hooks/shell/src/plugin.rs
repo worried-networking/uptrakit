@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use uptrakit_command::{CommandExecutor, UpdateOutputLine};
+use uptrakit_command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    HookShell, PluginCapability, PreUpdateHookResult, Result, UpdateLifecycleContext,
-    UpdateLifecyclePlugin, impl_plugin_base_config,
+    ConfigModel, ConfigTestKind, HookShell, HostRequirements, HostRuntime, LifecycleHook,
+    PluginFamily, PreUpdateHookResult, Result, UpdateLifecycleContext, UpdateOutputSender,
+    declare_plugin, require_posix_executor,
 };
 
 use crate::config::ShellHookConfig;
@@ -21,29 +22,23 @@ pub struct ShellHookPlugin {
 }
 
 impl ShellHookPlugin {
-    /// Compile-time capabilities declaration.
-    pub const CAPABILITIES: &[PluginCapability] = &[
-        PluginCapability::UpdateLifecycle,
-        PluginCapability::ConfigTest,
-    ];
-
     /// Create a new shell hook plugin instance.
-    pub async fn new(
+    pub fn new(
         config: ShellHookConfig,
-        executor: Arc<dyn CommandExecutor>,
+        runtime: Arc<dyn HostRuntime>,
     ) -> std::result::Result<Self, String> {
+        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
         Ok(Self { config, executor })
     }
 }
 
-impl_plugin_base_config!(ShellHookPlugin, ShellHookConfig, "hook_shell", {
-    fn capabilities(&self) -> Vec<PluginCapability> {
-        Self::CAPABILITIES.to_vec()
-    }
-
-    fn as_update_lifecycle(&self) -> Option<&dyn UpdateLifecyclePlugin> {
-        Some(self)
-    }
+declare_plugin!(ShellHookPlugin, ShellHookConfig, "hook_shell", {
+    display_name: "Shell Hook",
+    family: PluginFamily::Hook,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::POSIX,
+    config_test: [ConfigTestKind::UpdateCommandValidation, ConfigTestKind::PreUpdateHook, ConfigTestKind::PostUpdateHook],
+    roles: [LifecycleHook],
 });
 
 /// Run a shell command via the `run_command_with_shell` utility.
@@ -54,7 +49,7 @@ impl_plugin_base_config!(ShellHookPlugin, ShellHookConfig, "hook_shell", {
 async fn run_shell_command(
     command: &str,
     shell: HookShell,
-    output_tx: &uptrakit_plugin_infrastructure_core::mpsc::Sender<UpdateOutputLine>,
+    output_tx: &UpdateOutputSender,
 ) -> Result<i32> {
     match uptrakit_command::run_command_with_shell(command, shell, output_tx).await {
         Ok((output, exit_code)) => {
@@ -76,11 +71,11 @@ async fn run_shell_command(
 }
 
 #[async_trait]
-impl UpdateLifecyclePlugin for ShellHookPlugin {
+impl LifecycleHook for ShellHookPlugin {
     async fn execute_pre_hook(
         &self,
         ctx: &UpdateLifecycleContext,
-        output_tx: &uptrakit_plugin_infrastructure_core::mpsc::Sender<UpdateOutputLine>,
+        output_tx: &UpdateOutputSender,
     ) -> Result<PreUpdateHookResult> {
         let Some(cmd) = self
             .config
@@ -111,7 +106,7 @@ impl UpdateLifecyclePlugin for ShellHookPlugin {
     async fn execute_post_hook(
         &self,
         ctx: &UpdateLifecycleContext,
-        output_tx: &uptrakit_plugin_infrastructure_core::mpsc::Sender<UpdateOutputLine>,
+        output_tx: &UpdateOutputSender,
     ) -> Result<()> {
         let Some(cmd) = self
             .config
@@ -155,67 +150,59 @@ impl UpdateLifecyclePlugin for ShellHookPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_plugin_infrastructure_core::{
+        HostCapabilities, PluginCapability, PluginMeta, PosixHostRuntime,
+    };
 
-    #[test]
-    fn plugin_type_id() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap();
-        rt.block_on(async {
-            let config = ShellHookConfig {
-                pre_command: Some("echo pre".to_string()),
-                post_command: None,
-                on_failure: true,
-                shell: HookShell::Bash,
-            };
-            let executor =
-                Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
-            let plugin = ShellHookPlugin::new(config, executor).await.unwrap();
-
-            use uptrakit_plugin_infrastructure_core::PluginBase;
-            assert_eq!(plugin.plugin_type_id(), "hook_shell");
-            assert_eq!(
-                plugin.capabilities(),
-                vec![
-                    PluginCapability::UpdateLifecycle,
-                    PluginCapability::ConfigTest
-                ]
-            );
-            assert!(plugin.as_update_lifecycle().is_some());
-        });
+    /// Helper to create a ShellHookPlugin for testing.
+    fn test_plugin(config: ShellHookConfig) -> ShellHookPlugin {
+        let executor = Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        ShellHookPlugin::new(config, runtime).unwrap()
     }
 
     #[test]
-    fn no_sudo_commands_needed() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap();
-        rt.block_on(async {
-            let config = ShellHookConfig {
-                pre_command: Some("echo pre".to_string()),
-                post_command: None,
-                on_failure: true,
-                shell: HookShell::Bash,
-            };
-            let executor =
-                Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
-            let plugin = ShellHookPlugin::new(config, executor).await.unwrap();
-
-            use uptrakit_plugin_infrastructure_core::PluginBase;
-            assert!(plugin.required_sudo_commands().is_empty());
+    fn plugin_type_id() {
+        let plugin = test_plugin(ShellHookConfig {
+            pre_command: Some("echo pre".to_string()),
+            post_command: None,
+            on_failure: true,
+            shell: HookShell::Bash,
         });
+
+        assert_eq!(plugin.plugin_type_id().as_str(), "hook_shell");
+    }
+
+    #[test]
+    fn descriptor_capabilities() {
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::UpdateLifecycle)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ConfigTest)
+        );
+    }
+
+    #[test]
+    fn descriptor_has_lifecycle_hook_role() {
+        assert!(DESCRIPTOR.roles.lifecycle_hook.is_some());
+        assert!(DESCRIPTOR.roles.discoverer.is_none());
+        assert!(DESCRIPTOR.roles.version_detector.is_none());
     }
 
     #[tokio::test]
     async fn pre_hook_succeeds_with_echo() {
-        let config = ShellHookConfig {
+        let plugin = test_plugin(ShellHookConfig {
             pre_command: Some("echo 'pre-hook ran'".to_string()),
             post_command: None,
             on_failure: true,
             shell: HookShell::Bash,
-        };
-        let executor = Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
-        let plugin = ShellHookPlugin::new(config, executor).await.unwrap();
+        });
         let (tx, _rx) = uptrakit_plugin_infrastructure_core::mpsc::channel(100);
         let ctx = UpdateLifecycleContext::for_pre_hook("test", "1.0", None, None);
         let result = plugin.execute_pre_hook(&ctx, &tx).await.unwrap();
@@ -224,14 +211,12 @@ mod tests {
 
     #[tokio::test]
     async fn pre_hook_aborts_on_failure() {
-        let config = ShellHookConfig {
+        let plugin = test_plugin(ShellHookConfig {
             pre_command: Some("exit 1".to_string()),
             post_command: None,
             on_failure: true,
             shell: HookShell::Bash,
-        };
-        let executor = Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
-        let plugin = ShellHookPlugin::new(config, executor).await.unwrap();
+        });
         let (tx, _rx) = uptrakit_plugin_infrastructure_core::mpsc::channel(100);
         let ctx = UpdateLifecycleContext::for_pre_hook("test", "1.0", None, None);
         let result = plugin.execute_pre_hook(&ctx, &tx).await.unwrap();
@@ -240,14 +225,12 @@ mod tests {
 
     #[tokio::test]
     async fn pre_hook_skipped_when_empty() {
-        let config = ShellHookConfig {
+        let plugin = test_plugin(ShellHookConfig {
             pre_command: None,
             post_command: Some("echo post".to_string()),
             on_failure: true,
             shell: HookShell::Bash,
-        };
-        let executor = Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
-        let plugin = ShellHookPlugin::new(config, executor).await.unwrap();
+        });
         let (tx, _rx) = uptrakit_plugin_infrastructure_core::mpsc::channel(100);
         let ctx = UpdateLifecycleContext::for_pre_hook("test", "1.0", None, None);
         let result = plugin.execute_pre_hook(&ctx, &tx).await.unwrap();
@@ -256,14 +239,12 @@ mod tests {
 
     #[tokio::test]
     async fn post_hook_skipped_on_failure_when_disabled() {
-        let config = ShellHookConfig {
+        let plugin = test_plugin(ShellHookConfig {
             pre_command: None,
             post_command: Some("echo should-not-run".to_string()),
             on_failure: false,
             shell: HookShell::Bash,
-        };
-        let executor = Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
-        let plugin = ShellHookPlugin::new(config, executor).await.unwrap();
+        });
         let (tx, mut rx) = uptrakit_plugin_infrastructure_core::mpsc::channel(100);
         let ctx = UpdateLifecycleContext::for_post_hook("test", "1.0", None, None, false);
         plugin.execute_post_hook(&ctx, &tx).await.unwrap();

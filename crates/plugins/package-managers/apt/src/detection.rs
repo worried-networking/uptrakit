@@ -11,7 +11,7 @@ use crate::discovery::parse_dpkg_output;
 use crate::plugin::{AptPlugin, validate_identifier};
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for AptPlugin {
+impl uptrakit_plugin_infrastructure_core::VersionDetector for AptPlugin {
     #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
@@ -67,10 +67,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for AptPlugin {
     /// stdout. Packages absent from stdout are treated as not installed (`None` with
     /// no error).
     #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
+    async fn batch_detect(&self, items: &[BatchDetectItem]) -> Result<Vec<BatchDetectResult>> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -136,33 +133,35 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::RoutedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{
-        BatchDetectItem, LocalCommandExecutor, Version, VersionDetectorPlugin,
+        BatchDetectItem, HostCapabilities, HostRuntime, LocalCommandExecutor, PosixHostRuntime,
+        Version, VersionDetector,
     };
 
     use crate::config::AptConfig;
 
-    fn test_executor() -> Arc<dyn CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
+    /// Helper to create an `AptPlugin` from a mock executor for testing.
+    fn test_plugin_with_executor(
+        config: AptConfig,
+        executor: Arc<dyn CommandExecutor>,
+    ) -> AptPlugin {
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        AptPlugin::new(config, runtime).unwrap()
     }
 
     #[tokio::test]
-    async fn batch_detect_installed_version_found_packages() {
+    async fn batch_detect_found_packages() {
         let executor = RoutedOutputExecutor::success([(
             "dpkg-query",
             "nginx\t1.24.0-2ubuntu7.3\npython3\t3.11.0-5ubuntu2\n",
         )]);
-        let plugin = AptPlugin::new(AptConfig::default(), executor)
-            .await
-            .expect("create");
+        let plugin = test_plugin_with_executor(AptConfig::default(), executor);
 
         let items = vec![
             BatchDetectItem::new("nginx".to_string()),
             BatchDetectItem::new("python3".to_string()),
         ];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("ok");
+        let results = plugin.batch_detect(&items).await.expect("ok");
 
         assert_eq!(results.len(), 2);
         let nginx = results
@@ -187,21 +186,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn batch_detect_installed_version_package_not_in_output_is_not_installed() {
+    async fn batch_detect_package_not_in_output_is_not_installed() {
         // dpkg-query returns output for nginx only; curl is absent (not installed).
         let executor = RoutedOutputExecutor::success([("dpkg-query", "nginx\t1.24.0\n")]);
-        let plugin = AptPlugin::new(AptConfig::default(), executor)
-            .await
-            .expect("create");
+        let plugin = test_plugin_with_executor(AptConfig::default(), executor);
 
         let items = vec![
             BatchDetectItem::new("nginx".to_string()),
             BatchDetectItem::new("curl".to_string()),
         ];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("ok");
+        let results = plugin.batch_detect(&items).await.expect("ok");
 
         assert_eq!(results.len(), 2);
         let curl = results
@@ -213,24 +207,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn batch_detect_installed_version_empty_items_returns_empty() {
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
-            .await
-            .expect("create");
-        let results = plugin
-            .batch_detect_installed_version(&[])
-            .await
-            .expect("ok");
+    async fn batch_detect_empty_items_returns_empty() {
+        let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+        let plugin = test_plugin_with_executor(AptConfig::default(), executor);
+        let results = plugin.batch_detect(&[]).await.expect("ok");
         assert!(results.is_empty());
     }
 
     #[tokio::test]
-    async fn batch_detect_installed_version_invalid_identifier_fails() {
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
-            .await
-            .expect("create");
+    async fn batch_detect_invalid_identifier_fails() {
+        let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+        let plugin = test_plugin_with_executor(AptConfig::default(), executor);
         let items = vec![BatchDetectItem::new("INVALID_UPPERCASE".to_string())];
-        let result = plugin.batch_detect_installed_version(&items).await;
+        let result = plugin.batch_detect(&items).await;
         assert!(result.is_err());
     }
 }

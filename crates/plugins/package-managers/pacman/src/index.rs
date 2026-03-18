@@ -5,7 +5,7 @@ use uptrakit_plugin_infrastructure_core::{Result, execute_and_capture};
 use crate::plugin::PacmanPlugin;
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for PacmanPlugin {
+impl uptrakit_plugin_infrastructure_core::PackageIndexer for PacmanPlugin {
     #[tracing::instrument(skip_all)]
     async fn refresh_package_index(&self) -> Result<()> {
         tracing::info!("refreshing Pacman package database");

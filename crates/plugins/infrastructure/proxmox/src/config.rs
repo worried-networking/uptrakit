@@ -1,9 +1,7 @@
-use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::{SecretMasking, SecretString};
+use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
+use uptrakit_plugin_infrastructure_core::{PluginConfig, SecretString};
 use url::Url;
-
-use crate::error::{ProxmoxError, Result};
 
 /// Sentinel value used to indicate a masked secret in API responses.
 const SECRET_MASK: &str = "***";
@@ -47,12 +45,77 @@ impl Default for ProxmoxConfig {
     }
 }
 
+impl PluginConfig for ProxmoxConfig {
+    fn validate(&self) -> Result<(), String> {
+        // Validate api_url
+        if self.api_url.is_empty() {
+            return Err("api_url is required".to_string());
+        }
+        let parsed = Url::parse(&self.api_url).map_err(|e| format!("invalid api_url: {e}"))?;
+        if parsed.scheme() != "https" {
+            return Err("api_url must use https".to_string());
+        }
+        if parsed.host_str().is_none() {
+            return Err("api_url must include a host".to_string());
+        }
+
+        // Validate api_token format: USER@REALM!TOKENID=SECRET
+        let token = self.api_token.expose_secret();
+        if !token.is_empty() && !is_valid_pve_token(token) {
+            return Err("api_token must be in PVE format: USER@REALM!TOKENID=SECRET".to_string());
+        }
+
+        Ok(())
+    }
+
+    fn with_secrets_masked(mut self) -> Self {
+        self.api_token = SecretString::new(SECRET_MASK);
+        self
+    }
+
+    fn restore_secrets_from(&mut self, existing: &Self) {
+        if self.api_token.expose_secret() == SECRET_MASK {
+            self.api_token = existing.api_token.clone();
+        }
+    }
+
+    fn form_schema() -> Vec<FieldDef> {
+        vec![
+            FieldDef::new("api_url", "API URL")
+                .required()
+                .with_placeholder("https://pve.example.com:8006")
+                .with_help_text("Proxmox VE API endpoint URL"),
+            FieldDef::new("api_token", "API Token")
+                .with_type(FieldType::Password)
+                .required()
+                .sensitive()
+                .with_placeholder("USER@REALM!TOKENID=SECRET")
+                .with_help_text("PVE API token in USER@REALM!TOKENID=SECRET format"),
+            FieldDef::new("verify_tls", "Verify TLS")
+                .with_type(FieldType::Toggle)
+                .with_default_value(serde_json::json!(true))
+                .with_help_text("Verify TLS certificates (disable for self-signed certs)"),
+            FieldDef::new("node_filter", "Node Filter")
+                .with_type(FieldType::Textarea)
+                .list()
+                .with_help_text(
+                    "Restrict discovery to these node names (one per line, empty = all)",
+                ),
+        ]
+    }
+}
+
 impl ProxmoxConfig {
-    /// Validate the configuration.
+    /// Validate the configuration using the rich error type.
     ///
-    /// Checks that `api_url` is a valid HTTPS URL with a host, and that
-    /// `api_token` matches the PVE API token format.
-    pub fn validate(&self) -> Result<()> {
+    /// This method returns the full `ProxmoxError`-based `Result` for use
+    /// in internal plugin code that wants structured errors. The
+    /// `PluginConfig::validate` trait method delegates to this and maps to
+    /// `String`.
+    pub fn validate_rich(&self) -> crate::error::Result<()> {
+        use crate::error::ProxmoxError;
+        use rootcause::prelude::*;
+
         // Validate api_url
         if self.api_url.is_empty() {
             bail!(ProxmoxError::Configuration(
@@ -116,47 +179,6 @@ fn is_valid_pve_token(token: &str) -> bool {
     !user.is_empty() && !realm.is_empty() && !token_id.is_empty() && !secret.is_empty()
 }
 
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ProxmoxConfig {
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
-        vec![
-            FieldDef::new("api_url", "API URL")
-                .required()
-                .with_placeholder("https://pve.example.com:8006")
-                .with_help_text("Proxmox VE API endpoint URL"),
-            FieldDef::new("api_token", "API Token")
-                .with_type(FieldType::Password)
-                .required()
-                .sensitive()
-                .with_placeholder("USER@REALM!TOKENID=SECRET")
-                .with_help_text("PVE API token in USER@REALM!TOKENID=SECRET format"),
-            FieldDef::new("verify_tls", "Verify TLS")
-                .with_type(FieldType::Toggle)
-                .with_default_value(serde_json::json!(true))
-                .with_help_text("Verify TLS certificates (disable for self-signed certs)"),
-            FieldDef::new("node_filter", "Node Filter")
-                .with_type(FieldType::Textarea)
-                .list()
-                .with_help_text(
-                    "Restrict discovery to these node names (one per line, empty = all)",
-                ),
-        ]
-    }
-}
-
-impl SecretMasking for ProxmoxConfig {
-    fn with_secrets_masked(mut self) -> Self {
-        self.api_token = SecretString::new(SECRET_MASK);
-        self
-    }
-
-    fn restore_secrets_from(&mut self, existing: &Self) {
-        if self.api_token.expose_secret() == SECRET_MASK {
-            self.api_token = existing.api_token.clone();
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,7 +210,7 @@ mod tests {
             ..ProxmoxConfig::default()
         };
         let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("https"));
+        assert!(err.contains("https"));
     }
 
     #[test]
@@ -199,7 +221,7 @@ mod tests {
             ..ProxmoxConfig::default()
         };
         let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("PVE format"));
+        assert!(err.contains("PVE format"));
     }
 
     #[test]

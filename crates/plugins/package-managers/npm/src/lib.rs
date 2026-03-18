@@ -8,4 +8,4 @@ pub mod update;
 
 pub use config::NpmConfig;
 pub use error::*;
-pub use plugin::{NpmPlugin, validate_identifier, validate_version};
+pub use plugin::{DESCRIPTOR, NpmPlugin, validate_identifier, validate_version};

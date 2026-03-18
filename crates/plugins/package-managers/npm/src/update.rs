@@ -1,23 +1,22 @@
 use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandSpec, send_output};
-use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchUpdateItem, BatchUpdateResult, OutputStreamType, PluginError, ReleaseInfo, Result,
-    UpdateOutputLine,
+    UpdateOutputSender,
 };
 
 use crate::plugin::{NpmPlugin, validate_version};
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for NpmPlugin {
+impl uptrakit_plugin_infrastructure_core::UpdateExecutor for NpmPlugin {
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
         package_identifier: &str,
         to_version: &str,
         _release_info: Option<&ReleaseInfo>,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
+        output_tx: &UpdateOutputSender,
     ) -> Result<String> {
         self.require_package_identifier(package_identifier)?;
         validate_version(to_version).map_err(|e| report!(PluginError::Configuration(e)))?;
@@ -65,7 +64,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for NpmPlugin {
     async fn execute_batch_update(
         &self,
         items: &[BatchUpdateItem],
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
+        output_tx: &UpdateOutputSender,
     ) -> Result<Vec<BatchUpdateResult>> {
         if items.is_empty() {
             return Ok(vec![]);

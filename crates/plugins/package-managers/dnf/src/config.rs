@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::SecretMasking;
+use uptrakit_plugin_infrastructure_core::PluginConfig;
 
 /// Discovery filter: which packages to surface during autodiscovery.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,52 +30,17 @@ pub struct DnfConfig {
     pub discovery_filter: DnfDiscoveryFilter,
 }
 
-impl SecretMasking for DnfConfig {}
-
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for DnfConfig {
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        vec![]
+impl PluginConfig for DnfConfig {
+    fn validate(&self) -> Result<(), String> {
+        Ok(())
     }
 
-    fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
-    {
-        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
-        vec![
-            FieldDef::new("discovery_filter", "Discovery Filter")
-                .with_type(FieldType::Select)
-                .with_options(vec![
-                    SelectOption::new("all", "All installed packages"),
-                    SelectOption::new("user_installed", "User-installed only"),
-                ])
-                .with_help_text("Which packages to discover during autodiscovery"),
-        ]
-    }
-
-    fn type_settings_sample() -> serde_json::Value {
-        serde_json::json!({
-            "discovery_filter": "all"
-        })
+    fn validate_identifier(value: &str) -> Result<(), String> {
+        crate::validate_identifier(value)
     }
 }
 
 impl DnfConfig {
-    /// Validate an RPM package identifier string.
-    ///
-    /// Delegates to the crate-level [`validate_identifier`](crate::validate_identifier)
-    /// function. A valid identifier is a non-empty RPM package name.
-    ///
-    /// Called by the plugin registry's `validate_package_identifier` dispatch.
-    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
-    }
-
-    /// Validate the configuration.
-    ///
-    /// Currently accepts all valid deserialized configs.
-    pub fn validate(&self) -> crate::error::Result<()> {
-        Ok(())
-    }
-
     /// Returns the discovery filter to apply.
     pub(crate) fn effective_filter(&self) -> DnfDiscoveryFilter {
         self.discovery_filter
@@ -173,7 +138,7 @@ mod tests {
     #[test]
     fn validate_accepts_default_config() {
         let config = DnfConfig::default();
-        assert!(config.validate().is_ok());
+        assert!(PluginConfig::validate(&config).is_ok());
     }
 
     #[test]
@@ -181,7 +146,7 @@ mod tests {
         let config = DnfConfig {
             discovery_filter: DnfDiscoveryFilter::All,
         };
-        assert!(config.validate().is_ok());
+        assert!(PluginConfig::validate(&config).is_ok());
     }
 
     #[test]
@@ -189,6 +154,6 @@ mod tests {
         let config = DnfConfig {
             discovery_filter: DnfDiscoveryFilter::UserInstalled,
         };
-        assert!(config.validate().is_ok());
+        assert!(PluginConfig::validate(&config).is_ok());
     }
 }

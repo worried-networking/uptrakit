@@ -8,7 +8,7 @@ use uptrakit_plugin_infrastructure_core::{
 use crate::plugin::{SYSTEM_SNAPS, SnapPlugin, parse_snap_list_line};
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for SnapPlugin {
+impl uptrakit_plugin_infrastructure_core::Discoverer for SnapPlugin {
     /// Discover Snap packages installed on the local system.
     ///
     /// Runs `snap list` and returns all user-installed snaps, excluding known
@@ -88,7 +88,7 @@ mod tests {
     };
     use uptrakit_plugin_infrastructure_core::mpsc;
     use uptrakit_plugin_infrastructure_core::{
-        DiscoveryPlugin, PluginCapability, PluginType, UpdateOutputLine,
+        Discoverer, HostCapabilities, HostRuntime, PluginType, PosixHostRuntime, UpdateOutputLine,
     };
 
     use crate::config::SnapConfig;
@@ -124,11 +124,14 @@ mod tests {
         }
     }
 
-    fn make_executor(stdout: &str, exit_code: i32) -> Arc<dyn CommandExecutor> {
-        Arc::new(FixedOutputExecutor {
+    fn make_plugin(config: SnapConfig, stdout: &str, exit_code: i32) -> SnapPlugin {
+        let executor = Arc::new(FixedOutputExecutor {
             output: stdout.to_string(),
             exit_code,
-        })
+        }) as Arc<dyn CommandExecutor>;
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        SnapPlugin::new(config, runtime).unwrap()
     }
 
     // ── discover_software: system snap exclusion ──────────────────────────────
@@ -143,10 +146,7 @@ mod tests {
                                 vlc     3.0.20    2359   latest/stable    videolan   -\n\
                                 code    1.85.2    163351 latest/stable    vscode     -\n";
 
-        let executor = make_executor(snap_list_output, 0);
-        let plugin = SnapPlugin::new(SnapConfig::default(), executor)
-            .await
-            .unwrap();
+        let plugin = make_plugin(SnapConfig::default(), snap_list_output, 0);
 
         let discovered = plugin.discover_software().await.unwrap();
 
@@ -166,10 +166,7 @@ mod tests {
         let snap_list_output = "Name    Version   Rev    Tracking         Publisher  Notes\n\
                                 vlc     3.0.20    2359   latest/stable    videolan   -\n";
 
-        let executor = make_executor(snap_list_output, 0);
-        let plugin = SnapPlugin::new(SnapConfig::default(), executor)
-            .await
-            .unwrap();
+        let plugin = make_plugin(SnapConfig::default(), snap_list_output, 0);
 
         let discovered = plugin.discover_software().await.unwrap();
         assert_eq!(discovered.len(), 1);
@@ -185,46 +182,16 @@ mod tests {
         let snap_list_output = "Name    Version   Rev    Tracking         Publisher  Notes\n\
                                 vlc     3.0.20    2359   latest/stable    videolan   -\n";
 
-        let executor = make_executor(snap_list_output, 0);
-        let plugin = SnapPlugin::new(
+        let plugin = make_plugin(
             SnapConfig {
                 channel: Some("latest/stable".to_string()),
             },
-            executor,
-        )
-        .await
-        .unwrap();
+            snap_list_output,
+            0,
+        );
 
         let discovered = plugin.discover_software().await.unwrap();
         assert_eq!(discovered.len(), 1);
         assert_eq!(discovered[0].targets.len(), 1);
-    }
-
-    // ── capabilities ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn snap_capabilities_declared() {
-        assert!(SnapPlugin::CAPABILITIES.contains(&PluginCapability::DiscoverLocalSoftware));
-        assert!(SnapPlugin::CAPABILITIES.contains(&PluginCapability::DetectHostCompatibility));
-        assert!(SnapPlugin::CAPABILITIES.contains(&PluginCapability::VersionDetection));
-        assert!(SnapPlugin::CAPABILITIES.contains(&PluginCapability::ReleaseFetching));
-        assert!(SnapPlugin::CAPABILITIES.contains(&PluginCapability::UpdateExecution));
-        // Snap does not need RefreshPackageIndex — snapd manages its own cache.
-        assert!(!SnapPlugin::CAPABILITIES.contains(&PluginCapability::RefreshPackageIndex));
-    }
-
-    // ── required_sudo_commands ───────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn snap_plugin_required_sudo_commands() {
-        use uptrakit_plugin_infrastructure_core::PluginBase;
-        let plugin = SnapPlugin::new(SnapConfig::default(), make_executor("", 0))
-            .await
-            .expect("create plugin");
-        let entries = plugin.required_sudo_commands();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].command, "snap");
-        assert!(!entries[0].needs_setenv);
-        assert_eq!(entries[0].args_suffix.as_deref(), Some("refresh *"));
     }
 }

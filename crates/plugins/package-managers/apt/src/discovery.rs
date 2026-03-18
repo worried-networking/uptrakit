@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::command::CommandSpec;
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, PluginRole, PluginType, Result,
-    execute_and_capture,
+    DiscoveredSoftware, Discoverer, DiscoveryTarget, HostCompatibility, PluginRole, PluginType,
+    Result, execute_and_capture,
 };
 
 use crate::config::AptDiscoveryFilter;
@@ -31,7 +31,7 @@ pub(crate) fn parse_dpkg_output(output: &str) -> Vec<(String, String)> {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for AptPlugin {
+impl Discoverer for AptPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::info!("discovering APT-managed software");
@@ -134,13 +134,20 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::{FixedOutputExecutor, RoutedOutputExecutor};
     use uptrakit_plugin_infrastructure_core::{
-        DiscoveryPlugin, HostCompatibility, LocalCommandExecutor, PluginRole, PluginType,
+        Discoverer, HostCapabilities, HostCompatibility, HostRuntime, LocalCommandExecutor,
+        PluginRole, PluginType, PosixHostRuntime, ReleaseFetcher, VersionDetector,
     };
 
     use crate::config::{AptConfig, AptDiscoveryFilter};
 
-    fn test_executor() -> Arc<dyn CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
+    /// Helper to create an `AptPlugin` from a mock executor for testing.
+    fn test_plugin_with_executor(
+        config: AptConfig,
+        executor: Arc<dyn CommandExecutor>,
+    ) -> AptPlugin {
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        AptPlugin::new(config, runtime).unwrap()
     }
 
     // ── parse_dpkg_output ───────────────────────────────────────────────
@@ -181,9 +188,7 @@ mod tests {
     async fn discover_software_emits_targets() {
         // Targets are always emitted regardless of filter.
         let executor = RoutedOutputExecutor::success([("dpkg-query", "nginx\t1.24.0\n")]);
-        let plugin = AptPlugin::new(AptConfig::default(), executor)
-            .await
-            .expect("create plugin");
+        let plugin = test_plugin_with_executor(AptConfig::default(), executor);
 
         let discoveries = plugin.discover_software().await.expect("discover");
         assert_eq!(discoveries.len(), 1);
@@ -200,12 +205,10 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_default_config_discovers_all_packages() {
-        // Default config → effective filter All → all dpkg packages discovered.
+        // Default config -> effective filter All -> all dpkg packages discovered.
         let executor =
             RoutedOutputExecutor::success([("dpkg-query", "nginx\t1.24.0\npython3\t3.11.0\n")]);
-        let plugin = AptPlugin::new(AptConfig::default(), executor)
-            .await
-            .expect("create plugin");
+        let plugin = test_plugin_with_executor(AptConfig::default(), executor);
 
         let discoveries = plugin.discover_software().await.expect("discover");
         assert_eq!(discoveries.len(), 2, "all dpkg packages must be discovered");
@@ -213,16 +216,14 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_emits_targets_with_explicit_all_filter() {
-        // discovery_filter: All → targets always emitted.
+        // discovery_filter: All -> targets always emitted.
         let executor = RoutedOutputExecutor::success([("dpkg-query", "nginx\t1.24.0\n")]);
-        let plugin = AptPlugin::new(
+        let plugin = test_plugin_with_executor(
             AptConfig {
                 discovery_filter: AptDiscoveryFilter::All,
             },
             executor,
-        )
-        .await
-        .expect("create plugin");
+        );
 
         let discoveries = plugin.discover_software().await.expect("discover");
         assert_eq!(discoveries.len(), 1);
@@ -235,19 +236,17 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_emits_targets_with_manual_filter() {
-        // discovery_filter: Manual → apt-mark narrows packages; targets always emitted.
+        // discovery_filter: Manual -> apt-mark narrows packages; targets always emitted.
         let executor = RoutedOutputExecutor::success([
             ("dpkg-query", "nginx\t1.24.0\npython3\t3.11.0\n"),
             ("apt-mark", "nginx\n"), // only nginx is manually installed
         ]);
-        let plugin = AptPlugin::new(
+        let plugin = test_plugin_with_executor(
             AptConfig {
                 discovery_filter: AptDiscoveryFilter::Manual,
             },
             executor,
-        )
-        .await
-        .expect("create plugin");
+        );
 
         let discoveries = plugin.discover_software().await.expect("discover");
         assert_eq!(discoveries.len(), 1);
@@ -263,18 +262,16 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_compatible_when_which_exits_zero() {
-        let plugin = AptPlugin::new(AptConfig::default(), FixedOutputExecutor::failure(0))
-            .await
-            .expect("create");
+        let plugin =
+            test_plugin_with_executor(AptConfig::default(), FixedOutputExecutor::failure(0));
         let result = plugin.detect_host_compatibility().await.expect("ok");
         assert_eq!(result, HostCompatibility::Compatible);
     }
 
     #[tokio::test]
     async fn detect_host_compatibility_incompatible_when_which_exits_nonzero() {
-        let plugin = AptPlugin::new(AptConfig::default(), FixedOutputExecutor::failure(1))
-            .await
-            .expect("create");
+        let plugin =
+            test_plugin_with_executor(AptConfig::default(), FixedOutputExecutor::failure(1));
         let result = plugin.detect_host_compatibility().await.expect("ok");
         match result {
             HostCompatibility::Incompatible(msg) => {
@@ -289,20 +286,16 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_empty_identifier_fails() {
-        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
-            .await
-            .expect("create plugin");
+        let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+        let plugin = test_plugin_with_executor(AptConfig::default(), executor);
         let result = plugin.detect_installed_version("").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn fetch_releases_empty_identifier_fails() {
-        use uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin;
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
-            .await
-            .expect("create plugin");
+        let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+        let plugin = test_plugin_with_executor(AptConfig::default(), executor);
         let result = plugin.fetch_releases("").await;
         assert!(result.is_err());
     }

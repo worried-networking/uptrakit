@@ -6,10 +6,11 @@ use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, DiscoveredSoftware,
-    DiscoveryTarget, HostCompatibility, OutputStreamType, PluginCapability, PluginError,
-    PluginRole, PluginType, ReleaseInfo, Result, UpdateOutputLine, UpstreamRelease, Version,
-    execute_and_capture,
+    BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, ConfigModel,
+    ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, HostRequirements,
+    HostRuntime, OutputStreamType, PluginError, PluginFamily, PluginRole, PluginType, ReleaseInfo,
+    Result, UpdateOutputLine, UpstreamRelease, Version, declare_plugin, execute_and_capture,
+    require_posix_executor,
 };
 
 use crate::config::MasConfig;
@@ -145,21 +146,12 @@ pub struct MasPlugin {
 }
 
 impl MasPlugin {
-    /// Compile-time capabilities for the `mas` plugin.
-    pub const CAPABILITIES: &'static [PluginCapability] = &[
-        PluginCapability::DiscoverLocalSoftware,
-        PluginCapability::DetectHostCompatibility,
-        PluginCapability::VersionDetection,
-        PluginCapability::ReleaseFetching,
-        PluginCapability::UpdateExecution,
-        PluginCapability::ConfigTest,
-    ];
-
-    /// Create a new `mas` plugin with the given configuration and command executor.
-    pub async fn new(config: MasConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
-        config
-            .validate()
-            .map_err(|e| report!(PluginError::Configuration(e.to_string())))?;
+    /// Create a new `mas` plugin with the given configuration and host runtime.
+    pub fn new(
+        config: MasConfig,
+        runtime: Arc<dyn HostRuntime>,
+    ) -> std::result::Result<Self, String> {
+        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
         Ok(Self {
             _config: config,
             executor,
@@ -206,42 +198,19 @@ impl MasPlugin {
     }
 }
 
-// ── PluginBase + subtrait implementations ────────────────────────────────
+// ── Plugin descriptor ─────────────────────────────────────────────────────
 
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    MasPlugin,
-    MasConfig,
-    "package_manager_mas",
-    {
-        fn capabilities(&self) -> Vec<PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-
-        fn as_discovery(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
-            Some(self)
-        }
-        fn as_version_detector(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
-            Some(self)
-        }
-        fn as_release_fetcher(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
-            Some(self)
-        }
-        fn as_update_executor(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
-            Some(self)
-        }
-    }
-);
+declare_plugin!(MasPlugin, MasConfig, "package_manager_mas", {
+    display_name: "Mac App Store",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::POSIX,
+    config_test: [ConfigTestKind::VersionDetection, ConfigTestKind::UpdateCommandValidation],
+    roles: [Discoverer, VersionDetector, ReleaseFetcher, UpdateExecutor],
+});
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for MasPlugin {
+impl uptrakit_plugin_infrastructure_core::Discoverer for MasPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::debug!("discovering installed Mac App Store apps via mas list");
@@ -297,7 +266,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for MasPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for MasPlugin {
+impl uptrakit_plugin_infrastructure_core::VersionDetector for MasPlugin {
     #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
@@ -317,10 +286,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for MasPlugin {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
+    async fn batch_detect(&self, items: &[BatchDetectItem]) -> Result<Vec<BatchDetectResult>> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -355,7 +321,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for MasPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for MasPlugin {
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for MasPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
@@ -395,10 +361,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for MasPlugin {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn batch_fetch_releases(
-        &self,
-        items: &[BatchFetchItem],
-    ) -> Result<Vec<BatchFetchResult>> {
+    async fn batch_fetch(&self, items: &[BatchFetchItem]) -> Result<Vec<BatchFetchResult>> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -449,7 +412,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for MasPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for MasPlugin {
+impl uptrakit_plugin_infrastructure_core::UpdateExecutor for MasPlugin {
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
@@ -486,7 +449,9 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for MasPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::{CommandOutput, UpdateOutputLine, mpsc::Sender};
+    use uptrakit_plugin_infrastructure_core::{
+        CommandOutput, HostCapabilities, PosixHostRuntime, UpdateOutputLine, mpsc::Sender,
+    };
 
     // ─── Mock executor ───────────────────────────────────────────────────────
 
@@ -580,11 +545,15 @@ mod tests {
         }
     }
 
+    fn make_plugin_from_executor(executor: Arc<dyn CommandExecutor>) -> MasPlugin {
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        MasPlugin::new(MasConfig::default(), runtime).unwrap()
+    }
+
     fn make_plugin(list_output: &str, outdated_output: &str) -> MasPlugin {
-        MasPlugin {
-            _config: MasConfig::default(),
-            executor: Arc::new(MockMasExecutor::new(list_output, outdated_output)),
-        }
+        let executor = Arc::new(MockMasExecutor::new(list_output, outdated_output));
+        make_plugin_from_executor(executor)
     }
 
     const SAMPLE_LIST: &str = "\
@@ -686,7 +655,7 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_returns_all_apps() {
-        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
+        use uptrakit_plugin_infrastructure_core::Discoverer;
         let plugin = make_plugin(SAMPLE_LIST, "");
         let discovered = plugin.discover_software().await.expect("discover");
 
@@ -709,7 +678,7 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_empty_list() {
-        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
+        use uptrakit_plugin_infrastructure_core::Discoverer;
         let plugin = make_plugin("", "");
         let discovered = plugin.discover_software().await.expect("discover");
         assert!(discovered.is_empty());
@@ -719,16 +688,13 @@ mod tests {
 
     #[tokio::test]
     async fn batch_detect_returns_correct_versions() {
-        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
+        use uptrakit_plugin_infrastructure_core::VersionDetector;
         let plugin = make_plugin(SAMPLE_LIST, "");
         let items = vec![
             BatchDetectItem::new("497799835".to_string()),
             BatchDetectItem::new("1147396723".to_string()),
         ];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("batch detect");
+        let results = plugin.batch_detect(&items).await.expect("batch detect");
         assert_eq!(results.len(), 2);
 
         let xcode_result = results
@@ -744,13 +710,10 @@ mod tests {
 
     #[tokio::test]
     async fn batch_detect_returns_none_for_unknown_id() {
-        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
+        use uptrakit_plugin_infrastructure_core::VersionDetector;
         let plugin = make_plugin(SAMPLE_LIST, "");
         let items = vec![BatchDetectItem::new("999999999".to_string())];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("batch detect");
+        let results = plugin.batch_detect(&items).await.expect("batch detect");
         assert_eq!(results.len(), 1);
         assert!(results[0].installed_version.is_none());
         assert!(results[0].error.is_none());
@@ -758,12 +721,9 @@ mod tests {
 
     #[tokio::test]
     async fn batch_detect_empty_items() {
-        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
+        use uptrakit_plugin_infrastructure_core::VersionDetector;
         let plugin = make_plugin(SAMPLE_LIST, "");
-        let results = plugin
-            .batch_detect_installed_version(&[])
-            .await
-            .expect("batch detect");
+        let results = plugin.batch_detect(&[]).await.expect("batch detect");
         assert!(results.is_empty());
     }
 
@@ -771,13 +731,10 @@ mod tests {
 
     #[tokio::test]
     async fn batch_fetch_outdated_path() {
-        use uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin;
+        use uptrakit_plugin_infrastructure_core::ReleaseFetcher;
         let plugin = make_plugin(SAMPLE_LIST, SAMPLE_OUTDATED);
         let items = vec![BatchFetchItem::new("497799835".to_string())];
-        let results = plugin
-            .batch_fetch_releases(&items)
-            .await
-            .expect("batch fetch");
+        let results = plugin.batch_fetch(&items).await.expect("batch fetch");
         assert_eq!(results.len(), 1);
         assert!(results[0].error.is_none());
         assert_eq!(results[0].releases.len(), 1);
@@ -790,13 +747,10 @@ mod tests {
 
     #[tokio::test]
     async fn batch_fetch_up_to_date_path() {
-        use uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin;
+        use uptrakit_plugin_infrastructure_core::ReleaseFetcher;
         let plugin = make_plugin(SAMPLE_LIST, SAMPLE_OUTDATED);
         let items = vec![BatchFetchItem::new("1147396723".to_string())];
-        let results = plugin
-            .batch_fetch_releases(&items)
-            .await
-            .expect("batch fetch");
+        let results = plugin.batch_fetch(&items).await.expect("batch fetch");
         assert_eq!(results.len(), 1);
         assert!(results[0].error.is_none());
         assert_eq!(results[0].releases.len(), 1);
@@ -805,13 +759,10 @@ mod tests {
 
     #[tokio::test]
     async fn batch_fetch_unknown_id_returns_error() {
-        use uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin;
+        use uptrakit_plugin_infrastructure_core::ReleaseFetcher;
         let plugin = make_plugin(SAMPLE_LIST, "");
         let items = vec![BatchFetchItem::new("999999999".to_string())];
-        let results = plugin
-            .batch_fetch_releases(&items)
-            .await
-            .expect("batch fetch");
+        let results = plugin.batch_fetch(&items).await.expect("batch fetch");
         assert_eq!(results.len(), 1);
         assert!(results[0].error.is_some());
         assert!(results[0].releases.is_empty());
@@ -821,7 +772,7 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_compatible() {
-        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
+        use uptrakit_plugin_infrastructure_core::Discoverer;
         let plugin = make_plugin(SAMPLE_LIST, "");
         let compat = plugin
             .detect_host_compatibility()
@@ -832,11 +783,8 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_incompatible() {
-        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
-        let plugin = MasPlugin {
-            _config: MasConfig::default(),
-            executor: Arc::new(MockMasExecutor::incompatible("")),
-        };
+        use uptrakit_plugin_infrastructure_core::Discoverer;
+        let plugin = make_plugin_from_executor(Arc::new(MockMasExecutor::incompatible("")));
         let compat = plugin
             .detect_host_compatibility()
             .await

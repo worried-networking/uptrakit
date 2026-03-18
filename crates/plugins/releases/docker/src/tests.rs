@@ -8,8 +8,8 @@ use crate::plugin::DockerPlugin;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    BatchDetectItem, DiscoveryPlugin, HostCompatibility, PluginBase, PluginCapability,
-    UpdateExecutorPlugin, UpdateOutputLine, VersionDetectorPlugin,
+    BatchDetectItem, Discoverer, HostCompatibility, PluginCapability, UpdateExecutor as _,
+    UpdateOutputLine, VersionDetector,
 };
 
 fn test_executor() -> Arc<dyn CommandExecutor> {
@@ -105,36 +105,30 @@ fn plugin_creation_succeeds_with_empty_config() {
 }
 
 #[test]
-fn capabilities_includes_discover_local_software() {
-    let plugin = DockerPlugin::new_for_test(
-        DockerConfig::default(),
-        test_executor(),
-        default_mock_client(),
-    )
-    .unwrap();
-    assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
+fn descriptor_capabilities_includes_discover_local_software() {
+    assert!(
+        crate::plugin::DESCRIPTOR
+            .capabilities
+            .contains(&PluginCapability::DiscoverLocalSoftware)
+    );
 }
 
 #[test]
-fn capabilities_includes_detect_host_compatibility() {
-    let plugin = DockerPlugin::new_for_test(
-        DockerConfig::default(),
-        test_executor(),
-        default_mock_client(),
-    )
-    .unwrap();
-    assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
+fn descriptor_capabilities_includes_detect_host_compatibility() {
+    assert!(
+        crate::plugin::DESCRIPTOR
+            .capabilities
+            .contains(&PluginCapability::DetectHostCompatibility)
+    );
 }
 
 #[test]
-fn capabilities_excludes_refresh_package_index() {
-    let plugin = DockerPlugin::new_for_test(
-        DockerConfig::default(),
-        test_executor(),
-        default_mock_client(),
-    )
-    .unwrap();
-    assert!(!plugin.has_capability(PluginCapability::RefreshPackageIndex));
+fn descriptor_capabilities_excludes_refresh_package_index() {
+    assert!(
+        !crate::plugin::DESCRIPTOR
+            .capabilities
+            .contains(&PluginCapability::RefreshPackageIndex)
+    );
 }
 
 // ── detect_host_compatibility ─────────────────────────────────────────────
@@ -895,7 +889,7 @@ async fn batch_detect_deduplicates_inspections_for_shared_image() {
     ];
 
     let results = plugin
-        .batch_detect_installed_version(&items)
+        .batch_detect(&items)
         .await
         .expect("batch detect should succeed");
 
@@ -930,10 +924,7 @@ async fn batch_detect_returns_none_for_uninstalled_image() {
         .expect("valid config");
 
     let items = vec![BatchDetectItem::new("nginx:latest#web-server".to_string())];
-    let results = plugin
-        .batch_detect_installed_version(&items)
-        .await
-        .expect("ok");
+    let results = plugin.batch_detect(&items).await.expect("ok");
     assert_eq!(results.len(), 1);
     assert!(results[0].installed_version.is_none());
     assert!(results[0].error.is_none());
@@ -949,10 +940,7 @@ async fn batch_detect_handles_unqualified_identifiers() {
         .expect("valid config");
 
     let items = vec![BatchDetectItem::new("nginx".to_string())];
-    let results = plugin
-        .batch_detect_installed_version(&items)
-        .await
-        .expect("ok");
+    let results = plugin.batch_detect(&items).await.expect("ok");
     assert_eq!(results.len(), 1);
     assert_eq!(
         results[0]
@@ -1281,7 +1269,7 @@ async fn batch_detect_errors_on_transient_platform_registry_failure() {
     let items = vec![BatchDetectItem::new(
         "adguard/adguardhome:latest".to_string(),
     )];
-    let results = plugin.batch_detect_installed_version(&items).await.unwrap();
+    let results = plugin.batch_detect(&items).await.unwrap();
 
     assert_eq!(results.len(), 1);
     // Must record an error for the item — not return the index digest as
@@ -1308,7 +1296,7 @@ async fn batch_detect_returns_local_digest_not_platform_digest_when_no_platform_
         DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
 
     let items = vec![BatchDetectItem::new("traefik:v2.11".to_string())];
-    let results = plugin.batch_detect_installed_version(&items).await.unwrap();
+    let results = plugin.batch_detect(&items).await.unwrap();
 
     assert_eq!(results.len(), 1);
     assert_eq!(

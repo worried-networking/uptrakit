@@ -5,7 +5,7 @@ use uptrakit_plugin_infrastructure_core::{Result, UpstreamRelease, Version, exec
 use crate::plugin::{SnapPlugin, is_prerelease_channel, parse_snap_info_channels};
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for SnapPlugin {
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for SnapPlugin {
     /// Fetch the latest release for a Snap package from a specific channel.
     ///
     /// Runs `snap info <name>` and parses the `channels:` section. Returns a
@@ -66,7 +66,9 @@ mod tests {
         CommandExecutor, CommandOutput, CommandSpec,
     };
     use uptrakit_plugin_infrastructure_core::mpsc;
-    use uptrakit_plugin_infrastructure_core::{ReleaseFetcherPlugin, UpdateOutputLine};
+    use uptrakit_plugin_infrastructure_core::{
+        HostCapabilities, HostRuntime, PosixHostRuntime, ReleaseFetcher, UpdateOutputLine,
+    };
 
     use crate::config::SnapConfig;
     use crate::plugin::SnapPlugin;
@@ -101,11 +103,14 @@ mod tests {
         }
     }
 
-    fn make_executor(stdout: &str, exit_code: i32) -> Arc<dyn CommandExecutor> {
-        Arc::new(FixedOutputExecutor {
+    fn make_plugin(config: SnapConfig, stdout: &str, exit_code: i32) -> SnapPlugin {
+        let executor = Arc::new(FixedOutputExecutor {
             output: stdout.to_string(),
             exit_code,
-        })
+        }) as Arc<dyn CommandExecutor>;
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        SnapPlugin::new(config, runtime).unwrap()
     }
 
     // ── fetch_releases ────────────────────────────────────────────────────────
@@ -118,10 +123,7 @@ mod tests {
             "  latest/stable: 3.0.20 2024-01-12 (2359) 215MB -\n",
             "  latest/edge:   3.0.21 2024-01-15 (2400) 216MB -\n",
         );
-        let executor = make_executor(output, 0);
-        let plugin = SnapPlugin::new(SnapConfig::default(), executor)
-            .await
-            .unwrap();
+        let plugin = make_plugin(SnapConfig::default(), output, 0);
 
         let releases = plugin.fetch_releases("vlc").await.unwrap();
         assert_eq!(releases.len(), 1);
@@ -132,15 +134,13 @@ mod tests {
     #[tokio::test]
     async fn fetch_releases_edge_channel_is_prerelease() {
         let output = "channels:\n  latest/edge: 3.0.21 2024-01-15 (2400) 216MB -\n";
-        let executor = make_executor(output, 0);
-        let plugin = SnapPlugin::new(
+        let plugin = make_plugin(
             SnapConfig {
                 channel: Some("latest/edge".to_string()),
             },
-            executor,
-        )
-        .await
-        .unwrap();
+            output,
+            0,
+        );
 
         let releases = plugin.fetch_releases("vlc").await.unwrap();
         assert_eq!(releases.len(), 1);
@@ -150,15 +150,13 @@ mod tests {
     #[tokio::test]
     async fn fetch_releases_channel_not_in_output_returns_empty() {
         let output = "channels:\n  latest/stable: 3.0.20 2024-01-12 (2359) 215MB -\n";
-        let executor = make_executor(output, 0);
-        let plugin = SnapPlugin::new(
+        let plugin = make_plugin(
             SnapConfig {
                 channel: Some("1.0/stable".to_string()),
             },
-            executor,
-        )
-        .await
-        .unwrap();
+            output,
+            0,
+        );
 
         let releases = plugin.fetch_releases("vlc").await.unwrap();
         assert!(releases.is_empty());

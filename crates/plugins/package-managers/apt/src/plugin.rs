@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    PluginCapability, PluginError, Result, SudoCommandEntry,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginError, PluginFamily, Result,
+    SudoCommandEntry, declare_plugin, require_posix_executor,
 };
 use uptrakit_shared_types::PackageIdentifierRules;
 
@@ -79,22 +80,12 @@ pub(crate) struct MadisonEntry {
 }
 
 impl AptPlugin {
-    /// Compile-time capabilities for the APT plugin.
-    pub const CAPABILITIES: &'static [PluginCapability] = &[
-        PluginCapability::DiscoverLocalSoftware,
-        PluginCapability::RefreshPackageIndex,
-        PluginCapability::DetectHostCompatibility,
-        PluginCapability::VersionDetection,
-        PluginCapability::ReleaseFetching,
-        PluginCapability::UpdateExecution,
-        PluginCapability::ConfigTest,
-    ];
-
     /// Create a new APT plugin with the given configuration.
-    pub async fn new(config: AptConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
-        config
-            .validate()
-            .map_err(|e| rootcause::report!(PluginError::Configuration(e.to_string())))?;
+    pub fn new(
+        config: AptConfig,
+        runtime: Arc<dyn HostRuntime>,
+    ) -> std::result::Result<Self, String> {
+        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
         Ok(Self { config, executor })
     }
 
@@ -102,86 +93,73 @@ impl AptPlugin {
         validate_identifier(package_identifier)
             .map_err(|e| rootcause::report!(PluginError::Configuration(e)))
     }
+
+    /// Return the sudo commands required by the APT plugin.
+    ///
+    /// This is a static function taking the serialized config (not `&self`)
+    /// because the descriptor stores it as a function pointer.
+    pub fn required_sudo_commands(_config: &serde_json::Value) -> Vec<SudoCommandEntry> {
+        vec![
+            SudoCommandEntry::new("apt-get", "Refresh the APT package index")
+                // Restrict to `apt-get update` only (with optional flags).
+                .with_args_suffix(Cow::Borrowed("update *"))
+                .with_setenv(),
+            SudoCommandEntry::new("apt-get", "Install or upgrade an APT package")
+                // Restrict to `apt-get install` only; covers single and batch installs.
+                .with_args_suffix(Cow::Borrowed("install *"))
+                .with_setenv(),
+            SudoCommandEntry::new(
+                "apt-get",
+                "Upgrade packages using a pinned preferences file (batch update)",
+            )
+            // Lock in the exact -o Dir::Etc::Preferences= invocation that
+            // execute_batch_update uses. The path is intentionally hardcoded on
+            // both sides; see APT_BATCH_PREF_FILE. Using `apt-get upgrade` (not
+            // `install`) preserves the apt manual/auto install mark — packages
+            // auto-installed as dependencies keep their `auto` mark, allowing
+            // `apt autoremove` to clean them up correctly.
+            .with_args_suffix(Cow::Owned(format!(
+                "-o Dir::Etc::Preferences={APT_BATCH_PREF_FILE} upgrade *"
+            )))
+            .with_setenv(),
+        ]
+    }
 }
 
-// ── PluginBase + subtrait implementations ────────────────────────────────
+// ── declare_plugin! ──────────────────────────────────────────────────────
 
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    AptPlugin,
-    AptConfig,
-    "package_manager_apt",
-    {
-        fn capabilities(&self) -> Vec<PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-        fn required_sudo_commands(
-            &self,
-        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-            vec![
-                SudoCommandEntry::new("apt-get", "Refresh the APT package index")
-                    // Restrict to `apt-get update` only (with optional flags).
-                    .with_args_suffix(Cow::Borrowed("update *"))
-                    .with_setenv(),
-                SudoCommandEntry::new("apt-get", "Install or upgrade an APT package")
-                    // Restrict to `apt-get install` only; covers single and batch installs.
-                    .with_args_suffix(Cow::Borrowed("install *"))
-                    .with_setenv(),
-                SudoCommandEntry::new(
-                    "apt-get",
-                    "Upgrade packages using a pinned preferences file (batch update)",
-                )
-                // Lock in the exact -o Dir::Etc::Preferences= invocation that
-                // execute_batch_update uses. The path is intentionally hardcoded on
-                // both sides; see APT_BATCH_PREF_FILE. Using `apt-get upgrade` (not
-                // `install`) preserves the apt manual/auto install mark — packages
-                // auto-installed as dependencies keep their `auto` mark, allowing
-                // `apt autoremove` to clean them up correctly.
-                .with_args_suffix(Cow::Owned(format!(
-                    "-o Dir::Etc::Preferences={APT_BATCH_PREF_FILE} upgrade *"
-                )))
-                .with_setenv(),
-            ]
-        }
-
-        fn as_discovery(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
-            Some(self)
-        }
-        fn as_version_detector(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
-            Some(self)
-        }
-        fn as_release_fetcher(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
-            Some(self)
-        }
-        fn as_package_index(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::PackageIndexPlugin> {
-            Some(self)
-        }
-        fn as_update_executor(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
-            Some(self)
-        }
-    }
-);
+declare_plugin!(AptPlugin, AptConfig, "package_manager_apt", {
+    display_name: "APT Package Manager",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::POSIX,
+    config_test: [ConfigTestKind::VersionDetection, ConfigTestKind::UpdateCommandValidation],
+    type_settings: true,
+    roles: [
+        Discoverer,
+        VersionDetector,
+        ReleaseFetcher,
+        PackageIndexer { host_requirements: HostRequirements::POSIX_PRIVILEGED },
+        UpdateExecutor { host_requirements: HostRequirements::POSIX_PRIVILEGED },
+    ],
+    sudo: AptPlugin::required_sudo_commands,
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
     use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
-    use uptrakit_plugin_infrastructure_core::{LocalCommandExecutor, PluginCapability};
-    // Subtrait imports needed by tests (via `use super::*`) to resolve method calls.
-    use uptrakit_plugin_infrastructure_core::PluginBase;
+    use uptrakit_plugin_infrastructure_core::{
+        HostCapabilities, LocalCommandExecutor, PluginCapability, PluginMeta, PosixHostRuntime,
+    };
 
-    fn test_executor() -> Arc<dyn CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
+    /// Helper to create an `AptPlugin` for testing.
+    fn test_plugin(config: AptConfig) -> AptPlugin {
+        let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        AptPlugin::new(config, runtime).unwrap()
     }
 
     // ── validate_identifier ──────────────────────────────────────────────
@@ -319,14 +297,86 @@ mod tests {
         assert!(validate_version(&v).is_ok());
     }
 
+    // ── plugin_type_id ──────────────────────────────────────────────────
+
+    #[test]
+    fn plugin_type_id() {
+        let plugin = test_plugin(AptConfig::default());
+        assert_eq!(plugin.plugin_type_id().as_str(), "package_manager_apt");
+    }
+
+    // ── descriptor capabilities ─────────────────────────────────────────
+
+    #[test]
+    fn descriptor_capabilities() {
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::DiscoverLocalSoftware)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::DetectHostCompatibility)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::RefreshPackageIndex)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::VersionDetection)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ReleaseFetching)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::UpdateExecution)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ConfigTest)
+        );
+    }
+
+    // ── descriptor roles ────────────────────────────────────────────────
+
+    #[test]
+    fn descriptor_has_all_roles() {
+        assert!(DESCRIPTOR.roles.discoverer.is_some());
+        assert!(DESCRIPTOR.roles.version_detector.is_some());
+        assert!(DESCRIPTOR.roles.release_fetcher.is_some());
+        assert!(DESCRIPTOR.roles.package_indexer.is_some());
+        assert!(DESCRIPTOR.roles.update_executor.is_some());
+        assert!(DESCRIPTOR.roles.lifecycle_hook.is_none());
+    }
+
+    // ── descriptor type settings ────────────────────────────────────────
+
+    #[test]
+    fn descriptor_has_type_settings() {
+        assert!(DESCRIPTOR.type_settings.is_some());
+    }
+
+    // ── descriptor sudo ─────────────────────────────────────────────────
+
+    #[test]
+    fn descriptor_has_sudo() {
+        assert!(DESCRIPTOR.sudo.is_some());
+    }
+
     // ── required_sudo_commands ───────────────────────────────────────────
 
-    #[tokio::test]
-    async fn apt_plugin_required_sudo_commands() {
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
-            .await
-            .expect("create plugin");
-        let entries = plugin.required_sudo_commands();
+    #[test]
+    fn apt_plugin_required_sudo_commands() {
+        let entries = AptPlugin::required_sudo_commands(&serde_json::json!({}));
         assert_eq!(entries.len(), 3);
         // All three entries are for apt-get.
         assert!(entries.iter().all(|e| e.command == "apt-get"));
@@ -344,21 +394,5 @@ mod tests {
         );
         assert!(batch_suffix.starts_with("-o Dir::Etc::Preferences="));
         assert!(batch_suffix.ends_with("upgrade *"));
-    }
-
-    // ── capabilities ────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn apt_plugin_capabilities() {
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
-            .await
-            .expect("create plugin");
-        assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
-        assert!(plugin.has_capability(PluginCapability::RefreshPackageIndex));
-        assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
-        assert!(plugin.has_capability(PluginCapability::VersionDetection));
-        assert!(plugin.has_capability(PluginCapability::ReleaseFetching));
-        assert!(plugin.has_capability(PluginCapability::UpdateExecution));
-        assert_eq!(plugin.capabilities().len(), 7);
     }
 }

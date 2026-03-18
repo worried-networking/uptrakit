@@ -20,6 +20,7 @@ uptrakit-shared-macros = { workspace = true }
 time = { workspace = true }
 
 [dev-dependencies]
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["macros", "rt"] }
 uptrakit-command = { workspace = true }
 

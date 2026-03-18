@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_command::{CommandExecutor, CommandSpec, UpdateOutputLine};
+use uptrakit_command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
-    PluginCapability, PreUpdateHookResult, Result, SudoCommandEntry, UpdateLifecycleContext,
-    UpdateLifecyclePlugin, impl_plugin_base_config,
+    ConfigModel, ConfigTestKind, HostFeature, HostRequirements, HostRuntime, LifecycleHook,
+    OsFamily, PluginFamily, PreUpdateHookResult, Result, SudoCommandEntry, UpdateLifecycleContext,
+    UpdateOutputSender, declare_plugin, require_posix_executor,
 };
 
 use crate::config::SystemdHookConfig;
@@ -21,26 +22,17 @@ pub struct SystemdHookPlugin {
 }
 
 impl SystemdHookPlugin {
-    /// Compile-time capabilities declaration.
-    pub const CAPABILITIES: &[PluginCapability] = &[
-        PluginCapability::UpdateLifecycle,
-        PluginCapability::ConfigTest,
-    ];
-
     /// Create a new systemd hook plugin instance.
-    pub async fn new(
+    pub fn new(
         config: SystemdHookConfig,
-        executor: Arc<dyn CommandExecutor>,
+        runtime: Arc<dyn HostRuntime>,
     ) -> std::result::Result<Self, String> {
+        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
         Ok(Self { config, executor })
     }
 
     /// Run a systemctl subcommand against the configured service.
-    async fn run_systemctl(
-        &self,
-        action: &str,
-        output_tx: &uptrakit_plugin_infrastructure_core::mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<()> {
+    async fn run_systemctl(&self, action: &str, output_tx: &UpdateOutputSender) -> Result<()> {
         let spec = CommandSpec::exec(
             "systemctl",
             [action.to_string(), self.config.service_name.clone()],
@@ -67,14 +59,9 @@ impl SystemdHookPlugin {
 
         Ok(())
     }
-}
 
-impl_plugin_base_config!(SystemdHookPlugin, SystemdHookConfig, "hook_systemd", {
-    fn capabilities(&self) -> Vec<PluginCapability> {
-        Self::CAPABILITIES.to_vec()
-    }
-
-    fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
+    /// Sudo commands required by this plugin (static — uses wildcard for service names).
+    fn required_sudo_commands(_config: &serde_json::Value) -> Vec<SudoCommandEntry> {
         vec![
             SudoCommandEntry::new("systemctl", "Stop service before update")
                 .with_args_suffix("stop *"),
@@ -82,18 +69,28 @@ impl_plugin_base_config!(SystemdHookPlugin, SystemdHookConfig, "hook_systemd", {
                 .with_args_suffix("start *"),
         ]
     }
+}
 
-    fn as_update_lifecycle(&self) -> Option<&dyn UpdateLifecyclePlugin> {
-        Some(self)
-    }
+declare_plugin!(SystemdHookPlugin, SystemdHookConfig, "hook_systemd", {
+    display_name: "Systemd Hook",
+    family: PluginFamily::Hook,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::new(
+        &[OsFamily::Linux],
+        &[HostFeature::PosixShell, HostFeature::Systemd],
+        false,
+    ),
+    config_test: [ConfigTestKind::PreUpdateHook, ConfigTestKind::PostUpdateHook],
+    roles: [LifecycleHook],
+    sudo: SystemdHookPlugin::required_sudo_commands,
 });
 
 #[async_trait]
-impl UpdateLifecyclePlugin for SystemdHookPlugin {
+impl LifecycleHook for SystemdHookPlugin {
     async fn execute_pre_hook(
         &self,
         ctx: &UpdateLifecycleContext,
-        output_tx: &uptrakit_plugin_infrastructure_core::mpsc::Sender<UpdateOutputLine>,
+        output_tx: &UpdateOutputSender,
     ) -> Result<PreUpdateHookResult> {
         tracing::info!(
             service = %self.config.service_name,
@@ -119,7 +116,7 @@ impl UpdateLifecyclePlugin for SystemdHookPlugin {
     async fn execute_post_hook(
         &self,
         ctx: &UpdateLifecycleContext,
-        output_tx: &uptrakit_plugin_infrastructure_core::mpsc::Sender<UpdateOutputLine>,
+        output_tx: &UpdateOutputSender,
     ) -> Result<()> {
         let succeeded = ctx.update_succeeded.unwrap_or(false);
         tracing::info!(
@@ -147,51 +144,52 @@ impl UpdateLifecyclePlugin for SystemdHookPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_plugin_infrastructure_core::{
+        HostCapabilities, PluginCapability, PluginMeta, PosixHostRuntime,
+    };
 
-    #[test]
-    fn plugin_type_id() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap();
-        rt.block_on(async {
-            let config = SystemdHookConfig {
-                service_name: "nginx".to_string(),
-            };
-            let executor =
-                Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
-            let plugin = SystemdHookPlugin::new(config, executor).await.unwrap();
-
-            use uptrakit_plugin_infrastructure_core::PluginBase;
-            assert_eq!(plugin.plugin_type_id(), "hook_systemd");
-            assert_eq!(
-                plugin.capabilities(),
-                vec![
-                    PluginCapability::UpdateLifecycle,
-                    PluginCapability::ConfigTest
-                ]
-            );
-            assert!(plugin.as_update_lifecycle().is_some());
-        });
+    /// Helper to create a SystemdHookPlugin for testing.
+    fn test_plugin(config: SystemdHookConfig) -> SystemdHookPlugin {
+        let executor = Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        SystemdHookPlugin::new(config, runtime).unwrap()
     }
 
     #[test]
-    fn required_sudo_commands_are_declared() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap();
-        rt.block_on(async {
-            let config = SystemdHookConfig {
-                service_name: "nginx".to_string(),
-            };
-            let executor =
-                Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
-            let plugin = SystemdHookPlugin::new(config, executor).await.unwrap();
-
-            use uptrakit_plugin_infrastructure_core::PluginBase;
-            let cmds = plugin.required_sudo_commands();
-            assert_eq!(cmds.len(), 2);
-            assert_eq!(cmds[0].command, "systemctl");
-            assert_eq!(cmds[1].command, "systemctl");
+    fn plugin_type_id() {
+        let plugin = test_plugin(SystemdHookConfig {
+            service_name: "nginx".to_string(),
         });
+        assert_eq!(plugin.plugin_type_id().as_str(), "hook_systemd");
+    }
+
+    #[test]
+    fn descriptor_capabilities() {
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::UpdateLifecycle)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ConfigTest)
+        );
+    }
+
+    #[test]
+    fn descriptor_has_lifecycle_hook_role() {
+        assert!(DESCRIPTOR.roles.lifecycle_hook.is_some());
+        assert!(DESCRIPTOR.roles.discoverer.is_none());
+    }
+
+    #[test]
+    fn descriptor_has_sudo() {
+        assert!(DESCRIPTOR.sudo.is_some());
+        let cmds = (DESCRIPTOR.sudo.unwrap())(&serde_json::json!({}));
+        assert_eq!(cmds.len(), 2);
+        assert_eq!(cmds[0].command, "systemctl");
+        assert_eq!(cmds[1].command, "systemctl");
     }
 }

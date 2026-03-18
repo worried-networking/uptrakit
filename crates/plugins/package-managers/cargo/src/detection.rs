@@ -8,7 +8,7 @@ use uptrakit_plugin_infrastructure_core::{
 use crate::plugin::{CargoPlugin, parse_cargo_install_list, validate_identifier};
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for CargoPlugin {
+impl uptrakit_plugin_infrastructure_core::VersionDetector for CargoPlugin {
     /// Detect the installed version of a single crate.
     #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
@@ -46,10 +46,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for CargoPlugin 
 
     /// Detect installed versions for multiple crates using a single `cargo install --list` call.
     #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
+    async fn batch_detect(&self, items: &[BatchDetectItem]) -> Result<Vec<BatchDetectResult>> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -114,20 +111,67 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for CargoPlugin 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
-    use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use uptrakit_plugin_infrastructure_core::command::{
+        CommandExecutor, CommandOutput, CommandSpec,
+    };
+    use uptrakit_plugin_infrastructure_core::mpsc;
+    use uptrakit_plugin_infrastructure_core::{
+        BatchDetectItem, HostCapabilities, HostRuntime, PosixHostRuntime, UpdateOutputLine,
+        Version, VersionDetector,
+    };
 
     use crate::config::CargoConfig;
+    use crate::plugin::CargoPlugin;
+
+    /// Mock executor that always returns Ok (even for non-zero exit codes).
+    struct FixedOutputExecutor {
+        output: String,
+        exit_code: i32,
+    }
+
+    #[async_trait]
+    impl CommandExecutor for FixedOutputExecutor {
+        async fn execute(
+            &self,
+            _spec: &CommandSpec,
+            _output_tx: &mpsc::Sender<UpdateOutputLine>,
+        ) -> uptrakit_command::Result<CommandOutput> {
+            Ok(CommandOutput {
+                output: self.output.clone(),
+                exit_code: self.exit_code,
+            })
+        }
+
+        async fn execute_quiet(
+            &self,
+            _spec: &CommandSpec,
+        ) -> uptrakit_command::Result<CommandOutput> {
+            Ok(CommandOutput {
+                output: self.output.clone(),
+                exit_code: self.exit_code,
+            })
+        }
+    }
+
+    fn make_plugin(config: CargoConfig, stdout: &str, exit_code: i32) -> CargoPlugin {
+        let executor = Arc::new(FixedOutputExecutor {
+            output: stdout.to_string(),
+            exit_code,
+        }) as Arc<dyn CommandExecutor>;
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        CargoPlugin::new(config, runtime).unwrap()
+    }
 
     // ── detect_installed_version ──────────────────────────────────────────────
 
     #[tokio::test]
     async fn detect_installed_version_found() {
         let output = "bat v0.24.0:\n    bat\nripgrep v14.1.1:\n    rg\n";
-        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(output))
-            .await
-            .unwrap();
+        let plugin = make_plugin(CargoConfig::default(), output, 0);
 
         let result = plugin.detect_installed_version("bat").await.unwrap();
         assert_eq!(result, Some(Version::new("0.24.0")));
@@ -136,9 +180,7 @@ mod tests {
     #[tokio::test]
     async fn detect_installed_version_not_found() {
         let output = "bat v0.24.0:\n    bat\n";
-        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(output))
-            .await
-            .unwrap();
+        let plugin = make_plugin(CargoConfig::default(), output, 0);
 
         let result = plugin.detect_installed_version("ripgrep").await.unwrap();
         assert!(result.is_none());
@@ -146,22 +188,18 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_invalid_identifier_fails() {
-        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(""))
-            .await
-            .unwrap();
+        let plugin = make_plugin(CargoConfig::default(), "", 0);
 
         assert!(plugin.detect_installed_version("1invalid").await.is_err());
         assert!(plugin.detect_installed_version("owner/repo").await.is_err());
     }
 
-    // ── batch_detect_installed_version ────────────────────────────────────────
+    // ── batch_detect ─────────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn batch_detect_installed_version_basic() {
+    async fn batch_detect_basic() {
         let output = "bat v0.24.0:\n    bat\nripgrep v14.1.1:\n    rg\n";
-        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(output))
-            .await
-            .unwrap();
+        let plugin = make_plugin(CargoConfig::default(), output, 0);
 
         let items = vec![
             BatchDetectItem::new("bat".to_string()),
@@ -169,7 +207,7 @@ mod tests {
             BatchDetectItem::new("notinstalled".to_string()),
         ];
 
-        let results = plugin.batch_detect_installed_version(&items).await.unwrap();
+        let results = plugin.batch_detect(&items).await.unwrap();
         assert_eq!(results.len(), 3);
 
         let bat = results
@@ -192,12 +230,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn batch_detect_installed_version_empty_returns_empty() {
-        let plugin = CargoPlugin::new(CargoConfig::default(), FixedOutputExecutor::success(""))
-            .await
-            .unwrap();
+    async fn batch_detect_empty_returns_empty() {
+        let plugin = make_plugin(CargoConfig::default(), "", 0);
 
-        let results = plugin.batch_detect_installed_version(&[]).await.unwrap();
+        let results = plugin.batch_detect(&[]).await.unwrap();
         assert!(results.is_empty());
     }
 }

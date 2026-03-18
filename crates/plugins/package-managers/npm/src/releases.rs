@@ -8,7 +8,7 @@ use crate::plugin::{
 };
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for NpmPlugin {
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for NpmPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;

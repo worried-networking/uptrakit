@@ -10,7 +10,7 @@ use uptrakit_plugin_infrastructure_core::{
 use crate::plugin::{PacmanPlugin, validate_identifier, validate_version};
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for PacmanPlugin {
+impl uptrakit_plugin_infrastructure_core::UpdateExecutor for PacmanPlugin {
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,

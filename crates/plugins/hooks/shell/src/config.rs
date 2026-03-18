@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::{ConfigFormSchema, HookShell, SecretMasking};
+use uptrakit_plugin_infrastructure_core::PluginConfig;
 
 /// Maximum length for a hook command string.
 const MAX_COMMAND_LEN: usize = 4096;
@@ -26,16 +26,15 @@ pub struct ShellHookConfig {
 
     /// Shell interpreter to use. Defaults to Bash.
     #[serde(default)]
-    pub shell: HookShell,
+    pub shell: uptrakit_plugin_infrastructure_core::HookShell,
 }
 
 fn default_on_failure() -> bool {
     true
 }
 
-impl ShellHookConfig {
-    /// Validate the configuration.
-    pub fn validate(&self) -> Result<(), String> {
+impl PluginConfig for ShellHookConfig {
+    fn validate(&self) -> Result<(), String> {
         let has_pre = self
             .pre_command
             .as_ref()
@@ -67,13 +66,6 @@ impl ShellHookConfig {
         Ok(())
     }
 
-    /// Validate a package identifier (no-op for hook plugins).
-    pub fn validate_identifier(_value: &str) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-impl ConfigFormSchema for ShellHookConfig {
     fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
         use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
         vec![
@@ -97,11 +89,10 @@ impl ConfigFormSchema for ShellHookConfig {
     }
 }
 
-impl SecretMasking for ShellHookConfig {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_plugin_infrastructure_core::HookShell;
 
     #[test]
     fn valid_config_pre_only() {

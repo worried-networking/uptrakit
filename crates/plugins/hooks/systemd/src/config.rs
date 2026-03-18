@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::{ConfigFormSchema, SecretMasking};
+use uptrakit_plugin_infrastructure_core::PluginConfig;
 
 /// Maximum length for a systemd service name.
 const MAX_SERVICE_NAME_LEN: usize = 256;
@@ -18,19 +18,11 @@ pub struct SystemdHookConfig {
     pub service_name: String,
 }
 
-impl SystemdHookConfig {
-    /// Validate the configuration.
-    pub fn validate(&self) -> Result<(), String> {
+impl PluginConfig for SystemdHookConfig {
+    fn validate(&self) -> Result<(), String> {
         validate_service_name(&self.service_name)
     }
 
-    /// Validate a package identifier (no-op for hook plugins).
-    pub fn validate_identifier(_value: &str) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-impl ConfigFormSchema for SystemdHookConfig {
     fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
         use uptrakit_plugin_infrastructure_core::form_schema::FieldDef;
         vec![
@@ -40,8 +32,6 @@ impl ConfigFormSchema for SystemdHookConfig {
         ]
     }
 }
-
-impl SecretMasking for SystemdHookConfig {}
 
 /// Validate a systemd service name.
 ///

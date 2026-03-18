@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::SecretMasking;
+use uptrakit_plugin_infrastructure_core::{PluginConfig, TypeSettings};
 
 /// Validate a Snap channel string.
 ///
@@ -75,13 +75,20 @@ pub struct SnapConfig {
     pub channel: Option<String>,
 }
 
-impl SecretMasking for SnapConfig {}
-
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for SnapConfig {
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        vec![]
+impl PluginConfig for SnapConfig {
+    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
     }
 
+    fn validate(&self) -> std::result::Result<(), String> {
+        if let Some(channel) = &self.channel {
+            validate_channel(channel)?;
+        }
+        Ok(())
+    }
+}
+
+impl TypeSettings for SnapConfig {
     fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
     {
         use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
@@ -106,29 +113,6 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for SnapConfig {
 }
 
 impl SnapConfig {
-    /// Validate a Snap package identifier string.
-    ///
-    /// Delegates to the crate-level [`validate_identifier`](crate::validate_identifier)
-    /// function. A valid identifier is a Snap name: 2–40 lowercase alphanumeric
-    /// characters and hyphens, not starting or ending with a hyphen, and with
-    /// no consecutive hyphens.
-    ///
-    /// Called by the plugin registry's `validate_package_identifier` dispatch.
-    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
-    }
-
-    /// Validate the configuration.
-    ///
-    /// When `channel` is set, validates its format via [`validate_channel`].
-    pub fn validate(&self) -> crate::error::Result<()> {
-        if let Some(channel) = &self.channel {
-            validate_channel(channel)
-                .map_err(|e| rootcause::report!(crate::error::SnapError::Configuration(e)))?;
-        }
-        Ok(())
-    }
-
     /// Returns the effective channel to use for release queries.
     ///
     /// `None` (default config) behaves as `"latest/stable"`.

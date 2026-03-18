@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::SecretMasking;
+use uptrakit_plugin_infrastructure_core::{PluginConfig, TypeSettings};
 
 /// Configuration for the Cargo install plugin.
 ///
@@ -61,13 +61,24 @@ fn default_true() -> bool {
     true
 }
 
-impl SecretMasking for CargoConfig {}
-
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for CargoConfig {
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        vec![]
+impl PluginConfig for CargoConfig {
+    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
     }
 
+    fn validate(&self) -> std::result::Result<(), String> {
+        if let Some(url) = &self.registry_url
+            && url.is_empty()
+        {
+            return Err("registry_url must not be empty when set; \
+                 omit the field to use the default crates.io sparse index"
+                .to_string());
+        }
+        Ok(())
+    }
+}
+
+impl TypeSettings for CargoConfig {
     fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
     {
         use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
@@ -100,33 +111,6 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for CargoConfig {
 }
 
 impl CargoConfig {
-    /// Validate a Cargo crate identifier string.
-    ///
-    /// Delegates to the crate-level [`validate_identifier`](crate::validate_identifier)
-    /// function. A valid identifier is a Cargo crate name: 1–64 characters,
-    /// starts with a letter or underscore, and uses only `[A-Za-z0-9_-]`.
-    ///
-    /// Called by the plugin registry's `validate_package_identifier` dispatch.
-    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
-    }
-
-    /// Validate the configuration.
-    ///
-    /// When `registry_url` is set, it must be non-empty.
-    pub fn validate(&self) -> crate::error::Result<()> {
-        if let Some(url) = &self.registry_url
-            && url.is_empty()
-        {
-            return Err(rootcause::report!(CargoError::Configuration(
-                "registry_url must not be empty when set; \
-                 omit the field to use the default crates.io sparse index"
-                    .to_string()
-            )));
-        }
-        Ok(())
-    }
-
     /// Returns the effective sparse registry index base URL.
     ///
     /// `None` (default config) uses the crates.io sparse index.
@@ -136,8 +120,6 @@ impl CargoConfig {
             .unwrap_or("https://index.crates.io")
     }
 }
-
-use crate::error::CargoError;
 
 #[cfg(test)]
 mod tests {

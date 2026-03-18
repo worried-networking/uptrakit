@@ -1,16 +1,15 @@
 use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandSpec, send_output};
-use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchUpdateItem, BatchUpdateResult, OutputStreamType, PluginError, ReleaseInfo, Result,
-    UpdateOutputLine,
+    UpdateOutputSender,
 };
 
 use crate::plugin::{APT_BATCH_PREF_FILE, AptPlugin, validate_identifier, validate_version};
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for AptPlugin {
+impl uptrakit_plugin_infrastructure_core::PackageIndexer for AptPlugin {
     #[tracing::instrument(skip_all)]
     async fn refresh_package_index(&self) -> Result<()> {
         tracing::info!("refreshing APT package index");
@@ -38,14 +37,14 @@ impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for AptPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for AptPlugin {
+impl uptrakit_plugin_infrastructure_core::UpdateExecutor for AptPlugin {
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
         package_identifier: &str,
         to_version: &str,
         _release_info: Option<&ReleaseInfo>,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
+        output_tx: &UpdateOutputSender,
     ) -> Result<String> {
         self.require_package_identifier(package_identifier)?;
         validate_version(to_version).map_err(|e| report!(PluginError::Configuration(e)))?;
@@ -108,7 +107,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for AptPlugin {
     async fn execute_batch_update(
         &self,
         items: &[BatchUpdateItem],
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
+        output_tx: &UpdateOutputSender,
     ) -> Result<Vec<BatchUpdateResult>> {
         if items.is_empty() {
             return Ok(vec![]);

@@ -6,7 +6,7 @@ use crate::plugin::DockerPlugin;
 use uptrakit_plugin_infrastructure_core::{UpstreamRelease, Version};
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for DockerPlugin {
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for DockerPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(
         &self,

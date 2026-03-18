@@ -13,6 +13,7 @@ pub mod error;
 pub mod form_schema;
 pub mod host_requirements;
 pub mod host_runtime;
+pub mod macros;
 pub mod plugin_base;
 pub mod plugin_config;
 #[cfg(feature = "plugin-ops")]
@@ -93,9 +94,18 @@ pub use descriptor::{
     CreateTransportFn, ExtensionActionHandler, ExtensionOps, PluginDescriptor, PluginFamily,
     RoleCreators, RoleSlot, TypeSettingsOps,
 };
-#[cfg(feature = "agent-infra")]
-pub use descriptor::{InfraBundle, InfraSlot};
+// During migration: `plugin_ops` (gated on `plugin-ops`) exports its own
+// `ExtensionActionContext` with a concrete `&DatabaseConnection` field.
+// The `descriptor` module defines a new version using `&dyn Any`.
+// Re-export the descriptor version only when `plugin-ops` is NOT enabled,
+// to avoid a naming conflict. Once the old `plugin_ops` is removed (Phase 3),
+// this conditional disappears and the descriptor version is always exported.
+#[cfg(not(feature = "plugin-ops"))]
+pub use descriptor::ExtensionActionContext;
+pub use descriptor::{InfraBundle, InfraSlot, MigrationsFn};
 pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
+
+// Re-export ConfigTestKind so plugin crates don't need a direct internal-wire dependency
 pub use host_runtime::{
     HostRuntime, PosixHostRuntime, construct_host_runtime, require_posix_executor,
 };
@@ -106,6 +116,7 @@ pub use roles::{
 };
 #[cfg(feature = "agent-infra")]
 pub use roles::{GuestExec, HostLifecycle, HostReport};
+pub use uptrakit_internal_wire::ConfigTestKind;
 
 // Re-export shared-types for convenience
 pub use uptrakit_shared_types::{

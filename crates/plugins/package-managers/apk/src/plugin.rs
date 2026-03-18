@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -8,15 +7,10 @@ use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec,
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
-    BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType,
-    PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry,
-    UpdateOutputLine, UpstreamRelease, Version, execute_and_capture,
-};
-
-// Subtrait imports needed by tests (via `use super::*`) to resolve method calls.
-#[cfg(test)]
-use uptrakit_plugin_infrastructure_core::{
-    DiscoveryPlugin, ReleaseFetcherPlugin, UpdateExecutorPlugin, VersionDetectorPlugin,
+    BatchUpdateResult, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
+    HostCompatibility, HostRequirements, HostRuntime, OutputStreamType, PluginError, PluginFamily,
+    PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry, UpdateOutputLine,
+    UpstreamRelease, Version, declare_plugin, execute_and_capture, require_posix_executor,
 };
 
 use uptrakit_shared_types::PackageIdentifierRules;
@@ -108,7 +102,7 @@ fn parse_apk_list_line(line: &str) -> Option<(String, String)> {
     Some((name.to_string(), version.to_string()))
 }
 
-/// Parses `apk info -v pkg1 pkg2 ...` output into a map of package name → installed version.
+/// Parses `apk info -v pkg1 pkg2 ...` output into a map of package name -> installed version.
 ///
 /// Each output line is `<name>-<version>`. Only lines whose package name is in
 /// `pkg_names` are included.
@@ -135,7 +129,7 @@ fn parse_apk_info_output(output: &str, pkg_names: &HashSet<&str>) -> HashMap<Str
 /// where `cmp_op` is `=`, `<`, or `>`.
 ///
 /// Returns `(raw_name_version_token, latest_version)` or `None` for non-package lines
-/// (e.g. `fetch …` lines, empty lines).
+/// (e.g. `fetch ...` lines, empty lines).
 fn parse_apk_version_line(line: &str) -> Option<(String, String)> {
     let line = line.trim();
     if line.is_empty() {
@@ -157,7 +151,7 @@ fn parse_apk_version_line(line: &str) -> Option<(String, String)> {
     Some((name_ver.to_string(), latest_ver.to_string()))
 }
 
-/// Parses `apk version pkg1 pkg2 ...` output into a map of package name → latest version.
+/// Parses `apk version pkg1 pkg2 ...` output into a map of package name -> latest version.
 fn parse_apk_version_output(output: &str, pkg_names: &HashSet<&str>) -> HashMap<String, String> {
     let mut result = HashMap::new();
     for line in output.lines() {
@@ -230,23 +224,23 @@ pub struct ApkPlugin {
 }
 
 impl ApkPlugin {
-    /// Compile-time capabilities for the APK plugin.
-    pub const CAPABILITIES: &'static [PluginCapability] = &[
-        PluginCapability::DiscoverLocalSoftware,
-        PluginCapability::RefreshPackageIndex,
-        PluginCapability::DetectHostCompatibility,
-        PluginCapability::VersionDetection,
-        PluginCapability::ReleaseFetching,
-        PluginCapability::UpdateExecution,
-        PluginCapability::ConfigTest,
-    ];
-
-    /// Create a new APK plugin with the given configuration.
-    pub async fn new(config: ApkConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
-        config
-            .validate()
-            .map_err(|e| report!(PluginError::Configuration(e.to_string())))?;
+    /// Create a new APK plugin with the given configuration and host runtime.
+    pub fn new(
+        config: ApkConfig,
+        runtime: Arc<dyn HostRuntime>,
+    ) -> std::result::Result<Self, String> {
+        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
         Ok(Self { config, executor })
+    }
+
+    /// Sudo commands required by this plugin.
+    fn required_sudo_commands(_config: &serde_json::Value) -> Vec<SudoCommandEntry> {
+        vec![
+            SudoCommandEntry::new("apk", "Refresh the APK package index")
+                .with_args_suffix("update"),
+            SudoCommandEntry::new("apk", "Install or upgrade an APK package")
+                .with_args_suffix("add *"),
+        ]
     }
 
     fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
@@ -254,57 +248,23 @@ impl ApkPlugin {
     }
 }
 
-// ── PluginBase + subtrait implementations ────────────────────────────────
+// ── Plugin descriptor ─────────────────────────────────────────────────────
 
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    ApkPlugin,
-    ApkConfig,
-    "package_manager_apk",
-    {
-        fn capabilities(&self) -> Vec<PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-        fn required_sudo_commands(
-            &self,
-        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-            vec![
-                SudoCommandEntry::new("apk", "Refresh the APK package index")
-                    .with_args_suffix(Cow::Borrowed("update")),
-                SudoCommandEntry::new("apk", "Install or upgrade an APK package")
-                    .with_args_suffix(Cow::Borrowed("add *")),
-            ]
-        }
-
-        fn as_discovery(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
-            Some(self)
-        }
-        fn as_version_detector(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
-            Some(self)
-        }
-        fn as_release_fetcher(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
-            Some(self)
-        }
-        fn as_package_index(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::PackageIndexPlugin> {
-            Some(self)
-        }
-        fn as_update_executor(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
-            Some(self)
-        }
-    }
-);
+declare_plugin!(ApkPlugin, ApkConfig, "package_manager_apk", {
+    display_name: "APK",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::POSIX,
+    config_test: [ConfigTestKind::VersionDetection, ConfigTestKind::UpdateCommandValidation],
+    type_settings: true,
+    roles: [Discoverer, VersionDetector, ReleaseFetcher,
+            PackageIndexer { host_requirements: HostRequirements::POSIX_PRIVILEGED },
+            UpdateExecutor { host_requirements: HostRequirements::POSIX_PRIVILEGED }],
+    sudo: ApkPlugin::required_sudo_commands,
+});
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ApkPlugin {
+impl uptrakit_plugin_infrastructure_core::Discoverer for ApkPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::info!("discovering APK-managed software");
@@ -443,7 +403,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ApkPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for ApkPlugin {
+impl uptrakit_plugin_infrastructure_core::VersionDetector for ApkPlugin {
     #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
@@ -484,10 +444,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for ApkPlugin {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
+    async fn batch_detect(&self, items: &[BatchDetectItem]) -> Result<Vec<BatchDetectResult>> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -539,7 +496,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for ApkPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for ApkPlugin {
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for ApkPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
@@ -586,10 +543,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for ApkPlugin {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn batch_fetch_releases(
-        &self,
-        items: &[BatchFetchItem],
-    ) -> Result<Vec<BatchFetchResult>> {
+    async fn batch_fetch(&self, items: &[BatchFetchItem]) -> Result<Vec<BatchFetchResult>> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -654,7 +608,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for ApkPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for ApkPlugin {
+impl uptrakit_plugin_infrastructure_core::PackageIndexer for ApkPlugin {
     #[tracing::instrument(skip_all)]
     async fn refresh_package_index(&self) -> Result<()> {
         tracing::info!("refreshing APK package index");
@@ -671,7 +625,7 @@ impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for ApkPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for ApkPlugin {
+impl uptrakit_plugin_infrastructure_core::UpdateExecutor for ApkPlugin {
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
@@ -767,9 +721,11 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for ApkPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::{CommandOutput, UpdateOutputLine, mpsc::Sender};
+    use uptrakit_plugin_infrastructure_core::{
+        CommandOutput, Discoverer, ReleaseFetcher, UpdateOutputLine, VersionDetector, mpsc::Sender,
+    };
 
-    // ─── Mock executor ───────────────────────────────────────────────────────
+    // ── Mock executor ───────────────────────────────────────────────────────
 
     struct MockApkExecutor {
         list_output: String,
@@ -932,7 +888,7 @@ openssl>=3.0
 ~edge:community/nodejs
 ";
 
-    // ─── split_name_version ─────────────────────────────────────────────────
+    // ── split_name_version ─────────────────────────────────────────────────
 
     #[test]
     fn split_name_version_simple() {
@@ -957,11 +913,11 @@ openssl>=3.0
 
     #[test]
     fn split_name_version_hyphen_not_followed_by_digit() {
-        // "abc-def" — no digit after the hyphen → None
+        // "abc-def" -- no digit after the hyphen -> None
         assert_eq!(split_name_version("abc-def"), None);
     }
 
-    // ─── parse_apk_list_line ────────────────────────────────────────────────
+    // ── parse_apk_list_line ────────────────────────────────────────────────
 
     #[test]
     fn parse_apk_list_line_standard() {
@@ -995,7 +951,7 @@ openssl>=3.0
         assert_eq!(parse_apk_list_line(""), None);
     }
 
-    // ─── parse_apk_info_output ───────────────────────────────────────────────
+    // ── parse_apk_info_output ───────────────────────────────────────────────
 
     #[test]
     fn parse_apk_info_output_standard() {
@@ -1003,7 +959,7 @@ openssl>=3.0
         let map = parse_apk_info_output(SAMPLE_INFO, &pkg_names);
         assert_eq!(map.get("busybox").map(String::as_str), Some("1.36.1-r5"));
         assert_eq!(map.get("openssl").map(String::as_str), Some("3.1.4-r5"));
-        // ca-certificates not in pkg_names → not included
+        // ca-certificates not in pkg_names -> not included
         assert!(!map.contains_key("ca-certificates"));
     }
 
@@ -1014,7 +970,7 @@ openssl>=3.0
         assert!(map.is_empty());
     }
 
-    // ─── parse_apk_version_output ────────────────────────────────────────────
+    // ── parse_apk_version_output ────────────────────────────────────────────
 
     #[test]
     fn parse_apk_version_output_up_to_date() {
@@ -1037,7 +993,7 @@ openssl>=3.0
         assert!(!map.contains_key("curl"));
     }
 
-    // ─── parse_world_line ────────────────────────────────────────────────────
+    // ── parse_world_line ────────────────────────────────────────────────────
 
     #[test]
     fn parse_world_line_simple() {
@@ -1070,7 +1026,7 @@ openssl>=3.0
         assert_eq!(parse_world_line("# comment"), None);
     }
 
-    // ─── validate_identifier ────────────────────────────────────────────────
+    // ── validate_identifier ────────────────────────────────────────────────
 
     #[test]
     fn validate_identifier_accepts_valid() {
@@ -1112,7 +1068,7 @@ openssl>=3.0
         assert!(validate_identifier("foo/bar").is_err());
     }
 
-    // ─── validate_version ────────────────────────────────────────────────────
+    // ── validate_version ────────────────────────────────────────────────────
 
     #[test]
     fn validate_version_accepts_valid() {
@@ -1142,7 +1098,7 @@ openssl>=3.0
         assert!(validate_version(&"1".repeat(257)).is_err());
     }
 
-    // ─── discover_software (all mode) ───────────────────────────────────────
+    // ── discover_software (all mode) ───────────────────────────────────────
 
     #[tokio::test]
     async fn discover_software_all_mode() {
@@ -1172,7 +1128,7 @@ openssl>=3.0
 
     #[tokio::test]
     async fn discover_software_explicit_all_emits_targets() {
-        // Explicit All filter → targets still emitted.
+        // Explicit All filter -> targets still emitted.
         let plugin = ApkPlugin {
             config: ApkConfig {
                 discovery_filter: ApkDiscoveryFilter::All,
@@ -1212,7 +1168,7 @@ openssl>=3.0
         assert!(pkg_ids.contains(&"openssl"));
     }
 
-    // ─── batch_detect_installed_versions ────────────────────────────────────
+    // ── batch_detect ────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn batch_detect_installed_versions() {
@@ -1221,10 +1177,7 @@ openssl>=3.0
             BatchDetectItem::new("busybox".to_string()),
             BatchDetectItem::new("openssl".to_string()),
         ];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("batch detect");
+        let results = plugin.batch_detect(&items).await.expect("batch detect");
         assert_eq!(results.len(), 2);
 
         let busybox_r = results
@@ -1242,25 +1195,19 @@ openssl>=3.0
     async fn batch_detect_unknown_package_returns_none() {
         let plugin = make_plugin_all(SAMPLE_LIST, "", SAMPLE_VERSION);
         let items = vec![BatchDetectItem::new("curl".to_string())];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("batch detect");
+        let results = plugin.batch_detect(&items).await.expect("batch detect");
         assert_eq!(results.len(), 1);
         assert!(results[0].installed_version.is_none());
         assert!(results[0].error.is_none());
     }
 
-    // ─── batch_fetch_releases ────────────────────────────────────────────────
+    // ── batch_fetch ─────────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn batch_fetch_releases_up_to_date() {
+    async fn batch_fetch_up_to_date() {
         let plugin = make_plugin_all(SAMPLE_LIST, SAMPLE_INFO, SAMPLE_VERSION);
         let items = vec![BatchFetchItem::new("busybox".to_string())];
-        let results = plugin
-            .batch_fetch_releases(&items)
-            .await
-            .expect("batch fetch");
+        let results = plugin.batch_fetch(&items).await.expect("batch fetch");
         assert_eq!(results.len(), 1);
         assert!(results[0].error.is_none());
         assert_eq!(results[0].releases.len(), 1);
@@ -1272,13 +1219,10 @@ openssl>=3.0
     }
 
     #[tokio::test]
-    async fn batch_fetch_releases_upgrade_available() {
+    async fn batch_fetch_upgrade_available() {
         let plugin = make_plugin_all(SAMPLE_LIST, SAMPLE_INFO, SAMPLE_VERSION);
         let items = vec![BatchFetchItem::new("openssl".to_string())];
-        let results = plugin
-            .batch_fetch_releases(&items)
-            .await
-            .expect("batch fetch");
+        let results = plugin.batch_fetch(&items).await.expect("batch fetch");
         assert_eq!(results.len(), 1);
         assert!(results[0].error.is_none());
         assert_eq!(results[0].releases.len(), 1);
@@ -1286,22 +1230,20 @@ openssl>=3.0
     }
 
     #[tokio::test]
-    async fn batch_fetch_releases_missing_package_returns_error() {
+    async fn batch_fetch_missing_package_returns_error() {
         let plugin = make_plugin_all(SAMPLE_LIST, SAMPLE_INFO, SAMPLE_VERSION);
         let items = vec![BatchFetchItem::new("curl".to_string())];
-        let results = plugin
-            .batch_fetch_releases(&items)
-            .await
-            .expect("batch fetch");
+        let results = plugin.batch_fetch(&items).await.expect("batch fetch");
         assert_eq!(results.len(), 1);
         assert!(results[0].error.is_some());
         assert!(results[0].releases.is_empty());
     }
 
-    // ─── execute_update ──────────────────────────────────────────────────────
+    // ── execute_update ──────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn execute_update_constructs_correct_command() {
+        use uptrakit_plugin_infrastructure_core::UpdateExecutor;
         let plugin = make_plugin_all(SAMPLE_LIST, SAMPLE_INFO, SAMPLE_VERSION);
         let (tx, _rx) = mpsc::channel(16);
         let result = plugin
@@ -1311,7 +1253,7 @@ openssl>=3.0
         assert!(result.contains("apk add busybox=1.36.1-r5"));
     }
 
-    // ─── detect_host_compatibility ───────────────────────────────────────────
+    // ── detect_host_compatibility ───────────────────────────────────────────
 
     #[tokio::test]
     async fn detect_host_compatibility_compatible() {
@@ -1334,5 +1276,61 @@ openssl>=3.0
             .await
             .expect("compatibility");
         assert!(matches!(compat, HostCompatibility::Incompatible(_)));
+    }
+
+    // ── required_sudo_commands ───────────────────────────────────────────────
+
+    #[test]
+    fn apk_plugin_required_sudo_commands() {
+        assert!(DESCRIPTOR.sudo.is_some());
+        let entries = (DESCRIPTOR.sudo.unwrap())(&serde_json::json!({}));
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|e| e.command == "apk"));
+        assert!(entries.iter().all(|e| !e.needs_setenv));
+        assert_eq!(entries[0].args_suffix.as_deref(), Some("update"));
+        assert_eq!(entries[1].args_suffix.as_deref(), Some("add *"));
+    }
+
+    // ── capabilities ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn apk_plugin_capabilities() {
+        use uptrakit_plugin_infrastructure_core::PluginCapability;
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::DiscoverLocalSoftware)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::RefreshPackageIndex)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::DetectHostCompatibility)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::VersionDetection)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ReleaseFetching)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::UpdateExecution)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ConfigTest)
+        );
+        assert_eq!(DESCRIPTOR.capabilities.len(), 7);
     }
 }

@@ -2,7 +2,7 @@ use std::path::Path;
 
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::{SecretMasking, SecretString};
+use uptrakit_plugin_infrastructure_core::{PluginConfig, SecretString};
 use uptrakit_shared_types::network::is_private_host;
 use url::Url;
 
@@ -125,20 +125,10 @@ impl Default for GitHubConfig {
 }
 
 impl GitHubConfig {
-    /// Validate a GitHub package identifier string.
-    ///
-    /// A valid identifier has exactly one `/`, with non-empty `owner` and `repo`
-    /// parts, and neither part may contain `..`.
-    ///
-    /// Called by the plugin registry's `validate_package_identifier` dispatch.
-    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
-    }
-
     /// Validate the configuration, returning an error if any fields are invalid.
     ///
     /// An entirely empty `{}` config is valid — all fields are optional.
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate_inner(&self) -> Result<()> {
         if let Some(ref url) = self.api_base_url {
             let parsed = Url::parse(url).map_err(|e| {
                 report!(GitHubError::Configuration(format!(
@@ -213,7 +203,15 @@ impl GitHubConfig {
     }
 }
 
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for GitHubConfig {
+impl PluginConfig for GitHubConfig {
+    fn validate(&self) -> std::result::Result<(), String> {
+        self.validate_inner().map_err(|e| e.to_string())
+    }
+
+    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
+    }
+
     fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
         use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
         vec![
@@ -253,20 +251,12 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for GitHubConfig {
                 .with_help_text("Set executable permission (mode 0755) on the installed file"),
         ]
     }
-}
 
-impl SecretMasking for GitHubConfig {
-    /// Return a copy with secret fields masked for API responses.
-    ///
-    /// Unset secrets become `Some("***")` so the field always appears in JSON.
     fn with_secrets_masked(mut self) -> Self {
         self.auth_token = Some(SecretString::new(SECRET_MASK));
         self
     }
 
-    /// Restore masked secrets from an existing config (for PUT updates).
-    ///
-    /// If `auth_token` is the mask sentinel, take the value from `existing`.
     fn restore_secrets_from(&mut self, existing: &Self) {
         if let Some(ref token) = self.auth_token
             && token.expose_secret() == SECRET_MASK

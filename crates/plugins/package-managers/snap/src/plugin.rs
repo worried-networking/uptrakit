@@ -1,11 +1,11 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    PluginCapability, PluginError, Result, SudoCommandEntry,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginConfig, PluginError,
+    PluginFamily, Result, SudoCommandEntry, declare_plugin, require_posix_executor,
 };
 use uptrakit_shared_types::PackageIdentifierRules;
 
@@ -90,9 +90,9 @@ pub(crate) fn parse_snap_list_line(line: &str) -> Option<(String, String)> {
 /// Finds the `channels:` header line, then parses subsequent indented lines of the form:
 /// `  <channel>: <version> <date> (<rev>) <size> <notes>`
 ///
-/// Lines containing `↑` (same-as-above indicator) are skipped rather than resolved upward.
+/// Lines containing `\u{2191}` (same-as-above indicator) are skipped rather than resolved upward.
 ///
-/// Returns a map of channel name → [`SnapChannelInfo`].
+/// Returns a map of channel name -> [`SnapChannelInfo`].
 pub(crate) fn parse_snap_info_channels(output: &str) -> HashMap<String, SnapChannelInfo> {
     let mut result = HashMap::new();
     let mut in_channels = false;
@@ -126,8 +126,8 @@ pub(crate) fn parse_snap_info_channels(output: &str) -> HashMap<String, SnapChan
 
         let rest = line[colon_pos + 1..].trim();
 
-        // Skip ↑ entries (same version as the channel above).
-        if rest.starts_with('↑') || rest == "↑" {
+        // Skip \u{2191} entries (same version as the channel above).
+        if rest.starts_with('\u{2191}') || rest == "\u{2191}" {
             continue;
         }
 
@@ -181,22 +181,24 @@ pub struct SnapPlugin {
 }
 
 impl SnapPlugin {
-    /// Compile-time capabilities for the Snap plugin.
-    pub const CAPABILITIES: &'static [PluginCapability] = &[
-        PluginCapability::DiscoverLocalSoftware,
-        PluginCapability::DetectHostCompatibility,
-        PluginCapability::VersionDetection,
-        PluginCapability::ReleaseFetching,
-        PluginCapability::UpdateExecution,
-        PluginCapability::ConfigTest,
-    ];
-
-    /// Create a new Snap plugin with the given configuration and command executor.
-    pub async fn new(config: SnapConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
-        config
-            .validate()
-            .map_err(|e| rootcause::report!(PluginError::Configuration(e.to_string())))?;
+    /// Create a new Snap plugin with the given configuration and host runtime.
+    pub fn new(
+        config: SnapConfig,
+        runtime: Arc<dyn HostRuntime>,
+    ) -> std::result::Result<Self, String> {
+        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
+        config.validate()?;
         Ok(Self { config, executor })
+    }
+
+    /// Sudo commands required by this plugin.
+    fn required_sudo_commands(_config: &serde_json::Value) -> Vec<SudoCommandEntry> {
+        vec![
+            // `refresh *` covers `snap refresh PKG`, `snap refresh PKG --channel=stable`,
+            // and batch `snap refresh PKG1 PKG2 ...`.
+            SudoCommandEntry::new("snap", "Refresh one or more Snap packages")
+                .with_args_suffix("refresh *"),
+        ]
     }
 
     pub(crate) fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
@@ -205,49 +207,19 @@ impl SnapPlugin {
     }
 }
 
-// ── PluginBase + subtrait implementations ────────────────────────────────
+// ── Plugin descriptor ─────────────────────────────────────────────────────
 
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    SnapPlugin,
-    SnapConfig,
-    "package_manager_snap",
-    {
-        fn capabilities(&self) -> Vec<PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-        fn required_sudo_commands(
-            &self,
-        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-            vec![
-                // `refresh *` covers `snap refresh PKG`, `snap refresh PKG --channel=stable`,
-                // and batch `snap refresh PKG1 PKG2 ...`.
-                SudoCommandEntry::new("snap", "Refresh one or more Snap packages")
-                    .with_args_suffix(Cow::Borrowed("refresh *")),
-            ]
-        }
-
-        fn as_discovery(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
-            Some(self)
-        }
-        fn as_version_detector(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
-            Some(self)
-        }
-        fn as_release_fetcher(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
-            Some(self)
-        }
-        fn as_update_executor(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
-            Some(self)
-        }
-    }
-);
+declare_plugin!(SnapPlugin, SnapConfig, "package_manager_snap", {
+    display_name: "Snap",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::POSIX,
+    config_test: [ConfigTestKind::VersionDetection, ConfigTestKind::UpdateCommandValidation],
+    type_settings: true,
+    roles: [Discoverer, VersionDetector, ReleaseFetcher,
+            UpdateExecutor { host_requirements: HostRequirements::POSIX_PRIVILEGED }],
+    sudo: SnapPlugin::required_sudo_commands,
+});
 
 #[cfg(test)]
 mod tests {
@@ -372,7 +344,7 @@ mod tests {
 
     #[test]
     fn parse_snap_list_line_single_token() {
-        // Only a name, no version — malformed line.
+        // Only a name, no version -- malformed line.
         assert!(parse_snap_list_line("vlc").is_none());
     }
 
@@ -393,7 +365,7 @@ mod tests {
         assert_eq!(channels.len(), 2);
         assert_eq!(channels["latest/stable"].version, "3.0.20");
         assert_eq!(channels["latest/edge"].version, "3.0.21");
-        // ↑ entries should be skipped
+        // \u{2191} entries should be skipped
         assert!(!channels.contains_key("latest/candidate"));
         assert!(!channels.contains_key("latest/beta"));
     }
@@ -441,5 +413,61 @@ mod tests {
         assert!(SYSTEM_SNAPS.contains(&"snapd"));
         assert!(SYSTEM_SNAPS.contains(&"bare"));
         assert!(SYSTEM_SNAPS.contains(&"core22"));
+    }
+
+    // ── required_sudo_commands ───────────────────────────────────────────────
+
+    #[test]
+    fn snap_plugin_required_sudo_commands() {
+        assert!(DESCRIPTOR.sudo.is_some());
+        let entries = (DESCRIPTOR.sudo.unwrap())(&serde_json::json!({}));
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].command, "snap");
+        assert!(!entries[0].needs_setenv);
+        assert_eq!(entries[0].args_suffix.as_deref(), Some("refresh *"));
+    }
+
+    // ── capabilities ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn snap_plugin_capabilities() {
+        use uptrakit_plugin_infrastructure_core::PluginCapability;
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::DiscoverLocalSoftware)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::DetectHostCompatibility)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::VersionDetection)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ReleaseFetching)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::UpdateExecution)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ConfigTest)
+        );
+        // Snap does not need RefreshPackageIndex -- snapd manages its own cache.
+        assert!(
+            !DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::RefreshPackageIndex)
+        );
+        assert_eq!(DESCRIPTOR.capabilities.len(), 6);
     }
 }

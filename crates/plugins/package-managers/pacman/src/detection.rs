@@ -10,7 +10,7 @@ use uptrakit_plugin_infrastructure_core::{
 use crate::plugin::{PacmanPlugin, validate_identifier};
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for PacmanPlugin {
+impl uptrakit_plugin_infrastructure_core::VersionDetector for PacmanPlugin {
     #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
@@ -63,10 +63,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for PacmanPlugin
     /// still appear in stdout. Packages absent from stdout are treated as not
     /// installed (`None` with no error).
     #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
+    async fn batch_detect(&self, items: &[BatchDetectItem]) -> Result<Vec<BatchDetectResult>> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -129,30 +126,39 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for PacmanPlugin
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::RoutedOutputExecutor;
-    use uptrakit_plugin_infrastructure_core::{BatchDetectItem, Version, VersionDetectorPlugin};
+    use uptrakit_plugin_infrastructure_core::{
+        BatchDetectItem, HostCapabilities, HostRuntime, LocalCommandExecutor, PosixHostRuntime,
+        Version, VersionDetector,
+    };
 
     use crate::config::PacmanConfig;
     use crate::plugin::PacmanPlugin;
 
-    // ── batch_detect_installed_version ───────────────────────────────────────
+    fn test_plugin_with_executor(
+        config: PacmanConfig,
+        executor: Arc<dyn CommandExecutor>,
+    ) -> PacmanPlugin {
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        PacmanPlugin::new(config, runtime).unwrap()
+    }
+
+    // ── batch_detect ───────────────────────────────────────
 
     #[tokio::test]
-    async fn batch_detect_installed_version_found_packages() {
+    async fn batch_detect_found_packages() {
         let executor =
             RoutedOutputExecutor::success([("pacman", "nginx 1.26.3-1\npython 3.12.4-1\n")]);
-        let plugin = PacmanPlugin::new(PacmanConfig::default(), executor)
-            .await
-            .expect("create");
+        let plugin = test_plugin_with_executor(PacmanConfig::default(), executor);
 
         let items = vec![
             BatchDetectItem::new("nginx".to_string()),
             BatchDetectItem::new("python".to_string()),
         ];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("ok");
+        let results = plugin.batch_detect(&items).await.expect("ok");
 
         assert_eq!(results.len(), 2);
         let nginx = results
@@ -171,20 +177,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn batch_detect_installed_version_package_not_in_output_is_not_installed() {
+    async fn batch_detect_package_not_in_output_is_not_installed() {
         let executor = RoutedOutputExecutor::success([("pacman", "nginx 1.26.3-1\n")]);
-        let plugin = PacmanPlugin::new(PacmanConfig::default(), executor)
-            .await
-            .expect("create");
+        let plugin = test_plugin_with_executor(PacmanConfig::default(), executor);
 
         let items = vec![
             BatchDetectItem::new("nginx".to_string()),
             BatchDetectItem::new("curl".to_string()),
         ];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("ok");
+        let results = plugin.batch_detect(&items).await.expect("ok");
 
         assert_eq!(results.len(), 2);
         let curl = results
@@ -196,30 +197,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn batch_detect_installed_version_empty_items_returns_empty() {
-        use std::sync::Arc;
-        use uptrakit_plugin_infrastructure_core::LocalCommandExecutor;
-
-        let plugin = PacmanPlugin::new(PacmanConfig::default(), Arc::new(LocalCommandExecutor))
-            .await
-            .expect("create");
-        let results = plugin
-            .batch_detect_installed_version(&[])
-            .await
-            .expect("ok");
+    async fn batch_detect_empty_items_returns_empty() {
+        let plugin = test_plugin_with_executor(
+            PacmanConfig::default(),
+            Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>,
+        );
+        let results = plugin.batch_detect(&[]).await.expect("ok");
         assert!(results.is_empty());
     }
 
     #[tokio::test]
-    async fn batch_detect_installed_version_invalid_identifier_fails() {
-        use std::sync::Arc;
-        use uptrakit_plugin_infrastructure_core::LocalCommandExecutor;
-
-        let plugin = PacmanPlugin::new(PacmanConfig::default(), Arc::new(LocalCommandExecutor))
-            .await
-            .expect("create");
+    async fn batch_detect_invalid_identifier_fails() {
+        let plugin = test_plugin_with_executor(
+            PacmanConfig::default(),
+            Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>,
+        );
         let items = vec![BatchDetectItem::new("INVALID_UPPERCASE".to_string())];
-        let result = plugin.batch_detect_installed_version(&items).await;
+        let result = plugin.batch_detect(&items).await;
         assert!(result.is_err());
     }
 }

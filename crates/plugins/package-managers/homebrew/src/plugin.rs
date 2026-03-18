@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
-use uptrakit_plugin_infrastructure_core::{PluginCapability, PluginError, Result};
+use uptrakit_plugin_infrastructure_core::{
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginError, PluginFamily, Result,
+    declare_plugin, require_posix_executor,
+};
 
 use crate::config::{HomebrewConfig, HomebrewPackageType};
 
@@ -56,22 +59,12 @@ pub struct HomebrewPlugin {
 }
 
 impl HomebrewPlugin {
-    /// Compile-time capabilities for the Homebrew plugin.
-    pub const CAPABILITIES: &'static [PluginCapability] = &[
-        PluginCapability::DiscoverLocalSoftware,
-        PluginCapability::RefreshPackageIndex,
-        PluginCapability::DetectHostCompatibility,
-        PluginCapability::VersionDetection,
-        PluginCapability::ReleaseFetching,
-        PluginCapability::UpdateExecution,
-        PluginCapability::ConfigTest,
-    ];
-
     /// Create a new Homebrew plugin with the given configuration.
-    pub async fn new(config: HomebrewConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
-        config
-            .validate()
-            .map_err(|e| rootcause::report!(PluginError::Configuration(e.to_string())))?;
+    pub fn new(
+        config: HomebrewConfig,
+        runtime: Arc<dyn HostRuntime>,
+    ) -> std::result::Result<Self, String> {
+        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
         Ok(Self { config, executor })
     }
 
@@ -122,105 +115,121 @@ impl HomebrewPlugin {
     }
 }
 
-// ── PluginBase + subtrait implementations ────────────────────────────────
+// ── Plugin descriptor ─────────────────────────────────────────────────────
 
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    HomebrewPlugin,
-    HomebrewConfig,
-    "package_manager_homebrew",
-    {
-        fn capabilities(&self) -> Vec<PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-
-        fn as_discovery(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
-            Some(self)
-        }
-        fn as_version_detector(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
-            Some(self)
-        }
-        fn as_release_fetcher(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
-            Some(self)
-        }
-        fn as_update_executor(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
-            Some(self)
-        }
-    }
-);
+declare_plugin!(HomebrewPlugin, HomebrewConfig, "package_manager_homebrew", {
+    display_name: "Homebrew",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::POSIX,
+    config_test: [ConfigTestKind::VersionDetection, ConfigTestKind::UpdateCommandValidation],
+    type_settings: true,
+    roles: [Discoverer, VersionDetector, ReleaseFetcher, PackageIndexer, UpdateExecutor],
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
-    use uptrakit_plugin_infrastructure_core::{LocalCommandExecutor, PluginBase, PluginCapability};
+    use uptrakit_plugin_infrastructure_core::{
+        HostCapabilities, PluginCapability, PluginMeta, PosixHostRuntime,
+    };
 
     use crate::config::{HomebrewConfig, HomebrewPackageType};
 
-    fn test_executor() -> Arc<dyn CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
+    /// Helper to create a `HomebrewPlugin` for testing.
+    fn test_plugin(config: HomebrewConfig) -> HomebrewPlugin {
+        let executor = Arc::new(uptrakit_plugin_infrastructure_core::LocalCommandExecutor)
+            as Arc<dyn CommandExecutor>;
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        HomebrewPlugin::new(config, runtime).unwrap()
     }
 
-    // ── Plugin trait ──────────────────────────────────────────────────
+    // ── Plugin descriptor ───────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn homebrew_plugin_capabilities() {
-        let plugin = HomebrewPlugin::new(HomebrewConfig::default(), test_executor())
-            .await
-            .expect("create");
-        assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
-        assert!(plugin.has_capability(PluginCapability::RefreshPackageIndex));
-        assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
-        assert!(plugin.has_capability(PluginCapability::VersionDetection));
-        assert!(plugin.has_capability(PluginCapability::ReleaseFetching));
-        assert!(plugin.has_capability(PluginCapability::UpdateExecution));
-        assert_eq!(plugin.capabilities().len(), 7);
+    #[test]
+    fn plugin_type_id() {
+        let plugin = test_plugin(HomebrewConfig::default());
+        assert_eq!(plugin.plugin_type_id().as_str(), "package_manager_homebrew");
     }
 
-    #[tokio::test]
-    async fn is_cask_returns_false_for_both() {
-        let plugin = HomebrewPlugin::new(
-            HomebrewConfig {
-                package_type: HomebrewPackageType::Both,
-            },
-            test_executor(),
-        )
-        .await
-        .expect("create");
+    #[test]
+    fn descriptor_capabilities() {
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::DiscoverLocalSoftware)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::DetectHostCompatibility)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::RefreshPackageIndex)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::VersionDetection)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ReleaseFetching)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::UpdateExecution)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ConfigTest)
+        );
+    }
+
+    #[test]
+    fn descriptor_has_expected_roles() {
+        assert!(DESCRIPTOR.roles.discoverer.is_some());
+        assert!(DESCRIPTOR.roles.version_detector.is_some());
+        assert!(DESCRIPTOR.roles.release_fetcher.is_some());
+        assert!(DESCRIPTOR.roles.package_indexer.is_some());
+        assert!(DESCRIPTOR.roles.update_executor.is_some());
+        assert!(DESCRIPTOR.roles.lifecycle_hook.is_none());
+    }
+
+    #[test]
+    fn descriptor_has_type_settings() {
+        assert!(DESCRIPTOR.type_settings.is_some());
+    }
+
+    // ── is_cask ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn is_cask_returns_false_for_both() {
+        let plugin = test_plugin(HomebrewConfig {
+            package_type: HomebrewPackageType::Both,
+        });
         assert!(!plugin.is_cask());
     }
 
-    #[tokio::test]
-    async fn is_cask_returns_true_for_cask() {
-        let plugin = HomebrewPlugin::new(
-            HomebrewConfig {
-                package_type: HomebrewPackageType::Cask,
-            },
-            test_executor(),
-        )
-        .await
-        .expect("create");
+    #[test]
+    fn is_cask_returns_true_for_cask() {
+        let plugin = test_plugin(HomebrewConfig {
+            package_type: HomebrewPackageType::Cask,
+        });
         assert!(plugin.is_cask());
     }
 
-    #[tokio::test]
-    async fn is_cask_returns_false_for_formula() {
-        let plugin = HomebrewPlugin::new(
-            HomebrewConfig {
-                package_type: HomebrewPackageType::Formula,
-            },
-            test_executor(),
-        )
-        .await
-        .expect("create");
+    #[test]
+    fn is_cask_returns_false_for_formula() {
+        let plugin = test_plugin(HomebrewConfig {
+            package_type: HomebrewPackageType::Formula,
+        });
         assert!(!plugin.is_cask());
     }
 

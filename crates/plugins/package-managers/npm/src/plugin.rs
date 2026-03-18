@@ -7,7 +7,8 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    PluginCapability, PluginError, Result, SudoCommandEntry, UpstreamRelease, Version,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginError, PluginFamily, Result,
+    SudoCommandEntry, UpstreamRelease, Version, declare_plugin, require_posix_executor,
 };
 use uptrakit_plugin_infrastructure_core::{PluginHttpClientConfig, build_plugin_http_client};
 
@@ -173,22 +174,12 @@ pub struct NpmPlugin {
 }
 
 impl NpmPlugin {
-    /// Compile-time capabilities for the npm plugin.
-    pub const CAPABILITIES: &'static [PluginCapability] = &[
-        PluginCapability::DiscoverLocalSoftware,
-        PluginCapability::DetectHostCompatibility,
-        PluginCapability::ControllerSideFetchReleases,
-        PluginCapability::VersionDetection,
-        PluginCapability::ReleaseFetching,
-        PluginCapability::UpdateExecution,
-        PluginCapability::ConfigTest,
-    ];
-
-    /// Create a new npm plugin with the given configuration.
-    pub async fn new(config: NpmConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
-        config
-            .validate()
-            .map_err(|e| rootcause::report!(PluginError::Configuration(e.to_string())))?;
+    /// Create a new npm plugin with the given configuration and host runtime.
+    pub fn new(
+        config: NpmConfig,
+        runtime: Arc<dyn HostRuntime>,
+    ) -> std::result::Result<Self, String> {
+        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
 
         let client = build_plugin_http_client(PluginHttpClientConfig {
             user_agent: concat!(
@@ -197,13 +188,23 @@ impl NpmPlugin {
             ),
             ..Default::default()
         })
-        .map_err(|e| rootcause::report!(PluginError::PluginInternal(e)))?;
+        .map_err(|e| format!("failed to build HTTP client: {e}"))?;
 
         Ok(Self {
             config,
             executor,
             client,
         })
+    }
+
+    /// Sudo commands required by this plugin.
+    fn required_sudo_commands(_config: &serde_json::Value) -> Vec<SudoCommandEntry> {
+        // `install -g *` covers both `npm install -g PKG@VER` and
+        // batch `npm install -g PKG1@VER1 PKG2@VER2 ...`.
+        vec![
+            SudoCommandEntry::new("npm", "Install or upgrade a global npm package")
+                .with_args_suffix(Cow::Borrowed("install -g *")),
+        ]
     }
 
     pub(crate) fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
@@ -348,56 +349,22 @@ impl NpmPlugin {
 
         releases
     }
-
-    /// Returns the plugin type for this instance.
-    pub fn plugin_type(&self) -> uptrakit_plugin_infrastructure_core::PluginType {
-        uptrakit_plugin_infrastructure_core::PluginType::PackageManagerNpm
-    }
 }
 
-// ── PluginBase + subtrait implementations ────────────────────────────────
-
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    NpmPlugin,
-    NpmConfig,
-    "package_manager_npm",
-    {
-        fn capabilities(&self) -> Vec<PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-        fn required_sudo_commands(
-            &self,
-        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-            // `install -g *` covers both `npm install -g PKG@VER` and
-            // batch `npm install -g PKG1@VER1 PKG2@VER2 ...`.
-            vec![
-                SudoCommandEntry::new("npm", "Install or upgrade a global npm package")
-                    .with_args_suffix(Cow::Borrowed("install -g *")),
-            ]
-        }
-
-        fn as_discovery(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
-            Some(self)
-        }
-        fn as_version_detector(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
-            Some(self)
-        }
-        fn as_release_fetcher(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
-            Some(self)
-        }
-        fn as_update_executor(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
-            Some(self)
-        }
-    }
-);
+declare_plugin!(NpmPlugin, NpmConfig, "package_manager_npm", {
+    display_name: "npm",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::POSIX,
+    config_test: [ConfigTestKind::Connectivity, ConfigTestKind::VersionDetection],
+    roles: [
+        Discoverer,
+        VersionDetector,
+        ReleaseFetcher { host_requirements: HostRequirements::CONTROLLER_ONLY },
+        UpdateExecutor,
+    ],
+    sudo: NpmPlugin::required_sudo_commands,
+});
 
 #[cfg(test)]
 mod tests {
@@ -405,10 +372,19 @@ mod tests {
 
     use super::*;
     use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
-    use uptrakit_plugin_infrastructure_core::{LocalCommandExecutor, PluginBase};
+    use uptrakit_plugin_infrastructure_core::{
+        HostCapabilities, LocalCommandExecutor, PluginCapability, PluginMeta, PosixHostRuntime,
+    };
 
-    fn test_executor() -> Arc<dyn CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
+    fn test_runtime() -> Arc<dyn HostRuntime> {
+        let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+        let caps = HostCapabilities::default();
+        Arc::new(PosixHostRuntime::new(executor, caps))
+    }
+
+    fn test_runtime_with_executor(executor: Arc<dyn CommandExecutor>) -> Arc<dyn HostRuntime> {
+        let caps = HostCapabilities::default();
+        Arc::new(PosixHostRuntime::new(executor, caps))
     }
 
     // ── validate_identifier ───────────────────────────────────────────────────
@@ -609,12 +585,10 @@ mod tests {
 
     // ── parse_registry_response ───────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn parse_registry_response_latest_only() {
+    #[test]
+    fn parse_registry_response_latest_only() {
         let config = NpmConfig::default();
-        let plugin = NpmPlugin::new(config, test_executor())
-            .await
-            .expect("create");
+        let plugin = NpmPlugin::new(config, test_runtime()).expect("create");
         let json = serde_json::json!({
             "dist-tags": { "latest": "1.18.0" },
             "time": { "1.18.0": "2024-01-15T10:00:00.000Z" }
@@ -626,15 +600,13 @@ mod tests {
         assert!(releases[0].published_at.is_some());
     }
 
-    #[tokio::test]
-    async fn parse_registry_response_with_prereleases() {
+    #[test]
+    fn parse_registry_response_with_prereleases() {
         let config = NpmConfig {
             include_prereleases: true,
             registry_url: None,
         };
-        let plugin = NpmPlugin::new(config, test_executor())
-            .await
-            .expect("create");
+        let plugin = NpmPlugin::new(config, test_runtime()).expect("create");
         let json = serde_json::json!({
             "dist-tags": {
                 "latest": "1.18.0",
@@ -658,15 +630,13 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn parse_registry_response_prerelease_same_as_latest_deduped() {
+    #[test]
+    fn parse_registry_response_prerelease_same_as_latest_deduped() {
         let config = NpmConfig {
             include_prereleases: true,
             registry_url: None,
         };
-        let plugin = NpmPlugin::new(config, test_executor())
-            .await
-            .expect("create");
+        let plugin = NpmPlugin::new(config, test_runtime()).expect("create");
         let json = serde_json::json!({
             "dist-tags": {
                 "latest": "1.18.0",
@@ -680,26 +650,21 @@ mod tests {
         assert_eq!(releases[0].tag, "1.18.0");
     }
 
-    #[tokio::test]
-    async fn parse_registry_response_no_dist_tags() {
+    #[test]
+    fn parse_registry_response_no_dist_tags() {
         let config = NpmConfig::default();
-        let plugin = NpmPlugin::new(config, test_executor())
-            .await
-            .expect("create");
+        let plugin = NpmPlugin::new(config, test_runtime()).expect("create");
         let json = serde_json::json!({});
         let releases = plugin.parse_registry_response(&json, "n8n");
         assert!(releases.is_empty());
     }
 
-    // ── plugin_type ───────────────────────────────────────────────────────────
+    // ── plugin_type_id ──────────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn npm_plugin_type() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
-            .await
-            .expect("create");
-        use uptrakit_plugin_infrastructure_core::PluginType;
-        assert_eq!(plugin.plugin_type(), PluginType::PackageManagerNpm);
+    #[test]
+    fn npm_plugin_type_id() {
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_runtime()).expect("create");
+        assert_eq!(plugin.plugin_type_id().as_str(), "package_manager_npm");
     }
 
     // ── validate_version ────────────────────────────────────────────────────
@@ -755,31 +720,68 @@ mod tests {
         assert!(validate_version(&v).is_ok());
     }
 
-    // ── capabilities ──────────────────────────────────────────────────────────
+    // ── descriptor capabilities ────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn npm_plugin_capabilities() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
-            .await
-            .expect("create");
-        assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
-        assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
-        assert!(plugin.has_capability(PluginCapability::ControllerSideFetchReleases));
-        assert!(plugin.has_capability(PluginCapability::VersionDetection));
-        assert!(plugin.has_capability(PluginCapability::ReleaseFetching));
-        assert!(plugin.has_capability(PluginCapability::UpdateExecution));
-        assert!(!plugin.has_capability(PluginCapability::RefreshPackageIndex));
-        assert_eq!(plugin.capabilities().len(), 7);
+    #[test]
+    fn descriptor_capabilities() {
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::DiscoverLocalSoftware)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::DetectHostCompatibility)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::VersionDetection)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ReleaseFetching)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::UpdateExecution)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ConfigTest)
+        );
+        assert!(
+            !DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::RefreshPackageIndex)
+        );
+    }
+
+    #[test]
+    fn descriptor_has_expected_roles() {
+        assert!(DESCRIPTOR.roles.discoverer.is_some());
+        assert!(DESCRIPTOR.roles.version_detector.is_some());
+        assert!(DESCRIPTOR.roles.release_fetcher.is_some());
+        assert!(DESCRIPTOR.roles.update_executor.is_some());
+        assert!(DESCRIPTOR.roles.package_indexer.is_none());
+        assert!(DESCRIPTOR.roles.lifecycle_hook.is_none());
+    }
+
+    #[test]
+    fn descriptor_release_fetcher_is_controller_only() {
+        let slot = DESCRIPTOR.roles.release_fetcher.as_ref().unwrap();
+        assert!(slot.host_requirements.controller_only);
     }
 
     // ── required_sudo_commands ────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn npm_plugin_required_sudo_commands() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
-            .await
-            .expect("create");
-        let entries = plugin.required_sudo_commands();
+    #[test]
+    fn npm_plugin_required_sudo_commands() {
+        let entries = NpmPlugin::required_sudo_commands(&serde_json::json!({}));
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].command, "npm");
         assert!(!entries[0].needs_setenv);
@@ -791,10 +793,12 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_compatible_when_which_exits_zero() {
-        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new("", 0))
-            .await
-            .expect("create");
+        use uptrakit_plugin_infrastructure_core::Discoverer;
+        let plugin = NpmPlugin::new(
+            NpmConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::new("", 0)),
+        )
+        .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         assert_eq!(
             result,
@@ -804,10 +808,12 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_incompatible_when_which_exits_nonzero() {
-        use uptrakit_plugin_infrastructure_core::DiscoveryPlugin;
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new("", 1))
-            .await
-            .expect("create");
+        use uptrakit_plugin_infrastructure_core::Discoverer;
+        let plugin = NpmPlugin::new(
+            NpmConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::new("", 1)),
+        )
+        .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         match result {
             uptrakit_plugin_infrastructure_core::HostCompatibility::Incompatible(msg) => {

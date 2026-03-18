@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::SecretMasking;
+use uptrakit_plugin_infrastructure_core::{PluginConfig, TypeSettings};
 
 /// Discovery filter: which packages to surface during autodiscovery.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,13 +30,13 @@ pub struct PacmanConfig {
     pub discovery_filter: PacmanDiscoveryFilter,
 }
 
-impl SecretMasking for PacmanConfig {}
-
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for PacmanConfig {
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        vec![]
+impl PluginConfig for PacmanConfig {
+    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
     }
+}
 
+impl TypeSettings for PacmanConfig {
     fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
     {
         use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
@@ -59,23 +59,6 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for PacmanConfig {
 }
 
 impl PacmanConfig {
-    /// Validate a Pacman package identifier string.
-    ///
-    /// Delegates to the crate-level [`validate_identifier`](crate::validate_identifier)
-    /// function. A valid identifier is a non-empty Arch Linux package name.
-    ///
-    /// Called by the plugin registry's `validate_package_identifier` dispatch.
-    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
-    }
-
-    /// Validate the configuration.
-    ///
-    /// Currently accepts all valid deserialized configs.
-    pub fn validate(&self) -> crate::error::Result<()> {
-        Ok(())
-    }
-
     /// Returns the discovery filter to apply.
     pub(crate) fn effective_filter(&self) -> PacmanDiscoveryFilter {
         self.discovery_filter

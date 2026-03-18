@@ -157,7 +157,7 @@ impl HomebrewPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for HomebrewPlugin {
+impl uptrakit_plugin_infrastructure_core::Discoverer for HomebrewPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         let stdout = execute_and_capture(
@@ -225,13 +225,19 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{
-        DiscoveryPlugin, HostCompatibility, LocalCommandExecutor, PluginType,
+        Discoverer, HostCapabilities, HostRuntime, PluginType, PosixHostRuntime,
     };
 
     use crate::config::HomebrewConfig;
 
-    fn test_executor() -> Arc<dyn CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
+    fn test_runtime() -> Arc<dyn HostRuntime> {
+        let executor = Arc::new(uptrakit_plugin_infrastructure_core::LocalCommandExecutor)
+            as Arc<dyn CommandExecutor>;
+        Arc::new(PosixHostRuntime::new(executor, HostCapabilities::default()))
+    }
+
+    fn test_runtime_with_executor(executor: Arc<dyn CommandExecutor>) -> Arc<dyn HostRuntime> {
+        Arc::new(PosixHostRuntime::new(executor, HostCapabilities::default()))
     }
 
     fn sample_installed_json() -> serde_json::Value {
@@ -438,20 +444,22 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_compatible_when_which_exits_zero() {
-        let plugin =
-            HomebrewPlugin::new(HomebrewConfig::default(), FixedOutputExecutor::failure(0))
-                .await
-                .expect("create");
+        let plugin = HomebrewPlugin::new(
+            HomebrewConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::failure(0)),
+        )
+        .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         assert_eq!(result, HostCompatibility::Compatible);
     }
 
     #[tokio::test]
     async fn detect_host_compatibility_incompatible_when_which_exits_nonzero() {
-        let plugin =
-            HomebrewPlugin::new(HomebrewConfig::default(), FixedOutputExecutor::failure(1))
-                .await
-                .expect("create");
+        let plugin = HomebrewPlugin::new(
+            HomebrewConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::failure(1)),
+        )
+        .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         match result {
             HostCompatibility::Incompatible(msg) => {
@@ -466,20 +474,18 @@ mod tests {
 
     #[tokio::test]
     async fn homebrew_plugin_detect_installed_empty_identifier_fails() {
-        use uptrakit_plugin_infrastructure_core::VersionDetectorPlugin;
-        let plugin = HomebrewPlugin::new(HomebrewConfig::default(), test_executor())
-            .await
-            .expect("create");
+        use uptrakit_plugin_infrastructure_core::VersionDetector;
+        let plugin =
+            HomebrewPlugin::new(HomebrewConfig::default(), test_runtime()).expect("create");
         let result = plugin.detect_installed_version("").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn homebrew_plugin_fetch_releases_empty_identifier_fails() {
-        use uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin;
-        let plugin = HomebrewPlugin::new(HomebrewConfig::default(), test_executor())
-            .await
-            .expect("create");
+        use uptrakit_plugin_infrastructure_core::ReleaseFetcher;
+        let plugin =
+            HomebrewPlugin::new(HomebrewConfig::default(), test_runtime()).expect("create");
         let result = plugin.fetch_releases("").await;
         assert!(result.is_err());
     }

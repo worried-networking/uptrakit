@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["http-client"] }
+parking_lot = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

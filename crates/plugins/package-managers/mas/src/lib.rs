@@ -4,4 +4,4 @@ pub mod plugin;
 
 pub use config::MasConfig;
 pub use error::{MasError, Result};
-pub use plugin::{MasPlugin, validate_identifier};
+pub use plugin::{DESCRIPTOR, MasPlugin, validate_identifier};

@@ -40,7 +40,7 @@ impl HomebrewPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for HomebrewPlugin {
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for HomebrewPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
@@ -106,10 +106,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for HomebrewPlugi
     /// Parses the returned JSON once and resolves the latest version and homepage for
     /// each package individually. If the command fails, all items receive the same error.
     #[tracing::instrument(skip_all)]
-    async fn batch_fetch_releases(
-        &self,
-        items: &[BatchFetchItem],
-    ) -> Result<Vec<BatchFetchResult>> {
+    async fn batch_fetch(&self, items: &[BatchFetchItem]) -> Result<Vec<BatchFetchResult>> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -197,13 +194,19 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{
-        BatchFetchItem, LocalCommandExecutor, ReleaseFetcherPlugin,
+        BatchFetchItem, HostCapabilities, HostRuntime, PosixHostRuntime, ReleaseFetcher,
     };
 
     use crate::config::{HomebrewConfig, HomebrewPackageType};
 
-    fn test_executor() -> Arc<dyn CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
+    fn test_runtime() -> Arc<dyn HostRuntime> {
+        let executor = Arc::new(uptrakit_plugin_infrastructure_core::LocalCommandExecutor)
+            as Arc<dyn CommandExecutor>;
+        Arc::new(PosixHostRuntime::new(executor, HostCapabilities::default()))
+    }
+
+    fn test_runtime_with_executor(executor: Arc<dyn CommandExecutor>) -> Arc<dyn HostRuntime> {
+        Arc::new(PosixHostRuntime::new(executor, HostCapabilities::default()))
     }
 
     fn sample_formula_json() -> serde_json::Value {
@@ -341,9 +344,10 @@ mod tests {
             HomebrewConfig {
                 package_type: HomebrewPackageType::Formula,
             },
-            FixedOutputExecutor::success(multi_formula_json().to_string()),
+            test_runtime_with_executor(FixedOutputExecutor::success(
+                multi_formula_json().to_string(),
+            )),
         )
-        .await
         .expect("create");
 
         let items = vec![
@@ -351,7 +355,7 @@ mod tests {
             BatchFetchItem::new("jq".to_string()),
             BatchFetchItem::new("curl".to_string()),
         ];
-        let results = plugin.batch_fetch_releases(&items).await.expect("ok");
+        let results = plugin.batch_fetch(&items).await.expect("ok");
 
         assert_eq!(results.len(), 3);
 
@@ -388,16 +392,15 @@ mod tests {
             HomebrewConfig {
                 package_type: HomebrewPackageType::Cask,
             },
-            FixedOutputExecutor::success(multi_cask_json().to_string()),
+            test_runtime_with_executor(FixedOutputExecutor::success(multi_cask_json().to_string())),
         )
-        .await
         .expect("create");
 
         let items = vec![
             BatchFetchItem::new("firefox".to_string()),
             BatchFetchItem::new("google-chrome".to_string()),
         ];
-        let results = plugin.batch_fetch_releases(&items).await.expect("ok");
+        let results = plugin.batch_fetch(&items).await.expect("ok");
 
         assert_eq!(results.len(), 2);
 
@@ -425,10 +428,9 @@ mod tests {
 
     #[tokio::test]
     async fn batch_fetch_releases_empty_returns_empty() {
-        let plugin = HomebrewPlugin::new(HomebrewConfig::default(), test_executor())
-            .await
-            .expect("create");
-        let results = plugin.batch_fetch_releases(&[]).await.expect("ok");
+        let plugin =
+            HomebrewPlugin::new(HomebrewConfig::default(), test_runtime()).expect("create");
+        let results = plugin.batch_fetch(&[]).await.expect("ok");
         assert!(results.is_empty());
     }
 }

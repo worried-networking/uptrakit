@@ -8,7 +8,7 @@ pub mod tag;
 pub use config::GitLabConfig;
 pub use error::{GitLabError, Result};
 
-pub use plugin::{GitLabPlugin, parse_project_path};
+pub use plugin::{DESCRIPTOR, GitLabPlugin, parse_project_path};
 
 /// Validate a GitLab package identifier string.
 ///

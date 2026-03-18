@@ -15,7 +15,7 @@ use std::time::Duration;
 use uptrakit_plugin_infrastructure_core::HostCompatibility;
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for DockerPlugin {
+impl uptrakit_plugin_infrastructure_core::Discoverer for DockerPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(
         &self,

@@ -9,7 +9,7 @@ use uptrakit_plugin_infrastructure_core::{
 use crate::plugin::{NpmPlugin, SYSTEM_NPM_PACKAGES};
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for NpmPlugin {
+impl uptrakit_plugin_infrastructure_core::Discoverer for NpmPlugin {
     #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::info!("discovering globally installed npm packages");
@@ -88,20 +88,32 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for NpmPlugin {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
-    use uptrakit_plugin_infrastructure_core::{DiscoveryPlugin, PluginType};
+    use uptrakit_plugin_infrastructure_core::{
+        Discoverer, HostCapabilities, HostRuntime, PluginType, PosixHostRuntime,
+    };
 
     use crate::config::NpmConfig;
     use crate::plugin::NpmPlugin;
+
+    fn test_runtime_with_executor(executor: Arc<dyn CommandExecutor>) -> Arc<dyn HostRuntime> {
+        let caps = HostCapabilities::default();
+        Arc::new(PosixHostRuntime::new(executor, caps))
+    }
 
     // ── discover_software ─────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn discover_software_always_emits_targets() {
         let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"}}}"#;
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new(json, 0))
-            .await
-            .expect("create");
+        let plugin = NpmPlugin::new(
+            NpmConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::new(json, 0)),
+        )
+        .expect("create");
         let discovered = plugin.discover_software().await.expect("ok");
         assert_eq!(discovered.len(), 1);
         assert_eq!(discovered[0].targets.len(), 1);
@@ -116,9 +128,11 @@ mod tests {
     #[tokio::test]
     async fn discover_software_excludes_system_packages() {
         let json = r#"{"dependencies":{"npm":{"version":"10.0.0"},"n8n":{"version":"1.18.0"}}}"#;
-        let plugin = NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::new(json, 0))
-            .await
-            .expect("create");
+        let plugin = NpmPlugin::new(
+            NpmConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::new(json, 0)),
+        )
+        .expect("create");
         let discovered = plugin.discover_software().await.expect("ok");
         assert_eq!(discovered.len(), 1);
         assert_eq!(discovered[0].name, "n8n");

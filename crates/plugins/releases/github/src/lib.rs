@@ -8,7 +8,7 @@ pub mod tag;
 pub use config::GitHubConfig;
 pub use error::{GitHubError, Result};
 
-pub use plugin::{GitHubPlugin, parse_owner_repo};
+pub use plugin::{DESCRIPTOR, GitHubPlugin, parse_owner_repo};
 
 /// Validate a GitHub package identifier string.
 ///

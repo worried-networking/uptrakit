@@ -111,7 +111,7 @@ pub(crate) async fn fetch_crate_releases(
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for CargoPlugin {
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for CargoPlugin {
     /// Fetch available releases for a single crate from the sparse registry index.
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
@@ -129,10 +129,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for CargoPlugin {
 
     /// Fetch releases for multiple crates in parallel, bounded to 10 concurrent requests.
     #[tracing::instrument(skip_all)]
-    async fn batch_fetch_releases(
-        &self,
-        items: &[BatchFetchItem],
-    ) -> Result<Vec<BatchFetchResult>> {
+    async fn batch_fetch(&self, items: &[BatchFetchItem]) -> Result<Vec<BatchFetchResult>> {
         if items.is_empty() {
             return Ok(vec![]);
         }

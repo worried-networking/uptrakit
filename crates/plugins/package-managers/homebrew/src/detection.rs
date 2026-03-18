@@ -39,7 +39,7 @@ impl HomebrewPlugin {
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for HomebrewPlugin {
+impl uptrakit_plugin_infrastructure_core::VersionDetector for HomebrewPlugin {
     #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
@@ -81,10 +81,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetectorPlugin for HomebrewPlug
     /// existing [`parse_installed_version`](Self::parse_installed_version) helper. If
     /// the command fails, all items receive the same error.
     #[tracing::instrument(skip_all)]
-    async fn batch_detect_installed_version(
-        &self,
-        items: &[BatchDetectItem],
-    ) -> Result<Vec<BatchDetectResult>> {
+    async fn batch_detect(&self, items: &[BatchDetectItem]) -> Result<Vec<BatchDetectResult>> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -158,13 +155,19 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{
-        BatchDetectItem, LocalCommandExecutor, Version, VersionDetectorPlugin,
+        BatchDetectItem, HostCapabilities, HostRuntime, PosixHostRuntime, Version, VersionDetector,
     };
 
     use crate::config::{HomebrewConfig, HomebrewPackageType};
 
-    fn test_executor() -> Arc<dyn CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
+    fn test_runtime() -> Arc<dyn HostRuntime> {
+        let executor = Arc::new(uptrakit_plugin_infrastructure_core::LocalCommandExecutor)
+            as Arc<dyn CommandExecutor>;
+        Arc::new(PosixHostRuntime::new(executor, HostCapabilities::default()))
+    }
+
+    fn test_runtime_with_executor(executor: Arc<dyn CommandExecutor>) -> Arc<dyn HostRuntime> {
+        Arc::new(PosixHostRuntime::new(executor, HostCapabilities::default()))
     }
 
     fn sample_formula_json() -> serde_json::Value {
@@ -324,9 +327,10 @@ mod tests {
             HomebrewConfig {
                 package_type: HomebrewPackageType::Formula,
             },
-            FixedOutputExecutor::success(multi_formula_json().to_string()),
+            test_runtime_with_executor(FixedOutputExecutor::success(
+                multi_formula_json().to_string(),
+            )),
         )
-        .await
         .expect("create");
 
         let items = vec![
@@ -334,10 +338,7 @@ mod tests {
             BatchDetectItem::new("jq".to_string()),
             BatchDetectItem::new("curl".to_string()),
         ];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("ok");
+        let results = plugin.batch_detect(&items).await.expect("ok");
 
         assert_eq!(results.len(), 3);
 
@@ -371,19 +372,15 @@ mod tests {
             HomebrewConfig {
                 package_type: HomebrewPackageType::Cask,
             },
-            FixedOutputExecutor::success(multi_cask_json().to_string()),
+            test_runtime_with_executor(FixedOutputExecutor::success(multi_cask_json().to_string())),
         )
-        .await
         .expect("create");
 
         let items = vec![
             BatchDetectItem::new("firefox".to_string()),
             BatchDetectItem::new("google-chrome".to_string()),
         ];
-        let results = plugin
-            .batch_detect_installed_version(&items)
-            .await
-            .expect("ok");
+        let results = plugin.batch_detect(&items).await.expect("ok");
 
         assert_eq!(results.len(), 2);
 
@@ -406,13 +403,9 @@ mod tests {
 
     #[tokio::test]
     async fn batch_detect_installed_version_empty_returns_empty() {
-        let plugin = HomebrewPlugin::new(HomebrewConfig::default(), test_executor())
-            .await
-            .expect("create");
-        let results = plugin
-            .batch_detect_installed_version(&[])
-            .await
-            .expect("ok");
+        let plugin =
+            HomebrewPlugin::new(HomebrewConfig::default(), test_runtime()).expect("create");
+        let results = plugin.batch_detect(&[]).await.expect("ok");
         assert!(results.is_empty());
     }
 }

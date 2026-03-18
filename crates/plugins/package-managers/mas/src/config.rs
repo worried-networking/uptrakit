@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::SecretMasking;
+use uptrakit_plugin_infrastructure_core::PluginConfig;
 
 /// Configuration for the Mac App Store (`mas`) plugin.
 ///
@@ -9,31 +9,9 @@ use uptrakit_plugin_infrastructure_core::SecretMasking;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MasConfig {}
 
-impl SecretMasking for MasConfig {}
-
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for MasConfig {
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        vec![]
-    }
-}
-
-impl MasConfig {
-    /// Validate a Mac App Store package identifier string.
-    ///
-    /// Delegates to the crate-level [`validate_identifier`](crate::validate_identifier)
-    /// function. A valid identifier is a non-empty, all-digit string of at most 15
-    /// characters (App Store IDs are 9–10 digits as of 2025).
-    ///
-    /// Called by the plugin registry's `validate_package_identifier` dispatch.
-    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+impl PluginConfig for MasConfig {
+    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
         crate::validate_identifier(value)
-    }
-
-    /// Validate the configuration.
-    ///
-    /// `MasConfig` has no fields that require validation; always returns `Ok(())`.
-    pub fn validate(&self) -> crate::error::Result<()> {
-        Ok(())
     }
 }
 

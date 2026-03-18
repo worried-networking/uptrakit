@@ -1,7 +1,11 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
-use uptrakit_plugin_infrastructure_core::PluginCapability;
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
+use uptrakit_plugin_infrastructure_core::{
+    ConfigModel, HostRequirements, HostRuntime, PluginFamily, declare_plugin,
+};
 
 use crate::config::DockerConfig;
 use crate::docker_client::{DockerClient, NoopDockerClient};
@@ -22,7 +26,9 @@ pub struct DockerPlugin {
     pub(crate) config: DockerConfig,
     pub(crate) registry_client: Arc<dyn RegistryClientOps>,
     pub(crate) docker_client: parking_lot::Mutex<Arc<dyn DockerClient>>,
-    pub(crate) executor: Arc<dyn CommandExecutor>,
+    /// Command executor for agent-side operations. `None` when instantiated
+    /// on the controller (where only `ReleaseFetcher` runs).
+    pub(crate) executor: Option<Arc<dyn CommandExecutor>>,
     /// RAII handle for the Docker socket proxy (Unix-only, daemon feature).
     ///
     /// When an executor supports stdio tunnels and no explicit `docker_host`
@@ -42,31 +48,72 @@ pub struct DockerPlugin {
 impl DockerPlugin {
     /// Create a new `DockerPlugin` from the given configuration.
     ///
-    /// With the `daemon` feature enabled, connects to the Docker daemon via
-    /// bollard. Without it, uses [`NoopDockerClient`] so the plugin can still
-    /// serve registry-only capabilities (e.g. `ControllerSideFetchReleases`).
-    pub async fn new(config: DockerConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
-        // Always create a NoopDockerClient and a None proxy handle as
-        // starting values. When the `daemon` feature is enabled,
-        // upgrade_to_daemon_client replaces them with a real
-        // BollardDockerClient (and optionally a proxy handle), consuming
-        // the stub values in the process.
+    /// The HTTP registry client is built eagerly. The Docker daemon client
+    /// starts as [`NoopDockerClient`] and is upgraded to a real Bollard client
+    /// via [`Self::ensure_daemon_client()`] on first use (requires async).
+    /// The POSIX executor is obtained from the runtime if available (agent-side);
+    /// on the controller side it will be `None`.
+    pub fn new(
+        config: DockerConfig,
+        runtime: Arc<dyn HostRuntime>,
+    ) -> std::result::Result<Self, String> {
+        config.validate_inner().map_err(|e| e.to_string())?;
+
+        let registry_client: Arc<dyn RegistryClientOps> =
+            Arc::new(RegistryClient::new(config.auth.clone()).map_err(|e| e.to_string())?);
+
+        let executor =
+            uptrakit_plugin_infrastructure_core::require_posix_executor(runtime.as_ref()).ok();
+
         let docker_client: Arc<dyn DockerClient> = Arc::new(NoopDockerClient);
-        let proxy_handle: OpaqueHandle = None;
-        #[cfg(feature = "daemon")]
-        let (docker_client, proxy_handle) =
-            Self::upgrade_to_daemon_client(docker_client, proxy_handle, &config, &executor).await?;
-        Self::init(config, executor, docker_client, proxy_handle)
+
+        Ok(Self {
+            config,
+            registry_client,
+            docker_client: parking_lot::Mutex::new(docker_client),
+            executor,
+            #[cfg(feature = "daemon")]
+            proxy_handle: parking_lot::Mutex::new(None),
+            #[cfg(feature = "daemon")]
+            detected_runtime: parking_lot::Mutex::new(None),
+            #[cfg(feature = "daemon")]
+            credential_cache: crate::credentials::CredentialCache::new(),
+        })
+    }
+
+    /// Upgrade the Docker client from a noop stub to a real Bollard client.
+    ///
+    /// This is called lazily from role methods that need the Docker daemon.
+    /// With the `daemon` feature enabled, connects to the Docker daemon via
+    /// bollard. Without it, the [`NoopDockerClient`] remains.
+    #[cfg(feature = "daemon")]
+    #[allow(dead_code)]
+    pub(crate) async fn ensure_daemon_client(&self) -> Result<()> {
+        let Some(ref executor) = self.executor else {
+            // No executor means controller-side; NoopDockerClient is fine.
+            return Ok(());
+        };
+
+        let stub: Arc<dyn DockerClient> = Arc::new(NoopDockerClient);
+        let proxy_stub: OpaqueHandle = None;
+        let (client, proxy_handle) =
+            Self::upgrade_to_daemon_client(stub, proxy_stub, &self.config, executor).await?;
+
+        *self.docker_client.lock() = client;
+        *self.proxy_handle.lock() = proxy_handle;
+        Ok(())
     }
 
     /// Internal constructor that accepts any [`DockerClient`] implementation.
+    ///
+    /// Used by the old async `new_async()` path and by test constructors.
     pub(crate) fn init(
         config: DockerConfig,
         executor: Arc<dyn CommandExecutor>,
         docker_client: Arc<dyn DockerClient>,
         #[cfg_attr(not(feature = "daemon"), allow(unused_variables))] proxy_handle: OpaqueHandle,
     ) -> Result<Self> {
-        config.validate()?;
+        config.validate_inner()?;
 
         let registry_client: Arc<dyn RegistryClientOps> =
             Arc::new(RegistryClient::new(config.auth.clone())?);
@@ -75,7 +122,7 @@ impl DockerPlugin {
             config,
             registry_client,
             docker_client: parking_lot::Mutex::new(docker_client),
-            executor,
+            executor: Some(executor),
             #[cfg(feature = "daemon")]
             proxy_handle: parking_lot::Mutex::new(proxy_handle),
             #[cfg(feature = "daemon")]
@@ -85,24 +132,22 @@ impl DockerPlugin {
         })
     }
 
-    /// Compile-time capabilities for the Docker plugin.
+    /// Async constructor that connects to the Docker daemon immediately.
     ///
-    /// Read directly by the registry macro for sync capability queries.
-    /// All capabilities are declared unconditionally so the controller's
-    /// `discovery_plugins()` always includes Docker in discovery assignments.
-    /// The actual `discover_software()` and `detect_host_compatibility()`
-    /// implementations are gated behind `#[cfg(feature = "daemon")]` on the
-    /// trait impl — the controller never calls them; it only sends the
-    /// assignment to the agent over WebSocket.
-    pub const CAPABILITIES: &'static [PluginCapability] = &[
-        PluginCapability::ControllerSideFetchReleases,
-        PluginCapability::DiscoverLocalSoftware,
-        PluginCapability::DetectHostCompatibility,
-        PluginCapability::VersionDetection,
-        PluginCapability::ReleaseFetching,
-        PluginCapability::UpdateExecution,
-        PluginCapability::ConfigTest,
-    ];
+    /// Retained for backward compatibility with code paths that need a fully
+    /// initialized daemon connection at construction time.
+    #[allow(dead_code)]
+    pub(crate) async fn new_async(
+        config: DockerConfig,
+        executor: Arc<dyn CommandExecutor>,
+    ) -> Result<Self> {
+        let docker_client: Arc<dyn DockerClient> = Arc::new(NoopDockerClient);
+        let proxy_handle: OpaqueHandle = None;
+        #[cfg(feature = "daemon")]
+        let (docker_client, proxy_handle) =
+            Self::upgrade_to_daemon_client(docker_client, proxy_handle, &config, &executor).await?;
+        Self::init(config, executor, docker_client, proxy_handle)
+    }
 
     /// Test constructor that injects a custom [`DockerClient`].
     ///
@@ -133,12 +178,12 @@ impl DockerPlugin {
         docker_client: Arc<dyn DockerClient>,
         registry_client: Arc<dyn RegistryClientOps>,
     ) -> Result<Self> {
-        config.validate()?;
+        config.validate_inner()?;
         Ok(Self {
             config,
             registry_client,
             docker_client: parking_lot::Mutex::new(docker_client),
-            executor,
+            executor: Some(executor),
             #[cfg(feature = "daemon")]
             proxy_handle: parking_lot::Mutex::new(None),
             #[cfg(feature = "daemon")]
@@ -171,55 +216,80 @@ impl DockerPlugin {
         }
         true
     }
+
+    /// Return a reference to the command executor, or an error if unavailable.
+    ///
+    /// The executor is `None` when the plugin is instantiated on the
+    /// controller (where only `ReleaseFetcher` runs). Agent-side roles
+    /// that need the executor call this helper.
+    pub(crate) fn require_executor(
+        &self,
+    ) -> std::result::Result<&Arc<dyn CommandExecutor>, crate::error::DockerError> {
+        self.executor.as_ref().ok_or_else(|| {
+            crate::error::DockerError::Configuration(
+                "POSIX executor not available (controller-side instance)".to_string(),
+            )
+        })
+    }
+
+    /// Return extension manifests for the Docker plugin.
+    pub fn extension_manifests_static() -> Vec<uptrakit_extension_framework::ExtensionManifest> {
+        crate::extensions::extension_manifests()
+    }
+
+    /// Return extension action definitions for the Docker plugin.
+    pub fn extension_actions_static() -> Vec<uptrakit_extension_framework::ActionDef> {
+        crate::extensions::extension_actions()
+    }
 }
 
-// ── PluginBase + subtrait implementations ────────────────────────────────
+/// Extension action handler wrapper for the `declare_plugin!` macro.
+///
+/// This function matches the `ExtensionActionHandler` type signature, which
+/// receives `descriptor::ExtensionActionContext` (with `db: &dyn Any`).
+/// It downcasts the database connection and delegates to the existing
+/// `crate::extensions::handle_action` handler.
+fn docker_handle_extension_action<'a>(
+    ctx: &'a uptrakit_plugin_infrastructure_core::descriptor::ExtensionActionContext<'a>,
+    extension_id: &'a str,
+    action_id: &'a str,
+    params: serde_json::Value,
+) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>> {
+    Box::pin(async move {
+        let db = ctx
+            .db
+            .downcast_ref::<sea_orm::DatabaseConnection>()
+            .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
 
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    DockerPlugin,
-    DockerConfig,
-    "releases_docker",
-    {
-        fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
+        let inner_ctx = uptrakit_plugin_infrastructure_core::ExtensionActionContext {
+            db,
+            tenant_id: ctx.tenant_id,
+            caller_user_id: ctx.caller_user_id,
+        };
 
-        fn extension_manifests() -> Vec<uptrakit_extension_framework::ExtensionManifest>
-        where
-            Self: Sized,
-        {
-            crate::extensions::extension_manifests()
-        }
+        crate::extensions::handle_action(&inner_ctx, extension_id, action_id, params).await
+    })
+}
 
-        fn extension_actions() -> Vec<uptrakit_extension_framework::ActionDef>
-        where
-            Self: Sized,
-        {
-            crate::extensions::extension_actions()
-        }
+// ── declare_plugin! ──────────────────────────────────────────────────────
 
-        fn as_discovery(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::DiscoveryPlugin> {
-            Some(self)
-        }
-        fn as_version_detector(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::VersionDetectorPlugin> {
-            Some(self)
-        }
-        fn as_release_fetcher(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
-            Some(self)
-        }
-        fn as_update_executor(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
-            Some(self)
-        }
+declare_plugin!(DockerPlugin, DockerConfig, "releases_docker", {
+    display_name: "Docker",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::POSIX,
+    roles: [Discoverer, VersionDetector, ReleaseFetcher, UpdateExecutor]
+    , extra_capabilities: [
+        uptrakit_plugin_infrastructure_core::PluginCapability::ControllerSideFetchReleases,
+        uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility,
+    ]
+    , owned_extension_ids: &["docker."]
+    , extensions: {
+        manifests: DockerPlugin::extension_manifests_static,
+        actions: DockerPlugin::extension_actions_static,
+        handle_action: docker_handle_extension_action,
     }
-);
+});
 
 #[cfg(all(test, feature = "daemon"))]
 #[path = "tests.rs"]

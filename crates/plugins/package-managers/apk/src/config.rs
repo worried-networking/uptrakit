@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::SecretMasking;
+use uptrakit_plugin_infrastructure_core::{PluginConfig, TypeSettings};
 
 /// Discovery filter for the APK plugin.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,13 +30,13 @@ pub struct ApkConfig {
     pub discovery_filter: ApkDiscoveryFilter,
 }
 
-impl SecretMasking for ApkConfig {}
-
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ApkConfig {
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        vec![]
+impl PluginConfig for ApkConfig {
+    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
     }
+}
 
+impl TypeSettings for ApkConfig {
     fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
     {
         use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
@@ -59,16 +59,6 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ApkConfig {
 }
 
 impl ApkConfig {
-    /// Validate an APK package identifier string.
-    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
-    }
-
-    /// Validate the configuration.
-    pub fn validate(&self) -> crate::error::Result<()> {
-        Ok(())
-    }
-
     /// Returns the discovery filter to apply.
     pub(crate) fn effective_filter(&self) -> ApkDiscoveryFilter {
         self.discovery_filter

@@ -11,14 +11,11 @@ use tokio::io::AsyncWriteExt;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    AttestationStatus, OutputStreamType, PluginCapability, PluginError, ReleaseAsset, ReleaseInfo,
-    SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
+    AttestationStatus, ConfigModel, ConfigTestKind, HostRequirements, HostRuntime,
+    OutputStreamType, PluginCapability, PluginError, PluginFamily, ReleaseAsset, ReleaseInfo,
+    SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version, declare_plugin,
 };
 use uptrakit_plugin_infrastructure_core::{PluginHttpClientConfig, build_plugin_http_client};
-
-// Subtrait imports needed by tests (via `use super::*`) to resolve method calls.
-#[cfg(test)]
-use uptrakit_plugin_infrastructure_core::{PluginBase, UpdateExecutorPlugin};
 
 use crate::api_types::{AttestationsApiResponse, GitHubApiError, GitHubAsset, GitHubRelease};
 use crate::config::GitHubConfig;
@@ -77,30 +74,55 @@ pub fn parse_owner_repo(package_identifier: &str) -> Result<(&str, &str)> {
 /// at call time (format: `"owner/repo"`), not stored in the plugin config.
 /// A single plugin instance can therefore serve any number of GitHub repositories.
 pub struct GitHubPlugin {
-    client: reqwest::Client,
+    client: parking_lot::Mutex<Option<reqwest::Client>>,
     config: GitHubConfig,
     asset_filters: Vec<Regex>,
-    executor: Arc<dyn CommandExecutor>,
+    /// Command executor for agent-side `execute_update`. `None` when instantiated
+    /// on the controller (where only `ReleaseFetcher` runs).
+    executor: Option<Arc<dyn CommandExecutor>>,
 }
 
 impl GitHubPlugin {
-    /// Compile-time capabilities for the GitHub plugin.
-    pub const CAPABILITIES: &'static [PluginCapability] = &[
-        PluginCapability::ControllerSideFetchReleases,
-        PluginCapability::ReleaseFetching,
-        PluginCapability::UpdateExecution,
-        PluginCapability::ConfigTest,
-    ];
-
     /// Create a new `GitHubPlugin` from the given configuration.
     ///
-    /// Validates the configuration and pre-compiles asset filter regexes.
-    /// The executor is used for running `install(1)` during `execute_update`.
-    pub async fn new(config: GitHubConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
-        config
-            .validate()
-            .map_err(|e| report!(GitHubError::Configuration(e.to_string())))?;
+    /// Pre-compiles asset filter regexes. The HTTP client is built lazily.
+    /// The POSIX executor is obtained from the runtime if available (agent-side);
+    /// on the controller side it will be `None`.
+    pub fn new(
+        config: GitHubConfig,
+        runtime: Arc<dyn HostRuntime>,
+    ) -> std::result::Result<Self, String> {
+        let asset_filters: Vec<Regex> = config
+            .asset_patterns
+            .iter()
+            .map(|p| Regex::new(p).map_err(|e| format!("invalid regex '{p}': {e}")))
+            .collect::<std::result::Result<_, _>>()?;
 
+        // Try to get POSIX executor; None is fine for controller-side usage.
+        let executor =
+            uptrakit_plugin_infrastructure_core::require_posix_executor(runtime.as_ref()).ok();
+
+        Ok(Self {
+            client: parking_lot::Mutex::new(None),
+            config,
+            asset_filters,
+            executor,
+        })
+    }
+
+    /// Get or lazily build the HTTP client.
+    fn client(&self) -> Result<reqwest::Client> {
+        let mut guard = self.client.lock();
+        if let Some(ref c) = *guard {
+            return Ok(c.clone());
+        }
+        let c = Self::build_client(&self.config)?;
+        *guard = Some(c.clone());
+        Ok(c)
+    }
+
+    /// Build the HTTP client with appropriate headers.
+    fn build_client(config: &GitHubConfig) -> Result<reqwest::Client> {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::ACCEPT,
@@ -121,7 +143,7 @@ impl GitHubPlugin {
             headers.insert(reqwest::header::AUTHORIZATION, header_value);
         }
 
-        let client = build_plugin_http_client(PluginHttpClientConfig {
+        build_plugin_http_client(PluginHttpClientConfig {
             user_agent: concat!(
                 "uptrakit-plugin-releases-github/",
                 env!("CARGO_PKG_VERSION")
@@ -129,26 +151,19 @@ impl GitHubPlugin {
             default_headers: Some(headers),
             ..Default::default()
         })
-        .map_err(|e| report!(GitHubError::Request(e)))?;
+        .map_err(|e| report!(GitHubError::Request(e)))
+    }
 
-        let asset_filters: Vec<Regex> = config
-            .asset_patterns
-            .iter()
-            .map(|p| {
-                Regex::new(p).map_err(|e| {
-                    report!(GitHubError::InvalidPattern(format!(
-                        "invalid regex '{p}': {e}"
-                    )))
-                })
-            })
-            .collect::<Result<_>>()?;
-
-        Ok(Self {
-            client,
-            config,
-            asset_filters,
-            executor,
-        })
+    /// Return the sudo commands required by the GitHub plugin.
+    ///
+    /// This is a static function taking the serialized config (not `&self`)
+    /// because the descriptor stores it as a function pointer.
+    pub fn required_sudo_commands(_config: &serde_json::Value) -> Vec<SudoCommandEntry> {
+        // `install` — copies release assets to the target path.
+        vec![SudoCommandEntry::new(
+            "install",
+            "Install downloaded GitHub release assets to the target path",
+        )]
     }
 
     /// Build the releases API URL for the given owner/repo pair.
@@ -305,8 +320,14 @@ impl GitHubPlugin {
         };
 
         // 2. Download the checksums file.
-        let checksums_text = match self
-            .client
+        let client = match self.client() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to build HTTP client for attestation check");
+                return AttestationStatus::Unverified;
+            }
+        };
+        let checksums_text = match client
             .get(&checksums_asset.browser_download_url)
             .send()
             .await
@@ -356,7 +377,7 @@ impl GitHubPlugin {
         let url = self.attestation_url(owner, repo, digest_hex);
         tracing::debug!(%url, "checking GitHub attestation");
 
-        let response = match self.client.get(&url).send().await {
+        let response = match client.get(&url).send().await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(error = %e, "attestation API request failed");
@@ -420,41 +441,21 @@ fn parse_link_next(headers: &reqwest::header::HeaderMap) -> Option<String> {
     })
 }
 
-// ── PluginBase + subtrait implementations ────────────────────────────────
+// ── declare_plugin! ──────────────────────────────────────────────────────
 
-uptrakit_plugin_infrastructure_core::impl_plugin_base_config!(
-    GitHubPlugin,
-    GitHubConfig,
-    "releases_github",
-    {
-        fn capabilities(&self) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
-            Self::CAPABILITIES.to_vec()
-        }
-        fn required_sudo_commands(
-            &self,
-        ) -> Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry> {
-            // `install` — copies release assets to the target path.
-            vec![SudoCommandEntry::new(
-                "install",
-                "Install downloaded GitHub release assets to the target path",
-            )]
-        }
-
-        fn as_release_fetcher(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin> {
-            Some(self)
-        }
-        fn as_update_executor(
-            &self,
-        ) -> Option<&dyn uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin> {
-            Some(self)
-        }
-    }
-);
+declare_plugin!(GitHubPlugin, GitHubConfig, "releases_github", {
+    display_name: "GitHub Releases",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::CONTROLLER_ONLY,
+    config_test: [ConfigTestKind::Connectivity],
+    roles: [ReleaseFetcher, UpdateExecutor { host_requirements: HostRequirements::POSIX }],
+    extra_capabilities: [PluginCapability::ControllerSideFetchReleases],
+    sudo: GitHubPlugin::required_sudo_commands,
+});
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for GitHubPlugin {
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for GitHubPlugin {
     #[tracing::instrument(skip_all)]
     async fn fetch_releases(
         &self,
@@ -474,11 +475,17 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for GitHubPlugin 
         let mut url = initial_url;
 
         'pages: for _ in 0..MAX_PAGES {
-            let response = self.client.get(&url).send().await.map_err(|e| {
-                report!(PluginError::Configuration(format!(
-                    "HTTP request failed: {e}"
-                )))
-            })?;
+            let response = self
+                .client()
+                .context_to()?
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| {
+                    report!(PluginError::Configuration(format!(
+                        "HTTP request failed: {e}"
+                    )))
+                })?;
 
             let status = response.status();
             self.check_rate_limit(response.headers(), package_identifier);
@@ -560,7 +567,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcherPlugin for GitHubPlugin 
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for GitHubPlugin {
+impl uptrakit_plugin_infrastructure_core::UpdateExecutor for GitHubPlugin {
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
@@ -733,17 +740,20 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for GitHubPlugin 
         // Stream the asset bytes directly into the remote `cat` process via
         // the SSH stdio tunnel.  This works for any executor that supports
         // `open_stdio_tunnel` — in practice all SSH-backed executors.
+        let executor = self.executor.as_ref().ok_or_else(|| {
+            report!(PluginError::Configuration(
+                "execute_update requires a POSIX executor (not available on controller)"
+                    .to_string()
+            ))
+        })?;
+
         {
             let tunnel_cmd = format!("cat > {remote_temp}");
-            let mut tunnel = self
-                .executor
-                .open_stdio_tunnel(&tunnel_cmd)
-                .await
-                .map_err(|e| {
-                    report!(PluginError::InstallFailed(format!(
-                        "failed to open upload channel: {e}"
-                    )))
-                })?;
+            let mut tunnel = executor.open_stdio_tunnel(&tunnel_cmd).await.map_err(|e| {
+                report!(PluginError::InstallFailed(format!(
+                    "failed to open upload channel: {e}"
+                )))
+            })?;
             tunnel.write_all(&body_bytes).await.map_err(|e| {
                 report!(PluginError::InstallFailed(format!(
                     "failed to upload asset: {e}"
@@ -782,11 +792,11 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for GitHubPlugin 
         )
         .privileged();
 
-        let install_result = self.executor.execute(&install_spec, output_tx).await;
+        let install_result = executor.execute(&install_spec, output_tx).await;
 
         // Best-effort cleanup of the remote temp file regardless of install outcome.
         let rm_spec = CommandSpec::exec("rm", ["-f".to_string(), remote_temp]);
-        if let Err(e) = self.executor.execute_quiet(&rm_spec).await {
+        if let Err(e) = executor.execute_quiet(&rm_spec).await {
             tracing::warn!(error = %e, "failed to remove remote temp file (best-effort)");
         }
 
@@ -817,20 +827,23 @@ fn format_size(size: Option<u64>) -> String {
 mod tests {
     use super::*;
     use crate::api_types::{GitHubAsset, GitHubRelease};
-    use uptrakit_plugin_infrastructure_core::LocalCommandExecutor;
+    use uptrakit_plugin_infrastructure_core::{
+        HostCapabilities, PluginCapability, PosixHostRuntime, UpdateExecutor as _,
+    };
 
     fn test_config() -> GitHubConfig {
         GitHubConfig::default()
     }
 
-    fn test_executor() -> std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::CommandExecutor> {
-        std::sync::Arc::new(LocalCommandExecutor)
+    fn test_runtime() -> Arc<dyn HostRuntime> {
+        let executor = Arc::new(uptrakit_plugin_infrastructure_core::LocalCommandExecutor)
+            as Arc<dyn uptrakit_plugin_infrastructure_core::command::CommandExecutor>;
+        let caps = HostCapabilities::default();
+        Arc::new(PosixHostRuntime::new(executor, caps))
     }
 
-    async fn test_plugin() -> GitHubPlugin {
-        GitHubPlugin::new(test_config(), test_executor())
-            .await
-            .expect("valid config")
+    fn test_plugin() -> GitHubPlugin {
+        GitHubPlugin::new(test_config(), test_runtime()).expect("valid config")
     }
 
     fn make_release(tag: &str, draft: bool, prerelease: bool) -> GitHubRelease {
@@ -887,9 +900,9 @@ mod tests {
 
     // ── URL construction tests ────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn url_construction() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn url_construction() {
+        let plugin = test_plugin();
         let url = plugin.releases_url("octocat", "hello-world");
         assert_eq!(
             url,
@@ -897,15 +910,13 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn url_construction_custom_base() {
+    #[test]
+    fn url_construction_custom_base() {
         let config = GitHubConfig {
             api_base_url: Some("https://ghe.corp.com/api/v3".to_string()),
             ..GitHubConfig::default()
         };
-        let plugin = GitHubPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = GitHubPlugin::new(config, test_runtime()).expect("valid config");
         let url = plugin.releases_url("octocat", "hello-world");
         assert_eq!(
             url,
@@ -915,9 +926,9 @@ mod tests {
 
     // ── convert_release tests ─────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn convert_normal_release() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn convert_normal_release() {
+        let plugin = test_plugin();
         let gh = make_release("v1.0.0", false, false);
         let release = plugin.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "1.0.0");
@@ -926,74 +937,68 @@ mod tests {
         assert!(release.published_at.is_some());
     }
 
-    #[tokio::test]
-    async fn skip_draft_release() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn skip_draft_release() {
+        let plugin = test_plugin();
         let gh = make_release("v1.0.0", true, false);
         assert!(plugin.convert_release(&gh).is_none());
     }
 
-    #[tokio::test]
-    async fn skip_prerelease_by_default() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn skip_prerelease_by_default() {
+        let plugin = test_plugin();
         let gh = make_release("v1.0.0-beta.1", false, true);
         assert!(plugin.convert_release(&gh).is_none());
     }
 
-    #[tokio::test]
-    async fn include_prerelease_when_configured() {
+    #[test]
+    fn include_prerelease_when_configured() {
         let config = GitHubConfig {
             include_prereleases: true,
             ..GitHubConfig::default()
         };
-        let plugin = GitHubPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = GitHubPlugin::new(config, test_runtime()).expect("valid config");
         let gh = make_release("v1.0.0-beta.1", false, true);
         let release = plugin.convert_release(&gh).expect("should convert");
         assert!(release.is_prerelease);
         assert_eq!(release.version.as_str(), "1.0.0-beta.1");
     }
 
-    #[tokio::test]
-    async fn tag_stripping() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn tag_stripping() {
+        let plugin = test_plugin();
         let gh = make_release("v2.3.4", false, false);
         let release = plugin.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "2.3.4");
     }
 
-    #[tokio::test]
-    async fn tag_without_prefix() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn tag_without_prefix() {
+        let plugin = test_plugin();
         let gh = make_release("1.0.0", false, false);
         let release = plugin.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "1.0.0");
     }
 
-    #[tokio::test]
-    async fn custom_tag_prefix() {
+    #[test]
+    fn custom_tag_prefix() {
         let config = GitHubConfig {
             tag_strip_prefix: "release-".to_string(),
             ..GitHubConfig::default()
         };
-        let plugin = GitHubPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = GitHubPlugin::new(config, test_runtime()).expect("valid config");
         let gh = make_release("release-3.0.0", false, false);
         let release = plugin.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "3.0.0");
     }
 
-    #[tokio::test]
-    async fn asset_filtering() {
+    #[test]
+    fn asset_filtering() {
         let config = GitHubConfig {
             asset_patterns: vec![r".*\.tar\.gz$".to_string()],
             ..GitHubConfig::default()
         };
-        let plugin = GitHubPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = GitHubPlugin::new(config, test_runtime()).expect("valid config");
 
         let gh = GitHubRelease {
             tag_name: "v1.0.0".to_string(),
@@ -1030,9 +1035,9 @@ mod tests {
         assert_eq!(release.assets[0].name, "app-linux-amd64.tar.gz");
     }
 
-    #[tokio::test]
-    async fn no_asset_filter_includes_all() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn no_asset_filter_includes_all() {
+        let plugin = test_plugin();
         let gh = GitHubRelease {
             tag_name: "v1.0.0".to_string(),
             name: None,
@@ -1061,9 +1066,9 @@ mod tests {
         assert_eq!(release.assets.len(), 2);
     }
 
-    #[tokio::test]
-    async fn date_parsing() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn date_parsing() {
+        let plugin = test_plugin();
         let gh = make_release("v1.0.0", false, false);
         let release = plugin.convert_release(&gh).expect("should convert");
         let published = release.published_at.expect("should have published_at");
@@ -1072,9 +1077,9 @@ mod tests {
         assert_eq!(published.day(), 28);
     }
 
-    #[tokio::test]
-    async fn invalid_date_does_not_fail() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn invalid_date_does_not_fail() {
+        let plugin = test_plugin();
         let gh = GitHubRelease {
             tag_name: "v1.0.0".to_string(),
             name: None,
@@ -1089,10 +1094,10 @@ mod tests {
         assert!(release.published_at.is_none());
     }
 
-    #[tokio::test]
-    async fn plugin_creation_succeeds_with_empty_config() {
+    #[test]
+    fn plugin_creation_succeeds_with_empty_config() {
         let config = GitHubConfig::default();
-        assert!(GitHubPlugin::new(config, test_executor()).await.is_ok());
+        assert!(GitHubPlugin::new(config, test_runtime()).is_ok());
     }
 
     // ── find_checksums_asset tests ────────────────────────────────────────
@@ -1206,9 +1211,9 @@ mod tests {
 
     // ── attestation_url tests ─────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn attestation_url_default_base() {
-        let plugin = test_plugin().await;
+    #[test]
+    fn attestation_url_default_base() {
+        let plugin = test_plugin();
         let url = plugin.attestation_url("owner", "repo", "abc123");
         assert_eq!(
             url,
@@ -1216,15 +1221,13 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn attestation_url_custom_base() {
+    #[test]
+    fn attestation_url_custom_base() {
         let config = GitHubConfig {
             api_base_url: Some("https://ghe.corp.com/api/v3".to_string()),
             ..GitHubConfig::default()
         };
-        let plugin = GitHubPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = GitHubPlugin::new(config, test_runtime()).expect("valid config");
         let url = plugin.attestation_url("org", "project", "deadbeef");
         assert_eq!(
             url,
@@ -1256,7 +1259,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_update_fails_without_install_path() {
-        let plugin = test_plugin().await;
+        let plugin = test_plugin();
         let (tx, _rx) = mpsc::channel(100);
         let release = make_release_info(vec![make_release_asset("app", "https://example.com/app")]);
         let result = plugin
@@ -1273,9 +1276,7 @@ mod tests {
             install_path: Some("/usr/local/bin/app".to_string()),
             ..GitHubConfig::default()
         };
-        let plugin = GitHubPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = GitHubPlugin::new(config, test_runtime()).expect("valid config");
         let (tx, _rx) = mpsc::channel(100);
         let result = plugin
             .execute_update("owner/repo", "1.0.0", None, &tx)
@@ -1292,9 +1293,7 @@ mod tests {
             asset_patterns: vec![r".*windows.*".to_string()],
             ..GitHubConfig::default()
         };
-        let plugin = GitHubPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = GitHubPlugin::new(config, test_runtime()).expect("valid config");
         let (tx, _rx) = mpsc::channel(100);
         let release = make_release_info(vec![
             make_release_asset("app-linux-amd64", "https://example.com/linux"),
@@ -1315,9 +1314,7 @@ mod tests {
             asset_patterns: vec![r".*linux.*".to_string()],
             ..GitHubConfig::default()
         };
-        let plugin = GitHubPlugin::new(config, test_executor())
-            .await
-            .expect("valid config");
+        let plugin = GitHubPlugin::new(config, test_runtime()).expect("valid config");
         let (tx, _rx) = mpsc::channel(100);
         let release = make_release_info(vec![
             make_release_asset("app-linux-amd64", "https://example.com/amd64"),
@@ -1333,10 +1330,9 @@ mod tests {
 
     // ── required_sudo_commands tests ─────────────────────────────────────
 
-    #[tokio::test]
-    async fn required_sudo_commands_returns_install_only() {
-        let plugin = test_plugin().await;
-        let cmds = plugin.required_sudo_commands();
+    #[test]
+    fn required_sudo_commands_returns_install_only() {
+        let cmds = GitHubPlugin::required_sudo_commands(&serde_json::json!({}));
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0].command, "install");
     }
@@ -1397,5 +1393,39 @@ mod tests {
     fn parse_link_next_absent_when_no_link_header() {
         let headers = reqwest::header::HeaderMap::new();
         assert!(parse_link_next(&headers).is_none());
+    }
+
+    // ── descriptor tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn descriptor_plugin_type_id() {
+        assert_eq!(DESCRIPTOR.type_id, "releases_github");
+    }
+
+    #[test]
+    fn descriptor_capabilities() {
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ReleaseFetching)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::UpdateExecution)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ControllerSideFetchReleases)
+        );
+    }
+
+    #[test]
+    fn descriptor_roles() {
+        assert!(DESCRIPTOR.roles.release_fetcher.is_some());
+        assert!(DESCRIPTOR.roles.update_executor.is_some());
+        assert!(DESCRIPTOR.roles.discoverer.is_none());
+        assert!(DESCRIPTOR.roles.version_detector.is_none());
     }
 }

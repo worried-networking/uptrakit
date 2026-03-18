@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::SecretMasking;
+use uptrakit_plugin_infrastructure_core::PluginConfig;
 
 /// Configuration for the Proxmox Helper Scripts plugin.
 ///
@@ -15,38 +15,7 @@ use uptrakit_plugin_infrastructure_core::SecretMasking;
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ProxmoxHelperScriptsConfig {}
 
-impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ProxmoxHelperScriptsConfig {
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        vec![]
-    }
-}
-
-impl SecretMasking for ProxmoxHelperScriptsConfig {
-    fn with_secrets_masked(self) -> Self {
-        self
-    }
-
-    fn restore_secrets_from(&mut self, _existing: &Self) {}
-}
-
-impl ProxmoxHelperScriptsConfig {
-    /// Validate a Proxmox Helper Scripts package identifier string.
-    ///
-    /// Always succeeds — the PHS plugin does not impose constraints on the
-    /// identifier value; validation is handled at the autodiscovery layer.
-    ///
-    /// Called by the plugin registry's `validate_package_identifier` dispatch.
-    pub fn validate_identifier(_value: &str) -> std::result::Result<(), String> {
-        Ok(())
-    }
-
-    /// Validate the configuration.
-    ///
-    /// Always succeeds — the PHS plugin has no required configuration fields.
-    pub fn validate(&self) -> uptrakit_plugin_infrastructure_core::Result<()> {
-        Ok(())
-    }
-}
+impl PluginConfig for ProxmoxHelperScriptsConfig {}
 
 #[cfg(test)]
 mod tests {

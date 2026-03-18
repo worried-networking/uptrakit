@@ -11,7 +11,7 @@ use uptrakit_plugin_infrastructure_core::{
 };
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for DockerPlugin {
+impl uptrakit_plugin_infrastructure_core::UpdateExecutor for DockerPlugin {
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
@@ -20,6 +20,13 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for DockerPlugin 
         _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> uptrakit_plugin_infrastructure_core::Result<String> {
+        let executor = self.executor.as_ref().ok_or_else(|| {
+            report!(PluginError::Configuration(
+                "execute_update requires a POSIX executor (not available on controller)"
+                    .to_string()
+            ))
+        })?;
+
         let ir: ImageRef =
             package_identifier
                 .parse()
@@ -128,8 +135,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for DockerPlugin 
             output.push_str(&compose_msg);
             output.push('\n');
 
-            let cmd_output = self
-                .executor
+            let cmd_output = executor
                 .execute(&CommandSpec::shell(&cmd), output_tx)
                 .await
                 .context_transform(|e| PluginError::InstallFailed(e.to_string()))?;
@@ -158,8 +164,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for DockerPlugin 
             )
             .await;
 
-            let cmd_output = self
-                .executor
+            let cmd_output = executor
                 .execute(&CommandSpec::shell(&cmd), output_tx)
                 .await
                 .context_transform(|e| PluginError::InstallFailed(e.to_string()))?;

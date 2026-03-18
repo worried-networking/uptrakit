@@ -5,4 +5,4 @@ pub mod plugin;
 
 pub use config::ProxmoxHelperScriptsConfig;
 pub use error::*;
-pub use plugin::ProxmoxHelperScriptsPlugin;
+pub use plugin::{DESCRIPTOR, ProxmoxHelperScriptsPlugin};

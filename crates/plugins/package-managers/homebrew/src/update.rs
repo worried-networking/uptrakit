@@ -1,16 +1,15 @@
 use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandSpec, send_output};
-use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchUpdateItem, BatchUpdateResult, OutputStreamType, PluginError, ReleaseInfo, Result,
-    UpdateOutputLine,
+    UpdateOutputSender,
 };
 
 use crate::plugin::HomebrewPlugin;
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for HomebrewPlugin {
+impl uptrakit_plugin_infrastructure_core::PackageIndexer for HomebrewPlugin {
     #[tracing::instrument(skip_all)]
     async fn refresh_package_index(&self) -> Result<()> {
         tracing::info!("refreshing Homebrew package index");
@@ -34,14 +33,14 @@ impl uptrakit_plugin_infrastructure_core::PackageIndexPlugin for HomebrewPlugin 
 }
 
 #[async_trait]
-impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for HomebrewPlugin {
+impl uptrakit_plugin_infrastructure_core::UpdateExecutor for HomebrewPlugin {
     #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
         package_identifier: &str,
         _to_version: &str,
         _release_info: Option<&ReleaseInfo>,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
+        output_tx: &UpdateOutputSender,
     ) -> Result<String> {
         self.require_package_identifier(package_identifier)?;
         let pkg = package_identifier;
@@ -77,7 +76,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutorPlugin for HomebrewPlugi
     async fn execute_batch_update(
         &self,
         items: &[BatchUpdateItem],
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
+        output_tx: &UpdateOutputSender,
     ) -> Result<Vec<BatchUpdateResult>> {
         if items.is_empty() {
             return Ok(vec![]);
