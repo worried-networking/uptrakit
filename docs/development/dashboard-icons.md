@@ -119,9 +119,9 @@ The feature is gated by a per-tenant setting:
 
 | Setting key | `SettingKey` variant | DB key | Default |
 | --- | --- | --- | --- |
-| Dashboard Icons enabled | `SettingKey::DashboardIconsEnabled` | `dashboard_icons.enabled` | `false` |
+| Dashboard Icons enabled | `SettingKey::DashboardIconsEnabled` | `dashboard_icons.enabled` | `true` (when unset) |
 
-This is **not** a global setting (`is_global()` returns `false`). Each tenant must explicitly enable
+This is **not** a global setting (`is_global()` returns `false`). Each tenant can explicitly disable
 it. The setting is read via `load_setting()` and written via `upsert_setting()` from
 `uptrakit-web-api-auth`'s settings store.
 
@@ -147,7 +147,7 @@ The lifecycle dispatch fires in two places:
 After a successful `POST /api/v1/software-items`, the handler calls `fire_software_item_lifecycle()`,
 which:
 
-1. Loads `SettingKey::DashboardIconsEnabled` for the tenant. Returns `None` if disabled.
+1. Resolves the effective `SettingKey::DashboardIconsEnabled` value for the tenant. Returns `None` if explicitly disabled.
 2. Builds a `SoftwareItemCreatedEvent` from the response.
 3. Calls `state.plugin_ops.on_software_item_created(&event)`.
 4. Returns the merged `SoftwareItemPatch`, which the caller applies to the DB.
@@ -158,7 +158,7 @@ which:
 
 After discovery results are processed and new software items are persisted:
 
-1. Check `SettingKey::DashboardIconsEnabled` for the tenant. Return early if disabled.
+1. Check the effective `SettingKey::DashboardIconsEnabled` value for the tenant. Return early if explicitly disabled.
 2. Call `load_items_needing_enrichment(db, tenant_id)` to find featured, active items with no `icon_url`.
 3. For each item, build a `SoftwareItemCreatedEvent` and call `plugin_ops.on_software_item_created()`.
 4. Apply each returned `SoftwareItemPatch` to the DB via `apply_software_item_patch()`.

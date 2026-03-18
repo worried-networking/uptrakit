@@ -5,7 +5,7 @@
 //!
 //! Dashboard Icons is an optional enhancement that automatically assigns icon
 //! URLs to software items using the community-curated [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons)
-//! collection. The setting is per-tenant and disabled by default.
+//! collection. The setting is per-tenant and enabled by default.
 
 use serde::{Deserialize, Serialize};
 

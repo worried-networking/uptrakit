@@ -24,7 +24,7 @@ an existing icon are enriched.
 
 ## Enabling Dashboard Icons
 
-This feature is **per-tenant** and **disabled by default**. To enable it:
+This feature is **per-tenant** and **enabled by default**. To explicitly enable it:
 
 ```sh
 curl -X PUT /api/v1/settings/dashboard-icons \
@@ -48,6 +48,8 @@ Response:
 }
 ```
 
+You can explicitly disable it by sending `{"enabled": false}` to the same endpoint.
+
 Enabling requires the `manage_global_settings` permission. Reading the setting requires
 `view_settings`.
 
@@ -58,7 +60,7 @@ Icons are assigned at two points:
 | Trigger | Description |
 | --- | --- |
 | Manual creation | When you create a software item via `POST /api/v1/software-items` without specifying an `icon_url`. |
-| Autodiscovery | After discovery results are processed, all featured items that have no icon are checked against the index. |
+| Autodiscovery | After discovery results are processed, featured items without an icon are checked against the index. |
 
 In both cases, the feature must be enabled for the tenant. Items that already have an `icon_url`
 are never modified.

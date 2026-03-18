@@ -17,6 +17,7 @@ use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::plugin_configs::find_raw_active_config;
 use crate::queries::software_items::{self as item_queries, SoftwareItemQueryError};
 use crate::queries::update_types::ActorType;
+use crate::routes::settings_dashboard_icons::is_dashboard_icons_enabled;
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -1184,15 +1185,7 @@ async fn fire_software_item_lifecycle(
     resp: &SoftwareItemResponse,
 ) -> Option<uptrakit_plugin_infrastructure_registry::SoftwareItemPatch> {
     // Check the per-tenant setting (disabled by default).
-    if !matches!(
-        crate::settings_store::load_setting(
-            tenant_db.db(),
-            tenant_db.tenant_id,
-            crate::SettingKey::DashboardIconsEnabled,
-        )
-        .await,
-        Ok(Some(serde_json::Value::Bool(true)))
-    ) {
+    if !is_dashboard_icons_enabled(tenant_db.db(), tenant_db.tenant_id).await {
         return None;
     }
 

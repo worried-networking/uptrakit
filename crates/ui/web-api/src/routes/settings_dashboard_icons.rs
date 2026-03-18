@@ -3,7 +3,7 @@
 //!
 //! Per-tenant toggle for the Dashboard Icons enhancement plugin. When enabled,
 //! newly created software items are automatically enriched with icon URLs from
-//! the community-curated Dashboard Icons collection.
+//! the community-curated Dashboard Icons collection. Unset defaults to enabled.
 
 use std::sync::Arc;
 
@@ -25,6 +25,19 @@ use crate::extract::Validated;
 use crate::middleware::permission::{CanManageGlobalSettings, CanViewSettings};
 use crate::settings_store::{load_setting, upsert_setting};
 use crate::tenant_db::TenantDb;
+use sea_orm::DatabaseConnection;
+use uuid::Uuid;
+
+/// Return the effective Dashboard Icons state for a tenant.
+///
+/// Explicit `false` disables the feature. Explicit `true` and an unset value
+/// both enable it.
+pub(crate) async fn is_dashboard_icons_enabled(db: &DatabaseConnection, tenant_id: Uuid) -> bool {
+    !matches!(
+        load_setting(db, tenant_id, SettingKey::DashboardIconsEnabled).await,
+        Ok(Some(serde_json::Value::Bool(false)))
+    )
+}
 
 /// Get Dashboard Icons settings
 ///
@@ -46,16 +59,7 @@ pub async fn get_dashboard_icons_settings(
     tenant_db: TenantDb,
     CanViewSettings(_user): CanViewSettings,
 ) -> Response {
-    let enabled = match load_setting(
-        tenant_db.db(),
-        tenant_db.tenant_id,
-        SettingKey::DashboardIconsEnabled,
-    )
-    .await
-    {
-        Ok(Some(serde_json::Value::Bool(val))) => val,
-        _ => false,
-    };
+    let enabled = is_dashboard_icons_enabled(tenant_db.db(), tenant_db.tenant_id).await;
 
     let resp = DashboardIconsSettingsResponse { enabled };
     (StatusCode::OK, Json(resp)).into_response()
@@ -102,4 +106,50 @@ pub async fn update_dashboard_icons_settings(
         enabled: req.enabled,
     };
     (StatusCode::OK, Json(resp)).into_response()
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    use super::*;
+    use crate::test_harness::{insert_default_tenant, setup_migrated_db};
+
+    #[tokio::test]
+    async fn setting_defaults_to_enabled_when_unset() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+
+        assert!(is_dashboard_icons_enabled(&db, tenant_id).await);
+    }
+
+    #[tokio::test]
+    async fn setting_respects_explicit_false() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        upsert_setting(
+            &db,
+            tenant_id,
+            SettingKey::DashboardIconsEnabled,
+            serde_json::json!(false),
+        )
+        .await
+        .expect("save setting");
+
+        assert!(!is_dashboard_icons_enabled(&db, tenant_id).await);
+    }
+
+    #[tokio::test]
+    async fn setting_respects_explicit_true() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        upsert_setting(
+            &db,
+            tenant_id,
+            SettingKey::DashboardIconsEnabled,
+            serde_json::json!(true),
+        )
+        .await
+        .expect("save setting");
+
+        assert!(is_dashboard_icons_enabled(&db, tenant_id).await);
+    }
 }
