@@ -2,11 +2,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::{
-    PluginBase, PluginCapability, SoftwareItemCreatedEvent, SoftwareItemLifecyclePlugin,
-    SoftwareItemPatch, error::PluginError,
+    CatalogConfig, ConfigModel, PluginFamily, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
+    SoftwareItemPatch, declare_plugin, error::PluginError,
 };
 
 use crate::cache::DashboardIconCache;
+use crate::config::DashboardIconsConfig;
 
 /// Dashboard Icons enhancement plugin.
 ///
@@ -24,22 +25,7 @@ impl DashboardIconsPlugin {
 }
 
 #[async_trait]
-impl PluginBase for DashboardIconsPlugin {
-    fn plugin_type_id(&self) -> &str {
-        "enhancement_dashboard_icons"
-    }
-
-    fn capabilities(&self) -> Vec<PluginCapability> {
-        vec![PluginCapability::SoftwareItemLifecycle]
-    }
-
-    fn as_software_item_lifecycle(&self) -> Option<&dyn SoftwareItemLifecyclePlugin> {
-        Some(self)
-    }
-}
-
-#[async_trait]
-impl SoftwareItemLifecyclePlugin for DashboardIconsPlugin {
+impl SoftwareItemLifecycle for DashboardIconsPlugin {
     async fn on_software_item_created(
         &self,
         event: &SoftwareItemCreatedEvent,
@@ -60,10 +46,42 @@ impl SoftwareItemLifecyclePlugin for DashboardIconsPlugin {
     }
 }
 
+// ── Creation function for the catalog ────────────────────────────────────
+
+/// Create the singleton `SoftwareItemLifecycle` instance from catalog config.
+///
+/// Constructs a `DashboardIconCache` using the shared HTTP client and
+/// cancellation token from `CatalogConfig`, then spawns the background
+/// refresh loop.
+fn create_dashboard_icons_lifecycle(
+    config: &CatalogConfig,
+) -> uptrakit_plugin_infrastructure_core::Result<Arc<dyn SoftwareItemLifecycle>> {
+    let client = config.http_client.clone().unwrap_or_default();
+
+    let cache = Arc::new(DashboardIconCache::new(client));
+
+    if let Some(cancel) = config.cancellation_token.clone() {
+        DashboardIconCache::spawn_refresh_loop(Arc::clone(&cache), cancel);
+    }
+
+    Ok(Arc::new(DashboardIconsPlugin::new(cache)))
+}
+
+// ── declare_plugin! ──────────────────────────────────────────────────────
+
+declare_plugin!(DashboardIconsPlugin, DashboardIconsConfig, "enhancement_dashboard_icons", {
+    display_name: "Dashboard Icons",
+    family: PluginFamily::Enhancement,
+    config_model: ConfigModel::None,
+    roles: [SoftwareItemLifecycle],
+    software_item_lifecycle: create_dashboard_icons_lifecycle,
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::cache::DashboardIconCache;
+    use uptrakit_plugin_infrastructure_core::PluginMeta;
 
     fn make_plugin(paths: &[&str]) -> DashboardIconsPlugin {
         let cache = DashboardIconCache::new_with_paths(reqwest::Client::new(), paths);
@@ -78,6 +96,23 @@ mod tests {
             true,
             icon_url.map(String::from),
         )
+    }
+
+    #[test]
+    fn plugin_meta_returns_correct_type_id() {
+        let plugin = make_plugin(&[]);
+        assert_eq!(
+            plugin.plugin_type_id().as_str(),
+            "enhancement_dashboard_icons"
+        );
+    }
+
+    #[test]
+    fn descriptor_has_correct_metadata() {
+        assert_eq!(DESCRIPTOR.type_id, "enhancement_dashboard_icons");
+        assert_eq!(DESCRIPTOR.display_name, "Dashboard Icons");
+        assert_eq!(DESCRIPTOR.family, PluginFamily::Enhancement);
+        assert_eq!(DESCRIPTOR.config_model, ConfigModel::None);
     }
 
     #[tokio::test]

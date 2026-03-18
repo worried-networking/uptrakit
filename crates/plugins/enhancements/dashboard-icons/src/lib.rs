@@ -7,9 +7,11 @@
 //! [`SoftwareItemPatch`] with the CDN URL when a matching icon slug exists.
 
 pub mod cache;
+pub mod config;
 mod error;
 pub mod plugin;
 mod slugify;
 
 pub use cache::DashboardIconCache;
-pub use plugin::DashboardIconsPlugin;
+pub use config::DashboardIconsConfig;
+pub use plugin::{DESCRIPTOR, DashboardIconsPlugin};
