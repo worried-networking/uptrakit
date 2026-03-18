@@ -18,8 +18,9 @@ Key components:
   management via the service config store.
 - **Agents**: lightweight daemons on each managed host; outbound-only secure WebSocket to the controller; local version
   detection and update execution via sudo allowlists.
-- **Plugins**: first-party extension modules that detect, report, and update software; each crate implements the
-  `PluginBase` trait (and optionally `PluginOps`) and is registered in `uptrakit-plugin-infrastructure-registry`.
+- **Plugins**: first-party extension modules that detect, report, and update software; each crate uses the
+  `declare_plugin!` macro to export a `PluginDescriptor` static (metadata + role trait impls) and is listed in
+  `all_descriptors()` inside the unified `PluginCatalog` (`uptrakit-plugin-infrastructure-registry`).
 
 For full project context, see [README.md](README.md). For contribution rules, see [CONTRIBUTING.md](CONTRIBUTING.md).
 For system design and technology choices, see [ARCHITECTURE.md](ARCHITECTURE.md). For security policy and cryptographic
@@ -74,9 +75,9 @@ uptrakit/
 │   │   └── integration-tests/          # uptrakit-integration-tests             (test) — Docker-based integration tests: (1) reverse-proxy tests (real nginx/haproxy/traefik/caddy/envoy containers, CRL/OCSP revocation); (2) system integration tests (uptrakit-test:latest image, verifies enrollment and inter-component communication)
 │   ├── plugins/
 │   │   ├── infrastructure/
-│   │   │   ├── core/                   # uptrakit-plugin-infrastructure-core                   (lib)  — plugin trait + SecretMasking; re-exports tokio::sync::mpsc; defines PluginCapability, HostCompatibility, UpdateHookContext, PreUpdateHookResult; batch types: BatchDetectItem/Result, BatchFetchItem/Result, BatchUpdateItem/Result; `http_client.rs` (feature `http-client`): `SsrfMode` enum, `PluginHttpClientConfig<'a>` struct, `build_plugin_http_client(cfg)` — central HTTP client constructor (SSRF, TLS, timeouts) used by github/gitlab/forgejo/docker/npm/cargo plugins; `command.rs`: `execute_and_capture(executor, cmd, context) -> Result<String, PluginError>` — shared helper for all package-manager plugins: calls `execute_quiet`, maps errors to `PluginError::PluginInternal` with context label, maps non-zero exit to `PluginError::CommandFailed`; re-exported via `pub use command::execute_and_capture` in `lib.rs` — use this instead of inline execute+map_err boilerplate; `testing.rs` (feature `testing`): `FixedOutputExecutor` (`::success(output)`, `::failure(exit_code)`, `::new(output, code)`) and `RoutedOutputExecutor` (`::success(pairs)`, `::new(triples)`) for use by package-manager plugin test modules instead of local mock structs
+│   │   │   ├── core/                   # uptrakit-plugin-infrastructure-core                   (lib)  — plugin descriptor + role traits + catalog; key modules: `descriptor.rs` (`PluginDescriptor` static metadata struct), `catalog.rs` (`PluginCatalog` — unified registry for all plugin types incl. notifications), `roles.rs` (narrow role traits: `Discoverer`, `VersionDetector`, `ReleaseFetcher`, `PackageIndexer`, `UpdateExecutor`, `LifecycleHook`, `NotificationTransport`, `SoftwareItemLifecycle`, `HostLifecycle`, `HostReport`, `GuestExec`), `macros.rs` (`declare_plugin!` macro — replaces `impl_plugin_base_config!`), `plugin_config.rs` (`PluginConfig` trait — unified config form schema + secret masking; `TypeSettings` trait for type-settings-capable plugins), `host_runtime.rs` (`HostRuntime` trait, `PosixHostRuntime`, `ControllerRuntime`), `host_requirements.rs` (`HostRequirements`, `RoleKey`, `HostCompatibilityError`); re-exports tokio::sync::mpsc; defines PluginCapability, HostCompatibility, UpdateHookContext, PreUpdateHookResult; batch types: BatchDetectItem/Result, BatchFetchItem/Result, BatchUpdateItem/Result; `InfraBundle` + `InfraSlot` for infrastructure plugins (Proxmox); `CatalogConfig` with `allow_private_urls`, `http_client`, `cancellation_token` (last two gated on `catalog` Cargo feature — enables heavy deps); `http_client.rs` (feature `http-client`): `SsrfMode` enum, `PluginHttpClientConfig<'a>` struct, `build_plugin_http_client(cfg)` — central HTTP client constructor (SSRF, TLS, timeouts) used by github/gitlab/forgejo/docker/npm/cargo plugins; `command.rs`: `execute_and_capture(executor, cmd, context) -> Result<String, PluginError>` — shared helper for all package-manager plugins: calls `execute_quiet`, maps errors to `PluginError::PluginInternal` with context label, maps non-zero exit to `PluginError::CommandFailed`; re-exported via `pub use command::execute_and_capture` in `lib.rs` — use this instead of inline execute+map_err boilerplate; `form_schema.rs` kept only as a re-export module (delegates to `plugin_config.rs`); `testing.rs` (feature `testing`): `FixedOutputExecutor` (`::success(output)`, `::failure(exit_code)`, `::new(output, code)`) and `RoutedOutputExecutor` (`::success(pairs)`, `::new(triples)`) for use by package-manager plugin test modules instead of local mock structs
 │   │   │   ├── registry/              # uptrakit-plugin-infrastructure-registry               (lib)  — plugin dispatch & validation; `daemon` feature (default) enables Docker local ops
-│   │   │   └── proxmox/              # uptrakit-plugin-infrastructure-proxmox                (lib)  — Proxmox VE infrastructure plugin: unified `ProxmoxPlugin` struct (`new(config, executor)` for controller, `new_agent()` for agent); controller-side REST API client for PVE (incl. guest agent file-read for machine_id), VM/CT discovery with best-effort machine_id collection (QEMU only), semi-automatic host matching with inline suggestions (MatchConfidence: High/Medium/Low, signals: machine_id, hostname+IP, hostname, IP, name), manual matching, extension manifests (proxmox.hosts page + proxmox.host-info panel), extension action handlers (list, discover, test-connection, match, approve-match, unmatch, get-info, list-all-unmatched); DB table: proxmox_host_mappings (incl. machine_id column); agent-side (feature `agent-infra`): subtrait impls (HostLifecyclePlugin, HostReportPlugin, GuestExecPlugin) on ProxmoxPlugin, agent extension actions (list-discovered-guests, bootstrap-proxmox-guest), agent DB tables (proxmox_host_state, proxmox_pending_matches); agent-side modules: pve_setup (PVE detection, cluster dedup via check_pve_token_exists → PveTokenStatus enum, tenant-scoped API credential creation via pveum with pve_user_realm(tenant_id)), guest_exec (command execution inside LXC/QEMU guests via pct exec / qm guest exec)
+│   │   │   └── proxmox/              # uptrakit-plugin-infrastructure-proxmox                (lib)  — Proxmox VE infrastructure plugin: unified `ProxmoxPlugin` struct (`new(config, executor)` for controller, `new_agent()` for agent); returns `InfraBundle` with `InfraSlot`s for its narrow role traits; controller-side REST API client for PVE (incl. guest agent file-read for machine_id), VM/CT discovery with best-effort machine_id collection (QEMU only), semi-automatic host matching with inline suggestions (MatchConfidence: High/Medium/Low, signals: machine_id, hostname+IP, hostname, IP, name), manual matching, extension manifests (proxmox.hosts page + proxmox.host-info panel), extension action handlers (list, discover, test-connection, match, approve-match, unmatch, get-info, list-all-unmatched); DB table: proxmox_host_mappings (incl. machine_id column); agent-side (feature `agent-infra`): narrow trait impls (`HostLifecycle`, `HostReport`, `GuestExec`) on ProxmoxPlugin, agent extension actions (list-discovered-guests, bootstrap-proxmox-guest), agent DB tables (proxmox_host_state, proxmox_pending_matches); agent-side modules: pve_setup (PVE detection, cluster dedup via check_pve_token_exists → PveTokenStatus enum, tenant-scoped API credential creation via pveum with pve_user_realm(tenant_id)), guest_exec (command execution inside LXC/QEMU guests via pct exec / qm guest exec)
 │   │   ├── releases/
 │   │   │   ├── docker/                 # uptrakit-plugin-releases-docker                 (lib)  — Docker/OCI plugin: tag tracking, SHA digest tracking, image pull via bollard, container autodiscovery; `daemon` feature (default) gates bollard + local Docker ops; Docker-over-SSH via StdioTunnel proxy (unix socket bridge to `docker system dial-stdio`)
 │   │   │   ├── github/                 # uptrakit-plugin-releases-github                 (lib)  — GitHub Releases plugin: controller-side fetch_releases only; owner/repo parsed from package_identifier at call time (format "owner/repo"); exports validate_identifier
@@ -102,20 +103,20 @@ uptrakit/
 │   │   │   ├── webhook/               # uptrakit-notification-plugin-webhook    (lib)  — Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing)
 │   │   │   ├── telegram/              # uptrakit-notification-plugin-telegram   (lib)  — Telegram plugin with inline keyboard (feature-gated)
 │   │   │   ├── email/                 # uptrakit-notification-plugin-email      (lib)  — Email plugin (SMTP via mail-send, internal SMTP merge from settings bag); extensions.rs: channel management + SMTP settings CRUD (global and per-tenant) via raw-key settings store (feature-gated)
-│   │   │   # (registry removed — notification plugins now registered in unified PluginRegistry via with_notifications())
+│   │   │   # (registry removed — notification plugins now registered in unified PluginCatalog via declare_plugin! + all_descriptors())
 │   │   ├── enhancements/
-│   │   │   └── dashboard-icons/         # uptrakit-plugin-enhancement-dashboard-icons (lib)  — Dashboard Icons enhancement plugin; SoftwareItemLifecyclePlugin impl; caches icon slugs from homarr-labs/dashboard-icons GitHub tree (6h refresh via CancellationToken); slugify() converts software names to icon slugs; CDN URL: cdn.jsdelivr.net; feature-gated (`dashboard-icons` on controller/web-api/registry); per-tenant setting `dashboard_icons.enabled` (disabled by default)
+│   │   │   └── dashboard-icons/         # uptrakit-plugin-enhancement-dashboard-icons (lib)  — Dashboard Icons enhancement plugin; `SoftwareItemLifecycle` trait impl; caches icon slugs from homarr-labs/dashboard-icons GitHub tree (6h refresh via CancellationToken); slugify() converts software names to icon slugs; CDN URL: cdn.jsdelivr.net; feature-gated (`dashboard-icons` on controller/web-api/registry); per-tenant setting `dashboard_icons.enabled` (disabled by default)
 │   │   └── discovery/
 │   │       └── proxmox-helper-scripts/ # uptrakit-plugin-discovery-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/Codeberg/npm/APT upstream; emits ReleasesGithub+GenericShell targets for GitHub-managed items, ReleasesForgejo+GenericShell targets for Codeberg-managed items (api_base_url="https://codeberg.org"; uses Forgejo plugin since Codeberg runs Forgejo), PackageManagerNpm target for npm-managed items, PackageManagerApt target for APT-managed items)
 │   ├── shared/
-│   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, batch updates; spawn_background()/send_background_result() for non-blocking event loop; run_check_versions/run_discover_software/run_execute_batch_update (compute-only); handle_execute_update/handle_graceful_shutdown; start_update() for per-host parallel use by SSH agent; batch_check_versions() groups assignments by (PluginType, effective_config), calls batch_detect_installed_version in parallel, refreshes package index once per fetch group, then calls batch_fetch_releases in parallel
+│   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, batch updates; spawn_background()/send_background_result() for non-blocking event loop; run_check_versions/run_discover_software/run_execute_batch_update (compute-only); handle_execute_update/handle_graceful_shutdown; start_update() for per-host parallel use by SSH agent; batch_check_versions() groups assignments by (`PluginTypeId`, effective_config), calls batch_detect_installed_version in parallel, refreshes package index once per fetch group, then calls batch_fetch_releases in parallel; uses `PluginCatalog` for plugin lookup and dispatch
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor; SudoAwareCommandExecutor (wraps any executor, prepends sudo based on SudoContext); SudoPolicy enum (auto/force_with/force_without); CommandSpec.privileged flag; StdioTunnel trait (bidirectional byte-stream tunnel for remote command I/O); RemoteExecutor trait + RemoteCommandResult (transport-agnostic remote command execution for SSH and PVE guest exec)
 │   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption with envelope encryption (KEK wraps DEKs); EncryptedString, init_master_key, DataKeyRing; ENC:v1/v2/v3 formats (v3 = current default with DEK + AAD); column AAD registry (register_column_aad); DEK wrap/unwrap; O(1) master key rotation support
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities (hosts, host_tags, host_tag_assignments, software_items, host_software_items, software_ignores, update_history, plugin_type_settings, etc.); `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`; `migration::helpers` module provides reusable SQLite table-recreation helpers (set_foreign_keys, check_crash_recovery, drop_original, rename_temp, is_sqlite)
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── extension-framework/        # uptrakit-extension-framework            (lib)  — UI extension framework types: ExtensionManifest, ActionDef, FieldDef, FormDef, RowVisibleWhen, RowCondition, wire payloads; PanelPosition (adjacently tagged serde: {"type":"tab"}); tab_group for grouped tab rendering; ActionDef supports `confirm_entity_field` for destructive action confirmation dialogs; standalone crate so plugins don't depend on uptrakit-internal-wire
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared macros (impl_report_conversion!)
-│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (PluginRole, PluginType, etc.); network::is_private_host()/is_private_ip() for SSRF validation; ssrf::SsrfSafeResolver (feature `http-ssrf`) for DNS rebinding protection; `PackageIdentifierRules` struct (`min_len`, `max_len`, `first_char_valid`, `char_valid`, `reject_double_dot`) in `package_identifier.rs` — all 8 package-manager plugins define a `const IDENTIFIER_RULES: PackageIdentifierRules` and call `IDENTIFIER_RULES.validate(value)` instead of duplicating inline validation; feature-gated: sea-orm, openapi, http-ssrf
+│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (PluginRole, `PluginTypeId` newtype, `OsFamily`, `HostFeature`, `HostCapabilities`, `plugin_ids` module with compile-time plugin ID constants, etc.); `PluginTypeId` lives here (not in `plugin-infrastructure-core`) because it is part of the REST API contract; network::is_private_host()/is_private_ip() for SSRF validation; ssrf::SsrfSafeResolver (feature `http-ssrf`) for DNS rebinding protection; `PackageIdentifierRules` struct (`min_len`, `max_len`, `first_char_valid`, `char_valid`, `reject_double_dot`) in `package_identifier.rs` — all 8 package-manager plugins define a `const IDENTIFIER_RULES: PackageIdentifierRules` and call `IDENTIFIER_RULES.validate(value)` instead of duplicating inline validation; feature-gated: sea-orm, openapi, http-ssrf
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API + SSE streaming coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing; sse.rs provides lightweight SSE parser; update_output_stream.rs provides typed stream_update_output() method; device_auth_stream.rs provides SSE-first device auth; events_stream.rs provides typed admin event SSE client
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
@@ -450,7 +451,7 @@ These are non-negotiable design constraints. Do not violate them.
    `auth_user.has_permission(perm)` inline — mark these with a `// APPROVED: custom auth path` comment. See
    [Authentication and Authorization](docs/security/auth-and-authorization.md).
 1. **Extension action permissions are enforced at invocation.** The `ActionDef::permission` field on any action
-   returned by `PluginOps::extension_actions()` or a service's `ExtensionRegister` is checked server-side by the
+   returned by `PluginExtensionOps::extension_actions()` or a service's `ExtensionRegister` is checked server-side by the
    `invoke_action` route handler before dispatching to a plugin or service. New actions that modify state or access
    sensitive data must always set `.with_permission(...)`. The permission check applies to both plugin-backed and
    service-backed extension paths. See [Extension Security](docs/security/extensions.md#action-level-permissions).
@@ -596,23 +597,24 @@ for user review. Key invariants:
    The `extra` field on `DiscoveredSoftware` is purely informational metadata (e.g. Docker's
    `{"containers": ["web-server"]}`) — the controller never interprets it for config synthesis.
 
-5. **Discovery capability is derived from the registry.** Call `state.plugin_ops.discovery_plugin_types()`
-   (or `PluginRegistry::discovery_plugin_types()` statically) to get the current list of discovery-capable
-   plugin types. This is derived automatically from each plugin's `capabilities()` method via the registry —
+5. **Discovery capability is derived from the catalog.** Call `state.plugin_ops.discovery_plugin_types()`
+   (or `PluginCatalog::discovery_plugin_types()` statically) to get the current list of discovery-capable
+   plugin types. This is derived automatically from each plugin's `capabilities()` method via the catalog —
    no static list is maintained separately.
 
-6. **Package identifier validation goes through `PluginRegistry`.** Plugin-specific constraints on the
+6. **Package identifier validation goes through `PluginCatalog`.** Plugin-specific constraints on the
    `package_identifier` field (e.g. Homebrew's allowed character set) must be implemented as:
    (a) a crate-level `pub fn validate_identifier(value: &str) -> std::result::Result<(), String>` in the plugin crate,
    (b) an associated function on the config struct that delegates to it:
    `impl MyConfig { pub fn validate_identifier(value: &str) -> std::result::Result<(), String> { crate::validate_identifier(value) } }`.
    Plugins with no identifier constraints must still implement the associated function as a no-op returning `Ok(())`.
-   The `register_plugins!` macro auto-generates `PluginRegistry::validate_package_identifier()` by dispatching through
-   each config struct's associated function — no manual match arm is required in the registry.
-   The `PluginOps` trait (defined in `infrastructure-core` behind the `plugin-ops` feature, re-exported by
-   `infrastructure-registry`) exposes this as `validate_package_identifier_str(plugin_type: &str, value: &str)` for
-   trait-object dispatch. Crates that only need `PluginOps` (e.g. `web-api-queries`) should depend on
-   `infrastructure-core` with `features = ["plugin-ops"]` rather than the full registry.
+   The `declare_plugin!` macro wires each config struct's associated function into the `PluginDescriptor`;
+   `PluginCatalog` dispatches through the descriptor list — no manual match arm is required.
+   The `PluginOps` convenience alias (composed of `PluginMetadataOps + PluginConfigOps + PluginExtensionOps +
+   NotificationOps + SoftwareItemLifecycleOps`, defined in `infrastructure-core` behind the `plugin-ops` feature,
+   re-exported by `infrastructure-registry`) exposes this as `validate_package_identifier_str(plugin_type: &str,
+   value: &str)` for trait-object dispatch. Crates that only need `PluginOps` (e.g. `web-api-queries`) should
+   depend on `infrastructure-core` with `features = ["plugin-ops"]` rather than the full registry.
    Never add plugin-specific validation logic directly to web API query helpers or route
    handlers. See [Plugin Guidelines](docs/development/plugin-guidelines.md) for the full extension pattern.
 
@@ -634,7 +636,7 @@ for user review. Key invariants:
 
    **Never hardcode `sudo` in `CommandSpec`** — instead call `.privileged()`
    on the spec. Shell-mode commands (`CommandSpec::shell`) must embed `sudo` in the command string directly because
-   `.privileged()` has no effect on shell mode. `PluginRegistry::all_required_sudo_commands()` aggregates all
+   `.privileged()` has no effect on shell mode. `PluginCatalog::all_required_sudo_commands()` aggregates all
    declarations for use by the SSH agent's sudoers generation logic. See
    [Plugin Guidelines](docs/development/plugin-guidelines.md) and [Sudoers Management](docs/security/sudoers-management.md).
 
@@ -670,7 +672,7 @@ for user review. Key invariants:
 
    **Update lifecycle and hooks:**
 
-   - `UpdateLifecycle` — the plugin implements the `UpdateLifecyclePlugin` subtrait (via
+   - `UpdateLifecycle` — the plugin implements the `LifecycleHook` narrow trait (via
      `as_update_lifecycle()` accessor). Provides `execute_pre_hook()` (returns `PreUpdateHookResult`:
      proceed or abort with reason) and `execute_post_hook()` (non-fatal, errors logged as warnings).
      The `UpdateLifecycleContext` contains `package_identifier`, `to_version`, `from_version`,
@@ -718,7 +720,7 @@ for user review. Key invariants:
      update multiple packages in one command. Default calls `execute_update` per item. Implemented by
      APT, Homebrew, and npm.
 
-   Agent-core `batch_check_versions()` groups `VersionCheckAssignment`s by `(PluginType,
+   Agent-core `batch_check_versions()` groups `VersionCheckAssignment`s by `(PluginTypeId,
    effective_config_json)` and calls these batch methods once per group via `join_all`.
    `RefreshPackageIndex` is called at most once per unique fetch group (before `batch_fetch_releases`
    runs); it is not called for detect-only groups. Scheduler Phase A groups by `plugin_config_id`
@@ -737,7 +739,9 @@ for user review. Key invariants:
    It does **not** apply to `POST /api/v1/plugin-configs/{id}/discover` (explicit plugin-config invocation bypasses
    the allowlist intentionally). Duplicate entries are idempotent — the server returns the existing entry
    rather than erroring. Only plugin types that have the `DiscoverLocalSoftware` capability and are not
-   `PluginType::Other(...)` can be added to the allowlist; all other types are rejected with HTTP 400.
+   unknown `PluginTypeId` values (i.e., strings not present in the catalog) can be added to the allowlist;
+   all other types are rejected with HTTP 400. (`PluginTypeId::new(...)` always accepts any string;
+   validation against known plugins happens via catalog lookup.)
 
 10. **Partial unique indexes.** `software_items` uses a partial unique index
    `(tenant_id, name) WHERE deactivated_at IS NULL` — prevents duplicate item names within a tenant while
@@ -791,15 +795,17 @@ defaults apply.
 Each layer's JSON is shallow-merged on top of the previous one. Fields present in a narrower layer override
 the same field from a broader layer.
 
-**`ConfigFormSchema` trait extensions.** Plugins that support type settings implement two additional methods:
+**`PluginConfig` and `TypeSettings` traits.** All plugin configs implement the `PluginConfig` trait
+(unified form schema + secret masking, replacing the old separate `ConfigFormSchema` and `SecretMasking`
+traits). Plugins that support type settings additionally implement the `TypeSettings` trait with two methods:
 
 - `type_settings_form_schema() -> Vec<FieldDef>` -- returns the form field definitions for the type settings
   UI (e.g. `discovery_filter` for APT, `package_type` for Homebrew).
 - `type_settings_sample() -> serde_json::Value` -- returns a sample/default JSON for the type settings.
 
-The `register_plugins!` macro auto-generates `type_settings_form_schema()` and `type_settings_sample_for()`
-dispatch methods on `PluginRegistry`, plus the `PluginOps` trait methods `type_settings_form_schema_str()`
-and `type_settings_sample_for_str()` for trait-object dispatch.
+The `declare_plugin!` macro (with `type_settings: true`) wires `TypeSettings` into the `PluginDescriptor`;
+`PluginCatalog` dispatches through the descriptor list, plus the `PluginOps` trait methods
+`type_settings_form_schema_str()` and `type_settings_sample_for_str()` for trait-object dispatch.
 
 The `PluginTypeInfo` response (from `GET /api/v1/plugin-types`) includes `type_settings_form_fields` and
 `type_settings_sample` fields so the frontend can render a settings form.
@@ -818,7 +824,7 @@ Key files:
 | File | Purpose |
 | --- | --- |
 | `crates/shared/db/src/entity/plugin_type_setting.rs` | SeaORM entity for `plugin_type_settings` table |
-| `crates/plugins/infrastructure/core/src/form_schema.rs` | `ConfigFormSchema` trait with `type_settings_form_schema()` |
+| `crates/plugins/infrastructure/core/src/plugin_config.rs` | `PluginConfig` trait (form schema + secret masking) and `TypeSettings` trait; `form_schema.rs` is a re-export shim |
 | `crates/ui/web-api-queries/src/queries/plugin_configs.rs` | `resolve_effective_config()` three-layer merge |
 | `crates/ui/web-api/src/routes/plugin_type_settings.rs` | Route handlers for type settings CRUD |
 
@@ -1466,12 +1472,13 @@ overflow are dropped with a `tracing::warn!` rather than causing unbounded heap 
 
 | Crate/module | Purpose |
 | --- | --- |
-| `crates/plugins/infrastructure/core/src/plugin_base.rs` | `PluginBase` trait, `NotificationTransportPlugin` trait (with `channel_type()`, `deliver(config, settings, message)`) |
+| `crates/plugins/infrastructure/core/src/roles.rs` | Narrow role traits including `NotificationTransport` (with `channel_type()`, `deliver(config, settings, message)`); `PluginMeta` trait |
+| `crates/plugins/infrastructure/core/src/descriptor.rs` | `PluginDescriptor` static metadata struct; `declare_plugin!` macro output target |
 | `crates/plugins/notifications/core/` | `DeliveryMessage` (`#[non_exhaustive]`, `::new()`), `MessageAction` (`#[non_exhaustive]`, `::new()`), `NotificationPluginError`, `escape_html()`; shared `list_channels` helper (feature `extensions`) |
-| `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing); `extensions.rs` action handler; implements `PluginBase` + `NotificationTransportPlugin` |
-| `crates/plugins/notifications/telegram/` | Telegram plugin with inline keyboard; `extensions.rs` action handler (including callback verification); implements `PluginBase` + `NotificationTransportPlugin` |
-| `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, internal SMTP merge); `extensions.rs` action handler (SMTP settings CRUD); implements `PluginBase` + `NotificationTransportPlugin` |
-| `crates/plugins/infrastructure/registry/` | Unified `PluginRegistry` with `with_notifications()` builder, `NotificationRegistryConfig`; `notification_transport()` lookup; `notification_supported_types()` |
+| `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing); `extensions.rs` action handler; uses `declare_plugin!` + implements `NotificationTransport` role trait |
+| `crates/plugins/notifications/telegram/` | Telegram plugin with inline keyboard; `extensions.rs` action handler (including callback verification); uses `declare_plugin!` + implements `NotificationTransport` role trait |
+| `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, internal SMTP merge); `extensions.rs` action handler (SMTP settings CRUD); uses `declare_plugin!` + implements `NotificationTransport` role trait |
+| `crates/plugins/infrastructure/registry/` | Unified `PluginCatalog` built from `all_descriptors()` list, `CatalogConfig`; `notification_transport()` lookup; `notification_supported_types()`; implements `NotificationOps` trait |
 | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, `NotificationEventType`, `NotificationDeliveryStatus` enums; `channel_type` is `String` (not an enum) |
 | `crates/ui/web-api/src/notifications/` | Internal `NotificationEvent`, `NotificationDispatcher` (generic, no channel-type blocks), `message_builder` |
 | `crates/ui/web-api/src/routes/notifications.rs` | REST API route handlers (channels, rules, log, generic notification callback) |
@@ -1529,9 +1536,9 @@ permission model and [User Management API](docs/api/user-management.md) for the 
 ### Adding a new channel
 
 1. Create a new crate under `crates/plugins/notifications/<name>/`
-2. Implement `PluginBase` + `NotificationTransportPlugin` traits from `uptrakit-plugin-infrastructure-core`
+2. Use `declare_plugin!` macro to export a `PluginDescriptor` static; implement the `NotificationTransport` role trait from `uptrakit-plugin-infrastructure-core`
 3. Add `extensions.rs` with `handle_action()` for settings CRUD, channel listing (`list_channels` helper), and callback handling
-4. Register in `PluginRegistry::with_notifications()` behind `#[cfg(feature = "...")]`
+4. Add the descriptor to the `all_descriptors()` list in `PluginCatalog` behind `#[cfg(feature = "...")]`
 5. Add feature in `crates/plugins/infrastructure/registry/Cargo.toml`
 6. Propagate feature: `web-api/Cargo.toml` -> `controller/Cargo.toml`
 7. HTML-escape all user-controlled values in `body_html` via `uptrakit_notification_plugin_core::escape_html()`

@@ -8,7 +8,7 @@ dispatcher flow, and how to extend the system with new notification plugins.
 The notification subsystem follows a strict plugin-agnostic pipeline:
 
 ```text
-Event producers --> NotificationEvent --> Dispatcher --> match rules --> DeliveryMessage --> NotificationTransportPlugin::deliver()
+Event producers --> NotificationEvent --> Dispatcher --> match rules --> DeliveryMessage --> NotificationTransport::deliver()
 ```
 
 **Event producers** know nothing about notification plugins. They emit a `NotificationEvent` containing contextual data
@@ -24,10 +24,11 @@ This separation means adding a new notification plugin never requires changes to
 | Crate | Path | Purpose |
 | --- | --- | --- |
 | `uptrakit-notification-plugin-core` | `crates/plugins/notifications/core/` | `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()` |
-| `uptrakit-notification-plugin-webhook` | `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation, header blocklist, HMAC-SHA256 signing); implements `PluginBase` + `NotificationTransportPlugin` |
-| `uptrakit-notification-plugin-telegram` | `crates/plugins/notifications/telegram/` | Telegram plugin (inline keyboard support); implements `PluginBase` + `NotificationTransportPlugin` |
-| `uptrakit-notification-plugin-email` | `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`); implements `PluginBase` + `NotificationTransportPlugin` |
-| `uptrakit-plugin-infrastructure-registry` | `crates/plugins/infrastructure/registry/` | Unified `PluginRegistry` stores notification plugins via `with_notifications(config)`; `NotificationRegistryConfig`; consumers use `PluginOps::notification_transport()` |
+| `uptrakit-notification-plugin-webhook` | `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation, header blocklist, HMAC-SHA256 signing); typed `WebhookChannelConfig` + `NotificationTransport` impl |
+| `uptrakit-notification-plugin-telegram` | `crates/plugins/notifications/telegram/` | Telegram plugin (inline keyboard support); typed `TelegramChannelConfig` + `NotificationTransport` impl |
+| `uptrakit-notification-plugin-email` | `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`); typed `EmailChannelConfig` + `NotificationTransport` impl |
+| `uptrakit-plugin-infrastructure-core` | `crates/plugins/infrastructure/core/` | `NotificationTransport` role trait, `PluginMeta`, `PluginDescriptor`, `PluginConfig` trait, `PluginFamily`, `ConfigModel`, `CatalogConfig`, `declare_plugin!` macro |
+| `uptrakit-plugin-infrastructure-registry` | `crates/plugins/infrastructure/registry/` | `PluginCatalog` registers all plugins (software, notification, enhancement) via descriptors; transport lookup via `catalog.transport(&PluginTypeId)` |
 | `uptrakit-web-api-types` | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, public enums (`NotificationEventType`, `NotificationDeliveryStatus`); `channel_type` is `String` (not an enum) |
 | `uptrakit-web-api` | `crates/ui/web-api/src/notifications/` | Dispatcher, internal event types, `message_builder` |
 | `uptrakit-web-api` | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers (CRUD for channels, rules, log) |
@@ -56,38 +57,39 @@ controller/Cargo.toml           web-api/Cargo.toml                 plugin-infras
 The `web-api` always depends on `plugin-infrastructure-registry` with the `webhook` feature enabled,
 ensuring webhooks are always compiled in.
 
-## `PluginBase` + `NotificationTransportPlugin` traits
+## Unified plugin framework
 
-Notification plugins implement two traits from `uptrakit-plugin-infrastructure-core`:
+Notification plugins use the same unified plugin framework as software and enhancement plugins.
+There is no separate `NotificationPluginRegistry` or `NotificationOps` trait. All plugins register
+through `PluginCatalog` via their `PluginDescriptor`.
 
-**`PluginBase`** (defined in `crates/plugins/infrastructure/core/src/plugin_base.rs`):
+### `PluginMeta` trait
+
+Every plugin struct implements `PluginMeta` (defined in `crates/plugins/infrastructure/core/src/roles.rs`):
 
 ```rust
-pub trait PluginBase: Send + Sync {
-    fn name(&self) -> &'static str;
-    fn capabilities(&self) -> Vec<PluginCapability>;
-    fn as_notification_transport(&self) -> Option<&dyn NotificationTransportPlugin> {
-        None
-    }
-    // ... other optional downcasting methods
+pub trait PluginMeta: Send + Sync + 'static {
+    fn plugin_type_id(&self) -> PluginTypeId;
 }
 ```
 
-**`NotificationTransportPlugin`** (defined in `crates/plugins/infrastructure/core/src/plugin_base.rs`):
+The `plugin_type_id()` replaces the old `name()` and `channel_type()` methods. It returns
+a typed `PluginTypeId` (e.g. `PluginTypeId::new("webhook")`).
+
+### `NotificationTransport` role trait
+
+Notification plugins implement the `NotificationTransport` role trait
+(defined in `crates/plugins/infrastructure/core/src/roles.rs`):
 
 ```rust
 #[async_trait]
-pub trait NotificationTransportPlugin: PluginBase {
-    fn channel_type(&self) -> &'static str;
+pub trait NotificationTransport: PluginMeta {
     async fn deliver(
         &self,
         config: &serde_json::Value,
         settings: &serde_json::Value,
         message: &DeliveryMessage,
     ) -> Result<()>;
-    fn validate_config(&self, config: &serde_json::Value) -> Result<()>;
-    #[must_use]
-    fn mask_config_secrets(&self, config: &serde_json::Value) -> serde_json::Value;
 }
 ```
 
@@ -96,15 +98,86 @@ The `settings` parameter is a generic JSON bag with the structure
 what it needs internally (e.g. the email plugin performs SMTP merge, the telegram plugin
 extracts `bot_token` from tenant settings, the webhook plugin ignores it).
 
-Each notification plugin implements both traits and overrides `as_notification_transport()` to return `Some(self)`.
-The `channel_type()` method on `NotificationTransportPlugin` returns the channel type string identifier
-(e.g. `"webhook"`, `"telegram"`, `"email"`).
-
-Consumers look up notification plugins via `PluginOps::notification_transport(channel_type)`, which calls
-`as_notification_transport()` on the matching plugin.
+There is no `channel_type()` method on the trait. The channel type is the plugin's `type_id`
+from its `PluginDescriptor`, which is also the value returned by `plugin_type_id()`.
 
 There is no `supports_actions()` method. Each plugin decides independently whether to render `DeliveryMessage.actions`.
 Plugins that do not support interactive elements silently ignore the `actions` field.
+
+### `PluginConfig` trait
+
+Each notification plugin has a typed config struct implementing `PluginConfig`
+(defined in `crates/plugins/infrastructure/core/src/plugin_config.rs`):
+
+```rust
+pub trait PluginConfig:
+    Serialize + DeserializeOwned + Default + Clone + Send + Sync + 'static
+{
+    fn validate(&self) -> Result<(), String> { Ok(()) }
+    fn with_secrets_masked(self) -> Self { self }
+    fn restore_secrets_from(&mut self, _existing: &Self) {}
+    fn form_schema() -> Vec<FieldDef> { vec![] }
+}
+```
+
+Concrete config structs:
+
+- `WebhookChannelConfig` -- fields: `url`, `secret`, `headers`
+- `TelegramChannelConfig` -- fields: `bot_token`, `chat_id`, `webhook_secret`
+- `EmailChannelConfig` -- fields: `to_addresses`
+
+The `declare_plugin!` macro generates JSON-level wrapper functions (`ConfigOps`) that delegate
+to the typed `PluginConfig` methods, handling serialization/deserialization automatically.
+
+### `declare_plugin!` macro
+
+Every notification plugin uses `declare_plugin!` to generate its `PluginDescriptor` and
+`PluginMeta` implementation:
+
+```rust
+declare_plugin!(WebhookPlugin, WebhookChannelConfig, "webhook", {
+    display_name: "Webhook",
+    family: PluginFamily::Notification,
+    config_model: ConfigModel::NotificationChannel,
+    roles: [NotificationTransport],
+    notification_transport: create_webhook_transport,
+    owned_extension_ids: &["notifications.webhook"],
+    raw_settings_keys: &[],
+    extensions: {
+        manifests: webhook_extension_manifests,
+        actions: webhook_extension_actions,
+        handle_action: webhook_handle_extension_action,
+    },
+});
+```
+
+The macro generates:
+
+- A `pub static DESCRIPTOR: PluginDescriptor` with all metadata, config ops, role creators,
+  and extension ops.
+- An `impl PluginMeta for WebhookPlugin` that returns `PluginTypeId::from_static("webhook")`.
+- Compile-time assertions that the plugin struct implements all declared role traits.
+
+### Transport creation and lookup
+
+Transport creation uses `CreateTransportFn`:
+
+```rust
+pub type CreateTransportFn =
+    fn(&CatalogConfig) -> Result<Arc<dyn NotificationTransport>>;
+```
+
+`CatalogConfig` carries shared configuration (notably `allow_private_urls: bool`) that was
+previously on the removed `NotificationRegistryConfig`.
+
+At startup, the `PluginCatalog` calls each notification plugin's `CreateTransportFn` to
+construct a singleton `Arc<dyn NotificationTransport>`. The dispatcher looks up transports via:
+
+```rust
+catalog.transport(&PluginTypeId::new(channel_type))
+```
+
+This replaces the old `notification_ops.transport(channel_type)` pattern.
 
 ### `DeliveryMessage`
 
@@ -155,26 +228,71 @@ name = "uptrakit-notification-plugin-slack"
 [dependencies]
 uptrakit-notification-plugin-core = { workspace = true }
 uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-extension-framework = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 rootcause = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 ```
 
-### 2. Implement `PluginBase` + `NotificationTransportPlugin`
+### 2. Define the typed config struct
 
-Create `crates/plugins/notifications/slack/src/lib.rs` implementing both traits:
+Create `crates/plugins/notifications/slack/src/config.rs` implementing `PluginConfig`:
 
 ```rust
+use serde::{Deserialize, Serialize};
+use uptrakit_plugin_infrastructure_core::PluginConfig;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SlackChannelConfig {
+    #[serde(default)]
+    pub webhook_url: String,
+}
+
+impl PluginConfig for SlackChannelConfig {
+    fn validate(&self) -> Result<(), String> {
+        if self.webhook_url.is_empty() {
+            return Err("'webhook_url' is required".to_string());
+        }
+        if !self.webhook_url.starts_with("https://") {
+            return Err("'webhook_url' must start with https://".to_string());
+        }
+        Ok(())
+    }
+
+    fn with_secrets_masked(mut self) -> Self {
+        if !self.webhook_url.is_empty() {
+            self.webhook_url = "***".to_string();
+        }
+        self
+    }
+
+    fn restore_secrets_from(&mut self, existing: &Self) {
+        if self.webhook_url == "***" {
+            self.webhook_url = existing.webhook_url.clone();
+        }
+    }
+}
+```
+
+### 3. Implement `NotificationTransport`
+
+Create `crates/plugins/notifications/slack/src/plugin.rs`:
+
+```rust
+use std::sync::Arc;
+use std::future::Future;
+use std::pin::Pin;
+
 use async_trait::async_trait;
 use rootcause::prelude::*;
-
-use uptrakit_notification_plugin_core::{
-    DeliveryMessage, NotificationPluginError, Result,
-};
+use uptrakit_notification_plugin_core::{DeliveryMessage, NotificationPluginError, Result};
 use uptrakit_plugin_infrastructure_core::{
-    NotificationTransportPlugin, PluginBase, PluginCapability,
+    CatalogConfig, ConfigModel, NotificationTransport, PluginFamily, declare_plugin,
 };
+
+use crate::config::SlackChannelConfig;
 
 pub struct SlackPlugin {
     http: reqwest::Client,
@@ -191,61 +309,63 @@ impl SlackPlugin {
     }
 }
 
-impl PluginBase for SlackPlugin {
-    fn name(&self) -> &'static str {
-        "slack"
-    }
-
-    fn capabilities(&self) -> Vec<PluginCapability> {
-        vec![PluginCapability::NotificationDelivery]
-    }
-
-    fn as_notification_transport(&self) -> Option<&dyn NotificationTransportPlugin> {
-        Some(self)
-    }
-}
-
 #[async_trait]
-impl NotificationTransportPlugin for SlackPlugin {
-    fn channel_type(&self) -> &'static str {
-        "slack"
-    }
-
+impl NotificationTransport for SlackPlugin {
     async fn deliver(
         &self,
         config: &serde_json::Value,
-        settings: &serde_json::Value,
+        _settings: &serde_json::Value,
         message: &DeliveryMessage,
     ) -> Result<()> {
         // Build Slack Block Kit payload from message.title, message.body, etc.
-        // `settings` contains {"tenant": {...}, "global": {...}} -- extract any
-        // settings the plugin needs (e.g. API tokens from tenant settings).
-        todo!()
-    }
-
-    fn validate_config(&self, config: &serde_json::Value) -> Result<()> {
-        // Require "webhook_url" field
-        todo!()
-    }
-
-    fn mask_config_secrets(&self, config: &serde_json::Value) -> serde_json::Value {
-        // Mask "webhook_url" value
         todo!()
     }
 }
+
+fn create_slack_transport(
+    _config: &CatalogConfig,
+) -> uptrakit_plugin_infrastructure_core::Result<
+    Arc<dyn NotificationTransport>,
+> {
+    Ok(Arc::new(
+        SlackPlugin::new().map_err(|e| {
+            rootcause::report!(
+                uptrakit_plugin_infrastructure_core::PluginError::Configuration(e.to_string())
+            )
+        })?,
+    ))
+}
+
+// Extension manifest/action functions omitted for brevity -- see Step 5.
+
+declare_plugin!(SlackPlugin, SlackChannelConfig, "slack", {
+    display_name: "Slack",
+    family: PluginFamily::Notification,
+    config_model: ConfigModel::NotificationChannel,
+    roles: [NotificationTransport],
+    notification_transport: create_slack_transport,
+    owned_extension_ids: &["notifications.slack"],
+    raw_settings_keys: &[],
+    extensions: {
+        manifests: slack_extension_manifests,
+        actions: slack_extension_actions,
+        handle_action: slack_handle_extension_action,
+    },
+});
 ```
 
 Key requirements:
 
 - HTTP client **must** set `.connect_timeout(10s)` and `.timeout(60s)` (see [coding-standards.md](coding-standards.md)).
-- `mask_config_secrets` has `#[must_use]` on the trait and must replace all secret fields with `"***"`.
+- `with_secrets_masked()` must replace all secret fields with `"***"`.
+- `restore_secrets_from()` must restore secrets when the incoming value is `"***"`.
 - Use `report!()` / `bail!()` macros for error creation, never `Report::new()` directly.
 - No `unwrap()` in production code.
 
-### 3. Register in the unified `PluginRegistry`
+### 4. Register in the `PluginCatalog`
 
-Add a feature flag in `crates/plugins/infrastructure/registry/Cargo.toml` and register the plugin
-in the `with_notifications()` builder:
+Add a feature flag in `crates/plugins/infrastructure/registry/Cargo.toml` and add the
+plugin's `DESCRIPTOR` to the catalog registration list:
 
 ```toml
 [features]
@@ -257,19 +377,17 @@ slack = ["uptrakit-notification-plugin-slack"]       # <-- new
 all = ["webhook", "telegram", "email", "slack"]      # <-- update
 ```
 
-In `crates/plugins/infrastructure/registry/src/registry.rs`, add inside `with_notifications()`:
+In the registry module, add the descriptor behind its feature gate:
 
 ```rust
 #[cfg(feature = "slack")]
-{
-    notification_plugins.insert(
-        "slack",
-        Arc::new(uptrakit_notification_plugin_slack::SlackPlugin::new()?),
-    );
-}
+descriptors.push(&uptrakit_notification_plugin_slack::DESCRIPTOR);
 ```
 
-### 4. Add the extension action handler
+The `PluginCatalog` reads each descriptor's `family`, `config_model`, and `roles` to
+automatically register the transport singleton, config ops, and extension handlers.
+
+### 5. Add the extension action handler
 
 Each notification plugin owns its own `extensions.rs` module with a `handle_action()` function
 that handles settings CRUD, channel listing, and callback handling. Create
@@ -296,7 +414,11 @@ The shared `list_channels` helper (in `uptrakit-notification-plugin-core`, behin
 feature) provides pagination and config flattening that all notification plugins share. See
 [Shared list_channels helper](#shared-list_channels-helper) for details.
 
-### 5. Propagate the feature flag
+The `declare_plugin!` macro's `extensions` section wires the handler into the descriptor. The
+handler receives a `descriptor::ExtensionActionContext` (with `db: &dyn Any`) and must downcast
+to `sea_orm::DatabaseConnection` before delegating to the `extensions::handle_action` function.
+
+### 6. Propagate the feature flag
 
 In `crates/ui/web-api/Cargo.toml`:
 
@@ -310,18 +432,19 @@ In `crates/core/controller/Cargo.toml`:
 notifications-slack = ["uptrakit-web-api/notifications-slack"]
 ```
 
-### 6. Global shared settings (if applicable)
+### 7. Global shared settings (if applicable)
 
 If the new plugin uses global shared settings (like email uses global SMTP settings), the plugin
 handles settings extraction internally from the `settings` bag passed to `deliver()`. The
 dispatcher builds the settings bag generically from the database (tenant and global settings by
 prefix) and passes it to all plugins -- no channel-type-specific logic in the dispatcher.
 
-### 7. Add tests
+### 8. Add tests
 
-- Unit tests for `validate_config`, `mask_config_secrets` (sync tests, no `start_paused`).
+- Unit tests for `PluginConfig` methods: `validate()`, `with_secrets_masked()`, `restore_secrets_from()` (sync tests, no `start_paused`).
+- Descriptor tests verifying `DESCRIPTOR.type_id`, `DESCRIPTOR.family`, `DESCRIPTOR.config_model`, and `DESCRIPTOR.config.*` function pointers.
 - Delivery tests using `httpmock` for HTTP assertions.
-- Serde round-trip tests for the new `NotificationChannelType` variant.
+- Serde round-trip tests for config structs.
 
 ## `NotificationEvent` and dispatcher
 
@@ -373,7 +496,7 @@ background loop. It is fully generic -- there are no channel-type-specific code 
 3. Filter by scope: if a rule specifies `host_id`, `software_item_id`, or `plugin_type`, the event must match.
 4. For each matched rule:
    - Load the channel from DB and verify it is enabled.
-   - Look up the plugin implementation via `PluginOps::notification_transport(channel_type)`.
+   - Look up the transport via `catalog.transport(&PluginTypeId::new(channel_type))`.
    - Parse and decrypt the channel config (`EncryptedString`).
    - Build a generic settings bag from the database: `{"tenant": {...}, "global": {...}}`
      using `load_settings_by_prefix` and `load_global_settings_by_prefix`.
@@ -381,7 +504,7 @@ background loop. It is fully generic -- there are no channel-type-specific code 
    - Build `DeliveryMessage` via `message_builder::build_delivery_message()`.
    - Insert a `notification_log` row with `status = "pending"`.
    - Spawn a `tokio::spawn` delivery task.
-5. The delivery task calls `plugin.deliver(config, settings, message)` and updates the log
+5. The delivery task calls `transport.deliver(config, settings, message)` and updates the log
    to `"delivered"` or `"failed"`. Each plugin extracts what it needs from the settings bag
    internally (e.g. the email plugin performs SMTP merge from global/tenant settings).
 
@@ -454,7 +577,8 @@ All three tables implement `TenantScoped`. IDs use UUIDv7 for time-ordered index
 
 Channel configs are stored as `EncryptedString` in the database. The config is serialized to JSON, encrypted, and
 stored. When reading, the config is decrypted via `config.expose_secret()` and then parsed. API responses always
-return masked configs (secrets replaced with `"***"`) via `channel.mask_config_secrets()`.
+return masked configs (secrets replaced with `"***"`) via the descriptor's `config.mask_secrets` function pointer,
+which delegates to the typed `PluginConfig::with_secrets_masked()`.
 
 ## REST API endpoints
 
@@ -493,22 +617,23 @@ the channel's `webhook_secret` config field).
 
 ## Webhook plugin details
 
-`crates/plugins/notifications/webhook/src/lib.rs`
+`crates/plugins/notifications/webhook/src/plugin.rs`
 
 - POSTs a JSON payload to the configured `url`.
-- Config fields: `url` (required), `secret` (optional), `headers` (optional object).
+- Config struct: `WebhookChannelConfig` with fields `url` (required), `secret` (optional), `headers` (optional map).
 - When `secret` is present, the request body is signed with HMAC-SHA256 and the signature is included as
   `X-Uptrakit-Signature: sha256=<hex>`.
 - Custom headers from `config.headers` are added to the request.
-- `validate_config` requires `url` to start with `http://` or `https://`, validates the URL host against
-  `is_private_host()` (unless `allow_private_urls` is set), validates custom headers against a blocklist of
-  security-sensitive names (`authorization`, `cookie`, `host`, etc.), and requires `headers` to be an object
-  if present.
-- `mask_config_secrets` replaces the `secret` field with `"***"`.
+- `PluginConfig::validate()` requires `url` to start with `http://` or `https://`, validates custom headers
+  against a blocklist of security-sensitive names (`authorization`, `cookie`, `host`, etc.), and requires
+  `headers` to be an object if present. SSRF host validation is enforced at the HTTP client level via
+  `SsrfSafeResolver` (unless `allow_private_urls` is set in `CatalogConfig`).
+- `PluginConfig::with_secrets_masked()` replaces the `secret` field with `"***"`.
+- `PluginConfig::restore_secrets_from()` restores `secret` when the incoming value is `"***"`.
 
 ## Email plugin details
 
-`crates/plugins/notifications/email/src/lib.rs`
+`crates/plugins/notifications/email/src/plugin.rs`
 
 The email plugin sends notifications via SMTP using the [mail-send](https://crates.io/crates/mail-send) 0.5 library with
 async Tokio support and [mail-builder](https://crates.io/crates/mail-builder) for message construction.
@@ -519,6 +644,7 @@ It is gated on the `email` feature flag.
 The email plugin uses a **three-layer config** model:
 
 - **Per-channel config** (stored encrypted in `notification_channels.config`): contains only `to_addresses`.
+  Typed as `EmailChannelConfig` implementing `PluginConfig`.
 - **Global SMTP defaults** (stored in the `global_settings` table): server-wide SMTP server host, port,
   credentials, sender identity, and TLS mode. Managed via the "SMTP Defaults" extension panel on the
   Global Settings page.
@@ -634,29 +760,33 @@ code. The email plugin performs the SMTP merge internally inside its `deliver()`
 The same merge logic is applied when the email plugin handles the `test_channel` extension
 action.
 
-### `validate_config` and `mask_config_secrets`
+### `PluginConfig` for email
 
-- `validate_config`: parses as `EmailChannelConfig`, rejects empty `to_addresses` and invalid email
+- `EmailChannelConfig::validate()`: parses `to_addresses`, rejects empty lists and invalid email
   formats (must contain `@`).
-- `mask_config_secrets`: no-op; per-channel config contains no secrets.
+- `EmailChannelConfig::with_secrets_masked()`: no-op; per-channel config contains no secrets.
 
 ## Telegram plugin details
 
-`crates/plugins/notifications/telegram/src/lib.rs`
+`crates/plugins/notifications/telegram/src/plugin.rs`
 
 - Sends messages via the Telegram Bot API `sendMessage` endpoint.
-- Config fields: `bot_token` (required), `chat_id` (required), `webhook_secret` (optional, for callback verification).
+- Config struct: `TelegramChannelConfig` with fields `bot_token` (required), `chat_id` (required), `webhook_secret` (optional, for callback verification).
 - Uses HTML parse mode. The title is wrapped in `<b>` tags. HTML special characters in the title are escaped.
 - When `DeliveryMessage.actions` is non-empty, buttons are rendered as Telegram inline keyboard buttons
   with `callback_data` set to the action token.
-- `validate_config` requires non-empty `bot_token` and `chat_id`.
-- `mask_config_secrets` replaces `bot_token` and `webhook_secret` with `"***"`.
+- `TelegramChannelConfig::validate()` requires non-empty `bot_token` and `chat_id`.
+- `TelegramChannelConfig::with_secrets_masked()` replaces `bot_token` and `webhook_secret` with `"***"`.
 
 ## Testing
 
 - **Unit tests** exist in every module: `events.rs`, `message_builder.rs`, and each plugin crate
   (`webhook`, `telegram`, `email`), `notifications.rs` (web-api-types).
-- **Plugin tests** use standard `#[test]` for sync methods (`validate_config`, `mask_config_secrets`).
+- **Config tests** verify `PluginConfig` methods and descriptor-level `ConfigOps` function pointers
+  (`DESCRIPTOR.config.validate`, `DESCRIPTOR.config.mask_secrets`, `DESCRIPTOR.config.restore_secrets`).
+- **Descriptor tests** verify `DESCRIPTOR.type_id`, `DESCRIPTOR.family`, `DESCRIPTOR.config_model`,
+  role availability (`DESCRIPTOR.roles.notification_transport.is_some()`), and extension ownership.
+- **Plugin tests** use standard `#[test]` for sync methods (`validate()`, `with_secrets_masked()`).
   Use `httpmock` for delivery assertions in async tests. Email delivery tests verify error conversion
   against non-routable SMTP hosts (the test waits up to 60 s for connection timeout).
 - **Serde round-trip tests** cover all enum variants (`NotificationEventType`,
@@ -670,15 +800,21 @@ action.
 
 | File | Purpose |
 | --- | --- |
-| `crates/plugins/infrastructure/core/src/plugin_base.rs` | `PluginBase` trait, `NotificationTransportPlugin` trait (with `channel_type()`, `deliver(config, settings, message)`) |
+| `crates/plugins/infrastructure/core/src/roles.rs` | `PluginMeta` trait, `NotificationTransport` role trait |
+| `crates/plugins/infrastructure/core/src/plugin_config.rs` | `PluginConfig` trait (validate, mask, restore, form schema) |
+| `crates/plugins/infrastructure/core/src/descriptor.rs` | `PluginDescriptor`, `PluginFamily`, `ConfigModel`, `CatalogConfig`, `CreateTransportFn`, `ConfigOps` |
+| `crates/plugins/infrastructure/core/src/macros.rs` | `declare_plugin!` macro |
 | `crates/plugins/notifications/core/src/lib.rs` | `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()` |
 | `crates/plugins/notifications/core/src/list_channels.rs` | Shared `list_channels` helper (behind `extensions` feature) |
-| `crates/plugins/infrastructure/registry/src/registry.rs` | Unified `PluginRegistry` with `with_notifications()` builder; `notification_transport()` lookup |
-| `crates/plugins/notifications/webhook/src/lib.rs` | Webhook plugin (HMAC-SHA256 signing) |
+| `crates/plugins/infrastructure/registry/src/registry.rs` | `PluginCatalog` with descriptor-driven registration; `transport()` lookup |
+| `crates/plugins/notifications/webhook/src/plugin.rs` | Webhook plugin (`declare_plugin!`, `NotificationTransport` impl, HMAC-SHA256 signing) |
+| `crates/plugins/notifications/webhook/src/config.rs` | `WebhookChannelConfig` implementing `PluginConfig` |
 | `crates/plugins/notifications/webhook/src/extensions.rs` | Webhook extension action handler |
-| `crates/plugins/notifications/telegram/src/lib.rs` | Telegram plugin (inline keyboard) |
+| `crates/plugins/notifications/telegram/src/plugin.rs` | Telegram plugin (`declare_plugin!`, inline keyboard) |
+| `crates/plugins/notifications/telegram/src/config.rs` | `TelegramChannelConfig` implementing `PluginConfig` |
 | `crates/plugins/notifications/telegram/src/extensions.rs` | Telegram extension action handler (including callback handling) |
-| `crates/plugins/notifications/email/src/lib.rs` | Email plugin (SMTP via mail-send, multipart/alternative) |
+| `crates/plugins/notifications/email/src/plugin.rs` | Email plugin (`declare_plugin!`, SMTP via mail-send, multipart/alternative) |
+| `crates/plugins/notifications/email/src/config.rs` | `EmailChannelConfig` implementing `PluginConfig` |
 | `crates/plugins/notifications/email/src/extensions.rs` | Email extension action handler (including SMTP settings CRUD) |
 | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, `Validate` impls |
 | `crates/ui/web-api/src/notifications/dispatcher.rs` | Fire-and-forget generic background dispatcher loop |
@@ -698,24 +834,29 @@ tabs without any transport-specific knowledge in the frontend or web API route h
 
 Each notification plugin owns its extension definitions **and** action handlers in an
 `extensions.rs` module within the plugin crate. This keeps all transport-specific knowledge
-co-located with the plugin implementation. The unified `PluginRegistry` delegates to each
-registered notification plugin and aggregates the results through
-`PluginOps::extension_manifests()` and `PluginOps::handle_extension_action()`.
+co-located with the plugin implementation. The `PluginCatalog` delegates to each registered
+plugin and aggregates the results through its extension dispatch methods. Extension manifests
+and actions are declared in the `declare_plugin!` macro's `extensions` section.
 
 Each plugin's `extensions.rs` module exports:
 
-- `extension_manifests() -> Vec<ExtensionManifest>` -- UI manifests for channel management
-- `extension_actions() -> Vec<(String, Vec<ActionDef>)>` -- action catalogue
 - `handle_action(ctx, extension_id, action_id, params) -> Result<Value, String>` -- action
   dispatch including settings CRUD, channel listing, and callback handling
+
+The `declare_plugin!` macro's `extensions` section declares three function pointers:
+
+- `manifests` -- returns `Vec<ExtensionManifest>` (UI manifests for channel management)
+- `actions` -- returns `Vec<ActionDef>` (action catalogue)
+- `handle_action` -- async action handler matching the `ExtensionActionHandler` type signature
 
 ### Shared `list_channels` helper
 
 The `uptrakit-notification-plugin-core` crate provides a shared `list_channels` module (behind
 the `extensions` feature) that all notification plugins use for paginated channel listing with
-config flattening. It queries channels by type, decrypts config, masks secrets via
-`mask_config_secrets()`, and flattens all top-level config keys into the row object. The
-extension manifest's `DataTable` column definitions reference these flattened keys.
+config flattening. It queries channels by type, decrypts config, masks secrets via the
+descriptor's `config.mask_secrets` function pointer, and flattens all top-level config keys
+into the row object. The extension manifest's `DataTable` column definitions reference these
+flattened keys.
 
 ### Extension IDs
 

@@ -9,12 +9,12 @@ support to a new service binary.
 
 The extension framework uses a hybrid registration model:
 
-- **Compile-time registration** for plugins and notifications (via the `PluginOps` trait)
+- **Compile-time registration** for plugins and notifications (via the `PluginMetadataOps` trait)
 - **Runtime registration** for connected services (via the wire protocol)
 
 The `ExtensionRegistry` tracks three owner types: `Plugin`, `Service`, and `Notification`.
 Plugin and notification extensions are dispatched to the unified plugin system via
-`PluginOps::handle_extension_action()`. Each notification plugin owns its own
+`PluginOps::handle_extension_action()` (the convenience alias). Each notification plugin owns its own
 `extensions.rs` module with a `handle_action()` function that handles settings CRUD,
 channel listing, and callback handling. Service extensions are proxied over WebSocket.
 
@@ -684,10 +684,11 @@ via `env!("CARGO_PKG_NAME")`. No manual changes needed per binary.
 
 ## Creating a plugin-backed extension
 
-Plugin-backed extensions are registered at compile time via the `PluginOps` trait.
+Plugin-backed extensions are registered at compile time via the `PluginMetadataOps` and `PluginConfigOps` traits
+(combined in the `PluginOps` convenience alias).
 They differ from service-backed extensions in two ways:
 
-1. **Registration**: manifests are returned by `PluginOps::extension_manifests()` and
+1. **Registration**: manifests are returned by `PluginMetadataOps::extension_manifests()` and
    loaded into the `ExtensionRegistry` at controller startup (always available, no
    provider tracking needed).
 2. **Action dispatch**: invocations are handled in-process by
@@ -746,9 +747,9 @@ pub async fn handle_action(
 }
 ```
 
-### Step 3: Wire into the plugin registry
+### Step 3: Wire into the plugin catalog
 
-In the `PluginOps` implementation for `PluginRegistry`:
+In the `PluginOps` implementation for `PluginCatalog`:
 
 - Return manifests from `extension_manifests()`.
 - Route actions in `handle_extension_action()` based on extension ID prefix.
@@ -964,7 +965,7 @@ a provider automatically or handles it directly (for plugins).
 | `crates/shared/service-sdk/src/lifecycle.rs` | `ServiceHandler::on_extension_request` + `on_extension_response` |
 | `crates/shared/service-sdk/src/extension_proxy.rs` | `ServiceExtensionProxy` for service-initiated invocations |
 | `crates/shared/service-sdk/src/event_loop.rs` | `ExtensionRequest` + `ExtensionResponse` dispatch |
-| `crates/plugins/infrastructure/core/src/plugin_ops.rs` | `PluginOps` trait (feature `plugin-ops`) |
+| `crates/plugins/infrastructure/core/src/plugin_ops.rs` | `PluginOps` convenience alias (`PluginMetadataOps` + `PluginConfigOps` + ...) (feature `plugin-ops`) |
 | `crates/ui/cli/src/commands/extensions.rs` | CLI `extensions` subcommand (static + dynamic) |
 | `crates/core/agent-ssh/src/extension.rs` | SSH agent extension implementation (reference) |
 | `crates/shared/crypto/src/ecies.rs` | ECIES sealed-box encryption/decryption (Rust, backend) |

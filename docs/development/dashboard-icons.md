@@ -15,21 +15,23 @@ The plugin crate lives at `crates/plugins/enhancements/dashboard-icons/`.
 
 ## Architecture
 
-The plugin introduces a `SoftwareItemLifecyclePlugin` subtrait on `PluginBase`, defined in
-`uptrakit-plugin-infrastructure-core`. This subtrait provides a hook that fires after a software
+The plugin implements the `SoftwareItemLifecycle` role trait, defined in
+`uptrakit-plugin-infrastructure-core`. This role trait provides a hook that fires after a software
 item is created, allowing enhancement plugins to inspect the item and return a patch.
 
-Key types (all defined in `crates/plugins/infrastructure/core/src/plugin_base.rs`):
+Key types (all defined in `crates/plugins/infrastructure/core/src/roles.rs`):
 
-- **`SoftwareItemLifecyclePlugin`** -- async trait with `on_software_item_created(&self, event) -> Result<Option<SoftwareItemPatch>>`.
+- **`SoftwareItemLifecycle`** -- async role trait with `on_software_item_created(&self, event) -> Result<Option<SoftwareItemPatch>>`.
 - **`SoftwareItemCreatedEvent`** -- `#[non_exhaustive]` struct carrying the item snapshot (`id`, `tenant_id`, `name`,
   `featured`, `icon_url`). Constructed via `::new()`.
 - **`SoftwareItemPatch`** -- `#[non_exhaustive]` struct with `Option<Option<T>>` fields. `Some(Some(url))` = set,
   `Some(None)` = clear, `None` = no change. Constructed via `::new()` / `::default()` with builder methods.
-- **`PluginCapability::SoftwareItemLifecycle`** -- capability variant declared by plugins that implement the subtrait.
+- **`PluginCapability::SoftwareItemLifecycle`** -- capability variant declared by plugins that implement the role trait.
 
-The `PluginBase` trait provides the `as_software_item_lifecycle()` downcast method (default returns `None`).
-The `DashboardIconsPlugin` overrides it to return `Some(self)`.
+The plugin is declared via `declare_plugin!` with the `SoftwareItemLifecycle` role and provides a
+`create_software_item_lifecycle` factory function. The `PluginCatalog` collects
+`SoftwareItemLifecycle` implementations directly via `CreateEnhancementFn` during catalog
+construction -- no downcast is needed.
 
 ## Components
 
@@ -63,8 +65,19 @@ The background refresh loop uses `CancellationToken` for graceful shutdown and l
 
 `crates/plugins/enhancements/dashboard-icons/src/plugin.rs`
 
-Implements `PluginBase` (with `plugin_type_id = "enhancement_dashboard_icons"` and
-`PluginCapability::SoftwareItemLifecycle`) and `SoftwareItemLifecyclePlugin`.
+Declared via `declare_plugin!` with `PluginDescriptor` (`plugin_type_id = "enhancement_dashboard_icons"`,
+`family: PluginFamily::Enhancement`) and implements the `SoftwareItemLifecycle` role:
+
+```rust
+declare_plugin!(DashboardIconsPlugin, DashboardIconsConfig, "enhancement_dashboard_icons", {
+    family: PluginFamily::Enhancement,
+    // ...
+    roles: [SoftwareItemLifecycle],
+});
+```
+
+The plugin provides a `create_software_item_lifecycle` function that the `PluginCatalog` calls
+during construction to obtain an `Arc<dyn SoftwareItemLifecycle>` singleton.
 
 The `on_software_item_created` implementation:
 
@@ -180,8 +193,8 @@ Check SettingKey::DashboardIconsEnabled for the tenant
   plugin_ops.on_software_item_created(&event)
       |
       v
-  PluginRegistry iterates software_item_lifecycle_plugins
-      |-- for each plugin: as_software_item_lifecycle() -> on_software_item_created()
+  PluginCatalog iterates lifecycle_plugins
+      |-- for each plugin: on_software_item_created()
       |-- merge patches (last writer wins per field)
       |
       v
@@ -191,19 +204,13 @@ Check SettingKey::DashboardIconsEnabled for the tenant
   Apply patch to DB (update icon_url on software_item row)
 ```
 
-## Registry integration
+## Catalog integration
 
-The `PluginRegistry` stores lifecycle plugins in `software_item_lifecycle_plugins: Vec<Arc<dyn PluginBase>>`.
-Registration happens via the builder method:
-
-```rust
-#[cfg(feature = "dashboard-icons")]
-pub fn with_dashboard_icons(mut self, cache: Arc<DashboardIconCache>) -> Self {
-    let plugin = DashboardIconsPlugin::new(cache);
-    self.software_item_lifecycle_plugins.push(Arc::new(plugin));
-    self
-}
-```
+The `PluginCatalog` stores lifecycle plugins in `lifecycle_plugins: Vec<Arc<dyn SoftwareItemLifecycle>>`.
+Registration happens automatically during catalog construction: the `declare_plugin!` macro
+registers a `CreateEnhancementFn` that the catalog calls to obtain the `SoftwareItemLifecycle`
+singleton. No separate builder method is needed -- the plugin is instantiated as part of catalog
+setup when the `dashboard-icons` feature is enabled.
 
 The `on_software_item_created()` method on `PluginOps` iterates all lifecycle plugins, collects
 patches, and merges them with a last-writer-wins strategy per field. Errors from individual plugins
@@ -214,13 +221,13 @@ are logged at `warn` level and do not prevent other plugins from running.
 | File | Purpose |
 | --- | --- |
 | `crates/plugins/enhancements/dashboard-icons/src/lib.rs` | Crate root, re-exports `DashboardIconCache` and `DashboardIconsPlugin` |
-| `crates/plugins/enhancements/dashboard-icons/src/plugin.rs` | `DashboardIconsPlugin` implementing `PluginBase` + `SoftwareItemLifecyclePlugin` |
+| `crates/plugins/enhancements/dashboard-icons/src/plugin.rs` | `DashboardIconsPlugin` declared via `declare_plugin!` with `SoftwareItemLifecycle` role |
 | `crates/plugins/enhancements/dashboard-icons/src/cache.rs` | `DashboardIconCache` with refresh loop and CDN URL construction |
 | `crates/plugins/enhancements/dashboard-icons/src/slugify.rs` | Name-to-slug conversion function |
 | `crates/plugins/enhancements/dashboard-icons/src/error.rs` | `DashboardIconsError` enum |
-| `crates/plugins/infrastructure/core/src/plugin_base.rs` | `SoftwareItemLifecyclePlugin` trait, `SoftwareItemCreatedEvent`, `SoftwareItemPatch` |
+| `crates/plugins/infrastructure/core/src/roles.rs` | `SoftwareItemLifecycle` role trait, `SoftwareItemCreatedEvent`, `SoftwareItemPatch` |
 | `crates/plugins/infrastructure/core/src/plugin_ops.rs` | `PluginOps::on_software_item_created()` default impl |
-| `crates/plugins/infrastructure/registry/src/registry.rs` | `PluginRegistry::with_dashboard_icons()` builder, lifecycle dispatch impl |
+| `crates/plugins/infrastructure/registry/src/registry.rs` | `PluginCatalog` construction, lifecycle dispatch impl |
 | `crates/plugins/infrastructure/registry/src/lib.rs` | `PluginOps::on_software_item_created()` override with merge logic |
 | `crates/ui/web-api/src/routes/software_items/mod.rs` | `fire_software_item_lifecycle()` for manual creation |
 | `crates/ui/web-api/src/routes/service_ws/handler/messages.rs` | Post-autodiscovery enrichment loop |

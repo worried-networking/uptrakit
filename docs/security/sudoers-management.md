@@ -52,7 +52,7 @@ explanation, and an optional `SudoHelperScript`.
 
 During bootstrap or sync-host:
 
-1. `PluginRegistry::compatible_sudo_commands_for_host(ssh_executor)` collects
+1. `PluginCatalog::compatible_sudo_commands_for_host(ssh_executor)` collects
    declarations from registered plugins that are **compatible with the target host**.
    - Plugins that declare the `DetectHostCompatibility` capability first run a
      compatibility check over SSH (e.g. the Proxmox Helper Scripts plugin checks

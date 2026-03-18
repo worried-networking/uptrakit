@@ -1,8 +1,9 @@
 # Plugin Development Guidelines
 
 Plugins are first-party extension modules that detect, report, and update software on managed hosts.
-Each plugin crate implements the `PluginBase` trait (and optionally `PluginOps`) and is registered in `uptrakit-plugin-infrastructure-registry`. This
-document describes the full lifecycle and conventions for building and extending plugins.
+Each plugin crate declares a `DESCRIPTOR` static via the `declare_plugin!` macro, implements `PluginMeta` plus
+role-specific traits, and is registered in `uptrakit-plugin-infrastructure-registry`. This document describes
+the full lifecycle and conventions for building and extending plugins.
 
 When adding or changing a plugin, document the full lifecycle:
 
@@ -16,35 +17,62 @@ When adding or changing a plugin, document the full lifecycle:
 Plugins should keep parsing and comparison logic in pure functions so they are easy to test.
 
 The plugin registry crate (`uptrakit-plugin-infrastructure-registry`) centralizes config validation, mask/restore
-workflows, and creates plugin instances based on `PluginType`. Document plugin behavior so the registry
+workflows, and creates plugin instances based on `PluginTypeId`. Document plugin behavior so the registry
 can continue to validate configs and mask secrets correctly.
 
-`PluginType` implements `FromStr`, `Display`, and `as_str()` for string conversion. Use
-`s.parse::<PluginType>()` to convert strings (returns `ParsePluginTypeError` on failure). The string
-representations are: `releases_github`, `releases_gitlab`, `releases_forgejo`, `releases_docker`,
-`discovery_proxmox_helper_scripts`, `package_manager_homebrew`, `package_manager_apt`,
-`package_manager_npm`, `package_manager_mas`, `generic_shell`, `infrastructure_proxmox`.
+`PluginTypeId` is a newtype wrapper around a string identifier. Plugin crates declare their ID with
+`PluginTypeId::from_static("my_plugin_id")`. The string representations are: `releases_github`,
+`releases_gitlab`, `releases_forgejo`, `releases_docker`, `discovery_proxmox_helper_scripts`,
+`package_manager_homebrew`, `package_manager_apt`, `package_manager_npm`, `package_manager_mas`,
+`generic_shell`, `infrastructure_proxmox`.
+
+## Plugin Families
+
+The `PluginFamily` enum classifies plugins into functional groups:
+
+| Family | Description |
+| :--- | :--- |
+| `Software` | Plugins that detect, fetch, and update software packages. |
+| `Hook` | Plugins that run pre/post-update lifecycle hooks. |
+| `Notification` | Plugins that deliver alerts via external channels (webhook, email, Telegram). |
+| `Infrastructure` | Plugins that manage infrastructure resources (Proxmox VE). |
+| `Enhancement` | Plugins that enrich software items with supplemental data (dashboard icons). |
+
+The family is declared in `declare_plugin!` and determines which role traits are expected.
 
 ## Plugin Capabilities
 
-The `PluginCapability` enum defines optional features a plugin may support. Plugins declare their
-capabilities by implementing `capabilities() -> Vec<PluginCapability>` on the `PluginBase` trait. All
-other trait methods have default no-op implementations; plugins override only what they support.
+The `PluginCapability` enum defines optional features a plugin may support. Capabilities are **auto-derived**
+from the roles declared in `declare_plugin!`. Plugins do not manually list capabilities -- the macro infers
+them from implemented role traits.
 
-| Capability | Trait method / accessor | Description |
+| Capability | Source | Description |
 | :--- | :--- | :--- |
-| `DiscoverLocalSoftware` | `discover_software()` | Enumerate software the plugin can manage on the local system. |
-| `RefreshPackageIndex` | `refresh_package_index()` | Refresh local package index (for example, `apt update`). |
-| `DetectHostCompatibility` | `detect_host_compatibility()` | Determine whether this plugin is applicable to the current host environment. |
-| `UpdateLifecycle` | `as_update_lifecycle()` → `UpdateLifecyclePlugin` | Plugin implements pre/post-update hooks via the `UpdateLifecyclePlugin` subtrait. See [Update Lifecycle Plugins](update-hooks.md). |
-| `ControllerSideFetchReleases` | _(no trait method)_ | Declares that `fetch_releases()` can run on the controller without local system state. See [Declaring ControllerSideFetchReleases](#declaring-controllersidefetchreleases). |
-| `ConfigTest` | _(handled by registry)_ | Plugin supports configuration testing (dry-run validation) without triggering real version checks, updates, or side effects. See [Config Test Capability](#config-test-capability). |
+| `DiscoverLocalSoftware` | `DiscoveryPlugin` role | Enumerate software the plugin can manage on the local system. |
+| `RefreshPackageIndex` | `PackageIndexPlugin` role | Refresh local package index (for example, `apt update`). |
+| `DetectHostCompatibility` | `HostCompatibilityPlugin` role | Determine whether this plugin is applicable to the current host environment. |
+| `UpdateLifecycle` | `UpdateLifecyclePlugin` role | Plugin implements pre/post-update hooks. See [Update Lifecycle Plugins](update-hooks.md). |
+| `ControllerSideFetchReleases` | `HostRequirements::CONTROLLER_ONLY` | `fetch_releases()` runs on the controller without local system state. |
+| `ConfigTest` | `config_test: [...]` in `declare_plugin!` | Plugin supports configuration testing. See [Config Test Capability](#config-test-capability). |
+
+## Host Requirements
+
+Each plugin role declares its host requirements via the `HostRequirements` enum:
+
+| Variant | Meaning | Example |
+| :--- | :--- | :--- |
+| `POSIX` | Requires a POSIX command executor (default). | APT version detection, Homebrew discovery. |
+| `POSIX_PRIVILEGED` | Requires POSIX with elevated privileges (sudo). | APT package installation, systemctl operations. |
+| `CONTROLLER_ONLY` | Runs on the controller; no agent needed. | GitHub Releases fetch, Docker registry queries. |
+
+A single plugin can have different requirements per role. For example, APT uses `POSIX` for detection
+and `POSIX_PRIVILEGED` for updates.
 
 ## Host Compatibility Detection
 
-Plugins that declare `PluginCapability::DetectHostCompatibility` implement
-`detect_host_compatibility()` to determine whether the plugin is applicable to the host where
-the agent is running. The method returns a `HostCompatibility` enum:
+Plugins that implement the `HostCompatibilityPlugin` role trait provide `detect_host_compatibility()` to
+determine whether the plugin is applicable to the host where the agent is running. The method returns a
+`HostCompatibility` enum:
 
 ```rust
 pub enum HostCompatibility {
@@ -61,7 +89,7 @@ hosts during bootstrap (preventing failures on read-only filesystems such as Fla
 
 ### Pattern examples
 
-**APT plugin** — checks whether `apt-get` is available:
+**APT plugin** -- checks whether `apt-get` is available:
 
 ```rust
 async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
@@ -78,13 +106,11 @@ async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
 }
 ```
 
-**Docker plugin** — pings the Docker daemon directly (daemon build only):
+**Docker plugin** -- pings the Docker daemon directly (daemon build only):
 
 ```rust
 #[cfg(feature = "daemon")]
 async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-    // Use bollard's ping to verify the daemon is actually reachable,
-    // including over SSH tunnels for remote hosts.
     match self.docker_client.ping().await {
         Ok(()) => Ok(HostCompatibility::Compatible),
         Err(e) => Ok(HostCompatibility::Incompatible(format!(
@@ -96,8 +122,7 @@ async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
 
 ## Update Lifecycle Plugins
 
-Plugins that declare `UpdateLifecycle` capability implement the `UpdateLifecyclePlugin` subtrait
-via the `as_update_lifecycle()` accessor on `PluginBase`. They receive an `UpdateLifecycleContext`:
+Plugins that implement the `UpdateLifecyclePlugin` role trait receive an `UpdateLifecycleContext`:
 
 ```rust
 pub struct UpdateLifecycleContext {
@@ -114,8 +139,8 @@ pub struct UpdateLifecycleContext {
 
 `execute_pre_hook()` is called before the update. It returns `PreUpdateHookResult`:
 
-- `PreUpdateHookResult::proceed()` — continue with the update.
-- `PreUpdateHookResult::abort(reason)` — cancel the update with a reason message.
+- `PreUpdateHookResult::proceed()` -- continue with the update.
+- `PreUpdateHookResult::abort(reason)` -- cancel the update with a reason message.
 
 If a pre-update hook returns abort, no further pre-hooks or the update itself are executed.
 
@@ -130,24 +155,18 @@ For full details on the built-in hook plugins (`hook_systemd`, `hook_shell`), se
 
 ## Declaring `ControllerSideFetchReleases`
 
-If your plugin's `fetch_releases()` implementation makes only HTTP/API calls and does not depend on
-any local system state (no `CommandExecutor` calls, no filesystem access, no local package index),
-you should declare `ControllerSideFetchReleases` in your `capabilities()`:
+Plugins with `HostRequirements::CONTROLLER_ONLY` automatically receive the
+`ControllerSideFetchReleases` capability. This signals that `fetch_releases()` makes only HTTP/API
+calls and does not depend on any local system state.
 
-```rust
-fn capabilities(&self) -> &'static [PluginCapability] {
-    &[PluginCapability::ControllerSideFetchReleases]
-}
-```
-
-**When to declare it:**
+**When to use `CONTROLLER_ONLY`:**
 
 - Your `fetch_releases()` only performs HTTP requests to an external API (GitHub REST API, OCI
   registry, etc.).
 - It does not call `self.executor.execute()` or `self.executor.execute_quiet()`.
 - It does not read from the local filesystem or depend on a locally synced package index.
 
-**When NOT to declare it:**
+**When NOT to use it:**
 
 - Your plugin needs a local package index (e.g. Homebrew's `brew info --json`, APT's
   `apt-cache policy`). These must run agent-side.
@@ -156,7 +175,7 @@ fn capabilities(&self) -> &'static [PluginCapability] {
 **Effect:** When `execution_site` is `auto` (the default), the controller runs `fetch_releases()`
 once per unique `(plugin_config_id, package_identifier)` combination and propagates the result
 to all hosts sharing that combination. This avoids redundant API calls when many hosts track the
-same upstream release. The controller uses a `NoopCommandExecutor` — if your plugin accidentally
+same upstream release. The controller uses a `NoopCommandExecutor` -- if your plugin accidentally
 calls it, the process will panic.
 
 **Current plugins with this capability:** `GitHubPlugin`, `GitLabPlugin`, `ForgejoPlugin`,
@@ -164,8 +183,18 @@ calls it, the process will panic.
 
 ## Config Test Capability
 
-Plugins that declare `PluginCapability::ConfigTest` support dry-run validation of their configuration
-via the `POST /api/v1/plugin-configs/test` endpoint. All 17 built-in plugins declare this capability.
+Plugins declare config test support in `declare_plugin!` using the `config_test:` field. The first
+kind listed is the default:
+
+```rust
+declare_plugin! {
+    // ... other fields ...
+    config_test: [VersionDetection, UpdateCommandValidation],
+}
+```
+
+This generates a `ConfigTestOps` implementation and adds `PluginCapability::ConfigTest` automatically.
+All built-in plugins declare this capability.
 
 The test executes without creating any database records or triggering real updates. The kind of test
 performed depends on the plugin type and its capabilities:
@@ -180,9 +209,9 @@ performed depends on the plugin type and its capabilities:
 
 ### Two execution paths
 
-The test endpoint dispatches to one of two paths based on the plugin's capabilities:
+The test endpoint dispatches to one of two paths based on the plugin's host requirements:
 
-**Controller-side test path** -- For plugins that declare `ControllerSideFetchReleases`, the
+**Controller-side test path** -- For plugins with `HostRequirements::CONTROLLER_ONLY`, the
 controller runs the test directly in its own process. No agent connection is required and `host_id`
 is optional. The controller instantiates the plugin with a `NoopCommandExecutor`, calls
 `fetch_releases()` (or equivalent), and returns the result. This path handles the `Connectivity`
@@ -195,114 +224,527 @@ that owns the specified `host_id`. The agent executes the test locally and respo
 `ConfigTestProxy` (same request/response pattern as `ExtensionProxy`) and returns it to the
 HTTP caller. The `host_id` field is required for this path.
 
-### Adding `ConfigTest` to a new plugin
+## The `declare_plugin!` Macro
 
-All plugins should declare `ConfigTest` in their `capabilities()` return value:
+The `declare_plugin!` macro is the single entry point for plugin declaration. It generates:
+
+- A `DESCRIPTOR` static containing all plugin metadata.
+- A `PluginMeta` trait implementation.
+- Config delegation functions (validation, masking, form schema).
+- `ConfigTestOps` if `config_test:` is specified.
+- Capability list derived from declared roles.
+
+### Syntax reference
 
 ```rust
-fn capabilities(&self) -> &'static [PluginCapability] {
-    &[
-        PluginCapability::VersionDetection,
-        PluginCapability::ConfigTest,
-        // ... other capabilities
-    ]
+declare_plugin! {
+    id: PluginTypeId::from_static("my_plugin_id"),
+    name: "My Plugin",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    config: MyConfig,
+    plugin: MyPlugin,
+    host_requirements: HostRequirements::POSIX,
+    config_test: [VersionDetection],
 }
 ```
 
-The test dispatch logic in the plugin registry selects the appropriate `ConfigTestKind` based on
-the plugin's other declared capabilities. No plugin-specific test code is required -- the registry
-reuses the existing `detect_installed_version()`, `fetch_releases()`, and hook methods.
+| Field | Required | Description |
+| :--- | :--- | :--- |
+| `id` | Yes | `PluginTypeId` identifying this plugin. |
+| `name` | Yes | Human-readable display name. |
+| `family` | Yes | `PluginFamily` variant. |
+| `config_model` | Yes | `ConfigModel::PluginConfig` or `ConfigModel::NotificationChannel`. |
+| `config` | Yes | Config struct type (must implement `PluginConfig`). |
+| `plugin` | Yes | Plugin struct type (must implement `PluginMeta` + role traits). |
+| `host_requirements` | Yes | Default `HostRequirements` for the plugin. |
+| `config_test` | No | List of `ConfigTestKind` variants (first is default). |
+
+## The `PluginConfig` Trait
+
+The `PluginConfig` trait unifies configuration validation, secret masking, form schema, and identifier
+validation into a single trait. It replaces the former `ConfigFormSchema` and `SecretMasking` traits.
+
+```rust
+pub trait PluginConfig: Serialize + DeserializeOwned + Clone + Send + Sync {
+    /// Validate the configuration. Called during plugin creation.
+    fn validate(&self) -> Result<(), String>;
+
+    /// Return a copy with secret fields replaced by "***".
+    fn with_secrets_masked(self) -> Self { self }
+
+    /// Restore secret fields from an existing config where `self` contains "***" sentinels.
+    fn restore_secrets_from(&mut self, _existing: &Self) {}
+
+    /// Return typed form field definitions for the frontend.
+    fn form_schema() -> Vec<FieldDef>;
+
+    /// Validate a package identifier for this plugin type.
+    fn validate_identifier(_value: &str) -> Result<(), String> { Ok(()) }
+}
+```
+
+### Secret masking
+
+Plugins with no secrets (Homebrew, Proxmox Helper Scripts) use the default no-op implementations
+of `with_secrets_masked()` and `restore_secrets_from()`.
+
+Plugins with secrets (GitHub, Docker) override both methods with field-level masking logic:
+
+```rust
+impl PluginConfig for GitHubConfig {
+    fn with_secrets_masked(mut self) -> Self {
+        if self.auth_token.is_some() {
+            self.auth_token = Some("***".to_string());
+        }
+        self
+    }
+
+    fn restore_secrets_from(&mut self, existing: &Self) {
+        if self.auth_token.as_deref() == Some("***") {
+            self.auth_token = existing.auth_token.clone();
+        }
+    }
+
+    // ... other methods
+}
+```
+
+The registry uses generic helpers `mask_secrets_for::<T>()` and `restore_secrets_for::<T>()` that
+deserialize the JSON config, apply the trait methods, and re-serialize. This eliminates duplicated
+deserialize-method-serialize boilerplate per plugin.
+
+### Config form schema
+
+The `form_schema()` method on `PluginConfig` allows plugins to declare typed form field definitions
+for their configuration. The frontend renders these as structured forms instead of raw JSON textareas.
+
+```rust
+impl PluginConfig for GitHubConfig {
+    fn form_schema() -> Vec<FieldDef> {
+        vec![
+            FieldDef::new("auth_token", "Auth Token")
+                .with_type(FieldType::Password)
+                .sensitive()
+                .with_help_text("Personal access token for private repos"),
+            FieldDef::new("include_prereleases", "Include Pre-releases")
+                .with_type(FieldType::Toggle)
+                .with_help_text("Include draft/pre-release versions"),
+        ]
+    }
+
+    // ... other methods
+}
+```
+
+Plugins with no configurable fields (MAS, Proxmox Helper Scripts) return an empty `Vec`.
+
+For nested configuration objects (e.g., Docker's `auth` enum), use dot-separated keys with a
+`_` prefix for tagged enum discriminators:
+
+- `auth._type` -- select field for the enum variant (maps to JSON `auth.type`)
+- `auth.username` -- text field visible when `auth._type` is `"basic"`
+- `auth.password` -- password field visible when `auth._type` is `"basic"`
+
+Use `FieldDef::with_visible_when()` for conditional visibility based on another field's value.
+
+The schema is served to the frontend via `GET /api/v1/plugin-types` in the `config_form_fields`
+array of `PluginTypeInfo`.
+
+## The `TypeSettings` Trait
+
+Plugins that support tenant-level settings implement the separate `TypeSettings` trait:
+
+```rust
+pub trait TypeSettings {
+    fn type_settings_form_schema() -> Vec<FieldDef>;
+    fn type_settings_sample() -> serde_json::Value;
+}
+```
+
+### Type settings vs plugin configs
+
+Plugin configuration uses a **two-tier model**:
+
+- **Type settings** (`plugin_type_settings` table) -- tenant-level defaults per plugin type.
+  These store discovery preferences and behavioral defaults that apply to all instances of a
+  plugin type within a tenant. Examples: APT `discovery_filter` (`manual` vs `all`), Homebrew
+  `package_type` (`formula` vs `cask`), Pacman `discovery_filter` (`all` vs `explicit`).
+- **Plugin configs** (`plugin_configs` table) -- named configuration profiles. These store
+  credentials, API endpoints, and per-profile settings that vary between configurations.
+  Examples: GitHub `auth_token`, Docker `auth` credentials, Forgejo `api_base_url`.
+
+**When to use which:**
+
+| Use type settings for | Use plugin configs for |
+| --- | --- |
+| Discovery preferences (`discovery_filter`) | Authentication credentials (`auth_token`) |
+| Behavioral defaults (`package_type`) | API endpoints (`api_base_url`) |
+| Settings shared across all configs of a type | Settings that differ between profiles |
+
+**Implementing type settings:**
+
+```rust
+impl TypeSettings for AptConfig {
+    fn type_settings_form_schema() -> Vec<FieldDef> {
+        vec![
+            FieldDef::new("discovery_filter", "Discovery Filter")
+                .with_type(FieldType::Select)
+                .with_options(vec![
+                    ("manual", "Manual packages only"),
+                    ("all", "All installed packages"),
+                ]),
+        ]
+    }
+
+    fn type_settings_sample() -> serde_json::Value {
+        serde_json::json!({ "discovery_filter": "manual" })
+    }
+}
+```
+
+Plugins with no type-level settings do not implement `TypeSettings`.
+
+The `PluginTypeInfo` response (from `GET /api/v1/plugin-types`) includes
+`type_settings_form_fields` and `type_settings_sample` so the frontend can render a type
+settings form.
+
+### Three-layer config merge
+
+When the system needs the effective configuration for a plugin operation,
+`resolve_effective_config()` merges three layers (broadest to narrowest):
+
+1. **Type settings** -- tenant-level defaults from `plugin_type_settings`.
+2. **Profile config** -- from the `plugin_configs` row.
+3. **Assignment config** -- per-host override from `host_software_item_plugins.config`.
+
+Each layer's JSON is shallow-merged on top of the previous one. Fields present in a narrower
+layer override the same field from a broader layer. This replaces the previous two-layer
+model (plugin config + `config_override`).
+
+## Plugin Construction
+
+Plugin construction is **synchronous**. Each plugin's `new()` takes its typed config and an
+`Arc<dyn HostRuntime>`:
+
+```rust
+fn new(config: MyConfig, runtime: Arc<dyn HostRuntime>) -> Result<Self>
+```
+
+### POSIX plugins
+
+POSIX plugins extract the `CommandExecutor` from the runtime at construction time:
+
+```rust
+impl AptPlugin {
+    pub fn new(config: AptConfig, runtime: Arc<dyn HostRuntime>) -> Result<Self> {
+        let executor = require_posix_executor(&runtime)?;
+        Ok(Self { config, executor })
+    }
+}
+```
+
+The `require_posix_executor(&runtime)` helper returns `Arc<dyn CommandExecutor>` or fails with
+a clear error if the runtime does not provide one.
+
+### Controller-side plugins
+
+Controller-side plugins downcast to `ControllerRuntime` to access shared services:
+
+```rust
+impl GitHubPlugin {
+    pub fn new(config: GitHubConfig, runtime: Arc<dyn HostRuntime>) -> Result<Self> {
+        let controller = runtime
+            .as_any()
+            .downcast_ref::<ControllerRuntime>()
+            .ok_or_else(|| report!(PluginError::Configuration(
+                "GitHub plugin requires ControllerRuntime".to_string()
+            )))?;
+        let http_client = controller.http_client().clone();
+        Ok(Self { config, http_client })
+    }
+}
+```
+
+All plugin `new()` constructors must return `Result<Self, Report<PluginError>>` so the registry can
+handle instantiation failures uniformly. The constructor should validate its configuration before
+returning.
 
 ## The Role Model for New Plugins
 
-When implementing a new plugin, consider which of the three roles it will serve:
+When implementing a new plugin, consider which roles it will serve. Plugins implement `PluginMeta`
+plus one or more role traits:
 
 ### Single-plugin-for-all-roles (common case)
 
-Most plugins implement all three roles (`detect_version`, `fetch_releases`, `execute_update`) in
-a single plugin crate. When autodiscovery or manual assignment creates host assignments, all three
-role rows point to the same `plugin_config_id`. This is the default and requires no special
-handling.
+Most plugins implement all three roles (`VersionDetectorPlugin`, `ReleaseFetcherPlugin`,
+`UpdateExecutorPlugin`) in a single plugin crate. When autodiscovery or manual assignment creates
+host assignments, all three role rows point to the same `plugin_config_id`. This is the default
+and requires no special handling.
 
 ### Partial-role plugins
 
 Some plugins only make sense for a subset of roles:
 
-- **Discovery-only plugins** (e.g. `ProxmoxHelperScriptsPlugin`) — implement `discover_software()`
+- **Discovery-only plugins** (e.g. `ProxmoxHelperScriptsPlugin`) -- implement `DiscoveryPlugin`
   but do not participate in any of the three version/update roles. The controller synthesizes
   downstream plugin configs that fill the role assignments.
-- **Fetch-only plugins** — a hypothetical plugin that only knows how to fetch upstream releases
+- **Fetch-only plugins** -- a hypothetical plugin that only knows how to fetch upstream releases
   (e.g. a custom changelog scraper). Users would pair it with another plugin for detection and
   updates.
+- **Enhancement plugins** -- implement `SoftwareItemLifecycle` to enrich software items with
+  supplemental data (e.g. dashboard icons) without participating in version/update roles.
 
-When your plugin does not implement a particular role's method (e.g. it has no `execute_update()`),
-the default trait implementation returns an error. The system will not call a role method on a
-plugin that is not assigned to that role, so this is safe.
+When your plugin does not implement a particular role's method, the default trait implementation
+returns an error. The system will not call a role method on a plugin that is not assigned to
+that role, so this is safe.
 
 ### Testing role assignments
 
 When writing integration tests for a new plugin, verify that:
 
-1. The plugin's `capabilities()` accurately reflects whether it declares
-   `ControllerSideFetchReleases`.
-2. All three role methods (`detect_installed_version`, `fetch_releases`, `execute_update`) either
-   work correctly or return a clear error if the plugin does not support that role.
+1. The plugin's declared roles in `declare_plugin!` accurately reflect its capabilities.
+2. All implemented role methods work correctly, and unimplemented roles return clear errors.
 
-## Dependencies and re-exports
+## `declare_plugin!` Examples
+
+### POSIX software plugin (APT)
+
+APT has mixed privilege requirements: detection is unprivileged, updates require sudo.
+
+```rust
+use uptrakit_plugin_infrastructure_core::prelude::*;
+
+declare_plugin! {
+    id: PluginTypeId::from_static("package_manager_apt"),
+    name: "APT",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    config: AptConfig,
+    plugin: AptPlugin,
+    host_requirements: HostRequirements::POSIX,
+    config_test: [VersionDetection],
+}
+
+pub struct AptPlugin {
+    config: AptConfig,
+    executor: Arc<dyn CommandExecutor>,
+}
+
+impl AptPlugin {
+    pub fn new(config: AptConfig, runtime: Arc<dyn HostRuntime>) -> Result<Self> {
+        let executor = require_posix_executor(&runtime)?;
+        Ok(Self { config, executor })
+    }
+}
+
+// Role traits: VersionDetectorPlugin, ReleaseFetcherPlugin,
+// UpdateExecutorPlugin (POSIX_PRIVILEGED), DiscoveryPlugin,
+// PackageIndexPlugin, HostCompatibilityPlugin
+```
+
+### Controller-side software plugin (GitHub Releases)
+
+GitHub Releases runs entirely on the controller. It gets a shared HTTP client from `ControllerRuntime`.
+
+```rust
+use uptrakit_plugin_infrastructure_core::prelude::*;
+
+declare_plugin! {
+    id: PluginTypeId::from_static("releases_github"),
+    name: "GitHub Releases",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    config: GitHubConfig,
+    plugin: GitHubPlugin,
+    host_requirements: HostRequirements::CONTROLLER_ONLY,
+    config_test: [Connectivity],
+}
+
+pub struct GitHubPlugin {
+    config: GitHubConfig,
+    http_client: reqwest::Client,
+}
+
+impl GitHubPlugin {
+    pub fn new(config: GitHubConfig, runtime: Arc<dyn HostRuntime>) -> Result<Self> {
+        let controller = runtime
+            .as_any()
+            .downcast_ref::<ControllerRuntime>()
+            .ok_or_else(|| report!(PluginError::Configuration(
+                "GitHub plugin requires ControllerRuntime".to_string()
+            )))?;
+        let http_client = controller.http_client().clone();
+        Ok(Self { config, http_client })
+    }
+}
+
+// Role traits: ReleaseFetcherPlugin (controller-side),
+// VersionDetectorPlugin (optional, via detect_installed_version_command),
+// UpdateExecutorPlugin (optional, via install_command)
+```
+
+### Hook plugin (Shell Hook)
+
+Hook plugins implement the `UpdateLifecyclePlugin` role.
+
+```rust
+use uptrakit_plugin_infrastructure_core::prelude::*;
+
+declare_plugin! {
+    id: PluginTypeId::from_static("hook_shell"),
+    name: "Shell Hook",
+    family: PluginFamily::Hook,
+    config_model: ConfigModel::PluginConfig,
+    config: ShellHookConfig,
+    plugin: ShellHookPlugin,
+    host_requirements: HostRequirements::POSIX,
+    config_test: [PreUpdateHook, PostUpdateHook],
+}
+
+pub struct ShellHookPlugin {
+    config: ShellHookConfig,
+    executor: Arc<dyn CommandExecutor>,
+}
+
+impl ShellHookPlugin {
+    pub fn new(config: ShellHookConfig, runtime: Arc<dyn HostRuntime>) -> Result<Self> {
+        let executor = require_posix_executor(&runtime)?;
+        Ok(Self { config, executor })
+    }
+}
+
+// Role trait: UpdateLifecyclePlugin
+```
+
+### Notification plugin (Webhook)
+
+Notification plugins use `PluginFamily::Notification`, `ConfigModel::NotificationChannel`, and provide
+a `create_notification_transport()` function.
+
+```rust
+use uptrakit_plugin_infrastructure_core::prelude::*;
+
+declare_plugin! {
+    id: PluginTypeId::from_static("notification_webhook"),
+    name: "Webhook",
+    family: PluginFamily::Notification,
+    config_model: ConfigModel::NotificationChannel,
+    config: WebhookConfig,
+    plugin: WebhookPlugin,
+    host_requirements: HostRequirements::CONTROLLER_ONLY,
+    config_test: [Connectivity],
+}
+
+impl WebhookPlugin {
+    pub fn create_notification_transport(
+        config: &CatalogConfig,
+    ) -> PluginResult<Arc<dyn NotificationTransport>> {
+        let typed: WebhookConfig = serde_json::from_value(config.settings.clone())
+            .map_err(|e| report!(PluginError::Configuration(e.to_string())))?;
+        Ok(Arc::new(WebhookTransport::new(typed)?))
+    }
+}
+```
+
+### Enhancement plugin (Dashboard Icons)
+
+Enhancement plugins implement the `SoftwareItemLifecycle` role.
+
+```rust
+use uptrakit_plugin_infrastructure_core::prelude::*;
+
+declare_plugin! {
+    id: PluginTypeId::from_static("enhancement_dashboard_icons"),
+    name: "Dashboard Icons",
+    family: PluginFamily::Enhancement,
+    config_model: ConfigModel::PluginConfig,
+    config: DashboardIconsConfig,
+    plugin: DashboardIconsPlugin,
+    host_requirements: HostRequirements::CONTROLLER_ONLY,
+}
+
+pub struct DashboardIconsPlugin {
+    config: DashboardIconsConfig,
+    http_client: reqwest::Client,
+}
+
+impl DashboardIconsPlugin {
+    pub fn new(config: DashboardIconsConfig, runtime: Arc<dyn HostRuntime>) -> Result<Self> {
+        let controller = runtime
+            .as_any()
+            .downcast_ref::<ControllerRuntime>()
+            .ok_or_else(|| report!(PluginError::Configuration(
+                "Dashboard Icons plugin requires ControllerRuntime".to_string()
+            )))?;
+        let http_client = controller.http_client().clone();
+        Ok(Self { config, http_client })
+    }
+}
+
+// Role trait: SoftwareItemLifecycle
+```
+
+## Dependencies and Re-exports
 
 Plugin crates should avoid unnecessary direct dependencies. The `uptrakit-plugin-infrastructure-core` crate
 re-exports commonly needed types:
 
-- **`uptrakit_plugin_infrastructure_core::mpsc`** — re-export of `tokio::sync::mpsc`. Use this instead of
+- **`uptrakit_plugin_infrastructure_core::prelude`** -- re-exports of `PluginTypeId`, `PluginFamily`,
+  `PluginMeta`, `PluginConfig`, `HostRequirements`, `ConfigModel`, `HostRuntime`, `ControllerRuntime`,
+  `require_posix_executor`, `PluginError`, `PluginCapability`, `report!`, `bail!`, and `Arc`.
+- **`uptrakit_plugin_infrastructure_core::mpsc`** -- re-export of `tokio::sync::mpsc`. Use this instead of
   depending on tokio directly. Tokio should only be in `[dev-dependencies]` (for `#[tokio::test]`).
-- **`uptrakit_plugin_infrastructure_core::CommandExecutor`**, **`CommandSpec`**, etc. — re-exports from
+- **`uptrakit_plugin_infrastructure_core::CommandExecutor`**, **`CommandSpec`**, etc. -- re-exports from
   `uptrakit-command`.
-- **`uptrakit_plugin_infrastructure_core::SecretString`** — re-export from `uptrakit-shared-types`.
+- **`uptrakit_plugin_infrastructure_core::SecretString`** -- re-export from `uptrakit-shared-types`.
 
 See [Dependency Policy](dependency-policy.md) for the full re-export strategy.
 
 ## HTTP Client Requirements
 
-Any plugin that makes outbound HTTP requests (e.g. to fetch upstream release metadata) **must** use
-`build_plugin_http_client` from `uptrakit-plugin-infrastructure-core` (enable the `http-client`
-feature). This function enforces all security and reliability requirements centrally:
+Controller-side plugins obtain a shared `reqwest::Client` from `ControllerRuntime` instead of building
+their own. This client is pre-configured with all security and reliability requirements:
 
 ```rust
-use uptrakit_plugin_infrastructure_core::{
-    PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
-};
-
-let client = build_plugin_http_client(PluginHttpClientConfig {
-    user_agent: concat!("uptrakit-my-plugin/", env!("CARGO_PKG_VERSION")),
-    ssrf_mode: SsrfMode::Strict,          // use Permissive only for self-hosted registries
-    request_timeout_secs: 60,
-    redirect_policy: reqwest::redirect::Policy::none(),
-    default_headers: None,
-})
-.map_err(|e| report!(PluginError::Configuration(e)))?;
+let controller = runtime
+    .as_any()
+    .downcast_ref::<ControllerRuntime>()
+    .ok_or_else(|| report!(PluginError::Configuration(
+        "Plugin requires ControllerRuntime".to_string()
+    )))?;
+let http_client = controller.http_client().clone();
 ```
 
-**What `build_plugin_http_client` enforces:**
+**What the shared client enforces:**
 
-- **SSRF protection** — `SsrfMode::Strict` installs `SsrfSafeResolver` to block requests to
-  private IP ranges and link-local addresses. Use `SsrfMode::Permissive` only when the plugin
-  connects to user-controlled self-hosted registries (e.g. Docker, GitLab, Forgejo) and the
-  deployment explicitly allows private URLs.
-- **TLS hardening** — WebPKI roots via `webpki_client_config()`, no system-trust drift.
-- **Connect timeout** — always 10 s; non-configurable.
-- **Request timeout** — configurable via `request_timeout_secs` (default 60 s).
-- **Redirect policy** — caller-specified; `Policy::none()` is the safe default.
+- **SSRF protection** -- `SsrfSafeResolver` blocks requests to private IP ranges and link-local
+  addresses by default.
+- **TLS hardening** -- WebPKI roots via `webpki_client_config()`, no system-trust drift.
+- **Connect timeout** -- always 10 s; non-configurable.
+- **Request timeout** -- 60 s default.
 
-Do **not** call `reqwest::Client::builder()` directly in plugin code. Using `build_plugin_http_client`
-ensures that all security settings are applied consistently and that future hardening improvements
-propagate automatically.
+**Auth headers are applied per-request**, not as default headers on the client. This prevents
+credential leakage across redirects:
+
+```rust
+let mut request = self.http_client.get(&url);
+if let Some(token) = &self.config.auth_token {
+    request = request.header("Authorization", format!("token {token}"));
+}
+let response = request.send().await?;
+```
+
+Do **not** call `reqwest::Client::builder()` directly in plugin code. Using the shared client from
+`ControllerRuntime` ensures that all security settings are applied consistently and that future
+hardening improvements propagate automatically.
 
 ## Command Executor Pattern
 
-Plugins do not spawn processes directly. Instead, each plugin receives an `Arc<dyn CommandExecutor>`
-at construction time and delegates all command execution through that trait. This decouples plugin
-logic from the execution transport, enabling the same plugin code to run commands locally (via
-`LocalCommandExecutor`) or remotely (via `SshCommandExecutor`).
+Plugins do not spawn processes directly. Instead, each POSIX plugin receives an `Arc<dyn CommandExecutor>`
+via `require_posix_executor(&runtime)` at construction time and delegates all command execution through
+that trait. This decouples plugin logic from the execution transport, enabling the same plugin code to
+run commands locally (via `LocalCommandExecutor`) or remotely (via `SshCommandExecutor`).
 
 See [Command Executor](command-executor.md) for the full trait reference, `CommandSpec` constructors,
 and guidance on implementing custom executors.
@@ -334,7 +776,7 @@ updates available). In those cases, call `execute_quiet` directly and inspect `e
 ### Declaring privileged commands with `required_sudo_commands()`
 
 If your plugin needs passwordless `sudo` to run certain commands, implement
-`required_sudo_commands()` on the `PluginBase` trait:
+`required_sudo_commands()` on the plugin struct:
 
 ```rust
 use uptrakit_plugin_infrastructure_core::SudoCommandEntry;
@@ -356,7 +798,7 @@ fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
   The bootstrap and `sync` commands resolve the absolute path on the target host via
   `command -v <name>`.
 - `args_suffix` optionally restricts the sudoers entry to specific subcommands (e.g.
-  `Some("stop *")` → `/usr/bin/systemctl stop *`). The suffix is written as normal
+  `Some("stop *")` -> `/usr/bin/systemctl stop *`). The suffix is written as normal
   command tokens; the SSH agent escapes sudoers-special characters when rendering the
   file while preserving wildcard tokens such as `*` anywhere in the argument list. Use
   this instead of a helper script when positional argument matching is sufficient.
@@ -378,7 +820,8 @@ Add a unit test verifying that your plugin returns the expected entries:
 ```rust
 #[test]
 fn required_sudo_commands_returns_expected_entries() {
-    let plugin = MyPlugin::new(MyConfig::default(), Arc::new(LocalCommandExecutor)).unwrap();
+    let runtime = Arc::new(TestRuntime::with_posix_executor());
+    let plugin = MyPlugin::new(MyConfig::default(), runtime).unwrap();
     let cmds = plugin.required_sudo_commands();
     assert_eq!(cmds.len(), 1);
     assert_eq!(cmds[0].command, "my-tool");
@@ -388,26 +831,6 @@ fn required_sudo_commands_returns_expected_entries() {
 
 See [Sudoers Management](../security/sudoers-management.md) for the full security rationale and
 operator guidance.
-
-## Plugin Trait: Required Methods
-
-The `Plugin` trait (`crates/plugins/infrastructure/core/src/traits.rs`) defines the contract for all plugin
-implementations. Two methods are required (no default implementation):
-
-| Method | Signature | Description |
-| :--- | :--- | :--- |
-| `plugin_type` | `fn plugin_type(&self) -> PluginType` | Returns the plugin's type for introspection, logging, and telemetry. |
-| `capabilities` | `fn capabilities(&self) -> Vec<PluginCapability>` | Declares which optional features the plugin supports. |
-
-All other methods (`detect_installed_version`, `fetch_releases`, `execute_update`,
-`discover_software`, `refresh_package_index`, `detect_host_compatibility`, `pre_update_hook`,
-`post_update_hook`, `execute_batch_update`, `batch_detect_installed_version`,
-`batch_fetch_releases`) have default implementations that return errors or empty results, so
-plugins override only what they support.
-
-When implementing a new plugin, always return the correct `PluginType` variant from `plugin_type()`.
-This ensures that boxed `dyn Plugin` objects can be introspected after creation by
-`PluginRegistry::create_plugin()`.
 
 ## Plugin Architecture
 
@@ -431,21 +854,21 @@ Plugin crates:
 
 | Crate | Path | Purpose |
 | :--- | :--- | :--- |
-| `uptrakit-shared-types` | `crates/shared/types/` | Canonical home for `PluginType`, `ReleaseAsset`, and `ReleaseInfo` (plus `SecretString`, hex helpers). |
+| `uptrakit-shared-types` | `crates/shared/types/` | Canonical home for `PluginTypeId`, `ReleaseAsset`, and `ReleaseInfo` (plus `SecretString`, hex helpers). |
 | `uptrakit-command` | `crates/shared/command/` | Shell execution, `CommandExecutor` trait, `CommandSpec`, `LocalCommandExecutor`. |
-| `uptrakit-plugin-infrastructure-core` | `crates/plugins/infrastructure/core/` | Plugin trait/abstractions; re-exports shared types and executor types. |
-| `uptrakit-plugin-infrastructure-registry` | `crates/plugins/infrastructure/registry/` | Centralized plugin dispatch and validation; re-exports `PluginType`. |
-| `uptrakit-plugin-releases-docker` | `crates/plugins/releases/docker/` | Docker/OCI image tracking and container discovery. Implements `DetectHostCompatibility` (daemon build only, pings the Docker daemon via bollard `GET /_ping`). |
+| `uptrakit-plugin-infrastructure-core` | `crates/plugins/infrastructure/core/` | Plugin trait/abstractions; `PluginConfig` trait; re-exports shared types and executor types. |
+| `uptrakit-plugin-infrastructure-registry` | `crates/plugins/infrastructure/registry/` | Centralized plugin dispatch and validation; re-exports `PluginTypeId`. |
+| `uptrakit-plugin-releases-docker` | `crates/plugins/releases/docker/` | Docker/OCI image tracking and container discovery. Implements `HostCompatibilityPlugin`. |
 | `uptrakit-plugin-releases-github` | `crates/plugins/releases/github/` | GitHub Releases: controller-side fetch; agent-side install. |
 | `uptrakit-plugin-releases-gitlab` | `crates/plugins/releases/gitlab/` | GitLab Releases: controller-side fetch; supports nested namespaces; PRIVATE-TOKEN auth. |
-| `uptrakit-plugin-releases-forgejo` | `crates/plugins/releases/forgejo/` | Forgejo / Codeberg Releases: controller-side fetch; requires `api_base_url`; auto-detected by PHS discovery. |
-| `uptrakit-plugin-package-manager-homebrew` | `crates/plugins/package-managers/homebrew/` | Homebrew: agent-side version tracking and updates. Implements `DetectHostCompatibility` (checks `which brew`). |
-| `uptrakit-plugin-discovery-proxmox-helper-scripts` | `crates/plugins/discovery/proxmox-helper-scripts/` | Proxmox VE: auto-discovers and manages helper scripts. Implements `DetectHostCompatibility` (tests for `/usr/bin/update`, Proxmox VE only). |
-| `uptrakit-plugin-package-manager-apt` | `crates/plugins/package-managers/apt/` | APT: Debian/Ubuntu package management. Implements `DetectHostCompatibility` (checks `which apt-get`). |
-| `uptrakit-plugin-package-manager-npm` | `crates/plugins/package-managers/npm/` | npm: global-package tracking via `registry.npmjs.org`. Implements `ControllerSideFetchReleases` and `DetectHostCompatibility` (checks `which npm`). |
+| `uptrakit-plugin-releases-forgejo` | `crates/plugins/releases/forgejo/` | Forgejo / Codeberg Releases: controller-side fetch; requires `api_base_url`. |
+| `uptrakit-plugin-package-manager-homebrew` | `crates/plugins/package-managers/homebrew/` | Homebrew: agent-side version tracking and updates. Implements `HostCompatibilityPlugin`. |
+| `uptrakit-plugin-discovery-proxmox-helper-scripts` | `crates/plugins/discovery/proxmox-helper-scripts/` | Proxmox VE: auto-discovers and manages helper scripts. Implements `HostCompatibilityPlugin`. |
+| `uptrakit-plugin-package-manager-apt` | `crates/plugins/package-managers/apt/` | APT: Debian/Ubuntu package management. Implements `HostCompatibilityPlugin`. |
+| `uptrakit-plugin-package-manager-npm` | `crates/plugins/package-managers/npm/` | npm: global-package tracking via `registry.npmjs.org`. Implements `HostCompatibilityPlugin`. |
 | `uptrakit-plugin-generic-shell` | `crates/plugins/generic/shell/` | Generic shell plugin: custom `version_command` and `update_command`; agent-side only. |
-| `uptrakit-plugin-hook-systemd` | `crates/plugins/hooks/systemd/` | Systemd hook: stops/starts a systemd service around updates. Implements `UpdateLifecycle`. |
-| `uptrakit-plugin-hook-shell` | `crates/plugins/hooks/shell/` | Shell hook: runs arbitrary shell commands before/after updates. Implements `UpdateLifecycle`. |
+| `uptrakit-plugin-hook-systemd` | `crates/plugins/hooks/systemd/` | Systemd hook: stops/starts a systemd service around updates. Implements `UpdateLifecyclePlugin`. |
+| `uptrakit-plugin-hook-shell` | `crates/plugins/hooks/shell/` | Shell hook: runs arbitrary shell commands before/after updates. Implements `UpdateLifecyclePlugin`. |
 
 ## Plugin Source Layout
 
@@ -454,14 +877,14 @@ rather than putting everything in a single `plugin.rs` god file. The canonical s
 
 ```text
 crates/plugins/package-managers/mypkg/src/
-  lib.rs         — crate root: module declarations + pub re-exports
-  config.rs      — Config struct + Serde impl + validate_identifier/validate_version
-  error.rs       — plugin-specific error type (if needed)
-  plugin.rs      — MyPlugin struct + PluginBase impls + constants (~200 lines)
-  discovery.rs   — DiscoveryPlugin impl + discovery helpers
-  detection.rs   — VersionDetectorPlugin impl + parsing helpers
-  releases.rs    — ReleaseFetcherPlugin impl (or ControllerSideFetchReleases)
-  update.rs      — UpdateExecutorPlugin + PackageIndexPlugin impls
+  lib.rs         -- crate root: module declarations + pub re-exports
+  config.rs      -- Config struct + PluginConfig impl + validate_identifier/validate_version
+  error.rs       -- plugin-specific error type (if needed)
+  plugin.rs      -- MyPlugin struct + PluginMeta impls + constants (~200 lines)
+  discovery.rs   -- DiscoveryPlugin impl + discovery helpers
+  detection.rs   -- VersionDetectorPlugin impl + parsing helpers
+  releases.rs    -- ReleaseFetcherPlugin impl (or ControllerSideFetchReleases)
+  update.rs      -- UpdateExecutorPlugin + PackageIndexPlugin impls
 ```
 
 Tests live at the bottom of the file containing the code under test (using `#[cfg(test)]`).
@@ -472,16 +895,18 @@ same module.
 
 Checklist for adding a new first-party plugin:
 
-1. **Create crate** — add a new crate under `crates/plugins/` (e.g. `crates/plugins/my-plugin/`).
-2. **Follow the plugin source layout** above — split trait impls into focused submodules from the start.
-3. **Implement `PluginBase` trait** — implement `plugin_type()`, `capabilities()`, and all relevant
-   optional methods. Implement `PluginOps` for runtime operations (discover, detect, fetch, update).
-4. **Declare capabilities** — include only the `PluginCapability` variants your plugin actually
-   supports. Avoid declaring capabilities the plugin does not implement.
-5. **Register in `PluginRegistry`** — add a single entry to the `register_plugins!` macro invocation
+1. **Create crate** -- add a new crate under `crates/plugins/` (e.g. `crates/plugins/my-plugin/`).
+2. **Follow the plugin source layout** above -- split trait impls into focused submodules from the start.
+3. **Implement `PluginConfig`** -- implement `validate()`, `form_schema()`, and secret masking methods on
+   your config struct. Implement `TypeSettings` if the plugin needs tenant-level settings.
+4. **Use `declare_plugin!`** -- declare the plugin's ID, family, config, host requirements, and config
+   test kinds. The macro generates the `DESCRIPTOR`, `PluginMeta` impl, and capability list.
+5. **Implement role traits** -- implement the role-specific traits your plugin supports
+   (`VersionDetectorPlugin`, `ReleaseFetcherPlugin`, `UpdateExecutorPlugin`, `DiscoveryPlugin`, etc.).
+6. **Register in `PluginRegistry`** -- add a single entry to the `register_plugins!` macro invocation
    in `crates/plugins/infrastructure/registry/src/registry.rs`. The macro generates all dispatch methods
    automatically.
-6. **Add tests** — cover success and failure paths for all implemented methods.
+7. **Add tests** -- cover success and failure paths for all implemented methods.
 
 ### The `register_plugins!` macro
 
@@ -504,20 +929,20 @@ register_plugins! {
 }
 ```
 
-The macro generates seven methods:
+The macro generates these methods:
 
-- `PluginRegistry::create_plugin()` — deserializes config, validates it, and instantiates the plugin.
-- `PluginRegistry::validate_config()` — deserializes and validates plugin configuration JSON.
-- `PluginRegistry::mask_config_secrets()` / `restore_config_secrets()` — handles secret masking for
-  API responses (delegates to the `SecretMasking` trait implemented on each config struct).
-- `PluginRegistry::create_plugin_for_discovery()` — same as `create_plugin` but without calling
+- `PluginRegistry::create_plugin()` -- deserializes config, validates it, and instantiates the plugin.
+- `PluginRegistry::validate_config()` -- deserializes and validates plugin configuration JSON.
+- `PluginRegistry::mask_config_secrets()` / `restore_config_secrets()` -- handles secret masking for
+  API responses (delegates to the `PluginConfig` trait implemented on each config struct).
+- `PluginRegistry::create_plugin_for_discovery()` -- same as `create_plugin` but without calling
   `validate()`, so discovery works with empty or minimal configs.
-- `PluginRegistry::discovery_plugins()` — returns the list of `PluginType` variants whose plugin
-  reports `PluginCapability::DiscoverLocalSoftware` in `capabilities()`. Fully auto-derived from the
-  macro — no manual list needed.
-- `PluginRegistry::validate_package_identifier()` — dispatches to
-  `<Config>::validate_identifier(value)` for each registered plugin type. Requires every config
-  struct to implement the associated function (see [Package identifier validation](#package-identifier-validation)).
+- `PluginRegistry::discovery_plugins()` -- returns the list of `PluginTypeId` values whose plugin
+  reports `PluginCapability::DiscoverLocalSoftware`. Fully auto-derived from the macro -- no manual
+  list needed.
+- `PluginRegistry::validate_package_identifier()` -- dispatches to
+  `<Config>::validate_identifier(value)` for each registered plugin type.
+- `PluginRegistry::config_form_schema()` -- dispatches to `<Config>::form_schema()` for each plugin type.
 
 **Discovery capability is registry-derived.** Use `state.plugin_ops.discovery_plugins()` in
 route handlers (or `PluginRegistry::discovery_plugins()` statically) to get the current list
@@ -534,7 +959,10 @@ Plugin-specific identifier validation is exposed through two APIs:
 **Static dispatch (preferred for internal use):**
 
 ```rust
-PluginRegistry::validate_package_identifier(PluginType::PackageManagerHomebrew, value)?;
+PluginRegistry::validate_package_identifier(
+    &PluginTypeId::from_static("package_manager_homebrew"),
+    value,
+)?;
 ```
 
 **Trait object dispatch (via `PluginOps`):**
@@ -548,8 +976,19 @@ human-readable message when the identifier is invalid.
 
 **When adding a new plugin with identifier constraints:**
 
-1. Declare a `const IDENTIFIER_RULES: PackageIdentifierRules` in your plugin crate using the
-   shared struct from `uptrakit-shared-types`:
+1. Implement `validate_identifier()` on your `PluginConfig`:
+
+   ```rust
+   impl PluginConfig for MyConfig {
+       fn validate_identifier(value: &str) -> Result<(), String> {
+           IDENTIFIER_RULES.validate(value)
+       }
+
+       // ... other PluginConfig methods
+   }
+   ```
+
+   Use a `const IDENTIFIER_RULES: PackageIdentifierRules` for the common case:
 
    ```rust
    use uptrakit_shared_types::PackageIdentifierRules;
@@ -561,54 +1000,35 @@ human-readable message when the identifier is invalid.
        char_valid: |c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'),
        reject_double_dot: true,
    };
-
-   pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-       IDENTIFIER_RULES.validate(value)
-   }
    ```
 
    For plugins with non-trivial identifier formats (e.g. npm's `@scope/name`), add extra checks
    after calling `IDENTIFIER_RULES.validate(value)?`.
 
-   If your plugin imposes **no** constraints on `package_identifier`, add a no-op:
+   If your plugin imposes **no** constraints on `package_identifier`, use the default no-op
+   implementation (returns `Ok(())`).
 
-   ```rust
-   pub fn validate_identifier(_value: &str) -> std::result::Result<(), String> {
-       Ok(())
-   }
-   ```
-
-2. Add an associated function on your config struct that delegates to the crate-level function:
-
-   ```rust
-   impl MyPluginConfig {
-       pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-           crate::validate_identifier(value)
-       }
-   }
-   ```
-
-3. Add your plugin to the `register_plugins!` macro invocation in
+2. Add your plugin to the `register_plugins!` macro invocation in
    `crates/plugins/infrastructure/registry/src/registry.rs`. The macro automatically generates
    `PluginRegistry::validate_package_identifier()` by calling
-   `<YourConfig>::validate_identifier(value)` for each registered plugin type — no manual match
+   `<YourConfig>::validate_identifier(value)` for each registered plugin type -- no manual match
    arm is required.
 
-4. Add unit tests in your plugin crate covering valid identifiers, empty identifiers, and all
+3. Add unit tests in your plugin crate covering valid identifiers, empty identifiers, and all
    constraint violations.
 
 Do **not** add plugin-specific identifier validation logic to the web API layer or query helpers. All
 identifier validation must go through `PluginRegistry::validate_package_identifier`.
 
 > **Implementation note:** `validate_package_identifier` is generated by the `register_plugins!`
-> macro. Adding a plugin to the macro and implementing `Config::validate_identifier` is sufficient;
-> the registry dispatch is updated automatically.
+> macro. Adding a plugin to the macro and implementing `PluginConfig::validate_identifier` is
+> sufficient; the registry dispatch is updated automatically.
 
 ### Version string validation
 
 Plugins that interpolate a `to_version` parameter into install commands must validate the version
 string before command construction. This provides defense in depth even though `CommandSpec::exec()`
-mode prevents shell injection — package managers have their own argument parsing that can be
+mode prevents shell injection -- package managers have their own argument parsing that can be
 exploited with crafted version strings.
 
 **Required pattern:** Add a `pub fn validate_version(version: &str) -> Result<(), String>` to your
@@ -645,158 +1065,7 @@ validate_version(to_version)
 **Testing:** Add unit tests covering valid versions, boundary cases (empty, max length), and
 injection attempts (protocol prefixes for npm, flag injection for apt).
 
-See also: [Security — Input Validation](../security/secure-development.md#plugin-input-validation).
-
-### Secret masking with the `SecretMasking` trait
-
-The `SecretMasking` trait (`crates/plugins/infrastructure/core/src/secrets.rs`, re-exported from
-`uptrakit-plugin-infrastructure-core`) provides a standard interface for masking and restoring secrets in plugin
-configurations. It has two methods with default no-op implementations:
-
-```rust
-pub trait SecretMasking: Serialize + DeserializeOwned {
-    /// Return a copy with secret fields replaced by `"***"`.
-    fn with_secrets_masked(self) -> Self { self }
-
-    /// Restore secret fields from an existing config where `self` contains `"***"` sentinels.
-    fn restore_secrets_from(&mut self, _existing: &Self) {}
-}
-```
-
-Plugins with no secrets (Homebrew, Proxmox Helper Scripts) use the default no-op implementations.
-Plugins with secrets (GitHub, Docker) override both methods with field-level masking logic.
-
-The registry uses generic helpers `mask_secrets_for::<T>()` and `restore_secrets_for::<T>()` that
-deserialize the JSON config, apply the trait methods, and re-serialize. This eliminates duplicated
-deserialize-method-serialize boilerplate per plugin.
-
-When adding a new plugin with secrets, implement `SecretMasking` on your config struct. The
-`register_plugins!` macro handles the dispatch automatically.
-
-### Config form schema with the `ConfigFormSchema` trait
-
-The `ConfigFormSchema` trait (`crates/plugins/infrastructure/core/src/form_schema.rs`, re-exported
-from `uptrakit-plugin-infrastructure-core`) allows plugins to declare typed form field definitions
-for their configuration. The frontend renders these as structured forms instead of raw JSON
-textareas.
-
-```rust
-pub trait ConfigFormSchema {
-    fn form_schema() -> Vec<FieldDef>;
-}
-```
-
-Each plugin config struct implements `ConfigFormSchema` to return its field definitions using the
-`FieldDef` builder pattern from `uptrakit-extension-framework` (re-exported via `uptrakit-plugin-infrastructure-core::form_schema`):
-
-```rust
-impl ConfigFormSchema for GitHubConfig {
-    fn form_schema() -> Vec<FieldDef> {
-        vec![
-            FieldDef::new("auth_token", "Auth Token")
-                .with_type(FieldType::Password)
-                .sensitive()
-                .with_help_text("Personal access token for private repos"),
-            FieldDef::new("include_prereleases", "Include Pre-releases")
-                .with_type(FieldType::Toggle)
-                .with_help_text("Include draft/pre-release versions"),
-        ]
-    }
-}
-```
-
-Plugins with no configurable fields (MAS, Proxmox Helper Scripts) return an empty `Vec`.
-
-For nested configuration objects (e.g., Docker's `auth` enum), use dot-separated keys with a
-`_` prefix for tagged enum discriminators:
-
-- `auth._type` — select field for the enum variant (maps to JSON `auth.type`)
-- `auth.username` — text field visible when `auth._type` is `"basic"`
-- `auth.password` — password field visible when `auth._type` is `"basic"`
-
-Use `FieldDef::with_visible_when()` for conditional visibility based on another field's value.
-
-The `register_plugins!` macro auto-generates `config_form_schema()` and `config_form_schema_str()`
-dispatch methods. The schema is served to the frontend via `GET /api/v1/plugin-types` in the
-`config_form_fields` array of `PluginTypeInfo`.
-
-When adding a new plugin, implement `ConfigFormSchema` on your config struct. The macro handles
-the rest.
-
-### Type settings vs plugin configs
-
-Plugin configuration uses a **two-tier model**:
-
-- **Type settings** (`plugin_type_settings` table) -- tenant-level defaults per plugin type.
-  These store discovery preferences and behavioral defaults that apply to all instances of a
-  plugin type within a tenant. Examples: APT `discovery_filter` (`manual` vs `all`), Homebrew
-  `package_type` (`formula` vs `cask`), Pacman `discovery_filter` (`all` vs `explicit`).
-- **Plugin configs** (`plugin_configs` table) -- named configuration profiles. These store
-  credentials, API endpoints, and per-profile settings that vary between configurations.
-  Examples: GitHub `auth_token`, Docker `auth` credentials, Forgejo `api_base_url`.
-
-**When to use which:**
-
-| Use type settings for | Use plugin configs for |
-| --- | --- |
-| Discovery preferences (`discovery_filter`) | Authentication credentials (`auth_token`) |
-| Behavioral defaults (`package_type`) | API endpoints (`api_base_url`) |
-| Settings shared across all configs of a type | Settings that differ between profiles |
-
-**Implementing type settings.** Plugins that support type settings implement two additional
-methods on `ConfigFormSchema`:
-
-```rust
-impl ConfigFormSchema for AptConfig {
-    fn form_schema() -> Vec<FieldDef> {
-        // Fields for the plugin config form (credentials, profiles)
-        vec![]
-    }
-
-    fn type_settings_form_schema() -> Vec<FieldDef> {
-        // Fields for the type settings form (discovery preferences)
-        vec![
-            FieldDef::new("discovery_filter", "Discovery Filter")
-                .with_type(FieldType::Select)
-                .with_options(vec![
-                    ("manual", "Manual packages only"),
-                    ("all", "All installed packages"),
-                ]),
-        ]
-    }
-
-    fn type_settings_sample() -> serde_json::Value {
-        serde_json::json!({ "discovery_filter": "manual" })
-    }
-}
-```
-
-Plugins with no type-level settings return empty `Vec` and `json!({})` from the default
-trait implementations.
-
-The `register_plugins!` macro auto-generates `type_settings_form_schema()` and
-`type_settings_sample_for()` dispatch methods on `PluginRegistry`.
-
-### Three-layer config merge
-
-When the system needs the effective configuration for a plugin operation,
-`resolve_effective_config()` merges three layers (broadest to narrowest):
-
-1. **Type settings** -- tenant-level defaults from `plugin_type_settings`.
-2. **Profile config** -- from the `plugin_configs` row.
-3. **Assignment config** -- per-host override from `host_software_item_plugins.config`.
-
-Each layer's JSON is shallow-merged on top of the previous one. Fields present in a narrower
-layer override the same field from a broader layer. This replaces the previous two-layer
-model (plugin config + `config_override`).
-
-The `PluginTypeInfo` response (from `GET /api/v1/plugin-types`) includes
-`type_settings_form_fields` and `type_settings_sample` so the frontend can render a type
-settings form.
-
-All plugin `new()` constructors must return `Result<Self, Report<PluginError>>` so the registry can
-handle instantiation failures uniformly. The constructor should validate its configuration before
-returning.
+See also: [Security -- Input Validation](../security/secure-development.md#plugin-input-validation).
 
 ### Bidirectional error conversion
 
@@ -807,10 +1076,10 @@ Every plugin crate defines its own error enum (e.g., `DockerError`, `GitHubError
 ```rust
 use uptrakit_shared_macros::impl_report_conversion;
 
-// Plugin-specific → shared (for the registry to propagate errors)
+// Plugin-specific -> shared (for the registry to propagate errors)
 impl_report_conversion!(DockerError => PluginError, |e| PluginError::PluginInternal(e.to_string()));
 
-// Shared → plugin-specific (for plugins calling shared code that returns PluginError)
+// Shared -> plugin-specific (for plugins calling shared code that returns PluginError)
 impl_report_conversion!(PluginError => DockerError, |e| DockerError::Configuration(e.to_string()));
 ```
 
@@ -823,19 +1092,18 @@ This bidirectional pattern allows:
 When adding a new plugin, always implement both directions.
 
 The agent crate imports `uptrakit-command` for shell execution and `uptrakit-plugin-infrastructure-registry` for
-plugin dispatch — it does not depend on `uptrakit-plugin-infrastructure-core` directly. The web-api crate imports
+plugin dispatch -- it does not depend on `uptrakit-plugin-infrastructure-core` directly. The web-api crate imports
 `uptrakit-plugin-infrastructure-registry` (not `uptrakit-plugin-infrastructure-core`). The wire protocol crate
-(`uptrakit-internal-wire`) imports `PluginType`, `ReleaseAsset`, and `ReleaseInfo` directly from
+(`uptrakit-internal-wire`) imports `PluginTypeId`, `ReleaseAsset`, and `ReleaseInfo` directly from
 `uptrakit-shared-types`, keeping it free of plugin-implementation dependencies.
 
 The update step can always be overridden by a custom shell script, regardless of plugin.
 
 ## Software Discovery
 
-The `Plugin` trait includes an optional `discover_software()` method that allows plugins to enumerate
-software they can manage on the local system. Plugins that support this capability declare
-`PluginCapability::DiscoverLocalSoftware` in their `capabilities()` method. The method returns a
-`Vec<DiscoveredSoftware>`, where each entry contains:
+The `DiscoveryPlugin` role trait includes a `discover_software()` method that allows plugins to enumerate
+software they can manage on the local system. The method returns a `Vec<DiscoveredSoftware>`, where each
+entry contains:
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
@@ -910,14 +1178,14 @@ discovery), or when running without a pre-existing plugin config, emit `Discover
 `targets` field of each `DiscoveredSoftware` item:
 
 ```rust
-use uptrakit_plugin_infrastructure_core::{DiscoveredSoftware, DiscoveryTarget, PluginRole, PluginType};
+use uptrakit_plugin_infrastructure_core::{DiscoveredSoftware, DiscoveryTarget, PluginRole, PluginTypeId};
 
 DiscoveredSoftware {
     package_identifier: "booklore".to_string(),
     name: "BookLore".to_string(),
     installed_version: "1.18.5".to_string(),
     targets: vec![DiscoveryTarget {
-        plugin_type: PluginType::ReleasesGithub,
+        plugin_type: PluginTypeId::from_static("releases_github"),
         plugin_config: serde_json::json!({
             "owner": "BookLore",
             "repo": "BookLore",
@@ -954,8 +1222,8 @@ plugin-specific synthesis logic exists in the controller.
 
 ## Batch Updates
 
-The `Plugin` trait includes an optional `execute_batch_update()` method for plugins that can
-update multiple packages in a single system command. This is primarily used by non-featured
+The `UpdateExecutorPlugin` role trait includes an optional `execute_batch_update()` method for plugins
+that can update multiple packages in a single system command. This is primarily used by non-featured
 software items where a package manager might update dozens of packages at once.
 
 ### Trait method
@@ -992,20 +1260,20 @@ from `uptrakit-plugin-infrastructure-core`.
 
 ### Implementation examples
 
-**APT** — uses `apt_preferences` pin-priority mechanism for safe, targeted upgrades:
+**APT** -- uses `apt_preferences` pin-priority mechanism for safe, targeted upgrades:
 
 1. Generate a preferences file that blocks all upgrades (`Pin-Priority: -1`) except the requested
    packages (pin at priority 990).
-2. Write to a temp file (no sudo needed — agent owns it).
+2. Write to a temp file (no sudo needed -- agent owns it).
 3. Run `sudo apt-get -o Dir::Etc::Preferences=<temp-file> upgrade --yes`.
 4. Delete the temp file.
 
 This approach preserves auto/manual package marks and is crash-safe (the temp file is not in
 `/etc/apt/preferences.d/`).
 
-**Homebrew** — runs `brew upgrade pkg1 pkg2 ...` as a single command.
+**Homebrew** -- runs `brew upgrade pkg1 pkg2 ...` as a single command.
 
-**npm** — runs `npm install -g pkg1@v1 pkg2@v2 ...` as a single command.
+**npm** -- runs `npm install -g pkg1@v1 pkg2@v2 ...` as a single command.
 
 ### When to implement batch updates
 
@@ -1021,7 +1289,7 @@ batch update flow from controller to agent.
 
 ## Batch Version Check
 
-The `Plugin` trait includes two optional batch methods for efficient version checking when the same
+The plugin role traits include two optional batch methods for efficient version checking when the same
 plugin handles many packages. Both have default sequential fallbacks so existing plugins need no
 changes; native implementations reduce N subprocess or API calls to one.
 
@@ -1088,7 +1356,7 @@ one HTTP request per package to a remote API). The sequential default is correct
 
 ### Implementation examples
 
-#### APT — `batch_detect_installed_version`
+#### APT -- `batch_detect_installed_version`
 
 Runs one `dpkg-query` call for all packages:
 
@@ -1097,11 +1365,11 @@ dpkg-query --show --showformat='${Package}\t${Version}\n' pkg1 pkg2 pkg3
 ```
 
 - Exit code is ignored (non-zero when any package is unknown; found packages still appear in stdout).
-- Parse stdout line-by-line: split on `\t` → `(package, version)`.
-- Empty version string → `installed_version: None, error: None` (known-uninstalled).
-- Package absent from stdout → `installed_version: None, error: None` (not installed).
+- Parse stdout line-by-line: split on `\t` -> `(package, version)`.
+- Empty version string -> `installed_version: None, error: None` (known-uninstalled).
+- Package absent from stdout -> `installed_version: None, error: None` (not installed).
 
-#### APT — `batch_fetch_releases`
+#### APT -- `batch_fetch_releases`
 
 Runs one `apt-cache madison` call for all packages:
 
@@ -1112,7 +1380,7 @@ apt-cache madison pkg1 pkg2 pkg3
 - Lines grouped by the first `|`-delimited field (package name, trimmed).
 - First line per package is the highest-priority available version.
 
-#### Homebrew — both methods
+#### Homebrew -- both methods
 
 Passes all packages to a single `brew info --json=v2` call:
 
@@ -1124,7 +1392,7 @@ The existing `parse_installed_version(json, pkg, is_cask)` and `parse_latest_ver
 is_cask)` helpers already search the returned JSON array by name, so they work for batch results
 without modification.
 
-#### npm — `batch_detect_installed_version`
+#### npm -- `batch_detect_installed_version`
 
 Fetches all globally installed packages in one call (no package filter):
 
@@ -1140,8 +1408,8 @@ sequential fallback because the npm registry has no batch endpoint.
 
 #### Agent-core `batch_check_versions()`
 
-`run_check_versions` (via `batch_check_versions`) groups `VersionCheckAssignment` entries by `(PluginType, effective_config_json)`
-before calling plugins. For each group:
+`run_check_versions` (via `batch_check_versions`) groups `VersionCheckAssignment` entries by
+`(PluginTypeId, effective_config_json)` before calling plugins. For each group:
 
 1. One plugin instance is created.
 2. `batch_detect_installed_version` is called for all items in the detect group.
@@ -1195,7 +1463,7 @@ All notification plugins share a `list_channels` helper from `uptrakit-notificat
 
 - Querying channels by type with tenant scoping
 - Decrypting and parsing channel config
-- Masking secrets via the plugin's `mask_config_secrets()`
+- Masking secrets via the plugin's `PluginConfig::with_secrets_masked()`
 - Flattening top-level config keys into the row object for `DataTable` rendering
 - Pagination with `page`/`per_page` parameters
 
@@ -1264,28 +1532,59 @@ mod tests {
             Ok(CommandOutput { output: String::new(), exit_code: self.exit_code })
         }
     }
+}
+```
 
-    #[tokio::test]
-    async fn detect_host_compatibility_when_tool_present() {
-        let plugin = AptPlugin::new(AptConfig::default(), FixedExitCodeExecutor::with_exit_code(0)).unwrap();
-        let result = plugin.detect_host_compatibility().await.unwrap();
-        assert_eq!(result, HostCompatibility::Compatible);
-    }
+### Testing POSIX plugins
 
-    #[tokio::test]
-    async fn detect_host_compatibility_when_tool_absent() {
-        let plugin = AptPlugin::new(AptConfig::default(), FixedExitCodeExecutor::with_exit_code(1)).unwrap();
-        let result = plugin.detect_host_compatibility().await.unwrap();
-        assert!(matches!(result, HostCompatibility::Incompatible(_)));
-    }
+POSIX plugins require a runtime that provides a `CommandExecutor`. Use `TestRuntime::with_posix_executor()`
+or wrap a mock executor:
+
+```rust
+#[tokio::test]
+async fn detect_host_compatibility_when_tool_present() {
+    let runtime = Arc::new(TestRuntime::with_executor(
+        FixedExitCodeExecutor::with_exit_code(0),
+    ));
+    let plugin = AptPlugin::new(AptConfig::default(), runtime).unwrap();
+    let result = plugin.detect_host_compatibility().await.unwrap();
+    assert_eq!(result, HostCompatibility::Compatible);
+}
+
+#[tokio::test]
+async fn detect_host_compatibility_when_tool_absent() {
+    let runtime = Arc::new(TestRuntime::with_executor(
+        FixedExitCodeExecutor::with_exit_code(1),
+    ));
+    let plugin = AptPlugin::new(AptConfig::default(), runtime).unwrap();
+    let result = plugin.detect_host_compatibility().await.unwrap();
+    assert!(matches!(result, HostCompatibility::Incompatible(_)));
+}
+```
+
+### Testing controller-side plugins
+
+Controller-side plugins require a `ControllerRuntime`. Use `TestControllerRuntime` in tests:
+
+```rust
+#[tokio::test]
+async fn fetch_releases_returns_versions() {
+    let runtime = Arc::new(TestControllerRuntime::new());
+    let config = GitHubConfig {
+        owner: "test".to_string(),
+        repo: "repo".to_string(),
+        ..Default::default()
+    };
+    let plugin = GitHubPlugin::new(config, runtime).unwrap();
+    // ... test fetch_releases
 }
 ```
 
 See also:
 
-- [Plugin System Architecture](plugin-system.md) — how plugins relate to software items and host assignments.
-- [Command Executor](command-executor.md) — full `CommandExecutor` trait reference.
-- [Sudoers Management](../security/sudoers-management.md) — security model for privileged commands.
+- [Plugin System Architecture](plugin-system.md) -- how plugins relate to software items and host assignments.
+- [Command Executor](command-executor.md) -- full `CommandExecutor` trait reference.
+- [Sudoers Management](../security/sudoers-management.md) -- security model for privileged commands.
 
 ## GitHub Releases plugin (`uptrakit-plugin-releases-github`)
 
@@ -1295,8 +1594,8 @@ Fetches release metadata from the GitHub API and converts it into `UpstreamRelea
 
 | Field | Type | Required | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `owner` | String | Yes | — | GitHub repository owner. |
-| `repo` | String | Yes | — | GitHub repository name. |
+| `owner` | String | Yes | -- | GitHub repository owner. |
+| `repo` | String | Yes | -- | GitHub repository name. |
 | `auth_token` | String | No | `null` | Personal access token (private repos or higher rate limits). |
 | `api_base_url` | String | No | `https://api.github.com` | API base URL (for GitHub Enterprise). |
 | `include_prereleases` | bool | No | `false` | Whether to include pre-release versions. |
@@ -1328,17 +1627,17 @@ Does **not** perform version detection, upstream release fetching, or update exe
 responsibility is to discover which PHS-managed apps are present in a container and emit
 `DiscoveryTarget` values that tell the controller which downstream plugin configs to create.
 
-**Config (`ProxmoxHelperScriptsConfig`):** No fields — the config is always `{}`.
+**Config (`ProxmoxHelperScriptsConfig`):** No fields -- the config is always `{}`.
 
-**Capabilities:** `DiscoverLocalSoftware` only.
+**Capabilities:** `DiscoverLocalSoftware` only (auto-derived from `DiscoveryPlugin` role).
 
 **Discovery targets emitted:**
 
-- GitHub-managed apps: `DiscoveryTarget { plugin_type: ReleasesGithub, ... }` with owner, repo,
-  `detect_installed_version_command`, and `install_command` pre-configured. Constants
+- GitHub-managed apps: `DiscoveryTarget { plugin_type: PluginTypeId::from_static("releases_github"), ... }` with
+  owner, repo, `detect_installed_version_command`, and `install_command` pre-configured. Constants
   `PHS_DETECT_VERSION_CMD` and `PHS_INSTALL_CMD` are defined in
   `crates/plugins/discovery/proxmox-helper-scripts/src/discovery.rs`.
-- APT-managed apps: `DiscoveryTarget { plugin_type: PackageManagerApt, config: {}, name: "APT (auto)" }`.
+- APT-managed apps: `DiscoveryTarget { plugin_type: PluginTypeId::from_static("package_manager_apt"), config: {}, name: "APT (auto)" }`.
 
 Cross-reference: [PHS end-user guide](../end-user/autodiscovery.md#proxmox-helper-scripts-discovery),
 [PHS API notes](../api/autodiscovery.md#plugin-driven-discovery-targets).

@@ -17,7 +17,7 @@ See also: [End-user Guide](../end-user/proxmox.md),
 agent sides. On the controller (created via `ProxmoxPlugin::new(config, executor)`)
 it holds a `ProxmoxConfig` and communicates with the Proxmox VE REST API. On
 the agent (created via `ProxmoxPlugin::new_agent()`) it implements infrastructure
-subtraits (`HostLifecyclePlugin`, `HostReportPlugin`, `GuestExecPlugin`) behind
+role traits (`HostLifecycle`, `HostReport`, `GuestExec`) behind
 the `agent-infra` feature gate.
 
 Feature-gated capabilities:
@@ -29,8 +29,8 @@ Feature-gated capabilities:
 
 ```text
 Controller
- ├── PluginRegistry
- │    └── InfrastructureProxmox (registered via register_plugins!)
+ ├── PluginCatalog
+ │    └── InfrastructureProxmox (registered via declare_plugin! + all_descriptors())
  ├── ExtensionRegistry
  │    └── proxmox.hosts (Page), proxmox.host-info (Panel)
  └── Extension action dispatch
@@ -51,8 +51,8 @@ Controller
 | `error.rs` | `ProxmoxError` enum with `impl_report_conversion!` |
 | `client.rs` | `ProxmoxClient` — HTTP client for Proxmox REST API |
 | `api_types.rs` | Serde structs for PVE API JSON responses |
-| `plugin.rs` | `ProxmoxPlugin` — unified `PluginBase` impl (controller + agent) |
-| `agent/plugin.rs` | Subtrait impls (`HostLifecyclePlugin`, `HostReportPlugin`, `GuestExecPlugin`) on `ProxmoxPlugin` |
+| `plugin.rs` | `ProxmoxPlugin` — unified `PluginMeta` + role trait impls (controller + agent) |
+| `agent/plugin.rs` | Role trait impls (`HostLifecycle`, `HostReport`, `GuestExec`) on `ProxmoxPlugin` |
 | `agent/extension_actions.rs` | Agent extension action handlers (`list-discovered-guests`, `bootstrap-proxmox-guest`) |
 | `agent/db_ops.rs` | Agent-local DB operations (PVE host state, pending matches) |
 | `agent/migration.rs` | Agent-local DB migrations (`proxmox_host_state`, `proxmox_pending_matches`) |

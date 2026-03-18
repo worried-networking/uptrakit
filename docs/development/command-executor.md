@@ -214,14 +214,11 @@ impl MyPlugin {
 }
 ```
 
-The `PluginRegistry::create_plugin()` method accepts the executor and forwards it to each plugin:
+The `PluginCatalog` creates plugins via the descriptor's role creation functions, forwarding the executor to each plugin:
 
 ```rust
-let plugin = PluginRegistry::create_plugin(
-    PluginType::ReleasesGithub,
-    &config,
-    executor,
-)?;
+let desc = PluginCatalog::get_descriptor(plugin_ids::RELEASES_GITHUB)?;
+let plugin = (desc.roles.update_executor.create)(&config, executor.clone())?;
 ```
 
 ## Using the executor in plugins

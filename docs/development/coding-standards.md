@@ -110,7 +110,7 @@ Enums currently annotated with `#[non_exhaustive]`:
 
 **`uptrakit-shared-types`:**
 
-- `PluginType`
+- `PluginTypeId` (newtype; replaces the former `PluginType` enum)
 - `MqttTransport`
 - `MqttClientConnectionStatus`
 - `OutputStreamType`

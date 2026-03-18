@@ -40,8 +40,8 @@ Each runtime extension entry contains:
 
 ### Compile-time registration (plugins and notifications)
 
-Plugins implement `PluginOps::extension_manifests()` which returns a `Vec<ExtensionManifest>`.
-The `PluginRegistry` aggregates manifests from all registered plugins (including notification
+Plugins implement `PluginMetadataOps::extension_manifests()` which returns a `Vec<ExtensionManifest>`.
+The `PluginCatalog` aggregates manifests from all registered plugins (including notification
 plugins) at controller startup. Notification plugins define their own extension manifests and
 action handlers in per-plugin `extensions.rs` modules.
 These are stored in `plugin_extensions` and are always available -- no provider tracking
@@ -224,7 +224,7 @@ The `UiExtensions` capability (wire string: `"ui_extensions"`) gates extension s
 │                            Controller                                 │
 │                                                                       │
 │  ┌────────────────┐     ┌───────────────────┐                         │
-│  │ PluginRegistry │────>│ ExtensionRegistry  │                         │
+│  │ PluginCatalog  │────>│ ExtensionRegistry  │                         │
 │  │ (compile-time) │     │                   │                         │
 │  └────────────────┘     │ plugin_extensions  │                         │
 │                         │ service_extensions │                         │
@@ -251,8 +251,8 @@ The `UiExtensions` capability (wire string: `"ui_extensions"`) gates extension s
 │         │ (service → controller plugin)                │              │
 │         ▼                                              │              │
 │  ┌────────────────┐     ┌───────────────────┐          │              │
-│  │ Plugin dispatch │────>│ PluginRegistry    │          │              │
-│  │ (in WS handler)│     │ handle_extension_ │          │              │
+│  │ Plugin dispatch │────>│ PluginCatalog     │          │              │
+│  │ (in WS handler)│     │ handle_extension_  │          │              │
 │  └────────────────┘     │ action()          │          │              │
 │         │               └───────────────────┘          │              │
 │         │ ControllerMessage::ExtensionResponse          │              │
@@ -334,7 +334,7 @@ to the specific WebSocket connection that originated or should receive them. The
 | `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` | WS message handling (both directions) |
 | `crates/shared/service-sdk/src/lifecycle.rs` | `ServiceHandler` trait (`on_extension_request` + `on_extension_response`) |
 | `crates/shared/service-sdk/src/event_loop.rs` | Event loop dispatch |
-| `crates/plugins/infrastructure/core/src/plugin_ops.rs` | `PluginOps` trait (feature `plugin-ops`) |
+| `crates/plugins/infrastructure/core/src/plugin_ops.rs` | `PluginOps` convenience alias (`PluginMetadataOps` + `PluginConfigOps` + ...) (feature `plugin-ops`) |
 | `frontend/src/lib/components/extensions/` | Schema-driven Svelte components |
 | `frontend/src/lib/extensions.svelte.ts` | Extension store |
 

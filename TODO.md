@@ -40,14 +40,14 @@ All foundation work is done. Summary of what was delivered:
 - **Agent Registration & Discovery** — Enrollment flow (auto/manual approval), certificate
   issuance, inventory tracking, heartbeat, status monitoring, metadata collection.
 - **Plugin Trait System** — Plugin trait (detect, check, update, update lifecycle hooks, host
-  compatibility), `PluginRegistry` + `register_plugins!` macro, capability discovery
+  compatibility), `PluginCatalog` + `declare_plugin!` macro, capability discovery
   (`PluginCapability`), configuration storage (`plugin_configs` table).
 - **Role-Based Plugin Assignment** — `host_software_item_plugins` table with per-role assignments
   (`detect_version`, `fetch_releases`, `execute_update`, `pre_update_hook`, `post_update_hook`),
   `execution_site` column, per-host latest version tracking, controller-side and agent-side
   `fetch_releases`.
 - **Update Lifecycle Plugins** — Standalone `hook_systemd` and `hook_shell` plugins assigned via
-  `PreUpdateHook`/`PostUpdateHook` roles with ordinal-based ordering. `UpdateLifecyclePlugin`
+  `PreUpdateHook`/`PostUpdateHook` roles with ordinal-based ordering. `LifecycleHook`
   trait with `execute_pre_hook()` / `execute_post_hook()` methods. Replaces the old embedded
   hook system (predefined templates + custom commands in plugin config JSON).
 
@@ -566,12 +566,12 @@ progress tracking (SSE), batch notification events, unified software tracking.
 
 Completed: channel-agnostic dispatcher, webhook + Telegram + email plugins, scope-based rule
 matching, notification history, actionable notifications, REST API, CLI, OpenAPI client.
-Plugin architecture under `crates/plugins/notifications/` with `PluginBase` + `NotificationTransportPlugin` traits.
+Plugin architecture under `crates/plugins/notifications/` with `declare_plugin!` + `NotificationTransport` role trait.
 
 - [ ] Slack notification plugin
   - **Category**: Notifications | **Impact**: Medium-High | **Effort**: Medium
   - Slack integration via `slack-morphism` or Incoming Webhooks. Create a new crate under
-    `crates/plugins/notifications/slack/` implementing `PluginBase` + `NotificationTransportPlugin`.
+    `crates/plugins/notifications/slack/` implementing `declare_plugin!` + `NotificationTransport`.
 - [ ] Discord notification plugin
   - **Category**: Notifications | **Impact**: Medium | **Effort**: Medium
   - Discord bot or webhook integration via `twilight-http` or simple HTTP POST.

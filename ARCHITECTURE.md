@@ -64,10 +64,13 @@ See [Embedded Services](docs/architecture/embedded-services.md#embedded-ssh-agen
 
 ## Plugins
 
-Plugins are first-party extension modules that define how to detect installed versions, resolve latest upstream versions, and execute updates. Each
-plugin crate implements the `Plugin` trait and is registered in `uptrakit-plugin-infrastructure-registry`. See
+Plugins are first-party extension modules that define how to detect installed versions, resolve latest upstream versions, and execute updates.
+Each plugin crate uses the `declare_plugin!` macro to export a `static DESCRIPTOR: PluginDescriptor` and is assembled into a `PluginCatalog`
+via the `all_descriptors()` list in `uptrakit-plugin-infrastructure-registry`. Five plugin families exist: **Software**, **Hook**,
+**Notification**, **Infrastructure**, and **Enhancement** — all using the same descriptor/catalog model. See
 [Plugin Development Guidelines](docs/development/plugin-guidelines.md) for the extension pattern,
-and [Plugin System Architecture](docs/development/plugin-system.md) for the broader design.
+[Plugin System Architecture](docs/development/plugin-system.md) for the broader design, and
+[Host Runtime](docs/development/host-runtime.md) for the host abstraction layer.
 
 ### Role-based plugin assignment
 
@@ -101,8 +104,9 @@ named profile use only type settings and per-assignment config). Plugins declari
 
 ### Enhancement plugins
 
-Enhancement plugins enrich software items after creation. They implement the `SoftwareItemLifecyclePlugin`
-subtrait and are registered separately on `PluginRegistry` (not via the `register_plugins!` macro).
+Enhancement plugins enrich software items after creation. They implement the `SoftwareItemLifecycle`
+role trait and are declared via `declare_plugin!` like all other plugin types. Their transport/singleton
+is created at catalog construction time via `CreateEnhancementFn`.
 
 | Plugin type | Crate | Purpose | Feature flag |
 | --- | --- | --- | --- |

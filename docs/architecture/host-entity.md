@@ -28,8 +28,8 @@ Five wire payload fields use typed enums instead of raw strings — invalid valu
 
 - `pre_update_hook_plugins: Vec<PluginAssignment>` — hook plugins to execute before the update
 - `post_update_hook_plugins: Vec<PluginAssignment>` — hook plugins to execute after the update
-- Hook plugins (`hook_systemd`, `hook_shell`) implement `UpdateLifecyclePlugin` and are
-  instantiated from `PluginAssignment` entries by the agent's plugin registry.
+- Hook plugins (`hook_systemd`, `hook_shell`) implement the `LifecycleHook` role trait and are
+  instantiated from `PluginAssignment` entries via the descriptor's `roles.lifecycle_hook` creation function.
 
 - `HostInfo` struct: `machine_id`, `os_type?`, `os_version?`, `architecture?`, `hostname?`, `ip_address?`
 - `EnrollPayload` includes `capabilities: BTreeSet<Capability>`. Host information is **not** part of enrollment — it is reported
@@ -196,7 +196,7 @@ The controller can request installed version detection from agents:
 
 **Plugins**: Each plugin crate implements a `Plugin` struct with `detect_installed_version()` and `execute_update()`
 containing plugin-specific logic. Both version detection and update execution are dispatched through the Plugin
-Registry (`PluginRegistry::create_plugin()`). The agent's `version_check.rs` handles version detection; `update.rs`
+Catalog via descriptor role creation (`(desc.roles.X.create)(&config, runtime)`). The agent's `version_check.rs` handles version detection; `update.rs`
 handles update execution via `execute_plugin_update()`. Command execution utilities (`shell_escape`,
 `run_command_exec`, `run_command_with_shell`, `run_command`) live in the `uptrakit-command` crate; plugin-infrastructure-core
 re-exports them with `PluginError` conversion.

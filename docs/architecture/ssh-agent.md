@@ -357,7 +357,7 @@ CommandSpec { Exec { program: "sudo", args: ["apt-get", "install", ...] } }
 2. Connect & authenticate (using stored credentials)
 3. Detect is_root (id -u) and sudo_available (sudo -n true)
 4. Persist detected values to DB
-5. Collect plugin commands (PluginRegistry::all_required_sudo_commands())
+5. Collect plugin commands (PluginCatalog::all_required_sudo_commands())
 6. Resolve absolute paths on remote host (command -v per entry)
 7. Build SudoersContent::SpecificCommands or AllCommands (with --allow-all)
 8. Write /etc/sudoers.d/uptrakit-<username>, chmod 440, validate with visudo -cf
