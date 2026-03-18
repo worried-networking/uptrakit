@@ -117,6 +117,8 @@ This directory holds audience-specific documentation split into five sections, p
 | [Interactive Updates](development/interactive-updates.md) | Interactive updates feature: PTY allocation, feature gate strategy, architecture, testing. See also: [Interactive Updates API](api/interactive-updates.md), [Interactive Updates Security](security/interactive-updates.md). |
 | [Zero-Configuration Discovery](development/zeroconf-discovery.md) | mDNS/DNS-SD zero-configuration discovery architecture, TXT records, feature flags, and testing. See also: [Zeroconf Guide](end-user/zeroconf-discovery.md), [Zeroconf Security](security/zeroconf-discovery.md). |
 | [Service Config Store](development/service-config-store.md) | Generic mechanism for services to persist named config entries on the controller, with multi-instance fanout. DB schema, SDK usage, and security model. See also: [Wire Protocol](api/wire-protocol.md). |
+| [Host Runtime](development/host-runtime.md) | Host runtime abstraction: `OsFamily`, `HostFeature`, `HostCapabilities`, `HostRequirements`, `HostRuntime` trait, POSIX and controller runtimes. See also: [Plugin Guidelines](development/plugin-guidelines.md), [Plugin System](development/plugin-system.md). |
+| [Config Testing](development/config-testing.md) | Config test architecture: supported test kinds, wire protocol, agent/controller flow, and adding new test kinds. See also: [Plugin Guidelines](development/plugin-guidelines.md). |
 
 ## Deployment Guides
 
