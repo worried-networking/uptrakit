@@ -46,12 +46,15 @@ impl SoftwareItemLifecyclePlugin for DashboardIconsPlugin {
     ) -> std::result::Result<Option<SoftwareItemPatch>, PluginError> {
         // Don't overwrite an existing icon.
         if event.icon_url.is_some() {
+            tracing::debug!(item_id = %event.id, name = %event.name, "dashboard icons skipped: icon already set");
             return Ok(None);
         }
 
         if let Some(url) = self.cache.lookup(&event.name) {
+            tracing::debug!(item_id = %event.id, name = %event.name, icon_url = %url, "dashboard icons match found");
             Ok(Some(SoftwareItemPatch::new().with_icon_url(Some(url))))
         } else {
+            tracing::debug!(item_id = %event.id, name = %event.name, "dashboard icons no match");
             Ok(None)
         }
     }
@@ -104,5 +107,21 @@ mod tests {
         let ev = event("SomeUnknownApp", None);
         let patch = plugin.on_software_item_created(&ev).await.unwrap();
         assert!(patch.is_none());
+    }
+
+    #[tokio::test]
+    async fn actual_budget_maps_to_actual_budget_slug() {
+        let plugin = make_plugin(&["actual-budget"]);
+        let ev = event("Actual Budget", None);
+        let patch = plugin.on_software_item_created(&ev).await.unwrap();
+        assert!(patch.is_some());
+        let patch = patch.unwrap();
+        assert!(
+            patch
+                .icon_url
+                .unwrap()
+                .unwrap()
+                .contains("actual-budget.svg")
+        );
     }
 }

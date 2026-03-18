@@ -6819,6 +6819,7 @@ name = "uptrakit-plugin-enhancement-dashboard-icons"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "httpmock",
  "parking_lot",
  "reqwest",
  "rootcause",
@@ -7426,6 +7427,7 @@ dependencies = [
  "uptrakit-config-merge",
  "uptrakit-crypto",
  "uptrakit-directories",
+ "uptrakit-extension-framework",
  "uptrakit-internal-wire",
  "uptrakit-nats",
  "uptrakit-notification-plugin-core",

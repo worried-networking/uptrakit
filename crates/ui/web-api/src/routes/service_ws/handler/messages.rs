@@ -37,6 +37,7 @@ use crate::routes::agent_operations::{
 use crate::routes::service_ws::protocol::{
     CertIdentity, record_service_activity, record_system_service_activity, send_pong,
 };
+use crate::routes::settings_dashboard_icons::is_dashboard_icons_enabled;
 
 // ---------------------------------------------------------------------------
 // handle_ping (stays in main loop — not part of processor)
@@ -992,24 +993,18 @@ pub(super) async fn handle_report_plugin_config(
 // ---------------------------------------------------------------------------
 
 /// After discovery results are processed, fire lifecycle plugins on featured
-/// items that have no icon yet. This is a best-effort operation — errors on
-/// individual items are logged but never propagate.
+/// icon-less items. This is a best-effort operation — errors on individual
+/// items are logged but never propagate.
 async fn enrich_discovered_items(state: &AppState, tenant_id: uuid::Uuid) {
-    // Check the per-tenant setting (disabled by default).
-    if !matches!(
-        crate::settings_store::load_setting(
-            state.db(),
-            tenant_id,
-            crate::SettingKey::DashboardIconsEnabled,
-        )
-        .await,
-        Ok(Some(serde_json::Value::Bool(true)))
-    ) {
+    if !is_dashboard_icons_enabled(state.db(), tenant_id).await {
+        tracing::debug!(%tenant_id, "dashboard icons enrichment skipped: explicitly disabled");
         return;
     }
 
     let items =
         crate::queries::software_items::load_items_needing_enrichment(state.db(), tenant_id).await;
+
+    tracing::debug!(%tenant_id, count = items.len(), "dashboard icons enrichment loaded items");
 
     for item in items {
         let event = uptrakit_plugin_infrastructure_registry::SoftwareItemCreatedEvent::new(
@@ -1019,19 +1014,28 @@ async fn enrich_discovered_items(state: &AppState, tenant_id: uuid::Uuid) {
             item.featured,
             item.icon_url.clone(),
         );
-        if let Some(patch) = state.plugin_ops.on_software_item_created(&event).await
-            && let Err(e) = crate::queries::software_items::apply_software_item_patch(
-                state.db(),
-                item.id,
-                &patch,
-            )
-            .await
-        {
-            tracing::warn!(
-                error = %e,
-                item_id = %item.id,
-                "failed to apply lifecycle patch to discovered item"
-            );
+        match state.plugin_ops.on_software_item_created(&event).await {
+            Some(patch) => {
+                if let Err(e) = crate::queries::software_items::apply_software_item_patch(
+                    state.db(),
+                    item.id,
+                    &patch,
+                )
+                .await
+                {
+                    tracing::warn!(
+                        error = %e,
+                        item_id = %item.id,
+                        name = %item.name,
+                        "dashboard icons patch failed"
+                    );
+                } else {
+                    tracing::trace!(item_id = %item.id, name = %item.name, "dashboard icons patch applied");
+                }
+            }
+            None => {
+                tracing::trace!(item_id = %item.id, name = %item.name, "dashboard icons produced no patch");
+            }
         }
     }
 }
@@ -1044,12 +1048,100 @@ async fn enrich_discovered_items(state: &AppState, tenant_id: uuid::Uuid) {
 mod tests {
     use super::*;
     use sea_orm::{ActiveModelTrait, Set};
+    use std::sync::Arc;
     use uptrakit_internal_wire::{VersionCheckResult, VersionCheckResultsPayload};
+    use uptrakit_plugin_infrastructure_registry::{
+        PluginOps, PluginOpsError, PluginType, SoftwareItemCreatedEvent, SoftwareItemPatch,
+    };
     use uptrakit_shared_db::entity::{
         host, host_software_item, service, service_host, software_item,
     };
 
-    use crate::test_harness::{build_test_state, insert_default_tenant, setup_migrated_db};
+    use crate::test_harness::{
+        build_test_state, build_test_state_with_plugin_ops, insert_default_tenant,
+        setup_migrated_db,
+    };
+
+    struct TestPluginOps;
+
+    impl PluginOps for TestPluginOps {
+        fn validate_config_str(
+            &self,
+            _plugin_type: &str,
+            _config: &serde_json::Value,
+        ) -> std::result::Result<(), rootcause::Report<PluginOpsError>> {
+            Ok(())
+        }
+
+        fn mask_config_secrets_str(
+            &self,
+            _plugin_type: &str,
+            config: &serde_json::Value,
+        ) -> serde_json::Value {
+            config.clone()
+        }
+
+        fn restore_config_secrets_str(
+            &self,
+            _plugin_type: &str,
+            _incoming: &mut serde_json::Value,
+            _existing: &serde_json::Value,
+        ) {
+        }
+
+        fn known_plugin_types(&self) -> Vec<PluginType> {
+            vec![]
+        }
+
+        fn discovery_plugins(&self) -> Vec<PluginType> {
+            vec![]
+        }
+
+        fn validate_package_identifier_str(
+            &self,
+            _plugin_type: &str,
+            _value: &str,
+        ) -> std::result::Result<(), String> {
+            Ok(())
+        }
+
+        fn capabilities_for_str(
+            &self,
+            _plugin_type: &str,
+        ) -> Vec<uptrakit_plugin_infrastructure_registry::PluginCapability> {
+            vec![]
+        }
+
+        fn sample_config_for_str(&self, _plugin_type: &str) -> serde_json::Value {
+            serde_json::json!({})
+        }
+
+        fn config_form_schema_str(
+            &self,
+            _plugin_type: &str,
+        ) -> Option<Vec<uptrakit_extension_framework::FieldDef>> {
+            Some(vec![])
+        }
+
+        fn on_software_item_created<'a>(
+            &'a self,
+            event: &'a SoftwareItemCreatedEvent,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Option<SoftwareItemPatch>> + Send + 'a>,
+        > {
+            Box::pin(async move {
+                if event.name == "Actual Budget" {
+                    Some(
+                        SoftwareItemPatch::new().with_icon_url(Some(
+                            "https://cdn.example.test/actual-budget.svg".into(),
+                        )),
+                    )
+                } else {
+                    None
+                }
+            })
+        }
+    }
 
     // ── Fixture helpers ───────────────────────────────────────────────────
 
@@ -1128,13 +1220,28 @@ mod tests {
         db: &sea_orm::DatabaseConnection,
         tenant_id: uuid::Uuid,
     ) -> software_item::Model {
+        insert_named_software_item(
+            db,
+            tenant_id,
+            &format!("App-{}", &uuid::Uuid::now_v7().to_string()[..8]),
+            false,
+        )
+        .await
+    }
+
+    async fn insert_named_software_item(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: uuid::Uuid,
+        name: &str,
+        featured: bool,
+    ) -> software_item::Model {
         let id = uuid::Uuid::now_v7();
         let now = time::OffsetDateTime::now_utc();
         software_item::ActiveModel {
             id: Set(id),
             tenant_id: Set(tenant_id),
-            name: Set(format!("App-{}", &id.to_string()[..8])),
-            featured: Set(false),
+            name: Set(name.to_string()),
+            featured: Set(featured),
             icon_url: Set(None),
             last_checked_at: Set(None),
             created_at: Set(now),
@@ -1278,5 +1385,28 @@ mod tests {
             .expect("query")
             .expect("row");
         assert_eq!(untouched_a.installed_version, None);
+    }
+
+    #[tokio::test]
+    async fn enrich_discovered_items_uses_default_on_setting() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(TestPluginOps);
+        let (state, _jwt) =
+            build_test_state_with_plugin_ops(db.clone(), tenant_id, Some(plugin_ops)).await;
+
+        let item = insert_named_software_item(&db, tenant_id, "Actual Budget", true).await;
+
+        enrich_discovered_items(&state, tenant_id).await;
+
+        let updated = software_item::Entity::find_by_id(item.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert_eq!(
+            updated.icon_url.as_deref(),
+            Some("https://cdn.example.test/actual-budget.svg")
+        );
     }
 }

@@ -22,6 +22,7 @@ uptrakit-plugin-infrastructure-core = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
+httpmock = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]

@@ -45,9 +45,13 @@ impl DashboardIconCache {
 
     /// Fetch the icon index from GitHub and populate the slug set.
     pub(crate) async fn refresh(&self) -> Result<usize> {
+        self.refresh_from_url(GITHUB_TREE_URL).await
+    }
+
+    async fn refresh_from_url(&self, tree_url: &str) -> Result<usize> {
         let resp = self
             .client
-            .get(GITHUB_TREE_URL)
+            .get(tree_url)
             .header("Accept", "application/vnd.github+json")
             .send()
             .await
@@ -93,14 +97,17 @@ impl DashboardIconCache {
     /// Look up a software name and return the CDN URL if a matching icon exists.
     pub fn lookup(&self, name: &str) -> Option<String> {
         let slug = slugify(name);
+        tracing::trace!(name, slug, "dashboard icons lookup");
         if slug.is_empty() {
             return None;
         }
 
         let slugs = self.slugs.read();
         if slugs.contains(&slug) {
+            tracing::trace!(name, slug, "dashboard icons cache hit");
             Some(format!("{CDN_BASE_URL}/{slug}.svg"))
         } else {
+            tracing::trace!(name, slug, "dashboard icons cache miss");
             None
         }
     }
@@ -134,6 +141,7 @@ impl DashboardIconCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use httpmock::prelude::*;
 
     fn cache_with_slugs(slugs: &[&str]) -> DashboardIconCache {
         let client = reqwest::Client::new();
@@ -175,5 +183,40 @@ mod tests {
                     .into()
             )
         );
+    }
+
+    #[tokio::test]
+    async fn refresh_loads_actual_budget_slug_from_mocked_tree_endpoint() {
+        let server = MockServer::start();
+        let tree_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path("/git/trees/main")
+                .query_param("recursive", "1")
+                .header("accept", "application/vnd.github+json");
+            then.status(200).json_body(serde_json::json!({
+                "tree": [
+                    { "path": "svg/actual-budget-light.svg" },
+                    { "path": "svg/nginx-light.svg" },
+                    { "path": "svg/ignored-dark.svg" }
+                ]
+            }));
+        });
+
+        let client = reqwest::Client::new();
+        let cache = DashboardIconCache::new(client);
+        let count = cache
+            .refresh_from_url(&format!("{}/git/trees/main?recursive=1", server.base_url()))
+            .await
+            .expect("refresh should succeed");
+
+        assert_eq!(count, 2);
+        assert_eq!(
+            cache.lookup("Actual Budget"),
+            Some(
+                "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/actual-budget.svg"
+                    .into()
+            )
+        );
+        tree_mock.assert();
     }
 }

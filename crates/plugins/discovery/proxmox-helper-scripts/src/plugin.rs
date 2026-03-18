@@ -482,6 +482,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ProxmoxHelperScrip
 
                 tracing::debug!(
                     slug = %script.slug,
+                    display_name = %display_name,
                     version_file_basename = %vfb,
                     version = %installed_version,
                     owner = %owner,
@@ -519,6 +520,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ProxmoxHelperScrip
 
                 tracing::debug!(
                     slug = %script.slug,
+                    display_name = %display_name,
                     version_file_basename = %vfb,
                     version = %installed_version,
                     owner = %owner,
@@ -550,6 +552,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ProxmoxHelperScrip
 
                 tracing::debug!(
                     slug = %script.slug,
+                    display_name = %display_name,
                     package = %npm_pkg,
                     version = %installed_version,
                     "discovered npm-managed PHS software"
@@ -576,6 +579,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ProxmoxHelperScrip
 
                 tracing::debug!(
                     slug = %script.slug,
+                    display_name = %display_name,
                     package = %apt_pkg,
                     version = %installed_version,
                     "discovered APT-managed PHS software"
@@ -615,6 +619,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ProxmoxHelperScrip
 
                     tracing::debug!(
                         slug = %script.slug,
+                        display_name = %display_name,
                         package = %npm_pkg,
                         version = %installed_version,
                         "discovered install-script npm-managed PHS software"
@@ -651,6 +656,7 @@ impl uptrakit_plugin_infrastructure_core::DiscoveryPlugin for ProxmoxHelperScrip
 
                     tracing::debug!(
                         slug = %script.slug,
+                        display_name = %display_name,
                         package = %candidate,
                         version = %installed_version,
                         "discovered install-script fallback PHS software"

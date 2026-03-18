@@ -97,6 +97,14 @@ pub(crate) async fn build_test_state(
     db: DatabaseConnection,
     tenant_id: uuid::Uuid,
 ) -> (Arc<AppState>, Arc<JwtManager>) {
+    build_test_state_with_plugin_ops(db, tenant_id, None).await
+}
+
+pub(crate) async fn build_test_state_with_plugin_ops(
+    db: DatabaseConnection,
+    tenant_id: uuid::Uuid,
+    plugin_ops_override: Option<Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps>>,
+) -> (Arc<AppState>, Arc<JwtManager>) {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     // Enable plaintext mode for crypto — tests don't need real encryption
@@ -170,12 +178,15 @@ pub(crate) async fn build_test_state(
         controller_id,
     );
 
-    let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(
-        uptrakit_plugin_infrastructure_registry::PluginRegistry::with_notifications(
-            uptrakit_plugin_infrastructure_registry::NotificationRegistryConfig::default(),
-        )
-        .expect("notification registry should build in tests"),
-    );
+    let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
+        plugin_ops_override.unwrap_or_else(|| {
+            Arc::new(
+                uptrakit_plugin_infrastructure_registry::PluginRegistry::with_notifications(
+                    uptrakit_plugin_infrastructure_registry::NotificationRegistryConfig::default(),
+                )
+                .expect("notification registry should build in tests"),
+            )
+        });
 
     let notification_dispatcher = crate::notifications::dispatcher::NotificationDispatcher::new(
         db.clone(),
