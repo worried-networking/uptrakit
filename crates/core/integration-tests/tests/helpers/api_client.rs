@@ -1,57 +1,33 @@
 //! REST API client for verifying controller state in system integration tests.
 //!
-//! Uses `reqwest` with `danger_accept_invalid_certs` to talk to the
-//! controller's self-signed HTTPS endpoint via the mapped host port.
+//! Wraps [`UptrakitClient`](uptrakit_openapi_client::UptrakitClient) from the
+//! `uptrakit-openapi-client` crate, adding polling helpers used by system tests.
 
 use std::time::Duration;
 
-use serde::Deserialize;
+use uptrakit_openapi_client::UptrakitClient;
+use uptrakit_openapi_client::types::SecretString;
+use uptrakit_openapi_client::types::auth::{LoginRequest, RegisterRequest};
+use uptrakit_openapi_client::types::pagination::PaginatedResponse;
+use uptrakit_openapi_client::types::services::{ListServicesQuery, ServiceResponse};
+use uptrakit_openapi_client::types::system_services::{
+    ListSystemServicesQuery, SystemServiceResponse,
+};
 
-/// A simple REST API client for the controller's HTTP API.
-///
-/// Used by integration tests to register a user, log in, and query the
-/// controller's state (e.g. list enrolled services).
+/// A thin wrapper around [`UptrakitClient`] with polling helpers for
+/// system integration tests.
 pub(crate) struct ApiClient {
-    client: reqwest::Client,
     base_url: String,
-    access_token: Option<String>,
-}
-
-/// Auth response from `POST /api/v1/auth/register` and `POST /api/v1/auth/login`.
-#[derive(Deserialize)]
-struct AuthResponse {
-    access_token: String,
-}
-
-/// Paginated response wrapper matching the controller's API format.
-#[derive(Deserialize)]
-pub(crate) struct PaginatedResponse<T> {
-    pub items: Vec<T>,
-}
-
-/// Minimal service response — only the fields needed for assertions.
-#[derive(Debug, Deserialize)]
-pub(crate) struct ServiceResponse {
-    pub friendly_name: String,
-    pub status: String,
-    pub capabilities: Vec<String>,
-    pub service_label: String,
+    client: Option<UptrakitClient>,
 }
 
 impl ApiClient {
     /// Create a new API client pointing at the controller's mapped host port.
     pub(crate) fn new(controller_port: u16) -> Self {
-        let client = reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(60))
-            .build()
-            .expect("build reqwest client");
-
+        let base_url = format!("https://127.0.0.1:{controller_port}");
         Self {
-            client,
-            base_url: format!("https://127.0.0.1:{controller_port}"),
-            access_token: None,
+            base_url,
+            client: None,
         }
     }
 
@@ -60,6 +36,9 @@ impl ApiClient {
     /// Polls `GET /healthz` every 500ms until success or timeout.
     pub(crate) async fn wait_for_ready(&self, timeout: Duration) {
         let deadline = tokio::time::Instant::now() + timeout;
+        let unauthenticated =
+            UptrakitClient::new(&self.base_url, None, true, Some(Duration::from_secs(5)))
+                .expect("build unauthenticated client");
 
         loop {
             if tokio::time::Instant::now() >= deadline {
@@ -69,85 +48,114 @@ impl ApiClient {
                 );
             }
 
-            match self
-                .client
-                .get(format!("{}/healthz", self.base_url))
-                .send()
-                .await
-            {
-                Ok(resp) if resp.status().is_success() => return,
-                _ => tokio::time::sleep(Duration::from_millis(500)).await,
+            if unauthenticated.healthz().await.is_ok() {
+                return;
             }
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
     }
 
     /// Register a test user and log in, optionally supplying a registration token.
     pub(crate) async fn register_and_login_with_token(&mut self, registration_token: Option<&str>) {
-        // Register
-        let register_resp = self
-            .client
-            .post(format!("{}/api/v1/auth/register", self.base_url))
-            .json(&serde_json::json!({
-                "email": "test@example.com",
-                "first_name": "Test",
-                "last_name": "User",
-                "password": "SecureTestPassword123",
-                "registration_token": registration_token,
-            }))
-            .send()
-            .await
-            .expect("register request");
+        let unauthenticated =
+            UptrakitClient::new(&self.base_url, None, true, Some(Duration::from_secs(60)))
+                .expect("build unauthenticated client");
 
-        assert_eq!(
-            register_resp.status().as_u16(),
-            201,
-            "registration failed: {}",
-            register_resp
-                .text()
-                .await
-                .unwrap_or_else(|_| "no body".into())
+        let register_req = RegisterRequest {
+            email: "test@example.com".to_string(),
+            first_name: "Test".to_string(),
+            last_name: "User".to_string(),
+            password: SecretString::new("SecureTestPassword123"),
+            registration_token: registration_token.map(SecretString::new),
+        };
+        let auth_resp = unauthenticated
+            .register(&register_req)
+            .await
+            .expect("registration failed");
+
+        let token = auth_resp.access_token.expose_secret().to_string();
+
+        // Verify login works too.
+        let login_req = LoginRequest {
+            email: "test@example.com".to_string(),
+            password: SecretString::new("SecureTestPassword123"),
+        };
+        let _login_resp = unauthenticated
+            .login(&login_req)
+            .await
+            .expect("login failed");
+
+        // Create an authenticated client using the registration token.
+        self.client = Some(
+            UptrakitClient::with_token(&self.base_url, &token, true)
+                .expect("build authenticated client"),
         );
-
-        // Login
-        let login_resp = self
-            .client
-            .post(format!("{}/api/v1/auth/login", self.base_url))
-            .json(&serde_json::json!({
-                "email": "test@example.com",
-                "password": "SecureTestPassword123"
-            }))
-            .send()
-            .await
-            .expect("login request");
-
-        assert_eq!(login_resp.status().as_u16(), 200, "login failed");
-
-        let auth: AuthResponse = login_resp.json().await.expect("parse login response");
-        self.access_token = Some(auth.access_token);
     }
 
-    /// List all services visible to the authenticated user.
-    ///
-    /// Requires a prior call to [`register_and_login`](Self::register_and_login).
-    pub(crate) async fn list_services(&self) -> Vec<ServiceResponse> {
-        let token = self
-            .access_token
+    /// Return a reference to the authenticated client.
+    fn authenticated(&self) -> &UptrakitClient {
+        self.client
             .as_ref()
-            .expect("must call register_and_login first");
+            .expect("must call register_and_login_with_token first")
+    }
 
-        let resp = self
-            .client
-            .get(format!("{}/api/v1/services?per_page=100", self.base_url))
-            .bearer_auth(token)
-            .send()
+    /// List all tenant services visible to the authenticated user.
+    pub(crate) async fn list_services(&self) -> Vec<ServiceResponse> {
+        let query = ListServicesQuery {
+            capability: None,
+            status: None,
+            page: None,
+            per_page: Some(100),
+        };
+        let resp: PaginatedResponse<ServiceResponse> = self
+            .authenticated()
+            .list_services(&query)
             .await
             .expect("list services request");
+        resp.items
+    }
 
-        assert_eq!(resp.status().as_u16(), 200, "list services failed");
+    /// List all system services visible to the authenticated user.
+    pub(crate) async fn list_system_services(&self) -> Vec<SystemServiceResponse> {
+        let query = ListSystemServicesQuery {
+            capability: None,
+            status: None,
+            page: None,
+            per_page: None,
+        };
+        let resp: PaginatedResponse<SystemServiceResponse> = self
+            .authenticated()
+            .list_system_services(&query)
+            .await
+            .expect("list system services request");
+        resp.items
+    }
 
-        let paginated: PaginatedResponse<ServiceResponse> =
-            resp.json().await.expect("parse services response");
-        paginated.items
+    /// Poll `GET /api/v1/system-services` until at least `min_count` system
+    /// services appear, or until `timeout` elapses.
+    pub(crate) async fn wait_for_system_service_count(
+        &self,
+        min_count: usize,
+        timeout: Duration,
+    ) -> Vec<SystemServiceResponse> {
+        let deadline = tokio::time::Instant::now() + timeout;
+
+        loop {
+            let services = self.list_system_services().await;
+            if services.len() >= min_count {
+                return services;
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                panic!(
+                    "expected at least {min_count} system services but found {} after {}s",
+                    services.len(),
+                    timeout.as_secs()
+                );
+            }
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
     }
 
     /// Poll `GET /api/v1/services` until at least `min_count` services appear,

@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use uptrakit_openapi_client::types::system_services::SystemServiceResponse;
+
 use crate::helpers::api_client::ApiClient;
 use crate::helpers::containers::{ControllerContainer, ServiceContainer, test_network_name};
 
@@ -19,20 +21,23 @@ async fn scheduler_enrolls_as_system_service() {
     // Start the scheduler — it enrolls with the system enrollment token.
     let _scheduler = ServiceContainer::start_scheduler(&network, controller.container_name()).await;
 
-    // The scheduler should appear in the services list.
+    // Wait for the external scheduler to appear alongside the embedded one.
     let services = client
-        .wait_for_service_count(1, Duration::from_secs(60))
+        .wait_for_system_service_count(2, Duration::from_secs(60))
         .await;
 
-    assert_eq!(services.len(), 1, "expected exactly 1 service");
-    let service = &services[0];
+    let external: Vec<&SystemServiceResponse> =
+        services.iter().filter(|s| !s.is_embedded).collect();
     assert_eq!(
-        service.status, "approved",
-        "scheduler should be auto-approved"
+        external.len(),
+        1,
+        "expected exactly 1 external system service"
     );
+
+    let scheduler = external[0];
     assert!(
-        service.capabilities.iter().any(|c| c == "scheduler"),
+        scheduler.capabilities.iter().any(|c| c == "scheduler"),
         "scheduler should have scheduler capability, got: {:?}",
-        service.capabilities,
+        scheduler.capabilities,
     );
 }

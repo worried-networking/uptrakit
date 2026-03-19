@@ -12,6 +12,7 @@ repository.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 testcontainers = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
+uptrakit-openapi-client = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }

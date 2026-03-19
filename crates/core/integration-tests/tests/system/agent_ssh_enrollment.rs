@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use uptrakit_openapi_client::types::services::ServiceStatus;
+
 use crate::helpers::api_client::ApiClient;
 use crate::helpers::containers::{ControllerContainer, ServiceContainer, test_network_name};
 
@@ -27,7 +29,8 @@ async fn agent_ssh_enrolls_with_token() {
     assert_eq!(services.len(), 1, "expected exactly 1 service");
     let service = &services[0];
     assert_eq!(
-        service.status, "approved",
+        service.status,
+        ServiceStatus::Approved,
         "agent-ssh should be auto-approved"
     );
     assert!(

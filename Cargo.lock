@@ -6619,6 +6619,7 @@ dependencies = [
  "uptrakit-audit-log",
  "uptrakit-crypto",
  "uptrakit-internal-wire",
+ "uptrakit-openapi-client",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-shared-db",
  "uptrakit-web-api",
