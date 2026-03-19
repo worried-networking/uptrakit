@@ -82,12 +82,12 @@ requirement. They never run during `cargo test`.
 ```text
 crates/core/integration-tests/
   Cargo.toml
-  src/
-    lib.rs              — re-exports helpers
-    containers.rs       — ControllerContainer, ServiceContainer wrappers
-    api_client.rs       — REST API client for verification
   tests/
-    system.rs           — test binary entry point
+    helpers/
+      mod.rs
+      containers.rs       — ControllerContainer, ServiceContainer wrappers
+      api_client.rs       — thin wrapper around uptrakit-openapi-client
+    system.rs             — test binary entry point
     system/
       controller_startup.rs     — health check, user registration/login
       agent_enrollment.rs       — agent enrolls with token
@@ -109,7 +109,7 @@ TTL (3600s) so multiple services can enroll in the same test.
 
 - Controller runs with `--allow-plaintext-secrets` (no master key required)
 - All services use `--tofu` to trust the controller's self-signed CA
-- API verification uses `reqwest` with `danger_accept_invalid_certs(true)`
+- API verification uses `uptrakit-openapi-client` with `insecure: true`
 - Agent-SSH additionally uses `--allow-plaintext-secrets` for its local store
 
 ### Wait strategies
