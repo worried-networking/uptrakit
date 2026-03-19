@@ -10,7 +10,7 @@ use super::http_client::TestClient;
 ///
 /// Mirrors the `TestApp` from `web-api/src/test_harness/mod.rs` but
 /// constructs `AppState` via the public builder API so it can be used
-/// from an external crate. Supports SQLite, PostgreSQL, and MariaDB.
+/// from an external crate. Supports SQLite and PostgreSQL.
 #[allow(dead_code)]
 pub(crate) struct TestHarness {
     pub state: Arc<AppState>,
@@ -51,12 +51,6 @@ impl TestHarness {
     /// Create a harness backed by PostgreSQL (testcontainers).
     pub(crate) async fn new_postgres() -> Self {
         let (db, guard) = super::db_providers::setup_postgres().await;
-        Self::with_db(db, guard).await
-    }
-
-    /// Create a harness backed by MariaDB (testcontainers).
-    pub(crate) async fn new_mariadb() -> Self {
-        let (db, guard) = super::db_providers::setup_mariadb().await;
         Self::with_db(db, guard).await
     }
 
