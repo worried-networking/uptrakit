@@ -180,7 +180,7 @@ async fn set_foreign_keys(manager: &SchemaManager<'_>, enabled: bool) -> Result<
 /// `qualifier`), targeting `table_name`.
 ///
 /// `fk_suffix` differentiates FK constraint names when creating a temp table
-/// alongside the original (MariaDB/InnoDB requires globally unique FK names).
+/// alongside the original (InnoDB requires globally unique FK names).
 fn build_hsi_table(table_name: impl IntoTableRef + Clone, fk_suffix: &str) -> TableCreateStatement {
     Table::create()
         .table(table_name.clone())

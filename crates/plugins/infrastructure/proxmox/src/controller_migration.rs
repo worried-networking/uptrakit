@@ -330,16 +330,14 @@ impl MigrationName for AddProxmoxHmLowerNameIndex {
 impl MigrationTrait for AddProxmoxHmLowerNameIndex {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // sea_query Index::create() does not support expression columns
-        // (functional indexes); raw SQL required. MySQL 8+ requires double
-        // parens around the expression per its CREATE INDEX syntax.
-        let sql = if manager.get_database_backend() == sea_orm::DatabaseBackend::MySql {
-            "CREATE INDEX idx_proxmox_host_mappings_lower_name \
-             ON proxmox_host_mappings ((lower(proxmox_name)))"
-        } else {
-            "CREATE INDEX idx_proxmox_host_mappings_lower_name \
-             ON proxmox_host_mappings (lower(proxmox_name))"
-        };
-        manager.get_connection().execute_unprepared(sql).await?;
+        // (functional indexes); raw SQL required.
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "CREATE INDEX idx_proxmox_host_mappings_lower_name \
+                 ON proxmox_host_mappings (lower(proxmox_name))",
+            )
+            .await?;
         Ok(())
     }
 

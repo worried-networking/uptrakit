@@ -101,24 +101,7 @@ impl RateLimitStore {
         // Raw SQL is required because SeaORM's on_conflict builder doesn't
         // support CASE WHEN expressions. The statement is fully parameterized.
         let backend = self.db.get_database_backend();
-        let sql = match backend {
-            sea_orm::DatabaseBackend::MySql => {
-                r#"INSERT INTO api_rate_limits (`key`, request_count, window_start, expires_at)
-                   VALUES (?, 1, ?, ?)
-                   ON DUPLICATE KEY UPDATE
-                     request_count = CASE
-                       WHEN window_start >= ? THEN request_count + 1
-                       ELSE 1
-                     END,
-                     window_start = CASE
-                       WHEN window_start >= ? THEN window_start
-                       ELSE VALUES(window_start)
-                     END,
-                     expires_at = VALUES(expires_at)"#
-            }
-            // SQLite and PostgreSQL both use $N positional params and ON CONFLICT
-            _ => {
-                r#"INSERT INTO api_rate_limits ("key", request_count, window_start, expires_at)
+        let sql = r#"INSERT INTO api_rate_limits ("key", request_count, window_start, expires_at)
                    VALUES ($1, 1, $2, $3)
                    ON CONFLICT ("key") DO UPDATE SET
                      request_count = CASE
@@ -129,25 +112,8 @@ impl RateLimitStore {
                        WHEN api_rate_limits.window_start >= $4 THEN api_rate_limits.window_start
                        ELSE excluded.window_start
                      END,
-                     expires_at = excluded.expires_at"#
-            }
-        };
-
-        let params = match backend {
-            sea_orm::DatabaseBackend::MySql => {
-                // MySQL uses ? placeholders; threshold is repeated for both CASE WHEN clauses.
-                vec![
-                    key.into(),
-                    now.into(),
-                    expires_at.into(),
-                    threshold.into(),
-                    threshold.into(),
-                ]
-            }
-            _ => {
-                vec![key.into(), now.into(), expires_at.into(), threshold.into()]
-            }
-        };
+                     expires_at = excluded.expires_at"#;
+        let params = vec![key.into(), now.into(), expires_at.into(), threshold.into()];
 
         let stmt = sea_orm::Statement::from_sql_and_values(backend, sql, params);
         self.db.execute_raw(stmt).await.context_to()?;

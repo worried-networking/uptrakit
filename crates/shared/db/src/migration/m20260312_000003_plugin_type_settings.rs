@@ -113,7 +113,7 @@ impl MigrationTrait for Migration {
 
         // ── Steps B+C+D: Alter host_software_item_plugins ───────────────
         // SQLite requires table recreation for column renames and nullability
-        // changes. For Postgres/MySQL, ALTER TABLE suffices.
+        // changes. For PostgreSQL, ALTER TABLE suffices.
         if helpers::is_sqlite(manager) {
             self.recreate_hsip_sqlite(manager).await?;
         } else {
@@ -308,7 +308,7 @@ impl Migration {
         Ok(())
     }
 
-    // ── Postgres/MySQL ALTER TABLE (Steps B+C+D) ─────────────────────────
+    // ── PostgreSQL ALTER TABLE (Steps B+C+D) ───────────────────────────
 
     async fn alter_hsip_postgres(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         // Step B: Add plugin_type column.

@@ -41,8 +41,8 @@ async fn grant_permission(
     perm_name: &str,
 ) -> Result<(), DbErr> {
     // `INSERT ... SELECT ... ON CONFLICT DO NOTHING` doesn't translate to
-    // valid MySQL/MariaDB syntax in sea_query. Use raw SQL with
-    // `WHERE NOT EXISTS` which is portable across SQLite, PG, and MariaDB.
+    // valid syntax for all backends in sea_query. Use raw SQL with
+    // `WHERE NOT EXISTS` which is portable across SQLite and PostgreSQL.
     let sql = format!(
         "INSERT INTO role_permissions (role_id, permission_id) \
          SELECT r.id, p.id \
@@ -65,7 +65,7 @@ impl MigrationTrait for Migration {
 
         // 1. Insert the new permission (idempotent: skip if already exists).
         //    Uses check-then-insert instead of ON CONFLICT DO NOTHING because
-        //    sea-query generates invalid MySQL syntax for INSERT ... ON CONFLICT.
+        //    sea-query's ON CONFLICT support is not portable across all backends.
         //    UUIDs must be bound via sea-query (not format!) to store as BLOB on SQLite.
         {
             let exists = manager

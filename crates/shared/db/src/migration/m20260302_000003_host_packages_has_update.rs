@@ -11,7 +11,7 @@ use super::helpers::{self, CrashRecoveryState, timestamp, timestamp_null};
 /// column already present, copy all data, drop the original, rename, rebuild
 /// indexes, and re-enable FK enforcement.
 ///
-/// On PostgreSQL (≥ 12) and MySQL (≥ 5.7) the migration uses
+/// On PostgreSQL (≥ 12) the migration uses
 /// `ALTER TABLE ADD COLUMN` directly, which avoids the FK-cascade problems
 /// that table recreation causes when other tables reference `host_packages`.
 ///
@@ -212,7 +212,7 @@ impl Migration {
         Ok(())
     }
 
-    /// PostgreSQL/MySQL path: ALTER TABLE ADD COLUMN + indexes.
+    /// PostgreSQL path: ALTER TABLE ADD COLUMN + indexes.
     async fn up_alter(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         manager
             .alter_table(
@@ -270,7 +270,7 @@ impl Migration {
         Ok(())
     }
 
-    /// PostgreSQL/MySQL down path: DROP COLUMN + indexes.
+    /// PostgreSQL down path: DROP COLUMN + indexes.
     async fn down_alter(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         // Drop the has_update indexes first.
         manager

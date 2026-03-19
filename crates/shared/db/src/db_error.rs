@@ -5,8 +5,8 @@ use sea_orm::RuntimeErr;
 /// Returns `true` when `e` represents a unique-constraint violation.
 ///
 /// Delegates to [`sqlx::error::ErrorKind::UniqueViolation`] so the mapping
-/// from backend-specific error codes (SQLite 2067/1555, PostgreSQL 23505,
-/// MySQL 1062) is handled by sqlx and not duplicated here.
+/// from backend-specific error codes (SQLite 2067/1555, PostgreSQL 23505) is
+/// handled by sqlx and not duplicated here.
 ///
 /// When no sqlx-backed database feature (`db-sqlite` or `db-postgres`) is
 /// enabled, this always returns `false` because the sqlx error type is not

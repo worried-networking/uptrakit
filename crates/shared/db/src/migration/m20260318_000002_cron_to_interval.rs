@@ -8,7 +8,7 @@ use super::helpers::{self, CrashRecoveryState};
 /// SQLite does not support arbitrary `ALTER TABLE DROP COLUMN`, so this migration uses
 /// the standard table-recreation pattern (create new → copy → drop old → rename).
 ///
-/// PostgreSQL and MySQL use `ALTER TABLE ADD/DROP COLUMN` directly.
+/// PostgreSQL uses `ALTER TABLE ADD/DROP COLUMN` directly.
 ///
 /// ## Interval mapping from previous cron expressions
 ///
@@ -217,7 +217,7 @@ impl Migration {
         Ok(())
     }
 
-    /// PostgreSQL/MySQL path: ALTER TABLE ADD + UPDATE + DROP.
+    /// PostgreSQL path: ALTER TABLE ADD + UPDATE + DROP.
     async fn up_alter(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         // Add new columns.
         manager

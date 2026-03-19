@@ -110,9 +110,8 @@ impl MigrationTrait for Migration {
             return Ok(());
         }
 
-        // SQLite / MariaDB: drop + recreate (SQLite cannot ALTER TABLE DROP
-        // COLUMN reliably; MariaDB has FK-backed index constraints that make
-        // column drops painful — and we're truncating data anyway).
+        // SQLite: drop + recreate (SQLite cannot ALTER TABLE DROP COLUMN
+        // reliably — and we're truncating data anyway).
         manager
             .drop_table(
                 Table::drop()

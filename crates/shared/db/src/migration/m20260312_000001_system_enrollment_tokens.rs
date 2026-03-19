@@ -79,7 +79,7 @@ impl MigrationTrait for Migration {
         // The old system_services.enrollment_token setting is superseded by the
         // new system_enrollment_tokens table. Delete it from the DB so the
         // application no longer reads it.
-        // Uses sea_query to correctly quote `key` (reserved word in MySQL/MariaDB).
+        // Uses sea_query to correctly quote `key` (reserved word in SQL).
         manager
             .exec_stmt(
                 Query::delete()

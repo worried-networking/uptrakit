@@ -8,9 +8,6 @@ use sea_orm_migration::prelude::*;
 /// creation of a new host record for the same machine. With the partial
 /// index, deactivated rows are excluded and the agent can register a fresh
 /// host record after the old one has been removed.
-///
-/// Note: MySQL does not support partial indexes; the WHERE clause is
-/// silently ignored. The application layer enforces the condition.
 #[derive(DeriveMigrationName)]
 pub(super) struct Migration;
 

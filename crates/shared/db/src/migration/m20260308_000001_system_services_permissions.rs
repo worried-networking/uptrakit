@@ -22,7 +22,7 @@ pub(super) struct Migration;
 /// Insert a permission by name.  Idempotent (check-then-insert).
 ///
 /// Uses check-then-insert instead of ON CONFLICT DO NOTHING because
-/// sea-query generates invalid MySQL syntax for INSERT ... ON CONFLICT.
+/// sea-query's ON CONFLICT support is not portable across all backends.
 /// UUIDs must be bound via sea-query (not format!) to store as BLOB on SQLite.
 async fn insert_permission(
     manager: &SchemaManager<'_>,

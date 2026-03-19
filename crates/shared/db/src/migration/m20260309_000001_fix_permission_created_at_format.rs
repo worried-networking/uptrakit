@@ -36,8 +36,7 @@ use sea_orm_migration::prelude::*;
 ///
 /// ## Scope
 ///
-/// SQLite-only.  PostgreSQL and MySQL use native timestamp types and are
-/// unaffected.
+/// SQLite-only.  PostgreSQL uses native timestamp types and is unaffected.
 ///
 /// ## Down
 ///

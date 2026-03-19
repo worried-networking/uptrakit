@@ -38,7 +38,7 @@ use uuid::Uuid;
 ///
 /// ## Scope
 ///
-/// SQLite-only.  PostgreSQL and MySQL store UUIDs differently and are not
+/// SQLite-only.  PostgreSQL stores UUIDs differently and is not
 /// affected by this issue.
 ///
 /// ## Down

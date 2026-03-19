@@ -147,8 +147,8 @@ mod tests {
 
     #[test]
     fn parse_enabled_features_sorts_and_deduplicates() {
-        let parsed = parse_enabled_features(Some("db-mysql,swagger-ui,db-mysql,db-sqlite"));
-        assert_eq!(parsed, vec!["db-mysql", "db-sqlite", "swagger-ui"]);
+        let parsed = parse_enabled_features(Some("db-postgres,swagger-ui,db-postgres,db-sqlite"));
+        assert_eq!(parsed, vec!["db-postgres", "db-sqlite", "swagger-ui"]);
     }
 
     #[test]

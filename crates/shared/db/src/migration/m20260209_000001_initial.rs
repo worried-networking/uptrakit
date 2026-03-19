@@ -1017,7 +1017,6 @@ impl MigrationTrait for Migration {
 
         // Unique active plugin config name per tenant (partial: only non-deactivated rows).
         // Prevents duplicate names for active configs and makes find-or-create idempotent.
-        // Note: MySQL does not support partial indexes; the WHERE clause is silently ignored.
         manager
             .create_index(
                 Index::create()
@@ -1066,7 +1065,6 @@ impl MigrationTrait for Migration {
 
         // Partial unique index: enforce unique names per tenant among active items.
         // Soft-deleted items are excluded, enabling re-creation with the same name.
-        // Note: MySQL does not support partial indexes; the WHERE clause is silently ignored.
         manager
             .create_index(
                 Index::create()

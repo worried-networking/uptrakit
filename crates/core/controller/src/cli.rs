@@ -28,7 +28,6 @@ pub(crate) struct DbMigrateArgs {
     /// Supported schemes depend on enabled build features:
     ///   SQLite (default): sqlite:///path/to/uptrakit.db
     ///   PostgreSQL: postgresql://user:pass@host:5432/dbname
-    ///   MySQL: mysql://user:pass@host:3306/dbname
     #[arg(long)]
     pub source_db: String,
 
@@ -83,7 +82,6 @@ pub(crate) struct Args {
     /// Supported schemes depend on enabled features:
     ///   SQLite (default): sqlite://path/to/db.sqlite
     ///   PostgreSQL: postgresql://user:pass@host:5432/dbname
-    ///   MySQL: mysql://user:pass@host:3306/dbname
     #[arg(long, env = "UPTRAKIT_DB_URL")]
     pub db_url: Option<String>,
 
