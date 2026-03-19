@@ -9,22 +9,22 @@ use crate::migration::helpers::{timestamp, timestamp_null};
 ///
 /// ## Changes
 ///
-/// ### `software_items` — table recreation (SQLite) / ALTER TABLE (PG/MySQL)
+/// ### `software_items` — table recreation (SQLite) / ALTER TABLE (PG)
 /// - Remove `enabled` and `discovery_state` columns
 /// - Add `featured BOOL NOT NULL DEFAULT false`
 ///
-/// ### `host_software_items` — table recreation (SQLite) / ALTER TABLE (PG/MySQL)
+/// ### `host_software_items` — table recreation (SQLite) / ALTER TABLE (PG)
 /// - Add `plugin_config_id UUID NULL` (FK -> plugin_configs)
 /// - Add `package_identifier TEXT NULL`
 /// - Add `deactivated_at TIMESTAMP NULL`
 ///
-/// ### `update_history` — table recreation (SQLite) / ALTER TABLE (PG/MySQL)
+/// ### `update_history` — table recreation (SQLite) / ALTER TABLE (PG)
 /// - Add `tenant_id UUID NOT NULL` (FK -> tenants)
 /// - Add `host_software_item_id UUID NULL` (FK -> host_software_items)
 /// - Change `to_version` from NOT NULL to NULL
 /// - Change `started_at` from NOT NULL to NULL
 ///
-/// ### `update_batches` — table recreation (SQLite) / ALTER TABLE (PG/MySQL)
+/// ### `update_batches` — table recreation (SQLite) / ALTER TABLE (PG)
 /// - Add `output TEXT NOT NULL DEFAULT ''`
 /// - Add `output_bytes BIGINT NOT NULL DEFAULT 0`
 ///
@@ -233,7 +233,7 @@ async fn up_sqlite(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
 }
 
 // ---------------------------------------------------------------------------
-// PG/MySQL path — ALTER TABLE
+// PG path — ALTER TABLE
 // ---------------------------------------------------------------------------
 
 async fn up_alter(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
@@ -315,7 +315,7 @@ async fn rebuild_software_items_sqlite(manager: &SchemaManager<'_>) -> Result<()
     Ok(())
 }
 
-// -- PG/MySQL --------------------------------------------------------------
+// -- PG --------------------------------------------------------------
 
 async fn alter_software_items(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     // Add the new `featured` column.
@@ -362,10 +362,6 @@ async fn alter_software_items(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
         )
         .await?;
 
-    // On MariaDB, temporarily drop FKs since InnoDB uses user-created indexes
-    // as FK backing indexes and refuses to drop them otherwise.
-    let si_fks = helpers::drop_mysql_foreign_keys(manager, "software_items").await?;
-
     // Drop existing indexes first — PG doesn't drop indexes when columns are removed
     // via ALTER TABLE (unlike SQLite table recreation which drops everything).
     drop_software_items_indexes(manager).await?;
@@ -373,15 +369,12 @@ async fn alter_software_items(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
     // Recreate indexes with the updated schema.
     create_software_items_indexes(manager).await?;
 
-    // Recreate FKs on MariaDB.
-    helpers::recreate_mysql_foreign_keys(manager, "software_items", &si_fks).await?;
-
     Ok(())
 }
 
 // -- Shared indexes --------------------------------------------------------
 
-/// Drop all `software_items` indexes (used by the PG/MySQL ALTER TABLE path
+/// Drop all `software_items` indexes (used by the PG ALTER TABLE path
 /// before recreating them to ensure no "already exists" errors).
 async fn drop_software_items_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     for name in [
@@ -395,36 +388,18 @@ async fn drop_software_items_indexes(manager: &SchemaManager<'_>) -> Result<(), 
 }
 
 async fn create_software_items_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-    let is_mysql = manager.get_database_backend() == sea_orm::DbBackend::MySql;
-
-    if is_mysql {
-        // MariaDB: no partial indexes. Use non-partial unique on (tenant_id, name, deactivated_at).
-        manager
-            .create_index(
-                Index::create()
-                    .name("uq_software_items_active_name")
-                    .table(SoftwareItems::Table)
-                    .col(SoftwareItems::TenantId)
-                    .col(SoftwareItems::Name)
-                    .col(SoftwareItems::DeactivatedAt)
-                    .unique()
-                    .to_owned(),
-            )
-            .await?;
-    } else {
-        manager
-            .create_index(
-                Index::create()
-                    .name("uq_software_items_active_name")
-                    .table(SoftwareItems::Table)
-                    .col(SoftwareItems::TenantId)
-                    .col(SoftwareItems::Name)
-                    .unique()
-                    .and_where(Expr::col(SoftwareItems::DeactivatedAt).is_null())
-                    .to_owned(),
-            )
-            .await?;
-    }
+    manager
+        .create_index(
+            Index::create()
+                .name("uq_software_items_active_name")
+                .table(SoftwareItems::Table)
+                .col(SoftwareItems::TenantId)
+                .col(SoftwareItems::Name)
+                .unique()
+                .and_where(Expr::col(SoftwareItems::DeactivatedAt).is_null())
+                .to_owned(),
+        )
+        .await?;
 
     manager
         .create_index(
@@ -494,7 +469,7 @@ async fn rebuild_host_software_items_sqlite(manager: &SchemaManager<'_>) -> Resu
     Ok(())
 }
 
-// -- PG/MySQL --------------------------------------------------------------
+// -- PG --------------------------------------------------------------
 
 async fn alter_host_software_items(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     // Add new columns.
@@ -545,18 +520,11 @@ async fn alter_host_software_items(manager: &SchemaManager<'_>) -> Result<(), Db
         )
         .await?;
 
-    // On MariaDB, InnoDB uses user-created indexes as FK backing indexes.
-    // Temporarily drop all FKs before dropping/recreating indexes.
-    let hsi_fks = helpers::drop_mysql_foreign_keys(manager, "host_software_items").await?;
-
     // Drop existing indexes before recreating — PG doesn't drop them on ALTER TABLE.
     drop_hsi_indexes(manager).await?;
 
     // Recreate indexes with the updated schema.
     create_hsi_indexes(manager).await?;
-
-    // Recreate the FKs we dropped on MariaDB.
-    helpers::recreate_mysql_foreign_keys(manager, "host_software_items", &hsi_fks).await?;
 
     Ok(())
 }
@@ -633,7 +601,7 @@ fn build_hsi_table(table_name: impl IntoTableRef + Clone) -> TableCreateStatemen
         .to_owned()
 }
 
-/// Drop all `host_software_items` indexes (used by the PG/MySQL ALTER TABLE path).
+/// Drop all `host_software_items` indexes (used by the PG ALTER TABLE path).
 async fn drop_hsi_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     for name in [
         "uix_hsi_unqualified",
@@ -648,51 +616,34 @@ async fn drop_hsi_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
 }
 
 async fn create_hsi_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-    // Partial unique indexes (SQLite/PostgreSQL) or a single composite unique
-    // index (MySQL/MariaDB, which doesn't support partial indexes).
-    if manager.get_database_backend() == sea_orm::DbBackend::MySql {
-        manager
-            .create_index(
-                Index::create()
-                    .name("uix_hsi_host_item_qualifier")
-                    .table(HostSoftwareItems::Table)
-                    .col(HostSoftwareItems::HostId)
-                    .col(HostSoftwareItems::SoftwareItemId)
-                    .col(HostSoftwareItems::Qualifier)
-                    .unique()
-                    .to_owned(),
-            )
-            .await?;
-    } else {
-        manager
-            .create_index(
-                Index::create()
-                    .name("uix_hsi_unqualified")
-                    .table(HostSoftwareItems::Table)
-                    .col(HostSoftwareItems::HostId)
-                    .col(HostSoftwareItems::SoftwareItemId)
-                    .unique()
-                    .and_where(Expr::col(HostSoftwareItems::Qualifier).is_null())
-                    .and_where(Expr::col(HostSoftwareItems::DeactivatedAt).is_null())
-                    .to_owned(),
-            )
-            .await?;
+    manager
+        .create_index(
+            Index::create()
+                .name("uix_hsi_unqualified")
+                .table(HostSoftwareItems::Table)
+                .col(HostSoftwareItems::HostId)
+                .col(HostSoftwareItems::SoftwareItemId)
+                .unique()
+                .and_where(Expr::col(HostSoftwareItems::Qualifier).is_null())
+                .and_where(Expr::col(HostSoftwareItems::DeactivatedAt).is_null())
+                .to_owned(),
+        )
+        .await?;
 
-        manager
-            .create_index(
-                Index::create()
-                    .name("uix_hsi_qualified")
-                    .table(HostSoftwareItems::Table)
-                    .col(HostSoftwareItems::HostId)
-                    .col(HostSoftwareItems::SoftwareItemId)
-                    .col(HostSoftwareItems::Qualifier)
-                    .unique()
-                    .and_where(Expr::col(HostSoftwareItems::Qualifier).is_not_null())
-                    .and_where(Expr::col(HostSoftwareItems::DeactivatedAt).is_null())
-                    .to_owned(),
-            )
-            .await?;
-    }
+    manager
+        .create_index(
+            Index::create()
+                .name("uix_hsi_qualified")
+                .table(HostSoftwareItems::Table)
+                .col(HostSoftwareItems::HostId)
+                .col(HostSoftwareItems::SoftwareItemId)
+                .col(HostSoftwareItems::Qualifier)
+                .unique()
+                .and_where(Expr::col(HostSoftwareItems::Qualifier).is_not_null())
+                .and_where(Expr::col(HostSoftwareItems::DeactivatedAt).is_null())
+                .to_owned(),
+        )
+        .await?;
 
     // Category lookup.
     manager
@@ -768,7 +719,7 @@ async fn rebuild_update_history_sqlite(manager: &SchemaManager<'_>) -> Result<()
     Ok(())
 }
 
-// -- PG/MySQL --------------------------------------------------------------
+// -- PG --------------------------------------------------------------
 
 async fn alter_update_history(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     // Drop update_output_lines first (FK dependency on update_history).
@@ -862,19 +813,12 @@ async fn alter_update_history(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
         )
         .await?;
 
-    // On MariaDB, temporarily drop FKs before dropping indexes (InnoDB uses
-    // user-created indexes as FK backing indexes).
-    let uh_fks = helpers::drop_mysql_foreign_keys(manager, "update_history").await?;
-
-    // Drop pre-existing indexes (they survive ALTER TABLE on PG/MySQL, unlike
+    // Drop pre-existing indexes (they survive ALTER TABLE on PG, unlike
     // SQLite table-recreation which drops everything automatically).
     drop_update_history_indexes(manager).await?;
 
     // Recreate indexes and update_output_lines (shared with SQLite path).
     create_update_history_indexes(manager).await?;
-
-    // Recreate FKs on MariaDB.
-    helpers::recreate_mysql_foreign_keys(manager, "update_history", &uh_fks).await?;
 
     recreate_update_output_lines(manager).await?;
 
@@ -1178,7 +1122,7 @@ async fn rebuild_update_batches_sqlite(manager: &SchemaManager<'_>) -> Result<()
     Ok(())
 }
 
-// -- PG/MySQL --------------------------------------------------------------
+// -- PG --------------------------------------------------------------
 
 async fn alter_update_batches(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     // Add new columns with defaults so existing rows are populated.
@@ -1210,17 +1154,11 @@ async fn alter_update_batches(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
         )
         .await?;
 
-    // On MariaDB, temporarily drop FKs before index operations.
-    let ub_fks = helpers::drop_mysql_foreign_keys(manager, "update_batches").await?;
-
-    // Drop pre-existing indexes (they survive ALTER TABLE on PG/MySQL).
+    // Drop pre-existing indexes (they survive ALTER TABLE on PG).
     drop_update_batches_indexes(manager).await?;
 
     // Recreate indexes.
     create_update_batches_indexes(manager).await?;
-
-    // Recreate FKs on MariaDB.
-    helpers::recreate_mysql_foreign_keys(manager, "update_batches", &ub_fks).await?;
 
     Ok(())
 }

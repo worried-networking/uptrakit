@@ -665,55 +665,33 @@ impl MigrationTrait for Migration {
 
         // ── Step 4: Create indexes ───────────────────────────────────────────
 
-        // Partial unique indexes (SQLite/PostgreSQL) or a single composite
-        // unique index (MySQL/MariaDB, which doesn't support partial indexes).
-        if manager.get_database_backend() == DbBackend::MySql {
-            // MySQL/MariaDB: single composite unique index on (host_id,
-            // software_item_id, qualifier). NULLs are considered distinct in
-            // MySQL unique indexes, so multiple NULL-qualifier rows per
-            // (host_id, software_item_id) are allowed — matching the semantics
-            // of the two partial indexes on the other backends.
-            manager
-                .create_index(
-                    Index::create()
-                        .name("uix_hsi_host_item_qualifier")
-                        .table(HostSoftwareItems::Table)
-                        .col(HostSoftwareItems::HostId)
-                        .col(HostSoftwareItems::SoftwareItemId)
-                        .col(HostSoftwareItems::Qualifier)
-                        .unique()
-                        .to_owned(),
-                )
-                .await?;
-        } else {
-            // SQLite/PostgreSQL: two partial unique indexes.
-            manager
-                .create_index(
-                    Index::create()
-                        .name("uix_hsi_unqualified")
-                        .table(HostSoftwareItems::Table)
-                        .col(HostSoftwareItems::HostId)
-                        .col(HostSoftwareItems::SoftwareItemId)
-                        .unique()
-                        .and_where(Expr::col(HostSoftwareItems::Qualifier).is_null())
-                        .to_owned(),
-                )
-                .await?;
+        // Two partial unique indexes for qualified/unqualified software items.
+        manager
+            .create_index(
+                Index::create()
+                    .name("uix_hsi_unqualified")
+                    .table(HostSoftwareItems::Table)
+                    .col(HostSoftwareItems::HostId)
+                    .col(HostSoftwareItems::SoftwareItemId)
+                    .unique()
+                    .and_where(Expr::col(HostSoftwareItems::Qualifier).is_null())
+                    .to_owned(),
+            )
+            .await?;
 
-            manager
-                .create_index(
-                    Index::create()
-                        .name("uix_hsi_qualified")
-                        .table(HostSoftwareItems::Table)
-                        .col(HostSoftwareItems::HostId)
-                        .col(HostSoftwareItems::SoftwareItemId)
-                        .col(HostSoftwareItems::Qualifier)
-                        .unique()
-                        .and_where(Expr::col(HostSoftwareItems::Qualifier).is_not_null())
-                        .to_owned(),
-                )
-                .await?;
-        }
+        manager
+            .create_index(
+                Index::create()
+                    .name("uix_hsi_qualified")
+                    .table(HostSoftwareItems::Table)
+                    .col(HostSoftwareItems::HostId)
+                    .col(HostSoftwareItems::SoftwareItemId)
+                    .col(HostSoftwareItems::Qualifier)
+                    .unique()
+                    .and_where(Expr::col(HostSoftwareItems::Qualifier).is_not_null())
+                    .to_owned(),
+            )
+            .await?;
 
         // Unique index for plugins: one plugin per role per host_software_item row.
         manager

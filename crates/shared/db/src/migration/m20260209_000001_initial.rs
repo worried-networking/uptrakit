@@ -460,16 +460,11 @@ impl MigrationTrait for Migration {
                         .on_delete(ForeignKeyAction::SetNull),
                 );
 
-            // MariaDB/MySQL do not support CHECK constraints that reference other
-            // columns. Application-level validation enforces this invariant on all
-            // backends; the CHECK is a defence-in-depth layer for SQLite and PG.
-            if manager.get_database_backend() != sea_orm::DbBackend::MySql {
-                sessions_table.check(
-                    Expr::col(Sessions::AuthMethod)
-                        .ne("oidc")
-                        .or(Expr::col(Sessions::OidcProviderId).is_not_null()),
-                );
-            }
+            sessions_table.check(
+                Expr::col(Sessions::AuthMethod)
+                    .ne("oidc")
+                    .or(Expr::col(Sessions::OidcProviderId).is_not_null()),
+            );
 
             manager.create_table(sessions_table.to_owned()).await?;
         }

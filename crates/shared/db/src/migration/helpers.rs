@@ -60,7 +60,6 @@
 //! }
 //! ```
 
-use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
 
 /// State of a table recreation after a potential partial previous run.
@@ -89,8 +88,8 @@ pub enum CrashRecoveryState {
 
 /// Suspend or resume FK enforcement on SQLite.
 ///
-/// On PostgreSQL and MySQL the `PRAGMA` statement is not recognised; this
-/// function is a no-op for those backends.
+/// On PostgreSQL the `PRAGMA` statement is not recognised; this function
+/// is a no-op for that backend.
 ///
 /// # When to use
 ///
@@ -153,9 +152,9 @@ pub async fn check_crash_recovery(
 ///
 /// **Important**: This helper is intended for the SQLite table recreation
 /// pattern where FK enforcement is disabled via `set_foreign_keys(false)`.
-/// On PostgreSQL/MySQL, prefer `ALTER TABLE` instead of table recreation
-/// to avoid FK constraint issues. If table recreation is unavoidable on
-/// PG/MySQL, the caller must handle dependent FK constraints manually.
+/// On PostgreSQL, prefer `ALTER TABLE` instead of table recreation to
+/// avoid FK constraint issues. If table recreation is unavoidable on PG,
+/// the caller must handle dependent FK constraints manually.
 pub async fn drop_original(manager: &SchemaManager<'_>, table_name: &str) -> Result<(), DbErr> {
     manager
         .drop_table(Table::drop().table(Alias::new(table_name)).to_owned())
@@ -186,156 +185,28 @@ pub async fn rename_temp(
 /// Check whether the current database backend is SQLite.
 ///
 /// Useful in migrations that need different paths for SQLite (table recreation)
-/// vs. PostgreSQL/MySQL (`ALTER TABLE`).
+/// vs. PostgreSQL (`ALTER TABLE`).
 pub fn is_sqlite(manager: &SchemaManager<'_>) -> bool {
     manager.get_database_backend() == DbBackend::Sqlite
 }
 
 /// Drop an index, ignoring "does not exist" errors.
 ///
-/// Uses `IF EXISTS` on SQLite/PostgreSQL and raw `DROP INDEX` on MySQL
-/// (sea-query panics on `IF EXISTS` for MySQL's `DROP INDEX`).
+/// Uses `IF EXISTS` on SQLite and PostgreSQL.
 pub async fn drop_index_if_exists(
     manager: &SchemaManager<'_>,
     index_name: &str,
     table_name: &str,
 ) -> Result<(), DbErr> {
-    if manager.get_database_backend() == DbBackend::MySql {
-        // MySQL/MariaDB: DROP INDEX without IF EXISTS; ignore "doesn't exist".
-        let sql = format!("DROP INDEX `{index_name}` ON `{table_name}`");
-        match manager.get_connection().execute_unprepared(&sql).await {
-            Ok(_) => Ok(()),
-            Err(DbErr::Exec(ref e)) if e.to_string().contains("1091") => Ok(()),
-            Err(e) => Err(e),
-        }
-    } else {
-        manager
-            .drop_index(
-                Index::drop()
-                    .name(index_name)
-                    .table(Alias::new(table_name))
-                    .if_exists()
-                    .to_owned(),
-            )
-            .await
-    }
-}
-
-/// Drop all foreign key constraints on a MySQL/MariaDB table.
-///
-/// Returns the FK metadata (constraint name, column, referenced table, referenced
-/// column, delete rule) so they can be recreated later via
-/// [`recreate_mysql_foreign_keys`].
-///
-/// This is a no-op on non-MySQL backends (returns an empty vec).
-///
-/// # Why
-///
-/// MariaDB/InnoDB implicitly uses user-created indexes as the backing index for
-/// FK constraints. Attempting to drop such an index fails with error 1553
-/// ("Cannot drop index: needed in a foreign key constraint"). The safest
-/// workaround is to temporarily drop all FKs on the table, perform index
-/// operations, then recreate the FKs.
-pub async fn drop_mysql_foreign_keys(
-    manager: &SchemaManager<'_>,
-    table_name: &str,
-) -> Result<Vec<FkInfo>, DbErr> {
-    if manager.get_database_backend() != DbBackend::MySql {
-        return Ok(vec![]);
-    }
-
-    let sql = format!(
-        "SELECT kcu.CONSTRAINT_NAME, kcu.COLUMN_NAME, kcu.REFERENCED_TABLE_NAME, \
-         kcu.REFERENCED_COLUMN_NAME, rc.DELETE_RULE \
-         FROM information_schema.KEY_COLUMN_USAGE kcu \
-         JOIN information_schema.REFERENTIAL_CONSTRAINTS rc \
-           ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA \
-          AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME \
-         WHERE kcu.TABLE_SCHEMA = DATABASE() \
-           AND kcu.TABLE_NAME = '{table_name}' \
-           AND kcu.REFERENCED_TABLE_NAME IS NOT NULL"
-    );
-
-    let rows = manager
-        .get_connection()
-        .query_all_raw(sea_orm::Statement::from_string(DbBackend::MySql, sql))
-        .await?;
-
-    let mut fks = Vec::new();
-    for row in &rows {
-        let constraint_name: String = row.try_get("", "CONSTRAINT_NAME")?;
-        let column_name: String = row.try_get("", "COLUMN_NAME")?;
-        let ref_table: String = row.try_get("", "REFERENCED_TABLE_NAME")?;
-        let ref_column: String = row.try_get("", "REFERENCED_COLUMN_NAME")?;
-        let delete_rule: String = row.try_get("", "DELETE_RULE")?;
-
-        fks.push(FkInfo {
-            constraint_name,
-            column_name,
-            referenced_table: ref_table,
-            referenced_column: ref_column,
-            delete_rule,
-        });
-    }
-
-    // Drop all found FKs.
-    for fk in &fks {
-        manager
-            .drop_foreign_key(
-                ForeignKey::drop()
-                    .name(&fk.constraint_name)
-                    .table(Alias::new(table_name))
-                    .to_owned(),
-            )
-            .await?;
-    }
-
-    Ok(fks)
-}
-
-/// Recreate foreign keys previously dropped by [`drop_mysql_foreign_keys`].
-///
-/// No-op if `fks` is empty.
-pub async fn recreate_mysql_foreign_keys(
-    manager: &SchemaManager<'_>,
-    table_name: &str,
-    fks: &[FkInfo],
-) -> Result<(), DbErr> {
-    for fk in fks {
-        let on_delete = match fk.delete_rule.as_str() {
-            "CASCADE" => ForeignKeyAction::Cascade,
-            "SET NULL" => ForeignKeyAction::SetNull,
-            "SET DEFAULT" => ForeignKeyAction::SetDefault,
-            "NO ACTION" | "RESTRICT" => ForeignKeyAction::Restrict,
-            _ => ForeignKeyAction::Restrict,
-        };
-
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name(&fk.constraint_name)
-                    .from(Alias::new(table_name), Alias::new(&fk.column_name))
-                    .to(
-                        Alias::new(&fk.referenced_table),
-                        Alias::new(&fk.referenced_column),
-                    )
-                    .on_delete(on_delete)
-                    .to_owned(),
-            )
-            .await?;
-    }
-
-    Ok(())
-}
-
-/// Foreign key metadata for temporary FK drop/recreate on MySQL.
-#[derive(Debug, Clone)]
-pub struct FkInfo {
-    pub constraint_name: String,
-    pub column_name: String,
-    pub referenced_table: String,
-    pub referenced_column: String,
-    pub delete_rule: String,
+    manager
+        .drop_index(
+            Index::drop()
+                .name(index_name)
+                .table(Alias::new(table_name))
+                .if_exists()
+                .to_owned(),
+        )
+        .await
 }
 
 /// Create a NOT NULL timestamp-with-time-zone column.

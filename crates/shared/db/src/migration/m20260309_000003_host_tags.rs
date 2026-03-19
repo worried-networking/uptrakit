@@ -57,33 +57,15 @@ impl MigrationTrait for Migration {
         // Partial unique: one active tag name per tenant.
         //
         // SQLite does not support partial indexes via sea_query's `.and_where()`,
-        // so we use `execute_unprepared` with DB-specific raw SQL. This is the
-        // same pattern used by other migrations that need partial unique indexes.
-        let backend = manager.get_database_backend();
-        if backend == sea_orm::DatabaseBackend::MySql {
-            // MariaDB does not support partial indexes. Use a regular composite
-            // unique index on (tenant_id, name, deactivated_at) instead.
-            manager
-                .create_index(
-                    Index::create()
-                        .name("uix_host_tags_tenant_name")
-                        .table(HostTags::Table)
-                        .col(HostTags::TenantId)
-                        .col(HostTags::Name)
-                        .col(HostTags::DeactivatedAt)
-                        .unique()
-                        .to_owned(),
-                )
-                .await?;
-        } else {
-            let partial_unique_sql = "CREATE UNIQUE INDEX uix_host_tags_tenant_name \
-                 ON host_tags (tenant_id, name) \
-                 WHERE deactivated_at IS NULL";
-            manager
-                .get_connection()
-                .execute_unprepared(partial_unique_sql)
-                .await?;
-        }
+        // so we use `execute_unprepared` with raw SQL. This is the same pattern
+        // used by other migrations that need partial unique indexes.
+        let partial_unique_sql = "CREATE UNIQUE INDEX uix_host_tags_tenant_name \
+             ON host_tags (tenant_id, name) \
+             WHERE deactivated_at IS NULL";
+        manager
+            .get_connection()
+            .execute_unprepared(partial_unique_sql)
+            .await?;
 
         // ── host_tag_assignments ─────────────────────────────────────────
         manager
