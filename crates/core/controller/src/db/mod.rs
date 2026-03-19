@@ -1,8 +1,6 @@
 // Compile-time check: at least one database backend must be enabled
-#[cfg(not(any(feature = "db-sqlite", feature = "db-postgres", feature = "db-mysql")))]
-compile_error!(
-    "At least one database backend feature must be enabled: db-sqlite, db-postgres, or db-mysql"
-);
+#[cfg(not(any(feature = "db-sqlite", feature = "db-postgres")))]
+compile_error!("At least one database backend feature must be enabled: db-sqlite or db-postgres");
 
 pub(crate) mod config;
 mod error;

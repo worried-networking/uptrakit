@@ -12,7 +12,6 @@ default = []
 migration   = ["dep:sea-orm-migration"]
 db-sqlite   = ["sea-orm/sqlx-sqlite",   "sea-orm-migration?/sqlx-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration?/sqlx-postgres"]
-db-mysql    = ["sea-orm/sqlx-mysql",    "sea-orm-migration?/sqlx-mysql"]
 
 [dependencies]
 rootcause = { workspace = true }

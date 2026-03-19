@@ -59,12 +59,6 @@ impl DbConfig {
                     "PostgreSQL URL provided but db-postgres feature not enabled".to_string(),
                 ));
             }
-        } else if url.starts_with("mysql://") {
-            if !cfg!(feature = "db-mysql") {
-                bail!(DbError::Configuration(
-                    "MySQL URL provided but db-mysql feature not enabled".to_string(),
-                ));
-            }
         } else {
             bail!(DbError::Configuration(format!(
                 "unsupported database URL scheme: {}",

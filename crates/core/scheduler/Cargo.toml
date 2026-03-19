@@ -10,10 +10,9 @@ version.workspace = true
 [features]
 default = ["db-sqlite", "zeroconf"]
 zeroconf = ["uptrakit-service-sdk/zeroconf"]
-db-all = ["db-sqlite", "db-postgres", "db-mysql"]
+db-all = ["db-sqlite", "db-postgres"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres"]
-db-mysql = ["sea-orm/sqlx-mysql", "uptrakit-shared-db/db-mysql"]
 oidc = ["uptrakit-scheduler-engine/oidc"]
 
 [dependencies]

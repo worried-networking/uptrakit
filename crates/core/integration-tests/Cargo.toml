@@ -42,7 +42,7 @@ rootcause = { workspace = true }
 # Database integration test helpers
 testcontainers-modules = { workspace = true }
 paste = { workspace = true }
-uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite", "db-postgres", "db-mysql"] }
+uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite", "db-postgres"] }
 uptrakit-web-api-types = { workspace = true }
 uptrakit-audit-log = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
