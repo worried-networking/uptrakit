@@ -178,7 +178,7 @@ directory is created automatically on first start.
 Unlike the standalone SSH agent (which uses its own SQLite database), the embedded SSH agent
 stores all data in the controller's shared database. The SSH agent tables (`ssh_hosts`,
 `proxmox_host_state`, `proxmox_pending_matches`) are created by the controller's migration
-system and work with any supported backend (SQLite, PostgreSQL, MySQL).
+system and work with any supported backend (SQLite, PostgreSQL).
 
 ### Transport and message flow
 

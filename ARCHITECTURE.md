@@ -267,12 +267,10 @@ Uptrakit supports three database backends via SeaORM:
 | --- | --- | --- |
 | SQLite | `db-sqlite` (default) | In-memory or file-based; single-server deployments |
 | PostgreSQL | `db-postgres` | Multi-server deployments; HA with external scheduler |
-| MariaDB/MySQL | `db-mysql` | MariaDB 11+; index key limits and partial index workarounds apply |
 
 All migrations use the same schema definitions across backends with backend-specific code paths
-where needed (e.g., table recreation vs. ALTER TABLE, partial indexes vs. composite indexes).
-See [Database Migrations](docs/development/database-migrations.md#mysqlmariadb-compatibility-workarounds)
-for MariaDB-specific migration patterns.
+where needed (e.g., table recreation for SQLite vs. ALTER TABLE for PostgreSQL).
+See [Database Migrations](docs/development/database-migrations.md) for migration patterns.
 
 ## Notification subsystem
 
@@ -470,7 +468,7 @@ The HTTP API is composed of three independent crates under `crates/ui/`:
 - **`uptrakit-web-api-queries`** (`crates/ui/web-api-queries/`): database query logic (~10.5k lines).
   Contains all query modules, `TenantDb` (tenant-scoped DB wrapper), and the `ServiceNotifier` trait
   (decouples queries from the concrete `NotificationService`). DB feature flags (`db-sqlite`,
-  `db-postgres`, `db-mysql`) are forwarded from the parent crate.
+  `db-postgres`) are forwarded from the parent crate.
 
 - **`uptrakit-web-api`** (`crates/ui/web-api/`): HTTP API layer (~27k lines). Contains routes,
   middleware, `AppState`, router, `NotificationService`, PKI utilities, and SSE broadcasters.

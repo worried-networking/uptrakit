@@ -141,19 +141,6 @@ has diverged significantly from chronological file naming.
   reports migration 1. If migration 11 fails, the developer investigates the wrong
   file.
 
-### [LOW] MySQL `DROP INDEX IF NOT EXISTS` uses fragile error-string matching
-
-- **Dimension**: database, portability
-- **Scope**: `migration/helpers.rs:208` (`drop_index_if_exists`)
-- **Description**: The function matches MySQL error code `1091` via
-  `e.to_string().contains("1091")`. This relies on the error message format
-  remaining stable across MySQL/MariaDB versions and sqlx driver versions.
-- **Why it matters**: If MySQL's error message format changes or the sqlx driver
-  alters its `Display` implementation, the match fails and the migration errors
-  instead of silently succeeding on an already-absent index.
-- **Failure scenario**: A MariaDB version change reformats the error message; the
-  migration fails on a rollback/reapply where the index was already dropped.
-
 ### [LOW] `proxmox_host_state` and `proxmox_pending_matches` use TEXT timestamps
 
 - **Dimension**: consistency, coding standards

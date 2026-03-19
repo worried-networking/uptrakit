@@ -249,13 +249,13 @@ cargo test --all-features
 
 - Error paths with clear messaging
 
-- Database integration tests (Docker-based for PG/MariaDB, ignored by default):
+- Database integration tests (Docker-based for PG, ignored by default):
 
   ```bash
   cargo test -p uptrakit-integration-tests --test database -- --ignored
   ```
 
-  Tests all REST API flows against SQLite, PostgreSQL, and MariaDB using testcontainers.
+  Tests all REST API flows against SQLite and PostgreSQL using testcontainers.
   See [Database Integration Tests](#database-integration-tests) below.
 
 - Reverse proxy integration tests (Docker-based, ignored by default):
@@ -349,21 +349,21 @@ cargo test --all-features
 ## Database Integration Tests
 
 The `database` test binary in `crates/core/integration-tests/tests/database.rs` exercises the
-full REST API against all three supported database backends: SQLite, PostgreSQL, and MariaDB.
+full REST API against both supported database backends: SQLite and PostgreSQL.
 
 ### Architecture
 
 A `TestHarness` builds a fully wired `AppState` + Axum router per backend, mirroring the
-in-crate `TestApp` but running from an external crate. PostgreSQL and MariaDB containers are
-managed by `testcontainers-modules` — one shared container per process, with a fresh
-`test_{uuid}` database per test for isolation.
+in-crate `TestApp` but running from an external crate. PostgreSQL containers are managed by
+`testcontainers-modules` — one shared container per process, with a fresh `test_{uuid}`
+database per test for isolation.
 
 ```text
 crates/core/integration-tests/tests/
   database.rs                      -- test binary entry point
   database_helpers/
     mod.rs                         -- module root
-    db_providers.rs                -- SQLite/PostgreSQL/MariaDB setup + migrations
+    db_providers.rs                -- SQLite/PostgreSQL setup + migrations
     harness.rs                     -- TestHarness (builds AppState + Router)
     http_client.rs                 -- TestClient (tower::oneshot wrapper)
     fixtures.rs                    -- DB insertion + HTTP registration helpers
@@ -393,7 +393,7 @@ crates/core/integration-tests/tests/
 ### The `db_test!` macro
 
 Each test function is written once as `async fn test_xxx(harness: &TestHarness)` and then
-expanded into three `#[ignore]` test functions via the `db_test!` macro:
+expanded into two `#[ignore]` test functions via the `db_test!` macro:
 
 ```rust
 async fn test_create_host_tag(harness: &TestHarness) {
@@ -401,13 +401,13 @@ async fn test_create_host_tag(harness: &TestHarness) {
 }
 
 db_test!(create_host_tag, test_create_host_tag);
-// Generates: create_host_tag_sqlite, create_host_tag_postgres, create_host_tag_mariadb
+// Generates: create_host_tag_sqlite, create_host_tag_postgres
 ```
 
 ### Running
 
 ```bash
-# Run all database integration tests (requires Docker for PG/MariaDB)
+# Run all database integration tests (requires Docker for PG)
 cargo test -p uptrakit-integration-tests --test database -- --ignored
 
 # Run only SQLite tests (no Docker required)
@@ -415,9 +415,6 @@ cargo test -p uptrakit-integration-tests --test database sqlite -- --ignored
 
 # Run only PostgreSQL tests
 cargo test -p uptrakit-integration-tests --test database postgres -- --ignored
-
-# Run only MariaDB tests
-cargo test -p uptrakit-integration-tests --test database mariadb -- --ignored
 
 # Run a specific test across all backends
 cargo test -p uptrakit-integration-tests --test database auth_flow -- --ignored

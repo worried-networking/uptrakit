@@ -2,8 +2,8 @@
 
 The `uptrakit-controller db-migrate` subcommand copies all data from one
 database to another. It is the supported path for moving a running installation
-from SQLite (the default, developer-friendly backend) to PostgreSQL or MySQL
-when you need high availability or horizontal scalability.
+from SQLite (the default, developer-friendly backend) to PostgreSQL when you
+need high availability or horizontal scalability.
 
 ---
 
@@ -11,8 +11,7 @@ when you need high availability or horizontal scalability.
 
 Use this command when you want to:
 
-- Move from SQLite to PostgreSQL or MySQL for a production deployment.
-- Move between any two supported database backends (e.g. PostgreSQL → MySQL).
+- Move from SQLite to PostgreSQL for a production deployment.
 - Clone an existing database for testing or disaster-recovery rehearsal.
 
 > **Important**: This tool copies **data only**. Schema setup (tables, indexes,
@@ -48,9 +47,7 @@ source and target database backends.
 | --- | --- |
 | SQLite → SQLite | _(default, no extra flag needed)_ |
 | SQLite → PostgreSQL | `--features db-postgres` |
-| SQLite → MySQL | `--features db-mysql` |
-| PostgreSQL → MySQL | `--features db-all` |
-| Any → SQLite | _(SQLite is always compiled in by default)_ |
+| PostgreSQL → SQLite | _(SQLite is always compiled in by default)_ |
 
 Example build for a SQLite → PostgreSQL migration:
 

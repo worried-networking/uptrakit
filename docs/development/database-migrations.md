@@ -100,7 +100,7 @@ enum MyTable {
 
 All entity columns that store point-in-time values must use `time::OffsetDateTime`, backed by
 SeaORM's `.timestamp()` column type (mapped to `TEXT` in SQLite via RFC 3339, and to the native
-`TIMESTAMP` type on PostgreSQL and MySQL).
+`TIMESTAMP` type on PostgreSQL).
 
 ```rust
 // ✓ Correct
@@ -184,7 +184,7 @@ manager
 
 A `UNIQUE` constraint (created via `.unique_key()` on a column, `string_uniq()`, or
 `Index::create().unique()`) already creates an implicit index in all three supported
-backends (SQLite, PostgreSQL, MySQL). Do **not** add a separate non-unique index on the same
+backends (SQLite, PostgreSQL). Do **not** add a separate non-unique index on the same
 column — it wastes disk space and slows every write:
 
 ```rust
@@ -218,10 +218,6 @@ manager
     )
     .await?;
 ```
-
-> **MySQL/MariaDB note:** MySQL/MariaDB do not support partial indexes. Branch on the backend
-> to create a composite unique index including the filtered column instead. See
-> [MySQL/MariaDB Compatibility Workarounds](#mysqlmariadb-compatibility-workarounds) for details.
 
 ### Composite indexes for multi-column queries
 
@@ -302,8 +298,7 @@ API must use the **sea_query typed builder API** instead of `execute_unprepared(
 
 - Raw strings bypass the type system — a renamed column silently breaks a query at runtime.
 - `format!()` SQL is a SQL-injection vector.
-- sea_query builders adapt automatically to the active database dialect (SQLite / PostgreSQL /
-  MySQL).
+- sea_query builders adapt automatically to the active database dialect (SQLite / PostgreSQL).
 
 ### UUID values must be bound as BLOB — never interpolated as strings
 
@@ -604,9 +599,9 @@ workaround is the **table recreation** pattern.
 | Add a foreign key to an existing table | Table recreation (SQLite has no `ALTER TABLE ADD CONSTRAINT`) |
 | Restructure a table's schema | Table recreation |
 
-For PostgreSQL and MySQL, `ALTER TABLE ADD/DROP/ALTER COLUMN` and `ALTER TABLE ADD CONSTRAINT`
+For PostgreSQL, `ALTER TABLE ADD/DROP/ALTER COLUMN` and `ALTER TABLE ADD CONSTRAINT`
 work directly. Migrations that need table recreation on SQLite should branch on the backend
-using `helpers::is_sqlite(manager)` and use `ALTER TABLE` on other backends.
+using `helpers::is_sqlite(manager)` and use `ALTER TABLE` on PostgreSQL.
 
 **All steps — table creation, data copy, drop, rename, and index recreation — must use
 sea_query builders or the shared helpers.** Never use raw SQL strings for these operations.
@@ -621,7 +616,7 @@ Reusable helpers live in `crates/shared/db/src/migration/helpers.rs` (imported a
 
 | Helper | Purpose |
 | --- | --- |
-| `set_foreign_keys(manager, enabled)` | Suspend/resume FK enforcement on SQLite (no-op on PostgreSQL/MySQL) |
+| `set_foreign_keys(manager, enabled)` | Suspend/resume FK enforcement on SQLite (no-op on PostgreSQL) |
 | `check_crash_recovery(manager, table, temp)` | Detect partial previous runs and return the appropriate recovery state |
 | `drop_original(manager, table)` | Drop the original table after data has been copied to the temp table |
 | `rename_temp(manager, temp, canonical)` | Rename the temp table to the canonical name |
@@ -721,7 +716,7 @@ sea_query — do not reach for `execute_unprepared` as a convenience shortcut.
 
 #### Backend branching
 
-When a migration uses table recreation on SQLite but `ALTER TABLE` on PostgreSQL/MySQL:
+When a migration uses table recreation on SQLite but `ALTER TABLE` on PostgreSQL:
 
 ```rust
 async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -991,7 +986,7 @@ See [Testing](testing.md) for the full test DB pattern and FK-helper conventions
 
 ## Backend feature flags
 
-The `db-sqlite`, `db-postgres`, and `db-mysql` features of `uptrakit-shared-db` propagate to
+The `db-sqlite` and `db-postgres` features of `uptrakit-shared-db` propagate to
 `sea-orm-migration` only when the `migration` feature is also enabled (weak dependency). The
 controller activates the correct backend via its own feature flags:
 
@@ -999,7 +994,6 @@ controller activates the correct backend via its own feature flags:
 | --- | --- |
 | `db-sqlite` (default) | `db-sqlite`, `migration` |
 | `db-postgres` | `db-postgres`, `migration` |
-| `db-mysql` | `db-mysql`, `migration` |
 
 In-memory SQLite tests in web-api use `features = ["migration", "db-sqlite"]` as a
 dev-dependency.
@@ -1055,9 +1049,9 @@ See the end-user guide for operator-facing instructions:
 
 ## Multi-backend integration testing
 
-All migrations are tested against SQLite, PostgreSQL, and MariaDB via the database integration
-tests in `crates/core/integration-tests/tests/database/`. The `migrations.rs` module verifies
-that migrations run successfully and all core tables exist on each backend.
+All migrations are tested against SQLite and PostgreSQL via the database integration tests in
+`crates/core/integration-tests/tests/database/`. The `migrations.rs` module verifies that
+migrations run successfully and all core tables exist on each backend.
 
 ```bash
 # Run migration tests on all backends (requires Docker)
@@ -1066,162 +1060,6 @@ cargo test -p uptrakit-integration-tests --test database migrations -- --ignored
 
 See [Testing — Database Integration Tests](testing.md#database-integration-tests) for the full
 guide.
-
----
-
-## MySQL/MariaDB Compatibility Workarounds
-
-MariaDB/InnoDB has several limitations that require special handling in migrations.
-All workarounds are implemented using helpers in `crates/shared/db/src/migration/helpers.rs`.
-
-### TEXT columns in indexes must be VARCHAR(255)
-
-MariaDB/InnoDB limits index key length to 3072 bytes. TEXT columns in indexes
-exceed this limit. Use `.string()` (VARCHAR(255)) for any column referenced by
-an index:
-
-```rust
-// Correct — VARCHAR(255) fits within the 3072-byte index key limit
-.col(ColumnDef::new(MyTable::Name).string().not_null())
-
-// Wrong — TEXT in index exceeds the 3072-byte limit on MariaDB
-.col(ColumnDef::new(MyTable::Name).text().not_null())
-```
-
-### Partial indexes not supported
-
-MariaDB does not support `WHERE` clauses on `CREATE INDEX`. Use a composite
-unique index that includes the filtered column:
-
-```rust
-let is_mysql = manager.get_database_backend() == sea_orm::DbBackend::MySql;
-if is_mysql {
-    manager.create_index(
-        Index::create()
-            .name("uq_items_active_name")
-            .table(Items::Table)
-            .col(Items::TenantId)
-            .col(Items::Name)
-            .col(Items::DeactivatedAt)  // include the filter column
-            .unique()
-            .to_owned(),
-    ).await?;
-} else {
-    manager.create_index(
-        Index::create()
-            .name("uq_items_active_name")
-            .table(Items::Table)
-            .col(Items::TenantId)
-            .col(Items::Name)
-            .unique()
-            .and_where(Expr::col(Items::DeactivatedAt).is_null())
-            .to_owned(),
-    ).await?;
-}
-```
-
-### Expression/functional indexes not supported
-
-MariaDB does not support `LOWER()` or other expressions in index definitions.
-Fall back to plain column indexes — MariaDB collations are case-insensitive
-by default (`utf8mb4_general_ci`):
-
-```rust
-let sql = if manager.get_database_backend() == sea_orm::DatabaseBackend::MySql {
-    "CREATE INDEX idx_items_tenant_name ON items (tenant_id, name)"
-} else {
-    "CREATE INDEX idx_items_tenant_name ON items (tenant_id, lower(name))"
-};
-```
-
-### DROP INDEX IF EXISTS panics on MySQL
-
-sea-query panics on `Index::drop().if_exists()` for the MySQL backend. Use the
-`helpers::drop_index_if_exists()` helper which handles MySQL error 1091
-(index doesn't exist) gracefully:
-
-```rust
-// Correct — safe on all backends
-helpers::drop_index_if_exists(manager, "idx_my_table_col", "my_table").await?;
-```
-
-### FK-backed index drops
-
-MariaDB/InnoDB implicitly uses user-created indexes as backing indexes for FK
-constraints. Dropping such an index fails with error 1553. Use the
-`drop_mysql_foreign_keys` / `recreate_mysql_foreign_keys` helpers to temporarily
-remove all FK constraints before index operations:
-
-```rust
-let fks = helpers::drop_mysql_foreign_keys(manager, "my_table").await?;
-
-helpers::drop_index_if_exists(manager, "idx_my_col", "my_table").await?;
-manager.create_index(/* new index */).await?;
-
-helpers::recreate_mysql_foreign_keys(manager, "my_table", &fks).await?;
-```
-
-These helpers are no-ops on non-MySQL backends.
-
-### INSERT...ON CONFLICT generates invalid MySQL syntax
-
-sea-query's `on_conflict(do_nothing)` generates malformed `INSERT IGNORE` on
-MySQL. Use raw SQL with `WHERE NOT EXISTS`:
-
-```rust
-let sql = format!(
-    "INSERT INTO role_permissions (role_id, permission_id) \
-     SELECT r.id, p.id FROM roles r, permissions p \
-     WHERE r.name = '{role}' AND p.name = '{perm}' \
-     AND NOT EXISTS ( \
-       SELECT 1 FROM role_permissions rp \
-       WHERE rp.role_id = r.id AND rp.permission_id = p.id \
-     )"
-);
-manager.get_connection().execute_unprepared(&sql).await?;
-```
-
-### Reserved word `key` must be quoted
-
-MySQL reserves the word `key`. Use sea_query builders which auto-quote identifiers:
-
-```rust
-// Correct — sea_query quotes reserved words automatically
-Expr::col(Alias::new("key")).eq(value)
-```
-
-### CHECK constraints cannot reference other columns
-
-MariaDB CHECK constraints cannot reference columns other than the one being
-checked. Make complex CHECK constraints conditional:
-
-```rust
-if manager.get_database_backend() != sea_orm::DbBackend::MySql {
-    table.check(
-        Expr::col(Sessions::AuthMethod).ne("oidc")
-            .or(Expr::col(Sessions::OidcProviderId).is_not_null()),
-    );
-}
-```
-
-### Table recreation on SQLite and MariaDB
-
-When ALTER TABLE operations are complex on MariaDB (FK constraints, column
-drops with dependent indexes), use the same table recreation pattern as SQLite:
-
-```rust
-let is_postgres = manager.get_database_backend() == sea_orm::DbBackend::Postgres;
-
-if is_postgres {
-    // PostgreSQL: ALTER TABLE directly
-} else {
-    // SQLite / MariaDB: drop + recreate the table
-    manager.drop_table(
-        Table::drop().table(MyTable::Table).if_exists().to_owned(),
-    ).await?;
-    manager.create_table(/* new schema */).await?;
-}
-```
 
 ---
 

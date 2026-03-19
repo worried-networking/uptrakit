@@ -740,7 +740,7 @@ ______________________________________________________________________
     results).
 - [x] Integration tests: database operations
   - **Category**: Testing | **Impact**: Medium | **Effort**: Medium
-  - Multi-DB integration tests (SQLite, PostgreSQL, MariaDB) using testcontainers. 61 tests
+  - Multi-DB integration tests (SQLite, PostgreSQL) using testcontainers. 61 tests
     per backend covering auth flows, CRUD operations, batch actions, and error cases.
 - [ ] Integration tests: plugin implementations
   - **Category**: Testing | **Impact**: Medium | **Effort**: Medium

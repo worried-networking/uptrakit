@@ -173,8 +173,7 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 | --- | --- | --- |
 | `db-sqlite` | Yes | SQLite backend |
 | `db-postgres` | No | PostgreSQL backend |
-| `db-mysql` | No | MySQL backend |
-| `db-all` | No | All database backends |
+| `db-all` | No | All database backends (SQLite + PostgreSQL) |
 | `oidc` | Yes | OpenID Connect authentication support. Disabling removes the `openidconnect` crate and all OIDC routes/stores, significantly reducing compile-time dependencies. Propagates to `uptrakit-web-api/oidc`. |
 | `embedded-scheduler` | Yes | Embeds the scheduler engine in the controller process via `EmbeddedServiceHost::add()`. Uses `CoexistencePolicy::YieldAlways` to defer external tasks when an external scheduler connects; internal tasks (CRL renewal, CA rotation, service cert check) always run. The yield check queries `EmbeddedServiceNotifier::is_capability_yielded(Scheduler)`. Adds `uptrakit-scheduler-engine` dependency. |
 | `embedded-agent` | No | Embeds a local agent in the controller process via `EmbeddedServiceHost::add()` for single-tenant deployments. Manages the controller host (software discovery, version checks, updates). Uses `CoexistencePolicy::YieldAlways` with a custom `yield_check` that yields only when an external agent reports the same `machine_id`. Provisioned as a tenant service (not system) under `AppState.default_tenant_id`. Reuses all business logic from `uptrakit-agent-core`. Propagates `interactive` feature as `uptrakit-agent-core?/interactive`. Freeze file at `<state_dir>/embedded-agent/update-freeze`. Rate limits updates to 5-second cooldown. |
@@ -198,8 +197,7 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 | `swagger-ui` | No | Swagger UI at `/swagger-ui` |
 | `db-sqlite` | No | SQLite backend. Propagates to `uptrakit-web-api-queries/db-sqlite`. |
 | `db-postgres` | No | PostgreSQL backend. Propagates to `uptrakit-web-api-queries/db-postgres`. |
-| `db-mysql` | No | MySQL backend. Propagates to `uptrakit-web-api-queries/db-mysql`. |
-| `db-all` | No | All database backends. Propagates to `uptrakit-web-api-queries/db-all`. |
+| `db-all` | No | All database backends (SQLite + PostgreSQL). Propagates to `uptrakit-web-api-queries/db-all`. |
 | `interactive` | No | Interactive update WebSocket endpoint (`/api/v1/update-history/{id}/interactive`), `InteractiveSessionRegistry`. Propagates to `uptrakit-command/interactive` via `uptrakit-agent-core`. |
 | `reset-data` | No | Registers the `POST /api/v1/settings/reset-data` route and the transactional data-reset query logic. No additional dependencies. |
 
@@ -259,7 +257,7 @@ build environments.
   - IP detection / `ClientIp`, forwarded headers, trusted-proxy logic
   - reverse proxy middleware/settings and related TLS behavior
 - If anything related to database queries, migrations, or REST API behavior changes, run the
-  database integration tests (requires Docker for PG/MariaDB):
+  database integration tests (requires Docker for PG):
   - `cargo test -p uptrakit-integration-tests --test database -- --ignored`
 - If anything related to enrollment, wire protocol, service lifecycle, or inter-component
   communication changes, run the system integration tests (requires Docker and pre-built image):
@@ -360,14 +358,9 @@ These are non-negotiable design constraints. Do not violate them.
    - `CASE` expressions in `INSERT...SELECT` during table recreation — sea_query's builder
      does not support `CASE` in the SELECT column list.
    - `INSERT...WHERE NOT EXISTS` for idempotent permission inserts — sea_query's
-     `on_conflict(do_nothing)` generates invalid MySQL syntax.
-   - `information_schema` queries in `helpers::drop_mysql_foreign_keys()` — introspection
-     of FK metadata has no sea_query equivalent.
-   - Backend-conditional expression indexes (`LOWER()`) — MariaDB does not support
-     expression indexes; falls back to plain column indexes.
-   See [database-migrations.md](docs/development/database-migrations.md) for the full exceptions table,
-   the table recreation guide with shared helpers, and
-   [MySQL/MariaDB Compatibility Workarounds](docs/development/database-migrations.md#mysqlmariadb-compatibility-workarounds).
+     `on_conflict(do_nothing)` does not generate correct syntax for all backends.
+   See [database-migrations.md](docs/development/database-migrations.md) for the full exceptions table
+   and the table recreation guide with shared helpers.
 1. **Cover new logic with tests.** Cover success and failure paths.
 1. **Document everything.** Any code change must be properly documented either in the code, or in the separate
    documentation. Any changes to the agent-controller wire protocol must be documented in
