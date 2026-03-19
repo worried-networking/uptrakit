@@ -1002,7 +1002,7 @@ async fn main() {
     // Host subcommands run with minimal tracing and no rustls provider.
     if let Some(Commands::Host { command }) = args.command {
         // Verbosity-aware tracing for CLI subcommands.
-        init_tracing("uptrakit_agent_ssh", args.common.verbose);
+        init_tracing(args.common.verbose);
 
         if let Err(e) = init_master_key(&args.master_key_file, args.allow_plaintext_secrets) {
             eprintln!("error: {e}");
@@ -1043,7 +1043,7 @@ async fn main() {
         std::process::exit(1);
     }
 
-    init_tracing("uptrakit_agent_ssh", args.common.verbose);
+    init_tracing(args.common.verbose);
     uptrakit_service_sdk::init_crypto();
 
     // Initialize master encryption key for local SSH credential storage.
@@ -1230,20 +1230,19 @@ fn parse_master_key_hex(key_hex: &str) -> InitResult<[u8; 32]> {
 }
 
 /// Initialize `tracing_subscriber` with a verbosity-aware filter.
-fn init_tracing(own_module: &str, verbosity: u8) {
+fn init_tracing(verbosity: u8) {
     use tracing_subscriber::EnvFilter;
     use tracing_subscriber::prelude::*;
 
-    if verbosity > 3 {
+    if verbosity > 2 {
         eprintln!(
-            "warning: -vvvv or more has no additional effect; maximum verbosity is -vvv (trace)"
+            "warning: -vvv or more has no additional effect; maximum verbosity is -vv (trace)"
         );
     }
 
     let directive = match verbosity {
         0 => "uptrakit=info".to_string(),
-        1 => format!("{own_module}=debug"),
-        2 => "uptrakit=debug".to_string(),
+        1 => "uptrakit=debug".to_string(),
         _ => "uptrakit=trace".to_string(),
     };
     let mut filter = EnvFilter::from_default_env();

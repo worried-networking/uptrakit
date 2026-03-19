@@ -306,7 +306,7 @@ async fn main() {
     // The SDK does not provide init_tracing() — libraries must not configure
     // the global dispatcher.
     let mut filter = tracing_subscriber::EnvFilter::from_default_env();
-    if let Ok(directive) = "uptrakit_my_service=info".parse() {
+    if let Ok(directive) = "uptrakit=info".parse() {
         filter = filter.add_directive(directive);
     }
     tracing_subscriber::fmt().with_env_filter(filter).init();
