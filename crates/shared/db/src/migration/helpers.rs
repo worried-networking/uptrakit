@@ -60,6 +60,7 @@
 //! }
 //! ```
 
+use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
 
 /// State of a table recreation after a potential partial previous run.
