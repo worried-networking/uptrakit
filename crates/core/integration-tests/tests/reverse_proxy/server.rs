@@ -217,6 +217,18 @@ async fn build_state(
         )))
         .device_flow_store(DeviceFlowStore::new(db.clone()))
         .rate_limit_store(RateLimitStore::new(db.clone()))
+        .oidc_flow_store(uptrakit_web_api::auth::oidc_state::OidcFlowStore::new(
+            db.clone(),
+        ))
+        .account_link_store(uptrakit_web_api::auth::oidc_state::AccountLinkStore::new(
+            db.clone(),
+        ))
+        .oidc_token_exchange_store(
+            uptrakit_web_api::auth::oidc_state::OidcTokenExchangeStore::new(db.clone()),
+        )
+        .oidc_registration_store(
+            uptrakit_web_api::auth::oidc_state::OidcRegistrationStore::new(db.clone()),
+        )
         .pki_path(std::path::PathBuf::from("/tmp/test-pki-reverse-proxy"))
         .rustls_config(rustls_cfg)
         .crl_pem_cache(Arc::new(tokio::sync::RwLock::new(String::new())))
