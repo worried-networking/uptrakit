@@ -1,3 +1,4 @@
+pub mod api_error;
 pub mod app_state;
 pub mod embedded_support;
 pub use uptrakit_web_api_auth::auth;
