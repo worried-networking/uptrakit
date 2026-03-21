@@ -21,6 +21,23 @@ Types are imported via `uptrakit_openapi_client::types::*` (re-exported from `up
   reflected in the OpenAPI spec via the `x-required-permission` extension on every protected endpoint.
   See [Authentication and Authorization](../security/auth-and-authorization.md) for the full permission model.
 
+## Error Response Shape
+
+All error responses from domain-logic handlers use the following JSON shape:
+
+```json
+{ "error": "Human-readable message.", "code": "domain.variant_name" }
+```
+
+The `code` field is a stable, machine-readable string (dot-separated, snake_case) that uniquely identifies
+the error variant. API clients should match on `code` for programmatic error handling and display `error`
+to end users. The mapping from domain error variants to HTTP status codes and codes is defined exhaustively
+in `crates/ui/web-api/src/api_error/mappings.rs` and documented in
+`crates/ui/web-api/src/api_error/MAPPING_REVIEW.md`.
+
+5xx responses always return a generic `error` message regardless of the underlying cause; the internal detail
+is logged server-side only.
+
 ## Health and Readiness Endpoints
 
 Two unauthenticated probe endpoints are available on both the main HTTPS router and the

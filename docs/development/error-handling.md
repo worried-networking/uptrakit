@@ -60,20 +60,20 @@ Errors propagate from plugin crates through the controller into HTTP responses:
 ```text
 Plugin crate                    Controller / Web-API              HTTP handler
 ────────────                    ──────────────────                ────────────
-PluginError                     AgentRouteError                   axum::Response
+PluginError                     AgentRouteError                   ApiError / axum::Response
  ├─ Configuration(String)        ├─ Database(DbErr)                ├─ 400 Bad Request
  ├─ Network(String)              ├─ BadRequest(String)             ├─ 404 Not Found
  └─ PluginInternal(String)       ├─ NotFound(String)               ├─ 500 Internal Error
-                                 └─ Plugin(String)                 └─ (JSON body)
+                                 └─ Plugin(String)                 └─ (JSON body with `code`)
        │                                │                                │
-       │  impl_report_conversion!       │  match on Report               │
-       │  + .context_to()?              │  + error_response()            │
+       │  impl_report_conversion!       │  From<Report<E>> for ApiError  │
+       │  + .context_to()?              │  + ? propagation               │
        └────────────────────────────────┘────────────────────────────────┘
 ```
 
 Each boundary owns its error enum and `Result<T>` alias. Cross-boundary conversion is handled by
 `impl_report_conversion!` and `.context_to()`. At the HTTP boundary, the orphan rule prevents
-`impl IntoResponse for Report<E>`, so errors are handled inline (see Pattern 18).
+`impl IntoResponse for Report<E>`, so errors are converted via `ApiError` (see Pattern 18).
 
 ## Complete Real-World Example
 
@@ -371,36 +371,64 @@ let (successes, errors): (Vec<_>, Vec<_>) = items
     .collect_reports();
 ```
 
-### Pattern 18: Orphan rule limitation for `IntoResponse`
+### Pattern 18: HTTP error conversion via `ApiError`
 
 Due to Rust's orphan rule, downstream crates cannot implement `impl IntoResponse for Report<E>` because both
-`IntoResponse` (from `axum`) and `Report` (from `rootcause`) are foreign types. At HTTP handler call sites, handle
-errors inline instead:
+`IntoResponse` (from `axum`) and `Report` (from `rootcause`) are foreign types. In `uptrakit-web-api`, all domain
+errors are bridged to HTTP via the centralized `ApiError` type defined in
+`crates/ui/web-api/src/api_error/mod.rs`.
+
+**Structure:**
 
 ```rust
-pub async fn my_handler(State(state): State<AppState>) -> impl IntoResponse {
-    match do_work(&state).await {
-        Ok(result) => Json(result).into_response(),
-        Err(report) => {
-            tracing::error!(error = %report, "operation failed");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        }
-    }
+pub struct ApiError {
+    status: StatusCode,
+    user_message: String,
+    code: String,              // machine-readable, e.g. "service.not_found"
+    internal_detail: Option<String>,  // logged at ERROR level for 5xx only
 }
 ```
+
+All 17 domain error types used in route handlers have exhaustive `From<Report<E>> for ApiError` impls in
+`crates/ui/web-api/src/api_error/mappings.rs`. Route handlers return
+`Result<impl IntoResponse, ApiError>` and use `?` to propagate domain errors:
+
+```rust
+pub async fn my_handler(...) -> Result<impl IntoResponse, ApiError> {
+    let result = do_work(&state).await?;   // Report<DomainError> → ApiError via From impl
+    Ok(Json(result).into_response())
+}
+```
+
+**`IntoResponse` behaviour:**
+
+- 5xx responses: emit one `tracing::error!` event with structured fields `error.code`, `error.status`,
+  and `error.detail`, then return the generic user message.
+- 4xx responses: no log event emitted; return the user-facing message directly.
+- All responses include a `code` field in the JSON body (`{ "error": "...", "code": "..." }`).
+
+**`DYNAMIC_DISPLAY_ALLOWLIST`:** Certain domain error variants carry user-supplied text that is safe to
+forward (e.g. `AuditLogQueryError::InvalidFilter`). These are listed in `DYNAMIC_DISPLAY_ALLOWLIST` in
+`mappings.rs` and have inline safety rationale comments. All other 5xx messages are generic.
+
+**Reference:** `crates/ui/web-api/src/api_error/MAPPING_REVIEW.md` contains the full mapping table
+with status codes, message strategies, and intentional behavioural deltas relative to the pre-refactor
+handlers.
 
 ### Pattern 19: Error assertion in tests with `current_context()`
 
 Use `current_context()` with `matches!()` to assert specific error variants in tests without matching on internal
-string messages:
+string messages. **Always bind the result of `current_context()` to a variable first** — calling
+`.current_context()` inline inside `matches!()` triggers the CI legacy-pattern gate:
 
 ```rust
 #[test]
 fn rejects_empty_input() {
-    let err = parse("").unwrap_err();
+    let report = parse("").unwrap_err();
+    let ctx = report.current_context();   // bind first
     assert!(
-        matches!(err.current_context(), MyError::Validation(_)),
-        "expected Validation error, got: {err}"
+        matches!(ctx, MyError::Validation(_)),
+        "expected Validation error, got: {report}"
     );
 }
 ```
