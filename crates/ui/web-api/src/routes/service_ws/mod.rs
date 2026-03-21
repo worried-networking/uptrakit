@@ -292,8 +292,9 @@ mod tests {
         let mut in_seq = IncomingSeq::new();
         let json = r#"{"protocol_version":1,"seq":2,"type":"ping","service_ts":12345}"#;
         let result = deserialize_service_msg(&mut in_seq, json);
+        let ctx = result.unwrap_err();
         assert!(
-            matches!(result, Err(ref e) if matches!(e.current_context(), ServiceWsError::SequenceValidation(_))),
+            matches!(ctx.current_context(), ServiceWsError::SequenceValidation(_)),
             "sequence mismatch should return Err(SequenceValidation)"
         );
     }

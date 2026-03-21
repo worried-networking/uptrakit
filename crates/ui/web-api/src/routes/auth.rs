@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::api_error::ApiError;
 use crate::auth::refresh_cookie::{
     clear_refresh_token_cookie, extract_refresh_token_from_cookie, set_refresh_token_cookie,
 };
@@ -47,32 +48,35 @@ pub use uptrakit_web_api_types::auth::{
 pub async fn register(
     State(state): State<Arc<AppState>>,
     Validated(req): Validated<RegisterRequest>,
-) -> Response {
+) -> Result<impl IntoResponse, ApiError> {
     // Check if password auth is enabled
     if !state.settings.authentication().password_auth_enabled {
-        return error_response(StatusCode::FORBIDDEN, "Password authentication is disabled");
+        return Ok(error_response(
+            StatusCode::FORBIDDEN,
+            "Password authentication is disabled",
+        ));
     }
 
     // Validate password length
     if let Some(message) = password::validate_password_length(req.password.expose_secret()) {
-        return error_response(StatusCode::BAD_REQUEST, message);
+        return Ok(error_response(StatusCode::BAD_REQUEST, message));
     }
 
     // Validate registration is allowed
-    if let Err(e) = state
+    state
         .settings
         .registration()
-        .validate(req.registration_token.as_ref().map(|t| t.expose_secret()))
-    {
-        return e.into_response();
-    }
+        .validate(req.registration_token.as_ref().map(|t| t.expose_secret()))?;
 
     // Hash password
     let password_hash = match password::hash_password(req.password.expose_secret()) {
         Ok(hash) => hash,
         Err(e) => {
             tracing::error!("Password hashing failed: {:?}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
         }
     };
 
@@ -82,7 +86,10 @@ pub async fn register(
         Ok(txn) => txn,
         Err(e) => {
             tracing::error!("Failed to start transaction: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
         }
     };
 
@@ -93,7 +100,7 @@ pub async fn register(
         .await;
 
     if let Ok(Some(_)) = existing {
-        return error_response(StatusCode::CONFLICT, "Email already exists");
+        return Ok(error_response(StatusCode::CONFLICT, "Email already exists"));
     }
 
     // Create user
@@ -114,7 +121,10 @@ pub async fn register(
 
     if let Err(e) = new_user.insert(&txn).await {
         tracing::error!("Failed to create user: {e}");
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
     }
 
     // Atomically check if this is the first user (threshold 1 because we just inserted)
@@ -138,7 +148,10 @@ pub async fn register(
 
     if let Err(e) = txn.commit().await {
         tracing::error!("Failed to commit registration transaction: {e}");
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
     }
 
     // Get user permissions
@@ -160,7 +173,10 @@ pub async fn register(
         Ok(token) => token,
         Err(e) => {
             tracing::error!("Failed to create refresh token: {:?}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
         }
     };
 
@@ -174,7 +190,10 @@ pub async fn register(
             Ok(token) => token,
             Err(e) => {
                 tracing::error!("Failed to create access token: {:?}", e);
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+                return Ok(error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error",
+                ));
             }
         };
 
@@ -193,12 +212,12 @@ pub async fn register(
         },
     };
 
-    (
+    Ok((
         StatusCode::CREATED,
         [(header::SET_COOKIE, cookie)],
         Json(response),
     )
-        .into_response()
+        .into_response())
 }
 
 /// Login with email and password

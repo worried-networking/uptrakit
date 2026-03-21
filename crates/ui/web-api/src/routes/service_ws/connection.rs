@@ -612,10 +612,12 @@ pub(super) async fn handle_anonymous(
                     Ok(None) => continue,
                     Err(e) => {
                         tracing::debug!(error = %e, "invalid message from anonymous client");
-                        let code = match e.current_context() {
-                            ServiceWsError::SequenceValidation(_) => ErrorCode::SequenceError,
-                            _ => ErrorCode::BadRequest,
-                        };
+                        let code =
+                            if let ServiceWsError::SequenceValidation(_) = e.current_context() {
+                                ErrorCode::SequenceError
+                            } else {
+                                ErrorCode::BadRequest
+                            };
                         let message = e.to_string();
                         let err = ControllerMessage::Error(ErrorPayload { code, message });
                         if let Some(json) = serialize_controller_msg(out_seq, err) {

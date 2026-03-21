@@ -3,15 +3,11 @@ use crate::SettingKey;
 use crate::settings_store::{
     RawSettings, RawSettingsExt, delete_setting, load_setting, upsert_setting,
 };
-use axum::response::{IntoResponse, Response};
-use http::StatusCode;
 use rootcause::prelude::*;
 use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait, PaginatorTrait};
 use thiserror::Error;
 use uptrakit_shared_db::entity::prelude::*;
 use uuid::Uuid;
-
-use crate::error_response::error_response;
 
 pub use uptrakit_web_api_types::registration::RegistrationMode;
 
@@ -28,18 +24,6 @@ pub enum RegistrationValidationError {
     VerificationFailed,
     #[error("invalid registration token")]
     InvalidToken,
-}
-
-impl IntoResponse for RegistrationValidationError {
-    fn into_response(self) -> Response {
-        let status = match self {
-            Self::VerificationFailed => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Closed | Self::TokenRequired | Self::NoTokenConfigured | Self::InvalidToken => {
-                StatusCode::FORBIDDEN
-            }
-        };
-        error_response(status, self.to_string())
-    }
 }
 
 /// Cached registration settings held in AppState.
@@ -449,25 +433,5 @@ mod tests {
             require_token_for_oidc: false,
         };
         assert!(!settings.needs_token_for_oidc(false));
-    }
-
-    // ── IntoResponse for RegistrationValidationError ─────────────────
-
-    #[test]
-    fn error_closed_returns_forbidden() {
-        let resp = RegistrationValidationError::Closed.into_response();
-        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-    }
-
-    #[test]
-    fn error_verification_failed_returns_internal() {
-        let resp = RegistrationValidationError::VerificationFailed.into_response();
-        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    }
-
-    #[test]
-    fn error_token_required_returns_forbidden() {
-        let resp = RegistrationValidationError::TokenRequired.into_response();
-        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 }

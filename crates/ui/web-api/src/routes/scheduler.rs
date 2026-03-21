@@ -4,10 +4,11 @@ use axum::response::{IntoResponse, Response};
 use http::StatusCode;
 use uuid::Uuid;
 
+use crate::api_error::ApiError;
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::middleware::permission::CanManageScheduler;
-use crate::queries::scheduled_tasks::{self as sched_queries, ScheduledTaskError};
+use crate::queries::scheduled_tasks as sched_queries;
 use crate::tenant_db::TenantDb;
 
 pub use uptrakit_web_api_types::scheduler::{
@@ -96,20 +97,9 @@ pub async fn update_scheduled_task(
     CanManageScheduler(_user): CanManageScheduler,
     Path(task_id): Path<Uuid>,
     Validated(req): Validated<UpdateScheduledTaskRequest>,
-) -> Response {
-    match sched_queries::update_scheduled_task(&tenant_db, task_id, req).await {
-        Ok(task) => Json(task).into_response(),
-        Err(report) => match report.current_context() {
-            ScheduledTaskError::NotFound => error_response(StatusCode::NOT_FOUND, "Task not found"),
-            ScheduledTaskError::InvalidInterval => {
-                error_response(StatusCode::BAD_REQUEST, "Invalid interval")
-            }
-            ScheduledTaskError::Db(_) => {
-                tracing::error!(error = %report, "failed to update scheduled task");
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update task")
-            }
-        },
-    }
+) -> Result<impl IntoResponse, ApiError> {
+    let task = sched_queries::update_scheduled_task(&tenant_db, task_id, req).await?;
+    Ok(Json(task).into_response())
 }
 
 /// Trigger immediate execution of a scheduled task.

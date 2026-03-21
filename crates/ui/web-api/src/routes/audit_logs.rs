@@ -12,13 +12,13 @@ use axum::{
     Json,
     extract::{Query, State},
     http::StatusCode,
-    response::{IntoResponse, Response},
+    response::IntoResponse,
 };
 
 use crate::AppState;
-use crate::error_response::error_response;
+use crate::api_error::ApiError;
 use crate::middleware::permission::{CanViewAuditLogs, CanViewSystemAuditLogs};
-use crate::queries::audit_logs::{self as audit_log_queries, AuditLogQueryError};
+use crate::queries::audit_logs as audit_log_queries;
 use crate::tenant_db::TenantDb;
 
 pub use uptrakit_web_api_types::audit_logs::{
@@ -59,17 +59,9 @@ pub async fn list_audit_logs(
     tenant_db: TenantDb,
     CanViewAuditLogs(_user): CanViewAuditLogs,
     Query(params): Query<AuditLogListParams>,
-) -> Response {
-    match audit_log_queries::list_tenant_audit_logs(&tenant_db, &params).await {
-        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(ref e) if matches!(e.current_context(), AuditLogQueryError::InvalidFilter(_)) => {
-            error_response(StatusCode::BAD_REQUEST, format!("{}", e.current_context()))
-        }
-        Err(e) => {
-            tracing::error!("Failed to list audit logs: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
-    }
+) -> Result<impl IntoResponse, ApiError> {
+    let resp = audit_log_queries::list_tenant_audit_logs(&tenant_db, &params).await?;
+    Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
 /// List system-level audit log entries
@@ -101,15 +93,7 @@ pub async fn list_system_audit_logs(
     State(state): State<Arc<AppState>>,
     CanViewSystemAuditLogs(_user): CanViewSystemAuditLogs,
     Query(params): Query<AuditLogListParams>,
-) -> Response {
-    match audit_log_queries::list_system_audit_logs(state.db(), &params).await {
-        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(ref e) if matches!(e.current_context(), AuditLogQueryError::InvalidFilter(_)) => {
-            error_response(StatusCode::BAD_REQUEST, format!("{}", e.current_context()))
-        }
-        Err(e) => {
-            tracing::error!("Failed to list system audit logs: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
-    }
+) -> Result<impl IntoResponse, ApiError> {
+    let resp = audit_log_queries::list_system_audit_logs(state.db(), &params).await?;
+    Ok((StatusCode::OK, Json(resp)).into_response())
 }

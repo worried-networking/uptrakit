@@ -32,6 +32,7 @@ use uptrakit_web_api_queries::queries::users::oidc_sync::{
     build_fake_claims_for_sync, find_active_provider,
 };
 
+use crate::api_error::ApiError;
 use crate::auth::AuthMethod;
 use uptrakit_web_api_types::SecretString;
 use uuid::Uuid;
@@ -897,14 +898,12 @@ pub async fn oidc_exchange(
 pub async fn oidc_complete_registration(
     State(state): State<Arc<AppState>>,
     Json(req): Json<OidcCompleteRegistrationRequest>,
-) -> Response {
+) -> Result<impl IntoResponse, ApiError> {
     // 1. Validate the registration token first (pure check, no side effects).
     // This must happen before consuming the one-time-use code so that a wrong
     // token does not permanently burn a valid registration_code.
     let reg_settings = state.settings.registration();
-    if let Err(e) = reg_settings.validate(Some(req.registration_token.expose_secret())) {
-        return e.into_response();
-    }
+    reg_settings.validate(Some(req.registration_token.expose_secret()))?;
 
     // 2. Atomically consume the pending registration so the code is one-time use.
     let pending = match state
@@ -915,14 +914,17 @@ pub async fn oidc_complete_registration(
     {
         Ok(Some(p)) => p,
         Ok(None) => {
-            return error_response(
+            return Ok(error_response(
                 StatusCode::BAD_REQUEST,
                 "Invalid or expired registration code",
-            );
+            ));
         }
         Err(e) => {
             tracing::error!("Failed to consume pending OIDC registration: {e:?}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
         }
     };
 
@@ -932,7 +934,10 @@ pub async fn oidc_complete_registration(
         Ok(txn) => txn,
         Err(e) => {
             tracing::error!("Failed to start OIDC complete-registration transaction: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
         }
     };
 
@@ -945,15 +950,18 @@ pub async fn oidc_complete_registration(
         Ok(n) => n > 0,
         Err(e) => {
             tracing::error!(err = %e, "DB error checking for duplicate user during OIDC registration");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
         }
     };
 
     if user_exists {
-        return error_response(
+        return Ok(error_response(
             StatusCode::CONFLICT,
             "A user with this email already exists",
-        );
+        ));
     }
 
     // 5. Create user (no password, same as resolve_oidc_user NewUser path)
@@ -973,7 +981,10 @@ pub async fn oidc_complete_registration(
 
     if let Err(e) = user_model.insert(&txn).await {
         tracing::error!("Failed to create user during OIDC registration: {e}");
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
     }
 
     // 6. Create OIDC link
@@ -986,7 +997,10 @@ pub async fn oidc_complete_registration(
     };
     if let Err(e) = link.insert(&txn).await {
         tracing::error!("Failed to create OIDC link during registration: {e}");
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
     }
 
     // 7. Atomically check if this is the first user (threshold 1 because we just created)
@@ -1038,11 +1052,14 @@ pub async fn oidc_complete_registration(
 
     if let Err(e) = txn.commit().await {
         tracing::error!("Failed to commit OIDC complete-registration transaction: {e}");
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
     }
 
     // 9. Create session + JWT
-    mint_oidc_auth_response(&state, user_id, pending.provider_id).await
+    Ok(mint_oidc_auth_response(&state, user_id, pending.provider_id).await)
 }
 
 /// Link a pending OIDC account (public)

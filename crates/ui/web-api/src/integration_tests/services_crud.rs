@@ -132,7 +132,7 @@ async fn get_nonexistent_service_returns_404() {
 }
 
 #[tokio::test]
-async fn deactivate_embedded_service_returns_409() {
+async fn deactivate_embedded_service_returns_400() {
     let app = TestApp::new().await;
     let client = app.client();
     let token = register_and_get_token(&client).await;
@@ -145,9 +145,9 @@ async fn deactivate_embedded_service_returns_409() {
         .send_json()
         .await;
 
-    assert_eq!(status, http::StatusCode::CONFLICT);
+    assert_eq!(status, http::StatusCode::BAD_REQUEST);
     assert!(
-        body["error"].as_str().unwrap_or("").contains("Embedded"),
+        body["error"].as_str().unwrap_or("").contains("embedded"),
         "expected error about embedded services, got: {body}"
     );
 }
