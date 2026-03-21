@@ -1,11 +1,12 @@
 use crate::AppState;
+use crate::api_error::ApiError;
 use crate::config_test_proxy::ConfigTestProxyError;
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::middleware::permission::{
     CanManageCommands, CanTestPluginConfigs, CanTriggerChecks, CanViewSoftware,
 };
-use crate::queries::plugin_configs::{self as pc_queries, PluginConfigError};
+use crate::queries::plugin_configs as pc_queries;
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -105,7 +106,7 @@ pub async fn create_plugin_config(
     tenant_db: TenantDb,
     CanManageCommands(user): CanManageCommands,
     Validated(req): Validated<CreatePluginConfigRequest>,
-) -> Response {
+) -> Result<impl IntoResponse, ApiError> {
     let plugin_type_str = req.plugin_type.to_string();
     let config_name = req.name.clone();
     let command_fields = detect_command_fields(&req.config);
@@ -118,7 +119,7 @@ pub async fn create_plugin_config(
         .plugin_ops
         .validate_config(&plugin_type_id, &req.config)
     {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+        return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
     }
 
     // Reject dangerous command patterns when operator policy is enabled.
@@ -132,53 +133,38 @@ pub async fn create_plugin_config(
                 config_name = %config_name,
                 "security_audit: plugin config creation rejected — dangerous command patterns detected"
             );
-            return error_response(
+            return Ok(error_response(
                 StatusCode::BAD_REQUEST,
                 format_dangerous_pattern_rejection(&dangerous),
-            );
+            ));
         }
     }
 
-    match pc_queries::create_plugin_config(state.plugin_ops.as_ref(), &tenant_db, req).await {
-        Ok(resp) => {
-            if command_fields.is_empty() {
-                tracing::warn!(
-                    user_id = %user.user_id,
-                    tenant_id = %tenant_db.tenant_id,
-                    plugin_config_id = %resp.id,
-                    plugin_type = %plugin_type_str,
-                    config_name = %config_name,
-                    "security_audit: plugin config created"
-                );
-            } else {
-                tracing::warn!(
-                    user_id = %user.user_id,
-                    tenant_id = %tenant_db.tenant_id,
-                    plugin_config_id = %resp.id,
-                    plugin_type = %plugin_type_str,
-                    config_name = %config_name,
-                    command_fields = %command_fields.join(", "),
-                    "security_audit: plugin config created with command-bearing fields"
-                );
-                audit_dangerous_patterns(&config_for_audit, AUDIT_COMMAND_FIELDS);
-            }
-            (StatusCode::CREATED, Json(resp)).into_response()
-        }
-        Err(report) => match report.current_context() {
-            PluginConfigError::DuplicateName => error_response(
-                StatusCode::CONFLICT,
-                "A plugin config with this name already exists",
-            ),
-            PluginConfigError::Db(_) => {
-                tracing::error!("Failed to create plugin config: {report}");
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-            _ => {
-                tracing::error!("Unexpected error creating plugin config: {report}");
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-        },
+    let resp = pc_queries::create_plugin_config(state.plugin_ops.as_ref(), &tenant_db, req).await?;
+
+    if command_fields.is_empty() {
+        tracing::warn!(
+            user_id = %user.user_id,
+            tenant_id = %tenant_db.tenant_id,
+            plugin_config_id = %resp.id,
+            plugin_type = %plugin_type_str,
+            config_name = %config_name,
+            "security_audit: plugin config created"
+        );
+    } else {
+        tracing::warn!(
+            user_id = %user.user_id,
+            tenant_id = %tenant_db.tenant_id,
+            plugin_config_id = %resp.id,
+            plugin_type = %plugin_type_str,
+            config_name = %config_name,
+            command_fields = %command_fields.join(", "),
+            "security_audit: plugin config created with command-bearing fields"
+        );
+        audit_dangerous_patterns(&config_for_audit, AUDIT_COMMAND_FIELDS);
     }
+
+    Ok((StatusCode::CREATED, Json(resp)).into_response())
 }
 
 /// List all non-deactivated plugin configurations.
@@ -266,7 +252,7 @@ pub async fn update_plugin_config(
     Path(config_id): Path<Uuid>,
     CanManageCommands(user): CanManageCommands,
     Json(req): Json<UpdatePluginConfigRequest>,
-) -> Response {
+) -> Result<impl IntoResponse, ApiError> {
     // Capture command fields from the incoming request config for audit logging.
     let new_command_fields = req
         .config
@@ -288,62 +274,42 @@ pub async fn update_plugin_config(
                 plugin_config_id = %config_id,
                 "security_audit: plugin config update rejected — dangerous command patterns detected"
             );
-            return error_response(
+            return Ok(error_response(
                 StatusCode::BAD_REQUEST,
                 format_dangerous_pattern_rejection(&dangerous),
-            );
+            ));
         }
     }
 
-    match pc_queries::update_plugin_config(state.plugin_ops.as_ref(), &tenant_db, config_id, req)
-        .await
-    {
-        Ok(resp) => {
-            if new_command_fields.is_empty() {
-                tracing::warn!(
-                    user_id = %user.user_id,
-                    tenant_id = %tenant_db.tenant_id,
-                    plugin_config_id = %config_id,
-                    plugin_type = %resp.plugin_type,
-                    config_name = %resp.name,
-                    "security_audit: plugin config updated"
-                );
-            } else {
-                tracing::warn!(
-                    user_id = %user.user_id,
-                    tenant_id = %tenant_db.tenant_id,
-                    plugin_config_id = %config_id,
-                    plugin_type = %resp.plugin_type,
-                    config_name = %resp.name,
-                    command_fields = %new_command_fields.join(", "),
-                    "security_audit: plugin config updated with command-bearing fields"
-                );
-                if let Some(ref config) = config_for_audit {
-                    audit_dangerous_patterns(config, AUDIT_COMMAND_FIELDS);
-                }
-            }
-            (StatusCode::OK, Json(resp)).into_response()
+    let resp =
+        pc_queries::update_plugin_config(state.plugin_ops.as_ref(), &tenant_db, config_id, req)
+            .await?;
+
+    if new_command_fields.is_empty() {
+        tracing::warn!(
+            user_id = %user.user_id,
+            tenant_id = %tenant_db.tenant_id,
+            plugin_config_id = %config_id,
+            plugin_type = %resp.plugin_type,
+            config_name = %resp.name,
+            "security_audit: plugin config updated"
+        );
+    } else {
+        tracing::warn!(
+            user_id = %user.user_id,
+            tenant_id = %tenant_db.tenant_id,
+            plugin_config_id = %config_id,
+            plugin_type = %resp.plugin_type,
+            config_name = %resp.name,
+            command_fields = %new_command_fields.join(", "),
+            "security_audit: plugin config updated with command-bearing fields"
+        );
+        if let Some(ref config) = config_for_audit {
+            audit_dangerous_patterns(config, AUDIT_COMMAND_FIELDS);
         }
-        Err(report) => match report.current_context() {
-            PluginConfigError::NotFound => {
-                error_response(StatusCode::NOT_FOUND, "Plugin config not found")
-            }
-            PluginConfigError::EmptyName => {
-                error_response(StatusCode::BAD_REQUEST, "name must not be empty")
-            }
-            PluginConfigError::ConfigValidation(msg) => {
-                error_response(StatusCode::BAD_REQUEST, msg.clone())
-            }
-            PluginConfigError::Db(_) => {
-                tracing::error!("Failed to update plugin config: {report}");
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-            _ => {
-                tracing::error!("Unexpected error updating plugin config: {report}");
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-        },
     }
+
+    Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
 /// Soft-delete a plugin configuration.

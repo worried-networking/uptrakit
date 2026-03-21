@@ -20,6 +20,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::api_error::ApiError;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanUpdateSoftware, CanViewSoftware};
 use crate::queries::discovery_allowlist as allowlist_queries;
@@ -88,27 +89,15 @@ pub async fn add_tenant_discovery_allowlist_entry(
     tenant_db: TenantDb,
     CanUpdateSoftware(_user): CanUpdateSoftware,
     Json(req): Json<CreateDiscoveryAllowlistEntryRequest>,
-) -> Response {
-    match allowlist_queries::add_tenant_allowlist_entry(
+) -> Result<impl IntoResponse, ApiError> {
+    let entry = allowlist_queries::add_tenant_allowlist_entry(
         state.plugin_ops.as_ref(),
         tenant_db.db(),
         tenant_db.tenant_id,
         req.plugin_type,
     )
-    .await
-    {
-        Ok(entry) => (StatusCode::CREATED, Json(entry)).into_response(),
-        Err(report) => match report.current_context() {
-            allowlist_queries::AllowlistError::InvalidPluginType => error_response(
-                StatusCode::BAD_REQUEST,
-                "plugin type does not support discovery or is unknown",
-            ),
-            allowlist_queries::AllowlistError::Db(_) => {
-                tracing::error!("DB error adding tenant discovery allowlist entry: {report}");
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-        },
-    }
+    .await?;
+    Ok((StatusCode::CREATED, Json(entry)).into_response())
 }
 
 /// Remove a tenant-wide discovery allowlist entry.
@@ -230,7 +219,7 @@ pub async fn add_host_discovery_allowlist_entry(
     CanUpdateSoftware(_user): CanUpdateSoftware,
     Path(host_id): Path<Uuid>,
     Json(req): Json<CreateDiscoveryAllowlistEntryRequest>,
-) -> Response {
+) -> Result<impl IntoResponse, ApiError> {
     // Verify host belongs to tenant.
     match Host::find_by_id(host_id)
         .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
@@ -239,34 +228,25 @@ pub async fn add_host_discovery_allowlist_entry(
         .await
     {
         Ok(Some(_)) => {}
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Host not found"),
+        Ok(None) => return Ok(error_response(StatusCode::NOT_FOUND, "Host not found")),
         Err(e) => {
             tracing::error!("DB error checking host: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
         }
     }
 
-    match allowlist_queries::add_host_allowlist_entry(
+    let entry = allowlist_queries::add_host_allowlist_entry(
         state.plugin_ops.as_ref(),
         tenant_db.db(),
         tenant_db.tenant_id,
         host_id,
         req.plugin_type,
     )
-    .await
-    {
-        Ok(entry) => (StatusCode::CREATED, Json(entry)).into_response(),
-        Err(report) => match report.current_context() {
-            allowlist_queries::AllowlistError::InvalidPluginType => error_response(
-                StatusCode::BAD_REQUEST,
-                "plugin type does not support discovery or is unknown",
-            ),
-            allowlist_queries::AllowlistError::Db(_) => {
-                tracing::error!("DB error adding host discovery allowlist entry: {report}");
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-        },
-    }
+    .await?;
+    Ok((StatusCode::CREATED, Json(entry)).into_response())
 }
 
 /// Remove a host-specific discovery allowlist entry.

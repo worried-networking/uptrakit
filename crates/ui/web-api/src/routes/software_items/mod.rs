@@ -7,6 +7,7 @@ mod controller_fetch;
 mod version_check_dispatch;
 
 use crate::AppState;
+use crate::api_error::ApiError;
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::middleware::permission::{
@@ -15,7 +16,7 @@ use crate::middleware::permission::{
 };
 use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::plugin_configs::find_raw_active_config;
-use crate::queries::software_items::{self as item_queries, SoftwareItemQueryError};
+use crate::queries::software_items as item_queries;
 use crate::queries::update_types::ActorType;
 use crate::routes::settings_dashboard_icons::is_dashboard_icons_enabled;
 use crate::tenant_db::TenantDb;
@@ -52,52 +53,6 @@ use version_check_dispatch::{
     collect_and_run_controller_fetches, dispatch_agent_version_checks, load_version_check_context,
 };
 
-// --- Error mapping helper ---
-
-fn query_error_to_response(report: rootcause::Report<SoftwareItemQueryError>) -> Response {
-    match report.current_context() {
-        SoftwareItemQueryError::NotFound => {
-            error_response(StatusCode::NOT_FOUND, "Software item not found")
-        }
-        SoftwareItemQueryError::EmptyName => {
-            error_response(StatusCode::BAD_REQUEST, "name must not be empty")
-        }
-        SoftwareItemQueryError::PluginConfigNotFound => error_response(
-            StatusCode::BAD_REQUEST,
-            "plugin_config_id does not reference an active plugin config",
-        ),
-        SoftwareItemQueryError::DuplicateItem => error_response(
-            StatusCode::CONFLICT,
-            "A software item with this name already exists",
-        ),
-        SoftwareItemQueryError::DuplicateHostAssignment => error_response(
-            StatusCode::CONFLICT,
-            "This host already has an assignment for the given plugin config and package identifier",
-        ),
-        SoftwareItemQueryError::HostNotFound(id) => error_response(
-            StatusCode::BAD_REQUEST,
-            format!("Host {id} not found or deactivated"),
-        ),
-        SoftwareItemQueryError::IncompatibleHost(msg) => error_response(
-            StatusCode::BAD_REQUEST,
-            format!("host incompatible with role: {msg}"),
-        ),
-        SoftwareItemQueryError::InvalidPackageIdentifier(msg)
-        | SoftwareItemQueryError::InvalidConfigOverride(msg)
-        | SoftwareItemQueryError::InvalidInlinePluginConfig(msg)
-        | SoftwareItemQueryError::InvalidExecutionSite(msg) => {
-            error_response(StatusCode::BAD_REQUEST, msg.clone())
-        }
-        SoftwareItemQueryError::PluginAssignmentNotFound => {
-            error_response(StatusCode::NOT_FOUND, "Plugin assignment not found")
-        }
-        SoftwareItemQueryError::Db(_) => {
-            tracing::error!("Database error in software items: {report}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
-    }
-}
-
 // --- Endpoints ---
 
 /// Create a new software item.
@@ -120,32 +75,29 @@ pub async fn create_software_item(
     tenant_db: TenantDb,
     CanCreateSoftware(_user): CanCreateSoftware,
     Validated(req): Validated<CreateSoftwareItemRequest>,
-) -> Response {
-    match item_queries::create_software_item(&tenant_db, req).await {
-        Ok(mut resp) => {
-            // Fire software-item lifecycle plugins (e.g. Dashboard Icons enrichment).
-            // The handler is generic — it applies whatever patch the plugins return.
-            if let Some(patch) = fire_software_item_lifecycle(&state, &tenant_db, &resp).await
-                && item_queries::apply_software_item_patch(tenant_db.db(), resp.id, &patch)
-                    .await
-                    .is_ok()
-                && let Some(ref icon_url) = patch.icon_url
-            {
-                resp.icon_url = icon_url.clone();
-            }
+) -> Result<impl IntoResponse, ApiError> {
+    let mut resp = item_queries::create_software_item(&tenant_db, req).await?;
 
-            state
-                .broadcast
-                .event_broadcaster
-                .send(
-                    tenant_db.tenant_id,
-                    AdminEvent::SoftwareItemCreated { id: resp.id },
-                )
-                .await;
-            (StatusCode::CREATED, Json(resp)).into_response()
-        }
-        Err(e) => query_error_to_response(e),
+    // Fire software-item lifecycle plugins (e.g. Dashboard Icons enrichment).
+    // The handler is generic — it applies whatever patch the plugins return.
+    if let Some(patch) = fire_software_item_lifecycle(&state, &tenant_db, &resp).await
+        && item_queries::apply_software_item_patch(tenant_db.db(), resp.id, &patch)
+            .await
+            .is_ok()
+        && let Some(ref icon_url) = patch.icon_url
+    {
+        resp.icon_url = icon_url.clone();
     }
+
+    state
+        .broadcast
+        .event_broadcaster
+        .send(
+            tenant_db.tenant_id,
+            AdminEvent::SoftwareItemCreated { id: resp.id },
+        )
+        .await;
+    Ok((StatusCode::CREATED, Json(resp)).into_response())
 }
 
 /// List all active software items (with host count).
@@ -232,21 +184,17 @@ pub async fn update_software_item(
     CanUpdateSoftware(_user): CanUpdateSoftware,
     Path(item_id): Path<Uuid>,
     Json(req): Json<UpdateSoftwareItemRequest>,
-) -> Response {
-    match item_queries::update_software_item(&tenant_db, item_id, req).await {
-        Ok(resp) => {
-            state
-                .broadcast
-                .event_broadcaster
-                .send(
-                    tenant_db.tenant_id,
-                    AdminEvent::SoftwareItemUpdated { id: item_id },
-                )
-                .await;
-            (StatusCode::OK, Json(resp)).into_response()
-        }
-        Err(e) => query_error_to_response(e),
-    }
+) -> Result<impl IntoResponse, ApiError> {
+    let resp = item_queries::update_software_item(&tenant_db, item_id, req).await?;
+    state
+        .broadcast
+        .event_broadcaster
+        .send(
+            tenant_db.tenant_id,
+            AdminEvent::SoftwareItemUpdated { id: item_id },
+        )
+        .await;
+    Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
 /// Soft-delete a software item.
@@ -372,18 +320,17 @@ pub async fn assign_hosts(
     CanUpdateSoftware(_user): CanUpdateSoftware,
     Path(item_id): Path<Uuid>,
     Json(req): Json<AssignHostsRequest>,
-) -> Response {
+) -> Result<impl IntoResponse, ApiError> {
     if req.host_assignments.is_empty() {
-        return error_response(
+        return Ok(error_response(
             StatusCode::BAD_REQUEST,
             "host_assignments must not be empty",
-        );
+        ));
     }
 
-    match item_queries::assign_hosts(state.plugin_ops.as_ref(), &tenant_db, item_id, req).await {
-        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(e) => query_error_to_response(e),
-    }
+    let resp =
+        item_queries::assign_hosts(state.plugin_ops.as_ref(), &tenant_db, item_id, req).await?;
+    Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -493,19 +440,16 @@ pub async fn update_host_assignment(
     CanUpdateSoftware(_user): CanUpdateSoftware,
     Path((item_id, host_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateHostAssignmentRequest>,
-) -> Response {
-    match item_queries::update_host_assignment(
+) -> Result<impl IntoResponse, ApiError> {
+    let resp = item_queries::update_host_assignment(
         state.plugin_ops.as_ref(),
         &tenant_db,
         item_id,
         host_id,
         req,
     )
-    .await
-    {
-        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(e) => query_error_to_response(e),
-    }
+    .await?;
+    Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
 /// Remove a specific plugin assignment identified by role and ordinal.
@@ -531,16 +475,14 @@ pub async fn delete_plugin_assignment(
     tenant_db: TenantDb,
     CanUpdateSoftware(_user): CanUpdateSoftware,
     Path((item_id, host_id, role, ordinal)): Path<(Uuid, Uuid, String, i32)>,
-) -> Response {
+) -> Result<impl IntoResponse, ApiError> {
     let role = match role.parse::<PluginRole>() {
         Ok(r) => r,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid role"),
+        Err(_) => return Ok(error_response(StatusCode::BAD_REQUEST, "invalid role")),
     };
-    match item_queries::delete_plugin_assignment(&tenant_db, item_id, host_id, role, ordinal).await
-    {
-        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(e) => query_error_to_response(e),
-    }
+    let resp =
+        item_queries::delete_plugin_assignment(&tenant_db, item_id, host_id, role, ordinal).await?;
+    Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
 /// Trigger a software update for a specific host.
@@ -569,7 +511,7 @@ pub async fn trigger_update(
     CanTriggerUpdates(user): CanTriggerUpdates,
     Path((item_id, host_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<TriggerUpdateRequest>,
-) -> Response {
+) -> Result<impl IntoResponse, ApiError> {
     // Convert the API release_info type to the wire type before delegating.
     let release_info = req
         .release_info
@@ -593,7 +535,7 @@ pub async fn trigger_update(
             require_attestation: false,
         });
 
-    match crate::queries::update_triggers::trigger_update_for_host(
+    let result = crate::queries::update_triggers::trigger_update_for_host(
         tenant_db.db(),
         &state.notification_service,
         crate::queries::update_triggers::TriggerUpdateParams {
@@ -607,84 +549,39 @@ pub async fn trigger_update(
             interactive: req.interactive,
         },
     )
-    .await
-    {
-        Ok(result) => {
-            let status = match result.initial_status {
-                uptrakit_shared_db::entity::update_history::UpdateStatus::Pending => {
-                    TriggerUpdateStatus::Pending
-                }
-                _ => TriggerUpdateStatus::Queued,
-            };
-            // Push updated software states immediately so that any connected
-            // MQTT/HA entity transitions to `in_progress: true`.
-            state
-                .notification_service
-                .push_software_states_for_tenant(tenant_db.db(), tenant_db.tenant_id)
-                .await;
-            // Notify SSE subscribers so the History page shows the new entry
-            // immediately, without waiting for the agent's UpdateStarted message.
-            state
-                .broadcast
-                .event_broadcaster
-                .send(
-                    tenant_db.tenant_id,
-                    AdminEvent::UpdateTriggered {
-                        update_history_id: result.update_history_id,
-                        host_id,
-                        software_item_id: item_id,
-                    },
-                )
-                .await;
-            let resp = TriggerUpdateResponse {
-                update_history_id: result.update_history_id,
-                status,
-            };
-            (StatusCode::OK, Json(resp)).into_response()
-        }
-        Err(report) => trigger_update_error_response(&report),
-    }
-}
+    .await?;
 
-/// Map a [`TriggerUpdateError`] to an HTTP error response with the appropriate
-/// status code and user-facing message.
-fn trigger_update_error_response(
-    report: &rootcause::Report<crate::queries::update_dispatch::TriggerUpdateError>,
-) -> Response {
-    use crate::queries::update_dispatch::TriggerUpdateError;
-
-    let (status, msg) = match report.current_context() {
-        TriggerUpdateError::SoftwareItemNotFound => {
-            (StatusCode::NOT_FOUND, "Software item not found")
+    let status = match result.initial_status {
+        uptrakit_shared_db::entity::update_history::UpdateStatus::Pending => {
+            TriggerUpdateStatus::Pending
         }
-        TriggerUpdateError::HostNotFound => (StatusCode::NOT_FOUND, "Host not found"),
-        TriggerUpdateError::HostNotAssigned => (
-            StatusCode::BAD_REQUEST,
-            "Host is not assigned to this software item",
-        ),
-        TriggerUpdateError::NoAgent => (StatusCode::NOT_FOUND, "No agent linked to this host"),
-        TriggerUpdateError::AgentNotApproved => (StatusCode::BAD_REQUEST, "Agent is not approved"),
-        TriggerUpdateError::UpdateAlreadyActive => (
-            StatusCode::CONFLICT,
-            "An update is already pending or in progress",
-        ),
-        TriggerUpdateError::NoExecuteUpdatePlugin => (
-            StatusCode::BAD_REQUEST,
-            "No execute_update plugin assigned for this host",
-        ),
-        TriggerUpdateError::PluginConfigNotFound => {
-            (StatusCode::INTERNAL_SERVER_ERROR, "Plugin config not found")
-        }
-        TriggerUpdateError::UnknownPluginType(pt) => {
-            tracing::error!("Unknown plugin type: {pt}");
-            (StatusCode::BAD_REQUEST, "Unknown plugin type")
-        }
-        TriggerUpdateError::Database(_) => {
-            tracing::error!("Database error in trigger_update: {report}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
+        _ => TriggerUpdateStatus::Queued,
     };
-    error_response(status, msg)
+    // Push updated software states immediately so that any connected
+    // MQTT/HA entity transitions to `in_progress: true`.
+    state
+        .notification_service
+        .push_software_states_for_tenant(tenant_db.db(), tenant_db.tenant_id)
+        .await;
+    // Notify SSE subscribers so the History page shows the new entry
+    // immediately, without waiting for the agent's UpdateStarted message.
+    state
+        .broadcast
+        .event_broadcaster
+        .send(
+            tenant_db.tenant_id,
+            AdminEvent::UpdateTriggered {
+                update_history_id: result.update_history_id,
+                host_id,
+                software_item_id: item_id,
+            },
+        )
+        .await;
+    let resp = TriggerUpdateResponse {
+        update_history_id: result.update_history_id,
+        status,
+    };
+    Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
 /// Trigger a version check for a specific software item across all assigned hosts.
