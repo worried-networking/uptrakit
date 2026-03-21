@@ -12,8 +12,9 @@ use uptrakit_web_api_types::SecretString;
 use uptrakit_web_api_types::device_auth::{DeviceAuthAuthorizedSse, DeviceAuthExpiredSse};
 
 use crate::AppState;
+use crate::api_error::ApiError;
 use crate::auth::api_token::ApiTokenService;
-use crate::auth::device_flow::{DeviceFlowError, DeviceFlowStatus};
+use crate::auth::device_flow::DeviceFlowStatus;
 use crate::auth::token::hash_token;
 use crate::device_flow_broadcaster::DeviceFlowEvent;
 use crate::error_response::error_response;
@@ -105,28 +106,15 @@ pub async fn device_auth_start(
 pub async fn device_auth_poll(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DeviceAuthPollRequest>,
-) -> Response {
-    // Check status
-    let status = match state
+) -> Result<impl IntoResponse, ApiError> {
+    let status = state
         .auth
         .device_flow_store
         .get_status(&req.device_code)
-        .await
-    {
-        Ok(s) => s,
-        Err(e) => match e.current_context() {
-            DeviceFlowError::NotFound => {
-                return error_response(StatusCode::NOT_FOUND, "Device flow not found or expired");
-            }
-            _ => {
-                tracing::error!("Device flow status check failed: {e}");
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        },
-    };
+        .await?;
 
     match status {
-        DeviceFlowStatus::Pending => (
+        DeviceFlowStatus::Pending => Ok((
             StatusCode::OK,
             Json(DeviceAuthPollResponse {
                 status: DeviceAuthStatus::Pending,
@@ -134,8 +122,8 @@ pub async fn device_auth_poll(
                 token_name: None,
             }),
         )
-            .into_response(),
-        DeviceFlowStatus::Expired => (
+            .into_response()),
+        DeviceFlowStatus::Expired => Ok((
             StatusCode::OK,
             Json(DeviceAuthPollResponse {
                 status: DeviceAuthStatus::Expired,
@@ -143,35 +131,21 @@ pub async fn device_auth_poll(
                 token_name: None,
             }),
         )
-            .into_response(),
+            .into_response()),
         DeviceFlowStatus::Authorized { .. } => {
             // Consume the flow (one-time use)
-            let (user_id, client_name) =
-                match state.auth.device_flow_store.consume(&req.device_code).await {
-                    Ok(result) => result,
-                    Err(e) => match e.current_context() {
-                        DeviceFlowError::NotFound => {
-                            return error_response(
-                                StatusCode::NOT_FOUND,
-                                "Device flow not found or expired",
-                            );
-                        }
-                        _ => {
-                            tracing::error!("Device flow consume failed: {e}");
-                            return error_response(
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "Internal server error",
-                            );
-                        }
-                    },
-                };
+            let (user_id, client_name) = state
+                .auth
+                .device_flow_store
+                .consume(&req.device_code)
+                .await?;
 
             let token_name = client_name.unwrap_or_else(|| "cli-device-auth".into());
 
             // Create an API token for the user
             let service = ApiTokenService::new(state.db().clone());
             match service.create_token(user_id, &token_name).await {
-                Ok(created) => (
+                Ok(created) => Ok((
                     StatusCode::OK,
                     Json(DeviceAuthPollResponse {
                         status: DeviceAuthStatus::Authorized,
@@ -179,10 +153,13 @@ pub async fn device_auth_poll(
                         token_name: Some(token_name),
                     }),
                 )
-                    .into_response(),
+                    .into_response()),
                 Err(e) => {
                     tracing::error!("Failed to create API token for device flow: {e:?}");
-                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                    Ok(error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    ))
                 }
             }
         }
@@ -210,50 +187,36 @@ pub async fn device_auth_approve(
     State(state): State<Arc<AppState>>,
     CanViewServices(auth_user): CanViewServices,
     Json(req): Json<DeviceAuthApproveRequest>,
-) -> Response {
+) -> Result<impl IntoResponse, ApiError> {
     let normalized = req.user_code.replace('-', "").to_uppercase();
 
-    match state
+    state
         .auth
         .device_flow_store
         .approve(&normalized, auth_user.user_id)
+        .await?;
+
+    // Notify SSE subscribers that the flow was approved.
+    if let Ok(hash) = state
+        .auth
+        .device_flow_store
+        .get_device_code_hash_by_user_code(&normalized)
         .await
     {
-        Ok(()) => {
-            // Notify SSE subscribers that the flow was approved.
-            if let Ok(hash) = state
-                .auth
-                .device_flow_store
-                .get_device_code_hash_by_user_code(&normalized)
-                .await
-            {
-                state
-                    .broadcast
-                    .device_flow_broadcaster
-                    .notify_status_changed(&hash)
-                    .await;
-            }
-            (
-                StatusCode::OK,
-                Json(DeviceAuthApproveResponse {
-                    message: "Device authorized".into(),
-                }),
-            )
-                .into_response()
-        }
-        Err(e) => match e.current_context() {
-            DeviceFlowError::NotFound => {
-                error_response(StatusCode::NOT_FOUND, "Device flow not found or expired")
-            }
-            DeviceFlowError::AlreadyAuthorized => {
-                error_response(StatusCode::CONFLICT, "Device flow already authorized")
-            }
-            _ => {
-                tracing::error!("Device flow approve failed: {e}");
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-        },
+        state
+            .broadcast
+            .device_flow_broadcaster
+            .notify_status_changed(&hash)
+            .await;
     }
+
+    Ok((
+        StatusCode::OK,
+        Json(DeviceAuthApproveResponse {
+            message: "Device authorized".into(),
+        }),
+    )
+        .into_response())
 }
 
 /// Query parameters for the device auth SSE stream.
@@ -276,7 +239,7 @@ pub struct DeviceAuthStreamQuery {
 pub async fn device_auth_stream(
     State(state): State<Arc<AppState>>,
     Query(query): Query<DeviceAuthStreamQuery>,
-) -> Response {
+) -> Result<impl IntoResponse, ApiError> {
     let device_code = query.device_code;
     let device_code_hash = hash_token(&device_code);
     let shutdown_token = state.shutdown_token.clone();
@@ -289,18 +252,11 @@ pub async fn device_auth_stream(
         .await;
 
     // Check current status in the DB.
-    let current_status = match state.auth.device_flow_store.get_status(&device_code).await {
-        Ok(s) => s,
-        Err(e) => match e.current_context() {
-            DeviceFlowError::NotFound => {
-                return error_response(StatusCode::NOT_FOUND, "Device flow not found or expired");
-            }
-            _ => {
-                tracing::error!("Device flow status check failed: {e}");
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        },
-    };
+    let current_status = state
+        .auth
+        .device_flow_store
+        .get_status(&device_code)
+        .await?;
 
     let stream = async_stream::stream! {
         match current_status {
@@ -380,9 +336,9 @@ pub async fn device_auth_stream(
         }
     };
 
-    Sse::new(stream)
+    Ok(Sse::new(stream)
         .keep_alive(KeepAlive::default().interval(std::time::Duration::from_secs(15)))
-        .into_response()
+        .into_response())
 }
 
 /// Consume the device flow and return an SSE `authorized` event with the token.

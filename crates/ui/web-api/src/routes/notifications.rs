@@ -1,7 +1,8 @@
 use crate::AppState;
+use crate::api_error::ApiError;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageNotifications, CanViewNotifications};
-use crate::queries::notifications::{self as notif_queries, ChannelQueryError, RuleQueryError};
+use crate::queries::notifications as notif_queries;
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -61,27 +62,13 @@ pub async fn create_channel(
     tenant_db: TenantDb,
     CanManageNotifications(_user): CanManageNotifications,
     Json(body): Json<CreateNotificationChannelRequest>,
-) -> Response {
+) -> Result<impl IntoResponse, ApiError> {
     if let Err(e) = body.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+        return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
     }
 
-    match notif_queries::create_channel(&tenant_db, &body, &*state.plugin_ops).await {
-        Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
-        Err(report) => match report.current_context() {
-            ChannelQueryError::UnsupportedType(t) => error_response(
-                StatusCode::BAD_REQUEST,
-                format!("Unsupported channel type: {t}"),
-            ),
-            ChannelQueryError::InvalidConfig(msg) => {
-                error_response(StatusCode::BAD_REQUEST, format!("Invalid config: {msg}"))
-            }
-            ChannelQueryError::Db(_) => {
-                tracing::error!(error = ?report, "failed to create notification channel");
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-        },
-    }
+    let resp = notif_queries::create_channel(&tenant_db, &body, &*state.plugin_ops).await?;
+    Ok((StatusCode::CREATED, Json(resp)).into_response())
 }
 
 /// List all notification channels
@@ -177,27 +164,14 @@ pub async fn update_channel(
     CanManageNotifications(_user): CanManageNotifications,
     Path(channel_id): Path<Uuid>,
     Json(body): Json<UpdateNotificationChannelRequest>,
-) -> Response {
+) -> Result<impl IntoResponse, ApiError> {
     if let Err(e) = body.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+        return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
     }
 
-    match notif_queries::update_channel(&tenant_db, channel_id, &body, &*state.plugin_ops).await {
-        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
-        Ok(None) => error_response(StatusCode::NOT_FOUND, "Channel not found"),
-        Err(report) => match report.current_context() {
-            ChannelQueryError::UnsupportedType(t) => error_response(
-                StatusCode::BAD_REQUEST,
-                format!("Unsupported channel type: {t}"),
-            ),
-            ChannelQueryError::InvalidConfig(msg) => {
-                error_response(StatusCode::BAD_REQUEST, format!("Invalid config: {msg}"))
-            }
-            ChannelQueryError::Db(_) => {
-                tracing::error!(error = ?report, "failed to update notification channel");
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-        },
+    match notif_queries::update_channel(&tenant_db, channel_id, &body, &*state.plugin_ops).await? {
+        Some(resp) => Ok((StatusCode::OK, Json(resp)).into_response()),
+        None => Ok(error_response(StatusCode::NOT_FOUND, "Channel not found")),
     }
 }
 
@@ -354,27 +328,13 @@ pub async fn create_rule(
     tenant_db: TenantDb,
     CanManageNotifications(_user): CanManageNotifications,
     Json(body): Json<CreateNotificationRuleRequest>,
-) -> Response {
+) -> Result<impl IntoResponse, ApiError> {
     if let Err(e) = body.validate() {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+        return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
     }
 
-    match notif_queries::create_rule(&tenant_db, &body).await {
-        Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
-        Err(report) => match report.current_context() {
-            RuleQueryError::ChannelNotFound => {
-                error_response(StatusCode::NOT_FOUND, "Channel not found")
-            }
-            RuleQueryError::Db(_) => {
-                tracing::error!(error = ?report, "failed to create notification rule");
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-            RuleQueryError::InvalidField(field) => error_response(
-                StatusCode::BAD_REQUEST,
-                format!("Invalid value for field '{field}'"),
-            ),
-        },
-    }
+    let resp = notif_queries::create_rule(&tenant_db, &body).await?;
+    Ok((StatusCode::CREATED, Json(resp)).into_response())
 }
 
 /// List notification rules
