@@ -234,10 +234,7 @@ impl ServiceHandler for AgentHandler {
                 client::handle_update_stdin_data(payload, &self.in_flight_update);
                 Ok(None)
             }
-            _ => {
-                tracing::debug!("ignoring unrecognized message in authenticated loop");
-                Ok(None)
-            }
+            _ => Ok(None),
         }
     }
 

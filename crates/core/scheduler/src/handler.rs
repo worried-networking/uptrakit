@@ -280,10 +280,7 @@ impl ServiceHandler for SchedulerHandler {
                 tracing::info!("scheduler engine started");
                 Ok(None)
             }
-            _ => {
-                tracing::debug!("ignoring unrecognized message in authenticated loop");
-                Ok(None)
-            }
+            _ => Ok(None),
         }
     }
 

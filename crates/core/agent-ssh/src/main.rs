@@ -289,10 +289,7 @@ impl ServiceHandler for SshAgentHandler {
                 self.handle_reset_data(&db).await;
                 Ok(None)
             }
-            _ => {
-                tracing::debug!("ignoring unrecognized message in authenticated loop");
-                Ok(None)
-            }
+            _ => Ok(None),
         }
     }
 

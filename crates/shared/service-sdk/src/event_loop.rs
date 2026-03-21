@@ -314,6 +314,32 @@ async fn handle_controller_message<H: ServiceHandler>(
         return Ok(Some(LoopOutcome::Disconnected));
     }
 
+    // ── SDK/handler dispatch boundary ────────────────────────────────────────
+    //
+    // This match implements the SDK-tier dispatch: 10 variants are consumed or
+    // callback-routed here; all other 27 variants fall through to `on_message`.
+    //
+    // Internally-consumed SDK variants (handled without a callback):
+    //   • Pong          — RTT logging
+    //   • Certificate   — certificate storage and renewal scheduling
+    //   • CaBundleUpdated — CA bundle hot-reload
+    //   • RequestCertRenewal — controller-requested cert renewal
+    //   • Unknown       — forward-compatibility no-op
+    //
+    // Callback-routed SDK variants (dispatched to ServiceHandler methods):
+    //   • ServiceSettings  → on_settings()
+    //   • ServerRestarting → on_shutdown()
+    //   • ExtensionRequest → on_extension_request()
+    //   • ExtensionResponse → on_extension_response()
+    //   • ServiceConfigAck → on_service_config_ack()
+    //
+    // All other variants (27) are forwarded to handler.on_message() via the
+    // catch-all `Some(msg)` arm at the bottom of this match.
+    //
+    // Authoritative classification lives in `classify_controller_message_variant()`
+    // in `crates/shared/wire/src/tests.rs`.  When adding a new SDK-owned arm here,
+    // also update that function and the `expected_sdk_owned` set in
+    // `test_variant_catalog_classification`.
     match msg.context_to::<LoopError>()? {
         Some(ControllerMessage::Pong(pong)) => {
             let rtt = now_millis() - pong.service_ts;
