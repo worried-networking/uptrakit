@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use time::UtcDateTime;
 use uuid::Uuid;
@@ -2988,4 +2988,416 @@ fn test_plugin_config_not_nats_publishable() {
         serde_json::json!({}),
     ));
     assert!(!msg.is_nats_publishable());
+}
+
+// =========================================================================
+// Variant catalog guardrail — SDK/handler partition enforcement
+//
+// These tests provide a compile-time exhaustive check that every `ControllerMessage`
+// variant is explicitly classified as either SDK-owned (consumed/routed by the
+// service-sdk event loop) or handler-owned (forwarded to `ServiceHandler::on_message`).
+//
+// Because `ControllerMessage` is `#[non_exhaustive]`, this exhaustive match is only
+// possible inside the wire crate itself — no wildcard arm is allowed here. That is
+// the enforcement mechanism: adding a new variant without updating the match will
+// produce a compile error.
+//
+// The authoritative SDK/handler split is:
+//
+// SDK-owned (10): Pong, Certificate, ServiceSettings, CaBundleUpdated,
+//   RequestCertRenewal, ServerRestarting, ExtensionRequest, ExtensionResponse,
+//   ServiceConfigAck, Unknown
+//
+// Handler-owned (27): all remaining variants.
+// =========================================================================
+
+/// Classification of a `ControllerMessage` variant with respect to the SDK dispatch tier.
+#[derive(Debug, PartialEq, Eq)]
+enum VariantOwnership {
+    /// Handled directly by the service-sdk event loop (never reaches `on_message`).
+    SdkOwned,
+    /// Forwarded to `ServiceHandler::on_message` by the catch-all arm.
+    HandlerOwned,
+}
+
+/// Classify a `ControllerMessage` variant as SDK-owned or handler-owned.
+///
+/// This match MUST be exhaustive — no wildcard arm. That is the guardrail:
+/// adding a new variant to `ControllerMessage` forces an update here.
+///
+/// When adding a new SDK-owned arm here, also update `handle_controller_message`
+/// in `crates/shared/service-sdk/src/event_loop.rs` and the
+/// `expected_sdk_owned` set in `test_variant_catalog_classification` below.
+fn classify_controller_message_variant(msg: &ControllerMessage) -> VariantOwnership {
+    match msg {
+        // --- SDK-owned: consumed or callback-routed by the service-sdk event loop ---
+        ControllerMessage::Pong(_) => VariantOwnership::SdkOwned,
+        ControllerMessage::Certificate(_) => VariantOwnership::SdkOwned,
+        ControllerMessage::ServiceSettings(_) => VariantOwnership::SdkOwned,
+        ControllerMessage::CaBundleUpdated(_) => VariantOwnership::SdkOwned,
+        ControllerMessage::RequestCertRenewal(_) => VariantOwnership::SdkOwned,
+        ControllerMessage::ServerRestarting(_) => VariantOwnership::SdkOwned,
+        ControllerMessage::ExtensionRequest(_) => VariantOwnership::SdkOwned,
+        ControllerMessage::ExtensionResponse(_) => VariantOwnership::SdkOwned,
+        ControllerMessage::ServiceConfigAck(_) => VariantOwnership::SdkOwned,
+        ControllerMessage::Unknown => VariantOwnership::SdkOwned,
+        // --- Handler-owned: forwarded to ServiceHandler::on_message ---
+        ControllerMessage::Enrolled(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::Approved(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::Rejected(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::Error(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::CheckVersions(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::ExecuteUpdate(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::ExecuteBatchUpdate(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::DiscoverSoftware(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::SetUpdateFreeze(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::UpdateStdinData(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::ResetData => VariantOwnership::HandlerOwned,
+        ControllerMessage::SoftwareStates(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::HostConnectivityUpdated(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::ReportPluginConfigResponse(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::ServiceCredentials(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::ServiceConfigDelivery(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::ServiceConfigUpdated(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::RequestCaRotation(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::RequestCrlRenewal(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::SoftwareStatesChanged(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::TokenRevoked(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::BroadcastAdminEvent(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::WorkloadClaimResult(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::WorkloadClaimAnnouncement(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::WorkloadClaimSyncRequest(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::WorkloadClaimSyncResponse(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::TestPluginConfig(_) => VariantOwnership::HandlerOwned,
+    }
+}
+
+/// Return the Rust variant name of a `ControllerMessage` as a `&'static str`.
+///
+/// Used by `test_variant_catalog_classification` to detect duplicate entries in
+/// `make_all_controller_message_variants`. Must be kept in sync with the enum.
+fn variant_discriminant_name(msg: &ControllerMessage) -> &'static str {
+    match msg {
+        ControllerMessage::Pong(_) => "Pong",
+        ControllerMessage::Certificate(_) => "Certificate",
+        ControllerMessage::ServiceSettings(_) => "ServiceSettings",
+        ControllerMessage::CaBundleUpdated(_) => "CaBundleUpdated",
+        ControllerMessage::RequestCertRenewal(_) => "RequestCertRenewal",
+        ControllerMessage::ServerRestarting(_) => "ServerRestarting",
+        ControllerMessage::ExtensionRequest(_) => "ExtensionRequest",
+        ControllerMessage::ExtensionResponse(_) => "ExtensionResponse",
+        ControllerMessage::ServiceConfigAck(_) => "ServiceConfigAck",
+        ControllerMessage::Unknown => "Unknown",
+        ControllerMessage::Enrolled(_) => "Enrolled",
+        ControllerMessage::Approved(_) => "Approved",
+        ControllerMessage::Rejected(_) => "Rejected",
+        ControllerMessage::Error(_) => "Error",
+        ControllerMessage::CheckVersions(_) => "CheckVersions",
+        ControllerMessage::ExecuteUpdate(_) => "ExecuteUpdate",
+        ControllerMessage::ExecuteBatchUpdate(_) => "ExecuteBatchUpdate",
+        ControllerMessage::DiscoverSoftware(_) => "DiscoverSoftware",
+        ControllerMessage::SetUpdateFreeze(_) => "SetUpdateFreeze",
+        ControllerMessage::UpdateStdinData(_) => "UpdateStdinData",
+        ControllerMessage::ResetData => "ResetData",
+        ControllerMessage::SoftwareStates(_) => "SoftwareStates",
+        ControllerMessage::HostConnectivityUpdated(_) => "HostConnectivityUpdated",
+        ControllerMessage::ReportPluginConfigResponse(_) => "ReportPluginConfigResponse",
+        ControllerMessage::ServiceCredentials(_) => "ServiceCredentials",
+        ControllerMessage::ServiceConfigDelivery(_) => "ServiceConfigDelivery",
+        ControllerMessage::ServiceConfigUpdated(_) => "ServiceConfigUpdated",
+        ControllerMessage::RequestCaRotation(_) => "RequestCaRotation",
+        ControllerMessage::RequestCrlRenewal(_) => "RequestCrlRenewal",
+        ControllerMessage::SoftwareStatesChanged(_) => "SoftwareStatesChanged",
+        ControllerMessage::TokenRevoked(_) => "TokenRevoked",
+        ControllerMessage::BroadcastAdminEvent(_) => "BroadcastAdminEvent",
+        ControllerMessage::WorkloadClaimResult(_) => "WorkloadClaimResult",
+        ControllerMessage::WorkloadClaimAnnouncement(_) => "WorkloadClaimAnnouncement",
+        ControllerMessage::WorkloadClaimSyncRequest(_) => "WorkloadClaimSyncRequest",
+        ControllerMessage::WorkloadClaimSyncResponse(_) => "WorkloadClaimSyncResponse",
+        ControllerMessage::TestPluginConfig(_) => "TestPluginConfig",
+    }
+}
+
+/// Construct one representative instance of every `ControllerMessage` variant.
+///
+/// `Unknown` cannot be constructed directly (it exists only as a deserialization
+/// catch-all), so it is produced via `serde_json::from_value` with an unknown type tag.
+/// All other variants use direct struct construction.
+fn make_all_controller_message_variants() -> Vec<ControllerMessage> {
+    use std::collections::BTreeMap;
+
+    let uuid1 = TEST_UUID_1;
+    let uuid2 = TEST_UUID_2;
+    let uuid3 = TEST_UUID_3;
+
+    vec![
+        // --- SDK-owned ---
+        ControllerMessage::Pong(PongPayload {
+            service_ts: 0,
+            controller_ts: 0,
+        }),
+        ControllerMessage::Certificate(CertificatePayload {
+            cert_pem: String::new(),
+            not_after: time::UtcDateTime::from_unix_timestamp(1_767_225_600).unwrap(),
+        }),
+        ControllerMessage::ServiceSettings(ServiceSettingsPayload {
+            renewal_window_hours: 6,
+            ca_bundle_hash: String::new(),
+            capabilities: BTreeSet::new(),
+            report_page_limits: ReportPageLimits::default(),
+            shutdown_timeout: None,
+            ping_interval: std::time::Duration::from_secs(300),
+            tenant_id: None,
+        }),
+        ControllerMessage::CaBundleUpdated(CaBundleUpdatedPayload {
+            ca_bundle_pem: String::new(),
+        }),
+        ControllerMessage::RequestCertRenewal(RequestCertRenewalPayload {
+            reason: String::new(),
+        }),
+        ControllerMessage::ServerRestarting(ServerRestartingPayload {
+            reason: String::new(),
+        }),
+        ControllerMessage::ExtensionRequest(extension::ExtensionRequestPayload {
+            request_id: "r".into(),
+            extension_id: "e".into(),
+            action_id: "a".into(),
+            params: serde_json::Value::Null,
+            sensitive_params: None,
+            tenant_id: None,
+        }),
+        ControllerMessage::ExtensionResponse(extension::ExtensionResponsePayload {
+            request_id: "r".into(),
+            success: true,
+            data: serde_json::Value::Null,
+            error: None,
+        }),
+        ControllerMessage::ServiceConfigAck(ServiceConfigAckPayload::success("r".into())),
+        // Unknown is only reachable via deserialization of an unknown type tag.
+        serde_json::from_value::<ControllerMessage>(
+            serde_json::json!({"type": "__test_unknown__"}),
+        )
+        .unwrap(),
+        // --- Handler-owned ---
+        ControllerMessage::Enrolled(EnrolledPayload {
+            service_id: uuid1,
+            enrollment_secret: uptrakit_shared_types::SecretString::new("s"),
+            status: EnrollmentStatus::Pending,
+        }),
+        ControllerMessage::Approved(ApprovedPayload { service_id: uuid1 }),
+        ControllerMessage::Rejected(RejectedPayload { service_id: uuid1 }),
+        ControllerMessage::Error(ErrorPayload {
+            code: ErrorCode::EnrollmentFailed,
+            message: "test".into(),
+        }),
+        ControllerMessage::CheckVersions(CheckVersionsPayload {
+            host_machine_id: "m".into(),
+            assignments: vec![],
+        }),
+        ControllerMessage::ExecuteUpdate(Box::new(ExecuteUpdatePayload {
+            host_machine_id: "m".into(),
+            update_history_id: uuid1,
+            software_item_id: uuid2,
+            software_item_name: "pkg".into(),
+            to_version: "1.0".into(),
+            detect_version_plugin: None,
+            execute_update_plugin: PluginAssignment {
+                plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
+                package_identifier: "owner/repo".into(),
+                config: serde_json::json!({}),
+            },
+            pre_update_hook_plugins: vec![],
+            post_update_hook_plugins: vec![],
+            release_info: None,
+            timeout: std::time::Duration::from_secs(600),
+            interactive: false,
+        })),
+        ControllerMessage::ExecuteBatchUpdate(Box::new(ExecuteBatchUpdatePayload {
+            host_machine_id: "m".into(),
+            batch_id: uuid1,
+            plugin_type: plugin_ids::PACKAGE_MANAGER_APT.clone(),
+            plugin_config: serde_json::json!({}),
+            updates: vec![],
+            pre_update_hook_plugins: vec![],
+            post_update_hook_plugins: vec![],
+            timeout: std::time::Duration::from_secs(3600),
+            interactive: false,
+        })),
+        ControllerMessage::DiscoverSoftware(DiscoverSoftwarePayload {
+            host_machine_id: "m".into(),
+            plugins: vec![],
+        }),
+        ControllerMessage::SetUpdateFreeze(SetUpdateFreezePayload {
+            enabled: false,
+            reason: None,
+        }),
+        ControllerMessage::UpdateStdinData(UpdateStdinDataPayload::new(uuid1, String::new())),
+        ControllerMessage::ResetData,
+        ControllerMessage::SoftwareStates(SoftwareStatesPayload {
+            tenant_id: uuid1,
+            items: vec![],
+            host_summaries: vec![],
+            hosts: vec![],
+            page: SoftwareStatesPage::single(),
+        }),
+        ControllerMessage::HostConnectivityUpdated(HostConnectivityUpdatedPayload::new(
+            uuid1,
+            vec![],
+        )),
+        ControllerMessage::ReportPluginConfigResponse(ReportPluginConfigResponsePayload {
+            request_id: "r".into(),
+            success: true,
+            plugin_config_id: None,
+            error: None,
+        }),
+        ControllerMessage::ServiceCredentials(ServiceCredentialsPayload {
+            db_url: None,
+            nats_url: None,
+            master_key_hex: None,
+        }),
+        ControllerMessage::ServiceConfigDelivery(ServiceConfigDeliveryPayload::new(vec![])),
+        ControllerMessage::ServiceConfigUpdated(ServiceConfigUpdatedPayload::new(vec![], vec![])),
+        ControllerMessage::RequestCaRotation(RequestCaRotationPayload {
+            reason: "test".into(),
+        }),
+        ControllerMessage::RequestCrlRenewal(RequestCrlRenewalPayload::default()),
+        ControllerMessage::SoftwareStatesChanged(SoftwareStatesChangedPayload::new(uuid1)),
+        ControllerMessage::TokenRevoked(TokenRevokedPayload {
+            jti: Some("jti".into()),
+            exp: Some(9_999_999_999),
+            user_id: None,
+            iat_cutoff: None,
+            purge_after: None,
+        }),
+        ControllerMessage::BroadcastAdminEvent(BroadcastAdminEventPayload {
+            tenant_id: Some(uuid1),
+            event_json: "{}".into(),
+        }),
+        ControllerMessage::WorkloadClaimResult(WorkloadClaimResultPayload::new(
+            BTreeSet::new(),
+            BTreeSet::new(),
+        )),
+        ControllerMessage::WorkloadClaimAnnouncement(WorkloadClaimAnnouncementPayload::new(
+            uuid1,
+            uuid2,
+            BTreeMap::new(),
+            BTreeSet::new(),
+            "2026-01-01T00:00:00Z".into(),
+        )),
+        ControllerMessage::WorkloadClaimSyncRequest(WorkloadClaimSyncRequestPayload::new(uuid3)),
+        ControllerMessage::WorkloadClaimSyncResponse(WorkloadClaimSyncResponsePayload::new(
+            uuid3,
+            BTreeMap::new(),
+        )),
+        ControllerMessage::TestPluginConfig(TestPluginConfigPayload::new(
+            "r".into(),
+            "m".into(),
+            ConfigTestKind::UpdateCommandValidation,
+            "shell".into(),
+            serde_json::json!({}),
+        )),
+    ]
+}
+
+#[test]
+fn test_variant_catalog_spot_checks() {
+    assert_eq!(
+        classify_controller_message_variant(&ControllerMessage::ServerRestarting(
+            ServerRestartingPayload {
+                reason: "test".into()
+            }
+        )),
+        VariantOwnership::SdkOwned,
+        "ServerRestarting must be SDK-owned"
+    );
+    assert_eq!(
+        classify_controller_message_variant(&ControllerMessage::CheckVersions(
+            CheckVersionsPayload {
+                host_machine_id: "m".into(),
+                assignments: vec![]
+            }
+        )),
+        VariantOwnership::HandlerOwned,
+        "CheckVersions must be handler-owned"
+    );
+    assert_eq!(
+        classify_controller_message_variant(&ControllerMessage::Unknown),
+        VariantOwnership::SdkOwned,
+        "Unknown must be SDK-owned"
+    );
+    assert_eq!(
+        classify_controller_message_variant(&ControllerMessage::ServiceConfigAck(
+            ServiceConfigAckPayload::success("r".into())
+        )),
+        VariantOwnership::SdkOwned,
+        "ServiceConfigAck must be SDK-owned"
+    );
+}
+
+#[test]
+fn test_variant_catalog_classification() {
+    let variants = make_all_controller_message_variants();
+
+    // 1. Total count must be exactly 37 — one entry per variant.
+    assert_eq!(
+        variants.len(),
+        37,
+        "make_all_controller_message_variants must return exactly 37 entries (one per variant); \
+         update it when adding or removing ControllerMessage variants"
+    );
+
+    // 2. Each entry must map to a unique discriminant name (no duplicates in the catalog).
+    let names: Vec<&'static str> = variants.iter().map(variant_discriminant_name).collect();
+    let unique: HashSet<&'static str> = names.iter().copied().collect();
+    assert_eq!(
+        unique.len(),
+        37,
+        "make_all_controller_message_variants contains duplicate variant entries: {:?}",
+        {
+            let mut seen = HashSet::new();
+            names
+                .iter()
+                .filter(|n| !seen.insert(*n))
+                .copied()
+                .collect::<Vec<_>>()
+        }
+    );
+
+    // 3. Exact SDK-owned membership — must be precisely the 10 variants handled by the
+    //    service-sdk event loop. Update this set when the SDK/handler boundary changes,
+    //    and also update `handle_controller_message` in event_loop.rs.
+    let expected_sdk_owned: HashSet<&'static str> = [
+        "Pong",
+        "Certificate",
+        "ServiceSettings",
+        "CaBundleUpdated",
+        "RequestCertRenewal",
+        "ServerRestarting",
+        "ExtensionRequest",
+        "ExtensionResponse",
+        "ServiceConfigAck",
+        "Unknown",
+    ]
+    .into_iter()
+    .collect();
+
+    let actual_sdk_owned: HashSet<&'static str> = variants
+        .iter()
+        .filter(|m| classify_controller_message_variant(m) == VariantOwnership::SdkOwned)
+        .map(variant_discriminant_name)
+        .collect();
+
+    assert_eq!(
+        actual_sdk_owned,
+        expected_sdk_owned,
+        "SDK-owned variant set mismatch.\n\
+         Missing from SDK: {:?}\n\
+         Unexpected in SDK: {:?}",
+        expected_sdk_owned
+            .difference(&actual_sdk_owned)
+            .collect::<Vec<_>>(),
+        actual_sdk_owned
+            .difference(&expected_sdk_owned)
+            .collect::<Vec<_>>(),
+    );
 }
