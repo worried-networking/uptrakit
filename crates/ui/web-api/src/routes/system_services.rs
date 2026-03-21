@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::api_error::ApiError;
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::middleware::permission::{
@@ -6,7 +7,7 @@ use crate::middleware::permission::{
     CanUpdateSystemServices, CanViewSystemServices,
 };
 use crate::middleware::require_auth::AuthenticatedUser;
-use crate::queries::system_services::{self as ss_queries, SystemServiceQueryError};
+use crate::queries::system_services as ss_queries;
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -170,29 +171,8 @@ pub async fn approve_system_service(
     State(state): State<Arc<AppState>>,
     CanApproveSystemServices(_user): CanApproveSystemServices,
     Path(service_id): Path<Uuid>,
-) -> Response {
-    let resp = match ss_queries::approve_system_service(state.db(), service_id).await {
-        Ok(r) => r,
-        Err(report) => {
-            return match report.current_context() {
-                SystemServiceQueryError::NotFound => {
-                    error_response(StatusCode::NOT_FOUND, "System service not found")
-                }
-                SystemServiceQueryError::NotPending => error_response(
-                    StatusCode::BAD_REQUEST,
-                    "System service is not in pending status",
-                ),
-                SystemServiceQueryError::Db(_) => {
-                    tracing::error!("Failed to approve system service: {}", report);
-                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-                }
-                _ => {
-                    tracing::error!("Unexpected error approving system service: {}", report);
-                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-                }
-            };
-        }
-    };
+) -> Result<impl IntoResponse, ApiError> {
+    let resp = ss_queries::approve_system_service(state.db(), service_id).await?;
 
     // Push approval via WebSocket (local + cross-controller outbox).
     let _ = state
@@ -212,7 +192,7 @@ pub async fn approve_system_service(
         })
         .await;
 
-    (StatusCode::OK, Json(resp)).into_response()
+    Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
 /// Reject a pending system service
@@ -238,29 +218,8 @@ pub async fn reject_system_service(
     State(state): State<Arc<AppState>>,
     CanRejectSystemServices(_user): CanRejectSystemServices,
     Path(service_id): Path<Uuid>,
-) -> Response {
-    let resp = match ss_queries::reject_system_service(state.db(), service_id).await {
-        Ok(r) => r,
-        Err(report) => {
-            return match report.current_context() {
-                SystemServiceQueryError::NotFound => {
-                    error_response(StatusCode::NOT_FOUND, "System service not found")
-                }
-                SystemServiceQueryError::NotPending => error_response(
-                    StatusCode::BAD_REQUEST,
-                    "System service is not in pending status",
-                ),
-                SystemServiceQueryError::Db(_) => {
-                    tracing::error!("Failed to reject system service: {}", report);
-                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-                }
-                _ => {
-                    tracing::error!("Unexpected error rejecting system service: {}", report);
-                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-                }
-            };
-        }
-    };
+) -> Result<impl IntoResponse, ApiError> {
+    let resp = ss_queries::reject_system_service(state.db(), service_id).await?;
 
     // Push rejection via WebSocket (local + cross-controller outbox).
     let _ = state
@@ -286,7 +245,7 @@ pub async fn reject_system_service(
         })
         .await;
 
-    (StatusCode::OK, Json(resp)).into_response()
+    Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
 /// Deactivate a system service (soft-delete)
@@ -311,9 +270,9 @@ pub async fn deactivate_system_service(
     State(state): State<Arc<AppState>>,
     CanRemoveSystemServices(_user): CanRemoveSystemServices,
     Path(service_id): Path<Uuid>,
-) -> Response {
-    match ss_queries::deactivate_system_service(state.db(), service_id).await {
-        Ok(true) => {
+) -> Result<impl IntoResponse, ApiError> {
+    match ss_queries::deactivate_system_service(state.db(), service_id).await? {
+        true => {
             state.cert.revocation_notify.notify_one();
             state
                 .notification_service
@@ -333,19 +292,12 @@ pub async fn deactivate_system_service(
                     status: "deactivated".to_string(),
                 })
                 .await;
-            StatusCode::NO_CONTENT.into_response()
+            Ok(StatusCode::NO_CONTENT.into_response())
         }
-        Ok(false) => error_response(StatusCode::NOT_FOUND, "System service not found"),
-        Err(report) => match report.current_context() {
-            SystemServiceQueryError::EmbeddedService => error_response(
-                StatusCode::CONFLICT,
-                "Embedded services cannot be deactivated",
-            ),
-            _ => {
-                tracing::error!("Failed to deactivate system service: {}", report);
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-        },
+        false => Ok(error_response(
+            StatusCode::NOT_FOUND,
+            "System service not found",
+        )),
     }
 }
 

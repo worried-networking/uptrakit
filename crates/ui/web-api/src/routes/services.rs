@@ -1,11 +1,12 @@
 use crate::AppState;
+use crate::api_error::ApiError;
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::middleware::permission::{
     CanApproveServices, CanRejectServices, CanRemoveServices, CanUpdateServices, CanViewServices,
 };
 use crate::middleware::require_auth::AuthenticatedUser;
-use crate::queries::services::{self as svc_queries, ServiceQueryError};
+use crate::queries::services as svc_queries;
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -172,28 +173,8 @@ pub async fn approve_service(
     tenant_db: TenantDb,
     CanApproveServices(_user): CanApproveServices,
     Path(service_id): Path<Uuid>,
-) -> Response {
-    let resp = match svc_queries::approve_service(&tenant_db, service_id).await {
-        Ok(r) => r,
-        Err(report) => {
-            return match report.current_context() {
-                ServiceQueryError::NotFound => {
-                    error_response(StatusCode::NOT_FOUND, "Service not found")
-                }
-                ServiceQueryError::NotPending => {
-                    error_response(StatusCode::BAD_REQUEST, "Service is not in pending status")
-                }
-                ServiceQueryError::Db(_) => {
-                    tracing::error!("Failed to approve service: {}", report);
-                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-                }
-                _ => {
-                    tracing::error!("Unexpected error approving service: {}", report);
-                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-                }
-            };
-        }
-    };
+) -> Result<impl IntoResponse, ApiError> {
+    let resp = svc_queries::approve_service(&tenant_db, service_id).await?;
 
     // Push approval via WebSocket (local + cross-controller outbox).
     let _ = state
@@ -236,7 +217,7 @@ pub async fn approve_service(
         )
         .await;
 
-    (StatusCode::OK, Json(resp)).into_response()
+    Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
 /// Reject a pending service
@@ -262,28 +243,8 @@ pub async fn reject_service(
     tenant_db: TenantDb,
     CanRejectServices(_user): CanRejectServices,
     Path(service_id): Path<Uuid>,
-) -> Response {
-    let resp = match svc_queries::reject_service(&tenant_db, service_id).await {
-        Ok(r) => r,
-        Err(report) => {
-            return match report.current_context() {
-                ServiceQueryError::NotFound => {
-                    error_response(StatusCode::NOT_FOUND, "Service not found")
-                }
-                ServiceQueryError::NotPending => {
-                    error_response(StatusCode::BAD_REQUEST, "Service is not in pending status")
-                }
-                ServiceQueryError::Db(_) => {
-                    tracing::error!("Failed to reject service: {}", report);
-                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-                }
-                _ => {
-                    tracing::error!("Unexpected error rejecting service: {}", report);
-                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-                }
-            };
-        }
-    };
+) -> Result<impl IntoResponse, ApiError> {
+    let resp = svc_queries::reject_service(&tenant_db, service_id).await?;
 
     // Push rejection via WebSocket (local + cross-controller outbox).
     let _ = state
@@ -312,7 +273,7 @@ pub async fn reject_service(
         )
         .await;
 
-    (StatusCode::OK, Json(resp)).into_response()
+    Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
 /// Deactivate a service (soft-delete)
@@ -338,9 +299,9 @@ pub async fn deactivate_service(
     tenant_db: TenantDb,
     CanRemoveServices(_user): CanRemoveServices,
     Path(service_id): Path<Uuid>,
-) -> Response {
-    match svc_queries::deactivate_service(&tenant_db, service_id, state.default_tenant_id).await {
-        Ok(true) => {
+) -> Result<impl IntoResponse, ApiError> {
+    match svc_queries::deactivate_service(&tenant_db, service_id, state.default_tenant_id).await? {
+        true => {
             state.cert.revocation_notify.notify_one();
             state
                 .notification_service
@@ -363,19 +324,9 @@ pub async fn deactivate_service(
                     },
                 )
                 .await;
-            StatusCode::NO_CONTENT.into_response()
+            Ok(StatusCode::NO_CONTENT.into_response())
         }
-        Ok(false) => error_response(StatusCode::NOT_FOUND, "Service not found"),
-        Err(report) => match report.current_context() {
-            ServiceQueryError::EmbeddedService => error_response(
-                StatusCode::CONFLICT,
-                "Embedded services cannot be deactivated",
-            ),
-            _ => {
-                tracing::error!("Failed to deactivate service: {}", report);
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-        },
+        false => Ok(error_response(StatusCode::NOT_FOUND, "Service not found")),
     }
 }
 
@@ -489,57 +440,26 @@ pub async fn merge_service(
     CanUpdateServices(_user): CanUpdateServices,
     Path(target_uuid): Path<Uuid>,
     Json(body): Json<MergeAgentRequest>,
-) -> Response {
+) -> Result<impl IntoResponse, ApiError> {
     let source_uuid = body.source_id;
 
     if target_uuid == source_uuid {
-        return error_response(StatusCode::BAD_REQUEST, "Cannot merge service into itself");
+        return Ok(error_response(
+            StatusCode::BAD_REQUEST,
+            "Cannot merge service into itself",
+        ));
     }
 
     let target_connected = state.service_connections.is_connected(&target_uuid).await;
 
-    let resp = match svc_queries::merge_service(
+    let resp = svc_queries::merge_service(
         &tenant_db,
         target_uuid,
         source_uuid,
         target_connected,
         state.default_tenant_id,
     )
-    .await
-    {
-        Ok(r) => r,
-        Err(report) => {
-            return match report.current_context() {
-                ServiceQueryError::NotFound => {
-                    error_response(StatusCode::NOT_FOUND, "Target service not found")
-                }
-                ServiceQueryError::SourceNotFound => {
-                    error_response(StatusCode::NOT_FOUND, "Source service not found")
-                }
-                ServiceQueryError::TargetConnected => error_response(
-                    StatusCode::CONFLICT,
-                    "Target service is currently connected",
-                ),
-                ServiceQueryError::NotMergeable => error_response(
-                    StatusCode::BAD_REQUEST,
-                    "Merge requires SoftwareDiscovery capability",
-                ),
-                ServiceQueryError::NotApproved => {
-                    error_response(StatusCode::BAD_REQUEST, "Target service must be approved")
-                }
-                ServiceQueryError::NotPending => {
-                    error_response(StatusCode::BAD_REQUEST, "Source service must be pending")
-                }
-                ServiceQueryError::EmbeddedService => {
-                    error_response(StatusCode::CONFLICT, "Embedded services cannot be merged")
-                }
-                ServiceQueryError::Db(_) => {
-                    tracing::error!("Failed to merge services: {}", report);
-                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-                }
-            };
-        }
-    };
+    .await?;
 
     state.cert.revocation_notify.notify_one();
     state
@@ -559,7 +479,7 @@ pub async fn merge_service(
         "services merged: source deactivated, target updated"
     );
 
-    (StatusCode::OK, Json(resp)).into_response()
+    Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
 /// Perform a batch action on multiple services.
@@ -1033,7 +953,11 @@ mod tests {
         )
         .await;
 
-        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let status = match response {
+            Err(e) => e.into_response().status(),
+            Ok(_) => panic!("expected Err(ApiError) but got Ok"),
+        };
+        assert_eq!(status, StatusCode::CONFLICT);
 
         // Source must not have been touched.
         let source_after = Service::find_by_id(source.id)
@@ -1074,7 +998,11 @@ mod tests {
         )
         .await;
 
-        assert_eq!(response.status(), StatusCode::OK);
+        let status = match response {
+            Ok(r) => r.into_response().status(),
+            Err(e) => panic!("expected Ok but got Err: {}", e.into_response().status()),
+        };
+        assert_eq!(status, StatusCode::OK);
 
         // Source must be deactivated and its original hash must be invalidated.
         let source_after = Service::find_by_id(source.id)
