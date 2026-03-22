@@ -1655,7 +1655,7 @@ guarantees consistent output formatting, and centralises error mapping in one te
 ```rust
 pub fn require_package_identifier(
     value: &str,
-    predicate: ValidatorFn,
+    predicate: impl FnMut(&str) -> std::result::Result<(), String>,
 ) -> Result<()>
 ```
 
