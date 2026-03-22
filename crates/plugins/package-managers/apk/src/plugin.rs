@@ -3,13 +3,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
+use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
-    HostCompatibility, HostRequirements, HostRuntime, OutputStreamType, PluginError, PluginFamily,
-    PluginRole, ReleaseInfo, Result, SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
+    HostCompatibility, HostRequirements, HostRuntime, PluginError, PluginFamily, PluginRole,
+    ReleaseInfo, Result, SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
     declare_plugin, execute_and_capture, plugin_ids, require_posix_executor,
 };
 
@@ -244,7 +244,10 @@ impl ApkPlugin {
     }
 
     fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
-        validate_identifier(package_identifier).map_err(|e| report!(PluginError::Configuration(e)))
+        uptrakit_plugin_infrastructure_core::require_package_identifier(
+            package_identifier,
+            validate_identifier,
+        )
     }
 }
 
@@ -611,16 +614,12 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for ApkPlugin {
 impl uptrakit_plugin_infrastructure_core::PackageIndexer for ApkPlugin {
     #[tracing::instrument(skip_all)]
     async fn refresh_package_index(&self) -> Result<()> {
-        tracing::info!("refreshing APK package index");
-        execute_and_capture(
+        uptrakit_plugin_infrastructure_core::refresh_package_index_command(
             self.executor.as_ref(),
             CommandSpec::exec("apk", ["update".to_string()]).privileged(),
-            "apk update",
+            "APK package index",
         )
-        .await?;
-
-        tracing::info!("APK package index refreshed");
-        Ok(())
+        .await
     }
 }
 
@@ -637,32 +636,24 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for ApkPlugin {
         self.require_package_identifier(package_identifier)?;
         validate_version(to_version).map_err(|e| report!(PluginError::Configuration(e)))?;
 
-        let pkg_arg = format!("{package_identifier}={to_version}");
-        let args = vec!["add".to_string(), pkg_arg];
-
-        let display_cmd = format!("apk {}", args.join(" "));
         tracing::debug!(package = %package_identifier, version = %to_version, "running apk add");
-        send_output(
+
+        uptrakit_plugin_infrastructure_core::execute_command_update(
+            uptrakit_plugin_infrastructure_core::CommandUpdateParams {
+                executor: self.executor.as_ref(),
+                binary: "apk",
+                args: vec![
+                    "add".to_string(),
+                    format!("{package_identifier}={to_version}"),
+                ],
+                privileged: true,
+                spec_modifier: None,
+                exit_code_success: None,
+                exit_code_error: Some(|_, code| PluginError::CommandFailed(code)),
+            },
             output_tx,
-            &format!("Running: {display_cmd}"),
-            OutputStreamType::Stdout,
         )
-        .await;
-        let mut output = format!("Running: {display_cmd}\n");
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("apk", args).privileged(), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-
-        output.push_str(&cmd_output.output);
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::CommandFailed(cmd_output.exit_code));
-        }
-
-        Ok(output)
+        .await
     }
 
     #[tracing::instrument(skip_all)]
@@ -671,50 +662,27 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for ApkPlugin {
         items: &[BatchUpdateItem],
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<Vec<BatchUpdateResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        for item in items {
-            validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
-            validate_version(&item.to_version)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
-        }
-
         tracing::debug!(count = items.len(), "running APK batch update");
-
-        let mut args = vec!["add".to_string()];
-        for item in items {
-            args.push(format!("{}={}", item.package_identifier, item.to_version));
-        }
-
-        let display_cmd = format!("apk {}", args.join(" "));
-        send_output(
+        let result = uptrakit_plugin_infrastructure_core::execute_batch_versioned_command(
+            uptrakit_plugin_infrastructure_core::BatchVersionedParams {
+                executor: self.executor.as_ref(),
+                binary: "apk",
+                prefix_args: vec!["add".to_string()],
+                privileged: true,
+                format_item: |id, ver| format!("{id}={ver}"),
+                validate_identifier,
+                validate_version,
+                context_prefix: None,
+            },
+            items,
             output_tx,
-            &format!("Running: {display_cmd}"),
-            OutputStreamType::Stdout,
         )
         .await;
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("apk", args).privileged(), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-
-        let success = cmd_output.exit_code == 0;
-        let output = cmd_output.output.clone();
-
-        let results = items
-            .iter()
-            .map(|item| {
-                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
-            })
-            .collect();
-
-        tracing::debug!(count = items.len(), success, "APK batch update complete");
-        Ok(results)
+        if let Ok(ref results) = result {
+            let success = results.first().is_none_or(|r| r.success);
+            tracing::debug!(count = items.len(), success, "APK batch update complete");
+        }
+        result
     }
 }
 
