@@ -51,11 +51,14 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for NpmPlugin {
         items: &[BatchUpdateItem],
         output_tx: &UpdateOutputSender,
     ) -> Result<Vec<BatchUpdateResult>> {
-        let context_prefix = if items.is_empty() {
-            None
-        } else {
-            Some(format!("Batch updating {} packages", items.len()))
-        };
+        if !items.is_empty() {
+            uptrakit_plugin_infrastructure_core::command::send_output(
+                output_tx,
+                &format!("Batch updating {} packages", items.len()),
+                uptrakit_plugin_infrastructure_core::OutputStreamType::Stdout,
+            )
+            .await;
+        }
         tracing::debug!(count = items.len(), "running npm batch install -g");
         uptrakit_plugin_infrastructure_core::execute_batch_versioned_command(
             uptrakit_plugin_infrastructure_core::BatchVersionedParams {
@@ -66,7 +69,6 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for NpmPlugin {
                 format_item: |id, ver| format!("{id}@{ver}"),
                 validate_identifier: crate::plugin::validate_identifier,
                 validate_version,
-                context_prefix,
             },
             items,
             output_tx,

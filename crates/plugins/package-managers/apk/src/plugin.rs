@@ -672,7 +672,6 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for ApkPlugin {
                 format_item: |id, ver| format!("{id}={ver}"),
                 validate_identifier,
                 validate_version,
-                context_prefix: None,
             },
             items,
             output_tx,

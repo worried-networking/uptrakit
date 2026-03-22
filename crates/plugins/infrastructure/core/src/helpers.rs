@@ -177,9 +177,6 @@ pub struct BatchVersionedParams<'a> {
     pub validate_identifier: ValidatorFn,
     /// Validate each package version before execution.
     pub validate_version: ValidatorFn,
-    /// Optional context message prepended before `"Running: ..."` in the output
-    /// stream.  Pass `None` to send only the `"Running: ..."` line (e.g., APK).
-    pub context_prefix: Option<String>,
 }
 
 /// Execute a versioned batch update using a single command invocation.
@@ -218,11 +215,12 @@ pub async fn execute_batch_versioned_command(
         .collect::<Vec<_>>()
         .join(" ");
 
-    let msg = match &params.context_prefix {
-        Some(ctx) => format!("{ctx}\nRunning: {display_args}"),
-        None => format!("Running: {display_args}"),
-    };
-    send_output(output_tx, &msg, OutputStreamType::Stdout).await;
+    send_output(
+        output_tx,
+        &format!("Running: {display_args}"),
+        OutputStreamType::Stdout,
+    )
+    .await;
     let mut output = format!("Running: {display_args}\n");
 
     let mut spec = CommandSpec::exec(params.binary, args);
@@ -269,9 +267,6 @@ pub struct BatchNamesParams<'a> {
     /// Optional version validator.  When `Some`, each item's `to_version` is
     /// validated (pre-flight check only; the version is not passed to the command).
     pub validate_version: Option<ValidatorFn>,
-    /// Optional context message prepended before `"Running: ..."` in the output
-    /// stream.  Pass `None` to skip the context line.
-    pub context_prefix: Option<String>,
 }
 
 /// Execute a names-only batch update using a single command invocation.
@@ -310,11 +305,12 @@ pub async fn execute_batch_names_command(
         .collect::<Vec<_>>()
         .join(" ");
 
-    let msg = match &params.context_prefix {
-        Some(ctx) => format!("{ctx}\nRunning: {display_args}"),
-        None => format!("Running: {display_args}"),
-    };
-    send_output(output_tx, &msg, OutputStreamType::Stdout).await;
+    send_output(
+        output_tx,
+        &format!("Running: {display_args}"),
+        OutputStreamType::Stdout,
+    )
+    .await;
     let mut output = format!("Running: {display_args}\n");
 
     let mut spec = CommandSpec::exec(params.binary, args);
@@ -551,7 +547,6 @@ mod tests {
                 format_item: |id, ver| format!("{id}@{ver}"),
                 validate_identifier: |_| Ok(()),
                 validate_version: |_| Ok(()),
-                context_prefix: None,
             },
             &[],
             &tx,
@@ -578,7 +573,6 @@ mod tests {
                 format_item: |id, ver| format!("{id}@{ver}"),
                 validate_identifier: |_| Ok(()),
                 validate_version: |_| Ok(()),
-                context_prefix: Some("Batch updating 2 packages".to_string()),
             },
             &items,
             &tx,
@@ -612,7 +606,6 @@ mod tests {
                 format_item: |id, ver| format!("{id}-{ver}"),
                 validate_identifier: |_| Ok(()),
                 validate_version: |_| Ok(()),
-                context_prefix: None,
             },
             &items,
             &tx,
@@ -647,7 +640,6 @@ mod tests {
                     }
                 },
                 validate_version: |_| Ok(()),
-                context_prefix: None,
             },
             &items,
             &tx,
@@ -684,7 +676,6 @@ mod tests {
                         Ok(())
                     }
                 },
-                context_prefix: None,
             },
             &items,
             &tx,
@@ -716,7 +707,6 @@ mod tests {
                 format_item: |id, ver| format!("{id}={ver}"),
                 validate_identifier: |_| Ok(()),
                 validate_version: |_| Ok(()),
-                context_prefix: None,
             },
             &items,
             &tx,
@@ -742,7 +732,6 @@ mod tests {
                 suffix_args: vec![],
                 validate_identifier: |_| Ok(()),
                 validate_version: None,
-                context_prefix: None,
             },
             &[],
             &tx,
@@ -769,7 +758,6 @@ mod tests {
                 suffix_args: vec![],
                 validate_identifier: |_| Ok(()),
                 validate_version: None,
-                context_prefix: Some("Batch updating 2 packages: nginx, curl".to_string()),
             },
             &items,
             &tx,
@@ -799,7 +787,6 @@ mod tests {
                 suffix_args: vec!["--channel=stable".to_string()],
                 validate_identifier: |_| Ok(()),
                 validate_version: None,
-                context_prefix: None,
             },
             &items,
             &tx,
@@ -839,7 +826,6 @@ mod tests {
                         Ok(())
                     }
                 }),
-                context_prefix: None,
             },
             &items,
             &tx,
@@ -871,7 +857,6 @@ mod tests {
                 suffix_args: vec![],
                 validate_identifier: |_| Ok(()),
                 validate_version: None,
-                context_prefix: None,
             },
             &items,
             &tx,

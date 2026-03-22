@@ -77,11 +77,14 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for HomebrewPlugin {
         items: &[BatchUpdateItem],
         output_tx: &UpdateOutputSender,
     ) -> Result<Vec<BatchUpdateResult>> {
-        let context_prefix = if items.is_empty() {
-            None
-        } else {
-            Some(format!("Batch updating {} packages", items.len()))
-        };
+        if !items.is_empty() {
+            uptrakit_plugin_infrastructure_core::command::send_output(
+                output_tx,
+                &format!("Batch updating {} packages", items.len()),
+                uptrakit_plugin_infrastructure_core::OutputStreamType::Stdout,
+            )
+            .await;
+        }
         let prefix_args: Vec<String> = if self.is_cask() {
             vec!["upgrade".to_string(), "--cask".to_string()]
         } else {
@@ -97,7 +100,6 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for HomebrewPlugin {
                 suffix_args: vec![],
                 validate_identifier: crate::plugin::validate_identifier_nonempty,
                 validate_version: None,
-                context_prefix,
             },
             items,
             output_tx,

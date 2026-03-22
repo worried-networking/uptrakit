@@ -74,15 +74,18 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for SnapPlugin {
             .iter()
             .map(|i| i.package_identifier.as_str())
             .collect();
-        let context_prefix = if items.is_empty() {
-            None
-        } else {
-            Some(format!(
-                "Batch updating {} Snap packages: {}",
-                items.len(),
-                pkg_list.join(", ")
-            ))
-        };
+        if !items.is_empty() {
+            send_output(
+                output_tx,
+                &format!(
+                    "Batch updating {} Snap packages: {}",
+                    items.len(),
+                    pkg_list.join(", ")
+                ),
+                OutputStreamType::Stdout,
+            )
+            .await;
+        }
         let suffix_args = self
             .config
             .channel
@@ -103,7 +106,6 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for SnapPlugin {
                 suffix_args,
                 validate_identifier,
                 validate_version: None,
-                context_prefix,
             },
             items,
             output_tx,

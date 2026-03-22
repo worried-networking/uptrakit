@@ -474,15 +474,18 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for PkgPlugin {
             .iter()
             .map(|i| i.package_identifier.as_str())
             .collect();
-        let context_prefix = if items.is_empty() {
-            None
-        } else {
-            Some(format!(
-                "Batch updating {} packages: {}",
-                items.len(),
-                pkg_list.join(", ")
-            ))
-        };
+        if !items.is_empty() {
+            uptrakit_plugin_infrastructure_core::command::send_output(
+                output_tx,
+                &format!(
+                    "Batch updating {} packages: {}",
+                    items.len(),
+                    pkg_list.join(", ")
+                ),
+                uptrakit_plugin_infrastructure_core::OutputStreamType::Stdout,
+            )
+            .await;
+        }
         tracing::debug!(
             count = items.len(),
             packages = ?pkg_list,
@@ -497,7 +500,6 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for PkgPlugin {
                 suffix_args: vec![],
                 validate_identifier,
                 validate_version: None,
-                context_prefix,
             },
             items,
             output_tx,
