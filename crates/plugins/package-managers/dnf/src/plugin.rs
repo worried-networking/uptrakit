@@ -4,14 +4,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
+use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
-    HostCompatibility, HostRequirements, HostRuntime, OutputStreamType, PluginError, PluginFamily,
-    PluginRole, ReleaseInfo, Result, SudoCommandEntry, UpdateCategory, UpdateOutputSender,
-    UpstreamRelease, Version, declare_plugin, execute_and_capture, plugin_ids,
-    require_posix_executor,
+    HostCompatibility, HostRequirements, HostRuntime, PluginError, PluginFamily, PluginRole,
+    ReleaseInfo, Result, SudoCommandEntry, UpdateCategory, UpdateOutputSender, UpstreamRelease,
+    Version, declare_plugin, execute_and_capture, plugin_ids, require_posix_executor,
 };
 // Subtrait imports -- needed so `use super::*` in tests brings these methods into scope.
 #[cfg(test)]
@@ -213,7 +212,10 @@ impl DnfPlugin {
     }
 
     fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
-        validate_identifier(package_identifier).map_err(|e| report!(PluginError::Configuration(e)))
+        uptrakit_plugin_infrastructure_core::require_package_identifier(
+            package_identifier,
+            validate_identifier,
+        )
     }
 }
 
@@ -612,16 +614,12 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for DnfPlugin {
 impl uptrakit_plugin_infrastructure_core::PackageIndexer for DnfPlugin {
     #[tracing::instrument(skip_all)]
     async fn refresh_package_index(&self) -> Result<()> {
-        tracing::info!("refreshing DNF package index");
-        execute_and_capture(
+        uptrakit_plugin_infrastructure_core::refresh_package_index_command(
             self.executor.as_ref(),
             CommandSpec::exec("dnf", ["makecache".to_string(), "-q".to_string()]).privileged(),
-            "dnf makecache",
+            "DNF package index",
         )
-        .await?;
-
-        tracing::info!("DNF package index refreshed");
-        Ok(())
+        .await
     }
 }
 
@@ -638,43 +636,29 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for DnfPlugin {
         self.require_package_identifier(package_identifier)?;
         validate_version(to_version).map_err(|e| report!(PluginError::Configuration(e)))?;
 
-        // DNF install accepts `pkg-version-release` to pin to a specific build.
-        let pkg_version = format!("{package_identifier}-{to_version}");
-        let args = vec!["install".to_string(), "-y".to_string(), pkg_version];
-
         tracing::debug!(
             package = %package_identifier,
             version = %to_version,
             "running dnf install"
         );
 
-        let display_args = std::iter::once("dnf")
-            .chain(args.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ");
-        send_output(
+        uptrakit_plugin_infrastructure_core::execute_command_update(
+            uptrakit_plugin_infrastructure_core::CommandUpdateParams {
+                executor: self.executor.as_ref(),
+                binary: "dnf",
+                args: vec![
+                    "install".to_string(),
+                    "-y".to_string(),
+                    format!("{package_identifier}-{to_version}"),
+                ],
+                privileged: true,
+                spec_modifier: None,
+                exit_code_success: None,
+                exit_code_error: None,
+            },
             output_tx,
-            &format!("Running: {display_args}"),
-            OutputStreamType::Stdout,
         )
-        .await;
-        let mut output = format!("Running: {display_args}\n");
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("dnf", args).privileged(), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::InstallFailed(format!(
-                "dnf install failed with exit code {}",
-                cmd_output.exit_code
-            )));
-        }
-
-        output.push_str(&cmd_output.output);
-        Ok(output)
+        .await
     }
 
     /// Execute batch updates using a single `dnf install -y` invocation.
@@ -687,88 +671,49 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for DnfPlugin {
         items: &[BatchUpdateItem],
         output_tx: &UpdateOutputSender,
     ) -> Result<Vec<BatchUpdateResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Validate all package identifiers and versions up front.
-        for item in items {
-            validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
-            validate_version(&item.to_version)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
-        }
-
-        let mut args = vec!["install".to_string(), "-y".to_string()];
-        for item in items {
-            args.push(format!("{}-{}", item.package_identifier, item.to_version));
-        }
-
-        let display_args = std::iter::once("dnf")
-            .chain(args.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ");
-
         let pkg_list: Vec<&str> = items
             .iter()
             .map(|i| i.package_identifier.as_str())
             .collect();
-        send_output(
-            output_tx,
-            &format!(
-                "Batch updating {} packages: {}\nRunning: {display_args}",
+        let context_prefix = if items.is_empty() {
+            None
+        } else {
+            Some(format!(
+                "Batch updating {} packages: {}",
                 items.len(),
                 pkg_list.join(", ")
-            ),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        let mut output = format!("Running: {display_args}\n");
-
+            ))
+        };
         tracing::debug!(
             count = items.len(),
             packages = ?pkg_list,
             "running dnf batch install"
         );
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("dnf", args).privileged(), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-
-        output.push_str(&cmd_output.output);
-
-        let success = cmd_output.exit_code == 0;
-        let results = items
-            .iter()
-            .map(|item| {
-                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
-            })
-            .collect();
-
-        Ok(results)
+        uptrakit_plugin_infrastructure_core::execute_batch_versioned_command(
+            uptrakit_plugin_infrastructure_core::BatchVersionedParams {
+                executor: self.executor.as_ref(),
+                binary: "dnf",
+                prefix_args: vec!["install".to_string(), "-y".to_string()],
+                privileged: true,
+                format_item: |id, ver| format!("{id}-{ver}"),
+                validate_identifier,
+                validate_version,
+                context_prefix,
+            },
+            items,
+            output_tx,
+        )
+        .await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::testing::{FixedOutputExecutor, RoutedOutputExecutor};
-    use uptrakit_plugin_infrastructure_core::{
-        CommandOutput, HostCapabilities, LocalCommandExecutor, PosixHostRuntime, UpdateOutputLine,
+    use uptrakit_plugin_infrastructure_core::testing::{
+        FixedOutputExecutor, RoutedOutputExecutor, test_runtime, test_runtime_with_executor,
     };
-
-    fn test_runtime() -> Arc<dyn HostRuntime> {
-        Arc::new(PosixHostRuntime::new(
-            Arc::new(LocalCommandExecutor),
-            HostCapabilities::default(),
-        ))
-    }
-
-    fn runtime_from_executor(executor: Arc<dyn CommandExecutor>) -> Arc<dyn HostRuntime> {
-        Arc::new(PosixHostRuntime::new(executor, HostCapabilities::default()))
-    }
+    use uptrakit_plugin_infrastructure_core::{CommandOutput, UpdateOutputLine};
 
     // ── validate_identifier ──────────────────────────────────────────────
 
@@ -998,7 +943,8 @@ mod tests {
     #[tokio::test]
     async fn host_compat_compatible_when_dnf_found() {
         let executor = RoutedOutputExecutor::new([("which", "", 0)]);
-        let plugin = DnfPlugin::new(DnfConfig::default(), runtime_from_executor(executor)).unwrap();
+        let plugin =
+            DnfPlugin::new(DnfConfig::default(), test_runtime_with_executor(executor)).unwrap();
         let result = plugin.detect_host_compatibility().await.unwrap();
         assert!(matches!(result, HostCompatibility::Compatible));
     }
@@ -1006,7 +952,8 @@ mod tests {
     #[tokio::test]
     async fn host_compat_incompatible_when_dnf_not_found() {
         let executor = FixedOutputExecutor::failure(1);
-        let plugin = DnfPlugin::new(DnfConfig::default(), runtime_from_executor(executor)).unwrap();
+        let plugin =
+            DnfPlugin::new(DnfConfig::default(), test_runtime_with_executor(executor)).unwrap();
         let result = plugin.detect_host_compatibility().await.unwrap();
         assert!(matches!(result, HostCompatibility::Incompatible(_)));
     }
@@ -1018,7 +965,8 @@ mod tests {
         // Targets are always emitted regardless of filter.
         let rpm_output = "nginx\t1.24.0-1.fc40\ncurl\t8.0.1-1.fc40\n";
         let executor = RoutedOutputExecutor::new([("rpm", rpm_output, 0)]);
-        let plugin = DnfPlugin::new(DnfConfig::default(), runtime_from_executor(executor)).unwrap();
+        let plugin =
+            DnfPlugin::new(DnfConfig::default(), test_runtime_with_executor(executor)).unwrap();
         let result = plugin.discover_software().await.unwrap();
         assert_eq!(result.len(), 2);
         for item in &result {
@@ -1037,7 +985,7 @@ mod tests {
         let config = DnfConfig {
             discovery_filter: DnfDiscoveryFilter::All,
         };
-        let plugin = DnfPlugin::new(config, runtime_from_executor(executor)).unwrap();
+        let plugin = DnfPlugin::new(config, test_runtime_with_executor(executor)).unwrap();
         let result = plugin.discover_software().await.unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(
@@ -1060,7 +1008,8 @@ mod tests {
     async fn batch_detect_finds_installed_packages() {
         let rpm_output = "nginx\t1.24.0-1.fc40\ncurl\t8.0.1-1.fc40\n";
         let executor = RoutedOutputExecutor::new([("rpm", rpm_output, 0)]);
-        let plugin = DnfPlugin::new(DnfConfig::default(), runtime_from_executor(executor)).unwrap();
+        let plugin =
+            DnfPlugin::new(DnfConfig::default(), test_runtime_with_executor(executor)).unwrap();
         let items = vec![
             BatchDetectItem::new("nginx".to_string()),
             BatchDetectItem::new("curl".to_string()),
@@ -1086,7 +1035,8 @@ mod tests {
     #[tokio::test]
     async fn batch_fetch_exit_0_all_up_to_date() {
         let executor = RoutedOutputExecutor::new([("dnf", "", 0)]);
-        let plugin = DnfPlugin::new(DnfConfig::default(), runtime_from_executor(executor)).unwrap();
+        let plugin =
+            DnfPlugin::new(DnfConfig::default(), test_runtime_with_executor(executor)).unwrap();
         let items = vec![BatchFetchItem::new("nginx".to_string())];
         let results = plugin.batch_fetch(&items).await.unwrap();
         assert_eq!(results.len(), 1);
@@ -1125,7 +1075,8 @@ mod tests {
         let executor = Arc::new(Exit100Executor {
             output: "nginx.x86_64    1.26.0-1.fc40    updates\n".to_string(),
         }) as Arc<dyn CommandExecutor>;
-        let plugin = DnfPlugin::new(DnfConfig::default(), runtime_from_executor(executor)).unwrap();
+        let plugin =
+            DnfPlugin::new(DnfConfig::default(), test_runtime_with_executor(executor)).unwrap();
         let items = vec![BatchFetchItem::new("nginx".to_string())];
         let results = plugin.batch_fetch(&items).await.unwrap();
         assert_eq!(results.len(), 1);
