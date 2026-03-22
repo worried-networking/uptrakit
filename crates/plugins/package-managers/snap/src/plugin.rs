@@ -4,8 +4,8 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginConfig, PluginError,
-    PluginFamily, Result, SudoCommandEntry, declare_plugin, require_posix_executor,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginConfig, PluginFamily, Result,
+    SudoCommandEntry, declare_plugin, require_posix_executor,
 };
 use uptrakit_shared_types::PackageIdentifierRules;
 
@@ -202,8 +202,10 @@ impl SnapPlugin {
     }
 
     pub(crate) fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
-        validate_identifier(package_identifier)
-            .map_err(|e| rootcause::report!(PluginError::Configuration(e)))
+        uptrakit_plugin_infrastructure_core::require_package_identifier(
+            package_identifier,
+            validate_identifier,
+        )
     }
 }
 

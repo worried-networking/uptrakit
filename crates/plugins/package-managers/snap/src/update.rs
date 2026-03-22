@@ -1,10 +1,8 @@
 use async_trait::async_trait;
-use rootcause::prelude::*;
-use uptrakit_plugin_infrastructure_core::command::{CommandSpec, send_output};
+use uptrakit_plugin_infrastructure_core::command::send_output;
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    BatchUpdateItem, BatchUpdateResult, OutputStreamType, PluginError, ReleaseInfo, Result,
-    UpdateOutputLine,
+    BatchUpdateItem, BatchUpdateResult, OutputStreamType, ReleaseInfo, Result, UpdateOutputLine,
 };
 
 use crate::plugin::{SnapPlugin, validate_identifier};
@@ -39,34 +37,26 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for SnapPlugin {
             "running snap refresh"
         );
 
-        let display_args = std::iter::once("snap")
-            .chain(args.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ");
-
         send_output(
             output_tx,
-            &format!("Updating {package_identifier} to {to_version}\nRunning: {display_args}"),
+            &format!("Updating {package_identifier} to {to_version}"),
             OutputStreamType::Stdout,
         )
         .await;
-        let mut output = format!("Running: {display_args}\n");
 
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("snap", args).privileged(), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::InstallFailed(format!(
-                "snap refresh failed with exit code {}",
-                cmd_output.exit_code
-            )));
-        }
-
-        output.push_str(&cmd_output.output);
-        Ok(output)
+        uptrakit_plugin_infrastructure_core::execute_command_update(
+            uptrakit_plugin_infrastructure_core::CommandUpdateParams {
+                executor: self.executor.as_ref(),
+                binary: "snap",
+                args,
+                privileged: true,
+                spec_modifier: None,
+                exit_code_success: None,
+                exit_code_error: None,
+            },
+            output_tx,
+        )
+        .await
     }
 
     /// Execute batch Snap package updates using a single `snap refresh` invocation.
@@ -80,66 +70,44 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for SnapPlugin {
         items: &[BatchUpdateItem],
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<Vec<BatchUpdateResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Validate all package identifiers up front.
-        for item in items {
-            validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
-        }
-
-        let mut args = vec!["refresh".to_string()];
-        for item in items {
-            args.push(item.package_identifier.clone());
-        }
-        if let Some(channel) = &self.config.channel {
-            args.push(format!("--channel={channel}"));
-        }
-
-        let display_args = std::iter::once("snap")
-            .chain(args.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ");
-
         let pkg_list: Vec<&str> = items
             .iter()
             .map(|i| i.package_identifier.as_str())
             .collect();
-
-        send_output(
-            output_tx,
-            &format!(
-                "Batch updating {} Snap packages: {}\nRunning: {display_args}",
+        let context_prefix = if items.is_empty() {
+            None
+        } else {
+            Some(format!(
+                "Batch updating {} Snap packages: {}",
                 items.len(),
                 pkg_list.join(", ")
-            ),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        let mut output = format!("Running: {display_args}\n");
-
+            ))
+        };
+        let suffix_args = self
+            .config
+            .channel
+            .as_ref()
+            .map(|c| vec![format!("--channel={c}")])
+            .unwrap_or_default();
         tracing::debug!(
             count = items.len(),
             packages = ?pkg_list,
             "running snap refresh batch"
         );
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("snap", args).privileged(), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-
-        output.push_str(&cmd_output.output);
-        let success = cmd_output.exit_code == 0;
-
-        Ok(items
-            .iter()
-            .map(|item| {
-                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
-            })
-            .collect())
+        uptrakit_plugin_infrastructure_core::execute_batch_names_command(
+            uptrakit_plugin_infrastructure_core::BatchNamesParams {
+                executor: self.executor.as_ref(),
+                binary: "snap",
+                prefix_args: vec!["refresh".to_string()],
+                privileged: true,
+                suffix_args,
+                validate_identifier,
+                validate_version: None,
+                context_prefix,
+            },
+            items,
+            output_tx,
+        )
+        .await
     }
 }
