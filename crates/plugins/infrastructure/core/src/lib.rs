@@ -13,6 +13,7 @@ pub mod command;
 pub mod descriptor;
 pub mod error;
 pub mod form_schema;
+pub mod helpers;
 pub mod host_requirements;
 pub mod host_runtime;
 pub mod macros;
@@ -53,6 +54,13 @@ pub use catalog::PluginCatalog;
 
 // Re-export the shared command-capture helper so plugin crates access it through this crate
 pub use command::execute_and_capture;
+
+// Re-export shared package-manager helpers
+pub use helpers::{
+    BatchNamesParams, BatchVersionedParams, CommandUpdateParams, ValidatorFn,
+    execute_batch_names_command, execute_batch_versioned_command, execute_command_update,
+    refresh_package_index_command, require_package_identifier,
+};
 
 // Re-export command crate types (keeps existing imports working for plugin crates)
 pub use uptrakit_command::UpdateOutputLine;
