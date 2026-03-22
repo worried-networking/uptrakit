@@ -524,8 +524,9 @@ The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared 
 - **Event Loop**: The SDK owns the unified `tokio::select!` loop that handles ping/pong, certificate renewal, CA staleness checks, signal handling,
   and close-reason dispatch. Services inject custom behaviour through `ServiceHandler` callbacks (`poll_service_event`, `on_service_event`).
 - **Main Helpers**: `init_crypto()`, `print_build_info()`, `default_resolve_shutdown()`, and
-  `run_lifecycle_and_handle_errors()` reduce `main()` boilerplate. Each binary owns its own `init_tracing()` function
-  using `tracing-subscriber` directly — the SDK does not configure the global dispatcher.
+  `run_lifecycle_and_handle_errors()` reduce `main()` boilerplate. Tracing initialisation is provided by
+  `uptrakit-tracing-init` (`TracingBuilder`, `init_cli_tracing`, `init_test_tracing`) and re-exported
+  from this crate — binaries must not configure the global dispatcher themselves.
   `default_resolve_shutdown()` maps `ShutdownCause` to `(DisconnectReason, LoopOutcome)` for standard binaries.
 - **Signal Handling**: Cross-platform `SignalWatcher` for `SIGINT`, `SIGTERM`, and `SIGHUP`.
 - **Enrollment**: WebSocket-based enrollment with certificate issuance.

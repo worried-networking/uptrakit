@@ -122,7 +122,8 @@ uptrakit/
 │   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API + SSE streaming coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing; sse.rs provides lightweight SSE parser; update_output_stream.rs provides typed stream_update_output() method; device_auth_stream.rs provides SSE-first device auth; events_stream.rs provides typed admin event SSE client
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
 │   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, interval+jitter scheduling (interval.rs: compute_next_run_at), TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); tasks categorised as internal (CrlRenewal, CaRotationCheck, ServiceCertCheck — embedded scheduler only) vs external (AuthCleanup, StaleLeaseCleanup, FetchReleases, DetectVersion — deferrable to external scheduler); `should_yield_external: Box<dyn Fn() -> bool>` closure skips external tasks when returning true; FetchReleasesExecutor Phase B sends fetch assignments for host_software_items so that latest_version is populated; `software_states.rs` — **canonical** `load_software_states_for_tenant(&TenantDb)` (all items, single page) and `load_software_states_page_for_tenant(&TenantDb, host_page, page_size)` (paginated: up to `STATES_HOST_PAGE_SIZE` hosts per page, ordered by host.id); canonical owner is now `web-api-queries/software_states.rs`
-│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity (ServiceIdentityState: service_id + enrollment_secret + tenant_id in service.json), TLS, CA bootstrap, main helpers; default_resolve_shutdown(); `decrypt_sensitive_params<T>()` generic ECIES sealed-box decryption for extension sensitive params; `zeroconf` feature (default): mDNS/DNS-SD discovery module (browse for `_uptrakit._tcp.local.`, cache in `discovery.json` with 0o600 permissions); when `--url` omitted + feature enabled, auto-discovers controller on LAN
+│   │   ├── tracing-init/               # uptrakit-tracing-init                  (lib)  — `TracingBuilder`, `BoxedLayer`, `init_cli_tracing` (feature `cli`), `init_test_tracing` (feature `test-support`); depends only on `tracing` + `tracing-subscriber`; re-exported wholesale by `uptrakit-service-sdk`; the controller depends on this crate directly
+│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity (ServiceIdentityState: service_id + enrollment_secret + tenant_id in service.json), TLS, CA bootstrap, main helpers; default_resolve_shutdown(); `decrypt_sensitive_params<T>()` generic ECIES sealed-box decryption for extension sensitive params; re-exports `uptrakit-tracing-init` public surface (`TracingBuilder`, `BoxedLayer`, `init_cli_tracing`, `init_test_tracing`); `zeroconf` feature (default): mDNS/DNS-SD discovery module (browse for `_uptrakit._tcp.local.`, cache in `discovery.json` with 0o600 permissions); when `--url` omitted + feature enabled, auto-discovers controller on LAN
 │   │   ├── audit-log/                  # uptrakit-audit-log                      (lib)  — AuditLogBackend trait, AuditEntry, AuditFilter, AuditLogDispatcher; backends: NoopBackend, DatabaseBackend (cfg db), JournaldBackend (cfg journald), MultiplexBackend; fire-and-forget dispatcher pattern
 │   │   ├── update-hooks/               # uptrakit-config-merge                  (lib)  — config merge utilities: resolve_effective_config(), merge_config(), shallow_merge_into()
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields; report pagination (`paginate.rs` Paginatable trait + `report_tracker.rs` ReportTracker); re-exports `uptrakit-extension-framework` as `extension` module
@@ -1361,17 +1362,24 @@ Only binary `main()` functions may call `tracing_subscriber::fmt().init()` or an
 subscriber from a library causes a panic if anything else in the process has already set it (e.g. test harness,
 another library).
 
-**All binaries use `uptrakit_service_sdk::TracingBuilder` (service daemons and controller) or
-`uptrakit_service_sdk::init_cli_tracing` (CLI).** Do not add per-binary `init_tracing()` helpers; all
-subscriber setup lives in `crates/shared/service-sdk/src/tracing_init.rs`. Tests call
-`uptrakit_service_sdk::init_test_tracing()` (requires the `test-support` feature).
+**All tracing initialisation lives in `crates/shared/tracing-init/src/lib.rs` (`uptrakit-tracing-init`).**
+`uptrakit-service-sdk` re-exports the full public surface so service daemons and the CLI use the
+`uptrakit_service_sdk::` path. The controller depends on `uptrakit-tracing-init` directly (to avoid
+pulling in the full service SDK) and uses `uptrakit_tracing_init::` paths. Do not add per-binary
+`init_tracing()` helpers. Tests call `uptrakit_service_sdk::init_test_tracing()` (feature `test-support`).
 
 **Pattern:**
 
 ```rust
 // Service daemon
+// Service daemons (via uptrakit-service-sdk re-export)
 uptrakit_service_sdk::TracingBuilder::new()
     .verbosity(args.common.verbose)
+    .init();
+
+// Controller (depends on uptrakit-tracing-init directly)
+uptrakit_tracing_init::TracingBuilder::new()
+    .verbosity(args.verbose)
     .init();
 
 // CLI (stderr, no subscriber at v=0)

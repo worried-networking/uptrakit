@@ -34,7 +34,7 @@ pub type BoxedLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>;
 /// # Example
 ///
 /// ```rust,ignore
-/// uptrakit_service_sdk::TracingBuilder::new()
+/// uptrakit_tracing_init::TracingBuilder::new()
 ///     .verbosity(args.common.verbose)
 ///     .init();
 /// ```

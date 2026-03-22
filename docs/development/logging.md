@@ -22,11 +22,19 @@ structured journald, etc.) to filter and search by field values.
 
 ### Tracing initialisation
 
-All Uptrakit binaries initialise their subscriber through `uptrakit_service_sdk::TracingBuilder` (service daemons)
-or `uptrakit_service_sdk::init_cli_tracing` (CLI). Tests call `uptrakit_service_sdk::init_test_tracing`. Do not
-duplicate subscriber setup in individual binaries.
+The canonical implementation lives in `crates/shared/tracing-init/src/lib.rs`
+(`uptrakit-tracing-init`). `uptrakit-service-sdk` re-exports everything from it, so most callers
+use the `uptrakit_service_sdk::` path. The controller depends on `uptrakit-tracing-init` directly
+to avoid pulling in the full service SDK.
 
-See `crates/shared/service-sdk/src/tracing_init.rs` for the canonical implementation.
+| Context | Call |
+| --- | --- |
+| Service daemons | `uptrakit_service_sdk::TracingBuilder::new().verbosity(…).init()` |
+| Controller | `uptrakit_tracing_init::TracingBuilder::new().verbosity(…).init()` |
+| CLI | `uptrakit_service_sdk::init_cli_tracing(cli.verbose)` |
+| Tests | `uptrakit_service_sdk::init_test_tracing()` (feature `test-support`) |
+
+Do not add per-binary `init_tracing()` helpers or call `tracing_subscriber` directly in binaries.
 
 ## Log Level Guidelines
 
