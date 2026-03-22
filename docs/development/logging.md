@@ -95,7 +95,7 @@ RUST_LOG=uptrakit=debug,security_audit=off uptrakit-controller
 The `security_audit` tracing target is separate from the `uptrakit-audit-log` subsystem, which
 records structured audit records to the database. The tracing events are advisory/operational
 (operator-visible in logs); the database records are the authoritative audit trail for compliance.
-See [Security — Audit Logging](../security/audit-logging.md) for the full audit architecture.
+See [Security — Audit Logging](../security/audit-logs.md) for the full audit architecture.
 
 ## Verbosity Flags
 
