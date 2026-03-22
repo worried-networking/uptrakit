@@ -18,7 +18,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { workspace = true }
 tracing = { workspace = true }
-uptrakit-service-sdk = { workspace = true, default-features = false, features = ["cli"] }
+uptrakit-tracing-init = { workspace = true, features = ["cli"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time"] }
 futures-util = { workspace = true }
 serde = { workspace = true }

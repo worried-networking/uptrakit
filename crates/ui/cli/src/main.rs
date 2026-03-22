@@ -213,7 +213,7 @@ async fn run(cli: Cli) -> error::Result<()> {
         return Ok(());
     }
 
-    uptrakit_service_sdk::init_cli_tracing(cli.verbose);
+    uptrakit_tracing_init::init_cli_tracing(cli.verbose);
 
     if cli.insecure {
         eprintln!("WARNING: TLS certificate verification is disabled. Connection is insecure.");

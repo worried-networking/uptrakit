@@ -6481,9 +6481,9 @@ dependencies = [
  "uptrakit-directories",
  "uptrakit-internal-wire",
  "uptrakit-openapi-client",
- "uptrakit-service-sdk",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uptrakit-tracing-init",
  "uuid",
 ]
 
@@ -6643,8 +6643,8 @@ dependencies = [
  "uptrakit-internal-wire",
  "uptrakit-openapi-client",
  "uptrakit-plugin-infrastructure-registry",
- "uptrakit-service-sdk",
  "uptrakit-shared-db",
+ "uptrakit-tracing-init",
  "uptrakit-web-api",
  "uptrakit-web-api-types",
  "uuid",

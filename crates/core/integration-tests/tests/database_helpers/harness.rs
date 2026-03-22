@@ -245,5 +245,5 @@ impl uptrakit_web_api::cert_signer::AgentCertSigner for NoopCertSigner {
 
 /// Initialize tracing for test output (only once per process).
 pub(crate) fn init_test_tracing() {
-    uptrakit_service_sdk::init_test_tracing();
+    uptrakit_tracing_init::init_test_tracing();
 }
