@@ -405,7 +405,7 @@ async fn init_data_key_ring(db: &sea_orm::DatabaseConnection) {
     let rows = match data_encryption_key::Entity::find().all(db).await {
         Ok(r) => r,
         Err(e) => {
-            tracing::warn!(error = %e, "failed to query data_encryption_keys");
+            tracing::error!(error = %e, "failed to query data_encryption_keys");
             return;
         }
     };
