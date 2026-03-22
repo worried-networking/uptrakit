@@ -3,13 +3,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
+use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, ConfigModel,
     ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, HostRequirements,
-    HostRuntime, OutputStreamType, PluginError, PluginFamily, PluginRole, ReleaseInfo, Result,
-    UpdateOutputLine, UpstreamRelease, Version, declare_plugin, execute_and_capture, plugin_ids,
+    HostRuntime, PluginError, PluginFamily, PluginRole, ReleaseInfo, Result, UpdateOutputLine,
+    UpstreamRelease, Version, declare_plugin, execute_and_capture, plugin_ids,
     require_posix_executor,
 };
 
@@ -194,7 +194,10 @@ impl MasPlugin {
     }
 
     fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
-        validate_identifier(package_identifier).map_err(|e| report!(PluginError::Configuration(e)))
+        uptrakit_plugin_infrastructure_core::require_package_identifier(
+            package_identifier,
+            validate_identifier,
+        )
     }
 }
 
@@ -423,26 +426,21 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for MasPlugin {
     ) -> Result<String> {
         self.require_package_identifier(package_identifier)?;
 
-        let args = vec!["upgrade".to_string(), package_identifier.to_string()];
-
-        let display_cmd = format!("mas {}", args.join(" "));
         tracing::debug!(package = %package_identifier, "running mas upgrade");
-        send_output(
+
+        uptrakit_plugin_infrastructure_core::execute_command_update(
+            uptrakit_plugin_infrastructure_core::CommandUpdateParams {
+                executor: self.executor.as_ref(),
+                binary: "mas",
+                args: vec!["upgrade".to_string(), package_identifier.to_string()],
+                privileged: false,
+                spec_modifier: None,
+                exit_code_success: Some(|_| true),
+                exit_code_error: None,
+            },
             output_tx,
-            &format!("Running: {display_cmd}"),
-            OutputStreamType::Stdout,
         )
-        .await;
-        let mut output = format!("Running: {display_cmd}\n");
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("mas", args), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-        output.push_str(&cmd_output.output);
-
-        Ok(output)
+        .await
     }
 }
 
