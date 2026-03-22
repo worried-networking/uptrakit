@@ -190,24 +190,12 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for HomebrewPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
-    use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
-    use uptrakit_plugin_infrastructure_core::{
-        BatchFetchItem, HostCapabilities, HostRuntime, PosixHostRuntime, ReleaseFetcher,
+    use uptrakit_plugin_infrastructure_core::testing::{
+        FixedOutputExecutor, test_runtime, test_runtime_with_executor,
     };
+    use uptrakit_plugin_infrastructure_core::{BatchFetchItem, ReleaseFetcher};
 
     use crate::config::{HomebrewConfig, HomebrewPackageType};
-
-    fn test_runtime() -> Arc<dyn HostRuntime> {
-        let executor = Arc::new(uptrakit_plugin_infrastructure_core::LocalCommandExecutor)
-            as Arc<dyn CommandExecutor>;
-        Arc::new(PosixHostRuntime::new(executor, HostCapabilities::default()))
-    }
-
-    fn test_runtime_with_executor(executor: Arc<dyn CommandExecutor>) -> Arc<dyn HostRuntime> {
-        Arc::new(PosixHostRuntime::new(executor, HostCapabilities::default()))
-    }
 
     fn sample_formula_json() -> serde_json::Value {
         serde_json::json!({

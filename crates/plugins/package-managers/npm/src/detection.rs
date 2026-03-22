@@ -119,28 +119,14 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for NpmPlugin {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
-    use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
-    use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
-    use uptrakit_plugin_infrastructure_core::{
-        BatchDetectItem, HostCapabilities, HostRuntime, LocalCommandExecutor, PosixHostRuntime,
-        Version, VersionDetector,
+    use uptrakit_plugin_infrastructure_core::testing::{
+        FixedOutputExecutor, test_runtime, test_runtime_with_executor,
     };
+    use uptrakit_plugin_infrastructure_core::{BatchDetectItem, Version, VersionDetector};
 
     use crate::config::NpmConfig;
     use crate::plugin::NpmPlugin;
-
-    fn test_runtime() -> Arc<dyn HostRuntime> {
-        let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
-        let caps = HostCapabilities::default();
-        Arc::new(PosixHostRuntime::new(executor, caps))
-    }
-
-    fn test_runtime_with_executor(executor: Arc<dyn CommandExecutor>) -> Arc<dyn HostRuntime> {
-        let caps = HostCapabilities::default();
-        Arc::new(PosixHostRuntime::new(executor, caps))
-    }
 
     // ── detect_installed_version ──────────────────────────────────────────────
 
