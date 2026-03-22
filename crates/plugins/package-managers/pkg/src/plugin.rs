@@ -3,15 +3,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
+use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
-    HostCompatibility, HostRequirements, HostRuntime, OutputStreamType, PluginError, PluginFamily,
-    PluginRole, ReleaseInfo, Result, SudoCommandEntry, UpdateCategory, UpdateOutputLine,
-    UpstreamRelease, Version, declare_plugin, execute_and_capture, plugin_ids,
-    require_posix_executor,
+    HostCompatibility, HostRequirements, HostRuntime, PluginError, PluginFamily, PluginRole,
+    ReleaseInfo, Result, SudoCommandEntry, UpdateCategory, UpdateOutputLine, UpstreamRelease,
+    Version, declare_plugin, execute_and_capture, plugin_ids, require_posix_executor,
 };
 
 use uptrakit_shared_types::PackageIdentifierRules;
@@ -127,7 +126,10 @@ impl PkgPlugin {
     }
 
     fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
-        validate_identifier(package_identifier).map_err(|e| report!(PluginError::Configuration(e)))
+        uptrakit_plugin_infrastructure_core::require_package_identifier(
+            package_identifier,
+            validate_identifier,
+        )
     }
 }
 
@@ -419,16 +421,12 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for PkgPlugin {
 impl uptrakit_plugin_infrastructure_core::PackageIndexer for PkgPlugin {
     #[tracing::instrument(skip_all)]
     async fn refresh_package_index(&self) -> Result<()> {
-        tracing::info!("refreshing BSD pkg package index");
-        execute_and_capture(
+        uptrakit_plugin_infrastructure_core::refresh_package_index_command(
             self.executor.as_ref(),
             CommandSpec::exec("pkg", ["update".to_string(), "-q".to_string()]).privileged(),
-            "pkg update",
+            "BSD pkg package index",
         )
-        .await?;
-
-        tracing::info!("BSD pkg package index refreshed");
-        Ok(())
+        .await
     }
 }
 
@@ -444,44 +442,25 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for PkgPlugin {
     ) -> Result<String> {
         self.require_package_identifier(package_identifier)?;
 
-        let args = vec![
-            "install".to_string(),
-            "-y".to_string(),
-            package_identifier.to_string(),
-        ];
+        tracing::debug!(package = %package_identifier, "running pkg install");
 
-        tracing::debug!(
-            package = %package_identifier,
-            "running pkg install"
-        );
-
-        let display_args = std::iter::once("pkg")
-            .chain(args.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ");
-        send_output(
+        uptrakit_plugin_infrastructure_core::execute_command_update(
+            uptrakit_plugin_infrastructure_core::CommandUpdateParams {
+                executor: self.executor.as_ref(),
+                binary: "pkg",
+                args: vec![
+                    "install".to_string(),
+                    "-y".to_string(),
+                    package_identifier.to_string(),
+                ],
+                privileged: true,
+                spec_modifier: None,
+                exit_code_success: None,
+                exit_code_error: None,
+            },
             output_tx,
-            &format!("Running: {display_args}"),
-            OutputStreamType::Stdout,
         )
-        .await;
-        let mut output = format!("Running: {display_args}\n");
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("pkg", args).privileged(), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::InstallFailed(format!(
-                "pkg install failed with exit code {}",
-                cmd_output.exit_code
-            )));
-        }
-
-        output.push_str(&cmd_output.output);
-        Ok(output)
+        .await
     }
 
     /// Execute batch updates using a single `pkg install -y` call.
@@ -491,65 +470,39 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for PkgPlugin {
         items: &[BatchUpdateItem],
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<Vec<BatchUpdateResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        for item in items {
-            validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
-        }
-
-        let mut args = vec!["install".to_string(), "-y".to_string()];
-        for item in items {
-            args.push(item.package_identifier.clone());
-        }
-
         let pkg_list: Vec<&str> = items
             .iter()
             .map(|i| i.package_identifier.as_str())
             .collect();
-
-        let display_args = std::iter::once("pkg")
-            .chain(args.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        send_output(
-            output_tx,
-            &format!(
-                "Batch updating {} packages: {}\nRunning: {display_args}",
+        let context_prefix = if items.is_empty() {
+            None
+        } else {
+            Some(format!(
+                "Batch updating {} packages: {}",
                 items.len(),
                 pkg_list.join(", ")
-            ),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        let mut output = format!("Running: {display_args}\n");
-
+            ))
+        };
         tracing::debug!(
             count = items.len(),
             packages = ?pkg_list,
             "running BSD pkg batch install"
         );
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("pkg", args).privileged(), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-
-        output.push_str(&cmd_output.output);
-
-        let success = cmd_output.exit_code == 0;
-        let results = items
-            .iter()
-            .map(|item| {
-                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
-            })
-            .collect();
-
-        Ok(results)
+        uptrakit_plugin_infrastructure_core::execute_batch_names_command(
+            uptrakit_plugin_infrastructure_core::BatchNamesParams {
+                executor: self.executor.as_ref(),
+                binary: "pkg",
+                prefix_args: vec!["install".to_string(), "-y".to_string()],
+                privileged: true,
+                suffix_args: vec![],
+                validate_identifier,
+                validate_version: None,
+                context_prefix,
+            },
+            items,
+            output_tx,
+        )
+        .await
     }
 }
 
