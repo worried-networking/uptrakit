@@ -7,7 +7,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginError, PluginFamily, Result,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginFamily, Result,
     SudoCommandEntry, UpstreamRelease, Version, declare_plugin, require_posix_executor,
 };
 use uptrakit_plugin_infrastructure_core::{PluginHttpClientConfig, build_plugin_http_client};
@@ -208,8 +208,10 @@ impl NpmPlugin {
     }
 
     pub(crate) fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
-        validate_identifier(package_identifier)
-            .map_err(|e| rootcause::report!(PluginError::Configuration(e)))
+        uptrakit_plugin_infrastructure_core::require_package_identifier(
+            package_identifier,
+            validate_identifier,
+        )
     }
 
     /// Parse installed version from `npm list -g <package> --depth=0 --json` output.
@@ -368,24 +370,11 @@ declare_plugin!(NpmPlugin, NpmConfig, "package_manager_npm", {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
-    use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
-    use uptrakit_plugin_infrastructure_core::{
-        HostCapabilities, LocalCommandExecutor, PluginCapability, PluginMeta, PosixHostRuntime,
+    use uptrakit_plugin_infrastructure_core::testing::{
+        FixedOutputExecutor, test_runtime, test_runtime_with_executor,
     };
-
-    fn test_runtime() -> Arc<dyn HostRuntime> {
-        let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
-        let caps = HostCapabilities::default();
-        Arc::new(PosixHostRuntime::new(executor, caps))
-    }
-
-    fn test_runtime_with_executor(executor: Arc<dyn CommandExecutor>) -> Arc<dyn HostRuntime> {
-        let caps = HostCapabilities::default();
-        Arc::new(PosixHostRuntime::new(executor, caps))
-    }
+    use uptrakit_plugin_infrastructure_core::{PluginCapability, PluginMeta};
 
     // ── validate_identifier ───────────────────────────────────────────────────
 

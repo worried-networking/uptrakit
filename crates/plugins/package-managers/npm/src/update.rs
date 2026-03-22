@@ -1,9 +1,7 @@
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_plugin_infrastructure_core::command::{CommandSpec, send_output};
 use uptrakit_plugin_infrastructure_core::{
-    BatchUpdateItem, BatchUpdateResult, OutputStreamType, PluginError, ReleaseInfo, Result,
-    UpdateOutputSender,
+    BatchUpdateItem, BatchUpdateResult, PluginError, ReleaseInfo, Result, UpdateOutputSender,
 };
 
 use crate::plugin::{NpmPlugin, validate_version};
@@ -21,42 +19,29 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for NpmPlugin {
         self.require_package_identifier(package_identifier)?;
         validate_version(to_version).map_err(|e| report!(PluginError::Configuration(e)))?;
 
-        let pkg_version = format!("{package_identifier}@{to_version}");
-        let args = vec!["install".to_string(), "-g".to_string(), pkg_version];
-
         tracing::debug!(
             package = %package_identifier,
             version = %to_version,
             "running npm install -g"
         );
 
-        let display_args = std::iter::once("npm")
-            .chain(args.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ");
-        send_output(
+        uptrakit_plugin_infrastructure_core::execute_command_update(
+            uptrakit_plugin_infrastructure_core::CommandUpdateParams {
+                executor: self.executor.as_ref(),
+                binary: "npm",
+                args: vec![
+                    "install".to_string(),
+                    "-g".to_string(),
+                    format!("{package_identifier}@{to_version}"),
+                ],
+                privileged: true,
+                spec_modifier: None,
+                exit_code_success: None,
+                exit_code_error: None,
+            },
             output_tx,
-            &format!("Running: {display_args}"),
-            OutputStreamType::Stdout,
         )
-        .await;
-        let mut output = format!("Running: {display_args}\n");
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("npm", args).privileged(), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::InstallFailed(format!(
-                "npm install -g failed with exit code {}",
-                cmd_output.exit_code
-            )));
-        }
-
-        output.push_str(&cmd_output.output);
-        Ok(output)
+        .await
     }
 
     /// Execute batch updates using a single `npm install -g pkg1@v1 pkg2@v2 ...` command.
@@ -66,54 +51,26 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for NpmPlugin {
         items: &[BatchUpdateItem],
         output_tx: &UpdateOutputSender,
     ) -> Result<Vec<BatchUpdateResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        for item in items {
-            self.require_package_identifier(&item.package_identifier)?;
-            validate_version(&item.to_version)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
-        }
-
-        let mut args = vec!["install".to_string(), "-g".to_string()];
-        for item in items {
-            args.push(format!("{}@{}", item.package_identifier, item.to_version));
-        }
-
-        let display_args = std::iter::once("npm")
-            .chain(args.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        send_output(
-            output_tx,
-            &format!(
-                "Batch updating {} packages\nRunning: {display_args}",
-                items.len()
-            ),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        let mut output = format!("Running: {display_args}\n");
-
+        let context_prefix = if items.is_empty() {
+            None
+        } else {
+            Some(format!("Batch updating {} packages", items.len()))
+        };
         tracing::debug!(count = items.len(), "running npm batch install -g");
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("npm", args).privileged(), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-        output.push_str(&cmd_output.output);
-
-        let success = cmd_output.exit_code == 0;
-        let results = items
-            .iter()
-            .map(|item| {
-                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
-            })
-            .collect();
-
-        Ok(results)
+        uptrakit_plugin_infrastructure_core::execute_batch_versioned_command(
+            uptrakit_plugin_infrastructure_core::BatchVersionedParams {
+                executor: self.executor.as_ref(),
+                binary: "npm",
+                prefix_args: vec!["install".to_string(), "-g".to_string()],
+                privileged: true,
+                format_item: |id, ver| format!("{id}@{ver}"),
+                validate_identifier: crate::plugin::validate_identifier,
+                validate_version,
+                context_prefix,
+            },
+            items,
+            output_tx,
+        )
+        .await
     }
 }
