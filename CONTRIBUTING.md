@@ -7,6 +7,7 @@ Thanks for helping improve Uptrakit. Focus on boring, testable, and well-reviewe
 - Development setup: [docs/development/setup.md](docs/development/setup.md)
 - Testing expectations: [docs/development/testing.md](docs/development/testing.md)
 - Coding standards: [docs/development/coding-standards.md](docs/development/coding-standards.md)
+- Logging conventions: [docs/development/logging.md](docs/development/logging.md)
 - Error handling: [docs/development/error-handling.md](docs/development/error-handling.md)
 - PR process: [docs/development/pr-process.md](docs/development/pr-process.md)
 - Plugin guidance: [docs/development/plugin-guidelines.md](docs/development/plugin-guidelines.md)

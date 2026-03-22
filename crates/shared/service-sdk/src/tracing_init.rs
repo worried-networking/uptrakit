@@ -133,9 +133,8 @@ impl TracingBuilder {
         if let Some(directives) = self.directives.get(&clamped) {
             for (target, level) in directives {
                 let s = format!("{target}={level}");
-                if let Ok(d) = s.parse() {
-                    filter = filter.add_directive(d);
-                }
+                filter =
+                    filter.add_directive(s.parse().expect("BUG: invalid compile-time directive"));
             }
         }
 
@@ -143,10 +142,16 @@ impl TracingBuilder {
         if let Ok(rust_log) = std::env::var("RUST_LOG") {
             for part in rust_log.split(',') {
                 let part = part.trim();
-                if !part.is_empty()
-                    && let Ok(d) = part.parse()
-                {
-                    filter = filter.add_directive(d);
+                if part.is_empty() {
+                    continue;
+                }
+                match part.parse() {
+                    Ok(d) => {
+                        filter = filter.add_directive(d);
+                    }
+                    Err(e) => {
+                        eprintln!("warning: ignoring invalid RUST_LOG directive {part:?}: {e}");
+                    }
                 }
             }
         }
@@ -217,14 +222,20 @@ pub fn init_cli_tracing(verbosity: u8) {
 pub fn init_test_tracing() {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut filter = EnvFilter::new("warn");
+        let mut filter = EnvFilter::new("").add_directive("warn".parse().expect("valid directive"));
         if let Ok(rust_log) = std::env::var("RUST_LOG") {
             for part in rust_log.split(',') {
                 let part = part.trim();
-                if !part.is_empty()
-                    && let Ok(d) = part.parse()
-                {
-                    filter = filter.add_directive(d);
+                if part.is_empty() {
+                    continue;
+                }
+                match part.parse() {
+                    Ok(d) => {
+                        filter = filter.add_directive(d);
+                    }
+                    Err(e) => {
+                        eprintln!("warning: ignoring invalid RUST_LOG directive {part:?}: {e}");
+                    }
                 }
             }
         }

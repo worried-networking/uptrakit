@@ -1361,13 +1361,30 @@ Only binary `main()` functions may call `tracing_subscriber::fmt().init()` or an
 subscriber from a library causes a panic if anything else in the process has already set it (e.g. test harness,
 another library).
 
-**`uptrakit-service-sdk` does not provide `init_tracing()`.** Each binary (`uptrakit-agent`, `uptrakit-agent-ssh`,
-`uptrakit-mqtt`, `uptrakit-scheduler`) owns its own `init_tracing()` helper in `src/main.rs`. `tracing-subscriber`
-must appear in each binary's `[dependencies]`, not in shared library crates.
+**All binaries use `uptrakit_service_sdk::TracingBuilder` (service daemons and controller) or
+`uptrakit_service_sdk::init_cli_tracing` (CLI).** Do not add per-binary `init_tracing()` helpers; all
+subscriber setup lives in `crates/shared/service-sdk/src/tracing_init.rs`. Tests call
+`uptrakit_service_sdk::init_test_tracing()` (requires the `test-support` feature).
 
-**Pattern:** Use `EnvFilter::from_default_env().add_directive(...)` with an `if let Ok(d) = directive.parse()`
-fallback — do not use `.expect()` on the parse. This prevents a panic if the verbosity directive string is ever
-malformed.
+**Pattern:**
+
+```rust
+// Service daemon
+uptrakit_service_sdk::TracingBuilder::new()
+    .verbosity(args.common.verbose)
+    .init();
+
+// CLI (stderr, no subscriber at v=0)
+uptrakit_service_sdk::init_cli_tracing(cli.verbose);
+
+// Tests
+uptrakit_service_sdk::init_test_tracing();
+```
+
+**Compile-time directives** (the programmatic `(target, level)` pairs built into the builder) use `.expect("BUG: …")`
+— they are programmer-controlled constants. **`RUST_LOG` directives** are parsed leniently: invalid segments print an
+`eprintln!` warning and are skipped; valid ones are appended after the programmatic directives so `RUST_LOG` wins for
+same-target matches. See `docs/development/logging.md` for the full verbosity mapping and `RUST_LOG` precedence rules.
 
 ### Directory management
 
