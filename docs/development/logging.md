@@ -20,29 +20,80 @@ tracing::trace!("...");
 The `tracing` ecosystem attaches structured fields directly to events, which enables log aggregation tooling (Loki,
 structured journald, etc.) to filter and search by field values.
 
+### Tracing initialisation
+
+All Uptrakit binaries initialise their subscriber through `uptrakit_service_sdk::TracingBuilder` (service daemons)
+or `uptrakit_service_sdk::init_cli_tracing` (CLI). Tests call `uptrakit_service_sdk::init_test_tracing`. Do not
+duplicate subscriber setup in individual binaries.
+
+See `crates/shared/service-sdk/src/tracing_init.rs` for the canonical implementation.
+
 ## Log Level Guidelines
 
-| Level | Usage |
-| --- | --- |
-| `error` | Unrecoverable failures that terminate an operation or require operator attention. |
-| `warn` | Unexpected conditions that are handled but may indicate misconfiguration or degraded operation (e.g., TOFU without a pinned fingerprint, rate limits encountered). |
-| `info` | High-level lifecycle events: service started, enrollment completed, connection established, CA fetched, update completed. One or a few lines per major operation. |
-| `debug` | Per-step instrumentation useful for diagnosing failures during development or on-site debugging: detected version, sending message, executing plugin, spawning command. |
-| `trace` | Highly verbose, per-message or per-item events: individual output lines from commands, WebSocket frames, token cache hits, slug validation skip. Never enable in production unless targeting a specific subsystem. |
+| Level | Usage | Example events |
+| --- | --- | --- |
+| `error` | Unrecoverable failures that terminate an operation or require operator attention. Always capture the error value as `error = %e`. | TLS setup failure, DEK unwrap failure, database connection lost |
+| `warn` | Unexpected conditions that are handled but may indicate misconfiguration or degraded operation. | TOFU without a pinned fingerprint, rate limits encountered, update frozen |
+| `info` | High-level lifecycle events: service started, enrollment completed, connection established, CA fetched, update completed. One or a few lines per major operation. | `"enrollment approved"`, `"WebSocket connected"`, `"update completed"` |
+| `debug` | Per-step instrumentation useful for diagnosing failures during development or on-site debugging. | Detected version, sending message, executing plugin, spawning command |
+| `trace` | Highly verbose, per-message or per-item events. Never enable in production unless targeting a specific subsystem. | Individual output lines from commands, WebSocket frames, token cache hits |
 
-**Examples from the codebase:**
+### Rules
 
-- `error!` — unrecoverable update failures, TLS setup failures.
-- `warn!` — TOFU CA acceptance without fingerprint, Docker registry rate limit, pre/post hook failures.
-- `info!` — enrollment approved, WebSocket connected, service certificate saved, CA fetched.
-- `debug!` — connecting to controller, detecting installed version, pulling Docker image, running brew upgrade.
-- `trace!` — sending individual WebSocket messages, command stdout/stderr lines, PHS slug validation skip.
+- `error!` **must always** capture the error as a structured field: `error!(error = %e, "operation failed")`.
+  Never embed the error in the message string: `error!("operation failed: {e}")` is wrong.
+- `info!` must not be used with the `"security_audit"` target. Security audit events use `warn!` at that target.
+
+## `security_audit` Target
+
+Operations that modify security-sensitive state emit events at `warn` level with
+`target: "security_audit"`. This allows log aggregation tools and alerting systems to filter and
+alert on audit events without text parsing.
+
+```rust
+// ✓ Correct — tracing target is first, structured fields follow
+tracing::warn!(
+    target: "security_audit",
+    user_id = %user.user_id,
+    tenant_id = %tenant_db.tenant_id,
+    plugin_config_id = %config_id,
+    "plugin config deleted"
+);
+
+// ✗ Wrong — message prefix is not machine-readable
+tracing::warn!("security_audit: plugin config deleted");
+```
+
+### Filtering by audit target
+
+```bash
+# Show only security audit events
+RUST_LOG=security_audit=warn uptrakit-controller
+
+# Suppress audit noise while debugging another subsystem
+RUST_LOG=uptrakit=debug,security_audit=off uptrakit-controller
+```
+
+### Operations that require the `security_audit` target
+
+- Create, update, or delete plugin configs with command-bearing fields
+- Toggle update freeze on a service or host
+- Reject updates due to rate limiting or freeze state
+- Upsert or delete plugin type settings
+- Machine ID mismatch detection on incoming controller messages
+
+### Relation to `uptrakit-audit-log`
+
+The `security_audit` tracing target is separate from the `uptrakit-audit-log` subsystem, which
+records structured audit records to the database. The tracing events are advisory/operational
+(operator-visible in logs); the database records are the authoritative audit trail for compliance.
+See [Security — Audit Logging](../security/audit-logging.md) for the full audit architecture.
 
 ## Verbosity Flags
 
 All binaries accept a `-v` / `--verbose` flag that can be repeated. Each additional `-v` steps up one log level.
 
-### Service daemons (`uptrakit-controller`, `uptrakit-agent`, `uptrakit-agent-ssh`, `uptrakit-mqtt`)
+### Service daemons (`uptrakit-agent`, `uptrakit-agent-ssh`, `uptrakit-mqtt`, `uptrakit-scheduler`)
 
 The baseline level is `info` for all uptrakit crates; third-party dependencies like
 `tokio`, `h2`, `rustls`, and `reqwest` are silent unless `RUST_LOG` enables them explicitly.
@@ -53,6 +104,19 @@ The baseline level is `info` for all uptrakit crates; third-party dependencies l
 | `-v` | `uptrakit=debug` | All uptrakit crates at debug |
 | `-vv` | `uptrakit=trace` | All uptrakit crates at trace |
 | `-vvv`+ | Same as `-vv`; a warning is printed | |
+
+### Controller (`uptrakit-controller`)
+
+The controller uses a finer-grained scheme at lower verbosity levels to reduce noise from
+web-API request logs at the default level.
+
+| Flags | Directives | Effect |
+| --- | --- | --- |
+| (none) | `uptrakit_controller=info,uptrakit_web_api=info` | Controller and API at info |
+| `-v` | `uptrakit_controller=debug,uptrakit_web_api=debug` | Controller and API at debug |
+| `-vv` | `uptrakit=debug` | All uptrakit crates at debug |
+| `-vvv` | `uptrakit=trace` | All uptrakit crates at trace |
+| `-vvvv`+ | Same as `-vvv`; a warning is printed | |
 
 ### CLI (`uptrakit`)
 
@@ -73,14 +137,25 @@ The CLI produces no log output by default (tracing is not initialised at all). W
 When more `-v` flags are passed than necessary to reach `trace`, a message is printed to stderr **before** the
 subscriber is initialised (so it always reaches the user regardless of log level):
 
-- Services: `warning: -vvvv or more has no additional effect; maximum verbosity is -vvv (trace)`
+- Services: `warning: -vvv or more has no additional effect; maximum verbosity is -vv (trace)`
+- Controller: `warning: -vvvv or more has no additional effect; maximum verbosity is -vvv (trace)`
 - CLI: `warning: -vvvvv or more has no additional effect; maximum verbosity is -vvvv (trace)`
 
 ## `RUST_LOG` Reference
 
-All binaries respect the standard `RUST_LOG` environment variable. Its directives take precedence over the
-verbosity-derived level because [`tracing_subscriber::EnvFilter`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)
-resolves by specificity: a more-specific directive always beats a less-specific one.
+All binaries respect the standard `RUST_LOG` environment variable. Since the migration to
+`TracingBuilder`, **`RUST_LOG` directives take precedence over programmatic (verbosity-derived)
+directives for the same target**. Programmatic directives are added first; `RUST_LOG` entries are
+appended after. Because `EnvFilter` resolves same-target conflicts in favour of the later directive,
+`RUST_LOG` always wins.
+
+> **Precedence reversal (post-migration):** Before the `TracingBuilder` migration, programmatic
+> directives were added *after* `RUST_LOG`, meaning `-v` flags could silently override `RUST_LOG`
+> settings for the same target. The new behaviour (RUST_LOG wins) is more predictable and matches
+> operator expectations.
+
+More-specific directives (target-qualified) always beat less-specific ones (bare level) regardless
+of order.
 
 ### Syntax
 
@@ -93,16 +168,16 @@ RUST_LOG=crate1=level1,crate2=level2,global_level
 
 ### How `-v` and `RUST_LOG` interact
 
-`-v` adds a scoped directive (`{module}=debug` or `uptrakit=debug/trace`) to the filter. Third-party crates remain
-silent unless `RUST_LOG` enables them explicitly. `RUST_LOG` entries are always additive and work alongside the
-verbosity directive, because `EnvFilter` resolves by specificity: a more-specific directive always beats a
-less-specific one.
+`-v` adds a scoped directive (`uptrakit=debug` etc.) to the filter. `RUST_LOG` directives are
+always added after, so:
 
-This means:
+- `RUST_LOG=uptrakit_agent=error uptrakit-agent -vv` → agent crate is `error` (RUST_LOG wins),
+  rest of uptrakit is `trace` (from `-vv`).
+- `RUST_LOG=tokio=info uptrakit-agent -v` → uptrakit at `debug`, tokio at `info`.
+- `RUST_LOG=uptrakit=info uptrakit-agent -vv` → all uptrakit at `info` (RUST_LOG=info overrides -vv=trace).
 
-- Use `-vv` to get debug output across all uptrakit crates without touching third-party noise.
-- Use `RUST_LOG=tokio=info` to enable tokio logging independently of any `-v` flag.
-- Use `RUST_LOG=uptrakit_agent=trace` to get trace output from one crate without enabling it elsewhere.
+Use `-v` to get debug output across all uptrakit crates without touching third-party noise.
+Use `RUST_LOG` for surgical per-crate overrides.
 
 ### Common examples
 
@@ -130,6 +205,9 @@ uptrakit -v hosts list
 
 # All uptrakit crates at debug via CLI
 uptrakit -vvv hosts list
+
+# Security audit events only
+RUST_LOG=security_audit=warn uptrakit-controller
 ```
 
 ## Security Rule
@@ -138,7 +216,7 @@ uptrakit -vvv hosts list
 
 All secret fields in HTTP API types must use `SecretString` instead of `String`. The `tracing` macros must never be
 called with values that expose sensitive data, even at `trace` level. The secret must be masked before any logging
-call.
+call. See also the `sensitive_params` module in `uptrakit-service-sdk` for helpers.
 
 ### Startup-time credentials: use `eprintln!`, not `tracing`
 
@@ -191,6 +269,18 @@ tracing::debug!("version {} detected for package {}", detected, id);
 Structured fields let downstream tooling (Loki, structured journald) filter and aggregate by specific values without
 text parsing.
 
+### Always use `error = %e` for error fields
+
+```rust
+// Correct — error is a structured field
+tracing::error!(error = %e, "operation failed");
+
+// Avoid — error embedded in message string is not filterable
+tracing::error!("operation failed: {e}");
+```
+
+Use `%e` (Display) for most errors. Use `?e` (Debug) only when the Display representation is insufficient.
+
 ### Avoid `format!()` in log calls
 
 `format!()` allocates even when the log level is not enabled. Use fields directly:
@@ -216,13 +306,12 @@ diagnostics at `debug`, and per-message events at `trace`. Avoid demoting `info`
 
 ### Security audit events
 
-Operations that modify security-sensitive state use a `security_audit:` message
-prefix at `warn` level. This prefix enables log aggregation filters and alerts
-without text parsing. See
-[Coding Standards — Security Audit Logging](coding-standards.md#security-audit-logging)
-for the full convention, required fields, and examples.
+Operations that modify security-sensitive state must emit a `warn!` event with `target: "security_audit"`.
+See the [Security audit events](#security_audit-target) section above and
+[Coding Standards — Security Audit Logging](coding-standards.md#security-audit-logging) for the
+full convention, required fields, and examples.
 
-### Cross-references
+## Cross-references
 
 - [Tracing Conventions](tracing.md) — spans, `#[instrument]`, request IDs, distributed tracing
 - [Security — Secrets Handling and Encryption](../security/secrets-and-encryption.md)

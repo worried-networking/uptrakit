@@ -1540,14 +1540,16 @@ Name the struct after its semantic role (`ProcessDiscoveryArgs`, `CreateServiceA
 
 ## Security Audit Logging
 
-Operations that modify security-sensitive state must emit structured
-`tracing::warn!` events prefixed with `security_audit:`. This convention
-enables log aggregation systems (Loki, journald, Datadog) to filter and alert
-on security-relevant changes without parsing message text.
+Operations that modify security-sensitive state must emit `tracing::warn!`
+events with `target: "security_audit"`. This convention enables log aggregation
+systems (Loki, journald, Datadog) to filter and alert on security-relevant
+changes without parsing message text. See
+[Logging — `security_audit` Target](logging.md#security_audit-target) for
+operator usage and filtering examples.
 
 ### When to use
 
-Apply `security_audit:` logging to any operation that:
+Apply `target: "security_audit"` logging to any operation that:
 
 - Creates, modifies, or deletes plugin configs containing command-bearing fields
   (`version_command`, `update_command`, `post_pull_command`, hook `commands`)
@@ -1568,13 +1570,14 @@ Apply `security_audit:` logging to any operation that:
 
 ```rust
 tracing::warn!(
+    target: "security_audit",
     user_id = %user.user_id,
     tenant_id = %tenant_db.tenant_id,
     plugin_config_id = %id,
     plugin_type = %req.plugin_type,
     config_name = %req.name,
     command_fields = %fields.join(", "),
-    "security_audit: plugin config created with command-bearing fields"
+    "plugin config created with command-bearing fields"
 );
 ```
 
