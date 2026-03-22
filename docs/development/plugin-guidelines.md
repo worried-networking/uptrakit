@@ -1640,4 +1640,116 @@ responsibility is to discover which PHS-managed apps are present in a container 
 - APT-managed apps: `DiscoveryTarget { plugin_type: PluginTypeId::from_static("package_manager_apt"), config: {}, name: "APT (auto)" }`.
 
 Cross-reference: [PHS end-user guide](../end-user/autodiscovery.md#proxmox-helper-scripts-discovery),
+
+## Shared Update Helpers
+
+All package-manager plugins must use the shared helper functions from
+`uptrakit-plugin-infrastructure-core` instead of hand-rolling their own command execution or
+validation boilerplate. This keeps each plugin's trait implementation under ten lines,
+guarantees consistent output formatting, and centralises error mapping in one tested location.
+
+### Available helpers
+
+#### `require_package_identifier`
+
+```rust
+pub fn require_package_identifier(
+    value: &str,
+    predicate: ValidatorFn,
+) -> Result<()>
+```
+
+One-liner wrapper for identifier validation. Calls `predicate(value)` and maps any `Err(message)`
+to `PluginError::Configuration`. Every package-manager plugin's `require_package_identifier` method
+delegates here:
+
+```rust
+fn require_package_identifier(&self, id: &str) -> Result<()> {
+    uptrakit_plugin_infrastructure_core::require_package_identifier(id, validate_identifier)
+}
+```
+
+#### `execute_command_update` and `CommandUpdateParams`
+
+Executes a single-package update via `executor.execute()`. Sends `"Running: {binary} {args}"` to
+the output stream and returns the combined output string. Supports an optional `spec_modifier`
+closure (e.g., setting `DEBIAN_FRONTEND=noninteractive` for APT) and configurable exit-code
+success predicates (e.g., `Some(|_| true)` for `mas upgrade` which may exit non-zero even on
+success).
+
+#### `execute_batch_versioned_command` and `BatchVersionedParams`
+
+Executes a batch update in a single command where each package argument includes a version
+(e.g., `pkg1-ver1 pkg2-ver2`). Use this for DNF (`pkg-ver` separator), APK (`pkg=ver`), and
+npm (`pkg@ver`). Validates all identifiers and versions before execution. Returns one
+`BatchUpdateResult` per input item, all sharing the same success flag and output.
+
+#### `execute_batch_names_command` and `BatchNamesParams`
+
+Executes a batch update in a single command where only package names are passed (the package
+manager resolves the version itself from the install instruction). Use this for Pacman, snap,
+pkg (BSD), and Homebrew. Supports optional `suffix_args` (e.g., `--channel=stable` for snap)
+and an optional version validator (pre-flight check only -- the version is not forwarded to the
+command).
+
+#### `refresh_package_index_command`
+
+Refreshes a package index by running a `CommandSpec` quietly via `execute_and_capture`. Logs
+`"refreshing {label}"` before and `"{label} refreshed"` after. Use this in `PackageIndexer`
+implementations (APT, APK, DNF, pkg):
+
+```rust
+async fn refresh_package_index(&self) -> Result<()> {
+    uptrakit_plugin_infrastructure_core::refresh_package_index_command(
+        self.executor.as_ref(),
+        CommandSpec::exec("dnf", ["makecache".to_string(), "-q".to_string()]).privileged(),
+        "DNF package index",
+    )
+    .await
+}
+```
+
+### Unit test helpers
+
+The `testing` Cargo feature (enabled via `[dev-dependencies]`) exposes:
+
+- `testing::test_runtime()` -- builds a `HostRuntime` backed by `LocalCommandExecutor`. Use
+  only for tests that need to detect real host compatibility against the current environment.
+- `testing::test_runtime_with_executor(executor)` -- builds a `HostRuntime` backed by any
+  `Arc<dyn CommandExecutor>`. Use this in the vast majority of tests where you control output
+  through `FixedOutputExecutor` or `RoutedOutputExecutor`.
+- `testing::FixedOutputExecutor` -- returns the same output and exit code for every command.
+  Constructors: `::success(output)`, `::failure(exit_code)`, `::new(output, exit_code)`.
+- `testing::RoutedOutputExecutor` -- routes calls by command program name. Constructors:
+  `::success(pairs)` (all exit 0), `::new(triples)` (per-route exit codes).
+
+Enable in `Cargo.toml`:
+
+```toml
+[dev-dependencies]
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing"] }
+```
+
+These replace any locally defined `test_runtime`, `test_runtime_with_executor`, or
+`FixedExitCodeExecutor` structs that previously lived inside individual plugin test modules.
+
+### Canonical import path
+
+All helpers are re-exported from the crate root:
+
+```rust
+use uptrakit_plugin_infrastructure_core::{
+    require_package_identifier, ValidatorFn,
+    CommandUpdateParams, execute_command_update,
+    BatchVersionedParams, execute_batch_versioned_command,
+    BatchNamesParams, execute_batch_names_command,
+    refresh_package_index_command,
+};
+use uptrakit_plugin_infrastructure_core::testing::{
+    FixedOutputExecutor, RoutedOutputExecutor, test_runtime, test_runtime_with_executor,
+};
+```
+
+Cross-reference: inline module documentation in
+`crates/plugins/infrastructure/core/src/helpers.rs` and `src/testing.rs`.
 [PHS API notes](../api/autodiscovery.md#plugin-driven-discovery-targets).
