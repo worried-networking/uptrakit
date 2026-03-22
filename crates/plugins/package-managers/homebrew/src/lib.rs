@@ -8,4 +8,4 @@ pub mod update;
 
 pub use config::{HomebrewConfig, HomebrewPackageType};
 pub use error::{HomebrewError, Result};
-pub use plugin::{DESCRIPTOR, HomebrewPlugin, validate_identifier};
+pub use plugin::{DESCRIPTOR, HomebrewPlugin, validate_identifier, validate_identifier_nonempty};

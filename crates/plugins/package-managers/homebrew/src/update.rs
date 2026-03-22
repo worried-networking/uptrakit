@@ -1,9 +1,8 @@
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_plugin_infrastructure_core::command::{CommandSpec, send_output};
+use uptrakit_plugin_infrastructure_core::command::CommandSpec;
 use uptrakit_plugin_infrastructure_core::{
-    BatchUpdateItem, BatchUpdateResult, OutputStreamType, PluginError, ReleaseInfo, Result,
-    UpdateOutputSender,
+    BatchUpdateItem, BatchUpdateResult, PluginError, ReleaseInfo, Result, UpdateOutputSender,
 };
 
 use crate::plugin::HomebrewPlugin;
@@ -43,32 +42,32 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for HomebrewPlugin {
         output_tx: &UpdateOutputSender,
     ) -> Result<String> {
         self.require_package_identifier(package_identifier)?;
-        let pkg = package_identifier;
-        let mut output = String::new();
 
         let args: Vec<String> = if self.is_cask() {
-            vec!["upgrade".to_string(), "--cask".to_string(), pkg.to_string()]
+            vec![
+                "upgrade".to_string(),
+                "--cask".to_string(),
+                package_identifier.to_string(),
+            ]
         } else {
-            vec!["upgrade".to_string(), pkg.to_string()]
+            vec!["upgrade".to_string(), package_identifier.to_string()]
         };
 
-        tracing::debug!(package = %pkg, "running brew upgrade");
-        send_output(
+        tracing::debug!(package = %package_identifier, "running brew upgrade");
+
+        uptrakit_plugin_infrastructure_core::execute_command_update(
+            uptrakit_plugin_infrastructure_core::CommandUpdateParams {
+                executor: self.executor.as_ref(),
+                binary: "brew",
+                args,
+                privileged: false,
+                spec_modifier: None,
+                exit_code_success: Some(|_| true),
+                exit_code_error: None,
+            },
             output_tx,
-            &format!("Running: brew {}", args.join(" ")),
-            OutputStreamType::Stdout,
         )
-        .await;
-        output.push_str(&format!("Running: brew {}\n", args.join(" ")));
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("brew", args), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-        output.push_str(&cmd_output.output);
-
-        Ok(output)
+        .await
     }
 
     /// Execute batch updates using a single `brew upgrade pkg1 pkg2 ...` command.
@@ -78,51 +77,31 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for HomebrewPlugin {
         items: &[BatchUpdateItem],
         output_tx: &UpdateOutputSender,
     ) -> Result<Vec<BatchUpdateResult>> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        for item in items {
-            self.require_package_identifier(&item.package_identifier)?;
-        }
-
-        let mut args: Vec<String> = vec!["upgrade".to_string()];
-        if self.is_cask() {
-            args.push("--cask".to_string());
-        }
-        for item in items {
-            args.push(item.package_identifier.clone());
-        }
-
-        let display_cmd = format!("brew {}", args.join(" "));
-        send_output(
-            output_tx,
-            &format!(
-                "Batch updating {} packages\nRunning: {display_cmd}",
-                items.len()
-            ),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        let mut output = format!("Running: {display_cmd}\n");
-
+        let context_prefix = if items.is_empty() {
+            None
+        } else {
+            Some(format!("Batch updating {} packages", items.len()))
+        };
+        let prefix_args: Vec<String> = if self.is_cask() {
+            vec!["upgrade".to_string(), "--cask".to_string()]
+        } else {
+            vec!["upgrade".to_string()]
+        };
         tracing::debug!(count = items.len(), "running brew batch upgrade");
-
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("brew", args), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-        output.push_str(&cmd_output.output);
-
-        let success = cmd_output.exit_code == 0;
-        let results = items
-            .iter()
-            .map(|item| {
-                BatchUpdateResult::new(item.package_identifier.clone(), success, output.clone())
-            })
-            .collect();
-
-        Ok(results)
+        uptrakit_plugin_infrastructure_core::execute_batch_names_command(
+            uptrakit_plugin_infrastructure_core::BatchNamesParams {
+                executor: self.executor.as_ref(),
+                binary: "brew",
+                prefix_args,
+                privileged: false,
+                suffix_args: vec![],
+                validate_identifier: crate::plugin::validate_identifier_nonempty,
+                validate_version: None,
+                context_prefix,
+            },
+            items,
+            output_tx,
+        )
+        .await
     }
 }

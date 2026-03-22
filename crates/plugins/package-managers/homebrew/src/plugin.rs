@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginError, PluginFamily, Result,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginFamily, Result,
     declare_plugin, require_posix_executor,
 };
 
@@ -49,6 +49,19 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// Validate that a Homebrew package identifier is non-empty.
+///
+/// Homebrew accepts any non-empty, non-whitespace-only string as a package
+/// identifier.  This is a looser check than the formula name rules because
+/// Homebrew enforces those constraints internally.
+pub fn validate_identifier_nonempty(value: &str) -> std::result::Result<(), String> {
+    if value.trim().is_empty() {
+        Err("package_identifier must not be empty".to_string())
+    } else {
+        Ok(())
+    }
+}
+
 /// Plugin for Homebrew (macOS/Linux package manager).
 ///
 /// Supports both formulae and casks. The `package_identifier` in `SoftwareItem`
@@ -78,12 +91,10 @@ impl HomebrewPlugin {
     }
 
     pub(crate) fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
-        if package_identifier.trim().is_empty() {
-            rootcause::bail!(PluginError::Configuration(
-                "package_identifier must not be empty".to_string()
-            ));
-        }
-        Ok(())
+        uptrakit_plugin_infrastructure_core::require_package_identifier(
+            package_identifier,
+            validate_identifier_nonempty,
+        )
     }
 
     /// Find the homepage URL of a formula by name in `brew info --json=v2` output.
