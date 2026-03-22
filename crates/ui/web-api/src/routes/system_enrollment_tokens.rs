@@ -50,7 +50,7 @@ pub async fn create_system_enrollment_token(
     let plaintext = match token::generate_secure_token() {
         Ok(t) => t,
         Err(e) => {
-            tracing::error!("Failed to generate system enrollment token: {:?}", e);
+            tracing::error!(error = ?e, "Failed to generate system enrollment token");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -58,7 +58,7 @@ pub async fn create_system_enrollment_token(
     let hash = match password::hash_password(&plaintext) {
         Ok(h) => h,
         Err(e) => {
-            tracing::error!("Failed to hash system enrollment token: {:?}", e);
+            tracing::error!(error = ?e, "Failed to hash system enrollment token");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -83,7 +83,7 @@ pub async fn create_system_enrollment_token(
     {
         Ok(m) => m,
         Err(e) => {
-            tracing::error!("Failed to create system enrollment token: {}", e);
+            tracing::error!(error = %e, "Failed to create system enrollment token");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -130,7 +130,7 @@ pub async fn list_system_enrollment_tokens(
     match set_queries::list_system_enrollment_tokens(state.db(), &query.pagination()).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
-            tracing::error!("Failed to list system enrollment tokens: {}", e);
+            tracing::error!(error = %e, "Failed to list system enrollment tokens");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -163,7 +163,7 @@ pub async fn get_system_enrollment_token(
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "System enrollment token not found"),
         Err(e) => {
-            tracing::error!("DB error: {}", e);
+            tracing::error!(error = %e, "DB error");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -199,7 +199,7 @@ pub async fn revoke_system_enrollment_token(
             "System enrollment token not found or already revoked",
         ),
         Err(e) => {
-            tracing::error!("Failed to revoke system enrollment token: {}", e);
+            tracing::error!(error = %e, "Failed to revoke system enrollment token");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }

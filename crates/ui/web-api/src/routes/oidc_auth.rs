@@ -157,7 +157,7 @@ pub async fn oidc_authorize(
     let redirect_url = match RedirectUrl::new(format!("{base_url}/api/v1/auth/oidc/callback")) {
         Ok(url) => url,
         Err(e) => {
-            tracing::error!("Invalid OIDC redirect URL: {e}");
+            tracing::error!(error = %e, "Invalid OIDC redirect URL");
             return error_response(StatusCode::BAD_REQUEST, "Invalid redirect URL");
         }
     };
@@ -207,7 +207,7 @@ pub async fn oidc_authorize(
         )
         .await
     {
-        tracing::error!("Failed to store OIDC flow: {e:?}");
+        tracing::error!(error = ?e, "Failed to store OIDC flow");
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
@@ -292,7 +292,7 @@ async fn validate_oidc_state(
         Ok(Some(f)) => f,
         Ok(None) => return Err(Redirect::to("/login?error=oidc_state_expired").into_response()),
         Err(e) => {
-            tracing::error!("Failed to retrieve OIDC flow: {e:?}");
+            tracing::error!(error = ?e, "Failed to retrieve OIDC flow");
             return Err(Redirect::to("/login?error=oidc_internal_error").into_response());
         }
     };
@@ -316,7 +316,7 @@ async fn validate_oidc_state(
     let redirect_url = match RedirectUrl::new(format!("{base_url}/api/v1/auth/oidc/callback")) {
         Ok(url) => url,
         Err(e) => {
-            tracing::error!("Invalid OIDC redirect URL during callback: {e}");
+            tracing::error!(error = %e, "Invalid OIDC redirect URL during callback");
             return Err(Redirect::to("/login?error=oidc_invalid_redirect").into_response());
         }
     };
@@ -377,7 +377,7 @@ async fn resolve_or_create_oidc_user(
     let txn = match state.db().begin().await {
         Ok(txn) => txn,
         Err(e) => {
-            tracing::error!("Failed to start OIDC callback transaction: {e}");
+            tracing::error!(error = %e, "Failed to start OIDC callback transaction");
             return Redirect::to("/login?error=oidc_internal_error").into_response();
         }
     };
@@ -397,7 +397,7 @@ async fn resolve_or_create_oidc_user(
     {
         Ok(r) => r,
         Err(e) => {
-            tracing::error!("OIDC user resolution failed: {e:?}");
+            tracing::error!(error = ?e, "OIDC user resolution failed");
             return Redirect::to("/login?error=oidc_internal_error").into_response();
         }
     };
@@ -442,7 +442,7 @@ async fn execute_oidc_resolution(
                     Err(response) => return response,
                 };
             if let Err(e) = txn.commit().await {
-                tracing::error!("Failed to commit OIDC callback transaction: {e}");
+                tracing::error!(error = %e, "Failed to commit OIDC callback transaction");
                 return Redirect::to("/login?error=oidc_internal_error").into_response();
             }
             create_oidc_exchange_and_redirect(state, user_id, provider_id).await
@@ -454,7 +454,7 @@ async fn execute_oidc_resolution(
                     Err(response) => return response,
                 };
             if let Err(e) = txn.commit().await {
-                tracing::error!("Failed to commit OIDC callback transaction: {e}");
+                tracing::error!(error = %e, "Failed to commit OIDC callback transaction");
                 return Redirect::to("/login?error=oidc_internal_error").into_response();
             }
             create_oidc_exchange_and_redirect(state, user_id, provider_id).await
@@ -608,7 +608,7 @@ async fn check_registration_eligibility(
         })
         .await
     {
-        tracing::error!("Failed to store pending OIDC registration: {e:?}");
+        tracing::error!(error = ?e, "Failed to store pending OIDC registration");
         return Some(Redirect::to("/login?error=oidc_internal_error").into_response());
     }
 
@@ -644,7 +644,7 @@ async fn handle_linked_user(
             return Err(Redirect::to("/login?error=oidc_internal_error").into_response());
         }
         Err(e) => {
-            tracing::error!("failed to load user for OIDC login: {e:?}");
+            tracing::error!(error = ?e, "failed to load user for OIDC login");
             return Err(Redirect::to("/login?error=oidc_internal_error").into_response());
         }
         _ => {}
@@ -681,7 +681,7 @@ async fn handle_new_user(
     let user_count = match User::find().count(txn).await {
         Ok(n) => n,
         Err(e) => {
-            tracing::error!("Failed to count users during OIDC registration: {e}");
+            tracing::error!(error = %e, "Failed to count users during OIDC registration");
             return Err(Redirect::to("/login?error=oidc_internal_error").into_response());
         }
     };
@@ -696,7 +696,7 @@ async fn handle_new_user(
         // Assign all roles (owner preset)
         if let Err(e) = super::auth::assign_owner_roles(txn, state.default_tenant_id, user_id).await
         {
-            tracing::error!("Failed to assign owner roles to first OIDC user: {e:?}");
+            tracing::error!(error = ?e, "Failed to assign owner roles to first OIDC user");
         }
 
         // Complete initial setup (close registration, remove token)
@@ -705,7 +705,7 @@ async fn handle_new_user(
             .complete_initial_setup(txn, state.default_tenant_id)
             .await
         {
-            tracing::error!("Failed to complete initial setup for first OIDC user: {e:?}");
+            tracing::error!(error = ?e, "Failed to complete initial setup for first OIDC user");
         }
         state.settings.set_registration(reg).await;
 
@@ -765,7 +765,7 @@ async fn handle_link_via_password(
     {
         Ok(token) => token,
         Err(e) => {
-            tracing::error!("Failed to store pending link: {e:?}");
+            tracing::error!(error = ?e, "Failed to store pending link");
             return Redirect::to("/login?error=oidc_internal_error").into_response();
         }
     };
@@ -814,7 +814,7 @@ async fn handle_link_via_oidc(
     {
         Ok(token) => token,
         Err(e) => {
-            tracing::error!("Failed to store pending link: {e:?}");
+            tracing::error!(error = ?e, "Failed to store pending link");
             return Redirect::to("/login?error=oidc_internal_error").into_response();
         }
     };
@@ -871,7 +871,7 @@ pub async fn oidc_exchange(
             return error_response(StatusCode::BAD_REQUEST, "Invalid or expired exchange code");
         }
         Err(e) => {
-            tracing::error!("Failed to retrieve OIDC exchange: {e:?}");
+            tracing::error!(error = ?e, "Failed to retrieve OIDC exchange");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -920,7 +920,7 @@ pub async fn oidc_complete_registration(
             ));
         }
         Err(e) => {
-            tracing::error!("Failed to consume pending OIDC registration: {e:?}");
+            tracing::error!(error = ?e, "Failed to consume pending OIDC registration");
             return Ok(error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal server error",
@@ -933,7 +933,7 @@ pub async fn oidc_complete_registration(
     let txn = match state.db().begin().await {
         Ok(txn) => txn,
         Err(e) => {
-            tracing::error!("Failed to start OIDC complete-registration transaction: {e}");
+            tracing::error!(error = %e, "Failed to start OIDC complete-registration transaction");
             return Ok(error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal server error",
@@ -980,7 +980,7 @@ pub async fn oidc_complete_registration(
     };
 
     if let Err(e) = user_model.insert(&txn).await {
-        tracing::error!("Failed to create user during OIDC registration: {e}");
+        tracing::error!(error = %e, "Failed to create user during OIDC registration");
         return Ok(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Internal server error",
@@ -996,7 +996,7 @@ pub async fn oidc_complete_registration(
         linked_at: Set(now),
     };
     if let Err(e) = link.insert(&txn).await {
-        tracing::error!("Failed to create OIDC link during registration: {e}");
+        tracing::error!(error = %e, "Failed to create OIDC link during registration");
         return Ok(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Internal server error",
@@ -1016,9 +1016,7 @@ pub async fn oidc_complete_registration(
     {
         Ok(is_first) => is_first,
         Err(e) => {
-            tracing::error!(
-                "Failed to handle first-user setup for OIDC complete-registration: {e:?}"
-            );
+            tracing::error!(error = ?e, "Failed to handle first-user setup for OIDC complete-registration");
             false
         }
     };
@@ -1030,7 +1028,7 @@ pub async fn oidc_complete_registration(
         if let Err(e) =
             super::auth::assign_viewer_role(&txn, state.default_tenant_id, user_id).await
         {
-            tracing::error!("Failed to assign default role during OIDC registration: {e:?}");
+            tracing::error!(error = ?e, "Failed to assign default role during OIDC registration");
         }
     }
 
@@ -1051,7 +1049,7 @@ pub async fn oidc_complete_registration(
     }
 
     if let Err(e) = txn.commit().await {
-        tracing::error!("Failed to commit OIDC complete-registration transaction: {e}");
+        tracing::error!(error = %e, "Failed to commit OIDC complete-registration transaction");
         return Ok(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Internal server error",
@@ -1102,7 +1100,7 @@ pub async fn oidc_link(
             return error_response(StatusCode::BAD_REQUEST, "Link token not found or expired");
         }
         Err(e) => {
-            tracing::error!("Failed to retrieve pending link: {e:?}");
+            tracing::error!(error = ?e, "Failed to retrieve pending link");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -1160,7 +1158,7 @@ pub async fn oidc_link(
     };
 
     if let Err(e) = link.insert(state.db()).await {
-        tracing::error!("Failed to create OIDC link: {e}");
+        tracing::error!(error = %e, "Failed to create OIDC link");
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
@@ -1205,18 +1203,15 @@ async fn build_oidc_client(
     redirect_url: RedirectUrl,
 ) -> Option<DiscoveredCoreClient> {
     let issuer_url = IssuerUrl::new(provider.issuer_url.clone())
-        .map_err(|e| tracing::error!("Invalid OIDC issuer URL for provider {}: {e}", provider.id))
+        .map_err(|e| tracing::error!(error = %e, provider_id = %provider.id, "Invalid OIDC issuer URL for provider"))
         .ok()?;
     let http_client = crate::oidc_http_client::OidcHttpClient::new()
-        .map_err(|e| tracing::error!("Failed to build OIDC HTTP client: {e}"))
+        .map_err(|e| tracing::error!(error = %e, "Failed to build OIDC HTTP client"))
         .ok()?;
     let provider_metadata = CoreProviderMetadata::discover_async(issuer_url, &http_client)
         .await
         .map_err(|e| {
-            tracing::error!(
-                "OIDC provider discovery failed for provider {}: {e}",
-                provider.id
-            );
+            tracing::error!(error = %e, provider_id = %provider.id, "OIDC provider discovery failed for provider");
         })
         .ok()?;
     Some(
@@ -1244,13 +1239,13 @@ async fn exchange_code_for_claims(
     redirect_url: RedirectUrl,
 ) -> Result<ExtractedOidcClaims, Response> {
     let http_client = crate::oidc_http_client::OidcHttpClient::new().map_err(|e| {
-        tracing::error!("Failed to build OIDC HTTP client: {e}");
+        tracing::error!(error = %e, "Failed to build OIDC HTTP client");
         Redirect::to("/login?error=oidc_token_exchange_failed").into_response()
     })?;
     let token_request = client
         .exchange_code(AuthorizationCode::new(code))
         .map_err(|e| {
-            tracing::error!("OIDC token endpoint not configured: {e}");
+            tracing::error!(error = %e, "OIDC token endpoint not configured");
             Redirect::to("/login?error=oidc_token_exchange_failed").into_response()
         })?;
     let token_response = token_request
@@ -1259,7 +1254,7 @@ async fn exchange_code_for_claims(
         .request_async(&http_client)
         .await
         .map_err(|e| {
-            tracing::error!("OIDC token exchange failed: {e}");
+            tracing::error!(error = %e, "OIDC token exchange failed");
             Redirect::to("/login?error=oidc_token_exchange_failed").into_response()
         })?;
 
@@ -1269,7 +1264,7 @@ async fn exchange_code_for_claims(
 
     let id_token_verifier = client.id_token_verifier();
     let claims = id_token.claims(&id_token_verifier, &nonce).map_err(|e| {
-        tracing::error!("OIDC ID token validation failed: {e}");
+        tracing::error!(error = %e, "OIDC ID token validation failed");
         Redirect::to("/login?error=oidc_token_validation_failed").into_response()
     })?;
 
@@ -1315,7 +1310,7 @@ async fn mint_oidc_auth_response(state: &AppState, user_id: Uuid, provider_id: U
     {
         Ok(t) => t,
         Err(e) => {
-            tracing::error!("Failed to create OIDC refresh token: {e:?}");
+            tracing::error!(error = ?e, "Failed to create OIDC refresh token");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -1341,7 +1336,7 @@ async fn mint_oidc_auth_response(state: &AppState, user_id: Uuid, provider_id: U
         {
             Ok(t) => t,
             Err(e) => {
-                tracing::error!("Failed to create OIDC access token: {e:?}");
+                tracing::error!(error = ?e, "Failed to create OIDC access token");
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
@@ -1391,7 +1386,7 @@ async fn create_oidc_exchange_and_redirect(
         .insert(exchange_code.clone(), user_id, provider_id)
         .await
     {
-        tracing::error!("Failed to store OIDC exchange: {e:?}");
+        tracing::error!(error = ?e, "Failed to store OIDC exchange");
         return Redirect::to("/login?error=oidc_session_failed").into_response();
     }
 

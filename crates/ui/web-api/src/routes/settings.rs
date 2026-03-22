@@ -81,7 +81,7 @@ pub async fn update_registration_settings(
         )
         .await
     {
-        tracing::error!("Failed to update registration settings: {:?}", e);
+        tracing::error!(error = ?e, "Failed to update registration settings");
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
     state.settings.set_registration(reg).await;

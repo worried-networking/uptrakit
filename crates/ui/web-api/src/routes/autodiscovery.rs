@@ -57,7 +57,7 @@ pub async fn list_autodiscovery_ignores(
     {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
-            tracing::error!("Failed to list autodiscovery ignore rules: {e}");
+            tracing::error!(error = %e, "Failed to list autodiscovery ignore rules");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -101,7 +101,7 @@ pub async fn create_autodiscovery_ignore(
     {
         Ok(created) => created,
         Err(e) => {
-            tracing::error!("Failed to create autodiscovery ignore rule: {e}");
+            tracing::error!(error = %e, "Failed to create autodiscovery ignore rule");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -174,7 +174,7 @@ pub async fn delete_autodiscovery_ignore(
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Ignore rule not found"),
         Err(e) => {
-            tracing::error!("Failed to delete autodiscovery ignore rule: {e}");
+            tracing::error!(error = %e, "Failed to delete autodiscovery ignore rule");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -215,7 +215,7 @@ pub async fn batch_autodiscovery_ignores(
             {
                 Ok(r) => r,
                 Err(e) => {
-                    tracing::error!("batch delete failed: {e}");
+                    tracing::error!(error = %e, "batch delete failed");
                     return error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Internal server error",

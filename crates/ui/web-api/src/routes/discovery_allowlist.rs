@@ -58,7 +58,7 @@ pub async fn list_tenant_discovery_allowlist(
     match allowlist_queries::list_tenant_allowlist(tenant_db.db(), tenant_db.tenant_id).await {
         Ok(entries) => (StatusCode::OK, Json(entries)).into_response(),
         Err(e) => {
-            tracing::error!("Failed to list tenant discovery allowlist: {e}");
+            tracing::error!(error = %e, "Failed to list tenant discovery allowlist");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -133,7 +133,7 @@ pub async fn remove_tenant_discovery_allowlist_entry(
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Allowlist entry not found"),
         Err(e) => {
-            tracing::error!("DB error removing tenant discovery allowlist entry: {e}");
+            tracing::error!(error = %e, "DB error removing tenant discovery allowlist entry");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -175,7 +175,7 @@ pub async fn list_host_discovery_allowlist(
         Ok(Some(_)) => {}
         Ok(None) => return error_response(StatusCode::NOT_FOUND, "Host not found"),
         Err(e) => {
-            tracing::error!("DB error checking host: {e}");
+            tracing::error!(error = %e, "DB error checking host");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     }
@@ -184,7 +184,7 @@ pub async fn list_host_discovery_allowlist(
     {
         Ok(entries) => (StatusCode::OK, Json(entries)).into_response(),
         Err(e) => {
-            tracing::error!("Failed to list host discovery allowlist: {e}");
+            tracing::error!(error = %e, "Failed to list host discovery allowlist");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -230,7 +230,7 @@ pub async fn add_host_discovery_allowlist_entry(
         Ok(Some(_)) => {}
         Ok(None) => return Ok(error_response(StatusCode::NOT_FOUND, "Host not found")),
         Err(e) => {
-            tracing::error!("DB error checking host: {e}");
+            tracing::error!(error = %e, "DB error checking host");
             return Ok(error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal server error",
@@ -287,7 +287,7 @@ pub async fn remove_host_discovery_allowlist_entry(
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Allowlist entry not found"),
         Err(e) => {
-            tracing::error!("DB error removing host discovery allowlist entry: {e}");
+            tracing::error!(error = %e, "DB error removing host discovery allowlist entry");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }

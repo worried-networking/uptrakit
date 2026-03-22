@@ -28,7 +28,7 @@ async fn persist_setting(
     setting_name: &str,
 ) -> Result<(), Response> {
     upsert_global_setting(db, key, value).await.map_err(|e| {
-        tracing::error!("Failed to save {setting_name}: {e:?}");
+        tracing::error!(error = ?e, setting_name = setting_name, "Failed to save setting");
         error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
     })
 }

@@ -410,7 +410,7 @@ pub async fn merge_service(
             .exec(&txn)
             .await
         {
-            tracing::error!("Failed to revoke {label} service certificates: {}", e);
+            tracing::error!(error = %e, label = label, "Failed to revoke service certificates");
             bail!(ServiceQueryError::Db(e));
         }
     }
@@ -460,7 +460,7 @@ pub async fn merge_service(
             .exec(&txn)
             .await
         {
-            tracing::error!("Failed to copy host link during merge: {}", e);
+            tracing::error!(error = %e, "Failed to copy host link during merge");
             bail!(ServiceQueryError::Db(e));
         }
     }

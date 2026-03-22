@@ -142,7 +142,7 @@ pub async fn list_extension_providers(
                         });
                     }
                     Err(e) => {
-                        tracing::error!("Failed to look up service {service_id}: {e}");
+                        tracing::error!(error = %e, service_id = %service_id, "Failed to look up service");
                         return error_response(
                             StatusCode::INTERNAL_SERVER_ERROR,
                             "Internal server error",

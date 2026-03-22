@@ -59,7 +59,7 @@ pub async fn list_update_history(
     match uh_queries::list_update_history(&tenant_db, &query).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
-            tracing::error!("Failed to list update history: {e}");
+            tracing::error!(error = %e, "Failed to list update history");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -90,7 +90,7 @@ pub async fn get_update_history(
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Update history record not found"),
         Err(e) => {
-            tracing::error!("Failed to get update history record: {e}");
+            tracing::error!(error = %e, "Failed to get update history record");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -143,7 +143,7 @@ pub async fn stream_update_output(
             return error_response(StatusCode::NOT_FOUND, "Update history record not found");
         }
         Err(e) => {
-            tracing::error!("Failed to load update history for SSE: {e}");
+            tracing::error!(error = %e, "Failed to load update history for SSE");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -166,7 +166,7 @@ pub async fn stream_update_output(
     {
         Ok(lines) => lines,
         Err(e) => {
-            tracing::error!("Failed to load output lines for SSE stream: {e}");
+            tracing::error!(error = %e, "Failed to load output lines for SSE stream");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
