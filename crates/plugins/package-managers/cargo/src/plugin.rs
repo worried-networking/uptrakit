@@ -142,7 +142,10 @@ impl CargoPlugin {
     }
 
     pub(crate) fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
-        validate_identifier(package_identifier).map_err(|e| report!(PluginError::Configuration(e)))
+        uptrakit_plugin_infrastructure_core::require_package_identifier(
+            package_identifier,
+            validate_identifier,
+        )
     }
 }
 

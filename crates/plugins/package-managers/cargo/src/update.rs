@@ -1,9 +1,8 @@
 use async_trait::async_trait;
-use rootcause::prelude::*;
-use uptrakit_plugin_infrastructure_core::command::{CommandSpec, send_output};
+use uptrakit_plugin_infrastructure_core::command::send_output;
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    OutputStreamType, PluginError, ReleaseInfo, Result, UpdateOutputLine,
+    OutputStreamType, ReleaseInfo, Result, UpdateOutputLine,
 };
 
 use crate::plugin::CargoPlugin;
@@ -31,17 +30,6 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for CargoPlugin {
             args.push("--locked".to_string());
         }
 
-        let display_cmd = if self.config.use_locked {
-            format!(
-                "cargo install {} --version {} --locked",
-                package_identifier, to_version
-            )
-        } else {
-            format!(
-                "cargo install {} --version {}",
-                package_identifier, to_version
-            )
-        };
         tracing::debug!(
             package = %package_identifier,
             to_version = %to_version,
@@ -50,27 +38,23 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for CargoPlugin {
 
         send_output(
             output_tx,
-            &format!("Updating {package_identifier} to {to_version}\nRunning: {display_cmd}"),
+            &format!("Updating {package_identifier} to {to_version}"),
             OutputStreamType::Stdout,
         )
         .await;
-        let mut output = format!("Running: {display_cmd}\n");
 
-        // No `.privileged()` -- cargo install does not require sudo.
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::exec("cargo", args), output_tx)
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::InstallFailed(format!(
-                "cargo install failed with exit code {}",
-                cmd_output.exit_code
-            )));
-        }
-
-        output.push_str(&cmd_output.output);
-        Ok(output)
+        uptrakit_plugin_infrastructure_core::execute_command_update(
+            uptrakit_plugin_infrastructure_core::CommandUpdateParams {
+                executor: self.executor.as_ref(),
+                binary: "cargo",
+                args,
+                privileged: false,
+                spec_modifier: None,
+                exit_code_success: None,
+                exit_code_error: None,
+            },
+            output_tx,
+        )
+        .await
     }
 }
