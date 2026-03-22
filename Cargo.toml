@@ -93,6 +93,7 @@ uptrakit-directories = { path = "crates/shared/directories" }
 uptrakit-web-api-types = { path = "crates/shared/web-api-types" }
 uptrakit-nats = { path = "crates/shared/nats" }
 uptrakit-scheduler-engine = { path = "crates/shared/scheduler-engine" }
+uptrakit-tracing-init = { path = "crates/shared/tracing-init", default-features = false }
 uptrakit-service-sdk = { path = "crates/shared/service-sdk", default-features = false }
 uptrakit-notification-plugin-core = { path = "crates/plugins/notifications/core" }
 uptrakit-notification-plugin-webhook = { path = "crates/plugins/notifications/webhook" }

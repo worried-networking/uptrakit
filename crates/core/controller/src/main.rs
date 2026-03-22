@@ -87,7 +87,7 @@ async fn main() -> std::process::ExitCode {
     }
 
     #[allow(unused_mut)] // mutated inside #[cfg(feature = "journald")] block
-    let mut builder = uptrakit_service_sdk::TracingBuilder::new()
+    let mut builder = uptrakit_tracing_init::TracingBuilder::new()
         .verbosity(args.verbose)
         .max_verbosity(3)
         .directives_for_verbosity(

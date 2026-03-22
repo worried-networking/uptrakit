@@ -1,0 +1,21 @@
+[package]
+name = "uptrakit-tracing-init"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[features]
+cli = []
+test-support = []
+
+[dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tracing-test = { workspace = true }
+
+[lints]
+workspace = true

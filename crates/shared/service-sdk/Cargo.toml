@@ -9,8 +9,8 @@ version.workspace = true
 [features]
 default = ["zeroconf"]
 zeroconf = ["dep:mdns-sd"]
-cli = []
-test-support = []
+cli = ["uptrakit-tracing-init/cli"]
+test-support = ["uptrakit-tracing-init/test-support"]
 
 [dependencies]
 async-trait = { workspace = true }
@@ -20,6 +20,7 @@ hostname = { workspace = true }
 http = { workspace = true }
 parking_lot = { workspace = true }
 uptrakit-backoff = { workspace = true }
+uptrakit-tracing-init = { workspace = true }
 rcgen = { workspace = true }
 reqwest = { workspace = true }
 rootcause = { workspace = true }
@@ -33,7 +34,6 @@ tokio = { workspace = true, features = ["net", "io-util", "time", "sync", "fs", 
 tokio-rustls = { workspace = true }
 tokio-tungstenite = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde"] }
 sha2 = { workspace = true }
@@ -50,7 +50,6 @@ mdns-sd = { workspace = true, optional = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
-tracing-test = { workspace = true }
 
 [lints]
 workspace = true

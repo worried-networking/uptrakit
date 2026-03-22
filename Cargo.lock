@@ -6553,10 +6553,10 @@ dependencies = [
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-scheduler-engine",
- "uptrakit-service-sdk",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uptrakit-tracing-init",
  "uptrakit-web-api",
  "url",
  "uuid",
@@ -7353,8 +7353,6 @@ dependencies = [
  "tokio-rustls",
  "tokio-tungstenite",
  "tracing",
- "tracing-subscriber",
- "tracing-test",
  "uptrakit-backoff",
  "uptrakit-build-info",
  "uptrakit-crypto",
@@ -7362,6 +7360,7 @@ dependencies = [
  "uptrakit-internal-wire",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uptrakit-tracing-init",
  "url",
  "uuid",
  "webpki-roots 1.0.6",
@@ -7414,6 +7413,15 @@ dependencies = [
  "utoipa",
  "webpki-roots 1.0.6",
  "zeroize",
+]
+
+[[package]]
+name = "uptrakit-tracing-init"
+version = "0.0.1"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
+ "tracing-test",
 ]
 
 [[package]]
