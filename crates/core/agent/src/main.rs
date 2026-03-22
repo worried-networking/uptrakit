@@ -22,7 +22,7 @@ use cli::Args;
 /// Minimum interval between consecutive update executions on this agent.
 ///
 /// Rapid-fire update messages from a compromised controller are rejected
-/// with a `security_audit:` warning. Legitimate orchestration always waits
+/// with a `security_audit` target warning. Legitimate orchestration always waits
 /// for the previous update to finish before sending the next one.
 const UPDATE_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -151,9 +151,10 @@ impl ServiceHandler for AgentHandler {
                     && last.elapsed() < UPDATE_COOLDOWN
                 {
                     tracing::warn!(
+                        target: "security_audit",
                         cooldown_secs = UPDATE_COOLDOWN.as_secs(),
                         elapsed_ms = last.elapsed().as_millis() as u64,
-                        "security_audit: update rate limit exceeded; ignoring ExecuteUpdate"
+                        "update rate limit exceeded; ignoring ExecuteUpdate"
                     );
                     return Ok(None);
                 }
@@ -200,9 +201,10 @@ impl ServiceHandler for AgentHandler {
                     && last.elapsed() < UPDATE_COOLDOWN
                 {
                     tracing::warn!(
+                        target: "security_audit",
                         cooldown_secs = UPDATE_COOLDOWN.as_secs(),
                         elapsed_ms = last.elapsed().as_millis() as u64,
-                        "security_audit: update rate limit exceeded; ignoring ExecuteBatchUpdate"
+                        "update rate limit exceeded; ignoring ExecuteBatchUpdate"
                     );
                     return Ok(None);
                 }
@@ -360,9 +362,10 @@ async fn handle_set_update_freeze(
         match tokio::fs::write(freeze_file_path, "").await {
             Ok(()) => {
                 tracing::warn!(
+                    target: "security_audit",
                     freeze_file = %freeze_file_path.display(),
                     reason = reason,
-                    "security_audit: update freeze enabled via remote command"
+                    "update freeze enabled via remote command"
                 );
             }
             Err(e) => {
@@ -377,9 +380,10 @@ async fn handle_set_update_freeze(
         match tokio::fs::remove_file(freeze_file_path).await {
             Ok(()) => {
                 tracing::warn!(
+                    target: "security_audit",
                     freeze_file = %freeze_file_path.display(),
                     reason = reason,
-                    "security_audit: update freeze disabled via remote command"
+                    "update freeze disabled via remote command"
                 );
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -426,7 +430,9 @@ async fn main() {
         return;
     }
 
-    init_tracing(args.common.verbose);
+    uptrakit_service_sdk::TracingBuilder::new()
+        .verbosity(args.common.verbose)
+        .init();
     uptrakit_service_sdk::init_crypto();
 
     // Resolve the freeze file path early so we can pass it to the handler.
@@ -455,36 +461,4 @@ async fn main() {
         &mut handler,
     )
     .await;
-}
-
-/// Initialize `tracing_subscriber` with a verbosity-aware filter.
-///
-/// All uptrakit crates are enabled at the chosen level; third-party crates
-/// remain silent unless `RUST_LOG` explicitly enables them:
-///
-/// - `verbosity == 0`: `uptrakit=info`
-/// - `verbosity == 1`: `uptrakit=debug`
-/// - `verbosity >= 2`: `uptrakit=trace`
-fn init_tracing(verbosity: u8) {
-    use tracing_subscriber::EnvFilter;
-    use tracing_subscriber::prelude::*;
-
-    if verbosity > 2 {
-        eprintln!(
-            "warning: -vvv or more has no additional effect; maximum verbosity is -vv (trace)"
-        );
-    }
-
-    let directive = match verbosity {
-        0 => "uptrakit=info".to_string(),
-        1 => "uptrakit=debug".to_string(),
-        _ => "uptrakit=trace".to_string(),
-    };
-    let mut filter = EnvFilter::from_default_env();
-    if let Ok(d) = directive.parse() {
-        filter = filter.add_directive(d);
-    }
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_filter(filter))
-        .init();
 }

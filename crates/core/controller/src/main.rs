@@ -44,7 +44,8 @@ use sea_orm::DatabaseConnection;
 use thiserror::Error;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio_util::sync::CancellationToken;
-use tracing_subscriber::EnvFilter;
+#[cfg(feature = "journald")]
+use tracing_subscriber::prelude::*;
 use uptrakit_audit_log::{AuditFilter, AuditLogDispatcher};
 use uptrakit_build_info::BuildInfo;
 use uptrakit_shared_macros::impl_report_conversion;
@@ -77,40 +78,6 @@ impl_report_conversion!(
     |e| AppError::Config(e.to_string())
 );
 
-/// Initialize the global tracing subscriber.
-///
-/// When the `journald` feature is compiled in and the journald backend was
-/// selected on the command line, the registry gets an additional journald layer
-/// filtered to `uptrakit_audit=info`.  In all other cases (or when the feature
-/// is absent) only the fmt layer is installed.
-///
-/// The `_backends` parameter is intentionally prefixed with `_` so that the
-/// compiler does not warn about it being unused when the `journald` feature is
-/// not compiled in.
-fn init_tracing(filter: EnvFilter, _backends: &[cli::AuditLogBackendArg]) {
-    use tracing_subscriber::prelude::*;
-
-    #[cfg(feature = "journald")]
-    if _backends.contains(&cli::AuditLogBackendArg::Journald) {
-        let journald_filter = EnvFilter::new("uptrakit_audit=info");
-        tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer().with_filter(filter))
-            .with(
-                tracing_journald::layer()
-                    .expect("failed to connect to journald")
-                    .with_filter(journald_filter),
-            )
-            .init();
-        return;
-    }
-
-    // Use registry-based subscriber so an OpenTelemetry layer can be added
-    // later as a one-line change.
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_filter(filter))
-        .init();
-}
-
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     let args = cli::Args::parse();
@@ -119,28 +86,42 @@ async fn main() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
-    if args.verbose > 3 {
-        eprintln!(
-            "warning: -vvvv or more has no additional effect; maximum verbosity is -vvv (trace)"
-        );
-    }
-    let directives: &[&str] = match args.verbose {
-        0 => &["uptrakit_controller=info", "uptrakit_web_api=info"],
-        1 => &["uptrakit_controller=debug", "uptrakit_web_api=debug"],
-        2 => &["uptrakit=debug"],
-        _ => &["uptrakit=trace"],
-    };
-    let mut filter = EnvFilter::from_default_env();
-    for dir_str in directives {
-        if let Ok(d) = dir_str.parse() {
-            filter = filter.add_directive(d);
-        }
-    }
+    #[allow(unused_mut)] // mutated inside #[cfg(feature = "journald")] block
+    let mut builder = uptrakit_service_sdk::TracingBuilder::new()
+        .verbosity(args.verbose)
+        .max_verbosity(3)
+        .directives_for_verbosity(
+            0,
+            &[
+                ("uptrakit_controller", "info"),
+                ("uptrakit_web_api", "info"),
+            ],
+        )
+        .directives_for_verbosity(
+            1,
+            &[
+                ("uptrakit_controller", "debug"),
+                ("uptrakit_web_api", "debug"),
+            ],
+        )
+        .directives_for_verbosity(2, &[("uptrakit", "debug")])
+        .directives_for_verbosity(3, &[("uptrakit", "trace")]);
 
     // When the journald audit backend is selected, add a dedicated journald
     // tracing layer filtered to the `uptrakit_audit` target so that structured
     // audit events reach the system journal alongside normal stdout logging.
-    init_tracing(filter, &args.audit_log_backend);
+    #[cfg(feature = "journald")]
+    if args
+        .audit_log_backend
+        .contains(&cli::AuditLogBackendArg::Journald)
+    {
+        let journald = tracing_journald::layer()
+            .expect("failed to connect to journald")
+            .with_filter(tracing_subscriber::EnvFilter::new("uptrakit_audit=info"));
+        builder = builder.extra_layer(Box::new(journald));
+    }
+
+    builder.init();
 
     // Dispatch optional subcommands before entering the normal server path.
     if let Some(cli::ControllerCommand::DbMigrate(ref db_args)) = args.command {

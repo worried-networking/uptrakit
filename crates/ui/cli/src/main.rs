@@ -1,7 +1,6 @@
 use uptrakit_cli::{commands, error, output};
 
 use clap::{CommandFactory, Parser, Subcommand};
-use tracing_subscriber::EnvFilter;
 use uptrakit_build_info::BuildInfo;
 use uptrakit_cli::output::OutputFormat;
 
@@ -214,29 +213,7 @@ async fn run(cli: Cli) -> error::Result<()> {
         return Ok(());
     }
 
-    if cli.verbose > 4 {
-        eprintln!(
-            "warning: -vvvvv or more has no additional effect; maximum verbosity is -vvvv (trace)"
-        );
-    }
-    if cli.verbose > 0 {
-        let directive = match cli.verbose {
-            1 => "uptrakit_cli=warn",
-            2 => "uptrakit_cli=debug",
-            3 => "uptrakit=debug",
-            _ => "uptrakit=trace",
-        };
-        let filter = EnvFilter::from_default_env();
-        let filter = if let Ok(d) = directive.parse() {
-            filter.add_directive(d)
-        } else {
-            filter
-        };
-        tracing_subscriber::fmt()
-            .with_writer(std::io::stderr)
-            .with_env_filter(filter)
-            .init();
-    }
+    uptrakit_service_sdk::init_cli_tracing(cli.verbose);
 
     if cli.insecure {
         eprintln!("WARNING: TLS certificate verification is disabled. Connection is insecure.");

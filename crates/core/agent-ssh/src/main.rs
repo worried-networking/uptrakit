@@ -651,10 +651,11 @@ impl SshAgentHandler {
             && last.elapsed() < UPDATE_COOLDOWN
         {
             tracing::warn!(
+                target: "security_audit",
                 host = %host_machine_id,
                 cooldown_secs = UPDATE_COOLDOWN.as_secs(),
                 elapsed_ms = last.elapsed().as_millis() as u64,
-                "security_audit: update rate limit exceeded; ignoring update"
+                "update rate limit exceeded; ignoring update"
             );
             return false;
         }
@@ -999,7 +1000,9 @@ async fn main() {
     // Host subcommands run with minimal tracing and no rustls provider.
     if let Some(Commands::Host { command }) = args.command {
         // Verbosity-aware tracing for CLI subcommands.
-        init_tracing(args.common.verbose);
+        uptrakit_service_sdk::TracingBuilder::new()
+            .verbosity(args.common.verbose)
+            .init();
 
         if let Err(e) = init_master_key(&args.master_key_file, args.allow_plaintext_secrets) {
             eprintln!("error: {e}");
@@ -1022,7 +1025,7 @@ async fn main() {
                 host_db.close().await.ok();
             }
             Err(e) => {
-                tracing::warn!(error = %e, "could not init DEK ring for host subcommand");
+                tracing::error!(error = %e, "could not init DEK ring for host subcommand");
             }
         }
 
@@ -1040,7 +1043,9 @@ async fn main() {
         std::process::exit(1);
     }
 
-    init_tracing(args.common.verbose);
+    uptrakit_service_sdk::TracingBuilder::new()
+        .verbosity(args.common.verbose)
+        .init();
     uptrakit_service_sdk::init_crypto();
 
     // Initialize master encryption key for local SSH credential storage.
@@ -1224,31 +1229,6 @@ fn parse_master_key_hex(key_hex: &str) -> InitResult<[u8; 32]> {
         )))
     })?;
     Ok(key_bytes)
-}
-
-/// Initialize `tracing_subscriber` with a verbosity-aware filter.
-fn init_tracing(verbosity: u8) {
-    use tracing_subscriber::EnvFilter;
-    use tracing_subscriber::prelude::*;
-
-    if verbosity > 2 {
-        eprintln!(
-            "warning: -vvv or more has no additional effect; maximum verbosity is -vv (trace)"
-        );
-    }
-
-    let directive = match verbosity {
-        0 => "uptrakit=info".to_string(),
-        1 => "uptrakit=debug".to_string(),
-        _ => "uptrakit=trace".to_string(),
-    };
-    let mut filter = EnvFilter::from_default_env();
-    if let Ok(d) = directive.parse() {
-        filter = filter.add_directive(d);
-    }
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_filter(filter))
-        .init();
 }
 
 #[cfg(test)]

@@ -794,7 +794,9 @@ async fn main() {
         return;
     }
 
-    init_tracing(args.common.verbose);
+    uptrakit_service_sdk::TracingBuilder::new()
+        .verbosity(args.common.verbose)
+        .init();
     uptrakit_service_sdk::init_crypto();
 
     tracing::info!("starting uptrakit-mqtt service");
@@ -818,31 +820,6 @@ async fn main() {
         &mut handler,
     )
     .await;
-}
-
-/// Initialize `tracing_subscriber` with a verbosity-aware filter.
-fn init_tracing(verbosity: u8) {
-    use tracing_subscriber::EnvFilter;
-    use tracing_subscriber::prelude::*;
-
-    if verbosity > 2 {
-        eprintln!(
-            "warning: -vvv or more has no additional effect; maximum verbosity is -vv (trace)"
-        );
-    }
-
-    let directive = match verbosity {
-        0 => "uptrakit=info".to_string(),
-        1 => "uptrakit=debug".to_string(),
-        _ => "uptrakit=trace".to_string(),
-    };
-    let mut filter = EnvFilter::from_default_env();
-    if let Ok(d) = directive.parse() {
-        filter = filter.add_directive(d);
-    }
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_filter(filter))
-        .init();
 }
 
 #[cfg(test)]
