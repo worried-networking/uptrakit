@@ -15,7 +15,14 @@ pub mod sensitive_params;
 pub mod shared_types;
 pub mod signal;
 pub mod tls;
+pub mod tracing_init;
 pub(crate) mod ws;
+
+#[cfg(feature = "cli")]
+pub use tracing_init::init_cli_tracing;
+#[cfg(feature = "test-support")]
+pub use tracing_init::init_test_tracing;
+pub use tracing_init::{BoxedLayer, TracingBuilder};
 
 pub use cert_handler::{
     CertificateRenewalHandler, FAR_FUTURE, compute_renewal_delay, create_renewal_sleep,

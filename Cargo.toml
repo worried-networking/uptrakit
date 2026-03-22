@@ -93,7 +93,7 @@ uptrakit-directories = { path = "crates/shared/directories" }
 uptrakit-web-api-types = { path = "crates/shared/web-api-types" }
 uptrakit-nats = { path = "crates/shared/nats" }
 uptrakit-scheduler-engine = { path = "crates/shared/scheduler-engine" }
-uptrakit-service-sdk = { path = "crates/shared/service-sdk" }
+uptrakit-service-sdk = { path = "crates/shared/service-sdk", default-features = false }
 uptrakit-notification-plugin-core = { path = "crates/plugins/notifications/core" }
 uptrakit-notification-plugin-webhook = { path = "crates/plugins/notifications/webhook" }
 uptrakit-notification-plugin-telegram = { path = "crates/plugins/notifications/telegram" }
@@ -149,6 +149,7 @@ http-body-util = "0.1"
 sqlx = { version = "0.8", default-features = false, features = ["tls-rustls-aws-lc-rs"] }
 directories = "6"
 testcontainers = { version = "0.27", default-features = false, features = ["aws-lc-rs"] }
+tracing-test = { version = "0.2", default-features = false }
 testcontainers-modules = { version = "0.15", default-features = false, features = ["aws-lc-rs", "postgres"] }
 paste = "1"
 sha1 = "0.10"
