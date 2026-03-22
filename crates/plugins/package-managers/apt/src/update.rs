@@ -49,52 +49,32 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for AptPlugin {
         self.require_package_identifier(package_identifier)?;
         validate_version(to_version).map_err(|e| report!(PluginError::Configuration(e)))?;
 
-        let pkg_version = format!("{package_identifier}={to_version}");
-        let args = vec![
-            "install".to_string(),
-            "--yes".to_string(),
-            "--no-install-recommends".to_string(),
-            pkg_version,
-        ];
-
         tracing::debug!(
             package = %package_identifier,
             version = %to_version,
             "running apt-get install"
         );
 
-        let display_args = std::iter::once("apt-get")
-            .chain(args.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ");
-        send_output(
+        uptrakit_plugin_infrastructure_core::execute_command_update(
+            uptrakit_plugin_infrastructure_core::CommandUpdateParams {
+                executor: self.executor.as_ref(),
+                binary: "apt-get",
+                args: vec![
+                    "install".to_string(),
+                    "--yes".to_string(),
+                    "--no-install-recommends".to_string(),
+                    format!("{package_identifier}={to_version}"),
+                ],
+                privileged: true,
+                spec_modifier: Some(Box::new(|spec| {
+                    spec.with_env("DEBIAN_FRONTEND", "noninteractive")
+                })),
+                exit_code_success: None,
+                exit_code_error: None,
+            },
             output_tx,
-            &format!("Running: {display_args}"),
-            OutputStreamType::Stdout,
         )
-        .await;
-        let mut output = format!("Running: {display_args}\n");
-
-        let cmd_output = self
-            .executor
-            .execute(
-                &CommandSpec::exec("apt-get", args)
-                    .with_env("DEBIAN_FRONTEND", "noninteractive")
-                    .privileged(),
-                output_tx,
-            )
-            .await
-            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
-
-        if cmd_output.exit_code != 0 {
-            bail!(PluginError::InstallFailed(format!(
-                "apt-get install failed with exit code {}",
-                cmd_output.exit_code
-            )));
-        }
-
-        output.push_str(&cmd_output.output);
-        Ok(output)
+        .await
     }
 
     /// Execute batch updates using APT preferences pin-priority mechanism.

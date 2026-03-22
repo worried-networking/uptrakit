@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginError, PluginFamily, Result,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginFamily, Result,
     SudoCommandEntry, declare_plugin, require_posix_executor,
 };
 use uptrakit_shared_types::PackageIdentifierRules;
@@ -90,8 +90,10 @@ impl AptPlugin {
     }
 
     pub(crate) fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
-        validate_identifier(package_identifier)
-            .map_err(|e| rootcause::report!(PluginError::Configuration(e)))
+        uptrakit_plugin_infrastructure_core::require_package_identifier(
+            package_identifier,
+            validate_identifier,
+        )
     }
 
     /// Return the sudo commands required by the APT plugin.
