@@ -26,6 +26,61 @@ For full project context, see [README.md](README.md). For contribution rules, se
 For system design and technology choices, see [ARCHITECTURE.md](ARCHITECTURE.md). For security policy and cryptographic
 details, see [SECURITY.md](SECURITY.md). For the documentation catalogue, see [docs/README.md](docs/README.md).
 
+## Quick-start commands
+
+### Key environment variables
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `UPTRAKIT_MASTER_KEY` | Yes (dev) | 64-hex-char AES-256-GCM master key for at-rest encryption — see `docs/development/setup.md` |
+
+### Rust / backend
+
+```sh
+cargo fmt --all                                                      # Format
+cargo check --no-default-features --features db-sqlite               # Lint with minimal features-set
+cargo check --all-features                                           # Lint
+cargo clippy --all-targets --no-default-features --features db-sqlite # Lint with Clippy over minimal features-set
+cargo clippy --all-targets --all-features                            # Lint with Clippy
+cargo test --all-features                                            # Tests
+cargo deny check                                                     # Validate new dependencies
+```
+
+> **Note:** `--all-features` includes `embed-frontend`, which requires `frontend/build/` to exist.
+> Build the frontend first (`cd frontend && npm ci && npm run build`) before running `--all-features` checks.
+
+### Frontend
+
+```sh
+cd frontend
+npm run lint          # ESLint
+npm run format:check  # Prettier — read-only
+npm run check         # Svelte type-check via svelte-check
+npm run build         # SvelteKit build — required before `cargo build` with `embed-frontend` feature
+```
+
+### Markdown
+
+```sh
+markdownlint --config .markdownlint.json '**/*.md'
+```
+
+### Integration tests (require Docker)
+
+```sh
+# Reverse proxy behavior changes
+cargo test -p uptrakit-integration-tests --test reverse_proxy -- --ignored
+
+# Database queries, migrations, or REST API behavior changes
+cargo test -p uptrakit-integration-tests --test database -- --ignored
+
+# Enrollment, wire protocol, service lifecycle, or inter-component communication changes
+docker build -f docker/Dockerfile.test -t uptrakit-test:latest .
+cargo test -p uptrakit-integration-tests -- --ignored
+```
+
+Run integration tests only when changes touch the triggering areas listed in the [Quality Gates](#quality-gates) section below.
+
 ## Documentation split
 
 - **End-user docs** ([`docs/end-user/`](docs/end-user/)): overview, manual update workflow, Home Assistant/MQTT
@@ -1808,3 +1863,94 @@ For more in-depth information on specific topics, refer to the following documen
 - [Autodiscovery](docs/api/autodiscovery.md)
 - [Extensions](docs/api/extensions.md)
 - [Host Tags](docs/api/host-tags.md)
+
+## Maintaining this file
+
+### Philosophy
+
+`AGENTS.md` is the single source of truth for AI coding agents working on this codebase. It must
+contain everything an agent needs to work correctly without asking clarifying questions, and nothing
+that would be better placed in the detailed docs under `docs/`. Its value is density and authority:
+agents read it first, so it must earn that position by being accurate and up-to-date.
+
+### What belongs here
+
+- **Codebase layout** (annotated directory tree) — orient agents before they read code
+- **Architecture invariants** — non-negotiable constraints that span multiple files and would not be
+  obvious from any single file (e.g., "updates are never automatic", "no raw SQL",
+  feature-flag additive-only rule)
+- **Subsystem contracts** (autodiscovery, plugin system, MQTT, notification, audit log, extensions)
+  — invariants across multiple crates that an agent editing one file could silently violate
+- **Quick-start command reference** — the exact commands agents must run, kept in sync with
+  `docs/development/quality-gates.md` (Rust commands) and the `### Quality Gates` sub-section
+  (integration test commands)
+- **Crate annotations in the layout tree** — one-line purpose and key module descriptions for each
+  crate
+- **Recurring anti-patterns discovered from AI-generated code** — add a rule when the same mistake
+  appears twice
+
+### What does NOT belong here
+
+| Content | Correct location |
+| --- | --- |
+| Full API endpoint reference | `docs/api/` |
+| End-user installation and setup guides | `docs/development/setup.md` |
+| Detailed testing patterns and coverage expectations | `docs/development/testing.md` |
+| Dependency policy rules | `docs/development/dependency-policy.md` |
+| Plugin authoring guide | `docs/development/plugin-guidelines.md` |
+| Detailed coding convention prose | `docs/development/coding-standards.md` |
+| Error handling patterns | `docs/development/error-handling.md` |
+
+`AGENTS.md` must **reference** those files (as it already does), not reproduce them.
+
+### When to update
+
+- **Update when:**
+  - A new crate is added to the workspace (add a line to the layout tree)
+  - A crate's key modules or primary responsibilities change significantly
+  - A new architecture invariant is established (add a rule to the General MUST FOLLOW Rules section)
+  - A build command, flag, or test workflow changes — update `docs/development/quality-gates.md` as
+    the canonical source for Rust commands, then update `## Quick-start commands` and the
+    `### Quality Gates` sub-section in sync
+  - A recurring anti-pattern in AI-generated code reveals a missing rule
+  - A subsystem contract changes (e.g., new autodiscovery invariant, new plugin capability)
+  - A new top-level directory or binary is added
+
+- **Do not update when:**
+  - Only linked `docs/` files change — update those files; `AGENTS.md` links to them already
+  - The change is purely internal to one file within an existing crate without altering the crate's
+    public contract or expected agent behavior
+  - A formatting or wording tweak in a doc file does not change meaning for agents
+  - Only integration test infrastructure changes and commands are unchanged
+  - Only `docker/` or `scripts/` files change without affecting agent-facing commands or invariants
+
+### How to update
+
+1. **Do not restructure the file.** Section order is intentional; agents rely on consistent
+   positioning.
+2. **Layout tree changes:** Add or remove the crate entry; keep annotations to one line where
+   possible; match the existing annotation style (crate name in backticks, `(lib)` or `(bin)` tag,
+   em-dash, one-sentence description).
+3. **New invariant rules:** Append to the numbered list in `## General MUST FOLLOW Rules for AI
+   Coding Agents`; start with a bold lead-in; link to the relevant `docs/` file.
+4. **Command or flag changes:** Update `docs/development/quality-gates.md` (canonical source for
+   Rust commands) and the `## Quick-start commands` section in the same commit. When updating
+   integration test commands, update the `### Quality Gates` sub-section of `AGENTS.md` and the
+   `## Quick-start commands` section in the same commit. Never modify one without the other.
+5. **Run `markdownlint --config .markdownlint.json AGENTS.md`** after every edit and fix any
+   violations before committing.
+6. **Commit the update together with the code change that triggered it** — same PR or commit.
+
+### Subfolder AGENTS.md files
+
+Subfolder-scoped files exist where an area uses a different toolchain or has conventions distinct
+enough to warrant a separate guide. Each subfolder file must link back to this root file in its
+opening paragraph.
+
+| File | Scope |
+| --- | --- |
+| `frontend/AGENTS.md` | SvelteKit frontend (`npm` toolchain, Svelte/TypeScript conventions) |
+
+All other areas (Rust crates, `docs/`, `docker/`, `scripts/`) are covered by this root file. To
+add a subfolder `AGENTS.md`: create the file, add an opening paragraph linking back to this root
+file, and add a row to the table above.
