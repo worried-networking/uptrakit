@@ -53,6 +53,7 @@ tower = { workspace = true }
 parking_lot = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+uptrakit-service-sdk = { workspace = true, default-features = false, features = ["test-support"] }
 jsonwebtoken = { workspace = true }
 
 [lints]

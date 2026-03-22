@@ -245,12 +245,5 @@ impl uptrakit_web_api::cert_signer::AgentCertSigner for NoopCertSigner {
 
 /// Initialize tracing for test output (only once per process).
 pub(crate) fn init_test_tracing() {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter("warn")
-            .with_test_writer()
-            .try_init();
-    });
+    uptrakit_service_sdk::init_test_tracing();
 }
