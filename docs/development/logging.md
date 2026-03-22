@@ -23,16 +23,16 @@ structured journald, etc.) to filter and search by field values.
 ### Tracing initialisation
 
 The canonical implementation lives in `crates/shared/tracing-init/src/lib.rs`
-(`uptrakit-tracing-init`). `uptrakit-service-sdk` re-exports everything from it, so most callers
-use the `uptrakit_service_sdk::` path. The controller depends on `uptrakit-tracing-init` directly
+(`uptrakit-tracing-init`). `uptrakit-service-sdk` re-exports everything from it for service
+daemons. The controller, CLI, and integration-tests depend on `uptrakit-tracing-init` directly
 to avoid pulling in the full service SDK.
 
 | Context | Call |
 | --- | --- |
 | Service daemons | `uptrakit_service_sdk::TracingBuilder::new().verbosity(…).init()` |
 | Controller | `uptrakit_tracing_init::TracingBuilder::new().verbosity(…).init()` |
-| CLI | `uptrakit_service_sdk::init_cli_tracing(cli.verbose)` |
-| Tests | `uptrakit_service_sdk::init_test_tracing()` (feature `test-support`) |
+| CLI | `uptrakit_tracing_init::init_cli_tracing(cli.verbose)` |
+| Tests | `uptrakit_tracing_init::init_test_tracing()` (feature `test-support`) |
 
 Do not add per-binary `init_tracing()` helpers or call `tracing_subscriber` directly in binaries.
 

@@ -1363,15 +1363,14 @@ subscriber from a library causes a panic if anything else in the process has alr
 another library).
 
 **All tracing initialisation lives in `crates/shared/tracing-init/src/lib.rs` (`uptrakit-tracing-init`).**
-`uptrakit-service-sdk` re-exports the full public surface so service daemons and the CLI use the
-`uptrakit_service_sdk::` path. The controller depends on `uptrakit-tracing-init` directly (to avoid
-pulling in the full service SDK) and uses `uptrakit_tracing_init::` paths. Do not add per-binary
-`init_tracing()` helpers. Tests call `uptrakit_service_sdk::init_test_tracing()` (feature `test-support`).
+`uptrakit-service-sdk` re-exports the full public surface so service daemons use the
+`uptrakit_service_sdk::` path. The controller, CLI, and integration-tests depend on `uptrakit-tracing-init`
+directly (to avoid pulling in the full service SDK) and use `uptrakit_tracing_init::` paths. Do not add
+per-binary `init_tracing()` helpers.
 
 **Pattern:**
 
 ```rust
-// Service daemon
 // Service daemons (via uptrakit-service-sdk re-export)
 uptrakit_service_sdk::TracingBuilder::new()
     .verbosity(args.common.verbose)
@@ -1382,11 +1381,11 @@ uptrakit_tracing_init::TracingBuilder::new()
     .verbosity(args.verbose)
     .init();
 
-// CLI (stderr, no subscriber at v=0)
-uptrakit_service_sdk::init_cli_tracing(cli.verbose);
+// CLI (depends on uptrakit-tracing-init directly; stderr, no subscriber at v=0)
+uptrakit_tracing_init::init_cli_tracing(cli.verbose);
 
-// Tests
-uptrakit_service_sdk::init_test_tracing();
+// Tests (depends on uptrakit-tracing-init directly)
+uptrakit_tracing_init::init_test_tracing();
 ```
 
 **Compile-time directives** (the programmatic `(target, level)` pairs built into the builder) use `.expect("BUG: …")`
