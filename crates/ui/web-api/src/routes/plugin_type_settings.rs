@@ -126,11 +126,12 @@ pub async fn upsert_plugin_type_settings(
     .await
     {
         Ok(model) => {
-            tracing::info!(
+            tracing::warn!(
+                target: "security_audit",
                 user_id = %user.user_id,
                 tenant_id = %tenant_db.tenant_id,
                 %plugin_type,
-                "security_audit: plugin type settings upserted"
+                "plugin type settings upserted"
             );
             (StatusCode::OK, Json(model_to_response(model))).into_response()
         }
@@ -166,10 +167,11 @@ pub async fn delete_plugin_type_settings(
     {
         Ok(true) => {
             tracing::warn!(
+                target: "security_audit",
                 user_id = %user.user_id,
                 tenant_id = %tenant_db.tenant_id,
                 %plugin_type,
-                "security_audit: plugin type settings deleted"
+                "plugin type settings deleted"
             );
             StatusCode::NO_CONTENT.into_response()
         }

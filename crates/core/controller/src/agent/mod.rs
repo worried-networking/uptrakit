@@ -351,9 +351,10 @@ pub(crate) async fn run_embedded_agent(
                     ControllerMessage::CheckVersions(payload) => {
                         if payload.host_machine_id != machine_id {
                             tracing::warn!(
+                                target: "security_audit",
                                 expected = %machine_id,
                                 received = %payload.host_machine_id,
-                                "security_audit: CheckVersions machine_id mismatch; ignoring"
+                                "CheckVersions machine_id mismatch; ignoring"
                             );
                             continue;
                         }
@@ -369,16 +370,18 @@ pub(crate) async fn run_embedded_agent(
                     ControllerMessage::ExecuteUpdate(payload) => {
                         if payload.host_machine_id != machine_id {
                             tracing::warn!(
+                                target: "security_audit",
                                 expected = %machine_id,
                                 received = %payload.host_machine_id,
-                                "security_audit: ExecuteUpdate machine_id mismatch; ignoring"
+                                "ExecuteUpdate machine_id mismatch; ignoring"
                             );
                             continue;
                         }
                         if is_frozen(&freeze_file_path).await {
                             tracing::warn!(
+                                target: "security_audit",
                                 update_id = %payload.update_history_id,
-                                "security_audit: ExecuteUpdate rejected — updates are frozen"
+                                "ExecuteUpdate rejected — updates are frozen"
                             );
                             continue;
                         }
@@ -386,8 +389,9 @@ pub(crate) async fn run_embedded_agent(
                             && last.elapsed() < UPDATE_COOLDOWN
                         {
                             tracing::warn!(
+                                target: "security_audit",
                                 update_id = %payload.update_history_id,
-                                "security_audit: ExecuteUpdate rejected — rate limit"
+                                "ExecuteUpdate rejected — rate limit"
                             );
                             continue;
                         }
@@ -405,9 +409,10 @@ pub(crate) async fn run_embedded_agent(
                     ControllerMessage::DiscoverSoftware(payload) => {
                         if payload.host_machine_id != machine_id {
                             tracing::warn!(
+                                target: "security_audit",
                                 expected = %machine_id,
                                 received = %payload.host_machine_id,
-                                "security_audit: DiscoverSoftware machine_id mismatch; ignoring"
+                                "DiscoverSoftware machine_id mismatch; ignoring"
                             );
                             continue;
                         }
@@ -423,16 +428,18 @@ pub(crate) async fn run_embedded_agent(
                     ControllerMessage::ExecuteBatchUpdate(payload) => {
                         if payload.host_machine_id != machine_id {
                             tracing::warn!(
+                                target: "security_audit",
                                 expected = %machine_id,
                                 received = %payload.host_machine_id,
-                                "security_audit: ExecuteBatchUpdate machine_id mismatch; ignoring"
+                                "ExecuteBatchUpdate machine_id mismatch; ignoring"
                             );
                             continue;
                         }
                         if is_frozen(&freeze_file_path).await {
                             tracing::warn!(
+                                target: "security_audit",
                                 batch_id = %payload.batch_id,
-                                "security_audit: ExecuteBatchUpdate rejected — updates are frozen"
+                                "ExecuteBatchUpdate rejected — updates are frozen"
                             );
                             continue;
                         }
@@ -440,8 +447,9 @@ pub(crate) async fn run_embedded_agent(
                             && last.elapsed() < UPDATE_COOLDOWN
                         {
                             tracing::warn!(
+                                target: "security_audit",
                                 batch_id = %payload.batch_id,
-                                "security_audit: ExecuteBatchUpdate rejected — rate limit"
+                                "ExecuteBatchUpdate rejected — rate limit"
                             );
                             continue;
                         }

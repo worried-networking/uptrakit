@@ -38,7 +38,7 @@ pub const HOST_RELOAD_INTERVAL: std::time::Duration = std::time::Duration::from_
 /// Minimum interval between consecutive update executions per host.
 ///
 /// Rapid-fire update messages from a compromised controller are rejected
-/// with a `security_audit:` warning. Legitimate orchestration always waits
+/// with a `security_audit` target warning. Legitimate orchestration always waits
 /// for the previous update to finish before sending the next one.
 pub const UPDATE_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -89,7 +89,7 @@ pub async fn init_ssh_data_key_ring(db: &sea_orm::DatabaseConnection) {
     {
         Ok(r) => r,
         Err(e) => {
-            tracing::warn!(error = %e, "failed to query data_encryption_keys");
+            tracing::error!(error = %e, "failed to query data_encryption_keys");
             return;
         }
     };
@@ -209,7 +209,7 @@ pub async fn reencrypt_ssh_to_v3(db: &sea_orm::DatabaseConnection) {
     let rows = match db::entity::ssh_host::Entity::find().all(db).await {
         Ok(r) => r,
         Err(e) => {
-            tracing::warn!(error = %e, "failed to query ssh_hosts for v3 upgrade");
+            tracing::error!(error = %e, "failed to query ssh_hosts for v3 upgrade");
             return;
         }
     };
@@ -226,13 +226,13 @@ pub async fn reencrypt_ssh_to_v3(db: &sea_orm::DatabaseConnection) {
                 let mut am = row.into_active_model();
                 am.private_key = sea_orm::Set(encrypted);
                 if let Err(e) = am.update(db).await {
-                    tracing::warn!(id = %id, error = %e, "v3 upgrade failed: ssh_hosts.private_key");
+                    tracing::error!(id = %id, error = %e, "v3 upgrade failed: ssh_hosts.private_key");
                 } else {
                     count += 1;
                 }
             }
             Err(e) => {
-                tracing::warn!(id = %id, error = %e, "v3 encrypt failed: ssh_hosts.private_key");
+                tracing::error!(id = %id, error = %e, "v3 encrypt failed: ssh_hosts.private_key");
             }
         }
     }
@@ -301,9 +301,10 @@ pub async fn handle_set_update_freeze(
         match tokio::fs::write(freeze_file_path, "").await {
             Ok(()) => {
                 tracing::warn!(
+                    target: "security_audit",
                     freeze_file = %freeze_file_path.display(),
                     reason = reason,
-                    "security_audit: update freeze enabled via remote command"
+                    "update freeze enabled via remote command"
                 );
             }
             Err(e) => {
@@ -318,9 +319,10 @@ pub async fn handle_set_update_freeze(
         match tokio::fs::remove_file(freeze_file_path).await {
             Ok(()) => {
                 tracing::warn!(
+                    target: "security_audit",
                     freeze_file = %freeze_file_path.display(),
                     reason = reason,
-                    "security_audit: update freeze disabled via remote command"
+                    "update freeze disabled via remote command"
                 );
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {

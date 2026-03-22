@@ -396,11 +396,12 @@ pub async fn set_update_freeze(
     }
 
     let action = if body.enabled { "enabled" } else { "disabled" };
-    tracing::info!(
+    tracing::warn!(
+        target: "security_audit",
         %service_id,
         enabled = body.enabled,
         reason = body.reason.as_deref().unwrap_or("-"),
-        "security_audit: update freeze {action} for service"
+        "update freeze {action} for service"
     );
 
     (

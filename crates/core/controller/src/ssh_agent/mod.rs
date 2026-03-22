@@ -449,8 +449,9 @@ async fn is_update_allowed(
 ) -> bool {
     if is_frozen(freeze_file_path).await {
         tracing::warn!(
+            target: "security_audit",
             %host_machine_id,
-            "security_audit: update rejected — updates are frozen"
+            "update rejected — updates are frozen"
         );
         return false;
     }
@@ -458,8 +459,9 @@ async fn is_update_allowed(
         && last.elapsed() < uptrakit_agent_ssh::UPDATE_COOLDOWN
     {
         tracing::warn!(
+            target: "security_audit",
             %host_machine_id,
-            "security_audit: update rejected — rate limit"
+            "update rejected — rate limit"
         );
         return false;
     }

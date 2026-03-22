@@ -127,11 +127,12 @@ pub async fn create_plugin_config(
         let dangerous = collect_dangerous_patterns(&req.config);
         if !dangerous.is_empty() {
             tracing::warn!(
+                target: "security_audit",
                 user_id = %user.user_id,
                 tenant_id = %tenant_db.tenant_id,
                 plugin_type = %plugin_type_str,
                 config_name = %config_name,
-                "security_audit: plugin config creation rejected — dangerous command patterns detected"
+                "plugin config creation rejected — dangerous command patterns detected"
             );
             return Ok(error_response(
                 StatusCode::BAD_REQUEST,
@@ -144,22 +145,24 @@ pub async fn create_plugin_config(
 
     if command_fields.is_empty() {
         tracing::warn!(
+            target: "security_audit",
             user_id = %user.user_id,
             tenant_id = %tenant_db.tenant_id,
             plugin_config_id = %resp.id,
             plugin_type = %plugin_type_str,
             config_name = %config_name,
-            "security_audit: plugin config created"
+            "plugin config created"
         );
     } else {
         tracing::warn!(
+            target: "security_audit",
             user_id = %user.user_id,
             tenant_id = %tenant_db.tenant_id,
             plugin_config_id = %resp.id,
             plugin_type = %plugin_type_str,
             config_name = %config_name,
             command_fields = %command_fields.join(", "),
-            "security_audit: plugin config created with command-bearing fields"
+            "plugin config created with command-bearing fields"
         );
         audit_dangerous_patterns(&config_for_audit, AUDIT_COMMAND_FIELDS);
     }
@@ -269,10 +272,11 @@ pub async fn update_plugin_config(
         let dangerous = collect_dangerous_patterns(config);
         if !dangerous.is_empty() {
             tracing::warn!(
+                target: "security_audit",
                 user_id = %user.user_id,
                 tenant_id = %tenant_db.tenant_id,
                 plugin_config_id = %config_id,
-                "security_audit: plugin config update rejected — dangerous command patterns detected"
+                "plugin config update rejected — dangerous command patterns detected"
             );
             return Ok(error_response(
                 StatusCode::BAD_REQUEST,
@@ -287,22 +291,24 @@ pub async fn update_plugin_config(
 
     if new_command_fields.is_empty() {
         tracing::warn!(
+            target: "security_audit",
             user_id = %user.user_id,
             tenant_id = %tenant_db.tenant_id,
             plugin_config_id = %config_id,
             plugin_type = %resp.plugin_type,
             config_name = %resp.name,
-            "security_audit: plugin config updated"
+            "plugin config updated"
         );
     } else {
         tracing::warn!(
+            target: "security_audit",
             user_id = %user.user_id,
             tenant_id = %tenant_db.tenant_id,
             plugin_config_id = %config_id,
             plugin_type = %resp.plugin_type,
             config_name = %resp.name,
             command_fields = %new_command_fields.join(", "),
-            "security_audit: plugin config updated with command-bearing fields"
+            "plugin config updated with command-bearing fields"
         );
         if let Some(ref config) = config_for_audit {
             audit_dangerous_patterns(config, AUDIT_COMMAND_FIELDS);
@@ -334,10 +340,11 @@ pub async fn delete_plugin_config(
     match pc_queries::delete_plugin_config(&tenant_db, config_id).await {
         Ok(true) => {
             tracing::warn!(
+                target: "security_audit",
                 user_id = %user.user_id,
                 tenant_id = %tenant_db.tenant_id,
                 plugin_config_id = %config_id,
-                "security_audit: plugin config deleted"
+                "plugin config deleted"
             );
             StatusCode::NO_CONTENT.into_response()
         }
@@ -553,7 +560,7 @@ fn format_dangerous_pattern_rejection(matches: &[DangerousPatternMatch]) -> Stri
     msg
 }
 
-/// Emit `security_audit:` warnings for any dangerous patterns found in
+/// Emit `security_audit` target warnings for any dangerous patterns found in
 /// command-bearing fields of a plugin configuration.
 ///
 /// This is advisory only — the `manage_commands` permission is already
@@ -571,9 +578,10 @@ fn audit_dangerous_patterns(config: &serde_json::Value, context_fields: &[(&str,
                 uptrakit_web_api_types::command_validation::detect_dangerous_patterns(val);
             for (pattern, desc) in patterns {
                 tracing::warn!(
+                    target: "security_audit",
                     field = display_name,
                     pattern = pattern,
-                    "security_audit: dangerous command pattern detected — {desc}"
+                    "dangerous command pattern detected — {desc}"
                 );
             }
         }
@@ -593,9 +601,10 @@ fn audit_dangerous_patterns(config: &serde_json::Value, context_fields: &[(&str,
                             );
                         for (pattern, desc) in patterns {
                             tracing::warn!(
+                                target: "security_audit",
                                 field = %format!("hooks.{phase}.commands[{i}]"),
                                 pattern = pattern,
-                                "security_audit: dangerous command pattern detected — {desc}"
+                                "dangerous command pattern detected — {desc}"
                             );
                         }
                     }
