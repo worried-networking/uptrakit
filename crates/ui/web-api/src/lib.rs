@@ -179,7 +179,7 @@ mod tests {
         );
 
         Arc::new(AppState {
-            db: db.clone(),
+            db: crate::app_state::DbState::new(db.clone()),
             cert: crate::app_state::CertState {
                 ca_snapshot: ca_rx,
                 ca_key_store,

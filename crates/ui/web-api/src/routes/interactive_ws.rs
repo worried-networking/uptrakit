@@ -111,7 +111,7 @@ pub async fn interactive_ws(
 
     // 4. Verify the update record exists (tenant-scoped) and is in-progress.
     let tenant_db =
-        uptrakit_web_api_queries::TenantDb::new(state.db.clone(), state.default_tenant_id);
+        uptrakit_web_api_queries::TenantDb::new(state.db().clone(), state.default_tenant_id);
     let record = match tenant_db
         .find_via_tenant_join::<update_history::Entity, host::Entity>(
             update_history::Relation::Host.def(),
@@ -242,7 +242,7 @@ async fn handle_interactive_session(
         .filter(update_output_line::Column::UpdateHistoryId.eq(update_history_id))
         .order_by_asc(update_output_line::Column::CreatedAt)
         .order_by_asc(update_output_line::Column::Id)
-        .all(&state.db)
+        .all(state.db())
         .await
     {
         Ok(lines) => {

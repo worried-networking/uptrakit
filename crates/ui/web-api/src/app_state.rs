@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use axum::extract::FromRef;
 use sea_orm::DatabaseConnection;
 use tokio_util::sync::CancellationToken;
 use uptrakit_plugin_infrastructure_registry::PluginOps;
@@ -35,6 +36,26 @@ pub struct ServiceCredentialSources {
     pub nats_url: Option<String>,
     /// Master key hex to provide to services with `master_key_access` capability.
     pub master_key_hex: Option<uptrakit_internal_wire::SecretString>,
+}
+
+/// Newtype wrapper for [`DatabaseConnection`] used as a focused Axum sub-state.
+///
+/// The inner field is private. External code accesses the connection via
+/// [`DbState::db`]. Construction is restricted to within this crate via
+/// [`DbState::new`], preventing external crates from constructing `DbState`
+/// directly.
+#[derive(Clone)]
+pub struct DbState(DatabaseConnection);
+
+impl DbState {
+    pub(crate) fn new(db: DatabaseConnection) -> Self {
+        Self(db)
+    }
+
+    /// Returns a reference to the underlying database connection.
+    pub fn db(&self) -> &DatabaseConnection {
+        &self.0
+    }
 }
 
 /// Certificate-authority related state: snapshot receiver, key store, and
@@ -97,8 +118,8 @@ pub struct OidcState {
 /// Shared application state available to all handlers.
 #[derive(Clone)]
 pub struct AppState {
-    /// Database connection pool.
-    pub(crate) db: DatabaseConnection,
+    /// Database connection pool wrapped in [`DbState`] for focused sub-state extraction.
+    pub(crate) db: DbState,
     /// Certificate-authority state: snapshot, key store, revocation, CRL, rotation.
     pub cert: CertState,
     /// Authentication state: JWT, device flow, rate limiting, token denylist.
@@ -536,7 +557,7 @@ impl AppStateBuilder {
     /// Returns an error if any required field was not set before calling `build`.
     pub fn build(self) -> Result<AppState, AppStateBuildError> {
         Ok(AppState {
-            db: self.db.ok_or(AppStateBuildError("db"))?,
+            db: DbState::new(self.db.ok_or(AppStateBuildError("db"))?),
             cert: CertState {
                 ca_snapshot: self.ca_snapshot.ok_or(AppStateBuildError("ca_snapshot"))?,
                 ca_key_store: self
@@ -653,6 +674,86 @@ impl AppState {
 
     /// Returns a reference to the underlying database connection.
     pub fn db(&self) -> &DatabaseConnection {
-        &self.db
+        self.db.db()
+    }
+}
+
+impl FromRef<Arc<AppState>> for DbState {
+    fn from_ref(state: &Arc<AppState>) -> Self {
+        state.db.clone()
+    }
+}
+
+impl FromRef<Arc<AppState>> for CertState {
+    fn from_ref(state: &Arc<AppState>) -> Self {
+        state.cert.clone()
+    }
+}
+
+impl FromRef<Arc<AppState>> for AuthState {
+    fn from_ref(state: &Arc<AppState>) -> Self {
+        state.auth.clone()
+    }
+}
+
+impl FromRef<Arc<AppState>> for BroadcastState {
+    fn from_ref(state: &Arc<AppState>) -> Self {
+        state.broadcast.clone()
+    }
+}
+
+#[cfg(feature = "oidc")]
+impl FromRef<Arc<AppState>> for OidcState {
+    fn from_ref(state: &Arc<AppState>) -> Self {
+        state.oidc.clone()
+    }
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod from_ref_tests {
+    use super::*;
+    use axum::extract::FromRef;
+
+    async fn test_app_state() -> Arc<AppState> {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        state
+    }
+
+    #[tokio::test]
+    async fn extract_db_state() {
+        let state = test_app_state().await;
+        let db_state = DbState::from_ref(&state);
+        let _db: &DatabaseConnection = db_state.db();
+    }
+
+    #[tokio::test]
+    async fn extract_auth_state() {
+        let state = test_app_state().await;
+        let auth = AuthState::from_ref(&state);
+        let _jwt = &auth.jwt;
+    }
+
+    #[tokio::test]
+    async fn extract_broadcast_state() {
+        let state = test_app_state().await;
+        let broadcast = BroadcastState::from_ref(&state);
+        let _eb = &broadcast.event_broadcaster;
+    }
+
+    #[tokio::test]
+    async fn extract_cert_state() {
+        let state = test_app_state().await;
+        let cert = CertState::from_ref(&state);
+        let _cache = &cert.crl_pem_cache;
+    }
+
+    #[cfg(feature = "oidc")]
+    #[tokio::test]
+    async fn extract_oidc_state() {
+        let state = test_app_state().await;
+        let oidc = OidcState::from_ref(&state);
+        let _store = &oidc.oidc_flow_store;
     }
 }

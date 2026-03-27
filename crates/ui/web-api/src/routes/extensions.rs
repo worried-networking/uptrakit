@@ -102,7 +102,7 @@ pub async fn list_extension_providers(
 
             for service_id in providers {
                 match uptrakit_shared_db::entity::prelude::Service::find_by_id(service_id)
-                    .one(&state.db)
+                    .one(state.db())
                     .await
                 {
                     Ok(Some(svc)) => {
@@ -118,7 +118,7 @@ pub async fn list_extension_providers(
                     Ok(None) => {
                         // Fallback: system services are not in the `services` table.
                         if let Ok(Some(sys_svc)) = system_service::Entity::find_by_id(service_id)
-                            .one(&state.db)
+                            .one(state.db())
                             .await
                         {
                             let encryption_public_key =

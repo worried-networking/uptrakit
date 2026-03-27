@@ -1610,7 +1610,7 @@ pub(crate) async fn handle_stdin_attention(
     let linked_host_ids = linked_host_ids.lock().clone();
     // Validate that this service owns the update
     if let Err(e) = validate_update_ownership(
-        &state.db,
+        state.db(),
         service_id,
         payload.update_history_id,
         &linked_host_ids,
