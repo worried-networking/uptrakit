@@ -78,6 +78,10 @@ jobs:
           shared-key: "rust-all-features"
           save-if: "false"
       - run: cargo test --all-features
+      - name: Verify handler state contract (routes/ only)
+        run: bash ci/verify_handler_state_contract.sh
+      - name: Verify DB access policy (routes/ only)
+        run: python3 ci/verify_db_access_policy.py
 
   reverse-proxy-tests:
     runs-on:
