@@ -58,6 +58,33 @@ authenticate even when password auth is disabled (OIDC-only environments).
   predecessor.
 - Logout adds entries to the in-memory `TokenDenylist` to deny future requests for the remaining lifetime (15 min).
 
+## Browser 401 Recovery Flow
+
+When `authenticatedFetch` in `frontend/src/lib/api.ts` receives a 401 response and an in-memory
+access token is present, it follows a five-outcome recovery flow:
+
+1. **Immediate banner**: `setSessionExpired(true)` is called at the very start of the 401 branch,
+   before any refresh attempt, so the session-expired UI banner is visible to the user while the
+   refresh round-trip is in progress.
+
+2. **Shared refresh**: concurrent callers deduplicate against a single module-level
+   `refreshPromise`. All concurrent 401 handlers await the same refresh.
+
+3. **Success path**: if the refresh succeeds, the new access token is stored and the retry request
+   is issued. The retry is returned as a promise (not awaited inside the `try` block), and a
+   `.finally()` callback clears the banner (`setSessionExpired(false)`) after the retry settles
+   regardless of the retry outcome. Retry errors propagate to `request()`, which maps `TypeError`
+   and `DOMException` to user-facing messages, because the retry is returned rather than awaited.
+
+4. **Transient refresh failure** (`TypeError`, `DOMException`, 5xx): `setSessionExpired(false)` is
+   called before the error is re-thrown, so the banner clears and the user sees the transient error
+   message without being forced to log in again.
+
+5. **Auth refresh failure** (4xx): the session is genuinely invalid. `setAccessToken(null)` clears
+   the in-memory token and `sessionExpired` stays `true`, keeping the banner visible. The error
+   `Session expired. Please log in again.` is thrown; no hard redirect occurs so the user can copy
+   any unsaved form state.
+
 ## API Tokens
 
 - Long-lived, revocable tokens stored in `api_tokens` table.

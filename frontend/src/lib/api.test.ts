@@ -263,6 +263,137 @@ describe('authenticatedFetch', () => {
 
 		await expect(me()).rejects.toThrow('Request timed out');
 	});
+
+	// ── session-expired banner lifecycle ─────────────────────────────────────
+
+	it('sets sessionExpired true immediately and clears it after successful refresh and retry', async () => {
+		vi.mocked(getAccessToken).mockReturnValue('old-token');
+		const mockFetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response('', { status: 401, statusText: 'Unauthorized' }))
+			.mockResolvedValueOnce(new Response(JSON.stringify(sampleRefresh), { status: 200 }))
+			.mockResolvedValueOnce(new Response(JSON.stringify(sampleUser), { status: 200 }));
+		vi.stubGlobal('fetch', mockFetch);
+
+		const result = await me();
+
+		const calls = vi.mocked(setSessionExpired).mock.calls.map((c) => c[0]);
+		expect(calls).toContain(true);
+		expect(calls[calls.length - 1]).toBe(false);
+		expect(result).toEqual(sampleUser);
+	});
+
+	it('clears sessionExpired via finally even when retry fetch rejects', async () => {
+		vi.mocked(getAccessToken).mockReturnValue('old-token');
+		const mockFetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response('', { status: 401, statusText: 'Unauthorized' }))
+			.mockResolvedValueOnce(new Response(JSON.stringify(sampleRefresh), { status: 200 }))
+			.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+		vi.stubGlobal('fetch', mockFetch);
+
+		await expect(me()).rejects.toThrow('Network error: Unable to connect to the server.');
+
+		expect(vi.mocked(setAccessToken)).toHaveBeenCalledWith('new-token');
+		const calls = vi.mocked(setSessionExpired).mock.calls.map((c) => c[0]);
+		expect(calls).toEqual([true, false]);
+	});
+
+	it('keeps sessionExpired true when refresh fails with 4xx', async () => {
+		vi.mocked(getAccessToken).mockReturnValue('old-token');
+		const mockFetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response('', { status: 401, statusText: 'Unauthorized' }))
+			.mockResolvedValueOnce(new Response('Forbidden', { status: 403, statusText: 'Forbidden' }));
+		vi.stubGlobal('fetch', mockFetch);
+
+		await expect(me()).rejects.toThrow('Session expired. Please log in again.');
+
+		expect(vi.mocked(setAccessToken)).toHaveBeenCalledWith(null);
+		const calls = vi.mocked(setSessionExpired).mock.calls.map((c) => c[0]);
+		expect(calls).toContain(true);
+		expect(calls).not.toContain(false);
+	});
+
+	it('clears sessionExpired when refresh fails with TypeError', async () => {
+		vi.mocked(getAccessToken).mockReturnValue('old-token');
+		const mockFetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response('', { status: 401, statusText: 'Unauthorized' }))
+			.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+		vi.stubGlobal('fetch', mockFetch);
+
+		await expect(me()).rejects.toThrow('Network error during token refresh. Check your connection.');
+
+		const calls = vi.mocked(setSessionExpired).mock.calls.map((c) => c[0]);
+		expect(calls).toEqual([true, false]);
+	});
+
+	it('clears sessionExpired when refresh fails with 503', async () => {
+		vi.mocked(getAccessToken).mockReturnValue('old-token');
+		const mockFetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response('', { status: 401, statusText: 'Unauthorized' }))
+			.mockResolvedValueOnce(new Response('Service Unavailable', { status: 503, statusText: 'Service Unavailable' }));
+		vi.stubGlobal('fetch', mockFetch);
+
+		await expect(me()).rejects.toThrow('Server error during token refresh. Please try again later.');
+
+		const calls = vi.mocked(setSessionExpired).mock.calls.map((c) => c[0]);
+		expect(calls).toEqual([true, false]);
+	});
+
+	it('clears sessionExpired when refresh times out with DOMException', async () => {
+		vi.mocked(getAccessToken).mockReturnValue('old-token');
+		const mockFetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response('', { status: 401, statusText: 'Unauthorized' }))
+			.mockRejectedValueOnce(new DOMException('signal timed out', 'TimeoutError'));
+		vi.stubGlobal('fetch', mockFetch);
+
+		await expect(me()).rejects.toThrow('Token refresh timed out. Please try again.');
+
+		const calls = vi.mocked(setSessionExpired).mock.calls.map((c) => c[0]);
+		expect(calls).toEqual([true, false]);
+	});
+
+	it('does not call setSessionExpired when 401 is returned without an access token', async () => {
+		vi.mocked(getAccessToken).mockReturnValue(null);
+		const mockFetch = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, statusText: 'Unauthorized' })
+			);
+		vi.stubGlobal('fetch', mockFetch);
+
+		await expect(me()).rejects.toThrow('Unauthorized');
+
+		expect(mockFetch).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(setSessionExpired)).not.toHaveBeenCalled();
+	});
+
+	it('concurrent 401s sharing one refresh both clear sessionExpired after retry', async () => {
+		vi.mocked(getAccessToken).mockReturnValue('old-token');
+		const mockFetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response('', { status: 401, statusText: 'Unauthorized' }))
+			.mockResolvedValueOnce(new Response('', { status: 401, statusText: 'Unauthorized' }))
+			.mockResolvedValueOnce(new Response(JSON.stringify(sampleRefresh), { status: 200 }))
+			.mockResolvedValueOnce(new Response(JSON.stringify(sampleUser), { status: 200 }))
+			.mockResolvedValueOnce(new Response(JSON.stringify(sampleUser), { status: 200 }));
+		vi.stubGlobal('fetch', mockFetch);
+
+		const results = await Promise.all([me(), me()]);
+
+		const calls = vi.mocked(setSessionExpired).mock.calls.map((c) => c[0]);
+		const trueCalls = calls.filter((v) => v === true);
+		const falseCalls = calls.filter((v) => v === false);
+		expect(trueCalls.length).toBeGreaterThanOrEqual(2);
+		expect(falseCalls.length).toBeGreaterThanOrEqual(2);
+		expect(calls[calls.length - 1]).toBe(false);
+		expect(results[0]).toEqual(sampleUser);
+		expect(results[1]).toEqual(sampleUser);
+	});
 });
 
 // ── sealedBoxEncrypt ──────────────────────────────────────────────────────────

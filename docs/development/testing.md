@@ -559,7 +559,7 @@ as coverage grows.
 
 | Test file | What it covers |
 | --- | --- |
-| `src/lib/api.test.ts` | `authenticatedFetch`, token refresh, error extraction |
+| `src/lib/api.test.ts` | `authenticatedFetch`, token refresh, error extraction, session-expired banner lifecycle |
 | `src/lib/auth.test.ts` | `initialize`, `handleLogin`, `handleLogout`, `handleOidcCallback` |
 | `src/lib/utils.test.ts` | `isValidLogoUrl`, `formatDate`, `safeRedirect`, `copyToClipboard` |
 | `src/routes/services/services.test.ts` | Services page: load, error, empty state, filter buttons |

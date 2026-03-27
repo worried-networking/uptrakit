@@ -167,6 +167,10 @@ async function authenticatedFetch(path: string, options: RequestInit = {}): Prom
 	});
 
 	if (res.status === 401 && getAccessToken()) {
+		// Surface the session-expired banner immediately so the user sees
+		// feedback before the refresh round-trip completes.
+		setSessionExpired(true);
+
 		// Attempt token refresh, deduplicating concurrent attempts.
 		// The promise is cleared after it settles (not per-caller) so that
 		// concurrent 401 handlers share a single refresh cycle.
@@ -192,6 +196,10 @@ async function authenticatedFetch(path: string, options: RequestInit = {}): Prom
 				? AbortSignal.any([options.signal, retryTimeoutSignal])
 				: retryTimeoutSignal;
 
+			// The retry is returned (not awaited) so that retry errors propagate
+			// to request(), which maps them to the correct user-facing messages.
+			// The .finally() clears the banner after the retry settles regardless
+			// of whether it succeeds or fails.
 			return fetch(`${BASE}${path}`, {
 				credentials: 'same-origin',
 				...options,
@@ -201,6 +209,8 @@ async function authenticatedFetch(path: string, options: RequestInit = {}): Prom
 					...(options.headers as Record<string, string> | undefined)
 				},
 				signal: retryCombinedSignal
+			}).finally(() => {
+				setSessionExpired(false);
 			});
 		} catch (refreshErr) {
 			// Network/timeout errors — keep session, surface the error
@@ -208,20 +218,22 @@ async function authenticatedFetch(path: string, options: RequestInit = {}): Prom
 				refreshErr instanceof DOMException &&
 				(refreshErr.name === 'TimeoutError' || refreshErr.name === 'AbortError')
 			) {
+				setSessionExpired(false);
 				throw new Error('Token refresh timed out. Please try again.');
 			}
 			if (refreshErr instanceof TypeError) {
+				setSessionExpired(false);
 				throw new Error('Network error during token refresh. Check your connection.');
 			}
 			// Server errors (5xx) — keep session, don't force logout
 			if (refreshErr instanceof RefreshError && refreshErr.status >= 500) {
+				setSessionExpired(false);
 				throw new Error('Server error during token refresh. Please try again later.');
 			}
 			// Real auth failures (4xx) — session is truly invalid.
 			// Show a non-blocking banner instead of hard-redirecting so the
 			// user can copy any unsaved form state before logging in again.
 			setAccessToken(null);
-			setSessionExpired(true);
 			throw new Error('Session expired. Please log in again.');
 		}
 	}
