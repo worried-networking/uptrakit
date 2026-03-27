@@ -1,15 +1,12 @@
-use crate::AppState;
-use crate::auth::api_token::ApiTokenService;
 use crate::error_response::error_response;
-use crate::extract::Validated;
+use crate::extract::{ApiTokenSvc, Validated};
 use crate::middleware::require_auth::AuthenticatedUser;
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::Path,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use std::sync::Arc;
 use uuid::Uuid;
 
 use uptrakit_web_api_types::SecretString;
@@ -32,13 +29,14 @@ pub use uptrakit_web_api_types::api_tokens::{
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_api_token(
-    State(state): State<Arc<AppState>>,
+    api_token_svc: ApiTokenSvc,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     Validated(req): Validated<CreateApiTokenRequest>,
 ) -> Response {
-    let service = ApiTokenService::new(state.db().clone());
-
-    match service.create_token(auth_user.user_id, &req.name).await {
+    match api_token_svc
+        .create_token(auth_user.user_id, &req.name)
+        .await
+    {
         Ok(created) => {
             let response = CreateApiTokenResponse {
                 id: created.id,
@@ -68,12 +66,10 @@ pub async fn create_api_token(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_api_tokens(
-    State(state): State<Arc<AppState>>,
+    api_token_svc: ApiTokenSvc,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
-    let service = ApiTokenService::new(state.db().clone());
-
-    match service.list_tokens(auth_user.user_id).await {
+    match api_token_svc.list_tokens(auth_user.user_id).await {
         Ok(tokens) => {
             let response = ApiTokenListResponse {
                 tokens: tokens
@@ -114,13 +110,14 @@ pub async fn list_api_tokens(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn revoke_api_token(
-    State(state): State<Arc<AppState>>,
+    api_token_svc: ApiTokenSvc,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     Path(token_id): Path<Uuid>,
 ) -> Response {
-    let service = ApiTokenService::new(state.db().clone());
-
-    match service.revoke_token(token_id, auth_user.user_id).await {
+    match api_token_svc
+        .revoke_token(token_id, auth_user.user_id)
+        .await
+    {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(_) => error_response(StatusCode::NOT_FOUND, "API token not found"),
     }

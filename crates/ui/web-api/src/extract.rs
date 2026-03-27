@@ -199,6 +199,12 @@ where
 /// private; access the service via [`Deref`].
 pub struct SessionSvc(SessionService);
 
+impl SessionSvc {
+    pub fn new(svc: SessionService) -> Self {
+        Self(svc)
+    }
+}
+
 impl Deref for SessionSvc {
     type Target = SessionService;
     fn deref(&self) -> &Self::Target {
