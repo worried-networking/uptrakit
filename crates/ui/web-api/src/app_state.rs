@@ -676,6 +676,17 @@ impl AppState {
     pub fn db(&self) -> &DatabaseConnection {
         self.db.db()
     }
+
+    /// Returns a [`MutationContext`] borrowing the three common side-effect
+    /// handles from this `AppState`. Pass it to action functions together with
+    /// any domain-specific handles.
+    pub(crate) fn mutation_context(&self) -> crate::actions::MutationContext<'_> {
+        crate::actions::MutationContext {
+            notification_service: &self.notification_service,
+            notification_dispatcher: &self.notification_dispatcher,
+            event_broadcaster: &self.broadcast.event_broadcaster,
+        }
+    }
 }
 
 impl FromRef<Arc<AppState>> for DbState {

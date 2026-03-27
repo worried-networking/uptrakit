@@ -59,6 +59,17 @@ impl NotificationDispatcher {
     }
 }
 
+#[cfg(test)]
+impl NotificationDispatcher {
+    /// Create a dispatcher whose events are sent to the returned receiver
+    /// instead of spawning the background dispatch loop. Use in unit tests to
+    /// observe dispatched [`NotificationEvent`]s without a real database.
+    pub fn test_channel() -> (Self, mpsc::Receiver<NotificationEvent>) {
+        let (tx, rx) = mpsc::channel(64);
+        (Self { tx }, rx)
+    }
+}
+
 /// Build a generic settings bag by loading SMTP and Telegram settings
 /// directly from the database.
 ///

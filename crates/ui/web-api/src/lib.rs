@@ -1,3 +1,4 @@
+pub(crate) mod actions;
 pub mod api_error;
 pub mod app_state;
 pub mod embedded_support;
