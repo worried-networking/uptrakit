@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::actions::settings as settings_actions;
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::middleware::permission::CanManageGlobalSettings;
@@ -10,8 +11,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
-use uptrakit_internal_wire::{Capability, ControllerMessage};
-use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::settings_reset::{ResetDataRequest, ResetDataResponse};
 
 /// Reset all tenant-scoped data (hosts, software items, configs, history, etc.)
@@ -36,39 +35,12 @@ pub async fn reset_data(
     tenant_db: TenantDb,
     Validated(_req): Validated<ResetDataRequest>,
 ) -> Response {
-    let tenant_id = tenant_db.tenant_id;
-
-    let counts =
-        match uptrakit_web_api_queries::queries::reset_data::reset_tenant_data(&tenant_db).await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("failed to reset tenant data: {:?}", e);
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        };
-
-    // Notify connected services with ResetData capability to clear local stores
-    state
-        .service_connections
-        .broadcast_by_capability(&Capability::ResetData, ControllerMessage::ResetData)
-        .await;
-
-    // Broadcast SSE event to admin subscribers
-    state
-        .broadcast
-        .event_broadcaster
-        .send(tenant_id, AdminEvent::DataReset)
-        .await;
-
-    tracing::info!(
-        hosts = counts.hosts,
-        software_items = counts.software_items,
-        plugin_configs = counts.plugin_configs,
-        host_tags = counts.host_tags,
-        update_history = counts.update_history,
-        update_batches = counts.update_batches,
-        "tenant data reset completed"
-    );
-
-    (StatusCode::OK, Json(ResetDataResponse { deleted: counts })).into_response()
+    let ctx = state.mutation_context();
+    match settings_actions::reset_data(&tenant_db, &ctx, &state.service_connections).await {
+        Ok(counts) => (StatusCode::OK, Json(ResetDataResponse { deleted: counts })).into_response(),
+        Err(e) => {
+            tracing::error!("failed to reset tenant data: {:?}", e);
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        }
+    }
 }
