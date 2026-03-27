@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::actions::services as svc_actions;
 use crate::api_error::ApiError;
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
@@ -15,11 +16,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
-use uptrakit_internal_wire::{
-    ApprovedPayload, ControllerMessage, RejectedPayload, RequestCrlRenewalPayload,
-    SetUpdateFreezePayload,
-};
-use uptrakit_web_api_types::events::AdminEvent;
+use uptrakit_internal_wire::{ControllerMessage, SetUpdateFreezePayload};
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
@@ -174,49 +171,8 @@ pub async fn approve_service(
     CanApproveServices(_user): CanApproveServices,
     Path(service_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let resp = svc_queries::approve_service(&tenant_db, service_id).await?;
-
-    // Push approval via WebSocket (local + cross-controller outbox).
-    let _ = state
-        .notification_service
-        .send(
-            &service_id,
-            ControllerMessage::Approved(ApprovedPayload { service_id }),
-        )
-        .await;
-
-    // Dispatch notification event for service enrollment.
-    {
-        let service_label = resp.service_label.clone();
-        state
-            .notification_dispatcher
-            .dispatch(crate::notifications::events::NotificationEvent {
-                tenant_id: tenant_db.tenant_id,
-                host_id: None,
-                host_name: None,
-                software_item_id: None,
-                software_item_name: None,
-                plugin_type: None,
-                details:
-                    crate::notifications::events::NotificationEventDetails::NewServiceEnrolled {
-                        service_id,
-                        service_label,
-                    },
-            });
-    }
-
-    state
-        .broadcast
-        .event_broadcaster
-        .send(
-            tenant_db.tenant_id,
-            AdminEvent::ServiceStatusChanged {
-                id: service_id,
-                status: "approved".to_string(),
-            },
-        )
-        .await;
-
+    let ctx = state.mutation_context();
+    let resp = svc_actions::approve(&tenant_db, &ctx, service_id).await?;
     Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
@@ -244,35 +200,9 @@ pub async fn reject_service(
     CanRejectServices(_user): CanRejectServices,
     Path(service_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let resp = svc_queries::reject_service(&tenant_db, service_id).await?;
-
-    // Push rejection via WebSocket (local + cross-controller outbox).
-    let _ = state
-        .notification_service
-        .send(
-            &service_id,
-            ControllerMessage::Rejected(RejectedPayload { service_id }),
-        )
-        .await;
-
-    // Terminate active WebSocket connection.
-    state
-        .service_connections
-        .force_disconnect(&service_id)
-        .await;
-
-    state
-        .broadcast
-        .event_broadcaster
-        .send(
-            tenant_db.tenant_id,
-            AdminEvent::ServiceStatusChanged {
-                id: service_id,
-                status: "rejected".to_string(),
-            },
-        )
-        .await;
-
+    let ctx = state.mutation_context();
+    let resp =
+        svc_actions::reject(&tenant_db, &ctx, service_id, &state.service_connections).await?;
     Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
@@ -300,33 +230,20 @@ pub async fn deactivate_service(
     CanRemoveServices(_user): CanRemoveServices,
     Path(service_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
-    match svc_queries::deactivate_service(&tenant_db, service_id, state.default_tenant_id).await? {
-        true => {
-            state.cert.revocation_notify.notify_one();
-            state
-                .notification_service
-                .publish_controller_event(ControllerMessage::RequestCrlRenewal(
-                    RequestCrlRenewalPayload::default(),
-                ))
-                .await;
-            state
-                .service_connections
-                .force_disconnect(&service_id)
-                .await;
-            state
-                .broadcast
-                .event_broadcaster
-                .send(
-                    tenant_db.tenant_id,
-                    AdminEvent::ServiceStatusChanged {
-                        id: service_id,
-                        status: "deactivated".to_string(),
-                    },
-                )
-                .await;
-            Ok(StatusCode::NO_CONTENT.into_response())
-        }
-        false => Ok(error_response(StatusCode::NOT_FOUND, "Service not found")),
+    let ctx = state.mutation_context();
+    let found = svc_actions::deactivate(
+        &tenant_db,
+        &ctx,
+        service_id,
+        state.default_tenant_id,
+        &state.cert,
+        &state.service_connections,
+    )
+    .await?;
+    if found {
+        Ok(StatusCode::NO_CONTENT.into_response())
+    } else {
+        Ok(error_response(StatusCode::NOT_FOUND, "Service not found"))
     }
 }
 
@@ -452,27 +369,20 @@ pub async fn merge_service(
     }
 
     let target_connected = state.service_connections.is_connected(&target_uuid).await;
-
-    let resp = svc_queries::merge_service(
+    let ctx = state.mutation_context();
+    let resp = svc_actions::merge(
         &tenant_db,
-        target_uuid,
-        source_uuid,
-        target_connected,
-        state.default_tenant_id,
+        &ctx,
+        svc_actions::MergeParams {
+            target_id: target_uuid,
+            source_id: source_uuid,
+            target_connected,
+            default_tenant_id: state.default_tenant_id,
+        },
+        &state.cert,
+        &state.service_connections,
     )
     .await?;
-
-    state.cert.revocation_notify.notify_one();
-    state
-        .notification_service
-        .publish_controller_event(ControllerMessage::RequestCrlRenewal(
-            RequestCrlRenewalPayload::default(),
-        ))
-        .await;
-    state
-        .service_connections
-        .force_disconnect(&source_uuid)
-        .await;
 
     tracing::info!(
         target_id = %target_uuid,
@@ -522,26 +432,37 @@ pub async fn batch_services(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
+    let ctx = state.mutation_context();
     let (succeeded_ids, failed) = match body.action.as_str() {
-        "approve" => match svc_queries::batch_approve_services(&tenant_db, &body.ids).await {
+        "approve" => match svc_actions::batch_approve(&tenant_db, &ctx, &body.ids).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("batch approve failed: {e}");
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         },
-        "reject" => match svc_queries::batch_reject_services(&tenant_db, &body.ids).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::error!("batch reject failed: {e}");
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        "reject" => {
+            match svc_actions::batch_reject(&tenant_db, &ctx, &body.ids, &state.service_connections)
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("batch reject failed: {e}");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
             }
-        },
+        }
         "deactivate" => {
-            match svc_queries::batch_deactivate_services(
+            match svc_actions::batch_deactivate(
                 &tenant_db,
+                &ctx,
                 &body.ids,
                 state.default_tenant_id,
+                &state.cert,
+                &state.service_connections,
             )
             .await
             {
@@ -562,75 +483,6 @@ pub async fn batch_services(
             );
         }
     };
-
-    // Dispatch side effects per succeeded item.
-    for id in &succeeded_ids {
-        match body.action.as_str() {
-            "approve" => {
-                let _ = state
-                    .notification_service
-                    .send(
-                        id,
-                        ControllerMessage::Approved(ApprovedPayload { service_id: *id }),
-                    )
-                    .await;
-                state
-                    .broadcast
-                    .event_broadcaster
-                    .send(
-                        tenant_db.tenant_id,
-                        AdminEvent::ServiceStatusChanged {
-                            id: *id,
-                            status: "approved".to_string(),
-                        },
-                    )
-                    .await;
-            }
-            "reject" => {
-                let _ = state
-                    .notification_service
-                    .send(
-                        id,
-                        ControllerMessage::Rejected(RejectedPayload { service_id: *id }),
-                    )
-                    .await;
-                state.service_connections.force_disconnect(id).await;
-                state
-                    .broadcast
-                    .event_broadcaster
-                    .send(
-                        tenant_db.tenant_id,
-                        AdminEvent::ServiceStatusChanged {
-                            id: *id,
-                            status: "rejected".to_string(),
-                        },
-                    )
-                    .await;
-            }
-            "deactivate" => {
-                state.cert.revocation_notify.notify_one();
-                state
-                    .notification_service
-                    .publish_controller_event(ControllerMessage::RequestCrlRenewal(
-                        RequestCrlRenewalPayload::default(),
-                    ))
-                    .await;
-                state.service_connections.force_disconnect(id).await;
-                state
-                    .broadcast
-                    .event_broadcaster
-                    .send(
-                        tenant_db.tenant_id,
-                        AdminEvent::ServiceStatusChanged {
-                            id: *id,
-                            status: "deactivated".to_string(),
-                        },
-                    )
-                    .await;
-            }
-            _ => {}
-        }
-    }
 
     let response = BatchActionResponse {
         succeeded: succeeded_ids
