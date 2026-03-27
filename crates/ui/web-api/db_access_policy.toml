@@ -97,19 +97,19 @@ healthz_returns_ok = "ignore"
 [routes."host_tags.rs"]
 list_host_tags = "tenant-scoped"
 get_host_tag = "tenant-scoped"
-create_host_tag = "tenant-scoped"
-update_host_tag = "tenant-scoped"
-delete_host_tag = "tenant-scoped"
-batch_host_tags = "tenant-scoped"
+create_host_tag = "full-state"
+update_host_tag = "full-state"
+delete_host_tag = "full-state"
+batch_host_tags = "full-state"
 set_host_tags = "full-state"
 
 [routes."hosts.rs"]
 list_hosts = "tenant-scoped"
 get_host = "tenant-scoped"
-update_host = "tenant-scoped"
-deactivate_host = "tenant-scoped"
+update_host = "full-state"
+deactivate_host = "full-state"
 discover_host = "full-state"
-batch_hosts = "tenant-scoped"
+batch_hosts = "full-state"
 
 [routes."interactive_ws.rs"]
 interactive_ws = "full-state"
