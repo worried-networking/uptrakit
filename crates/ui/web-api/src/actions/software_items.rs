@@ -137,3 +137,89 @@ pub(crate) async fn batch_delete(
 
     Ok((succeeded_ids, failed))
 }
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    use tokio::sync::broadcast::error::TryRecvError;
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::actions::MutationContext;
+    use crate::event_broadcaster::EventBroadcaster;
+    use crate::notification_service::NotificationService;
+    use crate::notifications::dispatcher::NotificationDispatcher;
+    use crate::service_connections::ServiceConnectionRegistry;
+    use crate::tenant_db::TenantDb;
+    use crate::test_harness::{insert_default_tenant, setup_migrated_db};
+
+    fn build_ctx_parts() -> (
+        NotificationService,
+        NotificationDispatcher,
+        EventBroadcaster,
+        tokio::sync::mpsc::Receiver<crate::notifications::events::NotificationEvent>,
+    ) {
+        let (dispatcher, dispatcher_rx) = NotificationDispatcher::test_channel();
+        let broadcaster = EventBroadcaster::new();
+        let notification_svc =
+            NotificationService::new(ServiceConnectionRegistry::default(), Uuid::nil());
+        (notification_svc, dispatcher, broadcaster, dispatcher_rx)
+    }
+
+    // ── batch_feature empty ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn batch_feature_empty_succeeds() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+
+        let (notification_svc, dispatcher, broadcaster, _dispatcher_rx) = build_ctx_parts();
+        let mut rx = broadcaster.subscribe(tenant_id).await;
+        let ctx = MutationContext {
+            notification_service: &notification_svc,
+            notification_dispatcher: &dispatcher,
+            event_broadcaster: &broadcaster,
+        };
+        let tenant_db = TenantDb::new_for_test(db, tenant_id);
+
+        let (succeeded, failed) = batch_feature(&tenant_db, &ctx, &[])
+            .await
+            .expect("batch_feature");
+
+        assert!(succeeded.is_empty(), "no items featured");
+        assert!(failed.is_empty(), "no failures");
+        assert_eq!(
+            rx.try_recv().unwrap_err(),
+            TryRecvError::Empty,
+            "no broadcast event expected for empty input"
+        );
+    }
+
+    // ── batch_delete empty ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn batch_delete_empty_no_broadcast() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+
+        let (notification_svc, dispatcher, broadcaster, _dispatcher_rx) = build_ctx_parts();
+        let mut rx = broadcaster.subscribe(tenant_id).await;
+        let ctx = MutationContext {
+            notification_service: &notification_svc,
+            notification_dispatcher: &dispatcher,
+            event_broadcaster: &broadcaster,
+        };
+        let tenant_db = TenantDb::new_for_test(db, tenant_id);
+
+        let (succeeded, failed) = batch_delete(&tenant_db, &ctx, &[])
+            .await
+            .expect("batch_delete");
+
+        assert!(succeeded.is_empty(), "no items deleted");
+        assert!(failed.is_empty(), "no failures");
+        assert_eq!(
+            rx.try_recv().unwrap_err(),
+            TryRecvError::Empty,
+            "no broadcast event expected for empty input"
+        );
+    }
+}
