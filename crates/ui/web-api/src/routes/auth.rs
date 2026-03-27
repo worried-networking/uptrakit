@@ -3,8 +3,9 @@ use crate::api_error::ApiError;
 use crate::auth::refresh_cookie::{
     clear_refresh_token_cookie, extract_refresh_token_from_cookie, set_refresh_token_cookie,
 };
-use crate::auth::{AuthError, password, session::SessionService, token::generate_uuid};
+use crate::auth::{AuthError, password, token::generate_uuid};
 use crate::error_response::error_response;
+use crate::extract::SessionSvc;
 use crate::middleware::require_auth::{AuthenticatedUser, get_user_permissions};
 use axum::{
     Json,
@@ -47,6 +48,7 @@ pub use uptrakit_web_api_types::auth::{
 #[tracing::instrument(skip_all)]
 pub async fn register(
     State(state): State<Arc<AppState>>,
+    session_svc: SessionSvc,
     Validated(req): Validated<RegisterRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     // Check if password auth is enabled
@@ -165,8 +167,7 @@ pub async fn register(
     };
 
     // Create refresh token
-    let session_service = SessionService::new(state.db().clone());
-    let refresh_token = match session_service
+    let refresh_token = match session_svc
         .create_refresh_token(user_id, AuthMethod::Password, None, None)
         .await
     {
@@ -234,6 +235,7 @@ pub async fn register(
 #[tracing::instrument(skip_all)]
 pub async fn login(
     State(state): State<Arc<AppState>>,
+    session_svc: SessionSvc,
     Validated(req): Validated<LoginRequest>,
 ) -> Response {
     // Check if password auth is enabled
@@ -297,8 +299,7 @@ pub async fn login(
     };
 
     // Create refresh token
-    let session_service = SessionService::new(state.db().clone());
-    let refresh_token = match session_service
+    let refresh_token = match session_svc
         .create_refresh_token(user.id, AuthMethod::Password, None, None)
         .await
     {
@@ -363,6 +364,7 @@ pub async fn login(
 #[tracing::instrument(skip_all)]
 pub async fn logout(
     State(state): State<Arc<AppState>>,
+    session_svc: SessionSvc,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     req: axum::extract::Request,
 ) -> Response {
@@ -385,10 +387,8 @@ pub async fn logout(
     let refresh_token = cookie_token.or(body_token);
 
     if let Some(token) = &refresh_token {
-        let session_service = SessionService::new(state.db().clone());
-
         // Verify the token to get the user_id before revoking
-        if let Ok(verified) = session_service.verify_refresh_token(token).await {
+        if let Ok(verified) = session_svc.verify_refresh_token(token).await {
             if verified.user_id != auth_user.user_id {
                 return error_response(StatusCode::FORBIDDEN, "Token does not belong to this user");
             }
@@ -425,7 +425,7 @@ pub async fn logout(
                 .await;
         }
 
-        if let Err(e) = session_service.revoke_refresh_token(token).await {
+        if let Err(e) = session_svc.revoke_refresh_token(token).await {
             tracing::error!("Failed to revoke refresh token: {:?}", e);
         }
     }
@@ -439,6 +439,7 @@ mod tests {
     use super::*;
     use crate::ServiceCredentialSources;
     use crate::auth::permissions::Permission;
+    use crate::auth::session::SessionService;
     use axum::body::Body;
     use axum::http::Request;
     use sea_orm::{ConnectOptions, Database, DatabaseConnection};
@@ -651,7 +652,13 @@ mod tests {
             ))
             .unwrap();
 
-        let response = logout(State(state), axum::Extension(auth_user), req).await;
+        let response = logout(
+            State(state),
+            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+            axum::Extension(auth_user),
+            req,
+        )
+        .await;
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
         let verified = session_service.verify_refresh_token(&token).await;
@@ -697,7 +704,13 @@ mod tests {
             ))
             .unwrap();
 
-        let response = logout(State(state), axum::Extension(auth_user), req).await;
+        let response = logout(
+            State(state),
+            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+            axum::Extension(auth_user),
+            req,
+        )
+        .await;
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
         let verified = session_service.verify_refresh_token(&token).await;
@@ -767,7 +780,11 @@ pub async fn me(
     tag = "Authentication"
 )]
 #[tracing::instrument(skip_all)]
-pub async fn refresh(State(state): State<Arc<AppState>>, req: axum::extract::Request) -> Response {
+pub async fn refresh(
+    State(state): State<Arc<AppState>>,
+    session_svc: SessionSvc,
+    req: axum::extract::Request,
+) -> Response {
     // Extract refresh token: prefer cookie, fall back to JSON body
     let cookie_token = extract_refresh_token_from_cookie(&req);
     let body_token = {
@@ -792,10 +809,7 @@ pub async fn refresh(State(state): State<Arc<AppState>>, req: axum::extract::Req
     };
 
     // Rotate refresh token: revoke old, create new
-    let session_service = SessionService::new(state.db().clone());
-    let (verified, new_refresh_token) = match session_service
-        .rotate_refresh_token(&refresh_token)
-        .await
+    let (verified, new_refresh_token) = match session_svc.rotate_refresh_token(&refresh_token).await
     {
         Ok(v) => v,
         Err(_) => {
@@ -813,9 +827,7 @@ pub async fn refresh(State(state): State<Arc<AppState>>, req: axum::extract::Req
 
     if !user.is_active {
         // Revoke the newly issued refresh token since user is deactivated
-        let _ = session_service
-            .revoke_refresh_token(&new_refresh_token)
-            .await;
+        let _ = session_svc.revoke_refresh_token(&new_refresh_token).await;
         return error_response(StatusCode::FORBIDDEN, "User is deactivated");
     }
 

@@ -18,6 +18,7 @@ use crate::auth::device_flow::DeviceFlowStatus;
 use crate::auth::token::hash_token;
 use crate::device_flow_broadcaster::DeviceFlowEvent;
 use crate::error_response::error_response;
+use crate::extract::ApiTokenSvc;
 use crate::middleware::permission::CanViewServices;
 
 pub use uptrakit_web_api_types::device_auth::{
@@ -105,6 +106,7 @@ pub async fn device_auth_start(
 #[tracing::instrument(skip_all)]
 pub async fn device_auth_poll(
     State(state): State<Arc<AppState>>,
+    api_token_svc: ApiTokenSvc,
     Json(req): Json<DeviceAuthPollRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let status = state
@@ -143,8 +145,7 @@ pub async fn device_auth_poll(
             let token_name = client_name.unwrap_or_else(|| "cli-device-auth".into());
 
             // Create an API token for the user
-            let service = ApiTokenService::new(state.db().clone());
-            match service.create_token(user_id, &token_name).await {
+            match api_token_svc.create_token(user_id, &token_name).await {
                 Ok(created) => Ok((
                     StatusCode::OK,
                     Json(DeviceAuthPollResponse {
@@ -238,6 +239,7 @@ pub struct DeviceAuthStreamQuery {
 #[tracing::instrument(skip_all)]
 pub async fn device_auth_stream(
     State(state): State<Arc<AppState>>,
+    api_token_svc: ApiTokenSvc,
     Query(query): Query<DeviceAuthStreamQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let device_code = query.device_code;
@@ -262,7 +264,7 @@ pub async fn device_auth_stream(
         match current_status {
             DeviceFlowStatus::Authorized { .. } => {
                 // Already authorized — consume and yield token immediately.
-                if let Some(event) = consume_and_yield(&state, &device_code).await {
+                if let Some(event) = consume_and_yield(&state, &api_token_svc, &device_code).await {
                     yield Ok::<_, Infallible>(event);
                 }
                 state.broadcast.device_flow_broadcaster.remove_channel(&device_code_hash).await;
@@ -293,7 +295,7 @@ pub async fn device_auth_stream(
                     ev = rx.recv() => {
                         match ev {
                             Ok(DeviceFlowEvent::StatusChanged) => {
-                                if let Some(event) = consume_and_yield(&state, &device_code).await {
+                                if let Some(event) = consume_and_yield(&state, &api_token_svc, &device_code).await {
                                     yield Ok::<_, Infallible>(event);
                                 }
                                 state.broadcast.device_flow_broadcaster.remove_channel(&device_code_hash).await;
@@ -342,7 +344,11 @@ pub async fn device_auth_stream(
 }
 
 /// Consume the device flow and return an SSE `authorized` event with the token.
-async fn consume_and_yield(state: &AppState, device_code: &str) -> Option<Event> {
+async fn consume_and_yield(
+    state: &AppState,
+    api_svc: &ApiTokenService,
+    device_code: &str,
+) -> Option<Event> {
     let (user_id, client_name) = match state.auth.device_flow_store.consume(device_code).await {
         Ok(result) => result,
         Err(e) => {
@@ -352,8 +358,7 @@ async fn consume_and_yield(state: &AppState, device_code: &str) -> Option<Event>
     };
 
     let token_name = client_name.unwrap_or_else(|| "cli-device-auth".into());
-    let service = ApiTokenService::new(state.db().clone());
-    match service.create_token(user_id, &token_name).await {
+    match api_svc.create_token(user_id, &token_name).await {
         Ok(created) => {
             let payload = DeviceAuthAuthorizedSse {
                 token: SecretString::new(created.plaintext_token),

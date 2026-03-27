@@ -7,6 +7,7 @@ use crate::auth::refresh_cookie::set_refresh_token_cookie;
 use crate::auth::session::SessionService;
 use crate::auth::token::{generate_secure_token, generate_uuid};
 use crate::error_response::error_response;
+use crate::extract::SessionSvc;
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
@@ -863,6 +864,7 @@ fn link_redirect_with_no_referrer(
 #[tracing::instrument(skip_all)]
 pub async fn oidc_exchange(
     State(state): State<Arc<AppState>>,
+    session_svc: SessionSvc,
     Json(req): Json<OidcExchangeRequest>,
 ) -> Response {
     let pending = match state.oidc.oidc_token_exchange_store.take(&req.code).await {
@@ -876,7 +878,7 @@ pub async fn oidc_exchange(
         }
     };
 
-    mint_oidc_auth_response(&state, pending.user_id, pending.provider_id).await
+    mint_oidc_auth_response(&state, &session_svc, pending.user_id, pending.provider_id).await
 }
 
 /// Complete OIDC registration with a registration token (public).
@@ -897,6 +899,7 @@ pub async fn oidc_exchange(
 #[tracing::instrument(skip_all)]
 pub async fn oidc_complete_registration(
     State(state): State<Arc<AppState>>,
+    session_svc: SessionSvc,
     Json(req): Json<OidcCompleteRegistrationRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     // 1. Validate the registration token first (pure check, no side effects).
@@ -1057,7 +1060,7 @@ pub async fn oidc_complete_registration(
     }
 
     // 9. Create session + JWT
-    Ok(mint_oidc_auth_response(&state, user_id, pending.provider_id).await)
+    Ok(mint_oidc_auth_response(&state, &session_svc, user_id, pending.provider_id).await)
 }
 
 /// Link a pending OIDC account (public)
@@ -1075,6 +1078,7 @@ pub async fn oidc_complete_registration(
 #[tracing::instrument(skip_all)]
 pub async fn oidc_link(
     State(state): State<Arc<AppState>>,
+    session_svc: SessionSvc,
     req: axum::extract::Request,
 ) -> Response {
     // Parse the body manually since we also need headers
@@ -1178,7 +1182,7 @@ pub async fn oidc_link(
         .await;
     }
 
-    mint_oidc_auth_response(&state, pending.user_id, pending.provider_id).await
+    mint_oidc_auth_response(&state, &session_svc, pending.user_id, pending.provider_id).await
 }
 
 // Helper functions
@@ -1302,9 +1306,13 @@ async fn exchange_code_for_claims(
 /// This is the shared session-creation step used by [`oidc_exchange`],
 /// [`oidc_complete_registration`], and [`oidc_link`] after any provider-
 /// specific work (user creation, linking, role sync) has been committed.
-async fn mint_oidc_auth_response(state: &AppState, user_id: Uuid, provider_id: Uuid) -> Response {
-    let session_service = SessionService::new(state.db().clone());
-    let refresh_token = match session_service
+async fn mint_oidc_auth_response(
+    state: &AppState,
+    session_svc: &SessionService,
+    user_id: Uuid,
+    provider_id: Uuid,
+) -> Response {
+    let refresh_token = match session_svc
         .create_refresh_token(user_id, AuthMethod::Oidc { provider_id }, None, None)
         .await
     {
