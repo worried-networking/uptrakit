@@ -49,6 +49,8 @@ cargo clippy --all-targets --no-default-features --features db-sqlite # Lint wit
 cargo clippy --all-targets --all-features                            # Lint with Clippy
 cargo test --all-features                                            # Tests
 cargo deny check                                                     # Validate new dependencies
+bash ci/verify_handler_state_contract.sh                             # No handler mixes State<Arc<AppState>> with sub-state
+python3 ci/verify_db_access_policy.py                                # db_access_policy.toml consistent with routes/
 ```
 
 Workspace lints (`[workspace.lints]` in root `Cargo.toml`) enforce `warnings = "deny"` and

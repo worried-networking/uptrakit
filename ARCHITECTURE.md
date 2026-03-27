@@ -476,6 +476,12 @@ The HTTP API is composed of three independent crates under `crates/ui/`:
   (`crate::auth::*`, `crate::queries::*`, `crate::SettingKey`, `crate::settings_store::*`)
   for backward compatibility.
 
+  `AppState` is decomposed into five focused sub-states (`DbState`, `AuthState`,
+  `BroadcastState`, `CertState`, `OidcState`) via hand-written `FromRef<Arc<AppState>>`
+  impls. Route handlers declare only the sub-states they use rather than the full
+  `Arc<AppState>`. See [AppState Architecture](docs/development/app-state.md) for the
+  classification rules and exception inventory.
+
 The auth and queries crates have no dependency on each other, enabling parallel compilation.
 Only `uptrakit-controller` depends on `uptrakit-web-api`.
 

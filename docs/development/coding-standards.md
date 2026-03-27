@@ -55,9 +55,11 @@ Use a `match` and return `StatusCode::INTERNAL_SERVER_ERROR` on `Err`, logging t
 `error` level:
 
 ```rust
+// Handlers use focused sub-states (State<DbState>) rather than the full State<Arc<AppState>>.
+// Access the connection via db.db() when using State<DbState>.
 let has_user = match User::find()
     .filter(user::Column::Email.eq(&email))
-    .count(state.db())
+    .count(db.db())
     .await
 {
     Ok(n) => n > 0,
@@ -67,6 +69,9 @@ let has_user = match User::find()
     }
 };
 ```
+
+See [AppState Architecture](app-state.md) for the full sub-state pattern, service extractors,
+and `db_access_policy.toml` classification rules.
 
 ### Required pattern — query functions
 
