@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -10,7 +9,7 @@ use axum::response::Response;
 use http::StatusCode;
 use parking_lot::Mutex;
 
-use crate::AppState;
+use crate::app_state::AuthState;
 use crate::auth::rate_limit::RateLimitOutcome;
 use crate::error_response::error_response;
 use crate::extract::ClientIp;
@@ -172,11 +171,7 @@ fn check_local_fallback(key: &str, max_requests: i32, window_secs: i64) -> RateL
 
 /// Middleware that enforces per-IP rate limits on public authentication
 /// endpoints. Non-rate-limited paths pass through immediately.
-pub async fn rate_limit_auth(
-    State(state): State<Arc<AppState>>,
-    req: Request,
-    next: Next,
-) -> Response {
+pub async fn rate_limit_auth(State(auth): State<AuthState>, req: Request, next: Next) -> Response {
     let path = req.uri().path();
 
     let limit = match RATE_LIMITS.get(path) {
@@ -191,8 +186,7 @@ pub async fn rate_limit_auth(
 
     let key = format!("{path}:{ip}");
 
-    match state
-        .auth
+    match auth
         .rate_limit_store
         .check_rate_limit(&key, limit.max_requests, limit.window_secs)
         .await
