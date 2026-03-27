@@ -15,5 +15,7 @@ pub mod session;
 pub mod token;
 pub mod token_denylist;
 
+pub use api_token::ApiTokenOps;
 pub use auth_method::AuthMethod;
 pub use error::{AuthError, Result};
+pub use session::SessionOps;

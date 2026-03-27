@@ -1,5 +1,6 @@
 use super::token::{generate_secure_token, generate_uuid, hash_token};
 use super::{AuthError, Result};
+use async_trait::async_trait;
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
@@ -129,6 +130,38 @@ impl ApiTokenService {
     }
 }
 
+/// Service trait for API token operations, enabling controller embedding without
+/// a dependency on `uptrakit-web-api` or Axum.
+///
+/// Implemented by [`ApiTokenService`]. The `#[async_trait]` desugaring ensures
+/// `Arc<dyn ApiTokenOps>` is dyn-safe.
+#[async_trait]
+pub trait ApiTokenOps: Send + Sync {
+    async fn create_token(&self, user_id: uuid::Uuid, name: &str) -> Result<CreatedApiToken>;
+    async fn list_tokens(&self, user_id: uuid::Uuid) -> Result<Vec<ApiTokenInfo>>;
+    async fn revoke_token(&self, token_id: uuid::Uuid, user_id: uuid::Uuid) -> Result<()>;
+    async fn verify_token(&self, plaintext: &str) -> Result<(uuid::Uuid, uuid::Uuid)>;
+}
+
+#[async_trait]
+impl ApiTokenOps for ApiTokenService {
+    async fn create_token(&self, user_id: uuid::Uuid, name: &str) -> Result<CreatedApiToken> {
+        ApiTokenService::create_token(self, user_id, name).await
+    }
+
+    async fn list_tokens(&self, user_id: uuid::Uuid) -> Result<Vec<ApiTokenInfo>> {
+        ApiTokenService::list_tokens(self, user_id).await
+    }
+
+    async fn revoke_token(&self, token_id: uuid::Uuid, user_id: uuid::Uuid) -> Result<()> {
+        ApiTokenService::revoke_token(self, token_id, user_id).await
+    }
+
+    async fn verify_token(&self, plaintext: &str) -> Result<(uuid::Uuid, uuid::Uuid)> {
+        ApiTokenService::verify_token(self, plaintext).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +267,45 @@ mod tests {
         let other_user_id = generate_uuid();
         let result = service.revoke_token(created.id, other_user_id).await;
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod controller_di_tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::Arc;
+
+    struct MockApiTokenOps;
+
+    #[async_trait]
+    impl ApiTokenOps for MockApiTokenOps {
+        async fn create_token(&self, _user_id: uuid::Uuid, _name: &str) -> Result<CreatedApiToken> {
+            unimplemented!("mock")
+        }
+
+        async fn list_tokens(&self, _user_id: uuid::Uuid) -> Result<Vec<ApiTokenInfo>> {
+            Ok(vec![])
+        }
+
+        async fn revoke_token(&self, _token_id: uuid::Uuid, _user_id: uuid::Uuid) -> Result<()> {
+            Ok(())
+        }
+
+        async fn verify_token(&self, _plaintext: &str) -> Result<(uuid::Uuid, uuid::Uuid)> {
+            Ok((uuid::Uuid::new_v4(), uuid::Uuid::new_v4()))
+        }
+    }
+
+    struct TestController {
+        token_ops: Arc<dyn ApiTokenOps>,
+    }
+
+    #[tokio::test]
+    async fn mock_api_token_ops_injection() {
+        let mock: Arc<dyn ApiTokenOps> = Arc::new(MockApiTokenOps);
+        let controller = TestController { token_ops: mock };
+        let result = controller.token_ops.verify_token("test").await;
+        assert!(result.is_ok());
     }
 }

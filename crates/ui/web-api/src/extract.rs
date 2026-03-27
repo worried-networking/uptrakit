@@ -1,10 +1,17 @@
+use std::convert::Infallible;
 use std::net::IpAddr;
+use std::ops::Deref;
 
-use axum::extract::FromRequest;
+use axum::extract::{FromRef, FromRequest, FromRequestParts};
 use axum::http::StatusCode;
+use axum::http::request::Parts;
 use axum::response::Response;
 use serde::de::DeserializeOwned;
+use uptrakit_web_api_auth::auth::api_token::ApiTokenService;
+use uptrakit_web_api_auth::auth::session::SessionService;
 use uptrakit_web_api_types::validation::Validate;
+
+use crate::app_state::DbState;
 
 use crate::error_response::error_response;
 
@@ -185,6 +192,58 @@ where
     }
 }
 
+/// Axum extractor that constructs a [`SessionService`] from the request state.
+///
+/// Requires the router state to implement `FromRef<DbState>` (satisfied by
+/// `Arc<AppState>` via the [`FromRef`] impl in `app_state`). Inner field is
+/// private; access the service via [`Deref`].
+pub struct SessionSvc(SessionService);
+
+impl Deref for SessionSvc {
+    type Target = SessionService;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<S> FromRequestParts<S> for SessionSvc
+where
+    DbState: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = Infallible;
+
+    async fn from_request_parts(_parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let db_state = DbState::from_ref(state);
+        Ok(SessionSvc(SessionService::new(db_state.db().clone())))
+    }
+}
+
+/// Axum extractor that constructs an [`ApiTokenService`] from the request state.
+///
+/// Same mechanics as [`SessionSvc`] — requires `FromRef<DbState>` on the state.
+pub struct ApiTokenSvc(ApiTokenService);
+
+impl Deref for ApiTokenSvc {
+    type Target = ApiTokenService;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<S> FromRequestParts<S> for ApiTokenSvc
+where
+    DbState: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = Infallible;
+
+    async fn from_request_parts(_parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let db_state = DbState::from_ref(state);
+        Ok(ApiTokenSvc(ApiTokenService::new(db_state.db().clone())))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,5 +367,36 @@ mod tests {
         let cert = params.self_signed(&key_pair).expect("self-sign");
 
         assert!(service_identity_from_der(cert.der()).is_none());
+    }
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod service_extractor_tests {
+    use super::*;
+    use axum::extract::FromRequestParts;
+    use axum::http::Request;
+
+    #[tokio::test]
+    async fn session_svc_extracts_from_app_state() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let mut parts = Request::builder().body(()).unwrap().into_parts().0;
+        let svc = SessionSvc::from_request_parts(&mut parts, &state)
+            .await
+            .unwrap();
+        let _: &SessionService = &svc;
+    }
+
+    #[tokio::test]
+    async fn api_token_svc_extracts_from_app_state() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let mut parts = Request::builder().body(()).unwrap().into_parts().0;
+        let svc = ApiTokenSvc::from_request_parts(&mut parts, &state)
+            .await
+            .unwrap();
+        let _: &ApiTokenService = &svc;
     }
 }

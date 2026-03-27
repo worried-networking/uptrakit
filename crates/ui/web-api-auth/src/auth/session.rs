@@ -1,5 +1,6 @@
 use super::token::{generate_secure_token, generate_uuid, hash_token};
 use super::{AuthError, Result};
+use async_trait::async_trait;
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
@@ -227,6 +228,61 @@ impl SessionService {
             .context_to()?;
 
         Ok(result.rows_affected)
+    }
+}
+
+/// Service trait for session operations, enabling controller embedding without
+/// a dependency on `uptrakit-web-api` or Axum.
+///
+/// Implemented by [`SessionService`]. The `#[async_trait]` desugaring ensures
+/// `Arc<dyn SessionOps>` is dyn-safe.
+#[async_trait]
+pub trait SessionOps: Send + Sync {
+    async fn create_refresh_token(
+        &self,
+        user_id: uuid::Uuid,
+        auth_method: super::AuthMethod,
+        user_agent: Option<String>,
+        ip_address: Option<String>,
+    ) -> Result<String>;
+    async fn verify_refresh_token(&self, token: &str) -> Result<VerifiedSession>;
+    async fn rotate_refresh_token(&self, token: &str) -> Result<(VerifiedSession, String)>;
+    async fn revoke_refresh_token(&self, token: &str) -> Result<()>;
+    async fn delete_user_sessions(&self, user_id: uuid::Uuid) -> Result<()>;
+    async fn cleanup_expired_sessions(&self) -> Result<u64>;
+}
+
+#[async_trait]
+impl SessionOps for SessionService {
+    async fn create_refresh_token(
+        &self,
+        user_id: uuid::Uuid,
+        auth_method: super::AuthMethod,
+        user_agent: Option<String>,
+        ip_address: Option<String>,
+    ) -> Result<String> {
+        SessionService::create_refresh_token(self, user_id, auth_method, user_agent, ip_address)
+            .await
+    }
+
+    async fn verify_refresh_token(&self, token: &str) -> Result<VerifiedSession> {
+        SessionService::verify_refresh_token(self, token).await
+    }
+
+    async fn rotate_refresh_token(&self, token: &str) -> Result<(VerifiedSession, String)> {
+        SessionService::rotate_refresh_token(self, token).await
+    }
+
+    async fn revoke_refresh_token(&self, token: &str) -> Result<()> {
+        SessionService::revoke_refresh_token(self, token).await
+    }
+
+    async fn delete_user_sessions(&self, user_id: uuid::Uuid) -> Result<()> {
+        SessionService::delete_user_sessions(self, user_id).await
+    }
+
+    async fn cleanup_expired_sessions(&self) -> Result<u64> {
+        SessionService::cleanup_expired_sessions(self).await
     }
 }
 
@@ -497,5 +553,74 @@ mod tests {
             result.is_err(),
             "DB CHECK constraint must prevent inserting a corrupted OIDC session"
         );
+    }
+}
+
+#[cfg(test)]
+mod controller_di_tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::Arc;
+
+    struct MockSessionOps;
+
+    #[async_trait]
+    impl SessionOps for MockSessionOps {
+        async fn create_refresh_token(
+            &self,
+            _user_id: uuid::Uuid,
+            _auth_method: super::super::AuthMethod,
+            _user_agent: Option<String>,
+            _ip_address: Option<String>,
+        ) -> Result<String> {
+            Ok("mock-token".to_string())
+        }
+
+        async fn verify_refresh_token(&self, _token: &str) -> Result<VerifiedSession> {
+            unimplemented!("mock")
+        }
+
+        async fn rotate_refresh_token(&self, _token: &str) -> Result<(VerifiedSession, String)> {
+            unimplemented!("mock")
+        }
+
+        async fn revoke_refresh_token(&self, _token: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn delete_user_sessions(&self, _user_id: uuid::Uuid) -> Result<()> {
+            Ok(())
+        }
+
+        async fn cleanup_expired_sessions(&self) -> Result<u64> {
+            Ok(0)
+        }
+    }
+
+    struct TestController {
+        session_ops: Arc<dyn SessionOps>,
+    }
+
+    impl TestController {
+        fn new(session_ops: Arc<dyn SessionOps>) -> Self {
+            Self { session_ops }
+        }
+    }
+
+    #[tokio::test]
+    async fn mock_session_ops_injection() {
+        let mock: Arc<dyn SessionOps> = Arc::new(MockSessionOps);
+        let controller = TestController::new(mock);
+        let result = controller
+            .session_ops
+            .create_refresh_token(
+                uuid::Uuid::new_v4(),
+                super::super::AuthMethod::Password,
+                None,
+                None,
+            )
+            .await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "mock-token");
     }
 }
