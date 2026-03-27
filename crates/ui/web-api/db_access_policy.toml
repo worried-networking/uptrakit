@@ -27,13 +27,13 @@ do_sign_csr_for_system_service = "ignore"
 revoke_system_certificate = "ignore"
 
 [routes."api_tokens.rs"]
-create_api_token = "full-state"
-list_api_tokens = "full-state"
-revoke_api_token = "full-state"
+create_api_token = "no-db"
+list_api_tokens = "no-db"
+revoke_api_token = "no-db"
 
 [routes."audit_logs.rs"]
 list_audit_logs = "tenant-scoped"
-list_system_audit_logs = "full-state"
+list_system_audit_logs = "tenant-agnostic"
 
 [routes."auth.rs"]
 register = "full-state"
@@ -57,8 +57,8 @@ delete_autodiscovery_ignore = "tenant-scoped"
 batch_autodiscovery_ignores = "tenant-scoped"
 
 [routes."ca.rs"]
-ca_cert = "full-state"
-ca_crl = "full-state"
+ca_cert = "no-db"
+ca_crl = "no-db"
 
 [routes."device_auth.rs"]
 device_auth_start = "full-state"
@@ -91,25 +91,25 @@ invoke_action = "full-state"
 
 [routes."health.rs"]
 healthz = "no-db"
-readyz = "full-state"
+readyz = "tenant-agnostic"
 healthz_returns_ok = "ignore"
 
 [routes."host_tags.rs"]
 list_host_tags = "tenant-scoped"
 get_host_tag = "tenant-scoped"
-create_host_tag = "full-state"
-update_host_tag = "full-state"
-delete_host_tag = "full-state"
-batch_host_tags = "full-state"
+create_host_tag = "tenant-scoped"
+update_host_tag = "tenant-scoped"
+delete_host_tag = "tenant-scoped"
+batch_host_tags = "tenant-scoped"
 set_host_tags = "full-state"
 
 [routes."hosts.rs"]
 list_hosts = "tenant-scoped"
 get_host = "tenant-scoped"
-update_host = "full-state"
-deactivate_host = "full-state"
+update_host = "tenant-scoped"
+deactivate_host = "tenant-scoped"
 discover_host = "full-state"
-batch_hosts = "full-state"
+batch_hosts = "tenant-scoped"
 
 [routes."interactive_ws.rs"]
 interactive_ws = "full-state"
@@ -132,8 +132,8 @@ list_log = "tenant-scoped"
 notification_callback = "full-state"
 
 [routes."ocsp.rs"]
-ocsp_post = "full-state"
-ocsp_get = "full-state"
+ocsp_post = "tenant-agnostic"
+ocsp_get = "tenant-agnostic"
 
 [routes."oidc_auth.rs"]
 auth_methods = "full-state"
@@ -185,8 +185,8 @@ delete_plugin_type_settings = "tenant-scoped"
 
 [routes."roles.rs"]
 build_role_response = "ignore"
-list_roles = "full-state"
-get_role = "full-state"
+list_roles = "tenant-agnostic"
+get_role = "tenant-agnostic"
 
 [routes."scheduler.rs"]
 list_scheduled_tasks = "tenant-scoped"
@@ -376,7 +376,7 @@ get_combined_settings = "full-state"
 [routes."settings_dashboard_icons.rs"]
 is_dashboard_icons_enabled = "ignore"
 get_dashboard_icons_settings = "tenant-scoped"
-update_dashboard_icons_settings = "full-state"
+update_dashboard_icons_settings = "tenant-scoped"
 setting_defaults_to_enabled_when_unset = "ignore"
 setting_respects_explicit_false = "ignore"
 setting_respects_explicit_true = "ignore"
@@ -433,10 +433,10 @@ dispatch_agent_version_checks = "no-db"
 get_system_alerts = "full-state"
 
 [routes."system_enrollment_tokens.rs"]
-create_system_enrollment_token = "full-state"
-list_system_enrollment_tokens = "full-state"
-get_system_enrollment_token = "full-state"
-revoke_system_enrollment_token = "full-state"
+create_system_enrollment_token = "tenant-agnostic"
+list_system_enrollment_tokens = "tenant-agnostic"
+get_system_enrollment_token = "tenant-agnostic"
+revoke_system_enrollment_token = "tenant-agnostic"
 
 [routes."system_services.rs"]
 list_system_services = "full-state"

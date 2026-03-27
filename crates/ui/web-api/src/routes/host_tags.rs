@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::app_state::BroadcastState;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanUpdateHosts, CanViewHosts};
 use crate::queries::host_tags as tag_queries;
@@ -109,7 +110,7 @@ pub async fn get_host_tag(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_host_tag(
-    State(state): State<Arc<AppState>>,
+    State(broadcast): State<BroadcastState>,
     tenant_db: TenantDb,
     CanUpdateHosts(_user): CanUpdateHosts,
     Json(body): Json<CreateHostTagRequest>,
@@ -120,8 +121,7 @@ pub async fn create_host_tag(
 
     match tag_queries::create_host_tag(&tenant_db, &body).await {
         Ok(resp) => {
-            state
-                .broadcast
+            broadcast
                 .event_broadcaster
                 .send(
                     tenant_db.tenant_id,
@@ -164,7 +164,7 @@ pub async fn create_host_tag(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_host_tag(
-    State(state): State<Arc<AppState>>,
+    State(broadcast): State<BroadcastState>,
     tenant_db: TenantDb,
     CanUpdateHosts(_user): CanUpdateHosts,
     Path(tag_id): Path<Uuid>,
@@ -176,8 +176,7 @@ pub async fn update_host_tag(
 
     match tag_queries::update_host_tag(&tenant_db, tag_id, &body).await {
         Ok(Some(resp)) => {
-            state
-                .broadcast
+            broadcast
                 .event_broadcaster
                 .send(
                     tenant_db.tenant_id,
@@ -218,15 +217,14 @@ pub async fn update_host_tag(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_host_tag(
-    State(state): State<Arc<AppState>>,
+    State(broadcast): State<BroadcastState>,
     tenant_db: TenantDb,
     CanUpdateHosts(_user): CanUpdateHosts,
     Path(tag_id): Path<Uuid>,
 ) -> Response {
     match tag_queries::delete_host_tag(&tenant_db, tag_id).await {
         Ok(true) => {
-            state
-                .broadcast
+            broadcast
                 .event_broadcaster
                 .send(
                     tenant_db.tenant_id,
@@ -262,7 +260,7 @@ pub async fn delete_host_tag(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_host_tags(
-    State(state): State<Arc<AppState>>,
+    State(broadcast): State<BroadcastState>,
     tenant_db: TenantDb,
     CanUpdateHosts(_user): CanUpdateHosts,
     Json(body): Json<BatchActionRequest>,
@@ -288,8 +286,7 @@ pub async fn batch_host_tags(
     };
 
     for id in &succeeded_ids {
-        state
-            .broadcast
+        broadcast
             .event_broadcaster
             .send(tenant_db.tenant_id, AdminEvent::HostTagDeleted { id: *id })
             .await;

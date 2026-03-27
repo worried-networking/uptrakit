@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -9,7 +7,7 @@ use axum::{
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::AppState;
+use crate::app_state::DbState;
 use crate::auth::{password, token};
 use crate::error_response::error_response;
 use crate::middleware::permission::CanManageGlobalSettings;
@@ -39,7 +37,7 @@ pub use uptrakit_web_api_types::system_enrollment_tokens::{
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_system_enrollment_token(
-    State(state): State<Arc<AppState>>,
+    State(db): State<DbState>,
     CanManageGlobalSettings(user): CanManageGlobalSettings,
     Json(body): Json<CreateSystemEnrollmentTokenRequest>,
 ) -> Response {
@@ -69,7 +67,7 @@ pub async fn create_system_enrollment_token(
         .map(|secs| OffsetDateTime::now_utc() + time::Duration::seconds(secs as i64));
 
     let model = match set_queries::create_system_enrollment_token(
-        state.db(),
+        db.db(),
         set_queries::CreateSystemTokenParams {
             id,
             name: &body.name,
@@ -123,11 +121,11 @@ pub async fn create_system_enrollment_token(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_system_enrollment_tokens(
-    State(state): State<Arc<AppState>>,
+    State(db): State<DbState>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
     Query(query): Query<ListSystemEnrollmentTokensQuery>,
 ) -> Response {
-    match set_queries::list_system_enrollment_tokens(state.db(), &query.pagination()).await {
+    match set_queries::list_system_enrollment_tokens(db.db(), &query.pagination()).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
             tracing::error!(error = %e, "Failed to list system enrollment tokens");
@@ -155,11 +153,11 @@ pub async fn list_system_enrollment_tokens(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_system_enrollment_token(
-    State(state): State<Arc<AppState>>,
+    State(db): State<DbState>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
     Path(token_id): Path<Uuid>,
 ) -> Response {
-    match set_queries::get_system_enrollment_token(state.db(), token_id).await {
+    match set_queries::get_system_enrollment_token(db.db(), token_id).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "System enrollment token not found"),
         Err(e) => {
@@ -188,11 +186,11 @@ pub async fn get_system_enrollment_token(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn revoke_system_enrollment_token(
-    State(state): State<Arc<AppState>>,
+    State(db): State<DbState>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
     Path(token_id): Path<Uuid>,
 ) -> Response {
-    match set_queries::revoke_system_enrollment_token(state.db(), token_id).await {
+    match set_queries::revoke_system_enrollment_token(db.db(), token_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => error_response(
             StatusCode::NOT_FOUND,

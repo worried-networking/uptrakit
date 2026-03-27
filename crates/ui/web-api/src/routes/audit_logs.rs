@@ -6,8 +6,6 @@
 //! - `GET /api/v1/system-audit-logs` — system-level entries, requires
 //!   [`Permission::ViewSystemAuditLogs`].
 
-use std::sync::Arc;
-
 use axum::{
     Json,
     extract::{Query, State},
@@ -15,8 +13,8 @@ use axum::{
     response::IntoResponse,
 };
 
-use crate::AppState;
 use crate::api_error::ApiError;
+use crate::app_state::DbState;
 use crate::middleware::permission::{CanViewAuditLogs, CanViewSystemAuditLogs};
 use crate::queries::audit_logs as audit_log_queries;
 use crate::tenant_db::TenantDb;
@@ -90,10 +88,10 @@ pub async fn list_audit_logs(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_system_audit_logs(
-    State(state): State<Arc<AppState>>,
+    State(db): State<DbState>,
     CanViewSystemAuditLogs(_user): CanViewSystemAuditLogs,
     Query(params): Query<AuditLogListParams>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let resp = audit_log_queries::list_system_audit_logs(state.db(), &params).await?;
+    let resp = audit_log_queries::list_system_audit_logs(db.db(), &params).await?;
     Ok((StatusCode::OK, Json(resp)).into_response())
 }

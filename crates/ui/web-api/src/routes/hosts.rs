@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::app_state::BroadcastState;
 use crate::error_response::error_response;
 use crate::middleware::permission::{
     CanDeactivateHosts, CanTriggerChecks, CanUpdateHosts, CanViewHosts,
@@ -115,7 +116,7 @@ pub async fn get_host(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_host(
-    State(state): State<Arc<AppState>>,
+    State(broadcast): State<BroadcastState>,
     tenant_db: TenantDb,
     CanUpdateHosts(_user): CanUpdateHosts,
     Path(host_id): Path<Uuid>,
@@ -123,8 +124,7 @@ pub async fn update_host(
 ) -> Response {
     match host_queries::update_host(&tenant_db, host_id, &body).await {
         Ok(Some(resp)) => {
-            state
-                .broadcast
+            broadcast
                 .event_broadcaster
                 .send(tenant_db.tenant_id, AdminEvent::HostUpdated { id: host_id })
                 .await;
@@ -157,15 +157,14 @@ pub async fn update_host(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn deactivate_host(
-    State(state): State<Arc<AppState>>,
+    State(broadcast): State<BroadcastState>,
     tenant_db: TenantDb,
     CanDeactivateHosts(_user): CanDeactivateHosts,
     Path(host_id): Path<Uuid>,
 ) -> Response {
     match host_queries::deactivate_host(&tenant_db, host_id).await {
         Ok(true) => {
-            state
-                .broadcast
+            broadcast
                 .event_broadcaster
                 .send(tenant_db.tenant_id, AdminEvent::HostDeleted { id: host_id })
                 .await;
@@ -279,7 +278,7 @@ pub async fn discover_host(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_hosts(
-    State(state): State<Arc<AppState>>,
+    State(broadcast): State<BroadcastState>,
     tenant_db: TenantDb,
     CanDeactivateHosts(_user): CanDeactivateHosts,
     Json(body): Json<BatchActionRequest>,
@@ -306,8 +305,7 @@ pub async fn batch_hosts(
 
     // Dispatch side effects per succeeded item.
     for id in &succeeded_ids {
-        state
-            .broadcast
+        broadcast
             .event_broadcaster
             .send(tenant_db.tenant_id, AdminEvent::HostDeleted { id: *id })
             .await;

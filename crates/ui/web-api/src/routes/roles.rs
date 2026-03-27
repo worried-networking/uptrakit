@@ -3,18 +3,16 @@
 //! All endpoints require the [`Permission::ManageUsers`] permission via the
 //! [`CanManageUsers`] extractor. Roles are read-only (seeded by migrations).
 
-use std::sync::Arc;
-
 use axum::{
     Json,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
-use crate::AppState;
+use crate::app_state::DbState;
 use crate::error_response::error_response;
 use crate::middleware::permission::CanManageUsers;
 use uptrakit_shared_db::entity::prelude::*;
@@ -28,12 +26,12 @@ pub use uptrakit_web_api_types::roles::RoleResponse;
 
 /// Build a [`RoleResponse`] for a single role model by resolving its permissions.
 async fn build_role_response(
-    state: &AppState,
+    db: &DatabaseConnection,
     role_model: &uptrakit_shared_db::entity::role::Model,
 ) -> Result<RoleResponse, sea_orm::DbErr> {
     let role_perms = RolePermission::find()
         .filter(role_permission::Column::RoleId.eq(role_model.id))
-        .all(state.db())
+        .all(db)
         .await?;
 
     let perm_ids: Vec<Uuid> = role_perms.iter().map(|rp| rp.permission_id).collect();
@@ -43,7 +41,7 @@ async fn build_role_response(
     } else {
         let perm_models = Permission::find()
             .filter(permission::Column::Id.is_in(perm_ids))
-            .all(state.db())
+            .all(db)
             .await?;
 
         perm_models
@@ -80,10 +78,10 @@ async fn build_role_response(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_roles(
-    State(state): State<Arc<AppState>>,
+    State(db): State<DbState>,
     CanManageUsers(_user): CanManageUsers,
 ) -> Response {
-    let roles = match Role::find().all(state.db()).await {
+    let roles = match Role::find().all(db.db()).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("Failed to list roles: {e}");
@@ -93,7 +91,7 @@ pub async fn list_roles(
 
     let mut responses = Vec::with_capacity(roles.len());
     for r in &roles {
-        match build_role_response(&state, r).await {
+        match build_role_response(db.db(), r).await {
             Ok(resp) => responses.push(resp),
             Err(e) => {
                 tracing::error!("Failed to build role response for {}: {e}", r.id);
@@ -124,11 +122,11 @@ pub async fn list_roles(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_role(
-    State(state): State<Arc<AppState>>,
+    State(db): State<DbState>,
     CanManageUsers(_user): CanManageUsers,
     Path(role_id): Path<Uuid>,
 ) -> Response {
-    let role_model = match Role::find_by_id(role_id).one(state.db()).await {
+    let role_model = match Role::find_by_id(role_id).one(db.db()).await {
         Ok(Some(r)) => r,
         Ok(None) => return error_response(StatusCode::NOT_FOUND, "Role not found"),
         Err(e) => {
@@ -137,7 +135,7 @@ pub async fn get_role(
         }
     };
 
-    match build_role_response(&state, &role_model).await {
+    match build_role_response(db.db(), &role_model).await {
         Ok(r) => (StatusCode::OK, Json(r)).into_response(),
         Err(e) => {
             tracing::error!("Failed to build role response: {e}");

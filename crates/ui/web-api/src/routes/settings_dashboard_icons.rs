@@ -5,11 +5,8 @@
 //! newly created software items are automatically enriched with icon URLs from
 //! the community-curated Dashboard Icons collection. Unset defaults to enabled.
 
-use std::sync::Arc;
-
 use axum::{
     Json,
-    extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -18,7 +15,6 @@ pub use uptrakit_web_api_types::settings_dashboard_icons::{
     DashboardIconsSettingsResponse, UpdateDashboardIconsSettingsRequest,
 };
 
-use crate::AppState;
 use crate::SettingKey;
 use crate::error_response::error_response;
 use crate::extract::Validated;
@@ -85,13 +81,12 @@ pub async fn get_dashboard_icons_settings(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_dashboard_icons_settings(
-    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
     Validated(req): Validated<UpdateDashboardIconsSettingsRequest>,
 ) -> Response {
     if let Err(e) = upsert_setting(
-        state.db(),
+        tenant_db.db(),
         tenant_db.tenant_id,
         SettingKey::DashboardIconsEnabled,
         serde_json::json!(req.enabled),

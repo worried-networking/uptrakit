@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -7,7 +5,7 @@ use axum::response::IntoResponse;
 use sea_orm::ConnectionTrait;
 use serde::Serialize;
 
-use crate::AppState;
+use crate::app_state::{CertState, DbState};
 
 #[tracing::instrument(skip_all)]
 pub async fn healthz() -> impl IntoResponse {
@@ -29,10 +27,10 @@ struct ReadinessChecks {
 /// Readiness probe — returns 200 when the service can handle traffic,
 /// 503 when a critical dependency is unavailable.
 #[tracing::instrument(skip_all)]
-pub async fn readyz(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let db_ok = state.db().execute_unprepared("SELECT 1").await.is_ok();
+pub async fn readyz(State(db): State<DbState>, State(cert): State<CertState>) -> impl IntoResponse {
+    let db_ok = db.db().execute_unprepared("SELECT 1").await.is_ok();
 
-    let ca_ok = !state.cert.ca_snapshot.borrow().bundle_pem.is_empty();
+    let ca_ok = !cert.ca_snapshot.borrow().bundle_pem.is_empty();
 
     let response = ReadinessResponse {
         status: if db_ok && ca_ok {

@@ -1,11 +1,9 @@
-use std::sync::Arc;
-
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Response};
 use http::header;
 
-use crate::AppState;
+use crate::app_state::{CertState, DbState};
 
 const OCSP_RESPONSE_CONTENT_TYPE: &str = "application/ocsp-response";
 
@@ -13,11 +11,14 @@ const OCSP_RESPONSE_CONTENT_TYPE: &str = "application/ocsp-response";
 ///
 /// Accepts a DER-encoded OCSP request body and returns a DER-encoded OCSP response.
 #[tracing::instrument(skip_all)]
-pub async fn ocsp_post(State(state): State<Arc<AppState>>, body: Bytes) -> Response {
-    let snapshot = state.cert.ca_snapshot.borrow().clone();
+pub async fn ocsp_post(
+    State(cert): State<CertState>,
+    State(db): State<DbState>,
+    body: Bytes,
+) -> Response {
+    let snapshot = cert.ca_snapshot.borrow().clone();
     let response_der =
-        crate::ocsp::build_ocsp_response(&body, &snapshot, &state.cert.ca_key_store, state.db())
-            .await;
+        crate::ocsp::build_ocsp_response(&body, &snapshot, &cert.ca_key_store, db.db()).await;
     let cache_control = format!("max-age={}, public", crate::ocsp::OCSP_CACHE_MAX_AGE_SECS);
 
     (
@@ -35,7 +36,11 @@ pub async fn ocsp_post(State(state): State<Arc<AppState>>, body: Bytes) -> Respo
 /// Accepts a base64url-encoded OCSP request in the URL path and returns a DER-encoded OCSP response.
 /// This follows RFC 6960 Section A.1 (HTTP-based OCSP, GET method).
 #[tracing::instrument(skip_all)]
-pub async fn ocsp_get(State(state): State<Arc<AppState>>, Path(encoded): Path<String>) -> Response {
+pub async fn ocsp_get(
+    State(cert): State<CertState>,
+    State(db): State<DbState>,
+    Path(encoded): Path<String>,
+) -> Response {
     use base64::Engine;
 
     // RFC 6960 says the request is base64-encoded and then URL-encoded in the path.
@@ -44,14 +49,9 @@ pub async fn ocsp_get(State(state): State<Arc<AppState>>, Path(encoded): Path<St
         Ok(decoded) => decoded,
         Err(e) => {
             tracing::debug!(error = %e, "OCSP GET: invalid UTF-8 in percent-decoded path");
-            let snapshot = state.cert.ca_snapshot.borrow().clone();
-            let err_der = crate::ocsp::build_ocsp_response(
-                b"",
-                &snapshot,
-                &state.cert.ca_key_store,
-                state.db(),
-            )
-            .await;
+            let snapshot = cert.ca_snapshot.borrow().clone();
+            let err_der =
+                crate::ocsp::build_ocsp_response(b"", &snapshot, &cert.ca_key_store, db.db()).await;
             let cache_control = format!("max-age={}, public", crate::ocsp::OCSP_CACHE_MAX_AGE_SECS);
             return (
                 [
@@ -67,14 +67,9 @@ pub async fn ocsp_get(State(state): State<Arc<AppState>>, Path(encoded): Path<St
         Ok(der) => der,
         Err(_) => {
             // Return a malformed request OCSP response
-            let snapshot = state.cert.ca_snapshot.borrow().clone();
-            let err_der = crate::ocsp::build_ocsp_response(
-                b"",
-                &snapshot,
-                &state.cert.ca_key_store,
-                state.db(),
-            )
-            .await;
+            let snapshot = cert.ca_snapshot.borrow().clone();
+            let err_der =
+                crate::ocsp::build_ocsp_response(b"", &snapshot, &cert.ca_key_store, db.db()).await;
             let cache_control = format!("max-age={}, public", crate::ocsp::OCSP_CACHE_MAX_AGE_SECS);
             return (
                 [
@@ -87,14 +82,10 @@ pub async fn ocsp_get(State(state): State<Arc<AppState>>, Path(encoded): Path<St
         }
     };
 
-    let snapshot = state.cert.ca_snapshot.borrow().clone();
-    let response_der = crate::ocsp::build_ocsp_response(
-        &request_der,
-        &snapshot,
-        &state.cert.ca_key_store,
-        state.db(),
-    )
-    .await;
+    let snapshot = cert.ca_snapshot.borrow().clone();
+    let response_der =
+        crate::ocsp::build_ocsp_response(&request_der, &snapshot, &cert.ca_key_store, db.db())
+            .await;
     let cache_control = format!("max-age={}, public", crate::ocsp::OCSP_CACHE_MAX_AGE_SECS);
 
     (
