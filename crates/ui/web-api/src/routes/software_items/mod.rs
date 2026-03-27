@@ -7,6 +7,7 @@ mod controller_fetch;
 mod version_check_dispatch;
 
 use crate::AppState;
+use crate::actions::software_items as item_actions;
 use crate::api_error::ApiError;
 use crate::error_response::error_response;
 use crate::extract::Validated;
@@ -17,6 +18,7 @@ use crate::middleware::permission::{
 use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::plugin_configs::find_raw_active_config;
 use crate::queries::software_items as item_queries;
+use crate::queries::update_triggers::TriggerUpdateParams;
 use crate::queries::update_types::ActorType;
 use crate::routes::settings_dashboard_icons::is_dashboard_icons_enabled;
 use crate::tenant_db::TenantDb;
@@ -185,15 +187,8 @@ pub async fn update_software_item(
     Path(item_id): Path<Uuid>,
     Json(req): Json<UpdateSoftwareItemRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let resp = item_queries::update_software_item(&tenant_db, item_id, req).await?;
-    state
-        .broadcast
-        .event_broadcaster
-        .send(
-            tenant_db.tenant_id,
-            AdminEvent::SoftwareItemUpdated { id: item_id },
-        )
-        .await;
+    let ctx = state.mutation_context();
+    let resp = item_actions::update(&tenant_db, &ctx, item_id, req).await?;
     Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
@@ -535,16 +530,18 @@ pub async fn trigger_update(
             require_attestation: false,
         });
 
-    let result = crate::queries::update_triggers::trigger_update_for_host(
-        tenant_db.db(),
-        &state.notification_service,
-        crate::queries::update_triggers::TriggerUpdateParams {
+    let ctx = state.mutation_context();
+    let user_id_str = user.user_id.to_string();
+    let result = item_actions::trigger_update(
+        &tenant_db,
+        &ctx,
+        TriggerUpdateParams {
             tenant_id: tenant_db.tenant_id,
             item_id,
             host_id,
             to_version: req.to_version,
             actor_type: ActorType::User.as_str(),
-            actor_id: &user.user_id.to_string(),
+            actor_id: &user_id_str,
             release_info,
             interactive: req.interactive,
         },
@@ -557,26 +554,6 @@ pub async fn trigger_update(
         }
         _ => TriggerUpdateStatus::Queued,
     };
-    // Push updated software states immediately so that any connected
-    // MQTT/HA entity transitions to `in_progress: true`.
-    state
-        .notification_service
-        .push_software_states_for_tenant(tenant_db.db(), tenant_db.tenant_id)
-        .await;
-    // Notify SSE subscribers so the History page shows the new entry
-    // immediately, without waiting for the agent's UpdateStarted message.
-    state
-        .broadcast
-        .event_broadcaster
-        .send(
-            tenant_db.tenant_id,
-            AdminEvent::UpdateTriggered {
-                update_history_id: result.update_history_id,
-                host_id,
-                software_item_id: item_id,
-            },
-        )
-        .await;
     let resp = TriggerUpdateResponse {
         update_history_id: result.update_history_id,
         status,
@@ -993,40 +970,16 @@ pub async fn batch_software_items(
     CanDeleteSoftware(_user): CanDeleteSoftware,
     Validated(body): Validated<BatchActionRequest>,
 ) -> Response {
+    let ctx = state.mutation_context();
     let (succeeded_ids, failed) = match body.action.as_str() {
-        "approve" => {
-            // Inline batch approve: set featured = true for matching items.
-            let now = OffsetDateTime::now_utc();
-            let mut succeeded = Vec::new();
-            let mut failures: Vec<(Uuid, String)> = Vec::new();
-            for &id in &body.ids {
-                match software_item::Entity::find_by_id(id)
-                    .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
-                    .filter(software_item::Column::DeactivatedAt.is_null())
-                    .one(tenant_db.db())
-                    .await
-                {
-                    Ok(Some(item)) => {
-                        if item.featured {
-                            // Already featured -- still count as success (idempotent).
-                            succeeded.push(id);
-                            continue;
-                        }
-                        let mut active: software_item::ActiveModel = item.into();
-                        active.featured = Set(true);
-                        active.updated_at = Set(now);
-                        match active.update(tenant_db.db()).await {
-                            Ok(_) => succeeded.push(id),
-                            Err(e) => failures.push((id, e.to_string())),
-                        }
-                    }
-                    Ok(None) => failures.push((id, "not found".to_string())),
-                    Err(e) => failures.push((id, e.to_string())),
-                }
+        "approve" => match item_actions::batch_feature(&tenant_db, &ctx, &body.ids).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("batch approve failed: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
-            (succeeded, failures)
-        }
-        "delete" => match item_queries::batch_delete_software_items(&tenant_db, &body.ids).await {
+        },
+        "delete" => match item_actions::batch_delete(&tenant_db, &ctx, &body.ids).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("batch delete failed: {e}");
@@ -1040,18 +993,6 @@ pub async fn batch_software_items(
             );
         }
     };
-
-    // Dispatch side effects per succeeded item.
-    for id in &succeeded_ids {
-        state
-            .broadcast
-            .event_broadcaster
-            .send(
-                tenant_db.tenant_id,
-                AdminEvent::SoftwareItemUpdated { id: *id },
-            )
-            .await;
-    }
 
     let response = BatchActionResponse {
         succeeded: succeeded_ids
