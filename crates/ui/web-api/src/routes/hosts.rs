@@ -1,5 +1,5 @@
 use crate::AppState;
-use crate::app_state::BroadcastState;
+use crate::actions::hosts as host_actions;
 use crate::error_response::error_response;
 use crate::middleware::permission::{
     CanDeactivateHosts, CanTriggerChecks, CanUpdateHosts, CanViewHosts,
@@ -16,7 +16,6 @@ use axum::{
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, RelationTrait};
 use std::sync::Arc;
 use uptrakit_shared_db::entity::{host, prelude::*, service, service_host};
-use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
@@ -116,20 +115,15 @@ pub async fn get_host(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_host(
-    State(broadcast): State<BroadcastState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanUpdateHosts(_user): CanUpdateHosts,
     Path(host_id): Path<Uuid>,
     Json(body): Json<UpdateHostRequest>,
 ) -> Response {
-    match host_queries::update_host(&tenant_db, host_id, &body).await {
-        Ok(Some(resp)) => {
-            broadcast
-                .event_broadcaster
-                .send(tenant_db.tenant_id, AdminEvent::HostUpdated { id: host_id })
-                .await;
-            (StatusCode::OK, Json(resp)).into_response()
-        }
+    let ctx = state.mutation_context();
+    match host_actions::update(&tenant_db, &ctx, host_id, &body).await {
+        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Host not found"),
         Err(e) => {
             tracing::error!("Failed to update host: {}", e);
@@ -157,19 +151,14 @@ pub async fn update_host(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn deactivate_host(
-    State(broadcast): State<BroadcastState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanDeactivateHosts(_user): CanDeactivateHosts,
     Path(host_id): Path<Uuid>,
 ) -> Response {
-    match host_queries::deactivate_host(&tenant_db, host_id).await {
-        Ok(true) => {
-            broadcast
-                .event_broadcaster
-                .send(tenant_db.tenant_id, AdminEvent::HostDeleted { id: host_id })
-                .await;
-            StatusCode::NO_CONTENT.into_response()
-        }
+    let ctx = state.mutation_context();
+    match host_actions::deactivate(&tenant_db, &ctx, host_id).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Host not found"),
         Err(e) => {
             tracing::error!("Failed to deactivate host: {}", e);
@@ -278,7 +267,7 @@ pub async fn discover_host(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_hosts(
-    State(broadcast): State<BroadcastState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanDeactivateHosts(_user): CanDeactivateHosts,
     Json(body): Json<BatchActionRequest>,
@@ -287,8 +276,9 @@ pub async fn batch_hosts(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
+    let ctx = state.mutation_context();
     let (succeeded_ids, failed) = match body.action.as_str() {
-        "deactivate" => match host_queries::batch_deactivate_hosts(&tenant_db, &body.ids).await {
+        "deactivate" => match host_actions::batch_deactivate(&tenant_db, &ctx, &body.ids).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("batch deactivate failed: {e}");
@@ -302,14 +292,6 @@ pub async fn batch_hosts(
             );
         }
     };
-
-    // Dispatch side effects per succeeded item.
-    for id in &succeeded_ids {
-        broadcast
-            .event_broadcaster
-            .send(tenant_db.tenant_id, AdminEvent::HostDeleted { id: *id })
-            .await;
-    }
 
     let response = BatchActionResponse {
         succeeded: succeeded_ids
