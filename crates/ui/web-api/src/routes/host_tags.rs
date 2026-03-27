@@ -1,5 +1,5 @@
 use crate::AppState;
-use crate::app_state::BroadcastState;
+use crate::actions::host_tags as tag_actions;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanUpdateHosts, CanViewHosts};
 use crate::queries::host_tags as tag_queries;
@@ -11,7 +11,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
-use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
@@ -110,7 +109,7 @@ pub async fn get_host_tag(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_host_tag(
-    State(broadcast): State<BroadcastState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanUpdateHosts(_user): CanUpdateHosts,
     Json(body): Json<CreateHostTagRequest>,
@@ -119,17 +118,9 @@ pub async fn create_host_tag(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    match tag_queries::create_host_tag(&tenant_db, &body).await {
-        Ok(resp) => {
-            broadcast
-                .event_broadcaster
-                .send(
-                    tenant_db.tenant_id,
-                    AdminEvent::HostTagCreated { id: resp.id },
-                )
-                .await;
-            (StatusCode::CREATED, Json(resp)).into_response()
-        }
+    let ctx = state.mutation_context();
+    match tag_actions::create(&tenant_db, &ctx, &body).await {
+        Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("UNIQUE") || msg.contains("unique") || msg.contains("duplicate") {
@@ -164,7 +155,7 @@ pub async fn create_host_tag(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_host_tag(
-    State(broadcast): State<BroadcastState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanUpdateHosts(_user): CanUpdateHosts,
     Path(tag_id): Path<Uuid>,
@@ -174,17 +165,9 @@ pub async fn update_host_tag(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    match tag_queries::update_host_tag(&tenant_db, tag_id, &body).await {
-        Ok(Some(resp)) => {
-            broadcast
-                .event_broadcaster
-                .send(
-                    tenant_db.tenant_id,
-                    AdminEvent::HostTagUpdated { id: tag_id },
-                )
-                .await;
-            (StatusCode::OK, Json(resp)).into_response()
-        }
+    let ctx = state.mutation_context();
+    match tag_actions::update(&tenant_db, &ctx, tag_id, &body).await {
+        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Host tag not found"),
         Err(e) => {
             let msg = e.to_string();
@@ -217,22 +200,14 @@ pub async fn update_host_tag(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_host_tag(
-    State(broadcast): State<BroadcastState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanUpdateHosts(_user): CanUpdateHosts,
     Path(tag_id): Path<Uuid>,
 ) -> Response {
-    match tag_queries::delete_host_tag(&tenant_db, tag_id).await {
-        Ok(true) => {
-            broadcast
-                .event_broadcaster
-                .send(
-                    tenant_db.tenant_id,
-                    AdminEvent::HostTagDeleted { id: tag_id },
-                )
-                .await;
-            StatusCode::NO_CONTENT.into_response()
-        }
+    let ctx = state.mutation_context();
+    match tag_actions::delete(&tenant_db, &ctx, tag_id).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Host tag not found"),
         Err(e) => {
             tracing::error!("Failed to delete host tag: {e}");
@@ -260,7 +235,7 @@ pub async fn delete_host_tag(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_host_tags(
-    State(broadcast): State<BroadcastState>,
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanUpdateHosts(_user): CanUpdateHosts,
     Json(body): Json<BatchActionRequest>,
@@ -269,8 +244,9 @@ pub async fn batch_host_tags(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
+    let ctx = state.mutation_context();
     let (succeeded_ids, failed) = match body.action.as_str() {
-        "delete" => match tag_queries::batch_delete_host_tags(&tenant_db, &body.ids).await {
+        "delete" => match tag_actions::batch_delete(&tenant_db, &ctx, &body.ids).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("batch delete host tags failed: {e}");
@@ -284,13 +260,6 @@ pub async fn batch_host_tags(
             );
         }
     };
-
-    for id in &succeeded_ids {
-        broadcast
-            .event_broadcaster
-            .send(tenant_db.tenant_id, AdminEvent::HostTagDeleted { id: *id })
-            .await;
-    }
 
     let response = BatchActionResponse {
         succeeded: succeeded_ids
@@ -359,21 +328,10 @@ pub async fn set_host_tags(
         return error_response(StatusCode::NOT_FOUND, "Host not found");
     }
 
-    match tag_queries::set_host_tags(&tenant_db, host_id, &body.tag_ids).await {
-        Ok(tags) => {
-            let tenant_id = tenant_db.tenant_id;
-            state
-                .broadcast
-                .event_broadcaster
-                .send(tenant_id, AdminEvent::HostTagsChanged { host_id })
-                .await;
-            // Refresh MQTT `{prefix}/hosts/{h}/tags` for all connected MQTT services.
-            state
-                .notification_service
-                .push_software_states_for_tenant(tenant_db.db(), tenant_id)
-                .await;
-            (StatusCode::OK, Json(tags)).into_response()
-        }
+    let ctx = state.mutation_context();
+    // Refresh MQTT `{prefix}/hosts/{h}/tags` for all connected MQTT services.
+    match tag_actions::set(&tenant_db, &ctx, host_id, &body.tag_ids).await {
+        Ok(tags) => (StatusCode::OK, Json(tags)).into_response(),
         Err(e) => {
             tracing::error!("Failed to set host tags: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
