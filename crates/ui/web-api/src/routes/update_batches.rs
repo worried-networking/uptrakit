@@ -21,7 +21,6 @@ use uuid::Uuid;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use uptrakit_shared_db::entity::{host, software_item, update_batch, update_history};
 use uptrakit_shared_types::{BatchStatus, UpdateStatus};
-use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::update_batches::{
     HostBatchUpdateRequest, ItemBatchUpdateRequest, UpdateBatchDetailResponse,
     UpdateBatchListQuery, UpdateBatchSummaryResponse,
@@ -33,14 +32,12 @@ use crate::extract::Validated;
 use futures_util::StreamExt as _;
 
 use crate::AppState;
+use crate::actions::update_batches as batch_actions;
 use crate::api_error::ApiError;
 use crate::batch_progress_broadcaster::BatchProgressEvent;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanTriggerUpdates, CanViewSoftware};
-use crate::queries::{
-    update_batches as batch_queries,
-    update_types::{ActorType, BatchType},
-};
+use crate::queries::update_batches as batch_queries;
 use crate::tenant_db::TenantDb;
 
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
@@ -79,56 +76,17 @@ pub async fn trigger_host_batch_update(
     Path(host_id): Path<Uuid>,
     Validated(req): Validated<HostBatchUpdateRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let candidates = batch_queries::find_outdated_items_for_host(
-        tenant_db.db(),
-        tenant_db.tenant_id,
+    let ctx = state.mutation_context();
+    let resp = batch_actions::trigger_host_batch(
+        &tenant_db,
+        &ctx,
+        &state.broadcast.batch_progress_broadcaster,
         host_id,
+        user.user_id,
         req.category_filter.as_deref(),
         req.exclude_item_ids.as_deref(),
     )
     .await?;
-
-    let resp = batch_queries::create_batch(
-        tenant_db.db(),
-        &state.notification_service,
-        &batch_queries::CreateBatchParams {
-            tenant_id: tenant_db.tenant_id,
-            batch_type: BatchType::HostUpdate,
-            actor_type: ActorType::User.as_str(),
-            actor_id: &user.user_id.to_string(),
-        },
-        candidates,
-    )
-    .await?;
-
-    // Create broadcast channel for batch progress SSE streaming.
-    if let Some(batch_id) = resp.batch_id {
-        state
-            .broadcast
-            .batch_progress_broadcaster
-            .create_channel(batch_id)
-            .await;
-    }
-    // Push updated software states so MQTT entities reflect in_progress
-    state
-        .notification_service
-        .push_software_states_for_tenant(tenant_db.db(), tenant_db.tenant_id)
-        .await;
-    // Notify SSE subscribers for each created update_history entry.
-    for item in &resp.updates {
-        state
-            .broadcast
-            .event_broadcaster
-            .send(
-                tenant_db.tenant_id,
-                AdminEvent::UpdateTriggered {
-                    update_history_id: item.update_history_id,
-                    host_id: item.host_id,
-                    software_item_id: item.software_item_id,
-                },
-            )
-            .await;
-    }
     Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
@@ -162,59 +120,17 @@ pub async fn trigger_item_batch_update(
     Path(item_id): Path<Uuid>,
     Validated(req): Validated<ItemBatchUpdateRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let mut candidates = batch_queries::find_outdated_hosts_for_item(
-        tenant_db.db(),
-        tenant_db.tenant_id,
+    let ctx = state.mutation_context();
+    let resp = batch_actions::trigger_item_batch(
+        &tenant_db,
+        &ctx,
+        &state.broadcast.batch_progress_broadcaster,
         item_id,
+        user.user_id,
+        req.to_version,
         req.host_ids.as_deref(),
     )
     .await?;
-
-    // Override the to_version for all candidates to the requested version
-    for candidate in &mut candidates {
-        candidate.latest_version = req.to_version.clone();
-    }
-
-    let resp = batch_queries::create_batch(
-        tenant_db.db(),
-        &state.notification_service,
-        &batch_queries::CreateBatchParams {
-            tenant_id: tenant_db.tenant_id,
-            batch_type: BatchType::ItemRollout,
-            actor_type: ActorType::User.as_str(),
-            actor_id: &user.user_id.to_string(),
-        },
-        candidates,
-    )
-    .await?;
-
-    // Create broadcast channel for batch progress SSE streaming.
-    if let Some(batch_id) = resp.batch_id {
-        state
-            .broadcast
-            .batch_progress_broadcaster
-            .create_channel(batch_id)
-            .await;
-    }
-    state
-        .notification_service
-        .push_software_states_for_tenant(tenant_db.db(), tenant_db.tenant_id)
-        .await;
-    // Notify SSE subscribers for each created update_history entry.
-    for item in &resp.updates {
-        state
-            .broadcast
-            .event_broadcaster
-            .send(
-                tenant_db.tenant_id,
-                AdminEvent::UpdateTriggered {
-                    update_history_id: item.update_history_id,
-                    host_id: item.host_id,
-                    software_item_id: item.software_item_id,
-                },
-            )
-            .await;
-    }
     Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
