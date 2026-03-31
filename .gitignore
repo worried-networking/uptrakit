@@ -11,3 +11,6 @@ frontend/.svelte-kit
 .claude/settings.local.json
 .claude/CLAUDE.local.md
 .claude/worktrees/
+
+.pipeline-run/
+.subtask-*/
