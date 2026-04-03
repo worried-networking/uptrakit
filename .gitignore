@@ -16,4 +16,5 @@ frontend/.svelte-kit
 
 **/.pipeline-run/**
 !**/.pipeline-run/
+.cymbal/
 **/.subtask-*/
