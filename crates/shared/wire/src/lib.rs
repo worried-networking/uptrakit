@@ -26,7 +26,7 @@ pub use report_tracker::ReportTracker;
 pub use service_profile::{ServiceProfile, parse_capabilities, serialize_capabilities};
 pub use shared_types::*;
 pub use trace_context::{TraceContext, current_trace_context};
-pub use transport::{ServiceTransport, TransportError};
+pub use transport::{ServiceTransport, TransportClosePolicy, TransportError};
 
 // Re-export shared types used directly in wire protocol messages.
 pub use uptrakit_shared_types::{

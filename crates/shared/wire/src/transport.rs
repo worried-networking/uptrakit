@@ -32,6 +32,7 @@
 //! Close semantics are transport-specific and managed by lifecycle owners,
 //! not by shared business logic.
 
+use crate::CloseReason;
 use crate::messages::{ControllerMessage, ServiceMessage};
 
 /// Opaque send-failure marker for [`ServiceTransport`].
@@ -41,6 +42,19 @@ use crate::messages::{ControllerMessage, ServiceMessage};
 #[derive(Debug, thiserror::Error)]
 #[error("transport send failed")]
 pub struct TransportError;
+
+/// Policy the event loop should follow when the transport receive stream ends.
+///
+/// Each transport implementation returns the appropriate policy via
+/// [`ServiceTransport::close_policy`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransportClosePolicy {
+    /// Reconnect to the controller, optionally including the cached close reason
+    /// from the last close frame.
+    Reconnect { reason: Option<CloseReason> },
+    /// Shut down the event loop entirely.
+    Shutdown,
+}
 
 /// Transport-agnostic interface for sending/receiving wire messages.
 ///
@@ -80,4 +94,57 @@ pub trait ServiceTransport: Send {
     /// `ControllerConnection::recv()` directly for richer error handling.
     /// The `None` contract here is exercised by embedded channel transports.
     async fn transport_recv(&mut self) -> Option<ControllerMessage>;
+
+    /// Policy the event loop should follow when `transport_recv` returns `None`.
+    fn close_policy(&self) -> TransportClosePolicy {
+        TransportClosePolicy::Reconnect { reason: None }
+    }
+
+    /// Whether this transport is currently yielded to an external counterpart.
+    fn is_yielded(&self) -> bool {
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ServiceTransport, TransportClosePolicy, TransportError};
+    use crate::messages::{ControllerMessage, ServiceMessage};
+
+    struct DefaultTransport;
+
+    #[async_trait::async_trait]
+    impl ServiceTransport for DefaultTransport {
+        async fn transport_send(&mut self, _msg: ServiceMessage) -> Result<(), TransportError> {
+            Ok(())
+        }
+
+        async fn transport_send_best_effort(&mut self, _msg: ServiceMessage) {}
+
+        async fn transport_send_auto_paginate(
+            &mut self,
+            _msg: ServiceMessage,
+        ) -> Result<(), TransportError> {
+            Ok(())
+        }
+
+        async fn transport_recv(&mut self) -> Option<ControllerMessage> {
+            None
+        }
+    }
+
+    #[test]
+    fn default_close_policy_is_reconnect_with_no_reason() {
+        let transport = DefaultTransport;
+        assert_eq!(
+            transport.close_policy(),
+            TransportClosePolicy::Reconnect { reason: None }
+        );
+    }
+
+    #[test]
+    fn default_is_yielded_is_false() {
+        let transport = DefaultTransport;
+        assert!(!transport.is_yielded());
+    }
 }
