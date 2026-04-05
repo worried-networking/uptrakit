@@ -740,10 +740,20 @@ mod tests {
             .min()
             .unwrap_or(rest.len());
         let impl_body = &rest[..next_top_level_item];
+        let close_policy_marker = "fn close_policy(&self)";
+        let close_policy_start = impl_body
+            .find(close_policy_marker)
+            .expect("ControllerConnection must override close_policy() in ServiceTransport impl");
+        let close_policy_tail = &impl_body[close_policy_start..];
+        let close_policy_end = close_policy_tail
+            .find("\n    }\n")
+            .map(|idx| idx + "\n    }\n".len())
+            .unwrap_or(close_policy_tail.len());
+        let close_policy_body = &close_policy_tail[..close_policy_end];
 
         assert!(
-            impl_body.contains("fn close_policy(&self)"),
-            "ControllerConnection must override close_policy() in ServiceTransport impl"
+            close_policy_body.contains("close_reason_to_policy(self.close_reason())"),
+            "ControllerConnection close_policy() must delegate to close_reason_to_policy(self.close_reason())"
         );
     }
 }
