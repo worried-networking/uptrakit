@@ -27,12 +27,30 @@ use crate::signal::Signal;
 /// Each variant carries the semantic meaning needed by the lifecycle to
 /// decide whether to re-enroll, reconnect with backoff, or propagate —
 /// without requiring services to construct internal SDK error types.
+///
+/// Classification priority for `EnrollmentError -> LoopError` conversion:
+///
+/// | Priority | Predicate | `LoopError` variant |
+/// | --- | --- | --- |
+/// | 1 | `is_cert_expired()` | `CertExpired` |
+/// | 2 | `is_receive_closed()` | `ReceiveClosed` |
+/// | 3 | `is_transient_network()` | `TransientNetwork` |
+/// | 4 | fallback | `Other` |
+///
+/// Priority order is strict. Without this ordering and the guards in
+/// `is_transient_network()`, `WebSocket(Io(cert_expired))` could be
+/// misclassified as transient instead of `CertExpired`.
 #[derive(Debug, thiserror::Error)]
 pub enum LoopError {
     /// TLS handshake rejected: server considers our client certificate expired.
     #[error("certificate expired")]
     CertExpired,
     /// WebSocket connection cleanly closed by the controller.
+    ///
+    /// This variant is not produced by `ControllerConnection::recv()` inside
+    /// the authenticated event loop (that method maps close/EOF to `Ok(None)`).
+    /// It remains part of `LoopError` because the shared conversion from
+    /// `EnrollmentError` is reused by enrollment/lifecycle callers.
     #[error("connection closed by controller")]
     ReceiveClosed,
     /// Transient network error (broken pipe, connection reset, DNS failure, etc.)

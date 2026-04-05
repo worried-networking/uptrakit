@@ -75,6 +75,54 @@ Each boundary owns its error enum and `Result<T>` alias. Cross-boundary conversi
 `impl_report_conversion!` and `.context_to()`. At the HTTP boundary, the orphan rule prevents
 `impl IntoResponse for Report<E>`, so errors are converted via `ApiError` (see Pattern 18).
 
+## Transport/Error Contract
+
+Service runtime transport errors use a three-layer hierarchy:
+
+| Layer | Type | Responsibility |
+| --- | --- | --- |
+| 1 | [`TransportError`](../../crates/shared/wire/src/transport.rs), [`ServiceTransport`](../../crates/shared/wire/src/transport.rs) | Opaque transport abstraction for shared business logic (`transport_recv(): Option<_>`). |
+| 2 | [`EnrollmentError`](../../crates/shared/service-sdk/src/error.rs), [`ControllerConnection::recv()`](../../crates/shared/service-sdk/src/connection.rs) | Rich receive-side classification (`Result<Option<_>, Report<EnrollmentError>>`). |
+| 3 | [`LoopError`](../../crates/shared/service-sdk/src/shared_types.rs), [`handle_recv_error()`](../../crates/shared/service-sdk/src/event_loop.rs) | Lifecycle-facing policy (absorb as disconnected vs propagate with typed error). |
+
+`EnrollmentError -> LoopError` classification priority is strict:
+
+| Priority | Predicate | Result |
+| --- | --- | --- |
+| 1 | `is_cert_expired()` | `LoopError::CertExpired` |
+| 2 | `is_receive_closed()` | `LoopError::ReceiveClosed` |
+| 3 | `is_transient_network()` | `LoopError::TransientNetwork(_)` |
+| 4 | fallback | `LoopError::Other(_)` |
+
+`handle_recv_error()` in
+[`event_loop.rs`](../../crates/shared/service-sdk/src/event_loop.rs) applies a
+two-phase decision:
+
+- **Phase 1 (pre-conversion):** `should_absorb_as_disconnected()` returns
+  `true` for transient/closed conditions that should become
+  `Ok(Some(LoopOutcome::Disconnected))` (reconnect path with backoff reset).
+- **Phase 2 (conversion):** all remaining errors are converted via
+  `.context_to::<LoopError>()` and propagated as `Err(Report<LoopError>)`.
+
+`ProtocolError::ReceiveClosed` is unreachable from
+`ControllerConnection::recv()` during the authenticated event loop: close/EOF
+paths are classified by `classify_ws_frame()` and mapped to `Ok(None)`.
+
+### CertificateRevoked Classification
+
+`CertificateRevoked` is intentionally closed across all wrapping paths:
+
+- `EnrollmentError::Tls(TlsError::Rustls(AlertReceived(CertificateRevoked)))`
+- `EnrollmentError::WebSocket(tungstenite::Error::Io(io_with_revoked_alert))`
+- `EnrollmentError::Io(io_with_revoked_alert)`
+
+All three classify to `LoopError::Other(_)` (not transient).
+
+Other documentation areas (`docs/api/`, `docs/architecture/`,
+`docs/security/`, `docs/end-user/`) are unaffected. This change corrects
+internal error classification logic without changing wire formats, API
+endpoints, deployment procedures, or security posture.
+
 ## Complete Real-World Example
 
 A minimal but complete boundary showing all pieces together:

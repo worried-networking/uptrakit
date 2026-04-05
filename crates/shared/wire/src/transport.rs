@@ -1,20 +1,43 @@
-//! Transport-agnostic message sending interface.
+//! Transport abstraction shared by service business logic.
 //!
-//! [`ServiceTransport`] abstracts the send/receive side of a service's
-//! connection to the controller. Concrete implementations exist for:
+//! # Layered Error Contract
 //!
-//! - **`ControllerConnection`** (WebSocket) in `service-sdk`
-//! - **`EmbeddedTransport`** (mpsc channels) in the controller crate
+//! The service runtime uses three error layers:
+//!
+//! - **Layer 1 (this module)**: [`ServiceTransport`] + [`TransportError`].
+//!   This layer is intentionally lossy: send failures collapse to an opaque
+//!   `TransportError`, and receive failures collapse to `None`.
+//! - **Layer 2 (`service-sdk`)**: `ControllerConnection::recv()`.
+//!   This layer keeps rich receive fidelity via
+//!   `Result<Option<ControllerMessage>, Report<EnrollmentError>>`.
+//! - **Layer 3 (`service-sdk`)**: event-loop/lifecycle classification.
+//!   This layer maps `EnrollmentError` to `LoopError` and decides reconnect
+//!   semantics (`Disconnected`, backoff, or fatal propagation).
 //!
 //! `agent-core` functions accept `&mut dyn ServiceTransport` so the same
-//! update/version-check logic works for both standalone and embedded agents.
+//! logic can run with either WebSocket or in-process channel transports.
+//!
+//! # `transport_recv()` Terminal Contract
+//!
+//! `transport_recv()` returns `Option<ControllerMessage>`:
+//!
+//! - `Some(message)` => keep processing.
+//! - `None` => transport is closed or broken; stop reading.
+//!
+//! Layer 1 callers must not distinguish clean close from transport error.
+//!
+//! # Unresolved Gaps
+//!
+//! `ServiceTransport` intentionally has no `transport_close()` method.
+//! Close semantics are transport-specific and managed by lifecycle owners,
+//! not by shared business logic.
 
 use crate::messages::{ControllerMessage, ServiceMessage};
 
-/// Error returned when a transport send operation fails.
+/// Opaque send-failure marker for [`ServiceTransport`].
 ///
-/// Deliberately opaque — callers should treat any send failure as a reason
-/// to disconnect/reconnect rather than inspecting the cause.
+/// Layer 1 deliberately erases transport-specific failure details. Callers
+/// should treat any `TransportError` as a disconnect/reconnect signal.
 #[derive(Debug, thiserror::Error)]
 #[error("transport send failed")]
 pub struct TransportError;
@@ -43,6 +66,18 @@ pub trait ServiceTransport: Send {
 
     /// Receive the next controller message.
     ///
-    /// Returns `None` on clean close or when the transport is shut down.
+    /// # Contract
+    ///
+    /// `None` is the terminal condition for this abstraction:
+    ///
+    /// - clean close
+    /// - peer-closed stream
+    /// - receive-side transport failure
+    ///
+    /// Layer 1 callers must treat all three the same and stop reading.
+    ///
+    /// In production, standalone services bypass this lossy method and call
+    /// `ControllerConnection::recv()` directly for richer error handling.
+    /// The `None` contract here is exercised by embedded channel transports.
     async fn transport_recv(&mut self) -> Option<ControllerMessage>;
 }

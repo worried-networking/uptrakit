@@ -209,7 +209,30 @@ impl ControllerConnection {
 
     /// Receive the next [`ControllerMessage`] from the controller.
     ///
-    /// Returns `Ok(None)` on clean close or peer-closed.
+    /// # Return values
+    ///
+    /// - `Ok(Some(msg))`: a decoded controller message with validated protocol
+    ///   version and sequence.
+    /// - `Ok(None)`: close/EOF terminal condition (close frame, peer-closed,
+    ///   or stream end).
+    /// - `Err(Report<EnrollmentError>)`: transport/protocol failure.
+    ///
+    /// `ProtocolError::ReceiveClosed` is never produced by this method.
+    /// Close/EOF outcomes are classified by [`classify_ws_frame()`] and mapped
+    /// to `Ok(None)`.
+    ///
+    /// # Writer-health check
+    ///
+    /// Every loop iteration calls [`check_write_error`](Self::check_write_error)
+    /// before reading. If the background writer task failed, this method
+    /// returns `Err(EnrollmentError::Protocol(ProtocolError::SendTimeout))`.
+    ///
+    /// # Sequence and Version Validation
+    ///
+    /// [`validate_header`](Self::validate_header) enforces:
+    ///
+    /// - protocol version equality (`ProtocolError::VersionMismatch`)
+    /// - monotonic sequence validation (`ProtocolError::Enrollment("sequence validation failed: ...")`)
     ///
     /// Automatically:
     /// - Responds to WebSocket `Ping` with `Pong` (via the write channel)
@@ -470,6 +493,11 @@ impl ControllerConnection {
     }
 }
 
+/// Lossy Layer-2 -> Layer-1 bridge for generic transport callers.
+///
+/// Production lifecycle code does not use this impl for receive-side logic.
+/// It calls [`ControllerConnection::recv()`] directly to retain typed
+/// `EnrollmentError` information.
 #[async_trait::async_trait]
 impl uptrakit_internal_wire::ServiceTransport for ControllerConnection {
     async fn transport_send(
@@ -494,6 +522,13 @@ impl uptrakit_internal_wire::ServiceTransport for ControllerConnection {
             .map_err(|_| uptrakit_internal_wire::TransportError)
     }
 
+    /// Bridge `ControllerConnection::recv()` into Layer 1 `Option` semantics.
+    ///
+    /// All `Err` values are intentionally erased to `None` for the
+    /// `ServiceTransport` contract.
+    ///
+    /// This method exists for trait compliance. The authenticated event loop
+    /// calls [`ControllerConnection::recv()`] directly.
     async fn transport_recv(&mut self) -> Option<uptrakit_internal_wire::ControllerMessage> {
         match self.recv().await {
             Ok(msg) => msg,

@@ -327,8 +327,16 @@ fn handle_recv_error(
 ///
 /// Returns `Ok(Some(outcome))` when the event loop should break with that
 /// outcome, or `Ok(None)` when the loop should continue to the next
-/// iteration. Transient network errors are mapped to
-/// `Ok(Some(LoopOutcome::Disconnected))` for automatic reconnection.
+/// iteration.
+///
+/// Receive-error handling is delegated to [`handle_recv_error()`], which is
+/// the single production Phase 1/Phase 2 branch point:
+///
+/// - Phase 1 (`should_absorb_as_disconnected`) => `Ok(Some(Disconnected))`
+/// - Phase 2 (`context_to::<LoopError>()`) => `Err(Report<LoopError>)`
+///
+/// The `match msg { ... }` body below handles only successful `recv()` paths
+/// (`Option<ControllerMessage>`), not the error classification logic.
 async fn handle_controller_message<H: ServiceHandler>(
     msg: crate::error::Result<Option<ControllerMessage>>,
     handler: &mut H,
@@ -469,6 +477,21 @@ async fn process_service_settings<H: ServiceHandler>(
 }
 
 /// Map a WebSocket close reason to a [`LoopOutcome`].
+///
+/// | `CloseReason` | `LoopOutcome` |
+/// | --- | --- |
+/// | `CertificateRotated` | `Reconnect` |
+/// | `CertificateRevoked` | `Disconnected` |
+/// | any other close reason | `Disconnected` |
+/// | `None` | `Disconnected` |
+///
+/// All close reasons flow through the `Ok` path in the lifecycle (backoff is
+/// reset). For `CertificateRevoked`, two runtime paths exist:
+///
+/// - TLS handshake may fail first, producing `LoopError::Other` via
+///   [`handle_recv_error()`].
+/// - If the server accepts then sends a `CertificateRevoked` close frame,
+///   this function maps it to `Disconnected`.
 fn dispatch_close_reason(reason: Option<&CloseReason>) -> LoopOutcome {
     match reason {
         Some(CloseReason::CertificateRotated) => {

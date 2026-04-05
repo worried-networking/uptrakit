@@ -136,10 +136,11 @@ impl EnrollmentError {
     ///
     /// The following are considered transient:
     /// - [`EnrollmentError::WebSocket`] — network-level connection error (TCP
-    ///   refused, DNS failure, TLS handshake, etc.)
+    ///   refused, DNS failure, TLS handshake, etc.), except
+    ///   `WebSocket(Io(_))` wrapping rustls certificate-expired/revoked alerts.
     /// - [`EnrollmentError::Io`] — TCP reset, connection refused, etc.,
-    ///   **unless** the underlying error is a rustls `CertificateExpired` alert
-    ///   (which is permanent: the agent's client certificate needs renewal).
+    ///   **unless** the underlying error wraps rustls `CertificateExpired` or
+    ///   `CertificateRevoked` alerts.
     /// - [`ProtocolError::ConnectionTimeout`] — explicit TCP connect timeout.
     /// - [`ProtocolError::SendTimeout`] — write blocked until the OS buffer filled
     ///   (controller stopped consuming); the connection is dead and should reconnect.
@@ -152,6 +153,10 @@ impl EnrollmentError {
     /// - `Json::*` — protocol-level serialization error.
     /// - `Directory::*` — filesystem access failure.
     /// - `Tls::InvalidDnsName` — hostname is malformed (permanent).
+    ///
+    /// Note: `EnrollmentError::Tls(TlsError::Rustls(...))` is also non-transient.
+    /// There is no `Self::Tls(_)` match arm below, so TLS errors fall through
+    /// to `_ => false`.
     pub fn is_transient_network(&self) -> bool {
         match self {
             Self::WebSocket(tokio_tungstenite::tungstenite::Error::Io(io_err)) => {

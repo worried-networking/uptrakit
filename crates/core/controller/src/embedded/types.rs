@@ -24,6 +24,12 @@ use uuid::Uuid;
 /// by mpsc channels. The `yielded` flag is set by the `EmbeddedServiceHost`
 /// when the coexistence policy dictates that this embedded service should
 /// defer to an external counterpart.
+///
+/// `transport_recv()` follows the Layer-1 `Option` contract:
+/// `None` means the inbound channel sender was dropped. In normal shutdown
+/// flow, the shutdown signal resolves before channel closure. The host
+/// cancels and joins tasks before releasing senders. If `None` is reached,
+/// the embedded service loop exits without reconnection.
 #[allow(dead_code)] // Transport methods are used by service closures, not directly by the host.
 pub(crate) struct EmbeddedTransport {
     tx: mpsc::Sender<ServiceMessage>,
@@ -88,6 +94,8 @@ impl uptrakit_internal_wire::ServiceTransport for EmbeddedTransport {
     }
 
     async fn transport_recv(&mut self) -> Option<ControllerMessage> {
+        // Channel transports cannot surface typed transport errors here;
+        // `None` is always the terminal receive condition.
         self.rx.recv().await
     }
 }
