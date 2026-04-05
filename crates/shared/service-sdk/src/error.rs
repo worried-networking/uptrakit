@@ -384,6 +384,7 @@ mod tests {
         let io_err = std::io::Error::other(rustls_err);
         let err = EnrollmentError::Io(io_err);
         // Cert-expired IO errors must NOT be retried.
+        assert!(err.is_cert_expired());
         assert!(!err.is_transient_network());
     }
 
