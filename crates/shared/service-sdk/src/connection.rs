@@ -554,6 +554,8 @@ async fn writer_task(
 #[cfg(test)]
 mod tests {
     use super::{RecvAction, classify_ws_frame};
+    use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+    use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
     use tokio_tungstenite::tungstenite::{Error as WsErr, Message};
 
     #[test]
@@ -564,8 +566,11 @@ mod tests {
 
     #[test]
     fn classify_ws_frame_close_is_close_frame() {
-        let action = classify_ws_frame(Some(Ok(Message::Close(None))));
-        assert!(matches!(action, RecvAction::CloseFrame(None)));
+        let action = classify_ws_frame(Some(Ok(Message::Close(Some(CloseFrame {
+            code: CloseCode::Normal,
+            reason: "bye".into(),
+        })))));
+        assert!(matches!(action, RecvAction::CloseFrame(Some(_))));
     }
 
     #[test]

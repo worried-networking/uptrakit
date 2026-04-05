@@ -493,6 +493,7 @@ fn dispatch_close_reason(reason: Option<&CloseReason>) -> LoopOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::{EnrollmentError, ProtocolError, TlsError};
 
     #[test]
     fn dispatch_close_reason_cert_rotated() {
@@ -524,35 +525,106 @@ mod tests {
     }
 
     #[test]
-    fn phase1_cert_expired_not_absorbed() {
-        let err = crate::error::EnrollmentError::WebSocket(
-            tokio_tungstenite::tungstenite::Error::Io(std::io::Error::other(
-                rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired),
+    fn phase1_cert_expired_websocket_io_not_absorbed() {
+        let err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(
+            std::io::Error::other(rustls::Error::AlertReceived(
+                rustls::AlertDescription::CertificateExpired,
             )),
-        );
+        ));
+        assert!(!should_absorb_as_disconnected(&err));
+    }
+
+    #[test]
+    fn phase1_cert_expired_tls_direct_not_absorbed() {
+        let err = EnrollmentError::Tls(TlsError::Rustls(rustls::Error::AlertReceived(
+            rustls::AlertDescription::CertificateExpired,
+        )));
+        assert!(!should_absorb_as_disconnected(&err));
+    }
+
+    #[test]
+    fn phase1_transient_connection_reset_absorbed() {
+        let err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(
+            std::io::Error::from(std::io::ErrorKind::ConnectionReset),
+        ));
+        assert!(should_absorb_as_disconnected(&err));
+    }
+
+    #[test]
+    fn phase1_transient_connection_timeout_absorbed() {
+        let err = EnrollmentError::Protocol(ProtocolError::ConnectionTimeout);
+        assert!(should_absorb_as_disconnected(&err));
+    }
+
+    #[test]
+    fn phase1_cert_revoked_websocket_io_not_absorbed() {
+        let err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(
+            std::io::Error::other(rustls::Error::AlertReceived(
+                rustls::AlertDescription::CertificateRevoked,
+            )),
+        ));
+        assert!(!should_absorb_as_disconnected(&err));
+    }
+
+    #[test]
+    fn phase1_receive_closed_absorbed() {
+        let err = EnrollmentError::Protocol(ProtocolError::ReceiveClosed);
+        assert!(should_absorb_as_disconnected(&err));
+    }
+
+    #[test]
+    fn phase1_version_mismatch_not_absorbed() {
+        let err = EnrollmentError::Protocol(ProtocolError::VersionMismatch {
+            expected: 1,
+            received: 2,
+        });
         assert!(!should_absorb_as_disconnected(&err));
     }
 
     #[test]
     fn recv_error_transient_reset_produces_disconnected() {
-        let err =
-            crate::error::EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(
-                std::io::Error::from(std::io::ErrorKind::ConnectionReset),
-            ));
+        let err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(
+            std::io::Error::from(std::io::ErrorKind::ConnectionReset),
+        ));
         let result = handle_recv_error(report!(err));
         assert!(matches!(result, Ok(Some(LoopOutcome::Disconnected))));
     }
 
     #[test]
     fn recv_error_cert_expired_produces_loop_error() {
-        let err = crate::error::EnrollmentError::WebSocket(
-            tokio_tungstenite::tungstenite::Error::Io(std::io::Error::other(
-                rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired),
+        let err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(
+            std::io::Error::other(rustls::Error::AlertReceived(
+                rustls::AlertDescription::CertificateExpired,
             )),
-        );
+        ));
         let result = handle_recv_error(report!(err));
         assert!(result.is_err());
         let loop_err = result.expect_err("cert-expired must flow to phase 2");
         assert!(matches!(loop_err.current_context(), LoopError::CertExpired));
+    }
+
+    #[test]
+    fn recv_error_fatal_version_mismatch_produces_other() {
+        let err = EnrollmentError::Protocol(ProtocolError::VersionMismatch {
+            expected: 1,
+            received: 2,
+        });
+        let result = handle_recv_error(report!(err));
+        assert!(result.is_err());
+        let loop_err = result.expect_err("version mismatch must flow to phase 2");
+        assert!(matches!(loop_err.current_context(), LoopError::Other(_)));
+    }
+
+    #[test]
+    fn recv_error_cert_revoked_produces_other() {
+        let err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(
+            std::io::Error::other(rustls::Error::AlertReceived(
+                rustls::AlertDescription::CertificateRevoked,
+            )),
+        ));
+        let result = handle_recv_error(report!(err));
+        assert!(result.is_err());
+        let loop_err = result.expect_err("cert-revoked must flow to phase 2");
+        assert!(matches!(loop_err.current_context(), LoopError::Other(_)));
     }
 }

@@ -253,3 +253,114 @@ pub trait ServiceHandler: Send {
         shutdown_timeout: Duration,
     ) -> LoopOutcome;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::*;
+
+    #[test]
+    fn conversion_cert_expired_tls() {
+        let enrollment_err = EnrollmentError::Tls(TlsError::Rustls(rustls::Error::AlertReceived(
+            rustls::AlertDescription::CertificateExpired,
+        )));
+        let report: Report<EnrollmentError> = report!(enrollment_err);
+        let loop_report: Report<LoopError> = report.context_to();
+        assert!(matches!(
+            loop_report.current_context(),
+            LoopError::CertExpired
+        ));
+    }
+
+    #[test]
+    fn conversion_cert_expired_websocket_io() {
+        let enrollment_err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(
+            std::io::Error::other(rustls::Error::AlertReceived(
+                rustls::AlertDescription::CertificateExpired,
+            )),
+        ));
+        let report: Report<EnrollmentError> = report!(enrollment_err);
+        let loop_report: Report<LoopError> = report.context_to();
+        assert!(matches!(
+            loop_report.current_context(),
+            LoopError::CertExpired
+        ));
+    }
+
+    #[test]
+    fn conversion_cert_revoked_tls() {
+        let enrollment_err = EnrollmentError::Tls(TlsError::Rustls(rustls::Error::AlertReceived(
+            rustls::AlertDescription::CertificateRevoked,
+        )));
+        let report: Report<EnrollmentError> = report!(enrollment_err);
+        let loop_report: Report<LoopError> = report.context_to();
+        assert!(matches!(loop_report.current_context(), LoopError::Other(_)));
+    }
+
+    #[test]
+    fn conversion_cert_revoked_websocket_io() {
+        let enrollment_err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(
+            std::io::Error::other(rustls::Error::AlertReceived(
+                rustls::AlertDescription::CertificateRevoked,
+            )),
+        ));
+        let report: Report<EnrollmentError> = report!(enrollment_err);
+        let loop_report: Report<LoopError> = report.context_to();
+        assert!(matches!(loop_report.current_context(), LoopError::Other(_)));
+    }
+
+    #[test]
+    fn conversion_cert_revoked_io_direct() {
+        let enrollment_err = EnrollmentError::Io(std::io::Error::other(
+            rustls::Error::AlertReceived(rustls::AlertDescription::CertificateRevoked),
+        ));
+        let report: Report<EnrollmentError> = report!(enrollment_err);
+        let loop_report: Report<LoopError> = report.context_to();
+        assert!(matches!(loop_report.current_context(), LoopError::Other(_)));
+    }
+
+    #[test]
+    fn conversion_transient_websocket() {
+        let enrollment_err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(
+            std::io::Error::from(std::io::ErrorKind::ConnectionReset),
+        ));
+        let report: Report<EnrollmentError> = report!(enrollment_err);
+        let loop_report: Report<LoopError> = report.context_to();
+        assert!(matches!(
+            loop_report.current_context(),
+            LoopError::TransientNetwork(_)
+        ));
+    }
+
+    #[test]
+    fn conversion_receive_closed() {
+        let enrollment_err = EnrollmentError::Protocol(ProtocolError::ReceiveClosed);
+        let report: Report<EnrollmentError> = report!(enrollment_err);
+        let loop_report: Report<LoopError> = report.context_to();
+        assert!(matches!(
+            loop_report.current_context(),
+            LoopError::ReceiveClosed
+        ));
+    }
+
+    #[test]
+    fn conversion_version_mismatch() {
+        let enrollment_err = EnrollmentError::Protocol(ProtocolError::VersionMismatch {
+            expected: 1,
+            received: 2,
+        });
+        let report: Report<EnrollmentError> = report!(enrollment_err);
+        let loop_report: Report<LoopError> = report.context_to();
+        assert!(matches!(loop_report.current_context(), LoopError::Other(_)));
+    }
+
+    #[test]
+    fn conversion_sequence_validation() {
+        let enrollment_err = EnrollmentError::Protocol(ProtocolError::Enrollment(
+            "sequence validation failed: expected 5 got 3".to_string(),
+        ));
+        let report: Report<EnrollmentError> = report!(enrollment_err);
+        let loop_report: Report<LoopError> = report.context_to();
+        assert!(matches!(loop_report.current_context(), LoopError::Other(_)));
+    }
+}
