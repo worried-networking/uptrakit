@@ -218,18 +218,18 @@ impl ControllerConnection {
     /// - `Err(Report<EnrollmentError>)`: transport/protocol failure.
     ///
     /// `ProtocolError::ReceiveClosed` is never produced by this method.
-    /// Close/EOF outcomes are classified by [`classify_ws_frame()`] and mapped
+    /// Close/EOF outcomes are classified by `classify_ws_frame()` and mapped
     /// to `Ok(None)`.
     ///
     /// # Writer-health check
     ///
-    /// Every loop iteration calls [`check_write_error`](Self::check_write_error)
+    /// Every loop iteration calls `check_write_error()`
     /// before reading. If the background writer task failed, this method
     /// returns `Err(EnrollmentError::Protocol(ProtocolError::SendTimeout))`.
     ///
     /// # Sequence and Version Validation
     ///
-    /// [`validate_header`](Self::validate_header) enforces:
+    /// `validate_header()` enforces:
     ///
     /// - protocol version equality (`ProtocolError::VersionMismatch`)
     /// - monotonic sequence validation (`ProtocolError::Enrollment("sequence validation failed: ...")`)
