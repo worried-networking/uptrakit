@@ -113,6 +113,19 @@ pub fn is_rustls_cert_expired(io_err: &std::io::Error) -> bool {
     false
 }
 
+/// Check if an `std::io::Error` wraps a rustls `CertificateRevoked` alert.
+pub fn is_rustls_cert_revoked(io_err: &std::io::Error) -> bool {
+    if let Some(inner) = io_err.get_ref()
+        && let Some(rustls_err) = inner.downcast_ref::<rustls::Error>()
+    {
+        return matches!(
+            rustls_err,
+            rustls::Error::AlertReceived(rustls::AlertDescription::CertificateRevoked)
+        );
+    }
+    false
+}
+
 impl EnrollmentError {
     /// `true` when the controller closed the connection (normal during merges or restarts).
     pub fn is_receive_closed(&self) -> bool {
@@ -141,8 +154,11 @@ impl EnrollmentError {
     /// - `Tls::InvalidDnsName` — hostname is malformed (permanent).
     pub fn is_transient_network(&self) -> bool {
         match self {
+            Self::WebSocket(tokio_tungstenite::tungstenite::Error::Io(io_err)) => {
+                !is_rustls_cert_expired(io_err) && !is_rustls_cert_revoked(io_err)
+            }
             Self::WebSocket(_) => true,
-            Self::Io(e) if !is_rustls_cert_expired(e) => true,
+            Self::Io(e) if !is_rustls_cert_expired(e) && !is_rustls_cert_revoked(e) => true,
             Self::Protocol(ProtocolError::ConnectionTimeout | ProtocolError::SendTimeout) => true,
             _ => false,
         }

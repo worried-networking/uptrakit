@@ -289,6 +289,40 @@ async fn handle_service_settings(
     .await;
 }
 
+/// `true` when a `recv()` error should be absorbed by Phase 1 as
+/// `LoopOutcome::Disconnected` (triggering reconnection with backoff reset)
+/// rather than falling through to Phase 2 `context_to::<LoopError>()` conversion.
+///
+/// The `!is_cert_expired()` guard ensures cert-expired errors are never
+/// misclassified as transient — they must reach Phase 2 to produce
+/// `LoopError::CertExpired`. This implements the Phase 1 guard from the
+/// classification priority table (see `LoopError` doc-comment).
+fn should_absorb_as_disconnected(ctx: &crate::error::EnrollmentError) -> bool {
+    !ctx.is_cert_expired() && (ctx.is_transient_network() || ctx.is_receive_closed())
+}
+
+/// Classify a `recv()` error through the Phase 1 / Phase 2 pipeline.
+///
+/// - **Phase 1**: if `should_absorb_as_disconnected()` returns `true`, the
+///   error is a transient disconnection → return `Ok(Some(Disconnected))`
+///   (the lifecycle resets backoff and reconnects).
+/// - **Phase 2**: otherwise, convert via `context_to::<LoopError>()` and
+///   propagate as `Err(Report<LoopError>)` (the lifecycle applies backoff
+///   based on the `LoopError` variant).
+///
+/// This function is the single production branch point for recv errors.
+/// Both `handle_controller_message()` and unit tests invoke it directly.
+fn handle_recv_error(
+    error: Report<crate::error::EnrollmentError>,
+) -> LoopResult<Option<LoopOutcome>> {
+    if should_absorb_as_disconnected(error.current_context()) {
+        tracing::warn!(error = %error, "connection lost, will reconnect");
+        Ok(Some(LoopOutcome::Disconnected))
+    } else {
+        Err(error.context_to())
+    }
+}
+
 /// Dispatch a single controller message received from `conn.recv()`.
 ///
 /// Returns `Ok(Some(outcome))` when the event loop should break with that
@@ -304,15 +338,11 @@ async fn handle_controller_message<H: ServiceHandler>(
     identity: &mut ServiceIdentityState,
     ctx: &EventLoopContext<'_>,
 ) -> LoopResult<Option<LoopOutcome>> {
-    // Check for transient network errors before converting to LoopError.
-    // A broken pipe, connection reset, or similar transport failure during
-    // recv() is a disconnection — not a fatal protocol error.
-    if let Err(ref e) = msg
-        && (e.current_context().is_transient_network() || e.current_context().is_receive_closed())
-    {
-        tracing::warn!(error = %e, "connection lost, will reconnect");
-        return Ok(Some(LoopOutcome::Disconnected));
-    }
+    // Handle recv errors: Phase 1 absorption or Phase 2 conversion.
+    let msg = match msg {
+        Ok(msg) => msg,
+        Err(e) => return handle_recv_error(e),
+    };
 
     // ── SDK/handler dispatch boundary ────────────────────────────────────────
     //
@@ -340,7 +370,7 @@ async fn handle_controller_message<H: ServiceHandler>(
     // in `crates/shared/wire/src/tests.rs`.  When adding a new SDK-owned arm here,
     // also update that function and the `expected_sdk_owned` set in
     // `test_variant_catalog_classification`.
-    match msg.context_to::<LoopError>()? {
+    match msg {
         Some(ControllerMessage::Pong(pong)) => {
             let rtt = now_millis() - pong.service_ts;
             tracing::trace!(
