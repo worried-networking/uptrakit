@@ -332,11 +332,15 @@ pub struct SignalWatcher { /* platform-specific internals */ }
 impl SignalWatcher {
     pub fn new() -> std::io::Result<Self>;
     pub async fn recv(&mut self) -> Signal;
+    pub fn poll_signal(&mut self, cx: &mut Context<'_>) -> Poll<Signal>;
 }
 ```
 
-On Unix, all three signals are monitored. On non-Unix platforms, only `Ctrl+C` (mapped to `Signal::Interrupt`) is available; the other arms use
-`std::future::pending()`.
+On Unix, all three signals are monitored. `poll_signal()` checks them in fixed-priority order:
+`SIGINT` > `SIGTERM` > `SIGHUP`. When multiple signals are pending, the highest-priority signal
+is returned first.
+
+On non-Unix platforms, only `Ctrl+C` (mapped to `Signal::Interrupt`) is available.
 
 ## `CertificateRenewalHandler`
 

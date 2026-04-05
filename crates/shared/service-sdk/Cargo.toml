@@ -33,6 +33,7 @@ time = { workspace = true }
 tokio = { workspace = true, features = ["net", "io-util", "time", "sync", "fs", "signal", "macros"] }
 tokio-rustls = { workspace = true }
 tokio-tungstenite = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde"] }
@@ -48,6 +49,7 @@ uptrakit-shared-types = { workspace = true }
 mdns-sd = { workspace = true, optional = true }
 
 [dev-dependencies]
+nix = { workspace = true, features = ["signal", "process"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 
