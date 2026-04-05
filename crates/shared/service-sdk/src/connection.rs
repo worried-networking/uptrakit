@@ -714,9 +714,11 @@ mod tests {
         ];
 
         for variant in variants {
-            assert_ne!(
+            assert_eq!(
                 close_reason_to_policy(Some(&variant)),
-                TransportClosePolicy::Shutdown
+                TransportClosePolicy::Reconnect {
+                    reason: Some(variant.clone()),
+                },
             );
         }
     }
