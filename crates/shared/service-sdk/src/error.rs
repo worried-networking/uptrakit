@@ -259,6 +259,33 @@ mod tests {
     }
 
     #[test]
+    fn is_cert_revoked_rustls_direct() {
+        let err = EnrollmentError::Tls(TlsError::Rustls(rustls::Error::AlertReceived(
+            rustls::AlertDescription::CertificateRevoked,
+        )));
+        assert!(!err.is_cert_expired());
+        assert!(!err.is_transient_network());
+    }
+
+    #[test]
+    fn is_cert_revoked_websocket_io() {
+        let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateRevoked);
+        let io_err = std::io::Error::other(rustls_err);
+        let err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(io_err));
+        assert!(!err.is_cert_expired());
+        assert!(!err.is_transient_network());
+    }
+
+    #[test]
+    fn is_cert_revoked_io_direct() {
+        let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateRevoked);
+        let io_err = std::io::Error::other(rustls_err);
+        let err = EnrollmentError::Io(io_err);
+        assert!(!err.is_cert_expired());
+        assert!(!err.is_transient_network());
+    }
+
+    #[test]
     fn is_rustls_cert_expired_helper_positive() {
         let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
         let io_err = std::io::Error::other(rustls_err);
@@ -285,12 +312,35 @@ mod tests {
         assert!(!is_rustls_cert_revoked(&io_err));
     }
 
+    #[test]
+    fn is_rustls_cert_revoked_helper_false_for_plain_io() {
+        let io_err = std::io::Error::from(std::io::ErrorKind::ConnectionReset);
+        assert!(!is_rustls_cert_revoked(&io_err));
+    }
+
     // ── is_transient_network tests ────────────────────────────────────────
 
     #[test]
     fn is_transient_network_websocket_error() {
         let err =
             EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
+        assert!(err.is_transient_network());
+    }
+
+    #[test]
+    fn websocket_protocol_is_transient() {
+        let err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Protocol(
+            tokio_tungstenite::tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
+        ));
+        assert!(err.is_transient_network());
+    }
+
+    #[test]
+    fn plain_websocket_io_is_transient() {
+        let err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(
+            std::io::Error::from(std::io::ErrorKind::ConnectionReset),
+        ));
+        assert!(!err.is_cert_expired());
         assert!(err.is_transient_network());
     }
 
@@ -322,6 +372,13 @@ mod tests {
     }
 
     #[test]
+    fn receive_closed_not_transient() {
+        let err = EnrollmentError::Protocol(ProtocolError::ReceiveClosed);
+        assert!(err.is_receive_closed());
+        assert!(!err.is_transient_network());
+    }
+
+    #[test]
     fn is_transient_network_cert_expired_io() {
         let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
         let io_err = std::io::Error::other(rustls_err);
@@ -335,6 +392,7 @@ mod tests {
         let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
         let io_err = std::io::Error::other(rustls_err);
         let err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(io_err));
+        assert!(err.is_cert_expired());
         assert!(!err.is_transient_network());
     }
 
