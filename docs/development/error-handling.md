@@ -236,6 +236,8 @@ impl_report_conversion!(EnrollmentError => LoopError, |e| {
         LoopError::CertExpired
     } else if e.is_receive_closed() {
         LoopError::ReceiveClosed
+    } else if e.is_transient_network() {
+        LoopError::TransientNetwork(e.to_string())
     } else {
         LoopError::Other(e.to_string())
     }
