@@ -32,6 +32,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_rustls::TlsConnector;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use uptrakit_internal_wire::{
     CURRENT_PROTOCOL_VERSION, Capability, CloseReason, ControllerEnvelope, ControllerMessage,
     IncomingSeq, OutgoingSeq, Paginatable, ReportPageLimits, ServiceMessage,
@@ -97,6 +98,61 @@ pub struct ControllerConnection {
     close_reason: Option<CloseReason>,
     agreed_capabilities: BTreeSet<Capability>,
     report_page_limits: ReportPageLimits,
+}
+
+/// Classification of a raw WebSocket frame for the `recv()` loop.
+///
+/// `recv()` delegates to [`classify_ws_frame()`] to determine the action
+/// for each raw frame. The close/EOF contract: [`CloseFrame`],
+/// [`RecvAction::PeerClosed`], and [`RecvAction::StreamEnd`] all cause `recv()`
+/// to return `Ok(None)`. No path through this classification can produce
+/// `ProtocolError::ReceiveClosed`.
+enum RecvAction {
+    /// Text or binary message payload — decode, validate, and return.
+    Message(tokio_tungstenite::tungstenite::Message),
+    /// WebSocket close frame received — store close reason, return `Ok(None)`.
+    CloseFrame(Option<CloseFrame>),
+    /// Peer closed the connection (transport-level) — return `Ok(None)`.
+    PeerClosed,
+    /// WebSocket stream exhausted — return `Ok(None)`.
+    StreamEnd,
+    /// Control frame (ping, pong, raw frame) — continue the loop.
+    Control(tokio_tungstenite::tungstenite::Message),
+    /// Transport error — propagate as `Err`.
+    TransportError(tokio_tungstenite::tungstenite::Error),
+}
+
+/// Classify a raw WebSocket frame result into a [`RecvAction`].
+///
+/// This is the production classification logic used by
+/// [`ControllerConnection::recv()`]. The close/EOF contract:
+/// `Close`, peer-closed errors (via [`is_peer_closed()`]), and stream
+/// exhaustion (`None`) all produce variants that map to `Ok(None)` in
+/// `recv()`. Transport errors produce [`RecvAction::TransportError`]
+/// which `recv()` propagates as `Err`.
+///
+/// The `is_peer_closed()` function matches:
+/// - `WsErr::Io(io)` where `io.kind()` is `UnexpectedEof | BrokenPipe |
+///   ConnectionReset | ConnectionAborted | NotConnected`
+/// - `WsErr::Protocol(ResetWithoutClosingHandshake | SendAfterClosing)`
+fn classify_ws_frame(
+    frame: Option<
+        std::result::Result<
+            tokio_tungstenite::tungstenite::Message,
+            tokio_tungstenite::tungstenite::Error,
+        >,
+    >,
+) -> RecvAction {
+    use tokio_tungstenite::tungstenite::Message;
+
+    match frame {
+        Some(Ok(msg @ (Message::Text(_) | Message::Binary(_)))) => RecvAction::Message(msg),
+        Some(Ok(Message::Close(frame))) => RecvAction::CloseFrame(frame),
+        Some(Ok(msg)) => RecvAction::Control(msg),
+        Some(Err(e)) if is_peer_closed(&e) => RecvAction::PeerClosed,
+        Some(Err(e)) => RecvAction::TransportError(e),
+        None => RecvAction::StreamEnd,
+    }
 }
 
 impl ControllerConnection {
@@ -167,14 +223,17 @@ impl ControllerConnection {
             // Check writer health before blocking on read.
             self.check_write_error()?;
 
-            match self.read.next().await {
-                Some(Ok(Message::Text(text))) => {
+            match classify_ws_frame(self.read.next().await) {
+                RecvAction::Message(Message::Text(text)) => {
                     return self.decode_text_message(&text);
                 }
-                Some(Ok(Message::Binary(data))) => {
+                RecvAction::Message(Message::Binary(data)) => {
                     return self.decode_binary_message(&data);
                 }
-                Some(Ok(Message::Ping(data))) => {
+                RecvAction::Message(_) => {
+                    unreachable!("classify_ws_frame returns Message only for Text/Binary")
+                }
+                RecvAction::Control(Message::Ping(data)) => {
                     tracing::trace!("received ping from controller");
                     // Push pong through the write channel (non-blocking).
                     if self
@@ -186,8 +245,8 @@ impl ControllerConnection {
                     }
                     continue;
                 }
-                Some(Ok(Message::Pong(_))) => continue,
-                Some(Ok(Message::Close(frame))) => {
+                RecvAction::Control(_) => continue,
+                RecvAction::CloseFrame(frame) => {
                     self.close_reason = frame.as_ref().map(|f| {
                         f.reason
                             .parse::<CloseReason>()
@@ -196,16 +255,15 @@ impl ControllerConnection {
                     log_close_frame(frame);
                     return Ok(None);
                 }
-                Some(Ok(Message::Frame(_))) => continue,
-                Some(Err(e)) if is_peer_closed(&e) => {
+                RecvAction::PeerClosed => {
                     tracing::info!("connection closed by controller");
                     return Ok(None);
                 }
-                Some(Err(e)) => {
-                    return Err(e).context_to::<EnrollmentError>()?;
-                }
-                None => {
+                RecvAction::StreamEnd => {
                     return Ok(None);
+                }
+                RecvAction::TransportError(e) => {
+                    return Err(e).context_to::<EnrollmentError>()?;
                 }
             }
         }
