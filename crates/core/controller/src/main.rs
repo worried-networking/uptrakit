@@ -48,6 +48,7 @@ use tokio_util::sync::CancellationToken;
 use tracing_subscriber::prelude::*;
 use uptrakit_audit_log::{AuditFilter, AuditLogDispatcher};
 use uptrakit_build_info::BuildInfo;
+use uptrakit_internal_wire::ServiceTransport;
 use uptrakit_shared_macros::impl_report_conversion;
 
 use uptrakit_web_api::AppState;

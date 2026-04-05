@@ -8,7 +8,7 @@
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{Capability, ControllerMessage, ServiceMessage};
@@ -58,11 +58,6 @@ impl EmbeddedTransport {
     pub(crate) async fn recv(&mut self) -> Option<ControllerMessage> {
         self.rx.recv().await
     }
-
-    /// Check whether this embedded service is currently yielded.
-    pub(crate) fn is_yielded(&self) -> bool {
-        self.yielded.load(std::sync::atomic::Ordering::Relaxed)
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +92,14 @@ impl uptrakit_internal_wire::ServiceTransport for EmbeddedTransport {
         // Channel transports cannot surface typed transport errors here;
         // `None` is always the terminal receive condition.
         self.rx.recv().await
+    }
+
+    fn close_policy(&self) -> uptrakit_internal_wire::TransportClosePolicy {
+        uptrakit_internal_wire::TransportClosePolicy::Shutdown
+    }
+
+    fn is_yielded(&self) -> bool {
+        self.yielded.load(Ordering::Relaxed)
     }
 }
 
@@ -134,4 +137,59 @@ pub(crate) enum CoexistencePolicy {
     Custom(YieldCheckFn),
     /// Never yield — always coexist with external services.
     NeverYield,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::sync::mpsc;
+    use uptrakit_internal_wire::ServiceTransport;
+
+    fn make_transport(
+        yielded: bool,
+    ) -> (
+        EmbeddedTransport,
+        Arc<AtomicBool>,
+        mpsc::Receiver<ServiceMessage>,
+        mpsc::Sender<ControllerMessage>,
+    ) {
+        let (svc_tx, svc_rx) = mpsc::channel::<ServiceMessage>(1);
+        let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControllerMessage>(1);
+        let flag = Arc::new(AtomicBool::new(yielded));
+        let transport = EmbeddedTransport::new(svc_tx, ctrl_rx, Arc::clone(&flag));
+        (transport, flag, svc_rx, ctrl_tx)
+    }
+
+    #[test]
+    fn close_policy_returns_shutdown() {
+        let (transport, _flag, _rx, _tx) = make_transport(false);
+        assert_eq!(
+            transport.close_policy(),
+            uptrakit_internal_wire::TransportClosePolicy::Shutdown,
+        );
+    }
+
+    #[test]
+    fn is_yielded_returns_false_when_flag_is_false() {
+        let (transport, _flag, _rx, _tx) = make_transport(false);
+        assert!(!transport.is_yielded());
+    }
+
+    #[test]
+    fn is_yielded_returns_true_when_flag_is_true() {
+        let (transport, _flag, _rx, _tx) = make_transport(true);
+        assert!(transport.is_yielded());
+    }
+
+    #[test]
+    fn is_yielded_reflects_runtime_flag_change() {
+        let (transport, flag, _rx, _tx) = make_transport(false);
+        assert!(!transport.is_yielded());
+        flag.store(true, Ordering::Release);
+        assert!(transport.is_yielded());
+        flag.store(false, Ordering::Release);
+        assert!(!transport.is_yielded());
+    }
 }

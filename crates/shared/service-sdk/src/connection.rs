@@ -493,6 +493,19 @@ impl ControllerConnection {
     }
 }
 
+/// Map the cached close reason to a transport close policy.
+///
+/// Extracted for testability: `ControllerConnection::close_policy()`
+/// delegates to this helper, and tests can exercise the mapping without
+/// constructing a live WebSocket-backed connection.
+fn close_reason_to_policy(
+    reason: Option<&CloseReason>,
+) -> uptrakit_internal_wire::TransportClosePolicy {
+    uptrakit_internal_wire::TransportClosePolicy::Reconnect {
+        reason: reason.cloned(),
+    }
+}
+
 /// Lossy Layer-2 -> Layer-1 bridge for generic transport callers.
 ///
 /// Production lifecycle code does not use this impl for receive-side logic.
@@ -537,6 +550,10 @@ impl uptrakit_internal_wire::ServiceTransport for ControllerConnection {
                 None
             }
         }
+    }
+
+    fn close_policy(&self) -> uptrakit_internal_wire::TransportClosePolicy {
+        close_reason_to_policy(self.close_reason())
     }
 }
 
@@ -588,10 +605,11 @@ async fn writer_task(
 
 #[cfg(test)]
 mod tests {
-    use super::{RecvAction, classify_ws_frame};
+    use super::{RecvAction, classify_ws_frame, close_reason_to_policy};
     use tokio_tungstenite::tungstenite::protocol::CloseFrame;
     use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
     use tokio_tungstenite::tungstenite::{Error as WsErr, Message};
+    use uptrakit_internal_wire::{CloseReason, TransportClosePolicy};
 
     #[test]
     fn classify_ws_frame_text_is_message() {
@@ -626,5 +644,104 @@ mod tests {
     fn classify_ws_frame_none_is_stream_end() {
         let action = classify_ws_frame(None);
         assert!(matches!(action, RecvAction::StreamEnd));
+    }
+
+    #[test]
+    fn close_reason_none_returns_reconnect_no_reason() {
+        assert_eq!(
+            close_reason_to_policy(None),
+            TransportClosePolicy::Reconnect { reason: None },
+        );
+    }
+
+    #[test]
+    fn close_reason_cert_rotated_returns_reconnect_with_reason() {
+        assert_eq!(
+            close_reason_to_policy(Some(&CloseReason::CertificateRotated)),
+            TransportClosePolicy::Reconnect {
+                reason: Some(CloseReason::CertificateRotated),
+            },
+        );
+    }
+
+    #[test]
+    fn close_reason_cert_revoked_returns_reconnect_with_reason() {
+        assert_eq!(
+            close_reason_to_policy(Some(&CloseReason::CertificateRevoked)),
+            TransportClosePolicy::Reconnect {
+                reason: Some(CloseReason::CertificateRevoked),
+            },
+        );
+    }
+
+    #[test]
+    fn close_reason_unknown_returns_reconnect_with_reason() {
+        let reason = CloseReason::Unknown("future reason".to_string());
+        assert_eq!(
+            close_reason_to_policy(Some(&reason)),
+            TransportClosePolicy::Reconnect {
+                reason: Some(reason),
+            },
+        );
+    }
+
+    #[test]
+    fn close_reason_protocol_error_returns_reconnect_with_reason() {
+        assert_eq!(
+            close_reason_to_policy(Some(&CloseReason::ProtocolError)),
+            TransportClosePolicy::Reconnect {
+                reason: Some(CloseReason::ProtocolError),
+            },
+        );
+    }
+
+    #[test]
+    fn close_reason_to_policy_never_returns_shutdown() {
+        let variants = vec![
+            CloseReason::CertificateRotated,
+            CloseReason::CertificateRevoked,
+            CloseReason::NoValidCertificate,
+            CloseReason::InternalError,
+            CloseReason::CertificateNotRecognized,
+            CloseReason::ServiceDeactivated,
+            CloseReason::ServiceNotApproved,
+            CloseReason::ServiceNotFound,
+            CloseReason::EnrollmentTimeout,
+            CloseReason::RateLimitExceeded,
+            CloseReason::ProtocolError,
+            CloseReason::Superseded,
+            CloseReason::Unknown("unknown".to_string()),
+        ];
+
+        for variant in variants {
+            assert_ne!(
+                close_reason_to_policy(Some(&variant)),
+                TransportClosePolicy::Shutdown
+            );
+        }
+    }
+
+    #[test]
+    fn controller_connection_overrides_close_policy() {
+        let source = include_str!("connection.rs");
+        let impl_marker =
+            "\nimpl uptrakit_internal_wire::ServiceTransport for ControllerConnection {";
+        let impl_start = source
+            .find(impl_marker)
+            .expect("ServiceTransport impl for ControllerConnection should exist")
+            + impl_marker.len();
+        let rest = &source[impl_start..];
+
+        let next_top_level_item = ["\nimpl ", "\nfn ", "\nstruct ", "\nenum ", "\nmod ", "\n#["]
+            .iter()
+            .filter_map(|marker| rest.find(marker))
+            .min()
+            .unwrap_or(rest.len());
+        let impl_body = &rest[..next_top_level_item];
+
+        assert!(
+            impl_body.contains("fn close_policy(&self)"),
+            "ControllerConnection must override close_policy() in ServiceTransport impl"
+        );
     }
 }
