@@ -13,6 +13,7 @@ pub mod lifecycle;
 pub mod main_helper;
 pub mod sensitive_params;
 pub mod shared_types;
+pub mod shutdown;
 pub mod signal;
 pub mod tls;
 pub mod tracing_init;
@@ -44,5 +45,6 @@ pub use sensitive_params::decrypt_sensitive_params;
 pub use shared_types::{
     EventLoopContext, LoopError, LoopOutcome, LoopResult, ServiceHandler, ShutdownCause,
 };
+pub use shutdown::{ShutdownSignal, SignalShutdown, TokenShutdown};
 pub use signal::{Signal, SignalWatcher};
 pub use uptrakit_backoff::Backoff;
