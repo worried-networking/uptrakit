@@ -550,3 +550,41 @@ async fn writer_task(
     // Channel closed (connection dropped) — clean up.
     let _ = sink.close().await;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{RecvAction, classify_ws_frame};
+    use tokio_tungstenite::tungstenite::{Error as WsErr, Message};
+
+    #[test]
+    fn classify_ws_frame_text_is_message() {
+        let action = classify_ws_frame(Some(Ok(Message::Text("hello".into()))));
+        assert!(matches!(action, RecvAction::Message(Message::Text(_))));
+    }
+
+    #[test]
+    fn classify_ws_frame_close_is_close_frame() {
+        let action = classify_ws_frame(Some(Ok(Message::Close(None))));
+        assert!(matches!(action, RecvAction::CloseFrame(None)));
+    }
+
+    #[test]
+    fn classify_ws_frame_peer_closed_unexpected_eof() {
+        let action = classify_ws_frame(Some(Err(WsErr::Io(std::io::Error::from(
+            std::io::ErrorKind::UnexpectedEof,
+        )))));
+        assert!(matches!(action, RecvAction::PeerClosed));
+    }
+
+    #[test]
+    fn classify_ws_frame_non_peer_closed_error_is_transport_error() {
+        let action = classify_ws_frame(Some(Err(WsErr::Io(std::io::Error::other("other")))));
+        assert!(matches!(action, RecvAction::TransportError(_)));
+    }
+
+    #[test]
+    fn classify_ws_frame_none_is_stream_end() {
+        let action = classify_ws_frame(None);
+        assert!(matches!(action, RecvAction::StreamEnd));
+    }
+}

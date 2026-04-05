@@ -522,4 +522,37 @@ mod tests {
     fn dispatch_close_reason_none() {
         assert_eq!(dispatch_close_reason(None), LoopOutcome::Disconnected);
     }
+
+    #[test]
+    fn phase1_cert_expired_not_absorbed() {
+        let err = crate::error::EnrollmentError::WebSocket(
+            tokio_tungstenite::tungstenite::Error::Io(std::io::Error::other(
+                rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired),
+            )),
+        );
+        assert!(!should_absorb_as_disconnected(&err));
+    }
+
+    #[test]
+    fn recv_error_transient_reset_produces_disconnected() {
+        let err =
+            crate::error::EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(
+                std::io::Error::from(std::io::ErrorKind::ConnectionReset),
+            ));
+        let result = handle_recv_error(report!(err));
+        assert!(matches!(result, Ok(Some(LoopOutcome::Disconnected))));
+    }
+
+    #[test]
+    fn recv_error_cert_expired_produces_loop_error() {
+        let err = crate::error::EnrollmentError::WebSocket(
+            tokio_tungstenite::tungstenite::Error::Io(std::io::Error::other(
+                rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired),
+            )),
+        );
+        let result = handle_recv_error(report!(err));
+        assert!(result.is_err());
+        let loop_err = result.expect_err("cert-expired must flow to phase 2");
+        assert!(matches!(loop_err.current_context(), LoopError::CertExpired));
+    }
 }

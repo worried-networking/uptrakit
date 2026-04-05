@@ -266,6 +266,20 @@ mod tests {
         assert!(!is_rustls_cert_expired(&io_err));
     }
 
+    #[test]
+    fn is_rustls_cert_revoked_helper_positive() {
+        let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateRevoked);
+        let io_err = std::io::Error::other(rustls_err);
+        assert!(is_rustls_cert_revoked(&io_err));
+    }
+
+    #[test]
+    fn is_rustls_cert_revoked_helper_false_for_expired() {
+        let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
+        let io_err = std::io::Error::other(rustls_err);
+        assert!(!is_rustls_cert_revoked(&io_err));
+    }
+
     // ── is_transient_network tests ────────────────────────────────────────
 
     #[test]
@@ -308,6 +322,30 @@ mod tests {
         let io_err = std::io::Error::other(rustls_err);
         let err = EnrollmentError::Io(io_err);
         // Cert-expired IO errors must NOT be retried.
+        assert!(!err.is_transient_network());
+    }
+
+    #[test]
+    fn is_transient_network_websocket_cert_expired_io() {
+        let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
+        let io_err = std::io::Error::other(rustls_err);
+        let err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(io_err));
+        assert!(!err.is_transient_network());
+    }
+
+    #[test]
+    fn is_transient_network_websocket_cert_revoked_io() {
+        let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateRevoked);
+        let io_err = std::io::Error::other(rustls_err);
+        let err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(io_err));
+        assert!(!err.is_transient_network());
+    }
+
+    #[test]
+    fn is_transient_network_cert_revoked_io() {
+        let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateRevoked);
+        let io_err = std::io::Error::other(rustls_err);
+        let err = EnrollmentError::Io(io_err);
         assert!(!err.is_transient_network());
     }
 }
