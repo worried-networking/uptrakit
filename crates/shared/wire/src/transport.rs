@@ -109,6 +109,7 @@ pub trait ServiceTransport: Send {
 #[cfg(test)]
 mod tests {
     use super::{ServiceTransport, TransportClosePolicy, TransportError};
+    use crate::CloseReason;
     use crate::messages::{ControllerMessage, ServiceMessage};
 
     struct DefaultTransport;
@@ -146,5 +147,44 @@ mod tests {
     fn default_is_yielded_is_false() {
         let transport = DefaultTransport;
         assert!(!transport.is_yielded());
+    }
+
+    #[test]
+    fn close_policy_reconnect_none_eq_reconnect_none() {
+        let a = TransportClosePolicy::Reconnect { reason: None };
+        let b = TransportClosePolicy::Reconnect { reason: None };
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn close_policy_shutdown_eq_shutdown() {
+        assert_eq!(
+            TransportClosePolicy::Shutdown,
+            TransportClosePolicy::Shutdown
+        );
+    }
+
+    #[test]
+    fn close_policy_reconnect_ne_shutdown() {
+        assert_ne!(
+            TransportClosePolicy::Reconnect { reason: None },
+            TransportClosePolicy::Shutdown
+        );
+    }
+
+    #[test]
+    fn close_policy_clone_preserves_equality() {
+        let original = TransportClosePolicy::Reconnect {
+            reason: Some(CloseReason::CertificateRotated),
+        };
+        let cloned = original.clone();
+        assert_eq!(original, cloned);
+    }
+
+    #[test]
+    fn close_policy_debug_contains_variant_name() {
+        let policy = TransportClosePolicy::Shutdown;
+        let debug = format!("{policy:?}");
+        assert!(debug.contains("Shutdown"), "Debug output was: {debug}");
     }
 }
