@@ -79,7 +79,8 @@ impl_report_conversion!(EnrollmentError => LoopError, |e| {
 
 /// Cause of a service shutdown, passed to [`ServiceHandler::on_shutdown`].
 ///
-/// Services use this to choose the appropriate [`DisconnectReason`] and
+/// Services use this to choose the appropriate
+/// [`uptrakit_internal_wire::DisconnectReason`] and
 /// [`LoopOutcome`]:
 ///
 /// | Cause | `DisconnectReason` | `LoopOutcome` |
@@ -263,8 +264,8 @@ pub trait ServiceHandler: Send {
     ///
     /// Implementations MUST call
     /// [`default_resolve_shutdown`](crate::default_resolve_shutdown)`(cause)` and use the returned
-    /// `(`[`DisconnectReason`]`, `[`LoopOutcome`]`)` pair.  The
-    /// [`DisconnectReason`] sent in `Disconnecting` and the
+    /// `(`[`uptrakit_internal_wire::DisconnectReason`]`, `[`LoopOutcome`]`)` pair.  The
+    /// [`uptrakit_internal_wire::DisconnectReason`] sent in `Disconnecting` and the
     /// [`LoopOutcome`] returned to the lifecycle must both originate
     /// from that call.  Handlers may perform arbitrary teardown work
     /// (draining, pool closure, engine shutdown) in any order relative
@@ -273,7 +274,7 @@ pub trait ServiceHandler: Send {
     /// To override the mapping, add a
     /// `// DEVIATION(ADR-0037, approved: ADR-NNNN): <reason>` comment
     /// at the override site, where `ADR-NNNN` is an accepted ADR
-    /// justifying the deviation.  See ADR-0036.
+    /// justifying the deviation.  See ADR-0037.
     async fn on_shutdown(
         &mut self,
         conn: &mut ControllerConnection,

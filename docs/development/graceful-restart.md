@@ -50,8 +50,11 @@ with backoff once the controller is available again.
 | `SIGINT` / `SIGTERM` | `shutdown` | `Shutdown` (exits lifecycle cleanly) |
 | `ServerRestarting` | `restart` | `Disconnected` (reconnects with backoff) |
 
-The mapping is implemented via the `ShutdownCause` enum in `uptrakit-service-sdk` and the `resolve_shutdown` helper
-in each service. See [Service Lifecycle](service-lifecycle.md) for the full reconnect flow.
+The mapping is implemented by `default_resolve_shutdown()` in `crates/shared/service-sdk/src/lifecycle.rs`. All
+`ServiceHandler::on_shutdown` implementations MUST call this function and use the returned
+`(DisconnectReason, LoopOutcome)` pair (ADR-0036). Deviations require a
+`// DEVIATION(ADR-0037, approved: ADR-NNNN): <reason>` comment and a justifying ADR (ADR-0037). See
+[Service Lifecycle](service-lifecycle.md) for the full reconnect flow.
 
 **Timeout guards preventing shutdown hangs:**
 
@@ -80,8 +83,10 @@ indefinitely.
 | `crates/core/controller/src/tasks.rs` | `BackgroundTasks` struct with coordinated shutdown sequence |
 | `crates/core/controller/src/durations.rs` | `BACKGROUND_TASK_SHUTDOWN_TIMEOUT` (5s), `RESTART_NOTIFICATION_SCATTER` (5s), `SERVICE_DRAIN_POLL_INTERVAL` (250ms) |
 | `crates/core/controller/src/main.rs` | Signal handler setup (SIGTERM, SIGINT, SIGUSR1) and server event loop |
-| `crates/shared/service-sdk/src/lifecycle.rs` | `ShutdownCause` enum and `ServiceHandler::on_shutdown` trait method |
+| `crates/shared/service-sdk/src/shared_types.rs` | `ShutdownCause` enum and `ServiceHandler::on_shutdown` trait method |
+| `crates/shared/service-sdk/src/lifecycle.rs` | `default_resolve_shutdown()` - canonical cause-to-outcome mapping |
 | `crates/shared/service-sdk/src/event_loop.rs` | `ServerRestarting` handler — calls `on_shutdown` with `ShutdownCause::ServerRestarting` |
-| `crates/core/agent/src/main.rs` | `resolve_shutdown` helper and `AgentHandler::on_shutdown` implementation |
-| `crates/core/agent-ssh/src/main.rs` | `resolve_shutdown` helper and `SshAgentHandler::on_shutdown` implementation |
-| `crates/core/mqtt/src/main.rs` | `resolve_shutdown` helper and `MqttHandler::on_shutdown` implementation |
+| `crates/core/agent/src/main.rs` | `AgentHandler::on_shutdown` implementation |
+| `crates/core/agent-ssh/src/main.rs` | `SshAgentHandler::on_shutdown` implementation |
+| `crates/core/mqtt/src/main.rs` | `MqttHandler::on_shutdown` implementation |
+| `crates/core/scheduler/src/handler.rs` | `SchedulerHandler::on_shutdown` implementation |

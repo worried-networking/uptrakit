@@ -114,6 +114,10 @@ Graceful shutdown handler. Called when an OS signal or `ServerRestarting` messag
 `cause` parameter is a `ShutdownCause` enum that distinguishes OS signals (`Signal::Hangup` for restart, `Signal::Interrupt`/`Signal::Terminate` for
 shutdown) from controller-initiated restarts. `shutdown_timeout` (a `Duration`) comes from the latest `ServiceSettings`.
 
+Implementations MUST call `default_resolve_shutdown(cause)` and return the resolved `LoopOutcome` (see ADR-0036). The `DisconnectReason` from the same
+call must be used when sending `Disconnecting`. Handlers that deviate must add a `// DEVIATION(ADR-0037, approved: ADR-NNNN): <reason>` comment (see
+ADR-0037).
+
 ### `LoopOutcome`
 
 | Variant | Meaning | SDK behavior |
@@ -238,10 +242,10 @@ The SDK provides shared initialization and error-handling functions to reduce bo
 use std::collections::BTreeSet;
 use std::time::Duration;
 use async_trait::async_trait;
-use uptrakit_internal_wire::{Capability, ControllerMessage};
+use uptrakit_internal_wire::{Capability, ControllerMessage, DisconnectingPayload, ServiceMessage};
 use uptrakit_service_sdk::{
     ControllerConnection, LoopOutcome, LoopResult, ServiceHandler,
-    ServiceIdentityState, ShutdownCause,
+    ServiceIdentityState, ShutdownCause, default_resolve_shutdown,
 };
 
 struct MyHandler;
@@ -290,11 +294,17 @@ impl ServiceHandler for MyHandler {
 
     async fn on_shutdown(
         &mut self,
-        _conn: &mut ControllerConnection,
-        _cause: ShutdownCause,
+        conn: &mut ControllerConnection,
+        cause: ShutdownCause,
         _shutdown_timeout: Duration,
     ) -> LoopOutcome {
-        LoopOutcome::Shutdown
+        let (disconnect_reason, outcome) = default_resolve_shutdown(cause);
+        let _ = conn
+            .send(ServiceMessage::Disconnecting(
+                DisconnectingPayload::new(disconnect_reason),
+            ))
+            .await;
+        outcome
     }
 }
 
