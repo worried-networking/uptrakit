@@ -695,12 +695,24 @@ mod tests {
     }
 
     fn fetch_assignment(name: &str, package_identifier: &str) -> VersionCheckAssignment {
+        fetch_assignment_with_plugin(
+            name,
+            package_identifier,
+            plugin_ids::RELEASES_DOCKER.clone(),
+        )
+    }
+
+    fn fetch_assignment_with_plugin(
+        name: &str,
+        package_identifier: &str,
+        plugin_type: PluginTypeId,
+    ) -> VersionCheckAssignment {
         VersionCheckAssignment {
             software_item_id: uuid::Uuid::now_v7(),
             name: name.to_string(),
             detect_version: None,
             fetch_releases: Some(PluginAssignment {
-                plugin_type: plugin_ids::RELEASES_DOCKER.clone(),
+                plugin_type,
                 package_identifier: package_identifier.to_string(),
                 config: serde_json::json!({}),
             }),
@@ -1022,6 +1034,37 @@ mod tests {
                 result.error
             );
         }
+    }
+
+    #[tokio::test]
+    async fn batch_check_versions_public_api_uses_default_factory_role_validation() {
+        let assignments = vec![fetch_assignment_with_plugin(
+            "pkg-1",
+            "booklore",
+            plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
+        )];
+
+        let results = batch_check_versions(assignments, test_executor(), &no_ctx()).await;
+
+        assert_eq!(results.len(), 1);
+        let result = &results[0];
+        assert!(
+            result.error.is_some(),
+            "expected error when fetch plugin role is missing"
+        );
+        assert!(
+            result.latest_version.is_none(),
+            "expected latest_version to be None, got {:?}",
+            result.latest_version
+        );
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("does not implement ReleaseFetcherPlugin")),
+            "unexpected error: {:?}",
+            result.error
+        );
     }
 
     #[tokio::test]
