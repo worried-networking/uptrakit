@@ -1501,6 +1501,7 @@ Extend the `#[non_exhaustive]` rule from the "Public Enum Extensibility" section
 // ✓ Correct — unknown profile logged; safe fallback chosen explicitly
 match profile {
     ServiceProfile::Agent | ServiceProfile::Unknown => Some(AGENT_SHUTDOWN_TIMEOUT_SECS),
+    ServiceProfile::Scheduler => Some(SCHEDULER_SHUTDOWN_TIMEOUT_SECS),
     ServiceProfile::UpdateTracker => None,
     _ => {
         tracing::warn!(?profile, "unknown ServiceProfile for shutdown timeout; using agent default");

@@ -169,11 +169,12 @@ Discovery-capable plugin types are `releases_docker`, `package_manager_homebrew`
     tenant-level override row).
 
 `ServiceResponse` includes an optional `ping_interval_seconds` field (`Option<u32>`) that reports the per-service
-ping interval override. When `null`, the service uses its profile default (300s for agents/SSH agents, 15s for MQTT).
+ping interval override. When `null`, the service uses its profile default (15 s for `UpdateTracker`/MQTT, 60 s for
+`Scheduler`, 300 s for `Agent`/`Unknown`).
 
 `ServiceResponse` uses `capabilities: Vec<String>` and `service_label: String` instead of the former `service_type`
 field. The `service_label` is a human-readable display name derived from the service's capability set via
-`ServiceProfile` (e.g. "Agent", "SSH Agent", "Update Tracker").
+`ServiceProfile` (e.g. "Agent", "SSH Agent", "Scheduler", "Update Tracker", "Unknown").
 
 ### `PUT /api/v1/services/{id}`
 

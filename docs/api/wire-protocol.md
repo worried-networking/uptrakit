@@ -996,9 +996,9 @@ authenticated connection is established. It carries runtime configuration for th
 | `ca_bundle_hash` | `String` | `#[serde(default)]` | Hash of the current CA bundle for staleness detection |
 | `capabilities` | `BTreeSet<Capability>` | `#[serde(default, skip_serializing_if = "BTreeSet::is_empty")]` | Set of capabilities advertised by the controller; used for capability negotiation |
 | `report_page_limits` | `ReportPageLimits` | `#[serde(default, skip_serializing_if = "ReportPageLimits::is_default")]` | Per-page item-count caps for paginated `report_hosts`, `discovery_results`, `version_check_results`, and `batch_update_result` payloads |
-| `shutdown_timeout_seconds` | `Option<Duration>` | `#[serde(default, skip_serializing_if, with = "option_duration_seconds", rename = "shutdown_timeout_seconds")]` | Max time to wait during shutdown; Rust field is `shutdown_timeout`, serialized as seconds on the wire. Present for agents, absent for MQTT |
+| `shutdown_timeout_seconds` | `Option<Duration>` | `#[serde(default, skip_serializing_if, with = "option_duration_seconds", rename = "shutdown_timeout_seconds")]` | Max time to wait during shutdown; Rust field is `shutdown_timeout`, serialized as seconds on the wire. Present for `Agent`/`Unknown` (120 s) and `Scheduler` (30 s); absent for `UpdateTracker`/MQTT |
 | `tenant_id` | `Option<Uuid>` | `#[serde(default, skip_serializing_if = "Option::is_none")]` | Tenant UUID that this service belongs to; present for tenant-scoped services (agents, SSH agents), absent for system services (MQTT, scheduler) |
-| `ping_interval` | `Duration` | `#[serde(with = "duration_seconds")]` | Controller-managed ping interval; derived from per-service DB override or service-profile default (300s agent/SSH agent, 15s MQTT) |
+| `ping_interval` | `Duration` | `#[serde(with = "duration_seconds")]` | Controller-managed ping interval; derived from per-service DB override or service-profile default (15 s `UpdateTracker`/MQTT, 60 s `Scheduler`, 300 s `Agent`/`Unknown`) |
 
 The `ping_interval` field is serialized as a `u32` number of seconds on the wire (e.g. `"ping_interval": 300`)
 using the `duration_seconds` serde module. The controller reads `ping_interval_seconds` from the `services` table
@@ -1108,9 +1108,12 @@ stored -- it is always computed from capabilities.
 | Capability set | `ServiceProfile` | Label |
 | --- | --- | --- |
 | Has `update_tracking` | `UpdateTracker` | "Update Tracker" |
-| Has `ssh_remote` + `software_discovery` | `Agent` | "SSH Agent" |
-| Has `software_discovery`, no `update_tracking`, no `ssh_remote` | `Agent` | "Agent" |
+| Has `scheduler`, no `update_tracking` | `Scheduler` | "Scheduler" |
+| Has `ssh_remote` + `software_discovery`, no `update_tracking`, no `scheduler` | `Agent` | "SSH Agent" |
+| Has `software_discovery`, no `update_tracking`, no `scheduler`, no `ssh_remote` | `Agent` | "Agent" |
 | Unrecognized combination | `Unknown` | "Unknown" |
+
+Precedence when multiple key capabilities are present: `UpdateTracker` > `Scheduler` > `Agent` > `Unknown`.
 
 `EnrollPayload.capabilities` is a required `BTreeSet<Capability>` field. The controller persists the
 capabilities in the `services.capabilities` column (JSON array of snake_case strings) and derives
