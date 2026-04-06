@@ -541,20 +541,23 @@ mod tests {
         tokio_tungstenite::tungstenite::Error,
     >;
 
-    struct EmptyReadStream;
+    struct ChannelReadStream {
+        rx: mpsc::UnboundedReceiver<TestReadItem>,
+    }
 
-    impl Stream for EmptyReadStream {
+    impl Stream for ChannelReadStream {
         type Item = TestReadItem;
 
-        fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-            Poll::Ready(None)
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            self.rx.poll_recv(cx)
         }
     }
 
     struct BudgetTestHandler {
         event_rx: mpsc::Receiver<()>,
         processed_count: Arc<AtomicU32>,
-        target_count: u32,
+        read_tx: Option<mpsc::UnboundedSender<TestReadItem>>,
+        disconnect_read_after: u32,
     }
 
     #[async_trait]
@@ -594,8 +597,8 @@ mod tests {
             _conn: &mut ControllerConnection,
         ) -> LoopResult<Option<LoopOutcome>> {
             let count = self.processed_count.fetch_add(1, Ordering::SeqCst) + 1;
-            if count == self.target_count {
-                return Ok(Some(LoopOutcome::Shutdown));
+            if count == self.disconnect_read_after {
+                self.read_tx.take();
             }
             Ok(None)
         }
@@ -610,25 +613,26 @@ mod tests {
         }
     }
 
-    /// Proves that on the first exhaustion of `MAX_CONSECUTIVE_SERVICE_EVENTS`,
-    /// the service-event arm is disabled and `conn.recv()` can fire.
-    ///
-    /// This test intentionally does not observe the post-yield reset/re-enable
-    /// path; it covers only first-exhaustion arm-disable behavior.
+    /// Proves that first budget exhaustion triggers the yield/reset path and
+    /// re-enables service-event polling for a second burst before disconnect.
     #[tokio::test(start_paused = true)]
     async fn budget_disables_service_arm_on_first_exhaustion() {
-        let (event_tx, event_rx) = mpsc::channel::<()>(MAX_CONSECUTIVE_SERVICE_EVENTS as usize + 1);
+        let first_burst = MAX_CONSECUTIVE_SERVICE_EVENTS;
+        let second_burst = MAX_CONSECUTIVE_SERVICE_EVENTS;
+        let total_events = first_burst + second_burst;
+        let (event_tx, event_rx) = mpsc::channel::<()>(total_events as usize);
+        let (read_tx, read_rx) = mpsc::unbounded_channel::<TestReadItem>();
         let processed_count = Arc::new(AtomicU32::new(0));
-        let target_count = MAX_CONSECUTIVE_SERVICE_EVENTS + 1;
 
         let mut handler = BudgetTestHandler {
             event_rx,
             processed_count: Arc::clone(&processed_count),
-            target_count,
+            read_tx: Some(read_tx),
+            disconnect_read_after: total_events,
         };
 
         let read_stream: Pin<Box<dyn Stream<Item = TestReadItem> + Send>> =
-            Box::pin(EmptyReadStream);
+            Box::pin(ChannelReadStream { rx: read_rx });
         let mut conn = ControllerConnection::new_test(read_stream);
         let tmp = tempfile::tempdir().expect("tempdir must be created");
         let mut identity = ServiceIdentityState::new_single_dir(tmp.path());
@@ -639,13 +643,12 @@ mod tests {
         };
         let mut signals = SignalWatcher::new().expect("signal watcher must initialize");
 
-        for _ in 0..=MAX_CONSECUTIVE_SERVICE_EVENTS {
+        for _ in 0..total_events {
             event_tx
                 .send(())
                 .await
                 .expect("event channel must stay open during prefill");
         }
-        drop(event_tx);
 
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -659,13 +662,13 @@ mod tests {
         assert_eq!(
             loop_result,
             LoopOutcome::Disconnected,
-            "expected conn.recv() to win after first budget exhaustion"
+            "expected conn.recv() to end loop after budget reset allowed a second burst"
         );
 
         assert_eq!(
             processed_count.load(Ordering::SeqCst),
-            MAX_CONSECUTIVE_SERVICE_EVENTS,
-            "expected exactly MAX_CONSECUTIVE_SERVICE_EVENTS service events before conn.recv() took over"
+            total_events,
+            "expected two full bursts of MAX_CONSECUTIVE_SERVICE_EVENTS before disconnect"
         );
     }
 
