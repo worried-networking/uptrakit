@@ -47,6 +47,11 @@ pub(crate) type WsSink =
 /// Read half of a split [`WsStream`].
 pub(crate) type WsRead = futures_util::stream::SplitStream<WsStream>;
 
+/// Split a WebSocket stream into write/read halves using shared aliases.
+pub(crate) fn split_ws_stream(ws: WsStream) -> (WsSink, WsRead) {
+    ws.split()
+}
+
 /// Connect TCP → TLS → WebSocket upgrade, with optional Authorization header.
 ///
 /// When `service_id` is `Some`, it is appended as a `service_id` query

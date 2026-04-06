@@ -21,11 +21,12 @@
 //! immediately rather than queuing into a dead channel.
 
 use std::collections::BTreeSet;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{SinkExt, Stream, StreamExt};
 use rootcause::prelude::*;
 use serde::Deserialize;
 use tokio::sync::mpsc;
@@ -40,7 +41,7 @@ use uptrakit_internal_wire::{
 };
 
 use crate::error::{EnrollmentError, ProtocolError, Result};
-use crate::ws::{WsRead, WsSink, connect_ws, is_peer_closed, log_close_frame};
+use crate::ws::{WsSink, connect_ws, is_peer_closed, log_close_frame, split_ws_stream};
 
 /// Maximum time to wait for a single WebSocket write to complete.
 ///
@@ -86,7 +87,12 @@ struct EnvelopeHeader {
 /// a bounded channel and drained by a dedicated writer task.
 pub struct ControllerConnection {
     /// Read half of the split WebSocket stream.
-    read: WsRead,
+    read: Pin<
+        Box<
+            dyn Stream<Item = std::result::Result<Message, tokio_tungstenite::tungstenite::Error>>
+                + Send,
+        >,
+    >,
     /// Channel sender for outbound frames (drained by the writer task).
     write_tx: mpsc::Sender<OutboundFrame>,
     /// Signals that the writer task encountered an I/O error.
@@ -169,13 +175,13 @@ impl ControllerConnection {
         let ws = connect_ws(host, port, tls_connector, auth_header, None).await?;
         tracing::debug!("WebSocket connection established");
 
-        let (sink, read) = ws.split();
+        let (sink, read) = split_ws_stream(ws);
         let (write_tx, write_rx) = mpsc::channel(WRITE_CHANNEL_CAPACITY);
         let write_error = Arc::new(AtomicBool::new(false));
         let writer_handle = tokio::spawn(writer_task(sink, write_rx, Arc::clone(&write_error)));
 
         Ok(Self {
-            read,
+            read: Box::pin(read),
             write_tx,
             write_error,
             writer_handle: Some(writer_handle),
@@ -185,6 +191,39 @@ impl ControllerConnection {
             agreed_capabilities: BTreeSet::new(),
             report_page_limits: ReportPageLimits::default(),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_test(
+        read: Pin<
+            Box<
+                dyn Stream<
+                        Item = std::result::Result<Message, tokio_tungstenite::tungstenite::Error>,
+                    > + Send,
+            >,
+        >,
+    ) -> Self {
+        let (write_tx, mut write_rx) = mpsc::channel::<OutboundFrame>(WRITE_CHANNEL_CAPACITY);
+        let write_error = Arc::new(AtomicBool::new(false));
+        let writer_handle = tokio::spawn(async move {
+            while let Some(frame) = write_rx.recv().await {
+                if matches!(frame, OutboundFrame::Close) {
+                    return;
+                }
+            }
+        });
+
+        Self {
+            read,
+            write_tx,
+            write_error,
+            writer_handle: Some(writer_handle),
+            out_seq: OutgoingSeq::new(),
+            in_seq: IncomingSeq::new(),
+            close_reason: None,
+            agreed_capabilities: BTreeSet::new(),
+            report_page_limits: ReportPageLimits::default(),
+        }
     }
 
     /// Send a [`ServiceMessage`] to the controller.
@@ -606,10 +645,22 @@ async fn writer_task(
 #[cfg(test)]
 mod tests {
     use super::{RecvAction, classify_ws_frame, close_reason_to_policy};
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
     use tokio_tungstenite::tungstenite::protocol::CloseFrame;
     use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
     use tokio_tungstenite::tungstenite::{Error as WsErr, Message};
     use uptrakit_internal_wire::{CloseReason, TransportClosePolicy};
+
+    struct EmptyReadStream;
+
+    impl futures_util::Stream for EmptyReadStream {
+        type Item = std::result::Result<Message, WsErr>;
+
+        fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Ready(None)
+        }
+    }
 
     #[test]
     fn classify_ws_frame_text_is_message() {
@@ -755,5 +806,21 @@ mod tests {
             close_policy_body.contains("close_reason_to_policy(self.close_reason())"),
             "ControllerConnection close_policy() must delegate to close_reason_to_policy(self.close_reason())"
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn new_test_close_exits_writer_task_on_close_frame() {
+        let read = Box::pin(EmptyReadStream)
+            as Pin<
+                Box<dyn futures_util::Stream<Item = std::result::Result<Message, WsErr>> + Send>,
+            >;
+        let mut conn = super::ControllerConnection::new_test(read);
+        let close_result =
+            tokio::time::timeout(std::time::Duration::from_secs(5), conn.close()).await;
+        assert!(
+            close_result.is_ok(),
+            "close should complete quickly when writer sees OutboundFrame::Close"
+        );
+        assert!(close_result.expect("timeout wrapper should be Ok").is_ok());
     }
 }
