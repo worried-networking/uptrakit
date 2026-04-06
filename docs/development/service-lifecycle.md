@@ -541,7 +541,8 @@ Operations that stream output (like `ExecuteUpdate`) continue to use the existin
 
 The `ControllerConnection` uses a split-stream architecture to prevent write operations
 from blocking the event loop. At construction time the WebSocket stream is split into
-read and write halves (`WsRead` / `WsSink` type aliases in `ws.rs`). A background writer
+read and write halves. The write half uses the `WsSink` type alias from `ws.rs`; the read
+half is type-erased into a boxed stream inside `ControllerConnection`. A background writer
 task owns the write half and drains a bounded MPSC channel
 (`WRITE_CHANNEL_CAPACITY = 128`).
 
@@ -552,7 +553,7 @@ task owns the write half and drains a bounded MPSC channel
 | `send(msg)` | Serialize → push `OutboundFrame::Text` to channel. Checks `write_error` flag first. |
 | `send_best_effort(msg)` | Serialize → `try_send()` to channel. Non-blocking; drops message silently if channel is full. |
 | `send_paginated(msg, limits)` | Paginate → push all pages to channel. Serialization only, no I/O blocking. |
-| `recv()` | Read from `SplitStream`. On WS Ping, pushes `Pong` to write channel. Checks `write_error` on each receive. |
+| `recv()` | Read from the boxed controller stream. On WS Ping, pushes `Pong` to write channel. Checks `write_error` on each receive. |
 | `close()` | Push `Close` frame to channel, await writer task completion. |
 
 ### Error signaling

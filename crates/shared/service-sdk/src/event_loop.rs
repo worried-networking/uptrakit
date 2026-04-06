@@ -95,17 +95,28 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
     ctx: &EventLoopContext<'_>,
     signals: &mut SignalWatcher,
 ) -> LoopResult<LoopOutcome> {
-    let cert_not_after_ts = identity.cert_not_after_ms();
-    // Clone config_dir to avoid borrow conflicts with `&mut identity`.
-    let config_dir = identity.config_dir().to_path_buf();
-
     tracing::info!("connecting to controller (authenticated)");
     let mut conn = ControllerConnection::connect(host, port, tls_connector, None)
         .await
         .context_to::<LoopError>()?;
 
+    run_event_loop_connected(handler, &mut conn, identity, ctx, signals).await
+}
+
+/// Inner connected event loop shared by the lifecycle and tests.
+pub(crate) async fn run_event_loop_connected<H: ServiceHandler>(
+    handler: &mut H,
+    conn: &mut ControllerConnection,
+    identity: &mut ServiceIdentityState,
+    ctx: &EventLoopContext<'_>,
+    signals: &mut SignalWatcher,
+) -> LoopResult<LoopOutcome> {
+    let cert_not_after_ts = identity.cert_not_after_ms();
+    // Clone config_dir to avoid borrow conflicts with `&mut identity`.
+    let config_dir = identity.config_dir().to_path_buf();
+
     // Let the service handle post-connect initialization.
-    handler.on_connected(&mut conn, identity).await?;
+    handler.on_connected(conn, identity).await?;
 
     // Ping timer — not started until ServiceSettings arrives with ping_interval.
     let mut ping_timer: Option<tokio::time::Interval> = None;
@@ -132,7 +143,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
             // 1. Service-specific events (highest priority, budget-limited).
             event = handler.poll_service_event(), if poll_service => {
                 consecutive_service_events += 1;
-                match handler.on_service_event(event, &mut conn).await? {
+                match handler.on_service_event(event, conn).await? {
                     Some(outcome) => break outcome,
                     None => continue,
                 }
@@ -146,7 +157,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
             // of the `if let` return `()`, which tokio's select! requires.
             _ = async { if let Some(t) = ping_timer.as_mut() { t.tick().await; } }, if ping_timer.is_some() => {
                 consecutive_service_events = 0;
-                if let Some(outcome) = send_keepalive_ping(&mut conn).await {
+                if let Some(outcome) = send_keepalive_ping(conn).await {
                     break outcome;
                 }
             }
@@ -155,7 +166,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
             _ = &mut renewal_sleep => {
                 consecutive_service_events = 0;
                 if let Some(o) = cert_handler.handle_renewal_timer(
-                    identity, &mut conn, &mut renewal_sleep,
+                    identity, conn, &mut renewal_sleep,
                 ).await {
                     break o;
                 }
@@ -174,7 +185,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                 if let Some(outcome) = handle_controller_message(
                     msg,
                     handler,
-                    &mut conn,
+                    conn,
                     &mut cert_handler,
                     &mut loop_state,
                     identity,
@@ -189,7 +200,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                 tracing::info!(%signal, "received signal, initiating graceful shutdown");
                 break handler
                     .on_shutdown(
-                        &mut conn,
+                        conn,
                         ShutdownCause::Signal(signal),
                         shutdown_timeout,
                     )
@@ -517,6 +528,146 @@ fn dispatch_close_reason(reason: Option<&CloseReason>) -> LoopOutcome {
 mod tests {
     use super::*;
     use crate::error::{EnrollmentError, ProtocolError, TlsError};
+    use async_trait::async_trait;
+    use futures_util::Stream;
+    use std::pin::Pin;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::task::{Context, Poll};
+    use tokio::sync::mpsc;
+
+    type TestReadItem = std::result::Result<
+        tokio_tungstenite::tungstenite::Message,
+        tokio_tungstenite::tungstenite::Error,
+    >;
+
+    struct EmptyReadStream;
+
+    impl Stream for EmptyReadStream {
+        type Item = TestReadItem;
+
+        fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Ready(None)
+        }
+    }
+
+    struct BudgetTestHandler {
+        event_rx: mpsc::Receiver<()>,
+        processed_count: Arc<AtomicU32>,
+        target_count: u32,
+    }
+
+    #[async_trait]
+    impl ServiceHandler for BudgetTestHandler {
+        const DIR_NAME: &'static str = "test";
+        const SERVICE_LABEL: &'static str = "budget-test";
+        const SERVICE_APP_NAME: &'static str = "budget-test";
+
+        type ServiceEvent = ();
+
+        async fn on_connected(
+            &mut self,
+            _conn: &mut ControllerConnection,
+            _identity: &ServiceIdentityState,
+        ) -> LoopResult<()> {
+            Ok(())
+        }
+
+        async fn on_message(
+            &mut self,
+            _msg: ControllerMessage,
+            _conn: &mut ControllerConnection,
+        ) -> LoopResult<Option<LoopOutcome>> {
+            Ok(None)
+        }
+
+        async fn poll_service_event(&mut self) -> Self::ServiceEvent {
+            self.event_rx
+                .recv()
+                .await
+                .expect("service event channel closed unexpectedly")
+        }
+
+        async fn on_service_event(
+            &mut self,
+            _event: Self::ServiceEvent,
+            _conn: &mut ControllerConnection,
+        ) -> LoopResult<Option<LoopOutcome>> {
+            let count = self.processed_count.fetch_add(1, Ordering::SeqCst) + 1;
+            if count == self.target_count {
+                return Ok(Some(LoopOutcome::Shutdown));
+            }
+            Ok(None)
+        }
+
+        async fn on_shutdown(
+            &mut self,
+            _conn: &mut ControllerConnection,
+            _cause: ShutdownCause,
+            _shutdown_timeout: Duration,
+        ) -> LoopOutcome {
+            LoopOutcome::Shutdown
+        }
+    }
+
+    /// Proves that on the first exhaustion of `MAX_CONSECUTIVE_SERVICE_EVENTS`,
+    /// the service-event arm is disabled and `conn.recv()` can fire.
+    ///
+    /// This test intentionally does not observe the post-yield reset/re-enable
+    /// path; it covers only first-exhaustion arm-disable behavior.
+    #[tokio::test(start_paused = true)]
+    async fn budget_disables_service_arm_on_first_exhaustion() {
+        let (event_tx, event_rx) = mpsc::channel::<()>(MAX_CONSECUTIVE_SERVICE_EVENTS as usize + 1);
+        let processed_count = Arc::new(AtomicU32::new(0));
+        let target_count = MAX_CONSECUTIVE_SERVICE_EVENTS + 1;
+
+        let mut handler = BudgetTestHandler {
+            event_rx,
+            processed_count: Arc::clone(&processed_count),
+            target_count,
+        };
+
+        let read_stream: Pin<Box<dyn Stream<Item = TestReadItem> + Send>> =
+            Box::pin(EmptyReadStream);
+        let mut conn = ControllerConnection::new_test(read_stream);
+        let tmp = tempfile::tempdir().expect("tempdir must be created");
+        let mut identity = ServiceIdentityState::new_single_dir(tmp.path());
+        let ctx = EventLoopContext {
+            base_url: "https://test.local",
+            pki_addr: None,
+            ca_pem: None,
+        };
+        let mut signals = SignalWatcher::new().expect("signal watcher must initialize");
+
+        for _ in 0..=MAX_CONSECUTIVE_SERVICE_EVENTS {
+            event_tx
+                .send(())
+                .await
+                .expect("event channel must stay open during prefill");
+        }
+        drop(event_tx);
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            run_event_loop_connected(&mut handler, &mut conn, &mut identity, &ctx, &mut signals),
+        )
+        .await;
+
+        let loop_result = result
+            .expect("test timed out while waiting for loop completion")
+            .expect("event loop should complete without loop error");
+        assert_eq!(
+            loop_result,
+            LoopOutcome::Disconnected,
+            "expected conn.recv() to win after first budget exhaustion"
+        );
+
+        assert_eq!(
+            processed_count.load(Ordering::SeqCst),
+            MAX_CONSECUTIVE_SERVICE_EVENTS,
+            "expected exactly MAX_CONSECUTIVE_SERVICE_EVENTS service events before conn.recv() took over"
+        );
+    }
 
     #[test]
     fn dispatch_close_reason_cert_rotated() {
