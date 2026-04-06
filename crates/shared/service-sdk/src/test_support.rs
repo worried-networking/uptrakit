@@ -131,3 +131,230 @@ impl ServiceTransport for MockTransport {
         self.yielded
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    };
+    use std::task::{Context, Poll, Wake, Waker};
+    use std::time::Duration;
+
+    use super::*;
+
+    fn noop_cx() -> Context<'static> {
+        Context::from_waker(Waker::noop())
+    }
+
+    struct CountingWaker {
+        wake_count: Arc<AtomicU32>,
+    }
+
+    impl Wake for CountingWaker {
+        fn wake(self: Arc<Self>) {
+            self.wake_count.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.wake_count.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn counting_waker() -> (Arc<AtomicU32>, Waker) {
+        let wake_count = Arc::new(AtomicU32::new(0));
+        let waker = Waker::from(Arc::new(CountingWaker {
+            wake_count: Arc::clone(&wake_count),
+        }));
+        (wake_count, waker)
+    }
+
+    #[test]
+    fn new_defaults() {
+        let transport = MockTransport::new();
+
+        assert!(transport.send_log().is_empty());
+        assert!(!transport.has_parked_waker());
+        assert!(matches!(
+            transport.close_policy(),
+            TransportClosePolicy::Reconnect { reason: None }
+        ));
+        assert_eq!(transport.ping_interval(), None);
+        assert!(!transport.is_yielded());
+    }
+
+    #[test]
+    fn enqueue_fifo_delivery() {
+        let mut transport = MockTransport::new();
+        let mut cx = noop_cx();
+
+        transport.enqueue(ControllerMessage::ResetData);
+        transport.enqueue(ControllerMessage::Unknown);
+
+        assert!(matches!(
+            transport.poll_recv(&mut cx),
+            Poll::Ready(Ok(Some(ControllerMessage::ResetData)))
+        ));
+        assert!(matches!(
+            transport.poll_recv(&mut cx),
+            Poll::Ready(Ok(Some(ControllerMessage::Unknown)))
+        ));
+    }
+
+    #[test]
+    fn enqueue_close_returns_ok_none() {
+        let mut transport = MockTransport::new();
+        let mut cx = noop_cx();
+
+        transport.enqueue_close();
+
+        assert!(matches!(
+            transport.poll_recv(&mut cx),
+            Poll::Ready(Ok(None))
+        ));
+    }
+
+    #[test]
+    fn enqueue_error_returns_err() {
+        let mut transport = MockTransport::new();
+        let mut cx = noop_cx();
+
+        transport.enqueue_error();
+
+        assert!(matches!(transport.poll_recv(&mut cx), Poll::Ready(Err(_))));
+    }
+
+    #[tokio::test]
+    async fn send_log_records_all_three_send_methods() {
+        let mut transport = MockTransport::new();
+
+        transport
+            .transport_send(ServiceMessage::Unknown)
+            .await
+            .expect("transport_send should record without failing");
+        transport
+            .transport_send_best_effort(ServiceMessage::Unknown)
+            .await;
+        transport
+            .transport_send_auto_paginate(ServiceMessage::Unknown)
+            .await
+            .expect("transport_send_auto_paginate should record without failing");
+
+        let send_log = transport.send_log();
+        assert_eq!(send_log.len(), 3);
+        assert!(matches!(send_log[0], ServiceMessage::Unknown));
+        assert!(matches!(send_log[1], ServiceMessage::Unknown));
+        assert!(matches!(send_log[2], ServiceMessage::Unknown));
+    }
+
+    #[test]
+    fn set_close_policy_overrides_default() {
+        let mut transport = MockTransport::new();
+
+        transport.set_close_policy(TransportClosePolicy::Shutdown);
+
+        assert!(matches!(
+            transport.close_policy(),
+            TransportClosePolicy::Shutdown
+        ));
+    }
+
+    #[test]
+    fn set_ping_interval() {
+        let mut transport = MockTransport::new();
+
+        transport.set_ping_interval(Some(Duration::from_secs(30)));
+
+        assert_eq!(transport.ping_interval(), Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn set_yielded() {
+        let mut transport = MockTransport::new();
+
+        transport.set_yielded(true);
+
+        assert!(transport.is_yielded());
+    }
+
+    #[test]
+    fn async_transport_recv_parks_waker_when_empty() {
+        let mut transport = MockTransport::new();
+        let mut cx = noop_cx();
+
+        {
+            let mut fut = Box::pin(transport.transport_recv());
+            let poll = Future::poll(fut.as_mut(), &mut cx);
+            assert!(matches!(poll, Poll::Pending));
+        }
+
+        assert!(transport.has_parked_waker());
+    }
+
+    #[test]
+    fn wake_on_enqueue_variants() {
+        let mut transport = MockTransport::new();
+        let (wake_count, waker) = counting_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(matches!(transport.poll_recv(&mut cx), Poll::Pending));
+        assert!(transport.has_parked_waker());
+        assert_eq!(wake_count.load(Ordering::SeqCst), 0);
+
+        transport.enqueue(ControllerMessage::ResetData);
+        assert_eq!(wake_count.load(Ordering::SeqCst), 1);
+        assert!(!transport.has_parked_waker());
+        assert!(matches!(
+            transport.poll_recv(&mut cx),
+            Poll::Ready(Ok(Some(ControllerMessage::ResetData)))
+        ));
+        assert!(!transport.has_parked_waker());
+
+        assert!(matches!(transport.poll_recv(&mut cx), Poll::Pending));
+        assert!(transport.has_parked_waker());
+
+        transport.enqueue_close();
+        assert_eq!(wake_count.load(Ordering::SeqCst), 2);
+        assert!(!transport.has_parked_waker());
+        assert!(matches!(
+            transport.poll_recv(&mut cx),
+            Poll::Ready(Ok(None))
+        ));
+        assert!(!transport.has_parked_waker());
+
+        assert!(matches!(transport.poll_recv(&mut cx), Poll::Pending));
+        assert!(transport.has_parked_waker());
+
+        transport.enqueue_error();
+        assert_eq!(wake_count.load(Ordering::SeqCst), 3);
+        assert!(!transport.has_parked_waker());
+        assert!(matches!(transport.poll_recv(&mut cx), Poll::Ready(Err(_))));
+        assert!(!transport.has_parked_waker());
+    }
+
+    #[test]
+    fn poll_recv_replaces_parked_waker() {
+        let mut transport = MockTransport::new();
+        let (wake_count_a, waker_a) = counting_waker();
+        let (wake_count_b, waker_b) = counting_waker();
+        let mut cx_a = Context::from_waker(&waker_a);
+        let mut cx_b = Context::from_waker(&waker_b);
+
+        assert!(matches!(transport.poll_recv(&mut cx_a), Poll::Pending));
+        assert!(transport.has_parked_waker());
+        assert!(matches!(transport.poll_recv(&mut cx_b), Poll::Pending));
+        assert!(transport.has_parked_waker());
+
+        transport.enqueue(ControllerMessage::Unknown);
+
+        assert_eq!(wake_count_a.load(Ordering::SeqCst), 0);
+        assert_eq!(wake_count_b.load(Ordering::SeqCst), 1);
+
+        assert!(matches!(
+            transport.poll_recv(&mut cx_b),
+            Poll::Ready(Ok(Some(ControllerMessage::Unknown)))
+        ));
+        assert!(!transport.has_parked_waker());
+    }
+}
