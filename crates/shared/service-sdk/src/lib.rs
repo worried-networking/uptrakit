@@ -15,6 +15,8 @@ pub mod sensitive_params;
 pub mod shared_types;
 pub mod shutdown;
 pub mod signal;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 pub mod tls;
 pub mod tracing_init;
 pub(crate) mod ws;
