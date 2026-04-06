@@ -1,0 +1,19 @@
+name: agent-core-batch-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  agent-core-batch-failure-path:
+    runs-on:
+      - ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "agent-core-batch-ci"
+          save-if: "false"
+      - name: Run supplementary batch_check_versions failure-path tests
+        run: cargo test -p uptrakit-agent-core --all-features batch_check_versions_

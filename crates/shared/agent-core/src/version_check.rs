@@ -9,7 +9,8 @@ use uptrakit_internal_wire::{
     PluginAssignment, PluginTypeId, UpdateCategory, VersionCheckAssignment, VersionCheckResult,
 };
 use uptrakit_plugin_infrastructure_core::{
-    BatchDetectItem, BatchFetchItem, HostCapabilities, construct_host_runtime,
+    BatchDetectItem, BatchFetchItem, HostCapabilities, HostRuntime, PluginError, ReleaseFetcher,
+    construct_host_runtime,
 };
 use uptrakit_plugin_infrastructure_registry::{PluginCapability, get_descriptor};
 
@@ -108,6 +109,14 @@ struct BatchGroup {
 
 /// Group key: `(plugin_type, serialised effective config)`.
 type GroupKey = (PluginTypeId, String);
+
+type FetcherFactory = dyn Fn(
+        &PluginTypeId,
+        &serde_json::Value,
+        Arc<dyn HostRuntime>,
+    ) -> uptrakit_plugin_infrastructure_core::Result<Box<dyn ReleaseFetcher>>
+    + Send
+    + Sync;
 
 /// Build detect and fetch groups from assignments, keyed by
 /// `(PluginTypeId, effective_config_json)`.
@@ -263,6 +272,7 @@ async fn run_detect_group(
 async fn run_fetch_group(
     group: BatchGroup,
     executor: Arc<dyn CommandExecutor>,
+    fetcher_factory: &FetcherFactory,
 ) -> Vec<(usize, FetchItemResult)> {
     let batch_items: Vec<BatchFetchItem> = group
         .items
@@ -272,30 +282,7 @@ async fn run_fetch_group(
 
     let runtime = construct_host_runtime(executor, HostCapabilities::default());
 
-    let desc = match get_descriptor(group.plugin_type.as_str()) {
-        Some(d) => d,
-        None => {
-            return error_for_all_fetch_items(
-                &group.items,
-                format!("unknown plugin type: {}", group.plugin_type),
-            );
-        }
-    };
-
-    let slot = match desc.roles.release_fetcher.as_ref() {
-        Some(s) => s,
-        None => {
-            return error_for_all_fetch_items(
-                &group.items,
-                format!(
-                    "plugin {} does not implement ReleaseFetcherPlugin",
-                    group.plugin_type
-                ),
-            );
-        }
-    };
-
-    let fetcher = match (slot.create)(&group.effective_config, runtime) {
+    let fetcher = match fetcher_factory(&group.plugin_type, &group.effective_config, runtime) {
         Ok(f) => f,
         Err(e) => {
             return error_for_all_fetch_items(
@@ -346,6 +333,26 @@ async fn run_fetch_group(
             (*idx, outcome)
         })
         .collect()
+}
+
+fn default_fetcher_factory(
+    plugin_type: &PluginTypeId,
+    config: &serde_json::Value,
+    runtime: Arc<dyn HostRuntime>,
+) -> uptrakit_plugin_infrastructure_core::Result<Box<dyn ReleaseFetcher>> {
+    let desc = get_descriptor(plugin_type.as_str()).ok_or_else(|| {
+        rootcause::report!(PluginError::Configuration(format!(
+            "unknown plugin type: {plugin_type}"
+        )))
+    })?;
+
+    let slot = desc.roles.release_fetcher.as_ref().ok_or_else(|| {
+        rootcause::report!(PluginError::Configuration(format!(
+            "plugin {plugin_type} does not implement ReleaseFetcherPlugin"
+        )))
+    })?;
+
+    (slot.create)(config, runtime)
 }
 
 /// Refresh the package index for each unique fetch group.
@@ -420,13 +427,11 @@ fn merge_errors(detect_error: Option<String>, fetch_error: Option<String>) -> Op
 /// `RefreshPackageIndex` is called at most once per unique fetch-group
 /// (plugin_type, config) before `batch_fetch_releases` runs. It is not called
 /// for detect-only groups.
-///
-/// Results are returned in the same order as `assignments`.
-#[tracing::instrument(skip_all, fields(assignment_count = assignments.len()))]
-pub async fn batch_check_versions(
+async fn batch_check_versions_inner(
     assignments: Vec<VersionCheckAssignment>,
     executor: Arc<dyn CommandExecutor>,
     ctx: &ConnectionContext,
+    fetcher_factory: &FetcherFactory,
 ) -> Vec<VersionCheckResult> {
     if assignments.is_empty() {
         return vec![];
@@ -467,7 +472,7 @@ pub async fn batch_check_versions(
                 item_count = group.items.len(),
                 "queuing fetch_releases batch group"
             );
-            run_fetch_group(group, Arc::clone(&executor))
+            run_fetch_group(group, Arc::clone(&executor), fetcher_factory)
         })
         .collect();
 
@@ -501,6 +506,19 @@ pub async fn batch_check_versions(
             }
         })
         .collect()
+}
+
+/// Check installed versions and latest versions for a batch of software items,
+/// using native batch operations when the plugin supports them.
+///
+/// Results are returned in the same order as `assignments`.
+#[tracing::instrument(skip_all, fields(assignment_count = assignments.len()))]
+pub async fn batch_check_versions(
+    assignments: Vec<VersionCheckAssignment>,
+    executor: Arc<dyn CommandExecutor>,
+    ctx: &ConnectionContext,
+) -> Vec<VersionCheckResult> {
+    batch_check_versions_inner(assignments, executor, ctx, &default_fetcher_factory).await
 }
 
 /// Run `op` with exponential backoff retry on transient plugin errors.
@@ -661,8 +679,12 @@ async fn fetch_latest(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use uptrakit_command::LocalCommandExecutor;
     use uptrakit_internal_wire::plugin_ids;
+    use uptrakit_plugin_infrastructure_core::{
+        BatchFetchItem, BatchFetchResult, PluginMeta, UpstreamRelease,
+    };
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)
@@ -670,6 +692,93 @@ mod tests {
 
     fn no_ctx() -> ConnectionContext {
         ConnectionContext::default()
+    }
+
+    fn fetch_assignment(name: &str, package_identifier: &str) -> VersionCheckAssignment {
+        VersionCheckAssignment {
+            software_item_id: uuid::Uuid::now_v7(),
+            name: name.to_string(),
+            detect_version: None,
+            fetch_releases: Some(PluginAssignment {
+                plugin_type: plugin_ids::RELEASES_DOCKER.clone(),
+                package_identifier: package_identifier.to_string(),
+                config: serde_json::json!({}),
+            }),
+            host_software_item_id: Some(uuid::Uuid::now_v7()),
+        }
+    }
+
+    struct AlwaysFailFetcher;
+
+    impl PluginMeta for AlwaysFailFetcher {
+        fn plugin_type_id(&self) -> PluginTypeId {
+            PluginTypeId::from_static("test_always_fail")
+        }
+    }
+
+    #[async_trait]
+    impl ReleaseFetcher for AlwaysFailFetcher {
+        async fn fetch_releases(
+            &self,
+            _package_identifier: &str,
+        ) -> uptrakit_plugin_infrastructure_core::Result<Vec<UpstreamRelease>> {
+            Err(rootcause::report!(PluginError::PluginInternal(
+                "simulated registry unavailable".to_string()
+            )))
+        }
+    }
+
+    struct BatchLevelFailFetcher;
+
+    impl PluginMeta for BatchLevelFailFetcher {
+        fn plugin_type_id(&self) -> PluginTypeId {
+            PluginTypeId::from_static("test_batch_level_fail")
+        }
+    }
+
+    #[async_trait]
+    impl ReleaseFetcher for BatchLevelFailFetcher {
+        async fn fetch_releases(
+            &self,
+            _package_identifier: &str,
+        ) -> uptrakit_plugin_infrastructure_core::Result<Vec<UpstreamRelease>> {
+            unreachable!("batch_fetch is overridden; fetch_releases should not be called")
+        }
+
+        async fn batch_fetch(
+            &self,
+            _items: &[BatchFetchItem],
+        ) -> uptrakit_plugin_infrastructure_core::Result<Vec<BatchFetchResult>> {
+            Err(rootcause::report!(PluginError::PluginInternal(
+                "simulated batch-level network failure".to_string()
+            )))
+        }
+    }
+
+    fn failing_fetcher_factory(
+        _plugin_type: &PluginTypeId,
+        _config: &serde_json::Value,
+        _runtime: Arc<dyn HostRuntime>,
+    ) -> uptrakit_plugin_infrastructure_core::Result<Box<dyn ReleaseFetcher>> {
+        Ok(Box::new(AlwaysFailFetcher))
+    }
+
+    fn batch_failing_fetcher_factory(
+        _plugin_type: &PluginTypeId,
+        _config: &serde_json::Value,
+        _runtime: Arc<dyn HostRuntime>,
+    ) -> uptrakit_plugin_infrastructure_core::Result<Box<dyn ReleaseFetcher>> {
+        Ok(Box::new(BatchLevelFailFetcher))
+    }
+
+    fn broken_factory(
+        _plugin_type: &PluginTypeId,
+        _config: &serde_json::Value,
+        _runtime: Arc<dyn HostRuntime>,
+    ) -> uptrakit_plugin_infrastructure_core::Result<Box<dyn ReleaseFetcher>> {
+        Err(rootcause::report!(PluginError::Configuration(
+            "simulated plugin creation failure".to_string()
+        )))
     }
 
     fn gh_assignment() -> PluginAssignment {
@@ -782,6 +891,125 @@ mod tests {
         // proves the creation path runs without panicking.
         let outcome = check_version(Some(&assignment), None, test_executor(), &ctx).await;
         let _ = outcome;
+    }
+
+    #[tokio::test]
+    async fn batch_check_versions_fetch_error_sets_error_field() {
+        let results = batch_check_versions_inner(
+            vec![fetch_assignment("pkg-1", "nginx:latest")],
+            test_executor(),
+            &no_ctx(),
+            &failing_fetcher_factory,
+        )
+        .await;
+
+        assert_eq!(results.len(), 1);
+        let result = &results[0];
+        assert!(result.error.is_some(), "expected error when fetch fails");
+        assert!(
+            result.latest_version.is_none(),
+            "expected latest_version to be None, got {:?}",
+            result.latest_version
+        );
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("simulated registry unavailable")),
+            "unexpected error: {:?}",
+            result.error
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_check_versions_all_items_get_error_on_total_fetch_failure() {
+        let assignments = vec![
+            fetch_assignment("pkg-1", "img-1:latest"),
+            fetch_assignment("pkg-2", "img-2:latest"),
+            fetch_assignment("pkg-3", "img-3:latest"),
+        ];
+
+        let results = batch_check_versions_inner(
+            assignments,
+            test_executor(),
+            &no_ctx(),
+            &failing_fetcher_factory,
+        )
+        .await;
+
+        assert_eq!(results.len(), 3);
+        for (idx, result) in results.iter().enumerate() {
+            assert!(result.error.is_some(), "result[{idx}] should have error");
+            assert!(
+                result.latest_version.is_none(),
+                "result[{idx}] latest_version should be None, got {:?}",
+                result.latest_version
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn batch_check_versions_factory_error_sets_error_field() {
+        let assignments = vec![
+            fetch_assignment("pkg-1", "img-1:latest"),
+            fetch_assignment("pkg-2", "img-2:latest"),
+        ];
+
+        let results =
+            batch_check_versions_inner(assignments, test_executor(), &no_ctx(), &broken_factory)
+                .await;
+
+        assert_eq!(results.len(), 2);
+        for (idx, result) in results.iter().enumerate() {
+            assert!(result.error.is_some(), "result[{idx}] should have error");
+            assert!(
+                result.latest_version.is_none(),
+                "result[{idx}] latest_version should be None, got {:?}",
+                result.latest_version
+            );
+            assert!(
+                result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("failed to create plugin")),
+                "result[{idx}] unexpected error: {:?}",
+                result.error
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn batch_check_versions_batch_level_fetch_error_sets_error_field() {
+        let assignments = vec![
+            fetch_assignment("pkg-1", "img-1:latest"),
+            fetch_assignment("pkg-2", "img-2:latest"),
+        ];
+
+        let results = batch_check_versions_inner(
+            assignments,
+            test_executor(),
+            &no_ctx(),
+            &batch_failing_fetcher_factory,
+        )
+        .await;
+
+        assert_eq!(results.len(), 2);
+        for (idx, result) in results.iter().enumerate() {
+            assert!(result.error.is_some(), "result[{idx}] should have error");
+            assert!(
+                result.latest_version.is_none(),
+                "result[{idx}] latest_version should be None, got {:?}",
+                result.latest_version
+            );
+            assert!(
+                result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("fetch_releases failed")),
+                "result[{idx}] unexpected error: {:?}",
+                result.error
+            );
+        }
     }
 
     #[tokio::test]
