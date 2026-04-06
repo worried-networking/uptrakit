@@ -258,12 +258,22 @@ pub trait ServiceHandler: Send {
         Ok(())
     }
 
-    /// Graceful shutdown: send `Disconnecting` and drain in-flight work.
+    /// Graceful shutdown: map cause via [`default_resolve_shutdown`](crate::default_resolve_shutdown), send
+    /// `Disconnecting`, drain work, return the resolved [`LoopOutcome`].
     ///
-    /// `cause` indicates whether shutdown was triggered by an OS signal or
-    /// by the controller sending `ServerRestarting`. Services should map the
-    /// cause to a [`DisconnectReason`] and a [`LoopOutcome`] following the
-    /// table in [`ShutdownCause`].
+    /// Implementations MUST call
+    /// [`default_resolve_shutdown`](crate::default_resolve_shutdown)`(cause)` and use the returned
+    /// `(`[`DisconnectReason`]`, `[`LoopOutcome`]`)` pair.  The
+    /// [`DisconnectReason`] sent in `Disconnecting` and the
+    /// [`LoopOutcome`] returned to the lifecycle must both originate
+    /// from that call.  Handlers may perform arbitrary teardown work
+    /// (draining, pool closure, engine shutdown) in any order relative
+    /// to the call.
+    ///
+    /// To override the mapping, add a
+    /// `// DEVIATION(ADR-0037, approved: ADR-NNNN): <reason>` comment
+    /// at the override site, where `ADR-NNNN` is an accepted ADR
+    /// justifying the deviation.  See ADR-0036.
     async fn on_shutdown(
         &mut self,
         conn: &mut ControllerConnection,
