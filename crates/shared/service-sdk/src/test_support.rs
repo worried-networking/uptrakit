@@ -134,7 +134,6 @@ impl ServiceTransport for MockTransport {
 
 #[cfg(test)]
 mod tests {
-    use std::future::Future;
     use std::sync::{
         Arc,
         atomic::{AtomicU32, Ordering},
@@ -278,16 +277,11 @@ mod tests {
         assert!(transport.is_yielded());
     }
 
-    #[test]
-    fn async_transport_recv_parks_waker_when_empty() {
+    #[tokio::test]
+    async fn async_transport_recv_parks_waker_when_empty() {
         let mut transport = MockTransport::new();
-        let mut cx = noop_cx();
-
-        {
-            let mut fut = Box::pin(transport.transport_recv());
-            let poll = Future::poll(fut.as_mut(), &mut cx);
-            assert!(matches!(poll, Poll::Pending));
-        }
+        let poll = futures_util::poll!(transport.transport_recv());
+        assert!(matches!(poll, Poll::Pending));
 
         assert!(transport.has_parked_waker());
     }

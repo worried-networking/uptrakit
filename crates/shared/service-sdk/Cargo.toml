@@ -15,7 +15,7 @@ test-support = ["uptrakit-tracing-init/test-support"]
 [dependencies]
 async-trait = { workspace = true }
 clap = { workspace = true }
-futures-util = { workspace = true }
+futures-util = { workspace = true, features = ["async-await-macro"] }
 hostname = { workspace = true }
 http = { workspace = true }
 parking_lot = { workspace = true }
