@@ -71,8 +71,8 @@ the agreed capability set. Only typed (known) variants participate in the inters
 The default implementation returns an empty set. Services should override this to advertise their actual
 capabilities. For example, the local agent returns `{GracefulShutdown, SoftwareDiscovery, UpdateHooks}`.
 
-On the controller side, the persisted capability set is used to derive a `ServiceProfile` (Agent,
-UpdateTracker, or Unknown) which drives behavioral defaults such as ping interval, shutdown timeout, and
+On the controller side, the persisted capability set is used to derive a `ServiceProfile` (`UpdateTracker`,
+`Scheduler`, `Agent`, or `Unknown`) which drives behavioral defaults such as ping interval, shutdown timeout, and
 human-readable `service_label`. See [ServiceProfile derivation](#serviceprofile-derivation) below.
 
 ### `ServiceEvent` associated type
@@ -174,8 +174,8 @@ per-page limits.
 
 This design means the ping interval is fully controller-managed. The `ServiceHandler` trait no longer
 exposes a `ping_interval()` method. The controller derives the interval from a per-service database
-override (`services.ping_interval_seconds`) or falls back to `ServiceProfile`-based defaults (300s for
-Agent profile, 15s for UpdateTracker profile).
+override (`services.ping_interval_seconds`) or falls back to `ServiceProfile`-based defaults (15 s for
+`UpdateTracker`, 60 s for `Scheduler`, 300 s for `Agent`/`Unknown`).
 
 ### `EventLoopContext`
 
@@ -422,19 +422,20 @@ derived from the service's persisted capability set via `ServiceProfile::from_ca
 | Profile | Key capability | Example services |
 | --- | --- | --- |
 | `UpdateTracker` | `Capability::UpdateTracking` | MQTT service |
+| `Scheduler` | `Capability::Scheduler` | External task scheduler |
 | `Agent` | `Capability::SoftwareDiscovery` | Local agent, SSH agent |
 | `Unknown` | (fallback) | Unrecognized combinations |
 
-`UpdateTracker` takes precedence if both `UpdateTracking` and `SoftwareDiscovery` are present.
+Precedence: `UpdateTracker` > `Scheduler` > `Agent` > `Unknown`. If multiple key capabilities are present, the highest-precedence profile wins.
 
 The profile drives behavioral defaults:
 
-| Default | UpdateTracker | Agent | Unknown |
-| --- | --- | --- | --- |
-| `default_ping_interval_secs` | 15 | 300 | 300 |
-| `shutdown_timeout_secs` | None | Some(120) | Some(120) |
-| `service_label(false)` | "Update Tracker" | "Agent" | "Unknown" |
-| `service_label(true)` | "Update Tracker" | "SSH Agent" | "Unknown" |
+| Default | UpdateTracker | Scheduler | Agent | Unknown |
+| --- | --- | --- | --- | --- |
+| `default_ping_interval_secs` | 15 | 60 | 300 | 300 |
+| `shutdown_timeout_secs` | None | Some(30) | Some(120) | Some(120) |
+| `service_label(false)` | "Update Tracker" | "Scheduler" | "Agent" | "Unknown" |
+| `service_label(true)` | "Update Tracker" | "Scheduler" | "SSH Agent" | "Unknown" |
 
 The `service_label` column in API responses (`ServiceResponse.service_label`) is derived at query time
 from the profile and the presence of `Capability::SshRemote`. It is not stored in the database.
