@@ -893,6 +893,18 @@ mod tests {
         let _ = outcome;
     }
 
+    // -- Fetch-failure error propagation tests --------------------------------
+    // Execution model:
+    // - Workflow: .github/workflows/agent-core-batch-ci.yml
+    // - Job: agent-core-batch-failure-path
+    // - Command: cargo test -p uptrakit-agent-core --all-features batch_check_versions_
+    //
+    // Precondition for this group:
+    // - fetch_assignment() uses plugin_ids::RELEASES_DOCKER.
+    // - The Docker descriptor does not implement RefreshPackageIndex.
+    // - refresh_package_indexes() therefore skips these assignments, keeping the
+    //   tests deterministic with no Docker daemon, external network, or DB usage.
+
     #[tokio::test]
     async fn batch_check_versions_fetch_error_sets_error_field() {
         let results = batch_check_versions_inner(
