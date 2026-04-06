@@ -541,23 +541,69 @@ mod tests {
         tokio_tungstenite::tungstenite::Error,
     >;
 
-    struct ChannelReadStream {
-        rx: mpsc::UnboundedReceiver<TestReadItem>,
+    #[derive(Clone, Copy)]
+    enum ReadPhase {
+        AwaitFirstExhaustion,
+        WaitForSecondBurst,
+        Disconnected,
     }
 
-    impl Stream for ChannelReadStream {
+    struct BudgetReadStream {
+        rx: mpsc::UnboundedReceiver<TestReadItem>,
+        hold_tx: Option<mpsc::UnboundedSender<TestReadItem>>,
+        processed_count: Arc<AtomicU32>,
+        service_tx: mpsc::Sender<()>,
+        second_burst: u32,
+        target_count: u32,
+        phase: ReadPhase,
+    }
+
+    impl Stream for BudgetReadStream {
         type Item = TestReadItem;
 
         fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-            self.rx.poll_recv(cx)
+            let this = self.as_mut().get_mut();
+            match this.phase {
+                ReadPhase::AwaitFirstExhaustion => {
+                    let first_poll_count = this.processed_count.load(Ordering::SeqCst);
+                    assert_eq!(
+                        first_poll_count, MAX_CONSECUTIVE_SERVICE_EVENTS,
+                        "conn.recv() must first be polled exactly when the service-event budget is exhausted"
+                    );
+                    for _ in 0..this.second_burst {
+                        this.service_tx
+                            .try_send(())
+                            .expect("second burst enqueue must fit in event channel");
+                    }
+                    this.phase = ReadPhase::WaitForSecondBurst;
+                    let pending = this.rx.poll_recv(cx);
+                    assert!(
+                        pending.is_pending(),
+                        "read stream must stay pending at first budget exhaustion to force yield_now"
+                    );
+                    Poll::Pending
+                }
+                ReadPhase::WaitForSecondBurst => {
+                    if this.processed_count.load(Ordering::SeqCst) < this.target_count {
+                        return Poll::Pending;
+                    }
+                    this.hold_tx.take();
+                    this.phase = ReadPhase::Disconnected;
+                    let closed = this.rx.poll_recv(cx);
+                    assert!(
+                        matches!(closed, Poll::Ready(None)),
+                        "read stream must close on second poll to end loop as Disconnected"
+                    );
+                    closed
+                }
+                ReadPhase::Disconnected => Poll::Ready(None),
+            }
         }
     }
 
     struct BudgetTestHandler {
         event_rx: mpsc::Receiver<()>,
         processed_count: Arc<AtomicU32>,
-        read_tx: Option<mpsc::UnboundedSender<TestReadItem>>,
-        disconnect_read_after: u32,
     }
 
     #[async_trait]
@@ -596,10 +642,7 @@ mod tests {
             _event: Self::ServiceEvent,
             _conn: &mut ControllerConnection,
         ) -> LoopResult<Option<LoopOutcome>> {
-            let count = self.processed_count.fetch_add(1, Ordering::SeqCst) + 1;
-            if count == self.disconnect_read_after {
-                self.read_tx.take();
-            }
+            self.processed_count.fetch_add(1, Ordering::SeqCst);
             Ok(None)
         }
 
@@ -617,22 +660,30 @@ mod tests {
     /// re-enables service-event polling for a second burst before disconnect.
     #[tokio::test(start_paused = true)]
     async fn budget_disables_service_arm_on_first_exhaustion() {
-        let first_burst = MAX_CONSECUTIVE_SERVICE_EVENTS;
-        let second_burst = MAX_CONSECUTIVE_SERVICE_EVENTS;
+        let first_burst = MAX_CONSECUTIVE_SERVICE_EVENTS + 1;
+        let second_burst = MAX_CONSECUTIVE_SERVICE_EVENTS
+            .checked_sub(1)
+            .expect("MAX_CONSECUTIVE_SERVICE_EVENTS must be > 0");
         let total_events = first_burst + second_burst;
         let (event_tx, event_rx) = mpsc::channel::<()>(total_events as usize);
-        let (read_tx, read_rx) = mpsc::unbounded_channel::<TestReadItem>();
+        let (read_hold_tx, read_rx) = mpsc::unbounded_channel::<TestReadItem>();
         let processed_count = Arc::new(AtomicU32::new(0));
 
         let mut handler = BudgetTestHandler {
             event_rx,
             processed_count: Arc::clone(&processed_count),
-            read_tx: Some(read_tx),
-            disconnect_read_after: total_events,
         };
 
         let read_stream: Pin<Box<dyn Stream<Item = TestReadItem> + Send>> =
-            Box::pin(ChannelReadStream { rx: read_rx });
+            Box::pin(BudgetReadStream {
+                rx: read_rx,
+                hold_tx: Some(read_hold_tx),
+                processed_count: Arc::clone(&processed_count),
+                service_tx: event_tx.clone(),
+                second_burst,
+                target_count: total_events,
+                phase: ReadPhase::AwaitFirstExhaustion,
+            });
         let mut conn = ControllerConnection::new_test(read_stream);
         let tmp = tempfile::tempdir().expect("tempdir must be created");
         let mut identity = ServiceIdentityState::new_single_dir(tmp.path());
@@ -643,12 +694,13 @@ mod tests {
         };
         let mut signals = SignalWatcher::new().expect("signal watcher must initialize");
 
-        for _ in 0..total_events {
+        for _ in 0..first_burst {
             event_tx
                 .send(())
                 .await
                 .expect("event channel must stay open during prefill");
         }
+        drop(event_tx);
 
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -668,7 +720,7 @@ mod tests {
         assert_eq!(
             processed_count.load(Ordering::SeqCst),
             total_events,
-            "expected two full bursts of MAX_CONSECUTIVE_SERVICE_EVENTS before disconnect"
+            "expected exactly two MAX_CONSECUTIVE_SERVICE_EVENTS bursts before disconnect"
         );
     }
 
