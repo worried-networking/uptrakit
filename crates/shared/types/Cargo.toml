@@ -11,6 +11,7 @@ default = []
 sea-orm = ["dep:sea-orm"]
 openapi = ["dep:utoipa"]
 http-ssrf = ["dep:reqwest", "dep:tokio", "dep:rustls", "dep:webpki-roots"]
+test-support = []
 
 [dependencies]
 serde = { workspace = true }

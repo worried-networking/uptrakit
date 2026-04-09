@@ -154,6 +154,10 @@ pub mod plugin_ids {
     pub const EMAIL: PluginTypeId = PluginTypeId::from_static("email");
     pub const ENHANCEMENT_DASHBOARD_ICONS: PluginTypeId =
         PluginTypeId::from_static("enhancement_dashboard_icons");
+    #[cfg(feature = "test-support")]
+    pub const TEST_FETCH_FAIL: PluginTypeId = PluginTypeId::from_static("__test_fetch_fail");
+    #[cfg(feature = "test-support")]
+    pub const TEST_PER_ITEM_FAIL: PluginTypeId = PluginTypeId::from_static("__test_per_item_fail");
 
     /// All well-known plugin type IDs. Must include every constant above.
     /// Tests verify bidirectional consistency with `all_descriptors()`.
