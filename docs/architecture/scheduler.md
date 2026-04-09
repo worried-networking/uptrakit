@@ -254,11 +254,14 @@ Handles the **fetch_releases** scheduled task. Runs two phases concurrently via 
 
 **Phase A — Controller-side fetch:** Queries `host_software_item_plugins` rows with
 `role = 'fetch_releases'` that target the controller (`execution_site = 'controller'` or `'auto'`
-with `ControllerSideFetchReleases` capability). Groups by `(plugin_config_id, package_identifier)`,
-instantiates each plugin, then spawns all fetch calls into a `JoinSet` bounded by a `Semaphore`
-(max [`MAX_CONCURRENT_CONTROLLER_FETCHES`] = 10). After all fetches complete, stores
+with `ControllerSideFetchReleases` capability). Groups by `(plugin_config_id, assignment_config)`,
+instantiates each plugin, and runs `batch_fetch_releases` per group in a `JoinSet` bounded by a
+`Semaphore` (max [`MAX_CONCURRENT_CONTROLLER_FETCHES`] = 10). After fetches complete, stores
 `latest_version` in `host_software_items`, batch-updates `software_item.last_checked_at`, and
 signals `SoftwareStatesChanged` so the controller pushes updated states to update-tracking services.
+When a group-level batch call fails (`Err`) or a per-item result has `BatchFetchResult.error`,
+Phase A skips DB writes for those affected rows and preserves the previously stored
+`host_software_items.latest_version`.
 
 **Phase B — Agent-side dispatch:** Builds `VersionCheckAssignment` per
 `(service_id, host_machine_id)` with only `fetch_releases` set (no `detect_version`, no host

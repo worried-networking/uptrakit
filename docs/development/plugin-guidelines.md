@@ -1341,6 +1341,32 @@ The default implementations call `detect_installed_version()` or `fetch_releases
 each item. A per-item error is stored in `BatchDetectResult::error` or `BatchFetchResult::error`
 rather than failing the entire batch. An empty input slice returns an empty result.
 
+### Fetch failure and `latest_version` preservation
+
+When `fetch_releases()` fails for a package, the existing
+`host_software_items.latest_version` must be preserved. Uptrakit enforces this through three
+layers:
+
+1. The default `ReleaseFetcher::batch_fetch()` maps per-item `fetch_releases()` failures to
+   `BatchFetchResult { error: Some(...), releases: vec![] }` and still returns `Ok(Vec<...>)`.
+1. Controller-side Phase A (`FetchReleasesExecutor`) skips DB writes for items where
+   `BatchFetchResult.error` is set, preserving stored `latest_version` for those rows.
+1. Agent-side results are handled by `handle_version_check_results`, which skips DB writes for
+   `VersionCheckResult` entries where `error` is set.
+
+Plugin authors must return `Err(...)` from `fetch_releases()` when the latest version cannot be
+determined (for example: upstream API unavailable, rate-limited, or auth failure). Returning
+`Ok(vec![])` means "fetch succeeded but no releases were found", which is semantically different
+from "fetch failed".
+
+For agent-reported `VersionCheckResult` entries, `Ok(vec![])` maps to `latest_version: None` with
+`error: None`; the controller still updates `update_category` (typically to `unknown`) while
+leaving `latest_version` unchanged. Use this only for real "no release found" cases.
+
+Plugins that override `batch_fetch()` and return a batch-level `Err(...)` cause the scheduler to
+skip the entire group for that config. The default implementation avoids this by isolating
+failures per item in `BatchFetchResult.error`.
+
 ### When to override
 
 Override these methods when your plugin's package manager accepts multiple packages in a single
