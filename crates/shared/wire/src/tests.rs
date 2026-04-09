@@ -262,14 +262,41 @@ fn version_check_results_serialization_roundtrip() {
             },
         ],
     });
-    let json = serde_json::to_string(&msg).unwrap();
-    assert!(json.contains(r#""type":"version_check_results"#));
-    assert!(json.contains(r#""installed_version":"1.2.3"#));
-    // installed_version should be omitted when None
-    assert!(!json.contains(r#""installed_version":null"#));
-    // latest_version should be omitted when None
-    assert!(!json.contains(r#""latest_version"#));
-    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+    let value = serde_json::to_value(&msg).unwrap();
+    assert_eq!(
+        value.get("type"),
+        Some(&serde_json::Value::String(
+            "version_check_results".to_string()
+        ))
+    );
+
+    let results = value
+        .get("results")
+        .and_then(serde_json::Value::as_array)
+        .unwrap();
+    assert_eq!(results.len(), 2);
+
+    let first = results[0].as_object().unwrap();
+    assert_eq!(
+        first.get("installed_version"),
+        Some(&serde_json::json!("1.2.3"))
+    );
+    assert!(!first.contains_key("error"));
+    assert!(!first.contains_key("latest_version"));
+    assert!(!first.contains_key("installed_display_version"));
+    assert!(!first.contains_key("host_software_item_id"));
+
+    let second = results[1].as_object().unwrap();
+    assert_eq!(
+        second.get("error"),
+        Some(&serde_json::json!("detection failed"))
+    );
+    assert!(!second.contains_key("installed_version"));
+    assert!(!second.contains_key("latest_version"));
+    assert!(!second.contains_key("installed_display_version"));
+    assert!(!second.contains_key("host_software_item_id"));
+
+    let deserialized: ServiceMessage = serde_json::from_value(value).unwrap();
     assert_eq!(deserialized, msg);
 }
 
@@ -310,6 +337,33 @@ fn version_check_result_backward_compat_no_latest_version() {
             Some("1.0.0".to_string())
         );
         assert_eq!(payload.results[0].latest_version, None);
+    } else {
+        panic!("expected VersionCheckResults");
+    }
+}
+
+#[test]
+fn version_check_result_backward_compat_no_error() {
+    // Messages from older agents that don't include error
+    // should still deserialize correctly.
+    let json = serde_json::json!({
+        "type": "version_check_results",
+        "results": [{
+            "software_item_id": TEST_UUID_1.to_string(),
+            "installed_version": "1.0.0",
+            "update_category": "unknown"
+        }]
+    });
+    let msg: ServiceMessage = serde_json::from_value(json).unwrap();
+    if let ServiceMessage::VersionCheckResults(payload) = msg {
+        assert_eq!(payload.results.len(), 1);
+        assert_eq!(payload.results[0].software_item_id, TEST_UUID_1);
+        assert_eq!(
+            payload.results[0].installed_version,
+            Some("1.0.0".to_string())
+        );
+        assert_eq!(payload.results[0].update_category, UpdateCategory::Unknown);
+        assert!(payload.results[0].error.is_none());
     } else {
         panic!("expected VersionCheckResults");
     }
