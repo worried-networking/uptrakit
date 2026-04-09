@@ -143,13 +143,17 @@ for entries whose `last_heartbeat` exceeds the stale threshold.
 Handles the `fetch_releases` task. Phase A and Phase B run concurrently via `tokio::join!`.
 
 **Phase A — Controller-side fetch (parallel):** Queries `host_software_item_plugins` with
-`role = 'fetch_releases'` targeting the controller. Groups by `(plugin_config_id, package_identifier)`,
-instantiates plugins, then spawns them all into a `JoinSet` bounded by a
+`role = 'fetch_releases'` targeting the controller. Groups by
+`(plugin_config_id, assignment_config)`, instantiates one plugin per group, and runs
+`batch_fetch_releases` per group in a `JoinSet` bounded by a
 `Semaphore(MAX_CONCURRENT_CONTROLLER_FETCHES = 10)`. After all spawned tasks complete, the
-DB update loop runs sequentially: updates `host_software_items.latest_version`, batch-updates
-`software_item.last_checked_at`, and signals that software states have changed via
-`SchedulerNotifier::signal_software_states_changed(tenant_id)`. The controller's event delivery
-layer handles loading and pushing the states to update-tracking services.
+DB update loop runs sequentially: updates successful `host_software_items.latest_version` rows,
+batch-updates `software_item.last_checked_at`, and signals that software states have changed via
+`SchedulerNotifier::signal_software_states_changed(tenant_id)`. When a group-level batch call
+returns `Err` or a per-item result contains `BatchFetchResult.error`, Phase A skips DB writes for
+the affected rows and preserves their previously stored `host_software_items.latest_version`.
+The controller's event delivery layer handles loading and pushing states to update-tracking
+services.
 
 **Phase B — Agent-side dispatch:** Calls `query_agent_assignment_rows` with `roles = ["fetch_releases"]`,
 builds `VersionCheckAssignment` with only `fetch_releases` set, and sends `CheckVersions` messages

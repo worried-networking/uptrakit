@@ -172,11 +172,13 @@ calls and does not depend on any local system state.
   `apt-cache policy`). These must run agent-side.
 - Your `fetch_releases()` shells out to a local CLI tool.
 
-**Effect:** When `execution_site` is `auto` (the default), the controller runs `fetch_releases()`
-once per unique `(plugin_config_id, package_identifier)` combination and propagates the result
-to all hosts sharing that combination. This avoids redundant API calls when many hosts track the
-same upstream release. The controller uses a `NoopCommandExecutor` -- if your plugin accidentally
-calls it, the process will panic.
+**Effect:** When `execution_site` is `auto` (the default), controller-side scheduler Phase A
+groups controller-routed `fetch_releases` rows by effective config
+`(plugin_config_id, assignment_config)`. It makes one `batch_fetch_releases` call per group with
+all package identifiers in that group, then propagates each package result to all matching hosts.
+This avoids redundant API calls while preserving assignment-level overrides (for example Docker
+`platform`). The controller uses a `NoopCommandExecutor` -- if your plugin accidentally calls it,
+the process will panic.
 
 **Current plugins with this capability:** `GitHubPlugin`, `GitLabPlugin`, `ForgejoPlugin`,
 `DockerPlugin`, `NpmPlugin`.
@@ -1447,9 +1449,9 @@ that group.
 
 #### Scheduler Phase A
 
-The controller-side `run_controller_side_fetch_releases` groups rows by `plugin_config_id` (instead
-of `(plugin_config_id, package_identifier)`). A single `batch_fetch_releases` call per config
-replaces the previous N-per-package loop.
+The controller-side `run_controller_side_fetch_releases` groups rows by effective config
+`(plugin_config_id, assignment_config)`. A single `batch_fetch_releases` call per group carries
+all package identifiers in that effective-config group, replacing the previous N-per-package loop.
 
 ## Notification Plugin Extension Actions
 
