@@ -36,6 +36,7 @@ x509-parser = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["test-support"] }
 uptrakit-crypto = { workspace = true, features = ["testing"] }
 uptrakit-shared-db = { workspace = true, features = ["db-sqlite", "migration"] }
 

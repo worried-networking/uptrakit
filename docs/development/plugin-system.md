@@ -229,6 +229,23 @@ pub fn all_descriptors() -> Vec<&'static PluginDescriptor> {
 To add a new plugin: create a crate, use `declare_plugin!`, and add one line to
 `all_descriptors()`.
 
+### Test-Only Feature-Gated Descriptors
+
+For deterministic controller-side failure-path integration tests, the registry includes a
+`test-support` feature gate that adds two test-only descriptors to `all_descriptors()`:
+`__test_fetch_fail` and `__test_per_item_fail`.
+
+- Their corresponding `PluginTypeId` constants (`plugin_ids::TEST_FETCH_FAIL`,
+  `plugin_ids::TEST_PER_ITEM_FAIL`) are defined behind `#[cfg(feature = "test-support")]`.
+- They are intentionally excluded from `plugin_ids::ALL` so production/always-on invariants remain
+  unchanged.
+- The `descriptors_subset_of_known_ids` registry test conditionally extends its known-ID set with
+  these two IDs only when `test-support` is enabled.
+- These descriptors are manually constructed in `registry/src/test_support.rs` (not generated via
+  `declare_plugin!`) because they are test infrastructure, not first-party plugin crates.
+
+Decision rationale: [ADR-0022](../internal/changes/TASK-0012/ADR-0022.md).
+
 ## Plugin Families
 
 The `PluginFamily` enum categorizes plugins for UI grouping and catalog queries:

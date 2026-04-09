@@ -658,8 +658,145 @@ impl FetchReleasesExecutor {
 mod tests {
     use super::*;
     use crate::notifier::NoopSchedulerNotifier;
-    use sea_orm::{ConnectOptions, Database};
+    use sea_orm::{
+        ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
+    };
+    use uptrakit_shared_db::entity::{
+        host, host_software_item, host_software_item_plugin, software_item, tenant,
+    };
     use uptrakit_shared_db::migration::run_migrations;
+
+    const PRESERVED_LATEST_VERSION: &str = "1.0.0";
+    const TEST_PACKAGE_IDENTIFIER: &str = "test-pkg";
+
+    async fn setup_db() -> DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.unwrap();
+        run_migrations(&db).await.unwrap();
+        db
+    }
+
+    fn make_fetch_releases_task(tenant_id: Uuid) -> scheduled_task::Model {
+        let now = OffsetDateTime::now_utc();
+        scheduled_task::Model {
+            id: Uuid::now_v7(),
+            tenant_id,
+            task_type: uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType::FetchReleases,
+            interval_seconds: 21600,
+            jitter_seconds: 300,
+            enabled: true,
+            task_config: None,
+            last_run_at: None,
+            next_run_at: now,
+            locked_by: None,
+            locked_at: None,
+            last_error: None,
+            run_count: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    async fn insert_controller_fetch_fixture(
+        db: &DatabaseConnection,
+        plugin_type: &str,
+    ) -> (Uuid, Uuid) {
+        let now = OffsetDateTime::now_utc();
+        let tenant_id = Uuid::now_v7();
+        tenant::ActiveModel {
+            id: Set(tenant_id),
+            name: Set("test-tenant".to_string()),
+            slug: Set(format!("test-{tenant_id}")),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        let software_item_id = Uuid::now_v7();
+        software_item::ActiveModel {
+            id: Set(software_item_id),
+            tenant_id: Set(tenant_id),
+            name: Set("test-software".to_string()),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        let host_id = Uuid::now_v7();
+        host::ActiveModel {
+            id: Set(host_id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(format!("machine-{host_id}")),
+            hostname: Set("test-host".to_string()),
+            friendly_name: Set("Test Host".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        let host_software_item_id = Uuid::now_v7();
+        host_software_item::ActiveModel {
+            id: Set(host_software_item_id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(Some(TEST_PACKAGE_IDENTIFIER.to_string())),
+            installed_version: Set(None),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(Some(PRESERVED_LATEST_VERSION.to_string())),
+            latest_version_fetched_at: Set(Some(now - time::Duration::hours(1))),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(host_software_item_id),
+            plugin_config_id: Set(None),
+            plugin_type: Set(plugin_type.to_string()),
+            role: Set("fetch_releases".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set(TEST_PACKAGE_IDENTIFIER.to_string()),
+            config: Set(None),
+            execution_site: Set("controller".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        (tenant_id, host_software_item_id)
+    }
 
     // ── phase_a_group_key ────────────────────────────────────────────────────
 
@@ -727,34 +864,81 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_releases_executor_empty_db_returns_ok() {
-        let opt = ConnectOptions::new("sqlite::memory:");
-        let db = Database::connect(opt).await.unwrap();
-        run_migrations(&db).await.unwrap();
-
+        let db = setup_db().await;
         let notifier = Arc::new(NoopSchedulerNotifier);
         let executor = FetchReleasesExecutor::new(db.clone(), notifier);
-
-        // Build a minimal scheduled_task model for the call.
-        let tenant_id = uuid::Uuid::now_v7();
-        let task = scheduled_task::Model {
-            id: uuid::Uuid::now_v7(),
-            tenant_id,
-            task_type: uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType::FetchReleases,
-            interval_seconds: 21600,
-            jitter_seconds: 300,
-            enabled: true,
-            task_config: None,
-            last_run_at: None,
-            next_run_at: time::OffsetDateTime::now_utc(),
-            locked_by: None,
-            locked_at: None,
-            last_error: None,
-            run_count: 0,
-            created_at: time::OffsetDateTime::now_utc(),
-            updated_at: time::OffsetDateTime::now_utc(),
-        };
+        let task = make_fetch_releases_task(Uuid::now_v7());
 
         // With no software items in the DB, execute should return Ok(()).
         executor.execute(&task).await.unwrap();
+    }
+
+    #[test]
+    fn test_mock_descriptor_declares_controller_side_capability() {
+        let descriptor = get_descriptor("__test_fetch_fail")
+            .expect("expected __test_fetch_fail descriptor with test-support");
+        assert!(
+            descriptor
+                .capabilities
+                .contains(&PluginCapability::ControllerSideFetchReleases)
+        );
+        assert!(descriptor.roles.release_fetcher.is_some());
+
+        let per_item_descriptor = get_descriptor("__test_per_item_fail")
+            .expect("expected __test_per_item_fail descriptor with test-support");
+        assert!(
+            per_item_descriptor
+                .capabilities
+                .contains(&PluginCapability::ControllerSideFetchReleases)
+        );
+        assert!(per_item_descriptor.roles.release_fetcher.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_batch_fetch_err_preserves_latest_version() {
+        let db = setup_db().await;
+        let (tenant_id, host_software_item_id) =
+            insert_controller_fetch_fixture(&db, "__test_fetch_fail").await;
+
+        let notifier = Arc::new(NoopSchedulerNotifier);
+        let executor = FetchReleasesExecutor::new(db.clone(), notifier);
+        executor
+            .execute(&make_fetch_releases_task(tenant_id))
+            .await
+            .unwrap();
+
+        let model = host_software_item::Entity::find_by_id(host_software_item_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            model.latest_version.as_deref(),
+            Some(PRESERVED_LATEST_VERSION)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_per_item_fetch_error_preserves_latest_version() {
+        let db = setup_db().await;
+        let (tenant_id, host_software_item_id) =
+            insert_controller_fetch_fixture(&db, "__test_per_item_fail").await;
+
+        let notifier = Arc::new(NoopSchedulerNotifier);
+        let executor = FetchReleasesExecutor::new(db.clone(), notifier);
+        executor
+            .execute(&make_fetch_releases_task(tenant_id))
+            .await
+            .unwrap();
+
+        let model = host_software_item::Entity::find_by_id(host_software_item_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            model.latest_version.as_deref(),
+            Some(PRESERVED_LATEST_VERSION)
+        );
     }
 }
