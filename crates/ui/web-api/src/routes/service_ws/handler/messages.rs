@@ -451,6 +451,12 @@ async fn apply_version_update_to_db(
     matching_ids: Vec<uuid::Uuid>,
     now: time::OffsetDateTime,
 ) {
+    debug_assert!(
+        result.error.is_none(),
+        "apply_version_update_to_db called with error-bearing VersionCheckResult; caller must skip DB writes for software_item_id={} host_software_item_id={:?}",
+        result.software_item_id,
+        result.host_software_item_id
+    );
     let software_item_id = result.software_item_id;
     let mut update = host_software_item::Entity::update_many()
         .filter(host_software_item::Column::Id.is_in(matching_ids.clone()));
@@ -665,7 +671,7 @@ pub(super) async fn handle_version_check_results(
                 software_item_id = %result.software_item_id,
                 host_software_item_id = ?result.host_software_item_id,
                 error = ?result.error,
-                "skipping version result with error"
+                "skipping version result with error; existing DB state preserved"
             );
             continue;
         }
