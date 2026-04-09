@@ -174,11 +174,14 @@ mod tests {
     fn descriptors_subset_of_known_ids() {
         let descs = all_descriptors();
         #[allow(unused_mut)]
-        let mut known: BTreeSet<&str> = plugin_ids::ALL.iter().map(|id| id.as_str()).collect();
+        let mut known: BTreeSet<String> = plugin_ids::ALL
+            .iter()
+            .map(|id| id.as_str().to_owned())
+            .collect();
         #[cfg(feature = "test-support")]
         {
-            known.insert("__test_fetch_fail");
-            known.insert("__test_per_item_fail");
+            known.insert(plugin_ids::TEST_FETCH_FAIL.as_str().to_owned());
+            known.insert(plugin_ids::TEST_PER_ITEM_FAIL.as_str().to_owned());
         }
         for d in &descs {
             assert!(
