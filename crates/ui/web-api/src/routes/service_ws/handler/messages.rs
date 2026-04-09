@@ -1056,7 +1056,7 @@ mod tests {
     use super::*;
     use sea_orm::{ActiveModelTrait, Set};
     use std::sync::Arc;
-    use uptrakit_internal_wire::{VersionCheckResult, VersionCheckResultsPayload};
+    use uptrakit_internal_wire::{UpdateCategory, VersionCheckResult, VersionCheckResultsPayload};
     use uptrakit_plugin_infrastructure_registry::{
         NotificationOps, NotificationTransport, PluginConfigOps, PluginDescriptor,
         PluginExtensionOps, PluginMetadataOps, PluginOps, PluginTypeId, SoftwareItemCreatedEvent,
@@ -1391,6 +1391,149 @@ mod tests {
             .expect("query")
             .expect("row");
         assert_eq!(untouched_a.installed_version, None);
+    }
+
+    #[tokio::test]
+    async fn version_check_results_error_result_preserves_targeted_row_while_success_updates_peer_row()
+     {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+
+        let svc = insert_service(&db, tenant_id).await;
+        let host_error = insert_host(&db, tenant_id).await;
+        let host_success = insert_host(&db, tenant_id).await;
+        link_service_host(&db, svc.id, host_error.id).await;
+        link_service_host(&db, svc.id, host_success.id).await;
+
+        let sw = insert_software_item(&db, tenant_id).await;
+        let hsi_error = insert_host_software_item(&db, host_error.id, sw.id).await;
+        let hsi_success = insert_host_software_item(&db, host_success.id, sw.id).await;
+
+        let preserved_detected_at =
+            time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("valid unix timestamp");
+        let preserved_fetched_at =
+            time::OffsetDateTime::from_unix_timestamp(1_700_000_100).expect("valid unix timestamp");
+        let success_seed_detected_at =
+            time::OffsetDateTime::from_unix_timestamp(1_700_000_200).expect("valid unix timestamp");
+        let success_seed_fetched_at =
+            time::OffsetDateTime::from_unix_timestamp(1_700_000_300).expect("valid unix timestamp");
+
+        host_software_item::ActiveModel {
+            id: Set(hsi_error.id),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(Some(preserved_detected_at)),
+            installed_display_version: Set(Some("1.0.0+baseline".to_string())),
+            latest_version: Set(Some("1.0.1".to_string())),
+            latest_version_fetched_at: Set(Some(preserved_fetched_at)),
+            update_category: Set(UpdateCategory::Bugfix.to_string()),
+            ..Default::default()
+        }
+        .update(&db)
+        .await
+        .expect("seed error-targeted host_software_item");
+
+        let preserved_baseline = host_software_item::Entity::find_by_id(hsi_error.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+
+        host_software_item::ActiveModel {
+            id: Set(hsi_success.id),
+            installed_version: Set(Some("0.9.0".to_string())),
+            installed_version_detected_at: Set(Some(success_seed_detected_at)),
+            installed_display_version: Set(Some("0.9.0+seed".to_string())),
+            latest_version: Set(Some("0.9.9".to_string())),
+            latest_version_fetched_at: Set(Some(success_seed_fetched_at)),
+            update_category: Set(UpdateCategory::Unknown.to_string()),
+            ..Default::default()
+        }
+        .update(&db)
+        .await
+        .expect("seed success-targeted host_software_item");
+
+        let payload = VersionCheckResultsPayload {
+            results: vec![
+                VersionCheckResult {
+                    software_item_id: sw.id,
+                    installed_version: Some("9.9.9-should-not-apply".to_string()),
+                    installed_display_version: Some("should-not-apply-display".to_string()),
+                    latest_version: Some("10.0.0-should-not-apply".to_string()),
+                    error: Some("registry unavailable".to_string()),
+                    update_category: UpdateCategory::Feature,
+                    host_software_item_id: Some(hsi_error.id),
+                },
+                VersionCheckResult {
+                    software_item_id: sw.id,
+                    installed_version: Some("2.0.0".to_string()),
+                    installed_display_version: Some("2.0.0+stable".to_string()),
+                    latest_version: Some("2.1.0".to_string()),
+                    error: None,
+                    update_category: UpdateCategory::Security,
+                    host_software_item_id: Some(hsi_success.id),
+                },
+            ],
+        };
+
+        handle_version_check_results(&state, svc.id, &payload).await;
+
+        let preserved_after = host_software_item::Entity::find_by_id(hsi_error.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        let success_after = host_software_item::Entity::find_by_id(hsi_success.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+
+        assert_eq!(
+            preserved_after.installed_version,
+            preserved_baseline.installed_version
+        );
+        assert_eq!(
+            preserved_after.installed_display_version,
+            preserved_baseline.installed_display_version
+        );
+        assert_eq!(
+            preserved_after.installed_version_detected_at,
+            preserved_baseline.installed_version_detected_at
+        );
+        assert_eq!(
+            preserved_after.latest_version,
+            preserved_baseline.latest_version
+        );
+        assert_eq!(
+            preserved_after.latest_version_fetched_at,
+            preserved_baseline.latest_version_fetched_at
+        );
+        assert_eq!(
+            preserved_after.update_category,
+            preserved_baseline.update_category
+        );
+
+        assert_eq!(success_after.installed_version, Some("2.0.0".to_string()));
+        assert_eq!(
+            success_after.installed_display_version,
+            Some("2.0.0+stable".to_string())
+        );
+        assert!(success_after.installed_version_detected_at.is_some());
+        assert_ne!(
+            success_after.installed_version_detected_at,
+            Some(success_seed_detected_at)
+        );
+        assert_eq!(success_after.latest_version, Some("2.1.0".to_string()));
+        assert!(success_after.latest_version_fetched_at.is_some());
+        assert_ne!(
+            success_after.latest_version_fetched_at,
+            Some(success_seed_fetched_at)
+        );
+        assert_eq!(
+            success_after.update_category,
+            UpdateCategory::Security.to_string()
+        );
     }
 
     #[tokio::test]
