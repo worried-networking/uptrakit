@@ -14,7 +14,12 @@ frontend/.svelte-kit
 
 !**/.pipeline-run/subtasks_registry.json
 
+.cymbal/
+
 **/.pipeline-run/**
 !**/.pipeline-run/
-.cymbal/
+.tokensave/
+**/.tokensave/
+.pipeline-project/
+**/.pipeline-project/
 **/.subtask-*/
