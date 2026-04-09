@@ -8,8 +8,8 @@ use crate::plugin::DockerPlugin;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    BatchDetectItem, Discoverer, HostCompatibility, PluginCapability, ReleaseFetcher,
-    UpdateExecutor as _, UpdateOutputLine, VersionDetector,
+    BatchDetectItem, BatchFetchItem, Discoverer, HostCompatibility, PluginCapability,
+    ReleaseFetcher, UpdateExecutor as _, UpdateOutputLine, VersionDetector,
 };
 
 fn test_executor() -> Arc<dyn CommandExecutor> {
@@ -290,6 +290,90 @@ async fn fetch_releases_returns_err_on_invalid_image_ref() {
         result.is_err(),
         "invalid image references should return Err"
     );
+}
+
+#[tokio::test]
+async fn batch_fetch_preserves_error_for_invalid_image_ref() {
+    let plugin = DockerPlugin::new_for_test(
+        DockerConfig::default(),
+        test_executor(),
+        default_mock_client(),
+    )
+    .expect("valid config");
+    let items = vec![
+        BatchFetchItem::new("library/nginx:latest"),
+        BatchFetchItem::new(""),
+    ];
+    let invalid_ref_error = plugin
+        .fetch_releases("")
+        .await
+        .expect_err("invalid image reference should return an error")
+        .to_string();
+
+    let result = plugin.batch_fetch(&items).await;
+    assert!(
+        result.is_ok(),
+        "default ReleaseFetcher::batch_fetch should return Ok"
+    );
+
+    let results = result.expect("batch_fetch should return per-item results");
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].package_identifier, "library/nginx:latest");
+    assert!(results[0].error.is_none());
+    assert_eq!(results[0].releases.len(), 1);
+
+    assert_eq!(results[1].package_identifier, "");
+    assert_eq!(
+        results[1].error.as_deref(),
+        Some(invalid_ref_error.as_str())
+    );
+    assert!(results[1].releases.is_empty());
+}
+
+#[tokio::test]
+async fn batch_fetch_all_failures_populates_all_errors() {
+    use crate::registry::MockRegistryClient;
+
+    let mock_registry = Arc::new(MockRegistryClient {
+        manifest_info_should_fail: true,
+        ..Default::default()
+    });
+    let plugin = DockerPlugin::new_for_test_with_registry(
+        DockerConfig::default(),
+        test_executor(),
+        default_mock_client(),
+        mock_registry,
+    )
+    .expect("valid config");
+    let items = vec![
+        BatchFetchItem::new("library/nginx:latest"),
+        BatchFetchItem::new("library/redis:latest"),
+    ];
+    let nginx_error = plugin
+        .fetch_releases("library/nginx:latest")
+        .await
+        .expect_err("mock registry should fail for nginx")
+        .to_string();
+    let redis_error = plugin
+        .fetch_releases("library/redis:latest")
+        .await
+        .expect_err("mock registry should fail for redis")
+        .to_string();
+
+    let result = plugin.batch_fetch(&items).await;
+    assert!(
+        result.is_ok(),
+        "default ReleaseFetcher::batch_fetch should return Ok"
+    );
+
+    let results = result.expect("batch_fetch should return per-item results");
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].package_identifier, "library/nginx:latest");
+    assert_eq!(results[0].error.as_deref(), Some(nginx_error.as_str()));
+    assert!(results[0].releases.is_empty());
+    assert_eq!(results[1].package_identifier, "library/redis:latest");
+    assert_eq!(results[1].error.as_deref(), Some(redis_error.as_str()));
+    assert!(results[1].releases.is_empty());
 }
 
 // ── execute_update ────────────────────────────────────────────────────────
