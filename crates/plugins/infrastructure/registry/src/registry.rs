@@ -52,6 +52,11 @@ pub fn all_descriptors() -> Vec<&'static PluginDescriptor> {
     // Enhancements (feature-gated)
     #[cfg(feature = "dashboard-icons")]
     descs.push(&uptrakit_plugin_enhancement_dashboard_icons::DESCRIPTOR);
+    #[cfg(feature = "test-support")]
+    {
+        descs.push(&crate::test_support::DESCRIPTOR);
+        descs.push(&crate::test_support::PER_ITEM_FAIL_DESCRIPTOR);
+    }
     descs
 }
 
@@ -168,7 +173,13 @@ mod tests {
     #[test]
     fn descriptors_subset_of_known_ids() {
         let descs = all_descriptors();
-        let known: BTreeSet<&str> = plugin_ids::ALL.iter().map(|id| id.as_str()).collect();
+        #[allow(unused_mut)]
+        let mut known: BTreeSet<&str> = plugin_ids::ALL.iter().map(|id| id.as_str()).collect();
+        #[cfg(feature = "test-support")]
+        {
+            known.insert("__test_fetch_fail");
+            known.insert("__test_per_item_fail");
+        }
         for d in &descs {
             assert!(
                 known.contains(d.type_id),

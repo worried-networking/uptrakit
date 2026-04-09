@@ -25,6 +25,7 @@ notifications = []
 notifications-webhook = ["notifications", "dep:uptrakit-notification-plugin-webhook"]
 notifications-telegram = ["notifications", "dep:uptrakit-notification-plugin-telegram"]
 notifications-email = ["notifications", "dep:uptrakit-notification-plugin-email"]
+test-support = ["uptrakit-shared-types/test-support"]
 
 [dependencies]
 uptrakit-shared-types = { workspace = true }
@@ -55,6 +56,7 @@ sea-orm = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 rootcause = { workspace = true }
+async-trait = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-notification-plugin-core = { workspace = true }
 uptrakit-plugin-enhancement-dashboard-icons = { workspace = true, optional = true }

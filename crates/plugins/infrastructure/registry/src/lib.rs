@@ -8,6 +8,8 @@
 
 pub mod error;
 pub mod registry;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 
 pub use error::{PluginRegistryError, Result};
 pub use registry::{

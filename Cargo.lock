@@ -6964,6 +6964,7 @@ dependencies = [
 name = "uptrakit-plugin-infrastructure-registry"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "futures-util",
  "reqwest",
  "rootcause",
