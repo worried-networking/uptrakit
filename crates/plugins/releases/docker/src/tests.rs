@@ -8,8 +8,8 @@ use crate::plugin::DockerPlugin;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    BatchDetectItem, Discoverer, HostCompatibility, PluginCapability, UpdateExecutor as _,
-    UpdateOutputLine, VersionDetector,
+    BatchDetectItem, Discoverer, HostCompatibility, PluginCapability, ReleaseFetcher,
+    UpdateExecutor as _, UpdateOutputLine, VersionDetector,
 };
 
 fn test_executor() -> Arc<dyn CommandExecutor> {
@@ -216,6 +216,80 @@ async fn detect_installed_version_returns_none_when_image_absent() {
         DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
     let result = plugin.detect_installed_version("nginx").await.unwrap();
     assert!(result.is_none());
+}
+
+// ── fetch_releases ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn fetch_releases_returns_err_when_registry_manifest_info_fails() {
+    use crate::registry::MockRegistryClient;
+
+    let mock_registry = Arc::new(MockRegistryClient {
+        manifest_info_should_fail: true,
+        ..Default::default()
+    });
+    let plugin = DockerPlugin::new_for_test_with_registry(
+        DockerConfig::default(),
+        test_executor(),
+        default_mock_client(),
+        mock_registry,
+    )
+    .expect("valid config");
+
+    let result = plugin.fetch_releases("library/nginx:latest").await;
+    assert!(result.is_err(), "manifest-info failure should return Err");
+
+    let err = result.expect_err("manifest-info failure should return an error");
+    assert!(
+        err.to_string().contains("mock registry"),
+        "error should originate from mock registry: {err}"
+    );
+}
+
+#[tokio::test]
+async fn fetch_releases_returns_err_when_platform_digest_fails() {
+    use crate::registry::MockRegistryClient;
+
+    let mock_registry = Arc::new(MockRegistryClient {
+        platform_digest_should_fail: true,
+        ..Default::default()
+    });
+    let config = DockerConfig {
+        platform: Some("linux/amd64".to_string()),
+        ..Default::default()
+    };
+    let plugin = DockerPlugin::new_for_test_with_registry(
+        config,
+        test_executor(),
+        default_mock_client(),
+        mock_registry,
+    )
+    .expect("valid config");
+
+    let result = plugin.fetch_releases("library/nginx:latest").await;
+    assert!(result.is_err(), "platform digest failure should return Err");
+
+    let err = result.expect_err("platform digest failure should return an error");
+    assert!(
+        err.to_string().contains("mock registry"),
+        "error should originate from mock registry: {err}"
+    );
+}
+
+#[tokio::test]
+async fn fetch_releases_returns_err_on_invalid_image_ref() {
+    let plugin = DockerPlugin::new_for_test(
+        DockerConfig::default(),
+        test_executor(),
+        default_mock_client(),
+    )
+    .expect("valid config");
+
+    let result = plugin.fetch_releases("").await;
+    assert!(
+        result.is_err(),
+        "invalid image references should return Err"
+    );
 }
 
 // ── execute_update ────────────────────────────────────────────────────────
