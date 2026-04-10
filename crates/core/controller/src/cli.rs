@@ -344,6 +344,13 @@ pub(crate) struct OidcBootstrapArgs {
         default_value = "openid email profile groups"
     )]
     pub oidc_scopes: Option<String>,
+
+    /// Whether the bootstrapped OIDC provider may resolve to private-network
+    /// addresses. When omitted, the default depends on operation mode:
+    /// allowed in single-tenant mode and forbidden in multi-tenant mode.
+    /// Multi-tenant mode rejects an explicit `true`.
+    #[arg(long, env = "UPTRAKIT_OIDC_ALLOW_PRIVATE_NETWORK_ISSUERS")]
+    pub oidc_allow_private_network_issuers: Option<bool>,
 }
 
 /// Enrollment token bootstrap options.
@@ -671,6 +678,11 @@ mod tests {
         assert!(args.oidc_bootstrap.oidc_issuer_url.is_none());
         assert!(args.oidc_bootstrap.oidc_client_id.is_none());
         assert!(args.oidc_bootstrap.oidc_client_secret.is_none());
+        assert!(
+            args.oidc_bootstrap
+                .oidc_allow_private_network_issuers
+                .is_none()
+        );
         assert_eq!(
             args.oidc_bootstrap.oidc_provider_name.as_deref(),
             Some("SSO")
@@ -701,6 +713,8 @@ mod tests {
             "my-idp",
             "--oidc-scopes",
             "openid email",
+            "--oidc-allow-private-network-issuers",
+            "false",
         ])
         .expect("should parse custom values");
 
@@ -727,6 +741,10 @@ mod tests {
         assert_eq!(
             args.oidc_bootstrap.oidc_scopes.as_deref(),
             Some("openid email")
+        );
+        assert_eq!(
+            args.oidc_bootstrap.oidc_allow_private_network_issuers,
+            Some(false)
         );
     }
 

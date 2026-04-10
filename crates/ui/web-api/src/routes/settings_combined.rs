@@ -22,12 +22,14 @@ fn build_combined_settings_response(
     authentication: AuthenticationSettingsResponse,
     agent_certificates: AgentCertificateSettingsResponse,
     enrollment_tokens: EnrollmentTokensSummary,
+    multi_tenancy_enabled: bool,
 ) -> CombinedSettingsResponse {
     CombinedSettingsResponse {
         registration,
         authentication,
         agent_certificates,
         enrollment_tokens,
+        multi_tenancy_enabled,
     }
 }
 
@@ -75,12 +77,21 @@ pub async fn get_combined_settings(
             }
         };
     let enrollment_tokens = EnrollmentTokensSummary { active_count };
+    let multi_tenancy_enabled =
+        match crate::settings_store::is_multi_tenancy_enabled(state.db()).await {
+            Ok(enabled) => enabled,
+            Err(e) => {
+                tracing::error!("Failed to load multi-tenancy mode: {}", e);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
 
     let response = build_combined_settings_response(
         registration,
         authentication,
         agent_certificates,
         enrollment_tokens,
+        multi_tenancy_enabled,
     );
 
     (StatusCode::OK, Json(response)).into_response()
@@ -119,6 +130,7 @@ mod tests {
             authentication,
             agent_certificates,
             enrollment_tokens,
+            false,
         );
 
         assert_eq!(combined.registration.mode, RegistrationMode::Invite);
@@ -134,5 +146,6 @@ mod tests {
             67
         );
         assert_eq!(combined.enrollment_tokens.active_count, 3);
+        assert!(!combined.multi_tenancy_enabled);
     }
 }

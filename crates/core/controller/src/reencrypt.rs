@@ -510,6 +510,7 @@ mod tests {
             .unwrap()),
             scopes: Set("openid email".to_string()),
             auto_create_users: Set(false),
+            allow_private_network_issuers: Set(false),
             role_claim_path: Set(None),
             role_mapping: Set(RoleMapping::default()),
             is_active: Set(true),

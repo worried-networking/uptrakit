@@ -267,6 +267,17 @@ pub async fn delete_global_setting(db: &impl ConnectionTrait, key: SettingKey) -
     Ok(())
 }
 
+/// Returns whether multi-tenancy is enabled.
+///
+/// Missing or malformed values default to `false`, matching the current
+/// single-tenant runtime behavior.
+pub async fn is_multi_tenancy_enabled(db: &impl ConnectionTrait) -> Result<bool> {
+    Ok(load_global_setting(db, SettingKey::MultiTenancyEnabled)
+        .await?
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false))
+}
+
 /// Insert a global setting only if it does not already exist.
 ///
 /// Returns `true` if the row was inserted, `false` if a row with that key

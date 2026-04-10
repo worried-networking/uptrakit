@@ -4,6 +4,20 @@ use rootcause::prelude::*;
 
 use crate::AppError;
 
+fn resolve_bootstrap_allow_private_network_issuers(
+    requested: Option<bool>,
+    multi_tenancy_enabled: bool,
+) -> crate::Result<bool> {
+    match (requested, multi_tenancy_enabled) {
+        (Some(true), true) => Err(report!(AppError::Config(
+            "Private-network OIDC issuers are not allowed in multi-tenant mode".into()
+        ))),
+        (Some(value), _) => Ok(value),
+        (None, true) => Ok(false),
+        (None, false) => Ok(true),
+    }
+}
+
 /// Bootstrap an OIDC provider from CLI flags if all required flags are present.
 pub(crate) async fn bootstrap_oidc(
     db: &sea_orm::DatabaseConnection,
@@ -41,6 +55,17 @@ pub(crate) async fn bootstrap_oidc(
         .oidc_scopes
         .as_deref()
         .unwrap_or("openid email profile groups");
+    let multi_tenancy_enabled = uptrakit_web_api::settings_store::is_multi_tenancy_enabled(db)
+        .await
+        .map_err(|e| {
+            report!(AppError::Config(format!(
+                "Failed to load multi-tenancy mode: {e}"
+            )))
+        })?;
+    let allow_private_network_issuers = resolve_bootstrap_allow_private_network_issuers(
+        oidc.oidc_allow_private_network_issuers,
+        multi_tenancy_enabled,
+    )?;
 
     let force = args.force_settings_override;
 
@@ -78,6 +103,7 @@ pub(crate) async fn bootstrap_oidc(
                 client_secret: Set(encrypted_secret),
                 scopes: Set(scopes.to_string()),
                 auto_create_users: Set(true),
+                allow_private_network_issuers: Set(allow_private_network_issuers),
                 role_claim_path: Set(None),
                 role_mapping: Set(
                     uptrakit_shared_db::entity::oidc_provider::RoleMapping::default(),
@@ -105,6 +131,7 @@ pub(crate) async fn bootstrap_oidc(
             model.client_id = Set(client_id.to_string());
             model.client_secret = Set(encrypted_secret);
             model.is_active = Set(true);
+            model.allow_private_network_issuers = Set(allow_private_network_issuers);
             model.updated_at = Set(OffsetDateTime::now_utc());
             model.update(db).await.context(AppError::Database)?;
             tracing::info!(
@@ -148,6 +175,30 @@ pub(crate) async fn bootstrap_enrollment_tokens(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn bootstrap_defaults_to_true_in_single_tenant_mode() {
+        let value = super::resolve_bootstrap_allow_private_network_issuers(None, false)
+            .expect("single-tenant bootstrap should default to true");
+        assert!(value);
+    }
+
+    #[test]
+    fn bootstrap_defaults_to_false_in_multi_tenant_mode() {
+        let value = super::resolve_bootstrap_allow_private_network_issuers(None, true)
+            .expect("multi-tenant bootstrap should default to false");
+        assert!(!value);
+    }
+
+    #[test]
+    fn bootstrap_rejects_explicit_true_in_multi_tenant_mode() {
+        let error = super::resolve_bootstrap_allow_private_network_issuers(Some(true), true)
+            .expect_err("multi-tenant bootstrap must reject explicit true");
+        assert!(error.to_string().contains("multi-tenant"));
+    }
 }
 
 /// Create a tenant enrollment token named "bootstrap" if none exists.

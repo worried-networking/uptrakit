@@ -27,11 +27,16 @@ impl OidcHttpClient {
     ///
     /// Returns a [`reqwest::Error`] if the underlying client cannot be built
     /// (e.g. TLS initialisation failure).
-    pub(crate) fn new() -> Result<Self, reqwest::Error> {
+    pub(crate) fn new(allow_private_network_issuers: bool) -> Result<Self, reqwest::Error> {
+        let resolver = if allow_private_network_issuers {
+            SsrfSafeResolver::permissive()
+        } else {
+            SsrfSafeResolver::new()
+        };
         let inner = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(60))
-            .dns_resolver(Arc::new(SsrfSafeResolver::new()))
+            .dns_resolver(Arc::new(resolver))
             .build()?;
         Ok(Self { inner })
     }

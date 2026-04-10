@@ -112,6 +112,10 @@ impl HumanOutput for CombinedSettingsResponse {
             "  Password Auth Enabled:   {}\n",
             self.authentication.password_auth_enabled
         ));
+        out.push_str(&format!(
+            "  Multi-Tenancy Enabled:   {}\n",
+            self.multi_tenancy_enabled
+        ));
         out.push_str("\nAgent Certificates:\n");
         out.push_str(&format!(
             "  Lifetime (hours):        {}\n",
@@ -503,6 +507,7 @@ mod tests {
                 effective_renewal_window_hours: 336,
             },
             enrollment_tokens: EnrollmentTokensSummary { active_count: 3 },
+            multi_tenancy_enabled: false,
         };
         let s = resp.to_human_string();
         assert!(s.contains("Registration"), "registration section missing");

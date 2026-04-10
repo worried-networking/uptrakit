@@ -27,6 +27,7 @@ pub struct CreateOidcProviderRequest {
     pub scopes: String,
     #[serde(default = "default_auto_create")]
     pub auto_create_users: bool,
+    pub allow_private_network_issuers: Option<bool>,
     pub role_claim_path: Option<String>,
     #[serde(default)]
     pub role_mapping: HashMap<String, String>,
@@ -43,6 +44,7 @@ pub struct UpdateOidcProviderRequest {
     pub client_secret: Option<SecretString>,
     pub scopes: Option<String>,
     pub auto_create_users: Option<bool>,
+    pub allow_private_network_issuers: Option<bool>,
     pub role_claim_path: Option<String>,
     pub role_mapping: Option<HashMap<String, String>>,
 }
@@ -59,6 +61,7 @@ pub struct OidcProviderResponse {
     pub has_client_secret: bool,
     pub scopes: String,
     pub auto_create_users: bool,
+    pub allow_private_network_issuers: bool,
     pub role_claim_path: Option<String>,
     pub role_mapping: HashMap<String, String>,
     pub is_active: bool,
@@ -137,6 +140,7 @@ mod tests {
             client_secret: SecretString::new("super-secret"),
             scopes: default_scopes(),
             auto_create_users: true,
+            allow_private_network_issuers: Some(true),
             role_claim_path: None,
             role_mapping: HashMap::new(),
         }
@@ -155,6 +159,7 @@ mod tests {
         assert_eq!(de.client_id, "uptrakit");
         assert_eq!(de.client_secret.expose_secret(), "super-secret");
         assert!(de.auto_create_users);
+        assert_eq!(de.allow_private_network_issuers, Some(true));
     }
 
     #[test]
@@ -170,6 +175,7 @@ mod tests {
             serde_json::from_str(json).expect("deserialization should succeed");
         assert_eq!(de.scopes, "openid email profile groups");
         assert!(de.auto_create_users);
+        assert_eq!(de.allow_private_network_issuers, None);
         assert!(de.role_mapping.is_empty());
     }
 
@@ -236,6 +242,7 @@ mod tests {
             has_client_secret: true,
             scopes: "openid email profile".to_string(),
             auto_create_users: true,
+            allow_private_network_issuers: false,
             role_claim_path: Some("resource_access.uptrakit.roles".to_string()),
             role_mapping: HashMap::from([("admin".to_string(), "admin".to_string())]),
             is_active: true,
@@ -249,6 +256,7 @@ mod tests {
         assert_eq!(de.name, "Keycloak");
         assert!(de.has_client_secret);
         assert!(de.is_active);
+        assert!(!de.allow_private_network_issuers);
         assert_eq!(de.role_mapping.get("admin"), Some(&"admin".to_string()));
     }
 }

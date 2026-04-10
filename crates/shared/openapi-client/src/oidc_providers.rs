@@ -72,6 +72,7 @@ mod tests {
             client_secret: SecretString::new("client-secret-456"),
             scopes: "openid email profile groups".to_string(),
             auto_create_users: true,
+            allow_private_network_issuers: Some(true),
             role_claim_path: None,
             role_mapping: HashMap::new(),
         };
@@ -95,6 +96,7 @@ mod tests {
             client_secret: None,
             scopes: None,
             auto_create_users: Some(false),
+            allow_private_network_issuers: Some(false),
             role_claim_path: None,
             role_mapping: None,
         };

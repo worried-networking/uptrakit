@@ -20,7 +20,43 @@ pub use uptrakit_web_api_types::oidc_providers::{
     CreateOidcProviderRequest, OidcProviderResponse, UpdateOidcProviderRequest,
 };
 
-fn oidc_provider_response_from(m: oidc_provider::Model) -> OidcProviderResponse {
+fn effective_allow_private_network_issuers(
+    stored_value: bool,
+    multi_tenancy_enabled: bool,
+) -> bool {
+    stored_value && !multi_tenancy_enabled
+}
+
+fn resolve_allow_private_network_issuers_for_create(
+    requested: Option<bool>,
+    multi_tenancy_enabled: bool,
+) -> Result<bool, &'static str> {
+    match (requested, multi_tenancy_enabled) {
+        (Some(true), true) => {
+            Err("Private-network OIDC issuers are not allowed in multi-tenant mode")
+        }
+        (Some(value), _) => Ok(value),
+        (None, true) => Ok(false),
+        (None, false) => Ok(true),
+    }
+}
+
+fn resolve_allow_private_network_issuers_for_update(
+    requested: Option<bool>,
+    multi_tenancy_enabled: bool,
+) -> Result<Option<bool>, &'static str> {
+    match (requested, multi_tenancy_enabled) {
+        (Some(true), true) => {
+            Err("Private-network OIDC issuers are not allowed in multi-tenant mode")
+        }
+        _ => Ok(requested),
+    }
+}
+
+fn oidc_provider_response_from(
+    m: oidc_provider::Model,
+    multi_tenancy_enabled: bool,
+) -> OidcProviderResponse {
     OidcProviderResponse {
         id: m.id,
         name: m.name,
@@ -31,6 +67,10 @@ fn oidc_provider_response_from(m: oidc_provider::Model) -> OidcProviderResponse 
         has_client_secret: !m.client_secret.expose_secret().is_empty(),
         scopes: m.scopes,
         auto_create_users: m.auto_create_users,
+        allow_private_network_issuers: effective_allow_private_network_issuers(
+            m.allow_private_network_issuers,
+            multi_tenancy_enabled,
+        ),
         role_claim_path: m.role_claim_path,
         role_mapping: m.role_mapping.0,
         is_active: m.is_active,
@@ -59,6 +99,22 @@ pub async fn create_provider(
     CanManageAuthSettings(_user): CanManageAuthSettings,
     Validated(req): Validated<CreateOidcProviderRequest>,
 ) -> Response {
+    let multi_tenancy_enabled =
+        match crate::settings_store::is_multi_tenancy_enabled(tenant_db.db()).await {
+            Ok(enabled) => enabled,
+            Err(e) => {
+                tracing::error!("Failed to load multi-tenancy mode: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+    let allow_private_network_issuers = match resolve_allow_private_network_issuers_for_create(
+        req.allow_private_network_issuers,
+        multi_tenancy_enabled,
+    ) {
+        Ok(value) => value,
+        Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+    };
+
     // Check slug uniqueness among non-deleted providers within tenant
     let existing = tenant_db
         .find::<oidc_provider::Entity>()
@@ -94,6 +150,7 @@ pub async fn create_provider(
         client_secret: Set(encrypted_secret),
         scopes: Set(req.scopes),
         auto_create_users: Set(req.auto_create_users),
+        allow_private_network_issuers: Set(allow_private_network_issuers),
         role_claim_path: Set(req.role_claim_path),
         role_mapping: Set(RoleMapping(req.role_mapping)),
         is_active: Set(false),
@@ -105,7 +162,7 @@ pub async fn create_provider(
     match provider.insert(tenant_db.db()).await {
         Ok(model) => (
             StatusCode::CREATED,
-            Json(oidc_provider_response_from(model)),
+            Json(oidc_provider_response_from(model, multi_tenancy_enabled)),
         )
             .into_response(),
         Err(e) => {
@@ -131,6 +188,14 @@ pub async fn list_providers(
     tenant_db: TenantDb,
     CanViewSettings(_user): CanViewSettings,
 ) -> Response {
+    let multi_tenancy_enabled =
+        match crate::settings_store::is_multi_tenancy_enabled(tenant_db.db()).await {
+            Ok(enabled) => enabled,
+            Err(e) => {
+                tracing::error!("Failed to load multi-tenancy mode: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
     match tenant_db
         .find::<oidc_provider::Entity>()
         .filter(oidc_provider::Column::DeactivatedAt.is_null())
@@ -141,7 +206,7 @@ pub async fn list_providers(
         Ok(providers) => {
             let resp: Vec<OidcProviderResponse> = providers
                 .into_iter()
-                .map(oidc_provider_response_from)
+                .map(|provider| oidc_provider_response_from(provider, multi_tenancy_enabled))
                 .collect();
             (StatusCode::OK, Json(resp)).into_response()
         }
@@ -171,10 +236,20 @@ pub async fn get_provider(
     Path(provider_id): Path<Uuid>,
     CanViewSettings(_user): CanViewSettings,
 ) -> Response {
+    let multi_tenancy_enabled =
+        match crate::settings_store::is_multi_tenancy_enabled(tenant_db.db()).await {
+            Ok(enabled) => enabled,
+            Err(e) => {
+                tracing::error!("Failed to load multi-tenancy mode: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
     match find_non_deleted_provider(&tenant_db, provider_id).await {
-        Some(provider) => {
-            (StatusCode::OK, Json(oidc_provider_response_from(provider))).into_response()
-        }
+        Some(provider) => (
+            StatusCode::OK,
+            Json(oidc_provider_response_from(provider, multi_tenancy_enabled)),
+        )
+            .into_response(),
         None => error_response(StatusCode::NOT_FOUND, "Provider not found"),
     }
 }
@@ -200,6 +275,14 @@ pub async fn update_provider(
     CanManageAuthSettings(_user): CanManageAuthSettings,
     Json(req): Json<UpdateOidcProviderRequest>,
 ) -> Response {
+    let multi_tenancy_enabled =
+        match crate::settings_store::is_multi_tenancy_enabled(tenant_db.db()).await {
+            Ok(enabled) => enabled,
+            Err(e) => {
+                tracing::error!("Failed to load multi-tenancy mode: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(p) => p,
         None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
@@ -223,6 +306,13 @@ pub async fn update_provider(
 
     let now = OffsetDateTime::now_utc();
     let mut model: oidc_provider::ActiveModel = provider.into();
+    let allow_private_network_issuers = match resolve_allow_private_network_issuers_for_update(
+        req.allow_private_network_issuers,
+        multi_tenancy_enabled,
+    ) {
+        Ok(value) => value,
+        Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+    };
 
     if let Some(name) = req.name {
         model.name = Set(name);
@@ -258,6 +348,9 @@ pub async fn update_provider(
     if let Some(auto_create_users) = req.auto_create_users {
         model.auto_create_users = Set(auto_create_users);
     }
+    if let Some(allow_private_network_issuers) = allow_private_network_issuers {
+        model.allow_private_network_issuers = Set(allow_private_network_issuers);
+    }
     if let Some(role_claim_path) = req.role_claim_path {
         model.role_claim_path = Set(Some(role_claim_path));
     }
@@ -267,7 +360,11 @@ pub async fn update_provider(
     model.updated_at = Set(now);
 
     match model.update(tenant_db.db()).await {
-        Ok(updated) => (StatusCode::OK, Json(oidc_provider_response_from(updated))).into_response(),
+        Ok(updated) => (
+            StatusCode::OK,
+            Json(oidc_provider_response_from(updated, multi_tenancy_enabled)),
+        )
+            .into_response(),
         Err(e) => {
             tracing::error!("Failed to update OIDC provider: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
@@ -348,6 +445,14 @@ pub async fn activate_provider(
     Path(provider_id): Path<Uuid>,
     CanManageAuthSettings(_user): CanManageAuthSettings,
 ) -> Response {
+    let multi_tenancy_enabled =
+        match crate::settings_store::is_multi_tenancy_enabled(tenant_db.db()).await {
+            Ok(enabled) => enabled,
+            Err(e) => {
+                tracing::error!("Failed to load multi-tenancy mode: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(p) => p,
         None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
@@ -387,7 +492,11 @@ pub async fn activate_provider(
     model.updated_at = Set(now);
 
     match model.update(tenant_db.db()).await {
-        Ok(updated) => (StatusCode::OK, Json(oidc_provider_response_from(updated))).into_response(),
+        Ok(updated) => (
+            StatusCode::OK,
+            Json(oidc_provider_response_from(updated, multi_tenancy_enabled)),
+        )
+            .into_response(),
         Err(e) => {
             tracing::error!("Failed to activate OIDC provider: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
@@ -415,6 +524,14 @@ pub async fn deactivate_provider(
     Path(provider_id): Path<Uuid>,
     CanManageAuthSettings(user): CanManageAuthSettings,
 ) -> Response {
+    let multi_tenancy_enabled =
+        match crate::settings_store::is_multi_tenancy_enabled(tenant_db.db()).await {
+            Ok(enabled) => enabled,
+            Err(e) => {
+                tracing::error!("Failed to load multi-tenancy mode: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(p) => p,
         None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
@@ -438,7 +555,11 @@ pub async fn deactivate_provider(
     model.updated_at = Set(now);
 
     match model.update(tenant_db.db()).await {
-        Ok(updated) => (StatusCode::OK, Json(oidc_provider_response_from(updated))).into_response(),
+        Ok(updated) => (
+            StatusCode::OK,
+            Json(oidc_provider_response_from(updated, multi_tenancy_enabled)),
+        )
+            .into_response(),
         Err(e) => {
             tracing::error!("Failed to deactivate OIDC provider: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
@@ -457,4 +578,59 @@ async fn find_non_deleted_provider(
         .await
         .ok()
         .flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        effective_allow_private_network_issuers, resolve_allow_private_network_issuers_for_create,
+        resolve_allow_private_network_issuers_for_update,
+    };
+
+    #[test]
+    fn create_defaults_to_true_in_single_tenant_mode() {
+        let result = resolve_allow_private_network_issuers_for_create(None, false)
+            .expect("single-tenant create should default to true");
+        assert!(result);
+    }
+
+    #[test]
+    fn create_defaults_to_false_in_multi_tenant_mode() {
+        let result = resolve_allow_private_network_issuers_for_create(None, true)
+            .expect("multi-tenant create should default to false");
+        assert!(!result);
+    }
+
+    #[test]
+    fn create_rejects_explicit_true_in_multi_tenant_mode() {
+        let error = resolve_allow_private_network_issuers_for_create(Some(true), true)
+            .expect_err("multi-tenant mode must reject explicit private-network allowance");
+        assert!(error.contains("multi-tenant"));
+    }
+
+    #[test]
+    fn update_rejects_explicit_true_in_multi_tenant_mode() {
+        let error = resolve_allow_private_network_issuers_for_update(Some(true), true)
+            .expect_err("multi-tenant mode must reject explicit private-network allowance");
+        assert!(error.contains("multi-tenant"));
+    }
+
+    #[test]
+    fn update_allows_false_in_multi_tenant_mode() {
+        let result = resolve_allow_private_network_issuers_for_update(Some(false), true)
+            .expect("multi-tenant mode should allow explicit false");
+        assert_eq!(result, Some(false));
+    }
+
+    #[test]
+    fn effective_value_is_forced_false_in_multi_tenant_mode() {
+        assert!(!effective_allow_private_network_issuers(true, true));
+        assert!(!effective_allow_private_network_issuers(false, true));
+    }
+
+    #[test]
+    fn effective_value_matches_stored_flag_in_single_tenant_mode() {
+        assert!(effective_allow_private_network_issuers(true, false));
+        assert!(!effective_allow_private_network_issuers(false, false));
+    }
 }

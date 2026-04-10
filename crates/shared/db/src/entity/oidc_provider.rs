@@ -80,6 +80,7 @@ pub struct Model {
     pub client_secret: uptrakit_crypto::EncryptedString,
     pub scopes: String,
     pub auto_create_users: bool,
+    pub allow_private_network_issuers: bool,
     pub role_claim_path: Option<String>,
     #[sea_orm(column_type = "Json")]
     pub role_mapping: RoleMapping,

@@ -14,6 +14,7 @@ pub struct CombinedSettingsResponse {
     pub authentication: AuthenticationSettingsResponse,
     pub agent_certificates: AgentCertificateSettingsResponse,
     pub enrollment_tokens: EnrollmentTokensSummary,
+    pub multi_tenancy_enabled: bool,
 }
 
 /// Combined response for all global (infrastructure-scoped) settings.
@@ -54,6 +55,7 @@ mod tests {
                 effective_renewal_window_hours: 336,
             },
             enrollment_tokens: EnrollmentTokensSummary { active_count: 2 },
+            multi_tenancy_enabled: false,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let de: CombinedSettingsResponse =
@@ -62,5 +64,6 @@ mod tests {
         assert!(de.authentication.password_auth_enabled);
         assert_eq!(de.agent_certificates.lifetime_hours, 8_760);
         assert_eq!(de.enrollment_tokens.active_count, 2);
+        assert!(!de.multi_tenancy_enabled);
     }
 }

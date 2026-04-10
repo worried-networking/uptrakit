@@ -49,6 +49,9 @@ pub enum OidcCommands {
         /// Auto-create users on first login
         #[arg(long)]
         auto_create_users: Option<bool>,
+        /// Whether issuer hostnames may resolve to private-network addresses
+        #[arg(long)]
+        allow_private_network_issuers: Option<bool>,
         /// JSONPath for role claim
         #[arg(long)]
         role_claim_path: Option<String>,
@@ -81,6 +84,9 @@ pub enum OidcCommands {
         /// Auto-create users on first login
         #[arg(long)]
         auto_create_users: Option<bool>,
+        /// Whether issuer hostnames may resolve to private-network addresses
+        #[arg(long)]
+        allow_private_network_issuers: Option<bool>,
         /// JSONPath for role claim
         #[arg(long)]
         role_claim_path: Option<String>,
@@ -118,6 +124,7 @@ pub struct OidcCreateParams<'a> {
     pub client_secret: String,
     pub scopes: Option<String>,
     pub auto_create_users: Option<bool>,
+    pub allow_private_network_issuers: Option<bool>,
     pub role_claim_path: Option<String>,
 }
 
@@ -136,6 +143,7 @@ pub struct OidcUpdateParams<'a> {
     pub client_secret: Option<String>,
     pub scopes: Option<String>,
     pub auto_create_users: Option<bool>,
+    pub allow_private_network_issuers: Option<bool>,
     pub role_claim_path: Option<String>,
 }
 
@@ -171,6 +179,10 @@ impl HumanOutput for OidcProviderResponse {
         out.push_str(&format!("Has Secret:       {}\n", self.has_client_secret));
         out.push_str(&format!("Scopes:           {}\n", self.scopes));
         out.push_str(&format!("Auto Create Users: {}\n", self.auto_create_users));
+        out.push_str(&format!(
+            "Allow Private Network Issuers: {}\n",
+            self.allow_private_network_issuers
+        ));
         if let Some(ref path) = self.role_claim_path {
             out.push_str(&format!("Role Claim Path:  {}\n", path));
         }
@@ -223,6 +235,7 @@ pub async fn dispatch_oidc(command: OidcCommands, ctx: &CliContext) -> Result<()
             client_secret,
             scopes,
             auto_create_users,
+            allow_private_network_issuers,
             role_claim_path,
         } => {
             let resp = oidc_create(OidcCreateParams {
@@ -237,6 +250,7 @@ pub async fn dispatch_oidc(command: OidcCommands, ctx: &CliContext) -> Result<()
                 client_secret,
                 scopes,
                 auto_create_users,
+                allow_private_network_issuers,
                 role_claim_path,
                 request_timeout: ctx.request_timeout,
             })
@@ -253,6 +267,7 @@ pub async fn dispatch_oidc(command: OidcCommands, ctx: &CliContext) -> Result<()
             client_secret,
             scopes,
             auto_create_users,
+            allow_private_network_issuers,
             role_claim_path,
         } => {
             let resp = oidc_update(OidcUpdateParams {
@@ -268,6 +283,7 @@ pub async fn dispatch_oidc(command: OidcCommands, ctx: &CliContext) -> Result<()
                 client_secret,
                 scopes,
                 auto_create_users,
+                allow_private_network_issuers,
                 role_claim_path,
                 request_timeout: ctx.request_timeout,
             })
@@ -355,6 +371,7 @@ pub async fn oidc_create(params: OidcCreateParams<'_>) -> Result<OidcProviderRes
             .scopes
             .unwrap_or_else(|| "openid email profile groups".to_string()),
         auto_create_users: params.auto_create_users.unwrap_or(true),
+        allow_private_network_issuers: params.allow_private_network_issuers,
         role_claim_path: params.role_claim_path,
         role_mapping: HashMap::new(),
     };
@@ -378,6 +395,7 @@ pub async fn oidc_update(params: OidcUpdateParams<'_>) -> Result<OidcProviderRes
         client_secret: params.client_secret.map(SecretString::new),
         scopes: params.scopes,
         auto_create_users: params.auto_create_users,
+        allow_private_network_issuers: params.allow_private_network_issuers,
         role_claim_path: params.role_claim_path,
         role_mapping: None,
     };

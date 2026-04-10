@@ -875,6 +875,7 @@ mod tests {
             client_secret: SecretString::new("secret"),
             scopes: "openid email".to_string(),
             auto_create_users: true,
+            allow_private_network_issuers: Some(true),
             role_claim_path: None,
             role_mapping: Default::default(),
         };
@@ -893,6 +894,7 @@ mod tests {
             client_secret: SecretString::new("secret"),
             scopes: "openid".to_string(),
             auto_create_users: true,
+            allow_private_network_issuers: Some(true),
             role_claim_path: None,
             role_mapping: Default::default(),
         };
@@ -912,6 +914,7 @@ mod tests {
             client_secret: SecretString::new("secret"),
             scopes: "openid".to_string(),
             auto_create_users: true,
+            allow_private_network_issuers: Some(true),
             role_claim_path: None,
             role_mapping: Default::default(),
         };

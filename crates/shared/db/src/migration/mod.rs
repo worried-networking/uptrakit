@@ -58,6 +58,7 @@ mod m20260329_000001_drop_mqtt_and_add_service_config;
 mod m20260330_000001_embedded_service_visibility;
 mod m20260331_000001_ssh_agent_tables;
 mod m20260401_000001_host_features;
+mod m20260410_000001_oidc_private_network_issuers;
 
 pub struct Migrator;
 
@@ -120,6 +121,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260331_000001_ssh_agent_tables::Migration),
             Box::new(m20260317_000002_test_plugin_configs_permission::Migration),
             Box::new(m20260401_000001_host_features::Migration),
+            Box::new(m20260410_000001_oidc_private_network_issuers::Migration),
         ]
     }
 }

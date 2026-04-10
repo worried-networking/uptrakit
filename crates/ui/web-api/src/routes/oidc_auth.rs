@@ -69,6 +69,7 @@ struct ValidatedOidcCallback {
     provider: oidc_provider::Model,
     client: DiscoveredCoreClient,
     redirect_url: RedirectUrl,
+    allow_private_network_issuers: bool,
 }
 
 /// Get available auth methods (public)
@@ -168,12 +169,23 @@ pub async fn oidc_authorize(
             Some(p) => p,
             None => return error_response(StatusCode::NOT_FOUND, "Provider not found or inactive"),
         };
+    let multi_tenancy_enabled =
+        match crate::settings_store::is_multi_tenancy_enabled(state.db()).await {
+            Ok(enabled) => enabled,
+            Err(e) => {
+                tracing::error!(error = ?e, "Failed to load multi-tenancy mode");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+    let allow_private_network_issuers =
+        provider.allow_private_network_issuers && !multi_tenancy_enabled;
 
     // Build OIDC client via discovery
-    let client = match build_oidc_client(&provider, redirect_url).await {
-        Some(c) => c,
-        None => return error_response(StatusCode::BAD_GATEWAY, "OIDC provider unavailable"),
-    };
+    let client =
+        match build_oidc_client(&provider, redirect_url, allow_private_network_issuers).await {
+            Some(c) => c,
+            None => return error_response(StatusCode::BAD_GATEWAY, "OIDC provider unavailable"),
+        };
 
     // Generate PKCE challenge
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
@@ -256,6 +268,7 @@ pub async fn oidc_callback(
         provider,
         client,
         redirect_url,
+        allow_private_network_issuers,
     } = match validate_oidc_state(&state, &csrf_state, external_base_url, &headers).await {
         Ok(v) => v,
         Err(response) => return response,
@@ -265,13 +278,19 @@ pub async fn oidc_callback(
     let provider_id = flow.provider_id;
 
     // Stage 2: Exchange authorization code for tokens and extract claims
-    let claims =
-        match exchange_code_for_claims(&client, code, flow.pkce_verifier, flow.nonce, redirect_url)
-            .await
-        {
-            Ok(c) => c,
-            Err(response) => return response,
-        };
+    let claims = match exchange_code_for_claims(
+        &client,
+        code,
+        flow.pkce_verifier,
+        flow.nonce,
+        redirect_url,
+        allow_private_network_issuers,
+    )
+    .await
+    {
+        Ok(c) => c,
+        Err(response) => return response,
+    };
 
     // Stage 3: Resolve or create the user, sync roles, and produce the final response
     resolve_or_create_oidc_user(&state, provider_id, &provider, claims).await
@@ -321,9 +340,23 @@ async fn validate_oidc_state(
             return Err(Redirect::to("/login?error=oidc_invalid_redirect").into_response());
         }
     };
+    let multi_tenancy_enabled = crate::settings_store::is_multi_tenancy_enabled(state.db())
+        .await
+        .map_err(|e| {
+            tracing::error!(error = ?e, "Failed to load multi-tenancy mode");
+            Redirect::to("/login?error=oidc_discovery_failed").into_response()
+        })?;
+    let allow_private_network_issuers =
+        provider.allow_private_network_issuers && !multi_tenancy_enabled;
 
     // Build OIDC client via discovery
-    let client = match build_oidc_client(&provider, redirect_url.clone()).await {
+    let client = match build_oidc_client(
+        &provider,
+        redirect_url.clone(),
+        allow_private_network_issuers,
+    )
+    .await
+    {
         Some(c) => c,
         None => {
             return Err(Redirect::to("/login?error=oidc_discovery_failed").into_response());
@@ -335,6 +368,7 @@ async fn validate_oidc_state(
         provider,
         client,
         redirect_url,
+        allow_private_network_issuers,
     })
 }
 
@@ -1205,11 +1239,12 @@ type DiscoveredCoreClient = CoreClient<
 async fn build_oidc_client(
     provider: &oidc_provider::Model,
     redirect_url: RedirectUrl,
+    allow_private_network_issuers: bool,
 ) -> Option<DiscoveredCoreClient> {
     let issuer_url = IssuerUrl::new(provider.issuer_url.clone())
         .map_err(|e| tracing::error!(error = %e, provider_id = %provider.id, "Invalid OIDC issuer URL for provider"))
         .ok()?;
-    let http_client = crate::oidc_http_client::OidcHttpClient::new()
+    let http_client = crate::oidc_http_client::OidcHttpClient::new(allow_private_network_issuers)
         .map_err(|e| tracing::error!(error = %e, "Failed to build OIDC HTTP client"))
         .ok()?;
     let provider_metadata = CoreProviderMetadata::discover_async(issuer_url, &http_client)
@@ -1241,8 +1276,10 @@ async fn exchange_code_for_claims(
     pkce_verifier: PkceCodeVerifier,
     nonce: Nonce,
     redirect_url: RedirectUrl,
+    allow_private_network_issuers: bool,
 ) -> Result<ExtractedOidcClaims, Response> {
-    let http_client = crate::oidc_http_client::OidcHttpClient::new().map_err(|e| {
+    let http_client = crate::oidc_http_client::OidcHttpClient::new(allow_private_network_issuers)
+        .map_err(|e| {
         tracing::error!(error = %e, "Failed to build OIDC HTTP client");
         Redirect::to("/login?error=oidc_token_exchange_failed").into_response()
     })?;

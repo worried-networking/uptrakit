@@ -515,6 +515,7 @@ mod tests {
             client_secret,
             scopes: "openid profile email".to_string(),
             auto_create_users: false,
+            allow_private_network_issuers: false,
             role_claim_path,
             role_mapping: oidc_provider::RoleMapping(role_mapping),
             is_active: true,
