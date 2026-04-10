@@ -2,3 +2,4 @@ node_modules/
 target/
 .claude/
 CODEREVIEW.md
+docs/internal/changes/
