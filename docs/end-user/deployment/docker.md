@@ -112,9 +112,15 @@ To bootstrap an OIDC provider at startup:
 OIDC_ISSUER_URL=https://auth.example.com
 OIDC_CLIENT_ID=uptrakit
 OIDC_CLIENT_SECRET=your-secret
+# Optional: override the mode-dependent default
+# OIDC_ALLOW_PRIVATE_NETWORK_ISSUERS=true
 ```
 
 The controller creates the OIDC provider on first start and skips creation on subsequent restarts.
+
+In single-tenant deployments, private-network OIDC issuers are allowed by default. This is intended for self-hosted
+identity providers on a LAN or behind split-horizon DNS. In multi-tenant mode, private-network issuers are forbidden
+and cannot be enabled.
 
 ## Volumes
 

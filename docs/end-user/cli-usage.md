@@ -743,10 +743,14 @@ uptrakit settings oidc create \
   --slug google \
   --issuer-url "https://accounts.google.com" \
   --client-id "cid-123" \
-  --client-secret "cs-456"
+  --client-secret "cs-456" \
+  --allow-private-network-issuers false
 
 # Update a provider
-uptrakit settings oidc update <ID> --name "Google Workspace" --auto-create-users false
+uptrakit settings oidc update <ID> \
+  --name "Google Workspace" \
+  --auto-create-users false \
+  --allow-private-network-issuers true
 
 # Delete a provider
 uptrakit settings oidc delete <ID>
@@ -755,6 +759,9 @@ uptrakit settings oidc delete <ID>
 uptrakit settings oidc activate <ID>
 uptrakit settings oidc deactivate <ID>
 ```
+
+In single-tenant mode, OIDC providers may allow issuer hostnames that resolve to private / LAN addresses. In
+multi-tenant mode, private-network issuers are disabled and attempts to enable them are rejected by the server.
 
 ### NATS URL (feature: `nats`)
 

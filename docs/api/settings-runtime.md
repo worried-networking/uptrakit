@@ -71,6 +71,7 @@ where configuring OIDC requires ManageSettings permission, but the first user ne
 | `--oidc-provider-name` | `SSO` | Display name for the provider |
 | `--oidc-provider-slug` | `sso` | URL-safe slug (used for uniqueness check) |
 | `--oidc-scopes` | `openid email profile groups` | Space-separated scopes |
+| `--oidc-allow-private-network-issuers` | mode-dependent | Whether the bootstrapped provider may resolve to private / LAN addresses |
 
 **Bootstrap behavior:**
 
@@ -80,6 +81,15 @@ where configuring OIDC requires ManageSettings permission, but the first user ne
 
 The client secret is never logged. The bootstrapped provider is created with `is_active=true` and
 `auto_create_users=true`.
+
+**Private-network issuer policy:**
+
+- **Single-tenant mode** (default today): private-network OIDC issuers are allowed by default. This supports
+  self-hosted identity providers whose DNS names resolve to RFC1918 / ULA / loopback addresses.
+- **Multi-tenant mode**: private-network OIDC issuers are always forbidden. The bootstrap flag may be set to
+  `false`, but an explicit `true` is rejected.
+- If `--oidc-allow-private-network-issuers` is omitted, the default is derived from the current operation mode:
+  `true` in single-tenant mode, `false` in multi-tenant mode.
 
 When the first user logs in via OIDC (bootstrapped or otherwise), they are automatically promoted to the `owner` role
 and initial setup is completed (registration mode set to closed).
