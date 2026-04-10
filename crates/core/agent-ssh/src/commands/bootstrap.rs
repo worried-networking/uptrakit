@@ -341,8 +341,8 @@ async fn prepare_bootstrap_connection(
     let use_sudo = !is_root;
 
     if use_sudo {
-        // Verify auth user has sudo access.
-        let sudo_check = session.exec_command("sudo -n true").await?;
+        // Verify the auth user has at least one passwordless sudo entry.
+        let sudo_check = session.exec_command("sudo -n -l").await?;
         if sudo_check.exit_code != 0 {
             bail!(Error::SshCommand(format!(
                 "auth user '{}' does not have passwordless sudo access (exit code {}). \
@@ -711,11 +711,10 @@ async fn verify_remote(
 
     if has_sudo_grants {
         // Verify sudo. We use `sudo -n -l` (list allowed commands without
-        // prompting) rather than `sudo -n true` because the sudoers file may
-        // only grant specific commands (e.g. `/usr/bin/apt-get`), not the
-        // ability to run arbitrary executables. `-n -l` exits 0 whenever the
-        // user has at least one NOPASSWD entry, which is exactly what we want
-        // to confirm here.
+        // prompting) because the sudoers file may only grant specific commands
+        // (e.g. `/usr/bin/apt-get`), not the ability to run arbitrary
+        // executables. `-n -l` exits 0 whenever the user has at least one
+        // NOPASSWD entry, which is exactly what we want to confirm here.
         let sudo_check = session.exec_command("sudo -n -l").await?;
         if sudo_check.exit_code != 0 {
             bail!(Error::BootstrapVerification(format!(

@@ -57,7 +57,7 @@ pub mod host_features {
 
     /// POSIX-compatible shell (bash, sh, zsh). Agent checks: `sh -c true`.
     pub const POSIX_SHELL: HostFeature = HostFeature::from_static("posix_shell");
-    /// Privilege escalation available. Agent checks: `sudo -n true`.
+    /// Privilege escalation available. Agent checks: `sudo -n -l`.
     pub const PRIVILEGE_ESCALATION: HostFeature = HostFeature::from_static("privilege_escalation");
     /// Systemd init system. Agent checks: `systemctl --version`.
     pub const SYSTEMD: HostFeature = HostFeature::from_static("systemd");
@@ -72,7 +72,7 @@ pub mod host_features {
 /// by the standard probing function.
 pub const PROBEABLE_FEATURES: &[(HostFeature, &str, &[&str])] = &[
     (host_features::POSIX_SHELL, "sh", &["-c", "true"]),
-    (host_features::PRIVILEGE_ESCALATION, "sudo", &["-n", "true"]),
+    (host_features::PRIVILEGE_ESCALATION, "sudo", &["-n", "-l"]),
     (host_features::SYSTEMD, "systemctl", &["--version"]),
 ];
 

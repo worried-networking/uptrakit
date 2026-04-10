@@ -71,7 +71,7 @@ pub struct Model {
     pub machine_id: Option<String>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
-    /// Whether passwordless sudo (`sudo -n true`) is available for this host's agent user.
+    /// Whether the host's agent user has at least one passwordless sudo entry.
     ///
     /// `None` means the value has not yet been detected (host was bootstrapped
     /// before this column existed). `resolved_sudo_context()` defaults `None`

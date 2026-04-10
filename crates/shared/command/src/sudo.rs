@@ -77,7 +77,7 @@ impl FromStr for SudoPolicy {
 pub struct SudoContext {
     /// Whether the agent user is UID 0 on the target host.
     pub is_root: bool,
-    /// Whether passwordless sudo (`sudo -n true`) succeeds on the target host.
+    /// Whether the target user has at least one passwordless sudo entry.
     pub sudo_available: bool,
     /// The override policy controlling sudo usage.
     pub policy: SudoPolicy,

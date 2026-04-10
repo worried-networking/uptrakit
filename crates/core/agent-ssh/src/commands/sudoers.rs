@@ -20,13 +20,14 @@ pub(crate) async fn detect_is_root(executor: &dyn RemoteExecutor) -> Result<bool
     Ok(result.exit_code == 0 && result.stdout.trim() == "0")
 }
 
-/// Detect whether passwordless sudo is available via `sudo -n true`.
+/// Detect whether the current SSH user has at least one passwordless sudo
+/// entry via `sudo -n -l`.
 ///
 /// Returns `false` on any error or non-zero exit. Only meaningful when
 /// [`detect_is_root`] returned `false`.
 pub(crate) async fn detect_sudo_available(executor: &dyn RemoteExecutor) -> Result<bool> {
     let result = executor
-        .exec_command("sudo -n true")
+        .exec_command("sudo -n -l")
         .await
         .context_to::<Error>()?;
     Ok(result.exit_code == 0)
@@ -587,6 +588,17 @@ mod tests {
             stderr: stderr.to_string(),
             exit_code: 1,
         }
+    }
+
+    #[tokio::test]
+    async fn detect_sudo_available_uses_sudo_list_probe() {
+        let exec = ScriptedRemoteExecutor::new([ok_result()]);
+
+        let result = detect_sudo_available(&exec).await;
+
+        assert!(result.expect("sudo detection should succeed"));
+        let calls = exec.recorded_calls();
+        assert_eq!(calls, vec!["sudo -n -l".to_string()]);
     }
 
     #[tokio::test]
