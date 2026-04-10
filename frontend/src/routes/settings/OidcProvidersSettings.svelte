@@ -15,10 +15,12 @@
 
 	let {
 		providers,
+		multiTenancyEnabled,
 		onSuccess,
 		onError
 	}: {
 		providers: OidcProviderResponse[] | undefined;
+		multiTenancyEnabled: boolean;
 		onSuccess: (msg: string) => void;
 		onError: (msg: string) => void;
 	} = $props();
@@ -35,6 +37,7 @@
 		client_secret: '',
 		scopes: 'openid email profile groups',
 		auto_create_users: true,
+		allow_private_network_issuers: true,
 		role_claim_path: '',
 		role_mapping_json: '{}'
 	});
@@ -73,6 +76,7 @@
 			client_secret: '',
 			scopes: 'openid email profile groups',
 			auto_create_users: true,
+			allow_private_network_issuers: !multiTenancyEnabled,
 			role_claim_path: '',
 			role_mapping_json: '{}'
 		};
@@ -90,6 +94,7 @@
 			client_secret: '',
 			scopes: provider.scopes,
 			auto_create_users: provider.auto_create_users,
+			allow_private_network_issuers: provider.allow_private_network_issuers,
 			role_claim_path: provider.role_claim_path ?? '',
 			role_mapping_json: JSON.stringify(provider.role_mapping, null, 2)
 		};
@@ -119,6 +124,7 @@
 					client_id: oidcForm.client_id,
 					scopes: oidcForm.scopes,
 					auto_create_users: oidcForm.auto_create_users,
+					allow_private_network_issuers: oidcForm.allow_private_network_issuers,
 					role_mapping: roleMapping
 				};
 				if (oidcForm.logo_url) data.logo_url = oidcForm.logo_url;
@@ -137,6 +143,7 @@
 					client_secret: oidcForm.client_secret,
 					scopes: oidcForm.scopes,
 					auto_create_users: oidcForm.auto_create_users,
+					allow_private_network_issuers: oidcForm.allow_private_network_issuers,
 					role_mapping: roleMapping
 				};
 				if (oidcForm.logo_url) data.logo_url = oidcForm.logo_url;
@@ -317,6 +324,24 @@
 			<input class="checkbox" type="checkbox" bind:checked={oidcForm.auto_create_users} />
 			<span>Auto-create users on first login</span>
 		</label>
+
+		{#if multiTenancyEnabled}
+			<aside
+				class="rounded-lg border border-surface-300 p-3 text-sm text-surface-700 dark:border-surface-600 dark:text-surface-300"
+			>
+				Private-network OIDC issuers are disabled in multi-tenant mode and cannot be changed.
+			</aside>
+		{:else}
+			<label class="flex items-start gap-3">
+				<input class="checkbox mt-1" type="checkbox" bind:checked={oidcForm.allow_private_network_issuers} />
+				<span>
+					Allow private-network issuers
+					<small class="block text-surface-600 dark:text-surface-400">
+						Permit issuer hostnames that resolve to LAN, loopback, or other non-public addresses.
+					</small>
+				</span>
+			</label>
+		{/if}
 
 		<label class="label">
 			<span>Role Claim Path</span>

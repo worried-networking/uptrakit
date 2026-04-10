@@ -110,6 +110,7 @@
 	let oidcProviders: OidcProviderResponse[] | undefined = $state(undefined);
 	let agentCertSettings: AgentCertSettingsData | undefined = $state(undefined);
 	let enrollmentTokensSummary: EnrollmentTokensSummary | undefined = $state(undefined);
+	let multiTenancyEnabled: boolean = $state(false);
 
 	let registrationError: string | null = $state(null);
 	let authenticationError: string | null = $state(null);
@@ -139,6 +140,7 @@
 			authSettings = combined.authentication;
 			agentCertSettings = combined.agent_certificates;
 			enrollmentTokensSummary = combined.enrollment_tokens;
+			multiTenancyEnabled = combined.multi_tenancy_enabled;
 		} else {
 			const msg = results[0].reason instanceof Error ? results[0].reason.message : 'Failed to load combined settings.';
 			registrationError = msg;
@@ -250,7 +252,12 @@
 					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
 				</aside>
 			{/if}
-			<OidcProvidersSettings providers={oidcProviders} onSuccess={showSuccess} onError={showError} />
+			<OidcProvidersSettings
+				providers={oidcProviders}
+				{multiTenancyEnabled}
+				onSuccess={showSuccess}
+				onError={showError}
+			/>
 			{#if oidcProvidersError}
 				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
 					<p>{oidcProvidersError}</p>
