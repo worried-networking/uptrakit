@@ -299,25 +299,45 @@ pub(crate) async fn load_target_for_dispatch(
         .context_to()?
         .ok_or_else(|| report!(TriggerUpdateError::HostNotAssigned))?;
 
-    // 4. Find the agent linked to this host (tenant-scoped via join on service).
+    // 4. Find services linked to this host (tenant-scoped via join on service).
     let tenant_db_local = crate::TenantDb::new(db.clone(), tenant_id);
-    let agent_link = tenant_db_local
+    let agent_links = tenant_db_local
         .find_via_tenant_join::<service_host::Entity, service::Entity>(
             service_host::Relation::Service.def(),
         )
         .filter(service_host::Column::HostId.eq(host_id))
-        .one(db)
+        .all(db)
         .await
         .context_to()?
-        .ok_or_else(|| report!(TriggerUpdateError::NoAgent))?;
+        .into_iter()
+        .map(|link| link.service_id)
+        .collect::<Vec<_>>();
 
-    // 5. Verify agent exists, belongs to the tenant, and is approved.
-    let agent = Service::find_by_id(agent_link.service_id)
+    if agent_links.is_empty() {
+        bail!(TriggerUpdateError::NoAgent);
+    }
+
+    // 5. Prefer a non-deactivated approved service when multiple historical
+    // links exist for the same host (for example after re-enrolling agent-ssh).
+    let agents = Service::find()
+        .filter(service::Column::Id.is_in(agent_links))
         .filter(service::Column::TenantId.eq(tenant_id))
         .filter(service::Column::DeactivatedAt.is_null())
-        .one(db)
+        .all(db)
         .await
-        .context_to()?
+        .context_to()?;
+
+    let agent = agents
+        .iter()
+        .filter(|svc| svc.status == service::ServiceStatus::Approved)
+        .max_by_key(|svc| svc.last_seen_at.unwrap_or(svc.updated_at))
+        .cloned()
+        .or_else(|| {
+            agents
+                .iter()
+                .max_by_key(|svc| svc.last_seen_at.unwrap_or(svc.updated_at))
+                .cloned()
+        })
         .ok_or_else(|| report!(TriggerUpdateError::NoAgent))?;
 
     if agent.status != service::ServiceStatus::Approved {

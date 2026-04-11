@@ -526,6 +526,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn validate_preconditions_prefers_active_service_when_stale_link_exists() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let now = OffsetDateTime::now_utc();
+        let current_service_id = Uuid::now_v7();
+
+        let stale_service = Service::find_by_id(f.service_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut stale_active: service::ActiveModel = stale_service.into();
+        stale_active.deactivated_at = Set(Some(now));
+        stale_active.updated_at = Set(now);
+        stale_active.service_app_name = Set(Some("uptrakit-agent-ssh".to_string()));
+        stale_active.update(&db).await.unwrap();
+
+        service::ActiveModel {
+            id: Set(current_service_id),
+            tenant_id: Set(f.tenant_id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set("current-agent-host".to_string()),
+            friendly_name: Set("Current Agent".to_string()),
+            ip_address: Set(None),
+            status: Set(ServiceStatus::Approved),
+            enrollment_secret_hash: Set(format!("hash-{current_service_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(Some("uptrakit-agent-ssh".to_string())),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        service_host::ActiveModel {
+            service_id: Set(current_service_id),
+            host_id: Set(f.host_id),
+            linked_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
+        let validated = result.expect("active linked service should still be selected");
+        assert_eq!(validated.agent.id, current_service_id);
+    }
+
+    #[tokio::test]
     async fn validate_preconditions_agent_not_approved() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
