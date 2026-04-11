@@ -12,7 +12,6 @@ frontend/.svelte-kit
 .claude/CLAUDE.local.md
 .claude/worktrees/
 
-!**/.pipeline-run/subtasks_registry.json
 
 .cymbal/
 
