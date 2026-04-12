@@ -17,6 +17,7 @@ frontend/.svelte-kit
 
 **/.pipeline-run/**
 !**/.pipeline-run/
+docs/internal/changes/SEQUENCE.json
 .tokensave/
 **/.tokensave/
 .pipeline-project/
