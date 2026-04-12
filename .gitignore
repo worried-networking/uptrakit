@@ -13,8 +13,6 @@ frontend/.svelte-kit
 .claude/worktrees/
 
 
-.cymbal/
-
 **/.pipeline-run/**
 !**/.pipeline-run/
 docs/internal/changes/SEQUENCE.json
@@ -23,3 +21,4 @@ docs/internal/changes/SEQUENCE.json
 .pipeline-project/
 **/.pipeline-project/
 **/.subtask-*/
+.serena/
