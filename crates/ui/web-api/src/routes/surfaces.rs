@@ -246,6 +246,11 @@ fn map_lookup_error(error: SurfaceRegistryLookupError) -> Response {
             "Interaction not found",
             "interaction_not_found",
         ),
+        SurfaceRegistryLookupError::TargetProviderRequired => error_response_with_code(
+            StatusCode::BAD_REQUEST,
+            "target_provider_id is required for targeted surfaces",
+            "target_provider_required",
+        ),
         SurfaceRegistryLookupError::InvalidProvider(_) => error_response_with_code(
             StatusCode::BAD_REQUEST,
             "Invalid target provider",
@@ -265,6 +270,11 @@ fn map_proxy_error(error: SurfaceProxyError) -> Response {
             StatusCode::NOT_FOUND,
             "No provider available",
             "no_provider",
+        ),
+        SurfaceProxyError::TargetProviderRequired => error_response_with_code(
+            StatusCode::BAD_REQUEST,
+            "target_provider_id is required for targeted surfaces",
+            "target_provider_required",
         ),
         SurfaceProxyError::InvalidProvider(_) => error_response_with_code(
             StatusCode::BAD_REQUEST,

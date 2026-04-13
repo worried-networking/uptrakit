@@ -27,6 +27,7 @@ const FAILURE_COOLDOWN: Duration = Duration::from_secs(60);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SurfaceProxyError {
     NoProvider,
+    TargetProviderRequired,
     InvalidProvider(String),
     InteractionNotFound,
     PermissionDenied(String),
@@ -43,6 +44,12 @@ impl std::fmt::Display for SurfaceProxyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NoProvider => write!(f, "no provider available for surface interaction"),
+            Self::TargetProviderRequired => {
+                write!(
+                    f,
+                    "target_provider_id is required for targeted surface interactions"
+                )
+            }
             Self::InvalidProvider(provider_id) => {
                 write!(
                     f,
@@ -222,14 +229,6 @@ impl SurfaceProxy {
                     "provider-initiated requests cannot satisfy user permission gates".to_string(),
                 ));
             }
-            if matches!(
-                resolved.interaction.transport,
-                surfaces::InteractionTransport::ProviderProxied
-            ) {
-                return Err(SurfaceProxyError::PermissionDenied(
-                    "provider-initiated requests cannot proxy to service providers".to_string(),
-                ));
-            }
         }
 
         match &resolved.interaction.transport {
@@ -343,6 +342,28 @@ impl SurfaceProxy {
         let sender = self.pending.lock().take_pending(&request_id);
         if let Some(sender) = sender {
             let _ = sender.send(response);
+        }
+    }
+
+    pub fn fail_in_flight_for_provider(&self, provider_id: &str) {
+        let mut state = self.pending.lock();
+        let request_ids: Vec<Uuid> = state
+            .pending
+            .iter()
+            .filter_map(|(request_id, pending)| {
+                if pending.provider_id == provider_id {
+                    Some(*request_id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for request_id in &request_ids {
+            let _ = state.remove_pending(request_id);
+        }
+        if !request_ids.is_empty() {
+            state.record_provider_failure(provider_id);
         }
     }
 
@@ -572,6 +593,9 @@ fn map_lookup_error(error: SurfaceRegistryLookupError) -> SurfaceProxyError {
     match error {
         SurfaceRegistryLookupError::SurfaceNotFound => SurfaceProxyError::NoProvider,
         SurfaceRegistryLookupError::InteractionNotFound => SurfaceProxyError::InteractionNotFound,
+        SurfaceRegistryLookupError::TargetProviderRequired => {
+            SurfaceProxyError::TargetProviderRequired
+        }
         SurfaceRegistryLookupError::InvalidProvider(provider_id) => {
             SurfaceProxyError::InvalidProvider(provider_id)
         }
@@ -583,7 +607,7 @@ fn caller_origin_for_request(
     registry: &SurfaceRegistry,
     caller: &SurfaceCallerOrigin,
     _resolved: &crate::surface_registry::ResolvedSurfaceAction,
-    request: &SurfaceInvokeRequest,
+    _request: &SurfaceInvokeRequest,
 ) -> Result<surfaces::CallerOrigin, SurfaceProxyError> {
     match caller {
         SurfaceCallerOrigin::UserSession {
@@ -606,13 +630,6 @@ fn caller_origin_for_request(
                         "service {service_id} has no registered surface provider"
                     ))
                 })?;
-            if let Some(target_provider_id) = &request.target_provider_id
-                && target_provider_id != &provider_id
-            {
-                return Err(SurfaceProxyError::PermissionDenied(
-                    "provider-initiated request cannot impersonate another provider".to_string(),
-                ));
-            }
             Ok(surfaces::CallerOrigin::Provider { provider_id })
         }
     }
@@ -891,6 +908,7 @@ mod tests {
             .register_service(
                 service_id,
                 "uptrakit-agent-ssh",
+                Some(tenant_id()),
                 registration("provider-a", tenant_id()),
             )
             .expect("registration should succeed");
@@ -1099,7 +1117,12 @@ mod tests {
         custom_registration.surfaces[0].interactions[0].input_schema =
             Some(surfaces::SchemaContract::Integer);
         registry
-            .register_service(service_id, "uptrakit-agent-ssh", custom_registration)
+            .register_service(
+                service_id,
+                "uptrakit-agent-ssh",
+                Some(tenant_id()),
+                custom_registration,
+            )
             .expect("registration should succeed");
         let (_rx, _cancel) = service_connections
             .register(
@@ -1128,5 +1151,137 @@ mod tests {
             matches!(result, Err(SurfaceProxyError::SchemaValidationFailed(_))),
             "expected schema validation failure, got {result:?}"
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn invoke_targeted_surface_requires_explicit_target_provider() {
+        let registry = registry();
+        let service_connections = ServiceConnectionRegistry::new();
+        let proxy = SurfaceProxy::new();
+        let (_service_id, _rx) = register_service_for_proxy(&registry, &service_connections).await;
+
+        let mut request = request_with_idem("idem-missing-target");
+        request.target_provider_id = None;
+
+        let err = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                request,
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect_err("targeted invocation must require explicit target provider");
+        assert!(matches!(err, SurfaceProxyError::TargetProviderRequired));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn invoke_provider_origin_can_route_to_another_provider() {
+        let registry = registry();
+        let service_connections = ServiceConnectionRegistry::new();
+        let proxy = Arc::new(SurfaceProxy::new());
+
+        let service_a = Uuid::now_v7();
+        let mut reg_a = registration("provider-a", tenant_id());
+        reg_a.surfaces[0].interactions[0].required_permission = None;
+        registry
+            .register_service(service_a, "uptrakit-agent-ssh", Some(tenant_id()), reg_a)
+            .expect("provider-a registration should succeed");
+
+        let service_b = Uuid::now_v7();
+        let mut reg_b = registration("provider-b", tenant_id());
+        reg_b.surfaces[0].interactions[0].required_permission = None;
+        registry
+            .register_service(service_b, "uptrakit-agent-ssh", Some(tenant_id()), reg_b)
+            .expect("provider-b registration should succeed");
+
+        let (_rx_a, _cancel_a) = service_connections
+            .register(
+                service_a,
+                BTreeSet::new(),
+                None,
+                None,
+                Some("uptrakit-agent-ssh".to_string()),
+            )
+            .await;
+        let (mut rx_b, _cancel_b) = service_connections
+            .register(
+                service_b,
+                BTreeSet::new(),
+                None,
+                None,
+                Some("uptrakit-agent-ssh".to_string()),
+            )
+            .await;
+
+        let proxy_clone = Arc::clone(&proxy);
+        tokio::spawn(async move {
+            if let Some(ControllerMessage::SurfaceActionRequest(request)) = rx_b.recv().await {
+                proxy_clone.complete(
+                    request.request_id,
+                    surfaces::SurfaceActionResponse {
+                        request_id: request.request_id,
+                        success: true,
+                        result: Some(serde_json::json!({"routed": true})),
+                        error: None,
+                    },
+                );
+            }
+        });
+
+        let mut request = request_with_idem("idem-cross-provider");
+        request.target_provider_id = Some("provider-b".to_string());
+        request.caller_origin = SurfaceCallerOrigin::Provider {
+            service_id: service_a,
+        };
+
+        let response = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                request,
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("controller-authorized cross-provider invoke should succeed");
+        assert!(response.success);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn invoke_fails_immediately_when_provider_disconnects() {
+        let registry = registry();
+        let service_connections = ServiceConnectionRegistry::new();
+        let proxy = Arc::new(SurfaceProxy::new());
+        let (_service_id, mut rx) =
+            register_service_for_proxy(&registry, &service_connections).await;
+
+        let proxy_invoke = Arc::clone(&proxy);
+        let invoke_task = tokio::spawn(async move {
+            proxy_invoke
+                .invoke(
+                    &service_connections,
+                    &registry,
+                    request_with_idem("idem-disconnect"),
+                    Some(Duration::from_secs(60)),
+                )
+                .await
+        });
+
+        let outbound = rx
+            .recv()
+            .await
+            .expect("first message should be action request");
+        assert!(matches!(
+            outbound,
+            ControllerMessage::SurfaceActionRequest(_)
+        ));
+
+        proxy.fail_in_flight_for_provider("provider-a");
+
+        let result = invoke_task.await.expect("invoke task should finish");
+        assert!(matches!(
+            result,
+            Err(SurfaceProxyError::ServiceDisconnected)
+        ));
     }
 }
