@@ -10,7 +10,7 @@ use uptrakit_surfaces::{
     ProviderIdentity, ProviderKind, RefreshPolicy, RegisteredSurface, SLOT_EXTENSION_PAGE,
     SLOT_SETTINGS_TABS, SchemaContract, Scope, SurfaceActionRequest, SurfaceDescriptor, SurfaceId,
     SurfaceNode, SurfaceRegistration, SurfaceRegistrationErrorCode, SurfaceRegistrationPolicy,
-    Targeting,
+    SurfaceTab, SurfaceTabId, Targeting,
 };
 
 fn registration_policy(required_capabilities: CapabilitySet) -> SurfaceRegistrationPolicy {
@@ -434,4 +434,37 @@ fn protocol_registration_rejects_missing_data_source_kind_capability_for_usage()
             "provider query data source should require provider_query_data_source capability",
         );
     assert_eq!(err.code, SurfaceRegistrationErrorCode::MissingCapability);
+}
+
+#[test]
+fn protocol_registration_rejects_duplicate_tab_ids_within_tabs_node() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.capabilities.0.insert(Capability::TabsNode);
+    registration
+        .capabilities
+        .0
+        .insert(Capability::TextBlockNode);
+    registration.surfaces[0].descriptor.root_node = SurfaceNode::Tabs {
+        tabs: vec![
+            SurfaceTab {
+                id: SurfaceTabId::new("status").expect("valid tab id"),
+                label: "Status".to_string(),
+                root: SurfaceNode::TextBlock {
+                    text: "ok".to_string(),
+                },
+            },
+            SurfaceTab {
+                id: SurfaceTabId::new("status").expect("valid tab id"),
+                label: "Details".to_string(),
+                root: SurfaceNode::TextBlock {
+                    text: "duplicate".to_string(),
+                },
+            },
+        ],
+    };
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("duplicate tab ids should be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
 }
