@@ -247,6 +247,7 @@ insert_named_software_item = "ignore"
 insert_host_software_item = "ignore"
 version_check_results_targeted_update_isolates_correct_row = "ignore"
 version_check_results_targeted_update_rejects_foreign_hsi_id = "ignore"
+version_check_results_error_result_preserves_targeted_row_while_success_updates_peer_row = "ignore"
 enrich_discovered_items_uses_default_on_setting = "ignore"
 
 [routes."service_ws/handler/mod.rs"]
@@ -422,6 +423,8 @@ load_agent_service = "ignore"
 classify_role_assignments = "ignore"
 check_versions_host = "full-state"
 batch_software_items = "full-state"
+preview_software_item_merge = "tenant-scoped"
+execute_software_item_merge = "tenant-scoped"
 fire_software_item_lifecycle = "ignore"
 
 [routes."software_items/version_check_dispatch.rs"]
