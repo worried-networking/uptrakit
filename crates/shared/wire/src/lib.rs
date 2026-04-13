@@ -10,6 +10,7 @@ pub mod report_tracker;
 pub mod serde_helpers;
 pub mod service_profile;
 pub mod shared_types;
+pub mod surfaces;
 pub mod trace_context;
 pub mod transport;
 

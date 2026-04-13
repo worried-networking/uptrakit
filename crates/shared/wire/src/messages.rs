@@ -19,6 +19,7 @@ use super::payloads::{
     WorkloadClaimAnnouncementPayload, WorkloadClaimPayload, WorkloadClaimResultPayload,
     WorkloadClaimSyncRequestPayload, WorkloadClaimSyncResponsePayload, WorkloadReleasePayload,
 };
+use super::surfaces;
 
 /// Messages sent from a service (agent or MQTT) to the controller.
 ///
@@ -75,7 +76,7 @@ pub enum ServiceMessage {
     /// matching `(tenant_id, plugin_type, name)` and responds with
     /// `ReportPluginConfigResponse`.
     ReportPluginConfig(ReportPluginConfigPayload),
-    // -- UI Extensions --
+    // -- UI Extensions (migration shims; retained for rollout compatibility) --
     /// Service declares its UI extensions after connecting.
     ///
     /// Sent once after connection setup by services with the `UiExtensions`
@@ -108,6 +109,22 @@ pub enum ServiceMessage {
     /// is always `None` for service-initiated requests (the mTLS channel is
     /// already trusted).
     ExtensionRequest(extension::ExtensionRequestPayload),
+    // -- Surfaces --
+    /// Service declares its surfaces after connecting.
+    ///
+    /// Sent once after connection setup by services that participate in the
+    /// surface contract.
+    SurfaceRegistration(surfaces::SurfaceRegistration),
+    /// Response to a proxied surface action invocation.
+    ///
+    /// Sent by the service after processing a `SurfaceActionRequest` from the
+    /// controller.
+    SurfaceActionResponse(surfaces::SurfaceActionResponse),
+    /// Service requests a surface action invocation from the controller.
+    ///
+    /// Enables services to call surface actions via the wire protocol and
+    /// receive the correlated `ControllerMessage::SurfaceActionResponse`.
+    SurfaceActionRequest(surfaces::SurfaceActionRequest),
     // -- Service config store --
     /// Service → Controller: upsert a config entry in the controller DB.
     ///
@@ -198,7 +215,7 @@ pub enum ControllerMessage {
     ///
     /// **Safe to publish via NATS** — contains no credential material.
     HostConnectivityUpdated(HostConnectivityUpdatedPayload),
-    // -- UI Extensions --
+    // -- UI Extensions (migration shims; retained for rollout compatibility) --
     /// Proxied action invocation from the controller to a service.
     ///
     /// Sent to services with the `UiExtensions` capability when a REST client
@@ -211,6 +228,21 @@ pub enum ControllerMessage {
     /// The `request_id` correlates this response with the original request,
     /// completing the `ServiceExtensionProxy` oneshot channel on the service side.
     ExtensionResponse(extension::ExtensionResponsePayload),
+    // -- Surfaces --
+    /// Proxied surface action invocation from the controller to a service.
+    ///
+    /// Sent to services participating in the surface contract. The service
+    /// should process the action and respond with `SurfaceActionResponse`.
+    SurfaceActionRequest(surfaces::SurfaceActionRequest),
+    /// Cancellation of an in-flight proxied surface action request.
+    ///
+    /// Session-targeted and never published to NATS.
+    SurfaceActionCancel(surfaces::SurfaceActionCancel),
+    /// Response to a service-initiated surface action invocation.
+    ///
+    /// Sent by the controller after processing a
+    /// `ServiceMessage::SurfaceActionRequest`.
+    SurfaceActionResponse(surfaces::SurfaceActionResponse),
     // -- Plugin config reporting --
     /// Response to a `ReportPluginConfig` request from a service.
     ///
@@ -334,9 +366,11 @@ impl ControllerMessage {
     /// Returns `true` if this message may be published to NATS JetStream.
     ///
     /// Credential-bearing variants (`ServiceCredentials`) and session-targeted
-    /// variants (`ExtensionRequest`, `ExtensionResponse`) must **never** be
-    /// published to NATS — they are delivered exclusively over authenticated
-    /// WebSocket connections.  All other variants are safe to broadcast via NATS.
+    /// variants (`ExtensionRequest`, `ExtensionResponse`,
+    /// `SurfaceActionRequest`, `SurfaceActionCancel`, `SurfaceActionResponse`)
+    /// must **never** be published to NATS — they are delivered exclusively
+    /// over authenticated WebSocket connections. All other variants are safe
+    /// to broadcast via NATS.
     ///
     /// This is the authoritative gate used by [`NatsConnection::publish`].
     pub fn is_nats_publishable(&self) -> bool {
@@ -345,6 +379,9 @@ impl ControllerMessage {
             ControllerMessage::ServiceCredentials(_)
                 | ControllerMessage::ExtensionRequest(_)
                 | ControllerMessage::ExtensionResponse(_)
+                | ControllerMessage::SurfaceActionRequest(_)
+                | ControllerMessage::SurfaceActionCancel(_)
+                | ControllerMessage::SurfaceActionResponse(_)
                 | ControllerMessage::UpdateStdinData(_)
                 | ControllerMessage::ResetData
                 | ControllerMessage::ServiceConfigDelivery(_)
