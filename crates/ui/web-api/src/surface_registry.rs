@@ -144,17 +144,30 @@ impl SurfaceRegistry {
 
         let provider_id = registration.provider.provider_id.clone();
         let mut inner = self.inner.lock();
-        self.validate_registration_admission_locked(
+        let rotation_backup = inner
+            .service_to_provider
+            .get(&service_id)
+            .cloned()
+            .filter(|existing_provider_id| existing_provider_id != &provider_id)
+            .and_then(|existing_provider_id| {
+                let entry = inner.providers.get(&existing_provider_id).cloned()?;
+                remove_provider(&mut inner, &existing_provider_id);
+                Some((existing_provider_id, entry))
+            });
+
+        if let Err(error) = self.validate_registration_admission_locked(
             &inner,
             &registration,
             Some(service_id),
             Some(service_app_name),
-        )?;
-
-        if let Some(existing_provider_id) = inner.service_to_provider.get(&service_id).cloned()
-            && existing_provider_id != provider_id
-        {
-            remove_provider(&mut inner, &existing_provider_id);
+        ) {
+            if let Some((existing_provider_id, entry)) = rotation_backup.clone() {
+                upsert_provider(&mut inner, existing_provider_id.clone(), entry);
+                inner
+                    .service_to_provider
+                    .insert(service_id, existing_provider_id);
+            }
+            return Err(error);
         }
 
         if let Some(existing) = inner.providers.get(&provider_id)
@@ -711,13 +724,6 @@ impl SurfaceRegistry {
         let provider_id = registration.provider.provider_id.as_str();
 
         if let Some(service_id) = service_id {
-            if let Some(existing_provider_id) = inner.service_to_provider.get(&service_id)
-                && existing_provider_id != provider_id
-            {
-                return Err(SurfaceRegistryError::ProviderConflict(format!(
-                    "service {service_id} is already bound to provider `{existing_provider_id}`"
-                )));
-            }
             if let Some(existing) = inner.providers.get(provider_id)
                 && let Some(existing_service_id) = existing.service_id
                 && existing_service_id != service_id
@@ -1467,6 +1473,36 @@ mod tests {
                 .is_none()
         );
         assert_eq!(registry.provider_surface_count("provider-b"), 0);
+    }
+
+    #[test]
+    fn register_service_can_atomically_rotate_provider_id_for_same_service() {
+        let registry = registry();
+        let service_id = Uuid::now_v7();
+        registry
+            .register_service(
+                service_id,
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration_for_service("provider-a", tenant_a()),
+            )
+            .expect("initial registration should succeed");
+
+        registry
+            .register_service(
+                service_id,
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration_for_service("provider-b", tenant_a()),
+            )
+            .expect("provider rotation for same service should succeed");
+
+        assert_eq!(
+            registry.provider_id_for_service(&service_id),
+            Some("provider-b".to_string())
+        );
+        assert_eq!(registry.provider_surface_count("provider-a"), 0);
+        assert_eq!(registry.provider_surface_count("provider-b"), 1);
     }
 
     #[test]

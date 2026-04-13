@@ -24,7 +24,7 @@ use crate::AppState;
 use crate::error_response::{error_response, error_response_with_code};
 use crate::middleware::tenant_context::TenantContext;
 use crate::surface_proxy::{SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceProxyError};
-use crate::surface_registry::SurfaceRegistryLookupError;
+use crate::surface_registry::{SurfaceCatalogItem, SurfaceRegistryLookupError};
 
 #[tracing::instrument(skip_all)]
 pub async fn list_surfaces(
@@ -38,22 +38,23 @@ pub async fn list_surfaces(
         query.page.as_deref(),
     );
 
-    let mut grouped: BTreeMap<String, SurfaceResponse> = BTreeMap::new();
+    (StatusCode::OK, Json(group_surface_catalog(catalog))).into_response()
+}
+
+fn group_surface_catalog(catalog: Vec<SurfaceCatalogItem>) -> Vec<SurfaceResponse> {
+    let mut grouped: BTreeMap<(String, String), SurfaceResponse> = BTreeMap::new();
     for item in catalog {
+        let descriptor_key =
+            serde_json::to_string(&item.descriptor).expect("surface descriptor should serialize");
         let entry = grouped
-            .entry(item.surface_id)
+            .entry((item.surface_id, descriptor_key))
             .or_insert_with(|| SurfaceResponse {
                 descriptor: item.descriptor,
                 provider_count: 0,
             });
         entry.provider_count += 1;
     }
-
-    (
-        StatusCode::OK,
-        Json(grouped.into_values().collect::<Vec<_>>()),
-    )
-        .into_response()
+    grouped.into_values().collect()
 }
 
 #[tracing::instrument(skip_all)]
@@ -328,5 +329,61 @@ fn action_error_code(code: &surfaces::SurfaceActionErrorCode) -> &'static str {
         surfaces::SurfaceActionErrorCode::Timeout => "timeout",
         surfaces::SurfaceActionErrorCode::DuplicateRequest => "duplicate_request",
         surfaces::SurfaceActionErrorCode::InternalError => "internal_error",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn catalog_item(surface_id: &str, label: &str, provider_id: &str) -> SurfaceCatalogItem {
+        SurfaceCatalogItem {
+            surface_id: surface_id.to_string(),
+            slot: surfaces::SLOT_SOFTWARE_TABS.to_string(),
+            provider_id: provider_id.to_string(),
+            targeting: surfaces::Targeting::Targeted,
+            descriptor: surfaces::SurfaceDescriptor {
+                surface_id: surfaces::SurfaceId::new(surface_id).unwrap(),
+                label: label.to_string(),
+                priority: 100,
+                slot: surfaces::SLOT_SOFTWARE_TABS.to_string(),
+                scope: surfaces::Scope::Tenant,
+                targeting: surfaces::Targeting::Targeted,
+                required_permission: Some("view_software".to_string()),
+                provider_kind: surfaces::ProviderKind::Service,
+                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::TextBlockNode,
+                    surfaces::Capability::TargetedTargeting,
+                ]),
+                root_node: surfaces::SurfaceNode::TextBlock {
+                    text: "ok".to_string(),
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn group_surface_catalog_merges_only_identical_descriptors() {
+        let grouped = group_surface_catalog(vec![
+            catalog_item("ssh.guest.panel", "SSH Guest Panel", "provider-a"),
+            catalog_item("ssh.guest.panel", "SSH Guest Panel", "provider-b"),
+            catalog_item("ssh.guest.panel", "Different Label", "provider-c"),
+        ]);
+
+        assert_eq!(grouped.len(), 2);
+        assert_eq!(
+            grouped
+                .iter()
+                .find(|entry| entry.descriptor.label == "SSH Guest Panel")
+                .map(|entry| entry.provider_count),
+            Some(2)
+        );
+        assert_eq!(
+            grouped
+                .iter()
+                .find(|entry| entry.descriptor.label == "Different Label")
+                .map(|entry| entry.provider_count),
+            Some(1)
+        );
     }
 }
