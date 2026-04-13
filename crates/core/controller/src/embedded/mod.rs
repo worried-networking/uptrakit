@@ -38,6 +38,10 @@ use types::{CoexistencePolicy, EmbeddedTransport, ExternalServiceInfo};
 /// Tokens passed to each embedded service's run closure to control its lifecycle.
 pub(crate) struct EmbeddedShutdownTokens {
     /// Cancel to stop claiming new work. In-flight work completes naturally.
+    #[cfg_attr(
+        not(any(feature = "embedded-scheduler", feature = "embedded-ssh-agent")),
+        allow(dead_code)
+    )]
     pub drain: CancellationToken,
     /// Cancel to abort in-flight work immediately.
     pub abort: CancellationToken,
