@@ -12,7 +12,7 @@ use axum::{
 };
 use serde::Deserialize;
 use std::sync::Arc;
-use uptrakit_notification_plugin_core::DeliveryMessage;
+use uptrakit_plugin_infrastructure_registry::DeliveryMessage;
 use uptrakit_web_api_types::pagination::PaginationParams;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;

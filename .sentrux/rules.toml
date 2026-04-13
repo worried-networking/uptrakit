@@ -32,19 +32,24 @@ no_god_files = false
 
 # ── Layers ────────────────────────────────────────────────────────────────────
 #
-# Dependency direction:  shared <- plugins <- ui <- binaries
+# Dependency direction: shared <- plugins <- plugin_protocol_clients <- ui <- binaries
 #
-# Sentrux: layer with order=0 can import any higher-order layer.
-# Violation fires when from_order > to_order (more foundational imports less).
-#
-#   0  binaries   crates/core/**      entry-point crates
-#   1  ui         crates/ui/**        web-api, cli
-#   2  plugins    crates/plugins/**   plugin library crates
-#   3  shared     crates/shared/**    foundational types, DB, wire, crypto
+# `plugin_protocol_clients` is the explicit operational carve-out for crates
+# that coordinate plugin protocol/runtime operations directly.
 
 [[layers]]
 name = "binaries"
-paths = ["crates/core/**"]
+paths = [
+  "crates/core/agent/**",
+  "crates/core/agent-runtime/**",
+  "crates/core/agent-ssh-runtime/**",
+  "crates/core/controller/**",
+  "crates/core/integration-tests/**",
+  "crates/core/mqtt/**",
+  "crates/core/mqtt-runtime/**",
+  "crates/core/scheduler/**",
+  "crates/core/scheduler-runtime/**",
+]
 order = 0
 
 [[layers]]
@@ -53,14 +58,42 @@ paths = ["crates/ui/**"]
 order = 1
 
 [[layers]]
-name = "plugins"
-paths = ["crates/plugins/**"]
+name = "plugin_protocol_clients"
+paths = [
+  "crates/shared/agent-core/**",
+  "crates/shared/scheduler-engine/**",
+  "crates/core/agent-ssh/**",
+]
 order = 2
 
 [[layers]]
-name = "shared"
-paths = ["crates/shared/**"]
+name = "plugins"
+paths = ["crates/plugins/**"]
 order = 3
+
+[[layers]]
+name = "shared"
+paths = [
+  "crates/shared/audit-log/**",
+  "crates/shared/backoff/**",
+  "crates/shared/build-info/**",
+  "crates/shared/command/**",
+  "crates/shared/crypto/**",
+  "crates/shared/db/**",
+  "crates/shared/directories/**",
+  "crates/shared/extension-framework/**",
+  "crates/shared/macros/**",
+  "crates/shared/nats/**",
+  "crates/shared/openapi-client/**",
+  "crates/shared/service-platform/**",
+  "crates/shared/service-sdk/**",
+  "crates/shared/tracing-init/**",
+  "crates/shared/types/**",
+  "crates/shared/update-hooks/**",
+  "crates/shared/web-api-types/**",
+  "crates/shared/wire/**",
+]
+order = 4
 
 # ── Boundaries ────────────────────────────────────────────────────────────────
 
@@ -115,11 +148,1345 @@ to = "crates/plugins/notifications/**"
 reason = "Discovery plugins must not depend on notification plugins"
 
 # ── Rule 1: plugins/infrastructure/registry is the only external plugin entry point ──
+#
+# Explicit non-carve-out roots only:
+# - shared: all shared crates except agent-core and scheduler-engine
+# - core: all core crates except agent-ssh
 
 [[boundaries]]
-from = "crates/shared/**"
-to = "crates/plugins/**"
-reason = "Shared crates must not depend on plugin crates"
+from = "crates/shared/audit-log/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/audit-log/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/audit-log/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/audit-log/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/audit-log/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/audit-log/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/audit-log/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/audit-log/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/audit-log/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/backoff/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/backoff/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/backoff/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/backoff/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/backoff/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/backoff/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/backoff/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/backoff/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/backoff/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/build-info/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/build-info/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/build-info/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/build-info/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/build-info/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/build-info/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/build-info/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/build-info/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/build-info/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/command/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/command/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/command/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/command/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/command/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/command/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/command/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/command/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/command/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/crypto/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/crypto/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/crypto/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/crypto/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/crypto/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/crypto/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/crypto/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/crypto/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/crypto/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/db/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/db/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/db/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/db/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/db/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/db/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/db/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/db/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/db/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/directories/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/directories/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/directories/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/directories/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/directories/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/directories/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/directories/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/directories/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/directories/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/extension-framework/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/extension-framework/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/extension-framework/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/extension-framework/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/extension-framework/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/extension-framework/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/extension-framework/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/extension-framework/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/extension-framework/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/macros/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/macros/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/macros/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/macros/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/macros/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/macros/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/macros/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/macros/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/macros/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/nats/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/nats/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/nats/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/nats/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/nats/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/nats/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/nats/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/nats/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/nats/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/openapi-client/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/openapi-client/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/openapi-client/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/openapi-client/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/openapi-client/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/openapi-client/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/openapi-client/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/openapi-client/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/openapi-client/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-platform/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-platform/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-platform/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-platform/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-platform/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-platform/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-platform/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-platform/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/service-platform/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-sdk/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-sdk/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-sdk/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-sdk/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-sdk/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-sdk/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-sdk/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/service-sdk/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/service-sdk/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/tracing-init/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/tracing-init/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/tracing-init/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/tracing-init/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/tracing-init/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/tracing-init/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/tracing-init/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/tracing-init/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/tracing-init/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/types/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/types/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/types/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/types/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/types/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/types/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/types/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/types/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/types/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/update-hooks/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/update-hooks/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/update-hooks/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/update-hooks/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/update-hooks/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/update-hooks/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/update-hooks/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/update-hooks/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/update-hooks/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/web-api-types/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/web-api-types/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/web-api-types/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/web-api-types/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/web-api-types/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/web-api-types/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/web-api-types/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/web-api-types/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/web-api-types/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/wire/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out shared crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/wire/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out shared crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/wire/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out shared crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/wire/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out shared crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/wire/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out shared crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/wire/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out shared crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/wire/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out shared crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/wire/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out shared crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/shared/wire/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out shared crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out core crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out core crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out core crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out core crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out core crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out core crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out core crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent/src/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out core crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/core/agent/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out core crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-runtime/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out core crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-runtime/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out core crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-runtime/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out core crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-runtime/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out core crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-runtime/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out core crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-runtime/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out core crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-runtime/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out core crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-runtime/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out core crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/core/agent-runtime/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out core crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-ssh-runtime/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out core crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-ssh-runtime/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out core crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-ssh-runtime/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out core crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-ssh-runtime/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out core crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-ssh-runtime/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out core crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-ssh-runtime/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out core crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-ssh-runtime/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out core crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/agent-ssh-runtime/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out core crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/core/agent-ssh-runtime/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out core crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/controller/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out core crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/controller/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out core crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/controller/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out core crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/controller/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out core crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/controller/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out core crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/controller/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out core crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/controller/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out core crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/controller/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out core crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/core/controller/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out core crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/integration-tests/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out core crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/integration-tests/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out core crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/integration-tests/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out core crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/integration-tests/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out core crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/integration-tests/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out core crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/integration-tests/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out core crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/integration-tests/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out core crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/integration-tests/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out core crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/core/integration-tests/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out core crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out core crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out core crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out core crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out core crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out core crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out core crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out core crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out core crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/core/mqtt/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out core crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt-runtime/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out core crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt-runtime/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out core crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt-runtime/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out core crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt-runtime/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out core crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt-runtime/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out core crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt-runtime/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out core crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt-runtime/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out core crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/mqtt-runtime/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out core crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/core/mqtt-runtime/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out core crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out core crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out core crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out core crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out core crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out core crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out core crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out core crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out core crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/core/scheduler/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out core crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler-runtime/**"
+to = "crates/plugins/releases/**"
+reason = "Non-carve-out core crates must not directly import release plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler-runtime/**"
+to = "crates/plugins/package-managers/**"
+reason = "Non-carve-out core crates must not directly import package manager plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler-runtime/**"
+to = "crates/plugins/notifications/**"
+reason = "Non-carve-out core crates must not directly import notification plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler-runtime/**"
+to = "crates/plugins/discovery/**"
+reason = "Non-carve-out core crates must not directly import discovery plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler-runtime/**"
+to = "crates/plugins/generic/**"
+reason = "Non-carve-out core crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler-runtime/**"
+to = "crates/plugins/hooks/**"
+reason = "Non-carve-out core crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler-runtime/**"
+to = "crates/plugins/enhancements/**"
+reason = "Non-carve-out core crates must not directly import enhancement plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/core/scheduler-runtime/**"
+to = "crates/plugins/infrastructure/core/**"
+reason = "Non-carve-out core crates must not bypass the registry and depend on plugin infrastructure/core directly"
+
+[[boundaries]]
+from = "crates/core/scheduler-runtime/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Non-carve-out core crates must not directly import the Proxmox infrastructure plugin — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/shared/agent-core/**"
+to = "crates/plugins/releases/**"
+reason = "Operational carve-out crates must not directly import release plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/shared/agent-core/**"
+to = "crates/plugins/package-managers/**"
+reason = "Operational carve-out crates must not directly import package manager plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/shared/agent-core/**"
+to = "crates/plugins/notifications/**"
+reason = "Operational carve-out crates must not directly import notification plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/shared/agent-core/**"
+to = "crates/plugins/discovery/**"
+reason = "Operational carve-out crates must not directly import discovery plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/shared/agent-core/**"
+to = "crates/plugins/generic/**"
+reason = "Operational carve-out crates must not directly import generic plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/shared/agent-core/**"
+to = "crates/plugins/hooks/**"
+reason = "Operational carve-out crates must not directly import hook plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/shared/agent-core/**"
+to = "crates/plugins/enhancements/**"
+reason = "Operational carve-out crates must not directly import enhancement plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/shared/agent-core/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Operational carve-out crates must not directly import the Proxmox infrastructure plugin; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/shared/scheduler-engine/**"
+to = "crates/plugins/releases/**"
+reason = "Operational carve-out crates must not directly import release plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/shared/scheduler-engine/**"
+to = "crates/plugins/package-managers/**"
+reason = "Operational carve-out crates must not directly import package manager plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/shared/scheduler-engine/**"
+to = "crates/plugins/notifications/**"
+reason = "Operational carve-out crates must not directly import notification plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/shared/scheduler-engine/**"
+to = "crates/plugins/discovery/**"
+reason = "Operational carve-out crates must not directly import discovery plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/shared/scheduler-engine/**"
+to = "crates/plugins/generic/**"
+reason = "Operational carve-out crates must not directly import generic plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/shared/scheduler-engine/**"
+to = "crates/plugins/hooks/**"
+reason = "Operational carve-out crates must not directly import hook plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/shared/scheduler-engine/**"
+to = "crates/plugins/enhancements/**"
+reason = "Operational carve-out crates must not directly import enhancement plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/shared/scheduler-engine/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Operational carve-out crates must not directly import the Proxmox infrastructure plugin; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/core/agent-ssh/**"
+to = "crates/plugins/releases/**"
+reason = "Operational carve-out crates must not directly import release plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/core/agent-ssh/**"
+to = "crates/plugins/package-managers/**"
+reason = "Operational carve-out crates must not directly import package manager plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/core/agent-ssh/**"
+to = "crates/plugins/notifications/**"
+reason = "Operational carve-out crates must not directly import notification plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/core/agent-ssh/**"
+to = "crates/plugins/discovery/**"
+reason = "Operational carve-out crates must not directly import discovery plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/core/agent-ssh/**"
+to = "crates/plugins/generic/**"
+reason = "Operational carve-out crates must not directly import generic plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/core/agent-ssh/**"
+to = "crates/plugins/hooks/**"
+reason = "Operational carve-out crates must not directly import hook plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/core/agent-ssh/**"
+to = "crates/plugins/enhancements/**"
+reason = "Operational carve-out crates must not directly import enhancement plugin crates; only infrastructure/core protocol usage is allowlisted"
+
+[[boundaries]]
+from = "crates/core/agent-ssh/**"
+to = "crates/plugins/infrastructure/proxmox/**"
+reason = "Operational carve-out crates must not directly import the Proxmox infrastructure plugin; only infrastructure/core protocol usage is allowlisted"
 
 [[boundaries]]
 from = "crates/ui/**"
@@ -131,11 +1498,10 @@ from = "crates/ui/**"
 to = "crates/plugins/package-managers/**"
 reason = "UI crates must not directly import package manager plugin crates — use infrastructure/registry"
 
-# NOTE: web-api currently depends on notifications/registry — known violation to address
 [[boundaries]]
 from = "crates/ui/**"
 to = "crates/plugins/notifications/**"
-reason = "UI crates must not directly import notification plugin crates — move NotificationOps to crates/shared"
+reason = "UI crates must not directly import notification plugin crates — use infrastructure/registry"
 
 [[boundaries]]
 from = "crates/ui/**"
@@ -145,7 +1511,17 @@ reason = "UI crates must not directly import discovery plugin crates — use inf
 [[boundaries]]
 from = "crates/ui/**"
 to = "crates/plugins/generic/**"
-reason = "UI crates must not directly import the generic shell plugin crate"
+reason = "UI crates must not directly import generic plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/ui/**"
+to = "crates/plugins/hooks/**"
+reason = "UI crates must not directly import hook plugin crates — use infrastructure/registry"
+
+[[boundaries]]
+from = "crates/ui/**"
+to = "crates/plugins/enhancements/**"
+reason = "UI crates must not directly import enhancement plugin crates — use infrastructure/registry"
 
 [[boundaries]]
 from = "crates/ui/**"
@@ -156,42 +1532,6 @@ reason = "UI crates must not bypass the registry and depend on plugin infrastruc
 from = "crates/ui/**"
 to = "crates/plugins/infrastructure/proxmox/**"
 reason = "UI crates must not directly import the Proxmox infrastructure plugin"
-
-[[boundaries]]
-from = "crates/core/**"
-to = "crates/plugins/releases/**"
-reason = "Binary crates must not directly import release plugin crates — use infrastructure/registry"
-
-[[boundaries]]
-from = "crates/core/**"
-to = "crates/plugins/package-managers/**"
-reason = "Binary crates must not directly import package manager plugin crates — use infrastructure/registry"
-
-[[boundaries]]
-from = "crates/core/**"
-to = "crates/plugins/notifications/**"
-reason = "Binary crates must not directly import notification plugin crates — use infrastructure/registry or move NotificationOps to crates/shared"
-
-[[boundaries]]
-from = "crates/core/**"
-to = "crates/plugins/discovery/**"
-reason = "Binary crates must not directly import discovery plugin crates — use infrastructure/registry"
-
-[[boundaries]]
-from = "crates/core/**"
-to = "crates/plugins/generic/**"
-reason = "Binary crates must not directly import the generic shell plugin crate"
-
-[[boundaries]]
-from = "crates/core/**"
-to = "crates/plugins/infrastructure/core/**"
-reason = "Binary crates must not bypass the registry and depend on plugin infrastructure/core directly"
-
-[[boundaries]]
-from = "crates/core/**"
-to = "crates/plugins/infrastructure/proxmox/**"
-reason = "Binary crates must not directly import the Proxmox infrastructure plugin"
-
 # ── Rule 2: plugins must not depend on wire or web-api ────────────────────────
 # plugins → ui/* is also caught by the layer check; listed explicitly for clarity.
 

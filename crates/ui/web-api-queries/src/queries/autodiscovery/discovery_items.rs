@@ -8,6 +8,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use std::collections::HashSet;
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{DiscoveryPluginResult, DiscoveryTarget};
+use uptrakit_plugin_infrastructure_registry::is_package_manager_plugin;
 use uptrakit_shared_db::entity::{
     host_software_item, host_software_item_plugin, prelude::*, software_ignore, software_item,
 };
@@ -146,7 +147,7 @@ async fn process_targets_discovery(
 
         // Package manager types use plugin_type_settings and do not need
         // per-config rows. Credential-bearing types still get plugin_configs.
-        let pc_id = if target.plugin_type.is_package_manager() {
+        let pc_id = if is_package_manager_plugin(&target.plugin_type) {
             None
         } else {
             Some(
@@ -1002,6 +1003,53 @@ mod tests {
             .expect("query hsi");
         assert_eq!(hsi.len(), 1, "expected one host_software_item");
         assert_eq!(hsi[0].installed_version.as_deref(), Some("10.2.3"));
+    }
+
+    #[tokio::test]
+    async fn target_based_npm_creates_hsip_without_plugin_config() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+
+        let mut result = phs_result_with_apt_target("pm2", "PM2", "5.4.2");
+        result.discoveries[0].targets[0].plugin_type = plugin_ids::PACKAGE_MANAGER_NPM.clone();
+
+        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
+            .await
+            .expect("process_plugin_result");
+
+        let configs = PluginConfig::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .filter(plugin_config::Column::PluginType.eq("package_manager_npm"))
+            .all(&db)
+            .await
+            .expect("query configs");
+        assert!(
+            configs.is_empty(),
+            "package managers no longer create plugin_configs"
+        );
+
+        let plugin_links = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .filter(host_software_item_plugin::Column::PackageIdentifier.eq("pm2"))
+            .all(&db)
+            .await
+            .expect("query plugin links");
+        assert!(
+            !plugin_links.is_empty(),
+            "expected plugin links for npm target"
+        );
+        for link in &plugin_links {
+            assert!(
+                link.plugin_config_id.is_none(),
+                "package manager HSIP rows must have plugin_config_id = NULL"
+            );
+            assert_eq!(link.plugin_type, "package_manager_npm");
+        }
     }
 
     /// An item with no targets and no plugin_config_id must be skipped.

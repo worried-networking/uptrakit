@@ -50,6 +50,7 @@ use tokio_util::sync::CancellationToken;
 use tracing_subscriber::prelude::*;
 use uptrakit_audit_log::{AuditFilter, AuditLogDispatcher};
 use uptrakit_build_info::BuildInfo;
+use uptrakit_plugin_infrastructure_registry::{PluginHttpClientConfig, build_plugin_http_client};
 use uptrakit_shared_macros::impl_report_conversion;
 
 use uptrakit_web_api::AppState;
@@ -339,13 +340,11 @@ async fn run(args: cli::Args) -> Result<()> {
     let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig {
         allow_private_urls: args.allow_private_notification_urls,
         http_client: Some(
-            uptrakit_plugin_infrastructure_core::build_plugin_http_client(
-                uptrakit_plugin_infrastructure_core::PluginHttpClientConfig {
-                    user_agent: "uptrakit-controller",
-                    redirect_policy: reqwest::redirect::Policy::limited(5),
-                    ..Default::default()
-                },
-            )
+            build_plugin_http_client(PluginHttpClientConfig {
+                user_agent: "uptrakit-controller",
+                redirect_policy: reqwest::redirect::Policy::limited(5),
+                ..Default::default()
+            })
             .map_err(|e| report!(AppError::Config(format!("plugin catalog HTTP client: {e}"))))?,
         ),
         cancellation_token: Some(shutdown_token.clone()),

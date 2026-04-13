@@ -38,7 +38,6 @@ uptrakit-directories = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uptrakit-command = { workspace = true }
 uptrakit-tracing-init = { workspace = true }
-uptrakit-plugin-infrastructure-core = { workspace = true, features = ["http-client"] }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["notifications", "migrations"] }
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "sync", "time"] }

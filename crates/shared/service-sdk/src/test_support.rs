@@ -117,10 +117,7 @@ impl ServiceTransport for MockTransport {
     }
 
     async fn transport_recv(&mut self) -> Option<ControllerMessage> {
-        match poll_fn(|cx| self.poll_recv(cx)).await {
-            Ok(msg) => msg,
-            Err(_) => None,
-        }
+        poll_fn(|cx| self.poll_recv(cx)).await.unwrap_or_default()
     }
 
     fn close_policy(&self) -> TransportClosePolicy {

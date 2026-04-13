@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_command::RemoteExecutor;
 use uptrakit_crypto::EncryptedString;
-use uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapExecutor;
+use uptrakit_plugin_infrastructure_registry::agent_infra::GuestBootstrapExecutor;
 use uptrakit_plugin_infrastructure_registry::{CatalogConfig, build_catalog, compatible_sudo_commands_for_host};
 
 use crate::commands::bootstrap;
@@ -71,9 +71,9 @@ pub(crate) struct NoopGuestBootstrapExecutor;
 impl GuestBootstrapExecutor for NoopGuestBootstrapExecutor {
     async fn bootstrap_guest(
         &self,
-        _params: uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapParams,
+        _params: uptrakit_plugin_infrastructure_registry::agent_infra::GuestBootstrapParams,
     ) -> std::result::Result<
-        uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapResult,
+        uptrakit_plugin_infrastructure_registry::agent_infra::GuestBootstrapResult,
         String,
     > {
         Err(
@@ -96,9 +96,9 @@ pub(crate) struct AgentGuestBootstrapExecutor {
 impl GuestBootstrapExecutor for AgentGuestBootstrapExecutor {
     async fn bootstrap_guest(
         &self,
-        params: uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapParams,
+        params: uptrakit_plugin_infrastructure_registry::agent_infra::GuestBootstrapParams,
     ) -> std::result::Result<
-        uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapResult,
+        uptrakit_plugin_infrastructure_registry::agent_infra::GuestBootstrapResult,
         String,
     > {
         let proxmox_params = ProxmoxBootstrapParams {
@@ -116,7 +116,7 @@ impl GuestBootstrapExecutor for AgentGuestBootstrapExecutor {
         run_proxmox_bootstrap(&self.state_dir, proxmox_params)
             .await
             .map(|r| {
-                uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapResult::new(
+                uptrakit_plugin_infrastructure_registry::agent_infra::GuestBootstrapResult::new(
                     r.hostname,
                 )
             })

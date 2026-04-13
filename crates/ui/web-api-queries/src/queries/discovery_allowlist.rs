@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
-use uptrakit_plugin_infrastructure_core::{PluginCapability, PluginMetadataOps};
+use uptrakit_plugin_infrastructure_registry::{PluginCapability, PluginMetadataOps};
 use uptrakit_shared_db::entity::{host_discovery_allowlist, tenant_discovery_allowlist};
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_shared_types::PluginTypeId;
@@ -353,7 +353,7 @@ pub async fn load_host_allowlist_set(db: &DatabaseConnection, host_id: Uuid) -> 
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_plugin_infrastructure_core::descriptor::PluginDescriptor;
+    use uptrakit_plugin_infrastructure_registry::PluginDescriptor;
     use uptrakit_shared_types::plugin_ids;
 
     use super::*;

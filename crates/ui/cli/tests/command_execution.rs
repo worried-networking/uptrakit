@@ -299,6 +299,7 @@ async fn software_items_list_success() {
         server: Some(&server.server().base_url()),
         token: Some("test-token"),
         insecure: false,
+        query: None,
         page: None,
         per_page: None,
         request_timeout: None,

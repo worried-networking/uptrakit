@@ -7,7 +7,10 @@
 
 use std::sync::Arc;
 
-use uptrakit_plugin_infrastructure_core::{PluginDescriptor, PluginTypeId, SudoCommandEntry};
+use uptrakit_plugin_infrastructure_core::{
+    PluginDescriptor, PluginFamily, PluginTypeId, SudoCommandEntry,
+};
+use uptrakit_shared_types::plugin_ids;
 
 /// Returns the authoritative list of all compiled-in plugin descriptors.
 ///
@@ -63,6 +66,31 @@ pub fn all_descriptors() -> Vec<&'static PluginDescriptor> {
 /// Look up a descriptor by type ID string.
 pub fn get_descriptor(type_id: &str) -> Option<&'static PluginDescriptor> {
     all_descriptors().into_iter().find(|d| d.type_id == type_id)
+}
+
+/// Returns the descriptor family for a known plugin type.
+pub fn plugin_family(plugin_type_id: &PluginTypeId) -> Option<PluginFamily> {
+    get_descriptor(plugin_type_id.as_str()).map(|d| d.family)
+}
+
+/// Returns true when the plugin type is one of the known package-manager plugins.
+pub fn is_package_manager_plugin(plugin_type_id: &PluginTypeId) -> bool {
+    const PACKAGE_MANAGER_IDS: &[PluginTypeId] = &[
+        plugin_ids::PACKAGE_MANAGER_APT,
+        plugin_ids::PACKAGE_MANAGER_HOMEBREW,
+        plugin_ids::PACKAGE_MANAGER_DNF,
+        plugin_ids::PACKAGE_MANAGER_NPM,
+        plugin_ids::PACKAGE_MANAGER_MAS,
+        plugin_ids::PACKAGE_MANAGER_PACMAN,
+        plugin_ids::PACKAGE_MANAGER_PKG,
+        plugin_ids::PACKAGE_MANAGER_APK,
+        plugin_ids::PACKAGE_MANAGER_SNAP,
+        plugin_ids::PACKAGE_MANAGER_CARGO,
+    ];
+
+    PACKAGE_MANAGER_IDS
+        .iter()
+        .any(|known| known == plugin_type_id)
 }
 
 /// Create a per-instance role plugin from descriptor + config + runtime.
@@ -157,7 +185,6 @@ pub async fn compatible_sudo_commands_for_host(
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
-    use uptrakit_shared_types::plugin_ids;
 
     /// Every descriptor has a unique type_id.
     #[test]
@@ -235,5 +262,38 @@ mod tests {
         assert!(desc_ids.contains(plugin_ids::EMAIL.as_str()));
         #[cfg(feature = "dashboard-icons")]
         assert!(desc_ids.contains(plugin_ids::ENHANCEMENT_DASHBOARD_ICONS.as_str()));
+    }
+
+    #[test]
+    fn package_manager_lookup_covers_all_current_package_managers() {
+        let package_managers = [
+            plugin_ids::PACKAGE_MANAGER_APT,
+            plugin_ids::PACKAGE_MANAGER_HOMEBREW,
+            plugin_ids::PACKAGE_MANAGER_DNF,
+            plugin_ids::PACKAGE_MANAGER_NPM,
+            plugin_ids::PACKAGE_MANAGER_MAS,
+            plugin_ids::PACKAGE_MANAGER_PACMAN,
+            plugin_ids::PACKAGE_MANAGER_PKG,
+            plugin_ids::PACKAGE_MANAGER_APK,
+            plugin_ids::PACKAGE_MANAGER_SNAP,
+            plugin_ids::PACKAGE_MANAGER_CARGO,
+        ];
+        let github = PluginTypeId::from_static("releases_github");
+
+        for plugin_type in package_managers {
+            assert!(is_package_manager_plugin(&plugin_type));
+        }
+        assert!(!is_package_manager_plugin(&github));
+    }
+
+    #[test]
+    fn plugin_family_lookup_returns_descriptor_family() {
+        let apt = PluginTypeId::from_static("package_manager_apt");
+        let proxmox = PluginTypeId::from_static("infrastructure_proxmox");
+        let missing = PluginTypeId::new("missing_plugin");
+
+        assert_eq!(plugin_family(&apt), Some(PluginFamily::Software));
+        assert_eq!(plugin_family(&proxmox), Some(PluginFamily::Infrastructure));
+        assert_eq!(plugin_family(&missing), None);
     }
 }

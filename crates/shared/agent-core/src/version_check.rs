@@ -9,10 +9,12 @@ use uptrakit_internal_wire::{
     PluginAssignment, PluginTypeId, UpdateCategory, VersionCheckAssignment, VersionCheckResult,
 };
 use uptrakit_plugin_infrastructure_core::{
-    BatchDetectItem, BatchFetchItem, HostCapabilities, HostRuntime, PluginError, ReleaseFetcher,
+    BatchDetectItem, BatchFetchItem, HostCapabilities, HostRuntime, PluginError,
     construct_host_runtime,
 };
-use uptrakit_plugin_infrastructure_registry::{PluginCapability, get_descriptor};
+use uptrakit_plugin_infrastructure_registry::{
+    PluginCapability, PluginResult, ReleaseFetcher, get_descriptor,
+};
 
 use crate::connection_context::ConnectionContext;
 
@@ -114,7 +116,7 @@ type FetcherFactory = dyn Fn(
         &PluginTypeId,
         &serde_json::Value,
         Arc<dyn HostRuntime>,
-    ) -> uptrakit_plugin_infrastructure_core::Result<Box<dyn ReleaseFetcher>>
+    ) -> PluginResult<Box<dyn ReleaseFetcher>>
     + Send
     + Sync;
 
@@ -339,7 +341,7 @@ fn default_fetcher_factory(
     plugin_type: &PluginTypeId,
     config: &serde_json::Value,
     runtime: Arc<dyn HostRuntime>,
-) -> uptrakit_plugin_infrastructure_core::Result<Box<dyn ReleaseFetcher>> {
+) -> PluginResult<Box<dyn ReleaseFetcher>> {
     let desc = get_descriptor(plugin_type.as_str()).ok_or_else(|| {
         rootcause::report!(PluginError::Configuration(format!(
             "unknown plugin type: {plugin_type}"
@@ -531,11 +533,7 @@ async fn run_with_retry<'a, T>(
     label: &'static str,
     max_retries: u32,
     mut op: impl FnMut() -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = uptrakit_plugin_infrastructure_core::Result<T>>
-                + Send
-                + 'a,
-        >,
+        Box<dyn std::future::Future<Output = PluginResult<T>> + Send + 'a>,
     >,
 ) -> Result<T, String> {
     let mut backoff = Backoff::new(RETRY_BASE_DELAY, RETRY_MAX_DELAY);
@@ -733,7 +731,7 @@ mod tests {
         async fn fetch_releases(
             &self,
             _package_identifier: &str,
-        ) -> uptrakit_plugin_infrastructure_core::Result<Vec<UpstreamRelease>> {
+        ) -> PluginResult<Vec<UpstreamRelease>> {
             Err(rootcause::report!(PluginError::PluginInternal(
                 "simulated registry unavailable".to_string()
             )))
@@ -753,14 +751,14 @@ mod tests {
         async fn fetch_releases(
             &self,
             _package_identifier: &str,
-        ) -> uptrakit_plugin_infrastructure_core::Result<Vec<UpstreamRelease>> {
+        ) -> PluginResult<Vec<UpstreamRelease>> {
             unreachable!("batch_fetch is overridden; fetch_releases should not be called")
         }
 
         async fn batch_fetch(
             &self,
             _items: &[BatchFetchItem],
-        ) -> uptrakit_plugin_infrastructure_core::Result<Vec<BatchFetchResult>> {
+        ) -> PluginResult<Vec<BatchFetchResult>> {
             Err(rootcause::report!(PluginError::PluginInternal(
                 "simulated batch-level network failure".to_string()
             )))
@@ -771,7 +769,7 @@ mod tests {
         _plugin_type: &PluginTypeId,
         _config: &serde_json::Value,
         _runtime: Arc<dyn HostRuntime>,
-    ) -> uptrakit_plugin_infrastructure_core::Result<Box<dyn ReleaseFetcher>> {
+    ) -> PluginResult<Box<dyn ReleaseFetcher>> {
         Ok(Box::new(AlwaysFailFetcher))
     }
 
@@ -779,7 +777,7 @@ mod tests {
         _plugin_type: &PluginTypeId,
         _config: &serde_json::Value,
         _runtime: Arc<dyn HostRuntime>,
-    ) -> uptrakit_plugin_infrastructure_core::Result<Box<dyn ReleaseFetcher>> {
+    ) -> PluginResult<Box<dyn ReleaseFetcher>> {
         Ok(Box::new(BatchLevelFailFetcher))
     }
 
@@ -787,7 +785,7 @@ mod tests {
         _plugin_type: &PluginTypeId,
         _config: &serde_json::Value,
         _runtime: Arc<dyn HostRuntime>,
-    ) -> uptrakit_plugin_infrastructure_core::Result<Box<dyn ReleaseFetcher>> {
+    ) -> PluginResult<Box<dyn ReleaseFetcher>> {
         Err(rootcause::report!(PluginError::Configuration(
             "simulated plugin creation failure".to_string()
         )))

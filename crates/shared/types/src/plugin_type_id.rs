@@ -37,6 +37,7 @@ impl PluginTypeId {
     ///
     /// Once the `PluginCatalog` is fully wired, this will be replaced by
     /// `catalog.get(id)?.type_settings.is_some()`.
+    #[deprecated(note = "Use registry is_package_manager_plugin() instead")]
     pub fn is_package_manager(&self) -> bool {
         self.0.starts_with("package_manager_")
     }
@@ -45,6 +46,9 @@ impl PluginTypeId {
     ///
     /// Once the `PluginCatalog` is fully wired, this will be replaced by
     /// `catalog.get(id)?.display_name`.
+    #[deprecated(
+        note = "No Track A replacement; remove callers or add a dedicated registry label lookup later"
+    )]
     pub fn display_name(&self) -> &str {
         match self.0.as_ref() {
             "releases_github" => "GitHub Releases",

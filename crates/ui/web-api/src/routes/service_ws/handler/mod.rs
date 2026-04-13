@@ -786,11 +786,13 @@ pub(crate) async fn run_embedded_message_handler(
 ) {
     run_embedded_message_handler_inner(
         state,
-        service_id,
-        false,
-        Some(tenant_id),
+        EmbeddedHandlerSession {
+            service_id,
+            is_system: false,
+            service_tenant_id: Some(tenant_id),
+            app_name,
+        },
         capabilities,
-        app_name,
         service_rx,
         cancel,
     )
@@ -807,24 +809,30 @@ pub(crate) async fn run_embedded_system_message_handler(
 ) {
     run_embedded_message_handler_inner(
         state,
-        service_id,
-        true,
-        None,
+        EmbeddedHandlerSession {
+            service_id,
+            is_system: true,
+            service_tenant_id: None,
+            app_name,
+        },
         capabilities,
-        app_name,
         service_rx,
         cancel,
     )
     .await;
 }
 
-async fn run_embedded_message_handler_inner(
-    state: Arc<AppState>,
+struct EmbeddedHandlerSession<'a> {
     service_id: uuid::Uuid,
     is_system: bool,
     service_tenant_id: Option<uuid::Uuid>,
+    app_name: &'a str,
+}
+
+async fn run_embedded_message_handler_inner(
+    state: Arc<AppState>,
+    session: EmbeddedHandlerSession<'_>,
     capabilities: &BTreeSet<Capability>,
-    app_name: &str,
     mut service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
     cancel: tokio_util::sync::CancellationToken,
 ) {
@@ -834,20 +842,21 @@ async fn run_embedded_message_handler_inner(
     let has_workload_claims = capabilities.contains(&Capability::WorkloadClaims);
     let has_update_tracking = capabilities.contains(&Capability::UpdateTracking);
 
-    let linked_host_ids = load_session_host_ids(&state, service_id, has_software_discovery).await;
+    let linked_host_ids =
+        load_session_host_ids(&state, session.service_id, has_software_discovery).await;
 
     let mut processor = MessageProcessor {
         state: Arc::clone(&state),
-        service_id,
+        service_id: session.service_id,
         cert: None,
-        is_system,
+        is_system: session.is_system,
         has_update_tracking,
         has_software_discovery,
         has_update_hooks,
         has_ui_extensions,
         has_workload_claims,
-        service_app_name: Some(app_name.to_string()),
-        service_tenant_id,
+        service_app_name: Some(session.app_name.to_string()),
+        service_tenant_id: session.service_tenant_id,
         linked_host_ids,
         report_tracker: ReportTracker::new(),
     };
@@ -865,15 +874,18 @@ async fn run_embedded_message_handler_inner(
         let response = processor.dispatch(msg, None).await;
 
         for reply in response.replies {
-            state.service_connections.send(&service_id, reply).await;
+            state
+                .service_connections
+                .send(&session.service_id, reply)
+                .await;
         }
 
         match response.action {
             ProcessorAction::Continue => {}
             ProcessorAction::Break | ProcessorAction::CloseWithReason(_) => {
                 tracing::info!(
-                    %service_id,
-                    app_name,
+                    service_id = %session.service_id,
+                    app_name = session.app_name,
                     "embedded message handler stopping (processor requested break)"
                 );
                 break;
@@ -881,10 +893,19 @@ async fn run_embedded_message_handler_inner(
         }
     }
 
-    cleanup_embedded_service_session(&state, service_id, has_ui_extensions, has_workload_claims)
-        .await;
+    cleanup_embedded_service_session(
+        &state,
+        session.service_id,
+        has_ui_extensions,
+        has_workload_claims,
+    )
+    .await;
 
-    tracing::debug!(%service_id, app_name, "embedded message handler exited");
+    tracing::debug!(
+        service_id = %session.service_id,
+        app_name = session.app_name,
+        "embedded message handler exited"
+    );
 }
 
 async fn cleanup_embedded_service_session(

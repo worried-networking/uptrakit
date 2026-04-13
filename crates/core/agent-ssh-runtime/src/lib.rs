@@ -383,14 +383,13 @@ where
                 .spawn_post_report_hooks(&self.session_state, &self.bg_tx);
         }
 
-        if settings.ui_extensions_enabled {
-            if let Err(error) = self
+        if settings.ui_extensions_enabled
+            && let Err(error) = self
                 .support
                 .register_extensions(self.encryption_public_key.clone(), transport)
                 .await
-            {
-                tracing::warn!(error = %error, "failed to register UI extensions");
-            }
+        {
+            tracing::warn!(error = %error, "failed to register UI extensions");
         }
 
         Ok(())
@@ -900,6 +899,19 @@ mod tests {
                 .expect("lock")
                 .calls
                 .push("spawn_config_test");
+        }
+
+        #[cfg(feature = "interactive")]
+        fn handle_update_stdin_data(
+            &self,
+            _payload: uptrakit_internal_wire::UpdateStdinDataPayload,
+            _in_flight_updates: &HashMap<String, SshInFlightUpdate>,
+        ) {
+            self.state
+                .lock()
+                .expect("lock")
+                .calls
+                .push("handle_update_stdin_data");
         }
 
         async fn handle_report_plugin_config_response(
