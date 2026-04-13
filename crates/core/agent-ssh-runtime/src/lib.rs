@@ -384,9 +384,13 @@ where
         }
 
         if settings.ui_extensions_enabled {
-            self.support
+            if let Err(error) = self
+                .support
                 .register_extensions(self.encryption_public_key.clone(), transport)
-                .await?;
+                .await
+            {
+                tracing::warn!(error = %error, "failed to register UI extensions");
+            }
         }
 
         Ok(())
@@ -524,6 +528,10 @@ where
                 None
             }
             SshAgentEvent::HostConfigChanged => {
+                if transport.is_yielded() {
+                    tracing::debug!("SSH agent runtime: yielded, ignoring host config reload");
+                    return None;
+                }
                 self.handle_host_config_changed(transport).await;
                 None
             }
@@ -741,19 +749,30 @@ mod tests {
 
     use super::*;
 
+    #[derive(Default)]
+    struct FakeSupportState {
+        calls: Vec<&'static str>,
+        fail_register_extensions: bool,
+    }
+
     #[derive(Default, Clone)]
     struct FakeSupport {
-        calls: Arc<Mutex<Vec<&'static str>>>,
+        state: Arc<Mutex<FakeSupportState>>,
     }
 
     impl FakeSupport {
         fn call_count(&self, name: &str) -> usize {
-            self.calls
+            self.state
                 .lock()
                 .expect("lock")
+                .calls
                 .iter()
                 .filter(|entry| **entry == name)
                 .count()
+        }
+
+        fn set_fail_register_extensions(&self, fail: bool) {
+            self.state.lock().expect("lock").fail_register_extensions = fail;
         }
     }
 
@@ -763,9 +782,10 @@ mod tests {
             &self,
             transport: &mut dyn ServiceTransport,
         ) -> Result<(), TransportError> {
-            self.calls
+            self.state
                 .lock()
                 .expect("lock")
+                .calls
                 .push("report_enrolled_hosts");
             transport.transport_send(ServiceMessage::Unknown).await
         }
@@ -775,12 +795,23 @@ mod tests {
             _encryption_public_key: Option<String>,
             transport: &mut dyn ServiceTransport,
         ) -> Result<(), TransportError> {
-            self.calls.lock().expect("lock").push("register_extensions");
+            let fail_register_extensions = {
+                let mut state = self.state.lock().expect("lock");
+                state.calls.push("register_extensions");
+                state.fail_register_extensions
+            };
+            if fail_register_extensions {
+                return Err(TransportError);
+            }
             transport.transport_send(ServiceMessage::Unknown).await
         }
 
         async fn list_host_snapshots(&self) -> Result<Vec<HostSnapshot>, String> {
-            self.calls.lock().expect("lock").push("list_host_snapshots");
+            self.state
+                .lock()
+                .expect("lock")
+                .calls
+                .push("list_host_snapshots");
             Ok(Vec::new())
         }
 
@@ -789,19 +820,24 @@ mod tests {
             _transport: &mut dyn ServiceTransport,
             _changed_ids: &HashSet<uuid::Uuid>,
         ) -> Result<(), TransportError> {
-            self.calls
+            self.state
                 .lock()
                 .expect("lock")
+                .calls
                 .push("report_hosts_after_config_change");
             Ok(())
         }
 
         async fn evict_host(&self, _host_id: uuid::Uuid) {
-            self.calls.lock().expect("lock").push("evict_host");
+            self.state.lock().expect("lock").calls.push("evict_host");
         }
 
         async fn disconnect_all(&self) {
-            self.calls.lock().expect("lock").push("disconnect_all");
+            self.state
+                .lock()
+                .expect("lock")
+                .calls
+                .push("disconnect_all");
         }
 
         fn spawn_check_versions(
@@ -809,9 +845,10 @@ mod tests {
             _payload: CheckVersionsPayload,
             _bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
         ) {
-            self.calls
+            self.state
                 .lock()
                 .expect("lock")
+                .calls
                 .push("spawn_check_versions");
         }
 
@@ -822,9 +859,10 @@ mod tests {
             _aggregate_tx: &tokio::sync::mpsc::Sender<(String, UpdateEvent)>,
             _transport: &mut dyn ServiceTransport,
         ) {
-            self.calls
+            self.state
                 .lock()
                 .expect("lock")
+                .calls
                 .push("handle_execute_update");
         }
 
@@ -833,9 +871,10 @@ mod tests {
             _payload: ExecuteBatchUpdatePayload,
             _bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
         ) {
-            self.calls
+            self.state
                 .lock()
                 .expect("lock")
+                .calls
                 .push("spawn_execute_batch_update");
         }
 
@@ -844,9 +883,10 @@ mod tests {
             _payload: DiscoverSoftwarePayload,
             _bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
         ) {
-            self.calls
+            self.state
                 .lock()
                 .expect("lock")
+                .calls
                 .push("spawn_discover_software");
         }
 
@@ -855,21 +895,30 @@ mod tests {
             _payload: TestPluginConfigPayload,
             _bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
         ) {
-            self.calls.lock().expect("lock").push("spawn_config_test");
+            self.state
+                .lock()
+                .expect("lock")
+                .calls
+                .push("spawn_config_test");
         }
 
         async fn handle_report_plugin_config_response(
             &self,
             _payload: ReportPluginConfigResponsePayload,
         ) {
-            self.calls
+            self.state
                 .lock()
                 .expect("lock")
+                .calls
                 .push("handle_report_plugin_config_response");
         }
 
         async fn handle_reset_data(&self) -> bool {
-            self.calls.lock().expect("lock").push("handle_reset_data");
+            self.state
+                .lock()
+                .expect("lock")
+                .calls
+                .push("handle_reset_data");
             true
         }
 
@@ -880,16 +929,18 @@ mod tests {
             _bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
             _transport: &mut dyn ServiceTransport,
         ) {
-            self.calls
+            self.state
                 .lock()
                 .expect("lock")
+                .calls
                 .push("handle_extension_request");
         }
 
         fn handle_extension_response(&self, _response: ExtensionResponsePayload) {
-            self.calls
+            self.state
                 .lock()
                 .expect("lock")
+                .calls
                 .push("handle_extension_response");
         }
 
@@ -898,14 +949,19 @@ mod tests {
             _session_state: &RuntimeSessionState,
             _bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
         ) {
-            self.calls
+            self.state
                 .lock()
                 .expect("lock")
+                .calls
                 .push("spawn_post_report_hooks");
         }
 
         async fn persist_tenant_id(&self, _tenant_id: uuid::Uuid) {
-            self.calls.lock().expect("lock").push("persist_tenant_id");
+            self.state
+                .lock()
+                .expect("lock")
+                .calls
+                .push("persist_tenant_id");
         }
     }
 
@@ -981,6 +1037,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn apply_settings_ignores_extension_registration_error() {
+        let support = FakeSupport::default();
+        support.set_fail_register_extensions(true);
+        let support_clone = support.clone();
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let mut runtime = SshAgentRuntime::new(SshAgentRuntimeConfig::new(
+            support,
+            tempdir.path().join("update-freeze"),
+        ));
+        let mut transport = MockTransport::new();
+
+        runtime
+            .on_connected(&mut transport, SshAgentIdentity::default())
+            .await
+            .expect("connect");
+
+        let result = runtime
+            .apply_settings(
+                SshAgentSettings {
+                    ui_extensions_enabled: true,
+                    ..SshAgentSettings::default()
+                },
+                &mut transport,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "extension registration failures must not fail settings application"
+        );
+        assert_eq!(support_clone.call_count("report_enrolled_hosts"), 1);
+        assert_eq!(support_clone.call_count("register_extensions"), 1);
+    }
+
+    #[tokio::test]
     async fn execute_update_is_rate_limited_per_host() {
         let support = FakeSupport::default();
         let support_clone = support.clone();
@@ -1007,6 +1098,30 @@ mod tests {
             .await;
 
         assert_eq!(support_clone.call_count("handle_execute_update"), 1);
+    }
+
+    #[tokio::test]
+    async fn host_config_changed_is_ignored_when_transport_is_yielded() {
+        let support = FakeSupport::default();
+        let support_clone = support.clone();
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let mut runtime = SshAgentRuntime::new(SshAgentRuntimeConfig::new(
+            support,
+            tempdir.path().join("update-freeze"),
+        ));
+        let mut transport = MockTransport::new();
+        transport.set_yielded(true);
+
+        runtime
+            .handle_event(SshAgentEvent::HostConfigChanged, &mut transport)
+            .await;
+
+        assert_eq!(support_clone.call_count("list_host_snapshots"), 0);
+        assert_eq!(
+            support_clone.call_count("report_hosts_after_config_change"),
+            0
+        );
+        assert_eq!(support_clone.call_count("spawn_post_report_hooks"), 0);
     }
 
     #[tokio::test]
