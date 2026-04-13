@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
+use uptrakit_plugin_infrastructure_registry::{ExtensionActionContext, PluginOps};
 use uuid::Uuid;
 
 use uptrakit_internal_wire::{ControllerMessage, surfaces};
@@ -142,6 +143,119 @@ pub trait SurfaceLocalActionExecutor: Send + Sync {
         _resolved: &crate::surface_registry::ResolvedSurfaceAction,
         _request: &surfaces::SurfaceActionRequest,
     ) -> Result<serde_json::Value, SurfaceProxyError>;
+}
+
+#[async_trait]
+pub trait PluginSurfaceActionInvoker: Send + Sync {
+    async fn invoke(
+        &self,
+        db: &(dyn std::any::Any + Send + Sync),
+        tenant_id: Option<Uuid>,
+        caller_user_id: Option<Uuid>,
+        surface_id: &str,
+        interaction_id: &str,
+        params: serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String>;
+}
+
+pub struct PluginOpsSurfaceActionInvoker {
+    plugin_ops: Arc<dyn PluginOps>,
+}
+
+impl PluginOpsSurfaceActionInvoker {
+    pub fn new(plugin_ops: Arc<dyn PluginOps>) -> Self {
+        Self { plugin_ops }
+    }
+}
+
+#[async_trait]
+impl PluginSurfaceActionInvoker for PluginOpsSurfaceActionInvoker {
+    async fn invoke(
+        &self,
+        db: &(dyn std::any::Any + Send + Sync),
+        tenant_id: Option<Uuid>,
+        caller_user_id: Option<Uuid>,
+        surface_id: &str,
+        interaction_id: &str,
+        params: serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
+        let ctx = ExtensionActionContext {
+            db,
+            tenant_id,
+            caller_user_id,
+        };
+        self.plugin_ops
+            .handle_extension_action(&ctx, surface_id, interaction_id, params)
+            .await
+    }
+}
+
+pub struct PluginSurfaceLocalExecutor {
+    action_context_db: Arc<dyn std::any::Any + Send + Sync>,
+    plugin_invoker: Arc<dyn PluginSurfaceActionInvoker>,
+}
+
+impl PluginSurfaceLocalExecutor {
+    pub fn new(
+        action_context_db: Arc<dyn std::any::Any + Send + Sync>,
+        plugin_invoker: Arc<dyn PluginSurfaceActionInvoker>,
+    ) -> Self {
+        Self {
+            action_context_db,
+            plugin_invoker,
+        }
+    }
+}
+
+#[async_trait]
+impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
+    async fn execute(
+        &self,
+        resolved: &crate::surface_registry::ResolvedSurfaceAction,
+        request: &surfaces::SurfaceActionRequest,
+    ) -> Result<serde_json::Value, SurfaceProxyError> {
+        if resolved.provider_kind != surfaces::ProviderKind::Plugin {
+            return Err(SurfaceProxyError::SchemaValidationFailed(format!(
+                "local surface transport is only implemented for plugin providers (got `{}`)",
+                resolved.provider_id
+            )));
+        }
+
+        if resolved.interaction.transport != surfaces::InteractionTransport::ControllerLocal {
+            return Err(SurfaceProxyError::SchemaValidationFailed(format!(
+                "plugin local executor only supports controller_local transport for interaction `{}`",
+                resolved.interaction.interaction_id
+            )));
+        }
+
+        let tenant_id = Uuid::parse_str(request.tenant_id.as_str()).map_err(|error| {
+            SurfaceProxyError::SchemaValidationFailed(format!(
+                "invalid tenant_id in surface action request: {error}"
+            ))
+        })?;
+        let caller_user_id = match &request.caller_origin {
+            surfaces::CallerOrigin::UserSession { user_id, .. } => {
+                Some(Uuid::parse_str(user_id.as_str()).map_err(|error| {
+                    SurfaceProxyError::SchemaValidationFailed(format!(
+                        "invalid caller user_id in surface action request: {error}"
+                    ))
+                })?)
+            }
+            _ => None,
+        };
+
+        self.plugin_invoker
+            .invoke(
+                self.action_context_db.as_ref(),
+                Some(tenant_id),
+                caller_user_id,
+                request.surface_id.as_str(),
+                request.interaction_id.as_str(),
+                serde_json::Value::Object(request.params.clone()),
+            )
+            .await
+            .map_err(SurfaceProxyError::SchemaValidationFailed)
+    }
 }
 
 struct NoopSurfaceLocalExecutor;
@@ -796,7 +910,9 @@ fn schema_matches(schema: &surfaces::SchemaContract, value: &serde_json::Value) 
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeSet, HashSet};
+    use std::sync::Arc as StdArc;
 
+    use async_trait::async_trait;
     use uptrakit_internal_wire::ControllerMessage;
 
     use super::*;
@@ -870,6 +986,61 @@ mod tests {
         }
     }
 
+    fn plugin_registration(provider_id: &str) -> surfaces::SurfaceRegistration {
+        surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: provider_id.to_string(),
+                provider_kind: surfaces::ProviderKind::Plugin,
+                provider_namespace: "plugin".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+                surfaces::Capability::MutationAction,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Global,
+                tenant_id: None,
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor {
+                    surface_id: surfaces::SurfaceId::new("notifications.email.global_smtp")
+                        .unwrap(),
+                    label: "SMTP Defaults".to_string(),
+                    priority: 100,
+                    slot: surfaces::SLOT_SETTINGS_BELOW_GLOBAL.to_string(),
+                    scope: surfaces::Scope::Global,
+                    targeting: surfaces::Targeting::Universal,
+                    required_permission: None,
+                    provider_kind: surfaces::ProviderKind::Plugin,
+                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::MutationAction,
+                        surfaces::Capability::UniversalTargeting,
+                    ]),
+                    root_node: surfaces::SurfaceNode::TextBlock {
+                        text: "ok".to_string(),
+                    },
+                },
+                interactions: vec![surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new("save_global_smtp").unwrap(),
+                    kind: surfaces::InteractionKind::MutationAction,
+                    required_permission: None,
+                    input_schema: Some(surfaces::SchemaContract::Object),
+                    result_schema: Some(surfaces::SchemaContract::Object),
+                    sensitive_fields: vec![],
+                    timeout_seconds: Some(30),
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                }],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        }
+    }
+
     fn registry() -> SurfaceRegistry {
         SurfaceRegistry::new(SurfaceRegistryConfig {
             allowed_controller_queries: HashSet::new(),
@@ -896,6 +1067,32 @@ mod tests {
                 algorithm: surfaces::ProviderEncryptionAlgorithm::EciesP256,
                 ciphertext_b64: "AAAA".to_string(),
             }),
+        }
+    }
+
+    struct TestPluginInvoker {
+        response: serde_json::Value,
+        seen: StdArc<Mutex<Vec<(String, String, Option<Uuid>, Option<Uuid>)>>>,
+    }
+
+    #[async_trait]
+    impl PluginSurfaceActionInvoker for TestPluginInvoker {
+        async fn invoke(
+            &self,
+            _db: &(dyn std::any::Any + Send + Sync),
+            tenant_id: Option<Uuid>,
+            caller_user_id: Option<Uuid>,
+            surface_id: &str,
+            interaction_id: &str,
+            _params: serde_json::Value,
+        ) -> std::result::Result<serde_json::Value, String> {
+            self.seen.lock().push((
+                surface_id.to_string(),
+                interaction_id.to_string(),
+                tenant_id,
+                caller_user_id,
+            ));
+            Ok(self.response.clone())
         }
     }
 
@@ -961,6 +1158,55 @@ mod tests {
             .expect("invoke should succeed");
 
         assert!(response.success);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn invoke_executes_plugin_controller_local_interaction() {
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(plugin_registration("plugin.notifications_email"))
+            .expect("plugin registration should succeed");
+
+        let seen = StdArc::new(Mutex::new(Vec::new()));
+        let invoker = TestPluginInvoker {
+            response: serde_json::json!({"ok": true}),
+            seen: StdArc::clone(&seen),
+        };
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(StdArc::new(()), Arc::new(invoker)),
+        ));
+        let service_connections = ServiceConnectionRegistry::new();
+
+        let response = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "notifications.email.global_smtp".to_string(),
+                    interaction_id: "save_global_smtp".to_string(),
+                    idempotency_key: "idem-plugin-local".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params: serde_json::Map::new(),
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("plugin-backed local interaction should succeed");
+
+        assert!(response.success);
+        assert_eq!(response.result, Some(serde_json::json!({"ok": true})));
+        let seen = seen.lock();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, "notifications.email.global_smtp");
+        assert_eq!(seen[0].1, "save_global_smtp");
+        assert_eq!(seen[0].2, Some(tenant_id()));
+        assert_eq!(seen[0].3, Some(user_id()));
     }
 
     #[tokio::test(start_paused = true)]

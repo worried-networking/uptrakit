@@ -432,20 +432,9 @@ mod tests {
             .surfaces
             .expect("surfaces are registered")
             .registrations)();
-        assert!(!registrations.is_empty());
-        assert!(registrations.iter().all(|registration| {
-            registration.provider.provider_kind
-                == uptrakit_plugin_infrastructure_core::surfaces::ProviderKind::Plugin
-        }));
-        let all_surface_ids: Vec<String> = registrations
-            .iter()
-            .flat_map(|registration| registration.surfaces.iter())
-            .map(|surface| surface.descriptor.surface_id.to_string())
-            .collect();
         assert!(
-            all_surface_ids
-                .iter()
-                .any(|id| id == "notifications.webhook")
+            registrations.is_empty(),
+            "webhook data-table surface should be filtered until data-load hydration exists"
         );
     }
 

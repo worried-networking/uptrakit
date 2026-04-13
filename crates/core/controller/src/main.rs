@@ -414,7 +414,18 @@ async fn run(args: cli::Args) -> Result<()> {
                 )))
             })?;
     }
-    let surface_proxy = Arc::new(uptrakit_web_api::surface_proxy::SurfaceProxy::new());
+    let surface_proxy = Arc::new(
+        uptrakit_web_api::surface_proxy::SurfaceProxy::new().with_local_executor(Arc::new(
+            uptrakit_web_api::surface_proxy::PluginSurfaceLocalExecutor::new(
+                Arc::new(db_conn.clone()),
+                Arc::new(
+                    uptrakit_web_api::surface_proxy::PluginOpsSurfaceActionInvoker::new(
+                        Arc::clone(&plugin_ops),
+                    ),
+                ),
+            ),
+        )),
+    );
 
     let surface_runtime_rollout =
         build_surface_runtime_rollout_state_for_phase0(args.surface_runtime_rollout);
