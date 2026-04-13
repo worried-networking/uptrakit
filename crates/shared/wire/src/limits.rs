@@ -134,6 +134,12 @@ pub const MAX_EXTENSION_PARAMS_LEN: usize = 65_536;
 /// Maximum byte length of extension action response JSON.
 pub const MAX_EXTENSION_RESPONSE_LEN: usize = 1_048_576;
 
+/// Maximum nesting depth for JSON values carried in surface payloads.
+pub const MAX_SURFACE_JSON_DEPTH: usize = 32;
+
+/// Maximum number of nodes visited when traversing surface JSON values.
+pub const MAX_SURFACE_JSON_NODES: usize = 20_000;
+
 /// Maximum byte length of plugin config JSON in a `ReportPluginConfig` message.
 pub const MAX_PLUGIN_CONFIG_JSON_LEN: usize = 65_536;
 

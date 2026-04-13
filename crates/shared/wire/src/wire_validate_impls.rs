@@ -697,6 +697,338 @@ impl WireValidate for extension::ExtensionResponsePayload {
     }
 }
 
+fn validate_surface_json_bounds(
+    value: &serde_json::Value,
+    field: &'static str,
+) -> Result<(), WireValidationError> {
+    let mut node_count = 0usize;
+    fn walk(
+        value: &serde_json::Value,
+        depth: usize,
+        node_count: &mut usize,
+        field: &'static str,
+    ) -> Result<(), WireValidationError> {
+        if depth > MAX_SURFACE_JSON_DEPTH {
+            return Err(WireValidationError {
+                field,
+                message: format!(
+                    "JSON depth exceeds max {MAX_SURFACE_JSON_DEPTH} (observed depth {depth})"
+                ),
+            });
+        }
+
+        *node_count += 1;
+        if *node_count > MAX_SURFACE_JSON_NODES {
+            return Err(WireValidationError {
+                field,
+                message: format!("JSON node count exceeds max {MAX_SURFACE_JSON_NODES}"),
+            });
+        }
+
+        match value {
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    walk(item, depth + 1, node_count, field)?;
+                }
+            }
+            serde_json::Value::Object(map) => {
+                for item in map.values() {
+                    walk(item, depth + 1, node_count, field)?;
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    walk(value, 1, &mut node_count, field)
+}
+
+fn validate_surface_node(
+    node: &surfaces::SurfaceNode,
+    depth: usize,
+) -> Result<(), WireValidationError> {
+    if depth > MAX_SURFACE_JSON_DEPTH {
+        return Err(WireValidationError {
+            field: "surfaces[].descriptor.root_node",
+            message: format!(
+                "root node depth exceeds max {MAX_SURFACE_JSON_DEPTH} (observed depth {depth})"
+            ),
+        });
+    }
+
+    match node {
+        surfaces::SurfaceNode::Section { title, children } => {
+            check_opt_string_len(
+                title,
+                MAX_SHORT_STRING_LEN,
+                "surfaces[].descriptor.root_node.title",
+            )?;
+            check_vec_len(
+                children,
+                MAX_EXTENSION_FIELDS,
+                "surfaces[].descriptor.root_node.children",
+            )?;
+            for child in children {
+                validate_surface_node(child, depth + 1)?;
+            }
+        }
+        surfaces::SurfaceNode::TextBlock { text } => {
+            check_string_len(
+                text,
+                MAX_MEDIUM_STRING_LEN,
+                "surfaces[].descriptor.root_node.text",
+            )?;
+        }
+        surfaces::SurfaceNode::KeyValue { .. } | surfaces::SurfaceNode::Table { .. } => {}
+        surfaces::SurfaceNode::Form { .. } => {}
+        surfaces::SurfaceNode::ActionBar { action_ids } => {
+            check_vec_len(
+                action_ids,
+                MAX_EXTENSION_ACTION_REFS,
+                "surfaces[].descriptor.root_node.action_ids",
+            )?;
+        }
+        surfaces::SurfaceNode::Tabs { tabs } => {
+            check_vec_len(
+                tabs,
+                MAX_EXTENSION_COLUMNS,
+                "surfaces[].descriptor.root_node.tabs",
+            )?;
+            for tab in tabs {
+                check_string_len(
+                    &tab.label,
+                    MAX_SHORT_STRING_LEN,
+                    "surfaces[].descriptor.root_node.tabs[].label",
+                )?;
+                validate_surface_node(&tab.root, depth + 1)?;
+            }
+        }
+        surfaces::SurfaceNode::Callout { text, .. } => {
+            check_string_len(
+                text,
+                MAX_MEDIUM_STRING_LEN,
+                "surfaces[].descriptor.root_node.callout",
+            )?;
+        }
+        surfaces::SurfaceNode::EmptyState { title, description } => {
+            check_string_len(
+                title,
+                MAX_SHORT_STRING_LEN,
+                "surfaces[].descriptor.root_node.empty_state.title",
+            )?;
+            check_opt_string_len(
+                description,
+                MAX_MEDIUM_STRING_LEN,
+                "surfaces[].descriptor.root_node.empty_state.description",
+            )?;
+        }
+        surfaces::SurfaceNode::ModalTrigger { modal_nodes, .. } => {
+            check_vec_len(
+                modal_nodes,
+                MAX_EXTENSION_FIELDS,
+                "surfaces[].descriptor.root_node.modal_nodes",
+            )?;
+            for child in modal_nodes {
+                validate_surface_node(child, depth + 1)?;
+            }
+        }
+        surfaces::SurfaceNode::WorkflowTrigger { step_nodes, .. } => {
+            check_vec_len(
+                step_nodes,
+                MAX_EXTENSION_WIZARD_STEPS,
+                "surfaces[].descriptor.root_node.step_nodes",
+            )?;
+            for child in step_nodes {
+                validate_surface_node(child, depth + 1)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_surface_interaction(
+    interaction: &surfaces::InteractionDescriptor,
+) -> Result<(), WireValidationError> {
+    check_opt_string_len(
+        &interaction.required_permission,
+        MAX_SHORT_STRING_LEN,
+        "surfaces[].interactions[].required_permission",
+    )?;
+    check_vec_len(
+        &interaction.sensitive_fields,
+        MAX_EXTENSION_FIELDS,
+        "surfaces[].interactions[].sensitive_fields",
+    )?;
+    for field in &interaction.sensitive_fields {
+        check_string_len(
+            field,
+            MAX_SHORT_STRING_LEN,
+            "surfaces[].interactions[].sensitive_fields[]",
+        )?;
+    }
+
+    if let Some(confirmation) = &interaction.confirmation {
+        check_string_len(
+            &confirmation.title,
+            MAX_SHORT_STRING_LEN,
+            "surfaces[].interactions[].confirmation.title",
+        )?;
+        check_string_len(
+            &confirmation.message,
+            MAX_MEDIUM_STRING_LEN,
+            "surfaces[].interactions[].confirmation.message",
+        )?;
+        check_opt_string_len(
+            &confirmation.confirm_label,
+            MAX_SHORT_STRING_LEN,
+            "surfaces[].interactions[].confirmation.confirm_label",
+        )?;
+        check_opt_string_len(
+            &confirmation.cancel_label,
+            MAX_SHORT_STRING_LEN,
+            "surfaces[].interactions[].confirmation.cancel_label",
+        )?;
+    }
+
+    check_vec_len(
+        &interaction.workflow_steps,
+        MAX_EXTENSION_WIZARD_STEPS,
+        "surfaces[].interactions[].workflow_steps",
+    )?;
+    for step in &interaction.workflow_steps {
+        check_string_len(
+            &step.step_id,
+            MAX_SHORT_STRING_LEN,
+            "surfaces[].interactions[].workflow_steps[].step_id",
+        )?;
+    }
+
+    if let surfaces::InteractionTransport::DirectBuiltInApi { operation_id } =
+        &interaction.transport
+    {
+        check_string_len(
+            operation_id.as_str(),
+            MAX_SHORT_STRING_LEN,
+            "surfaces[].interactions[].transport.operation_id",
+        )?;
+    }
+
+    Ok(())
+}
+
+fn validate_surface_data_source(
+    data_source: &surfaces::DataSourceDescriptor,
+) -> Result<(), WireValidationError> {
+    match &data_source.kind {
+        surfaces::DataSourceKind::Static { data } => {
+            let data_len = serde_json::to_vec(data)
+                .map_err(|error| WireValidationError {
+                    field: "surfaces[].data_sources[].kind.static.data",
+                    message: format!("failed to serialize static data: {error}"),
+                })?
+                .len();
+            if data_len > MAX_EXTENSION_PARAMS_LEN {
+                return Err(WireValidationError {
+                    field: "surfaces[].data_sources[].kind.static.data",
+                    message: format!(
+                        "static data JSON is {data_len} bytes, max {MAX_EXTENSION_PARAMS_LEN}"
+                    ),
+                });
+            }
+            validate_surface_json_bounds(data, "surfaces[].data_sources[].kind.static.data")?;
+        }
+        surfaces::DataSourceKind::ControllerQuery { .. } => {}
+        surfaces::DataSourceKind::ProviderQuery { operation_id } => {
+            check_string_len(
+                operation_id,
+                MAX_SHORT_STRING_LEN,
+                "surfaces[].data_sources[].kind.provider_query.operation_id",
+            )?;
+        }
+    }
+
+    if let Some(pagination) = &data_source.pagination {
+        if pagination.default_page_size == 0 || pagination.max_page_size == 0 {
+            return Err(WireValidationError {
+                field: "surfaces[].data_sources[].pagination",
+                message: "page size values must be greater than zero".to_string(),
+            });
+        }
+        if pagination.default_page_size > pagination.max_page_size {
+            return Err(WireValidationError {
+                field: "surfaces[].data_sources[].pagination",
+                message: "default_page_size cannot exceed max_page_size".to_string(),
+            });
+        }
+    }
+
+    if let Some(sorting) = &data_source.sorting {
+        check_vec_len(
+            &sorting.sortable_fields,
+            MAX_EXTENSION_COLUMNS,
+            "surfaces[].data_sources[].sorting.sortable_fields",
+        )?;
+        for field in &sorting.sortable_fields {
+            check_string_len(
+                field,
+                MAX_SHORT_STRING_LEN,
+                "surfaces[].data_sources[].sorting.sortable_fields[]",
+            )?;
+        }
+        check_opt_string_len(
+            &sorting.default_sort_field,
+            MAX_SHORT_STRING_LEN,
+            "surfaces[].data_sources[].sorting.default_sort_field",
+        )?;
+    }
+
+    if let Some(filtering) = &data_source.filtering {
+        check_vec_len(
+            &filtering.filter_fields,
+            MAX_EXTENSION_COLUMNS,
+            "surfaces[].data_sources[].filtering.filter_fields",
+        )?;
+        for field in &filtering.filter_fields {
+            check_string_len(
+                field,
+                MAX_SHORT_STRING_LEN,
+                "surfaces[].data_sources[].filtering.filter_fields[]",
+            )?;
+        }
+    }
+
+    match &data_source.refresh_policy {
+        surfaces::RefreshPolicy::Manual => {}
+        surfaces::RefreshPolicy::Interval { seconds } => {
+            if *seconds == 0 {
+                return Err(WireValidationError {
+                    field: "surfaces[].data_sources[].refresh_policy.interval.seconds",
+                    message: "interval seconds must be greater than zero".to_string(),
+                });
+            }
+        }
+        surfaces::RefreshPolicy::Sse { .. } => {}
+    }
+
+    if let Some(empty_state) = &data_source.empty_state {
+        check_string_len(
+            &empty_state.title,
+            MAX_SHORT_STRING_LEN,
+            "surfaces[].data_sources[].empty_state.title",
+        )?;
+        check_opt_string_len(
+            &empty_state.description,
+            MAX_MEDIUM_STRING_LEN,
+            "surfaces[].data_sources[].empty_state.description",
+        )?;
+    }
+
+    Ok(())
+}
+
 impl WireValidate for surfaces::SurfaceRegistration {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(
@@ -714,6 +1046,25 @@ impl WireValidate for surfaces::SurfaceRegistration {
             MAX_SHORT_STRING_LEN,
             "effective_tenant_binding.tenant_id",
         )?;
+        if self.effective_tenant_binding.scope == surfaces::Scope::Tenant {
+            let tenant_id =
+                self.effective_tenant_binding
+                    .tenant_id
+                    .as_deref()
+                    .ok_or(WireValidationError {
+                        field: "effective_tenant_binding.tenant_id",
+                        message: "tenant scope requires tenant_id".to_string(),
+                    })?;
+            uuid::Uuid::parse_str(tenant_id).map_err(|error| WireValidationError {
+                field: "effective_tenant_binding.tenant_id",
+                message: format!("invalid tenant UUID: {error}"),
+            })?;
+        } else if let Some(tenant_id) = &self.effective_tenant_binding.tenant_id {
+            uuid::Uuid::parse_str(tenant_id).map_err(|error| WireValidationError {
+                field: "effective_tenant_binding.tenant_id",
+                message: format!("invalid tenant UUID: {error}"),
+            })?;
+        }
         check_vec_len(&self.surfaces, MAX_EXTENSION_MANIFESTS, "surfaces")?;
 
         if let Some(ref metadata) = self.encryption_metadata {
@@ -755,6 +1106,13 @@ impl WireValidate for surfaces::SurfaceRegistration {
                 MAX_EXTENSION_FIELDS,
                 "surfaces[].data_sources",
             )?;
+            validate_surface_node(&surface.descriptor.root_node, 1)?;
+            for interaction in &surface.interactions {
+                validate_surface_interaction(interaction)?;
+            }
+            for data_source in &surface.data_sources {
+                validate_surface_data_source(data_source)?;
+            }
         }
 
         Ok(())
@@ -764,6 +1122,10 @@ impl WireValidate for surfaces::SurfaceRegistration {
 impl WireValidate for surfaces::SurfaceActionRequest {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.tenant_id, MAX_SHORT_STRING_LEN, "tenant_id")?;
+        uuid::Uuid::parse_str(&self.tenant_id).map_err(|error| WireValidationError {
+            field: "tenant_id",
+            message: format!("invalid tenant UUID: {error}"),
+        })?;
         check_string_len(
             &self.idempotency_key,
             MAX_SHORT_STRING_LEN,
@@ -1747,6 +2109,186 @@ mod tests {
     }
 
     // ── Extension wire validation tests ─────────────────────────────────────
+
+    fn test_surface_registration() -> surfaces::SurfaceRegistration {
+        surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: "uptrakit-agent-ssh".to_string(),
+                provider_kind: surfaces::ProviderKind::Service,
+                provider_namespace: "uptrakit.agent.ssh".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::default(),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Tenant,
+                tenant_id: Some(uuid::Uuid::nil().to_string()),
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor {
+                    surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
+                    label: "SSH Guests".to_string(),
+                    priority: 100,
+                    slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
+                    scope: surfaces::Scope::Tenant,
+                    targeting: surfaces::Targeting::Universal,
+                    required_permission: None,
+                    provider_kind: surfaces::ProviderKind::Service,
+                    required_capabilities: surfaces::CapabilitySet::default(),
+                    root_node: surfaces::SurfaceNode::Section {
+                        title: Some("Guests".to_string()),
+                        children: vec![surfaces::SurfaceNode::TextBlock {
+                            text: "Guests view".to_string(),
+                        }],
+                    },
+                },
+                interactions: vec![surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+                    kind: surfaces::InteractionKind::MutationAction,
+                    required_permission: None,
+                    input_schema: None,
+                    result_schema: None,
+                    sensitive_fields: vec![],
+                    timeout_seconds: None,
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ProviderProxied,
+                    workflow_steps: vec![],
+                }],
+                data_sources: vec![surfaces::DataSourceDescriptor {
+                    data_source_id: surfaces::DataSourceId::new("guest.rows").unwrap(),
+                    kind: surfaces::DataSourceKind::Static {
+                        data: serde_json::json!({"rows": []}),
+                    },
+                    result_schema: surfaces::SchemaContract::Object,
+                    pagination: None,
+                    sorting: None,
+                    filtering: None,
+                    refresh_policy: surfaces::RefreshPolicy::Manual,
+                    empty_state: None,
+                }],
+            }],
+            encryption_metadata: None,
+        }
+    }
+
+    fn nested_json_array(depth: usize) -> serde_json::Value {
+        let mut value = serde_json::json!(0);
+        for _ in 0..depth {
+            value = serde_json::json!([value]);
+        }
+        value
+    }
+
+    #[test]
+    fn surface_registration_rejects_oversized_nested_root_node_text() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].descriptor.root_node = surfaces::SurfaceNode::Section {
+            title: None,
+            children: vec![surfaces::SurfaceNode::Tabs {
+                tabs: vec![surfaces::SurfaceTab {
+                    id: surfaces::SurfaceTabId::new("guests").unwrap(),
+                    label: "Guests".to_string(),
+                    root: surfaces::SurfaceNode::TextBlock {
+                        text: "x".repeat(MAX_MEDIUM_STRING_LEN + 1),
+                    },
+                }],
+            }],
+        };
+
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "surfaces[].descriptor.root_node.text");
+    }
+
+    #[test]
+    fn surface_registration_rejects_invalid_interaction_confirmation_text() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].interactions[0] = surfaces::InteractionDescriptor {
+            interaction_id: surfaces::InteractionId::new("danger.refresh").unwrap(),
+            kind: surfaces::InteractionKind::ConfirmableAction,
+            required_permission: None,
+            input_schema: None,
+            result_schema: None,
+            sensitive_fields: vec![],
+            timeout_seconds: None,
+            confirmation: Some(surfaces::InteractionConfirmation {
+                title: "Confirm".to_string(),
+                message: "x".repeat(MAX_MEDIUM_STRING_LEN + 1),
+                confirm_label: None,
+                cancel_label: None,
+                severity: surfaces::ConfirmationSeverity::Warning,
+            }),
+            transport: surfaces::InteractionTransport::ProviderProxied,
+            workflow_steps: vec![],
+        };
+
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "surfaces[].interactions[].confirmation.message");
+    }
+
+    #[test]
+    fn surface_registration_rejects_invalid_data_source_metadata() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].data_sources[0] = surfaces::DataSourceDescriptor {
+            data_source_id: surfaces::DataSourceId::new("guest.query").unwrap(),
+            kind: surfaces::DataSourceKind::ProviderQuery {
+                operation_id: "x".repeat(MAX_SHORT_STRING_LEN + 1),
+            },
+            result_schema: surfaces::SchemaContract::Object,
+            pagination: Some(surfaces::DataSourcePagination {
+                default_page_size: 100,
+                max_page_size: 10,
+            }),
+            sorting: None,
+            filtering: None,
+            refresh_policy: surfaces::RefreshPolicy::Interval { seconds: 0 },
+            empty_state: None,
+        };
+
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(
+            err.field,
+            "surfaces[].data_sources[].kind.provider_query.operation_id"
+        );
+    }
+
+    #[test]
+    fn surface_registration_rejects_overdeep_static_data() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].data_sources[0] = surfaces::DataSourceDescriptor {
+            data_source_id: surfaces::DataSourceId::new("guest.deep").unwrap(),
+            kind: surfaces::DataSourceKind::Static {
+                data: nested_json_array(MAX_SURFACE_JSON_DEPTH + 1),
+            },
+            result_schema: surfaces::SchemaContract::Array,
+            pagination: None,
+            sorting: None,
+            filtering: None,
+            refresh_policy: surfaces::RefreshPolicy::Manual,
+            empty_state: None,
+        };
+
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "surfaces[].data_sources[].kind.static.data");
+    }
+
+    #[test]
+    fn surface_action_request_rejects_invalid_tenant_uuid() {
+        let payload = surfaces::SurfaceActionRequest {
+            request_id: uuid::Uuid::new_v4(),
+            tenant_id: "not-a-uuid".to_string(),
+            surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
+            interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+            idempotency_key: "idem-1".to_string(),
+            target_provider_id: None,
+            caller_origin: surfaces::CallerOrigin::Provider {
+                provider_id: "uptrakit-agent-ssh".to_string(),
+            },
+            params: serde_json::Map::new(),
+            encrypted_sensitive_params: None,
+        };
+
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "tenant_id");
+    }
 
     fn test_manifest() -> extension::ExtensionManifest {
         extension::ExtensionManifest::new(
